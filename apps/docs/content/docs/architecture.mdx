@@ -499,7 +499,7 @@ the file's import table puts in the slot a call or a jump thunk goes through,
 the function at a direct call's target, or the slot a runtime pointer is read
 from. A jump or return before the call, a byte the decoder cannot read, the
 function's end, a write to the argument register, another stack move for a
-pushed one, or a call through a register leave it absent. After that call, the walk follows to the next call in the same function that receives one of two things (`output_passed_to`, x64): the one frame slot whose address the call was given as another argument, else its return value in `rax`. It is said as a fact about the slot or the register ("the frame slot [rsp+0xa0], given to that call as argument 2, is then argument 2 of the call at …"; "that call's return value in rax is then …"), never as what the first call does with it. One hop more, the same walk runs from that later call: its own `output_passed_to` names the next call that receives the frame slot the later call was given as another argument, else its return value, with the callee and the argument position, and nothing is followed past that call; each hop is absent on its own when the code does not show it. The walk tracks registers and frame slots, ends tracking of a slot any store overlaps (sized by the store's width, SSE and VEX stores included; within 16 bytes where the width cannot be read), follows unconditional jumps and falls through conditional ones (said), and is absent at a return, an undecodable byte, a jump back, the function's end or a stack or frame pointer write. Both state addresses as offsets from the image base and the function
+pushed one, or a call through a register leave it absent. After that call, the walk follows to the next call in the same function that receives one of two things (`output_passed_to`, x64): the one frame slot whose address the call was given as another argument, else its return value in `rax`. It is said as a fact about the slot or the register ("the frame slot [rsp+0xa0], given to that call as argument 2, is then argument 2 of the call at …"; "that call's return value in rax is then …"), never as what the first call does with it. One hop more, the same walk runs from that later call: its own `output_passed_to` names the next call that receives the frame slot the later call was given as another argument, else its return value, with the callee and the argument position, and nothing is followed past that call; each hop is absent on its own when the code does not show it. Where the first hop's call reaches a function of the file (no import), that function is read from its first instruction (`inside`): the first call in it that receives the argument register the value arrived in, an argument spilled to its home slot and read back after a `push` or a `sub rsp` being the same slot; any other stack or frame pointer write leaves it absent, and nothing deeper is read. Which call is stated never depends on what the code writes on the way; whether the followed slot, or the argument inside, reaches that call as the decoder left it is a flag of its own on the hop and on `inside` (`contents_unchanged`). It is false after a store through a register holding it or a string store through `rdi` holding it, and, while a frame slot is followed, after a store into the frame at or above the slot's start, a store through any register holding a frame address, a string store, a frame store with an index register, or a call given a frame address before the call that receives the slot. A call through an import or a slot states its stack arguments that a `mov [rsp+d], imm32` in the straight run before it sets (`constants`, by argument position). The walk tracks registers and frame slots, ends tracking of a slot any store overlaps (sized by the store's width, SSE and VEX stores included; within 16 bytes where the width cannot be read), follows unconditional jumps and falls through conditional ones (said), and is absent at a return, an undecodable byte, a jump back, the function's end or a stack or frame pointer write. Both state addresses as offsets from the image base and the function
 around each from the file's own function table (`tools.pe_image`), and neither
 guesses one. The decoder runs after FLOSS so it can read FLOSS's kept result;
 both run after every other step so no earlier id moves. Where the resolution names
@@ -5211,6 +5211,34 @@ is assembled from what the run gathered rather than recomputed beside it:
   listed four hashes; under the rule both are unpublished rows ("seen only in
   the file's strings") and the export declines them. A test holds the export
   and the table to one decision.
+* **A decoded value the code passes to an API argument of its role is a row of
+  its own.** A decoded mutex name, file path or user agent has no standing by
+  its shape: a run decodes user agents the code never uses. The builder binds
+  a decoded text (`reporting.call_bindings`, stored as `bound_values`) only
+  where the run's answers state the whole chain: the static decoder's
+  reference passes the encoded bytes to a function of the file, the frame slot
+  that call was given (never its return value) is an argument of the next call,
+  directly or inside the function that call reaches (`inside`), that call is
+  an import the file's table names or a slot one function index entry alone
+  names, and the argument-role table (`data/api_argument_roles_v1.json`,
+  written from the Win32 prototypes) says that argument of that API takes a
+  mutex name, a file path or a user agent in the text's encoding. A file path
+  is listed only where the call makes or removes the file (a copy's or a
+  move's destination, a download's file, a delete), and CreateFile only where
+  its creation disposition is a constant that creates the file, read at the
+  call; a path a call only reads is as often the system's own. The row's
+  source is `call_argument`, its context the argument and the call, and its
+  `yes:` reason the chain, which §9, `/iocs`, MISP's comment and the STIX
+  indicator's description each carry; a user agent's pattern compares the
+  `User-Agent` request header of `http-request-ext`. A judge value the
+  report binds is asked as the binding. A bound value publishes nothing under
+  a Benign verdict or one the judge stated no confidence for. A bound user
+  agent that begins as the common browsers' do (the table's
+  `browser_user_agents`) keeps its row and chain but is refused by the rule,
+  with the reason, on every surface; the prefix rule is conservative and also
+  leaves a browser-shaped agent with a token of its own unpublished. A user agent
+  nothing binds is refused with that reason, and every other decoded text
+  stays a candidate.
 * **A value a tool recovered from hidden text is a source of its own.** Two
   tools recover text the sample hid: FLOSS, by emulation (its decoded, stack
   and tight strings), and the static decoder (`decode_string_blobs`), which

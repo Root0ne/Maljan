@@ -1,0 +1,41 @@
+{
+  "schema": "maljan-api-argument-roles/v1",
+  "version": "1.1",
+  "source": "The parameter list of each function's prototype as Microsoft documents it in the Win32 API reference and declares it in the Windows SDK headers (synchapi.h, fileapi.h, winbase.h, wininet.h, winhttp.h, urlmon.h), and the documented values of the constants named here (fileapi.h: CREATE_NEW = 1, CREATE_ALWAYS = 2). The Windows ABI fixes each parameter's position; positions are counted from 1. Written for this project, not copied from a third-party table.",
+  "about": "Which argument of a Windows API function is a whole value of an indicator role, and the text encoding the function reads it in (an A function reads single-byte text, a W function UTF-16LE). A file path is listed only where the call makes or replaces the file it names, or removes it: the destination of a copy or a move, the file a download writes, the file a delete removes, and the file CreateFile opens only when the call's creation disposition is a constant that creates a file (the 'when' condition: that argument's value, read at the call, must be one of 'values'). A path the call only reads or opens as it exists (a copy's source, CreateFile opening an existing file, an attribute change) is left out: such a path is as often the system's own file as the sample's. A registry function's key argument is left out: it names a key under a root handle, not a whole key. A URL argument is left out: a URL the file hides is published by the network rule already.",
+  "roles": {
+    "mutex_name": {"kind": "mutex", "words": "the name of the mutex the call creates or opens"},
+    "file_path": {"kind": "path", "words": "the path of a file the call creates, writes or removes"},
+    "user_agent": {"kind": "user_agent", "words": "the user agent the HTTP session the call opens sends"}
+  },
+  "apis": {
+    "CreateMutexA": {"text": "ascii", "arguments": {"3": {"name": "lpName", "role": "mutex_name"}}},
+    "CreateMutexW": {"text": "utf-16le", "arguments": {"3": {"name": "lpName", "role": "mutex_name"}}},
+    "CreateMutexExA": {"text": "ascii", "arguments": {"2": {"name": "lpName", "role": "mutex_name"}}},
+    "CreateMutexExW": {"text": "utf-16le", "arguments": {"2": {"name": "lpName", "role": "mutex_name"}}},
+    "OpenMutexA": {"text": "ascii", "arguments": {"3": {"name": "lpName", "role": "mutex_name"}}},
+    "OpenMutexW": {"text": "utf-16le", "arguments": {"3": {"name": "lpName", "role": "mutex_name"}}},
+    "CreateFileA": {"text": "ascii", "arguments": {"1": {"name": "lpFileName", "role": "file_path", "when": {"argument": 5, "name": "dwCreationDisposition", "values": [1, 2]}}}},
+    "CreateFileW": {"text": "utf-16le", "arguments": {"1": {"name": "lpFileName", "role": "file_path", "when": {"argument": 5, "name": "dwCreationDisposition", "values": [1, 2]}}}},
+    "DeleteFileA": {"text": "ascii", "arguments": {"1": {"name": "lpFileName", "role": "file_path"}}},
+    "DeleteFileW": {"text": "utf-16le", "arguments": {"1": {"name": "lpFileName", "role": "file_path"}}},
+    "CopyFileA": {"text": "ascii", "arguments": {"2": {"name": "lpNewFileName", "role": "file_path"}}},
+    "CopyFileW": {"text": "utf-16le", "arguments": {"2": {"name": "lpNewFileName", "role": "file_path"}}},
+    "CopyFileExA": {"text": "ascii", "arguments": {"2": {"name": "lpNewFileName", "role": "file_path"}}},
+    "CopyFileExW": {"text": "utf-16le", "arguments": {"2": {"name": "lpNewFileName", "role": "file_path"}}},
+    "MoveFileA": {"text": "ascii", "arguments": {"2": {"name": "lpNewFileName", "role": "file_path"}}},
+    "MoveFileW": {"text": "utf-16le", "arguments": {"2": {"name": "lpNewFileName", "role": "file_path"}}},
+    "MoveFileExA": {"text": "ascii", "arguments": {"2": {"name": "lpNewFileName", "role": "file_path"}}},
+    "MoveFileExW": {"text": "utf-16le", "arguments": {"2": {"name": "lpNewFileName", "role": "file_path"}}},
+    "URLDownloadToFileA": {"text": "ascii", "arguments": {"3": {"name": "szFileName", "role": "file_path"}}},
+    "URLDownloadToFileW": {"text": "utf-16le", "arguments": {"3": {"name": "szFileName", "role": "file_path"}}},
+    "InternetOpenA": {"text": "ascii", "arguments": {"1": {"name": "lpszAgent", "role": "user_agent"}}},
+    "InternetOpenW": {"text": "utf-16le", "arguments": {"1": {"name": "lpszAgent", "role": "user_agent"}}},
+    "WinHttpOpen": {"text": "utf-16le", "arguments": {"1": {"name": "pszAgentW", "role": "user_agent"}}}
+  },
+  "browser_user_agents": {
+    "source": "The product token the common desktop and mobile browsers begin their User-Agent header with, as the header's grammar places it first (RFC 9110, section 10.1.5): every current browser sends 'Mozilla/5.0 (', an Internet Explorer era one 'Mozilla/4.0 (compatible; MSIE ', and the older Presto-based browsers 'Opera/'.",
+    "about": "A bound user agent that begins with one of these keeps its row and its chain but is not published: an indicator for it would match the ordinary browser traffic that sends the same header. The rule is conservative: it also leaves unpublished a browser-shaped user agent that carries a token of its own.",
+    "prefixes": ["Mozilla/5.0 (", "Mozilla/4.0 (compatible; MSIE ", "Opera/"]
+  }
+}

@@ -197,6 +197,12 @@ class MalwareReportBuilder:
         # C2 URL FLOSS and the static decoder both recovered once had no row
         # anywhere, not even a refused one, while the record gave it standing.
         emulated = emulation_from_ledger(ledger)
+        # Each decoded text the code passes whole to an API argument of a known
+        # role, with the chain that binds it: such a value is an indicator row
+        # of its own, published with that chain on every surface.
+        from maljan.reporting.call_bindings import bound_values_from_ledger
+
+        bound = bound_values_from_ledger(ledger)
         # Where the run's tools saw each value an analyst listed: a listed
         # value stands on the answer that holds it, and "no tool saw it" is
         # said only when this search of the whole ledger found none.
@@ -275,6 +281,7 @@ class MalwareReportBuilder:
             ],
             rule_match_strings=yara_rule_strings(ledger),
             emulated_strings=emulated,
+            bound_values=bound,
             tool_sightings=sightings,
             tool_queries=queries,
             references=references,
@@ -729,10 +736,12 @@ def ioc_table(report: MalwareReport, *, raise_unread: bool = False) -> list[Cons
 
 def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.extractors.network_extractor import url_host
+    from maljan.reporting.call_bindings import BOUND_SOURCE, binding_context
     from maljan.reporting.ledger_projection import listed_non_network_values
     from maljan.reporting.ledger_report import artifact_sections, listed_headings, listed_rows
     from maljan.reporting.renderers.stix_renderer import (
         UNATTRIBUTED_CAPTURE_VALUE,
+        bound_kwargs,
         corroborating_values,
         digest_label,
         emulation_kwargs,
@@ -849,6 +858,34 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 f"dropped {name}".strip(),
                 published=_sandbox_host("hash", digest),
             )
+
+    # A decoded text the code passes whole to an API argument of its role: the
+    # binding's row, before any other row of its value, with the chain as its
+    # reason (``call_bindings``). A user agent is a network row, added there.
+    def _add_bound(network: bool) -> None:
+        for bound in report.bound_values:
+            if (bound.kind in _BOUND_NETWORK_KINDS) != network:
+                continue
+            if bound.kind == "path":
+                label = "File path" if path_names_a_file(bound.value) else "Directory"
+            else:
+                label = _BOUND_LABELS.get(bound.kind, bound.kind)
+            _add(
+                label,
+                bound.kind,
+                bound.value,
+                BOUND_SOURCE,
+                binding_context(bound),
+                published=publish_answer(
+                    bound.kind,
+                    bound.value,
+                    BOUND_SOURCE,
+                    **bound_kwargs(report, bound.kind, bound.value),
+                ),
+                is_network=network,
+            )
+
+    _add_bound(network=False)
 
     for op in file_ops:
         if op.get("operation") == "write" and op.get("path"):
@@ -1063,6 +1100,7 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 ),
                 is_network=True,
             )
+        _add_bound(network=True)
         for label, kind, values in (
             ("User-Agent", "user_agent", net.user_agents),
             ("JA3", "ja3", net.ja3_fingerprints),
@@ -1077,6 +1115,8 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                     published=_captured(kind, value),
                     is_network=True,
                 )
+    else:
+        _add_bound(network=True)
 
     labels = {"url": "URL", "domain": "Domain", "email": "Email"}
     for s in strings:
@@ -1101,6 +1141,12 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         else row
         for row in table
     ]
+
+
+# The table's type for each kind a bound value can be, and the kinds that are
+# network rows.
+_BOUND_LABELS = {"mutex": "Mutex", "user_agent": "User-Agent"}
+_BOUND_NETWORK_KINDS = frozenset({"user_agent"})
 
 
 # The table's type for each non-network kind an analyst's table lists.

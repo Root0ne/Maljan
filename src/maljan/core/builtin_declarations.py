@@ -1094,6 +1094,7 @@ CONSUMER_KINDS: dict[str, dict[str, Any]] = {
         "kinds": ["emulated_strings", "decoded_strings", "strings", "file_iocs"]
     },
     "stix_renderer.DECODER_TOOL": {"kinds": ["decoded_strings"]},
+    "call_bindings": {"kinds": ["decoded_strings", "function_index"]},
     "stix_renderer._STRING_SWEEP_TOOLS": {"kinds": ["strings", "file_iocs", "text_iocs"]},
     "figures.code_listing": {"kinds": ["decompile"]},
     "ledger_projection.technique_hits": {"kinds": ["capability_rules"]},

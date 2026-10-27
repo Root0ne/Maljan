@@ -54,9 +54,18 @@ What counts, and nothing else:
   the later call was given as another argument, else its return value, stated
   with its callee and argument position the same way. Nothing is followed past
   that call, and this hop is absent on its own where the code does not show it.
+* **Into the function it reaches (x64).** Where that later call calls a
+  function of the file (no import), the function is read from its first
+  instruction (``inside``): the first call in it that receives the argument
+  register the value arrived in, tracked the same way through registers and
+  frame slots. A ``push`` of a register or a ``sub rsp`` before it moves the
+  tracked ``rsp`` slots by what it lowers the stack pointer by, so an argument
+  spilled to its home slot and read back after the frame is made is the same
+  slot; any other write to the stack or frame pointer ends the walk with
+  nothing stated. One function deep: nothing past that call is read.
 
-A pointer passed on the x64 stack, or a consumer in another function, are not
-read: the answer is absent rather than guessed.
+A pointer passed on the x64 stack, or a consumer deeper than that one function,
+are not read: the answer is absent rather than guessed.
 """
 
 from __future__ import annotations
@@ -493,6 +502,23 @@ def _call_words(joined: Any) -> str:
     return f"argument {joined['argument']} of the call at {joined['call_at']} to {named}"
 
 
+def _inside_words(joined: dict[str, Any]) -> str:
+    """``; inside the function at …, which the call at … calls, its argument 1 is …``, or ``""``."""
+    inside = joined.get("inside")
+    said = _call_words(inside)
+    if not said or not isinstance(inside, dict):
+        return ""
+    path = (
+        ", on the path where every conditional jump falls through"
+        if inside.get("fall_through")
+        else ""
+    )
+    return (
+        f"; inside the function at {inside.get('function')}, which the call at "
+        f"{joined.get('call_at')} calls, its argument {joined.get('argument')} is {said}{path}"
+    )
+
+
 def passed_to_words(joined: Any) -> str:
     """The one wording of a ``passed_to`` answer, for every place that prints one, or ``""``.
 
@@ -501,8 +527,10 @@ def passed_to_words(joined: Any) -> str:
     as such; where a frame slot that call was given, or its return value, was
     followed to a later call, that call and what was followed, said as a fact
     about the slot or the register and never as what the first call does with
-    it; the hop after that later call the same way where it was followed; and
-    that nothing is followed past the last call stated.
+    it; the hop after that later call the same way where it was followed;
+    that nothing is followed past the last call stated; and, where the later
+    call reaches a function of the file, the first call inside it that receives
+    the argument, named by the call that reaches the function.
     """
     said = _call_words(joined)
     if not said:
@@ -514,6 +542,7 @@ def passed_to_words(joined: Any) -> str:
     )
     out = f"{what} is {said}"
     hops = 0
+    inside = ""
     then = joined.get("output_passed_to")
     while isinstance(then, dict) and _call_words(then):
         path = (
@@ -522,11 +551,13 @@ def passed_to_words(joined: Any) -> str:
             else ""
         )
         out += f"; {then.get('followed')} is then {_call_words(then)}{path}"
+        inside += _inside_words(then)
         hops += 1
         then = then.get("output_passed_to")
     if hops:
         out += "; it is not followed past that call"
-    return out
+    # What the function a later call reaches does with it, named by that call.
+    return out + inside
 
 
 class _Starts:
@@ -774,6 +805,39 @@ def _frame_store(code: Code, at: int) -> tuple[int, int, int | None] | None:
     and VEX. An instruction whose memory operand is only read is no store. The
     width is ``None`` where the operand's width is not read here.
     """
+    found = _store_operand(code, at)
+    return _frame_operand(code, *found) if found is not None else None
+
+
+def _store_base(code: Code, at: int) -> int | None:
+    """The base register of a store's memory operand, any base; ``None`` for no store or none.
+
+    A RIP-relative or absolute operand, or one with no base, has none.
+    """
+    found = _store_operand(code, at)
+    if found is None:
+        return None
+    i, rex, _width = found
+    if i >= len(code) or code[i] >> 6 == 3:
+        return None
+    mod, rm = code[i] >> 6, code[i] & 7
+    if rm == 4:
+        if i + 1 >= len(code):
+            return None
+        base = code[i + 1] & 7
+        if mod == 0 and base == 5:
+            return None
+        return base | ((rex & 1) << 3)
+    if mod == 0 and rm == 5:
+        return None
+    return rm | ((rex & 1) << 3)
+
+
+def _store_operand(code: Code, at: int) -> tuple[int, int, int | None] | None:
+    """``(ModRM index, REX, width)`` of a store's memory operand, or ``None``.
+
+    A VEX store's REX is its B bit alone, read from the VEX prefix.
+    """
     i, prefixes = at, set()
     while i < len(code) and code[i] in _LEGACY_PREFIXES:
         prefixes.add(code[i])
@@ -791,6 +855,8 @@ def _frame_store(code: Code, at: int) -> tuple[int, int, int | None] | None:
             return None
         table = 1 if first == 0xC5 else code[i + 1] & 0x1F
         wide = bool((code[i + 1] if first == 0xC5 else code[i + 2]) & 0x04)
+        # The three-byte form carries the base register's high bit, inverted.
+        rex = 0x41 if first == 0xC4 and not code[i + 1] & 0x20 else 0
         i += 2 if first == 0xC5 else 3
         op = code[i]
         if op not in _VEX_STORES.get(table, frozenset()):
@@ -803,7 +869,7 @@ def _frame_store(code: Code, at: int) -> tuple[int, int, int | None] | None:
         op = code[i + 1]
         i += 2
         if op in (0x38, 0x3A):
-            return _frame_operand(code, i + 1, rex, None) if i < len(code) else None
+            return (i + 1, rex, None) if i < len(code) else None
         if op in _TWO_BYTE_PLAIN or 0x80 <= op <= 0x8F:
             return None
         if op in _TWO_BYTE_READS or (op == 0x7E and 0xF3 in prefixes):
@@ -827,7 +893,7 @@ def _frame_store(code: Code, at: int) -> tuple[int, int, int | None] | None:
             width = None
         else:
             width = 8 if rex & 8 else 2 if 0x66 in prefixes else 4
-    return _frame_operand(code, i, rex, width)
+    return i, rex, width
 
 
 def _frame_operand(
@@ -865,6 +931,11 @@ def _overlaps(slot: tuple[int, int], store: tuple[int, int, int | None]) -> bool
     if width is None:
         return abs(slot[1] - displacement) < _UNREAD_WIDTH_REACH
     return slot[1] < displacement + width and displacement < slot[1] + 8
+
+
+# What an ``output_passed_to`` answer says it followed when no frame slot was
+# given to the call: its return value, which is not that slot's contents.
+RETURN_VALUE_FOLLOWED = "that call's return value in rax"
 
 
 @read_as_bytes
@@ -931,15 +1002,15 @@ def _output_passed_to(
         )
         answer = _follow(code, section.rva, bounds, after, set(), (base, displacement))
     if answer is None:
-        followed = "that call's return value in rax"
+        followed = RETURN_VALUE_FOLLOWED
         answer = _follow(code, section.rva, bounds, after, {0}, None)
     if answer is None:
         return None
-    callee_rva, instruction, register, branched = answer
+    callee_rva, instruction, register, branched, unchanged = answer
     callee = _callee(image, callee_rva, instruction)
     if callee is None:
         return None
-    return {
+    stated: dict[str, Any] = {
         "call_at": hex(callee_rva),
         "callee": callee,
         "argument": _X64_ARGUMENTS[register],
@@ -947,6 +1018,10 @@ def _output_passed_to(
         "followed": followed,
         "fall_through": branched,
     }
+    if followed != RETURN_VALUE_FOLLOWED:
+        # Whether the slot reaches that call as the call before it left it.
+        stated["contents_unchanged"] = unchanged
+    return stated
 
 
 def _follow(
@@ -956,14 +1031,39 @@ def _follow(
     start_rva: int,
     carriers: set[int],
     buffer: tuple[int, int] | None,
-) -> tuple[int, Instruction, int, bool] | None:
-    """The first call after ``start_rva`` that receives the output, the register, and
-    whether a conditional jump was passed on the way."""
+    *,
+    entry: bool = False,
+) -> tuple[int, Instruction, int, bool, bool] | None:
+    """The first call after ``start_rva`` that receives the output, the register,
+    whether a conditional jump was passed on the way, and whether what is
+    followed reaches that call unchanged.
+
+    With ``entry`` the walk starts at a function's first instruction, where its
+    frame is still being made: a ``push`` of a register or a ``sub rsp`` moves
+    the tracked ``rsp`` slots by what it lowers the stack pointer by
+    (:func:`_stack_lowered`); any other write to the stack pointer still ends it.
+
+    Which call is reached never depends on what the code writes on the way.
+    Whether what is followed is unchanged when it gets there is the last value:
+    it is false after a store through a register holding it (``mov [rax+8], …``)
+    or a string store while ``rdi`` holds it, and, while a frame slot
+    (``buffer``) is followed, after a store into the frame at or above the
+    slot's own displacement, a store through a register holding any frame
+    address (``lea rax, [rsp+d]``, a place inside the slot among them), a string
+    store, a store into the frame whose address is not read here (an index
+    register), and a call given any frame address before the call that
+    receives the slot, which could write into it; with frame slots tracked, a
+    frame store whose address is not read also makes it false. The call that
+    receives the slot may be given other frame addresses beside it.
+    """
     at = start_rva - section_rva
     held = set(carriers)
+    # Registers holding the address of a place in the frame (a buffer's only).
+    framed: set[int] = set()
     slots: set[tuple[int, int]] = set()
     visited: set[int] = set()
     branched = False
+    unchanged = True
     while bounds[0] <= section_rva + at < bounds[1] and at not in visited:
         visited.add(at)
         rva = section_rva + at
@@ -983,17 +1083,30 @@ def _follow(
         if instruction.kind == "call":
             passed = sorted(held & set(_X64_ARGUMENTS), key=lambda r: _X64_ARGUMENTS[r])
             if passed:
-                return rva, instruction, passed[0], branched
+                return rva, instruction, passed[0], branched, unchanged
+            if buffer is not None and framed & set(_X64_ARGUMENTS):
+                unchanged = False
             held &= _X64_NONVOLATILE
+            framed &= _X64_NONVOLATILE
             if not held and not slots and buffer is None:
                 return None
             at += instruction.length
             continue
         # The stack and frame pointers every tracked slot is read against.
         if instruction.moves_stack or 5 in instruction.writes:
-            return None
+            lowered = _stack_lowered(code, at) if entry and 5 not in instruction.writes else None
+            if lowered is None:
+                return None
+            slots = {(base, d + lowered if base == _SP else d) for base, d in slots}
+            at += instruction.length
+            continue
         before = set(held)
+        framed_before = set(framed)
         held -= set(instruction.writes)
+        framed -= set(instruction.writes)
+        # A store that may write what is followed (``unchanged``).
+        if unchanged and _may_write(code, at, before, framed_before, buffer, bool(slots)):
+            unchanged = False
         # Any store that may write a byte of a tracked slot ends its tracking.
         store = _frame_store(code, at)
         if store is not None:
@@ -1004,6 +1117,8 @@ def _follow(
             rex, op, reg, base, displacement = ref
             place = (base, displacement)
             wide = bool(rex & 8)
+            if op == 0x8D and buffer is not None:
+                framed.add(reg)
             if op == 0x8D and wide and place == buffer:
                 held.add(reg)
             elif op == 0x89 and wide and reg in before:
@@ -1012,10 +1127,226 @@ def _follow(
                 held.add(reg)
         elif moved is not None and moved[1] in before:
             held.add(moved[0])
+        elif moved is not None and moved[1] in framed_before:
+            framed.add(moved[0])
         if not held and not slots and buffer is None:
             return None
         at += instruction.length
     return None
+
+
+def _string_store(code: Code, at: int) -> bool:
+    """Whether the instruction at ``at`` is a string store (``movs``, ``stos``: ``[rdi]``)."""
+    i = at
+    while i < len(code) and code[i] in _LEGACY_PREFIXES:
+        i += 1
+    if i < len(code) and 0x40 <= code[i] <= 0x4F:
+        i += 1
+    return i < len(code) and code[i] in (0xA4, 0xA5, 0xAA, 0xAB)
+
+
+def _unread_frame_store(code: Code, at: int, derived: set[int]) -> bool:
+    """Whether a store may write the frame at an address not read here.
+
+    A string store; a store through a register ``derived`` holds a frame
+    address in; a store with a stack or frame pointer base whose operand is
+    not ``[rsp+d]``/``[rbp+d]`` (an index register, another scale).
+    """
+    if _string_store(code, at):
+        return True
+    base = _store_base(code, at)
+    if base is None:
+        return False
+    if base in derived:
+        return True
+    return base in (_SP, 5) and _frame_store(code, at) is None
+
+
+def _may_write(
+    code: Code,
+    at: int,
+    held: set[int],
+    framed: set[int],
+    buffer: tuple[int, int] | None,
+    slots: bool,
+) -> bool:
+    """Whether the instruction at ``at`` may write what :func:`_follow` follows."""
+    base = _store_base(code, at)
+    if base is not None and base in held:
+        return True
+    if 7 in held and _string_store(code, at):
+        return True
+    if buffer is not None:
+        if _unread_frame_store(code, at, framed):
+            return True
+        store = _frame_store(code, at)
+        return store is not None and store[0] == buffer[0] and store[1] >= buffer[1]
+    # A frame store at an address not read may overwrite a tracked slot.
+    return slots and _unread_frame_store(code, at, set())
+
+
+def _stack_lowered(code: Code, at: int) -> int | None:
+    """The bytes an x64 ``push r64`` or ``sub rsp, imm`` at ``at`` lowers ``rsp`` by; ``None``."""
+    rex = code[at] if at < len(code) and 0x40 <= code[at] <= 0x4F else 0
+    i = at + (1 if rex else 0)
+    if i >= len(code):
+        return None
+    op = code[i]
+    if 0x50 <= op <= 0x57 and rex in (0, 0x40, 0x41):
+        return 8
+    if rex != 0x48 or op not in (0x81, 0x83) or i + 1 >= len(code) or code[i + 1] != 0xEC:
+        return None
+    width = 1 if op == 0x83 else 4
+    if i + 2 + width > len(code):
+        return None
+    lowered = int.from_bytes(code[i + 2 : i + 2 + width], "little", signed=True)
+    return lowered if lowered > 0 else None
+
+
+@read_as_bytes
+def parameter_passed_to(image: Image, function_rva: int, register: int) -> dict[str, Any] | None:
+    """The first call in the function at ``function_rva`` receiving its argument in ``register``.
+
+    x64 only, read from the function's first instruction (:func:`_follow` with
+    ``entry``): ``{"function", "call_at", "callee", "argument", "register",
+    "fall_through"}``, or ``None`` wherever the walk states nothing. Read once
+    per function and register.
+    """
+    if not image.is64 or register not in _X64_ARGUMENTS:
+        return None
+    section = image.section_at_rva(function_rva)
+    bounds = image.function_bounds(function_rva)
+    if section is None or not section.executable or bounds is None or bounds[0] != function_rva:
+        return None
+    walks = image.walks()
+    key = ("parameter", function_rva, register)
+    if key not in walks:
+        walks[key] = _parameter_passed_to(image, function_rva, register, section, bounds)
+    held = walks[key]
+    # A copy: the caller adds to the answer it is handed.
+    return copy.deepcopy(held) if held is not None else None
+
+
+def _parameter_passed_to(
+    image: Image, function_rva: int, register: int, section: Section, bounds: tuple[int, int]
+) -> dict[str, Any] | None:
+    """:func:`parameter_passed_to`, read once per function and register."""
+    code = image.section_view(section)
+    answer = _follow(code, section.rva, bounds, function_rva, {register}, None, entry=True)
+    if answer is None:
+        return None
+    callee_rva, instruction, passed, branched, unchanged = answer
+    callee = _callee(image, callee_rva, instruction)
+    if callee is None:
+        return None
+    return {
+        "function": hex(function_rva),
+        "call_at": hex(callee_rva),
+        "callee": callee,
+        "argument": _X64_ARGUMENTS[passed],
+        "register": _X64_REGISTER_NAMES[passed],
+        "fall_through": branched,
+        "contents_unchanged": unchanged,
+    }
+
+
+def stack_constants(image: Image, call_rva: int) -> dict[str, str]:
+    """``{argument position: constant}`` for the x64 stack arguments a call is given as constants.
+
+    Read in the straight run before the call (:class:`_Decoded`): the last
+    ``mov dword|qword [rsp+d], imm32`` to an argument's stack slot (``d`` from
+    0x20, argument ``d / 8 + 1``) with no later store overlapping it. A move of
+    the stack pointer in the run, or a store that may write the stack at an
+    address not read here (:func:`_unread_frame_store`: a string store, an
+    index register, a register holding a stack address), states none before it.
+    """
+    if not image.is64:
+        return {}
+    section = image.section_at_rva(call_rva)
+    bounds = image.function_bounds(call_rva)
+    if section is None or bounds is None:
+        return {}
+    code = image.section_view(section)
+    walks = image.walks()
+    key = ("decoded", section.raw_offset, section.mapped_size, section.rva, bounds)
+    decoded = walks.get(key)
+    if decoded is None:
+        decoded = walks[key] = _Decoded(code, section.rva, bounds)
+    run = decoded.run_before(code, section.rva, call_rva)
+    if run is None:
+        return {}
+    held: dict[int, int] = {}
+    # Registers holding a stack address (``lea r, [rsp+d]``, ``mov r, rsp``).
+    derived: set[int] = set()
+    for rva, instruction in run:
+        at = rva - section.rva
+        if instruction.moves_stack:
+            held.clear()
+            continue
+        if _unread_frame_store(code, at, derived):
+            held.clear()
+        before = set(derived)
+        derived -= set(instruction.writes)
+        ref = _frame_ref(code, at)
+        moved = _register_move(code, at)
+        if ref is not None and ref[1] == 0x8D and ref[3] == _SP:
+            derived.add(ref[2])
+        elif moved is not None and (moved[1] == _SP or moved[1] in before):
+            derived.add(moved[0])
+        store = _frame_store(code, at)
+        if store is None:
+            continue
+        for displacement in [d for d in held if _overlaps((_SP, d), store)]:
+            held.pop(displacement)
+        constant = _constant_store(code, at, instruction.length)
+        if constant is not None and store[0] == _SP:
+            held[store[1]] = constant
+    return {
+        str(d // 8 + 1): hex(value) for d, value in sorted(held.items()) if d >= 0x20 and d % 8 == 0
+    }
+
+
+def _constant_store(code: Code, at: int, length: int) -> int | None:
+    """The immediate of a ``mov r/m, imm32`` (``C7 /0``) of ``length`` bytes, or ``None``."""
+    i = at
+    rex = 0
+    if i < len(code) and 0x40 <= code[i] <= 0x4F:
+        rex = code[i]
+        i += 1
+    if (
+        i + 1 >= len(code)
+        or code[i] != 0xC7
+        or (code[i + 1] >> 3) & 7
+        or rex & 0xF7 not in (0, 0x40)
+    ):
+        return None
+    value = int.from_bytes(code[at + length - 4 : at + length], "little", signed=True)
+    return value if value >= 0 else None
+
+
+def _with_constants(image: Image, joined: dict[str, Any]) -> dict[str, Any]:
+    """The answer with its call's constant stack arguments (``constants``) for an API call."""
+    callee = joined.get("callee")
+    if isinstance(callee, dict) and (callee.get("import") or callee.get("slot")):
+        said = stack_constants(image, int(str(joined["call_at"]), 16))
+        if said:
+            joined["constants"] = said
+    return joined
+
+
+def _inside(image: Image, joined: dict[str, Any]) -> dict[str, Any] | None:
+    """What the function a call reaches does first with the argument it was given, or ``None``.
+
+    Only for a call to a function of the file: an import's body is not the file's.
+    """
+    callee = joined.get("callee")
+    if not isinstance(callee, dict) or callee.get("import") or not callee.get("function"):
+        return None
+    register = _X64_REGISTER_NUMBERS.get(str(joined.get("register") or ""))
+    if register is None:
+        return None
+    inside = parameter_passed_to(image, int(str(callee["function"]), 16), register)
+    return _with_constants(image, inside) if inside is not None else None
 
 
 @read_as_bytes
@@ -1067,7 +1398,12 @@ def passed_to(image: Image, site: int) -> dict[str, Any] | None:
                         image, int(then["call_at"], 16), _X64_REGISTER_NUMBERS[then["register"]]
                     )
                     if after is not None:
-                        then["output_passed_to"] = after
+                        then["output_passed_to"] = _with_constants(image, after)
+                    _with_constants(image, then)
+                    # Into the function that call reaches, one function deep.
+                    inside = _inside(image, then)
+                    if inside is not None:
+                        then["inside"] = inside
                     answer["output_passed_to"] = then
             elif argument == "push":
                 answer["argument"] = pushes + 1
