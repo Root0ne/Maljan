@@ -16,8 +16,8 @@
 # capability, a read-only root, no route out and the sample directory mounted
 # read-only.
 FROM python:3.13-slim-trixie@sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39 AS node
-ARG NODE_VERSION=22.23.3
-ARG NODE_TXZ_SHA256=df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
+ARG NODE_VERSION=22.23.4
+ARG NODE_TXZ_SHA256=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce
 WORKDIR /opt
 RUN python3 -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], 'node.tar.xz')" \
         "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" && \
