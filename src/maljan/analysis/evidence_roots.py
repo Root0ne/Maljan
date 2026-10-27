@@ -95,8 +95,8 @@ from maljan.analysis.sandbox_sections import (
 from maljan.core.declared_reading import (
     facts_of,
     kind_of,
+    reader_reference_facts,
     reads_as,
-    shipped_by_name,
 )
 from maljan.core.undeclared_tools import (
     entry_address_arguments,
@@ -1250,18 +1250,21 @@ BRANCH_ORDER: tuple[str, ...] = (
 
 
 def _shaped_otherwise(facts: Any) -> bool:
-    """Whether a tool declares rows and places other than the shipped tool of its kind.
+    """Whether a tool declares rows and places other than its kind's reader was written for.
 
     Such a tool's answer has another shape than its kind's own reading reads,
     so it is read by its declared paths; a tool shaped as the built-in of its
-    kind is read by that kind's reading.
+    kind is read by that kind's reading. The reference is the shape that
+    reading's code was written for (``declared_reading.reader_reference_facts``),
+    for a live entry and a stored one alike, never the declarations shipped
+    now, so a run reads the same whatever they say.
     """
     if not (facts.rows and facts.places):
         return False
-    shipped = next((f for f in shipped_by_name().values() if f.kind == facts.kind), None)
-    if shipped is None:
+    reference = reader_reference_facts(facts.kind)
+    if reference is None:
         return False
-    return (facts.rows, facts.places) != (shipped.rows, shipped.places)
+    return (facts.rows, facts.places) != (reference.rows, reference.places)
 
 
 def reading_branch(entry: Any) -> str:

@@ -16,11 +16,14 @@ Only ``reporting.tool_kinds`` imports this module, and only on its branches
 for an entry with no recorded source (a guard holds both).
 
 Some readers read a source-less entry through :func:`builtin_facts`, the
-shipped declaration of the built-in tool of that name, rather than a table.
-That equals the old reading only while each kind such a reader selects names
-exactly the tools its old table named; ``tests/unit/reporting/
+declaration the built-in tool of that name shipped, rather than a table. It is
+read from the frozen snapshot of the legacy reading
+(``declared_reading.legacy_by_name``), never from the declarations shipped
+now, so a later change to a built-in declaration leaves a stored run as it
+read. That equals the old reading only while each kind such a reader selects
+names exactly the tools its old table named; ``tests/unit/reporting/
 test_an_entry_without_a_source_is_read_as_before.py`` holds every such set
-equal, so a built-in declaration that changed a kind fails there first.
+equal.
 """
 
 from __future__ import annotations
@@ -36,14 +39,14 @@ from maljan.core.tool_declarations import ToolFacts
 
 
 def _builtin_by_name() -> Mapping[str, ToolFacts]:
-    """Every built-in tool's shipped facts by name (``declared_reading.shipped_by_name``).
+    """Every built-in tool's shipped facts by name, frozen (``declared_reading.legacy_by_name``).
 
     Read by the exact name a stored entry holds: the report's tables never
     took a server's prefix off a name.
     """
-    from maljan.core.declared_reading import shipped_by_name
+    from maljan.core.declared_reading import legacy_by_name
 
-    return shipped_by_name()
+    return legacy_by_name()
 
 
 def builtin_facts(tool: str) -> ToolFacts | None:
@@ -243,12 +246,11 @@ def in_table(consumer: str, tool: str) -> bool:
     if test is not None:
         return test(str(tool or ""))
     from maljan.core.builtin_declarations import CONSUMER_KINDS
+    from maljan.core.declared_reading import legacy_names
 
     spec = CONSUMER_KINDS[consumer]
     facts = builtin_facts(tool)
-    return (facts is not None and facts.kind in spec["kinds"]) or tool in spec.get(
-        "legacy_names", ()
-    )
+    return (facts is not None and facts.kind in spec["kinds"]) or tool in legacy_names(consumer)
 
 
 def section_hinted(section: str, tool: str) -> bool:

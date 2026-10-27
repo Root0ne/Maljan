@@ -3978,7 +3978,11 @@ declaration later changes only new runs. A record of a newer version is read
 for the fields this release knows, and a record that no longer validates is
 read as declaring nothing, each with a warning. An entry that recorded a source
 but no facts is read as an undeclared tool; an entry written before sources
-were recorded is read the way it always was.
+were recorded is read the way it always was, from a frozen, digest-pinned
+snapshot of the facts the built-in tools declared then
+(`data/legacy_tool_facts_v1.json`), never from the declarations a release
+ships now, so a later change to a built-in declaration leaves a stored run
+reading as before.
 
 **Who reads a tool's kind.** A tool of yours declared with a built-in's kind is
 treated as the built-in of that kind, and its answer is read in that kind's

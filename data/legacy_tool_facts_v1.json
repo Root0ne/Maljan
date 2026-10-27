@@ -1,0 +1,4096 @@
+{
+  "schema": "maljan-legacy-tool-facts/v1",
+  "version": "1.0",
+  "about": "What the legacy reading of a stored ledger entry (one that recorded no source and no facts) resolves a bare tool name to, frozen so that no later change to a shipped declaration changes how a stored run reads. `tools`: each tool name the platform's built-in declarations covered and the facts they declared for it (every field the declaration set), in the order the first source declaring a name was read. `legacy_names`: the names each consumer's table held that no built-in tool has. Read only for an entry with no source and no facts; never extended.",
+  "source": "Cut from the platform's own built-in declarations (the built-in servers, the provider-owned blocks and the in-process sources) and its consumer tables, as they stood on 2026-10-27. Written for this project, not copied from a third-party table.",
+  "tools": {
+    "apk_info": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "format_info",
+      "read_only": true,
+      "routed_formats": [
+        "apk",
+        "dex"
+      ]
+    },
+    "archive_list": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "archive_listing",
+      "read_only": true
+    },
+    "capa": {
+      "arguments": {
+        "path": "path"
+      },
+      "asserts_techniques": true,
+      "display_name": "capa",
+      "does_not_show": "whether the matched code runs, or a capability no rule describes",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "function_starts": "/function_starts",
+      "kind": "capability_rules",
+      "long_running": true,
+      "places": {
+        "addresses": "/addresses"
+      },
+      "rows": "/capabilities/*",
+      "shows": "the capabilities whose capa rules match features of the file, its code and its structure",
+      "source": "capa",
+      "techniques": [
+        {
+          "path": "/**6/technique_id",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/attck",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/technique_ids",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/tags",
+          "format": "sigma_tag"
+        }
+      ],
+      "values": {
+        "rule": "/rule",
+        "namespace": "/namespace"
+      }
+    },
+    "capabilities": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "capabilities",
+      "read_only": true
+    },
+    "carve_payloads": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "carve"
+    },
+    "decode_string_blobs": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decoded_strings",
+      "places": {
+        "rva": "/rva"
+      },
+      "rows": "/results/*",
+      "values": {
+        "text": "/text"
+      }
+    },
+    "document_info": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "document_info",
+      "read_only": true,
+      "routed_formats": [
+        "ole2",
+        "ooxml",
+        "pdf"
+      ]
+    },
+    "elf_info": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "format_info",
+      "read_only": true,
+      "reads_delay_imports": true,
+      "routed_formats": [
+        "elf"
+      ]
+    },
+    "find_crypto_constants": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "crypto_constants",
+      "read_only": true
+    },
+    "floss": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "display_name": "FLOSS",
+      "effects": {
+        "executes": "emulation",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "emulated_strings",
+      "long_running": true,
+      "places": {
+        "call_site": "/called_at_rva",
+        "function": "/function_rva"
+      },
+      "reader": "emulated_strings_with_call_sites",
+      "rows": "/strings/*",
+      "values": {
+        "text": "/string",
+        "scheme": "/kind"
+      },
+      "words": [
+        "decoded",
+        "emulation",
+        "floss"
+      ]
+    },
+    "function_index": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_index",
+      "reader": "function_table"
+    },
+    "hashes": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "identity",
+      "read_only": true
+    },
+    "identify_file": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "identity",
+      "read_only": true
+    },
+    "iocs_from_file": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "file_iocs",
+      "read_only": true
+    },
+    "iocs_from_text": {
+      "arguments": {
+        "text": "text"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "text_iocs",
+      "read_only": true
+    },
+    "macho_info": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "format_info",
+      "read_only": true,
+      "routed_formats": [
+        "mach-o"
+      ]
+    },
+    "pe_info": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "format_info",
+      "read_only": true,
+      "reader": "pe_header",
+      "reads_delay_imports": true,
+      "routed_formats": [
+        "pe"
+      ]
+    },
+    "put_sample": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sample_delivery"
+    },
+    "put_sample_begin": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sample_delivery"
+    },
+    "put_sample_chunk": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sample_delivery"
+    },
+    "put_sample_finish": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sample_delivery"
+    },
+    "release_job": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "staging_release"
+    },
+    "resolve_api_hashes": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "api_hash_resolution",
+      "places": {
+        "rva": "/occurrences/*/rva"
+      },
+      "read_only": true,
+      "rows": "/hits/*",
+      "values": {
+        "name": "/readings/*/name"
+      }
+    },
+    "run_reader": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "reader_delivery"
+    },
+    "sigma_match": {
+      "arguments": {
+        "events": "events"
+      },
+      "asserts_techniques": true,
+      "display_name": "Sigma",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "event_rules",
+      "places": {
+        "command_line": "/matched_fields/CommandLine"
+      },
+      "rows": "/matches/*",
+      "source": "sigma",
+      "techniques": [
+        {
+          "path": "/**6/technique_id",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/attck",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/technique_ids",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/tags",
+          "format": "sigma_tag"
+        }
+      ],
+      "values": {
+        "rule": "/rule",
+        "title": "/title"
+      },
+      "words": [
+        "sigma",
+        "rule",
+        "rules"
+      ]
+    },
+    "sigma_match_sandbox": {
+      "arguments": {
+        "report": "report"
+      },
+      "asserts_techniques": true,
+      "display_name": "Sigma",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "event_rules",
+      "places": {
+        "command_line": "/matched_fields/CommandLine"
+      },
+      "rows": "/matches/*",
+      "source": "sigma",
+      "techniques": [
+        {
+          "path": "/**6/technique_id",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/attck",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/technique_ids",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/tags",
+          "format": "sigma_tag"
+        }
+      ],
+      "values": {
+        "rule": "/rule",
+        "title": "/title"
+      },
+      "words": [
+        "sigma",
+        "rule",
+        "rules"
+      ]
+    },
+    "signing_info": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "signing",
+      "read_only": true
+    },
+    "strings": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "does_not_show": "strings that are encoded, encrypted, compressed or built at run time; nor runs shorter than min_len, or past this page (read next_offset)",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "strings",
+      "places": {
+        "offset": "/offset"
+      },
+      "read_only": true,
+      "rows": "/strings/*",
+      "shows": "printable ASCII and UTF-16LE runs as they sit in the file, with their offsets",
+      "values": {
+        "text": "/text"
+      }
+    },
+    "transform_bytes": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "transform",
+      "reader": "byte_transform"
+    },
+    "unpack_upx": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "unpack",
+      "reader": "unpacked_image"
+    },
+    "yara_scan": {
+      "arguments": {
+        "path": "path",
+        "carved": "carved_path"
+      },
+      "asserts_techniques": true,
+      "display_name": "YARA",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "signature_rules",
+      "places": {
+        "offset": "/strings/*/offset",
+        "instance_offset": "/strings/*/instances/*/offset"
+      },
+      "rows": "/matches/*",
+      "source": "yara",
+      "techniques": [
+        {
+          "path": "/**6/technique_id",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/attck",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/technique_ids",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/tags",
+          "format": "sigma_tag"
+        }
+      ],
+      "timeout_seconds": 60.0,
+      "values": {
+        "rule": "/rule"
+      },
+      "words": [
+        "yara",
+        "rule",
+        "rules"
+      ]
+    },
+    "api_capability": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "api_catalogue",
+      "read_only": true
+    },
+    "attck_lookup": {
+      "effects": {
+        "executes": "no",
+        "network": "on_refresh",
+        "third_party": "no"
+      },
+      "kind": "reference",
+      "read_only": true
+    },
+    "attck_validate": {
+      "effects": {
+        "executes": "no",
+        "network": "on_refresh",
+        "third_party": "no"
+      },
+      "kind": "reference",
+      "read_only": true
+    },
+    "family_lookup": {
+      "effects": {
+        "executes": "no",
+        "network": "on_refresh",
+        "third_party": "no"
+      },
+      "kind": "reference",
+      "read_only": true
+    },
+    "lolbin_lookup": {
+      "arguments": {
+        "command_lines": "command_lines"
+      },
+      "asserts_techniques": true,
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "command_match",
+      "read_only": true,
+      "source": "lolbin",
+      "techniques": [
+        {
+          "path": "/**6/technique_id",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/attck",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/technique_ids",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/tags",
+          "format": "sigma_tag"
+        }
+      ]
+    },
+    "resolve_technique": {
+      "effects": {
+        "executes": "no",
+        "network": "on_refresh",
+        "third_party": "no"
+      },
+      "kind": "reference",
+      "read_only": true
+    },
+    "similar_cases": {
+      "effects": {
+        "executes": "no",
+        "network": "on_refresh",
+        "third_party": "no"
+      },
+      "kind": "reference"
+    },
+    "extract_dns": {
+      "arguments": {
+        "path": "pcap_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "dns",
+      "reader": "dns_query_lines"
+    },
+    "extract_http": {
+      "arguments": {
+        "path": "pcap_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "http"
+    },
+    "pcap_summary": {
+      "arguments": {
+        "path": "pcap_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "pcap",
+      "reader": "flow_table",
+      "words": [
+        "capture",
+        "packet",
+        "packets",
+        "pcap"
+      ]
+    },
+    "read_pcap_summary": {
+      "arguments": {
+        "path": "pcap_path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "packet_overview",
+      "reader": "packet_lines",
+      "words": [
+        "capture",
+        "packet",
+        "packets",
+        "pcap"
+      ]
+    },
+    "check_domain_reputation": {
+      "arguments": {
+        "domain": "domain"
+      },
+      "does_not_show": "whether the sample contacts the domain, or what it would send there",
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "no"
+      },
+      "kind": "indicator_reputation",
+      "shows": "what VirusTotal reports of the domain: its engine counts and categories"
+    },
+    "check_hash": {
+      "arguments": {
+        "hash": "file_hash"
+      },
+      "display_name": "Threat intelligence",
+      "does_not_show": "this run's own analysis of the sample; an unknown hash or no detections is no evidence that the file is clean",
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "hash"
+      },
+      "kind": "reputation",
+      "reputation": {
+        "stats": "/last_analysis_stats",
+        "malicious": "/last_analysis_stats/malicious",
+        "suspicious": "/last_analysis_stats/suspicious",
+        "summary": "/summary",
+        "text_patterns": [
+          "(?s)\\AHash [0-9A-Fa-f]+ \\(.*\\): (?:clean|suspicious|malicious) — (?P<malicious>\\d+)/(?P<total>\\d+) malicious, (?P<suspicious>\\d+)/\\d+ suspicious\\.\\s*\\z"
+        ],
+        "rank": 20
+      },
+      "shows": "what VirusTotal reports of the hash: its engine counts and details of the file"
+    },
+    "check_ip_reputation": {
+      "arguments": {
+        "ip": "ip_address"
+      },
+      "does_not_show": "whether the sample contacts the address, or what it would send there",
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "no"
+      },
+      "kind": "indicator_reputation",
+      "shows": "what VirusTotal and AbuseIPDB report of the address"
+    },
+    "get_threatintel_status": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "status"
+    },
+    "get_analysis": {
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "hash"
+      },
+      "kind": "submission_status"
+    },
+    "get_domain_report": {
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "no"
+      },
+      "kind": "indicator_report"
+    },
+    "get_file_report": {
+      "arguments": {
+        "hash": "hash"
+      },
+      "display_name": "VirusTotal",
+      "does_not_show": "this run's own analysis of the sample; an unknown hash or no detections is no evidence that the file is clean",
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "hash"
+      },
+      "kind": "reputation",
+      "reputation": {
+        "service": "VirusTotal",
+        "stats": "/**7/last_analysis_stats",
+        "malicious": "/**7/last_analysis_stats/malicious",
+        "suspicious": "/**7/last_analysis_stats/suspicious",
+        "labels": [
+          "/**7/popular_threat_classification/suggested_threat_label",
+          "/**7/popular_threat_classification/popular_threat_name/*/value",
+          "/**7/popular_threat_classification/popular_threat_category/*/value"
+        ],
+        "detections": "/**7/detections",
+        "engines": "/**7/coverage/engines",
+        "first_seen": [
+          "/**7/first_submission_date",
+          "/**7/first_seen_itw_date"
+        ],
+        "last_seen": [
+          "/**7/last_analysis_date",
+          "/**7/analysis_date",
+          "/**7/last_submission_date"
+        ],
+        "link": [
+          "/**7/report_url",
+          "/**7/gui_url",
+          "/**7/permalink",
+          "/**7/html_url"
+        ],
+        "rank": 10
+      },
+      "shows": "what VirusTotal holds for the hash: its engines' detections and file details"
+    },
+    "get_ip_report": {
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "no"
+      },
+      "kind": "indicator_report"
+    },
+    "get_submission": {
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "hash"
+      },
+      "kind": "submission_status"
+    },
+    "get_url_report": {
+      "effects": {
+        "executes": "no",
+        "network": true,
+        "third_party": "no"
+      },
+      "kind": "indicator_report"
+    },
+    "submit_file": {
+      "discloses_sample": true,
+      "effects": {
+        "executes": "sandbox",
+        "network": true,
+        "third_party": "bytes"
+      },
+      "kind": "submission"
+    },
+    "submit_local_file": {
+      "discloses_sample": true,
+      "effects": {
+        "executes": "sandbox",
+        "network": true,
+        "third_party": "bytes"
+      },
+      "kind": "submission"
+    },
+    "die_scan": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "Detect It Easy",
+      "does_not_show": "what the code does, or a packer or compiler no signature describes; a name is a signature match, not a proof",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "identification",
+      "read_only": true,
+      "rows": "/detections/*",
+      "shows": "the packers, compilers, linkers, protectors, installers and libraries Detect It Easy's signatures name in the file, with the format each was found in",
+      "values": {
+        "name": "/name",
+        "type": "/type",
+        "version": "/version",
+        "file_type": "/file_type"
+      }
+    },
+    "dotnet_types": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "what any of them does, or types built or loaded at run time",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "type_list",
+      "read_only": true,
+      "routed_formats": [
+        "pe"
+      ],
+      "rows": "/types/*",
+      "shows": "the classes, interfaces, structs, delegates and enums the assembly defines",
+      "values": {
+        "name": "/name",
+        "type_kind": "/type_kind"
+      }
+    },
+    "dotnet_decompile_type": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "what runs at run time: code loaded, decrypted or emitted while the assembly runs, or native code beside the IL",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompile",
+      "read_only": true,
+      "report_sections": [
+        "cli_flags",
+        "discovery",
+        "persistence_detail",
+        "evasion_antiforensics",
+        "command_and_control",
+        "string_resolution",
+        "configuration",
+        "commands",
+        "payloads"
+      ],
+      "routed_formats": [
+        "pe"
+      ],
+      "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL"
+    },
+    "dotnet_decompile_member": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "what runs at run time: code loaded, decrypted or emitted while the assembly runs, or native code beside the IL",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompile",
+      "read_only": true,
+      "report_sections": [
+        "cli_flags",
+        "discovery",
+        "persistence_detail",
+        "evasion_antiforensics",
+        "command_and_control",
+        "string_resolution",
+        "configuration",
+        "commands",
+        "payloads"
+      ],
+      "routed_formats": [
+        "pe"
+      ],
+      "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL"
+    },
+    "dotnet_decompile_assembly": {
+      "aggregate_of": [
+        "dotnet_decompile_type",
+        "dotnet_decompile_member"
+      ],
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "what runs at run time: code loaded, decrypted or emitted while the assembly runs, or native code beside the IL",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompile_batch",
+      "long_running": true,
+      "read_only": true,
+      "report_sections": [
+        "cli_flags",
+        "discovery",
+        "persistence_detail",
+        "evasion_antiforensics",
+        "command_and_control",
+        "string_resolution",
+        "configuration",
+        "commands",
+        "payloads"
+      ],
+      "routed_formats": [
+        "pe"
+      ],
+      "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL"
+    },
+    "dotnet_resources": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "what a resource holds",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "resource_listing",
+      "read_only": true,
+      "routed_formats": [
+        "pe"
+      ],
+      "rows": "/resources/*",
+      "shows": "the names of the resources embedded in the assembly",
+      "values": {
+        "name": "/name"
+      }
+    },
+    "dotnet_metadata_table": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "ILSpy",
+      "does_not_show": "how the rows are used by the code",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "metadata_table",
+      "read_only": true,
+      "routed_formats": [
+        "pe"
+      ],
+      "rows": "/rows/*",
+      "shows": "every row of one ECMA-335 metadata table as the assembly holds it"
+    },
+    "go_symbols": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "GoReSym",
+      "does_not_show": "what a function does, or code that is not Go",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_list",
+      "long_running": true,
+      "places": {
+        "address": "/start"
+      },
+      "read_only": true,
+      "routed_formats": [
+        "pe",
+        "elf",
+        "mach-o"
+      ],
+      "rows": "/functions/*",
+      "shows": "the Go version, build id and build info, and each function's name, package and address range, read from the Go runtime's own tables in the file",
+      "values": {
+        "name": "/name",
+        "package": "/package"
+      }
+    },
+    "go_types": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "GoReSym",
+      "does_not_show": "how the types are used, or types of a Go version it misreads",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "type_list",
+      "long_running": true,
+      "read_only": true,
+      "routed_formats": [
+        "pe",
+        "elf",
+        "mach-o"
+      ],
+      "rows": "/types/*",
+      "shows": "the Go type structures and interfaces the binary's moduledata lists",
+      "values": {
+        "name": "/Str",
+        "type_kind": "/Kind"
+      }
+    },
+    "go_strings": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "GoReSym",
+      "does_not_show": "strings built, decoded or decrypted at run time",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "holds_strings": true,
+      "kind": "embedded_strings",
+      "long_running": true,
+      "read_only": true,
+      "routed_formats": [
+        "pe",
+        "elf",
+        "mach-o"
+      ],
+      "rows": "/strings/*",
+      "shows": "the strings the binary's Go string table holds, each cut where Go cuts it",
+      "values": {
+        "text": "/Str"
+      }
+    },
+    "yarax_scan": {
+      "arguments": {
+        "path": "path"
+      },
+      "asserts_techniques": true,
+      "display_name": "YARA-X",
+      "does_not_show": "rules that are not in the mounted rule files, or that YARA-X could not compile (named in rules_not_compiled); a match is the rule author's claim, not a verdict",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "signature_rules",
+      "places": {
+        "offset": "/strings/*/offset",
+        "instance_offset": "/strings/*/instances/*/offset"
+      },
+      "read_only": true,
+      "rows": "/matches/*",
+      "shows": "the operator's own YARA rules (the rule files mounted on the server) that match the file, with each matching string's offset and the rule's metadata",
+      "source": "yara",
+      "techniques": [
+        {
+          "path": "/**6/technique_id",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/attck",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/technique_ids",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/tags",
+          "format": "sigma_tag"
+        }
+      ],
+      "values": {
+        "rule": "/rule"
+      },
+      "words": [
+        "yara",
+        "rule",
+        "rules"
+      ]
+    },
+    "ole_vba": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "olevba",
+      "does_not_show": "what a macro does when it runs: no macro is run, so code it builds or downloads at run time is not seen",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "vba_macros",
+      "read_only": true,
+      "routed_formats": [
+        "ole2",
+        "ooxml"
+      ],
+      "rows": "/indicators/*",
+      "shows": "the VBA source of each macro module and olevba's keyword analysis of it (auto-run triggers, suspicious calls, IOCs, encoded strings), Excel 4 macro sheets and VBA stomping",
+      "values": {
+        "type": "/type",
+        "keyword": "/keyword"
+      }
+    },
+    "ole_macro_risk": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "MacroRaptor",
+      "does_not_show": "whether a macro is malicious or what it does: a keyword match on the source, with no macro run",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "macro_risk",
+      "read_only": true,
+      "routed_formats": [
+        "ole2",
+        "ooxml"
+      ],
+      "rows": "/matches/*",
+      "shows": "whether the macros run on their own and write or execute, by keyword rules",
+      "values": {
+        "flag": "/flag",
+        "keyword": "/keyword"
+      }
+    },
+    "ole_indicators": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "oleid",
+      "does_not_show": "the content behind an indicator, or anything oleid has no check for",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "document_indicators",
+      "read_only": true,
+      "routed_formats": [
+        "ole2",
+        "ooxml",
+        "rtf"
+      ],
+      "rows": "/indicators/*",
+      "shows": "the document's format, encryption, VBA and XLM macros, external relationships, Flash and object pools, each with oleid's risk rating",
+      "values": {
+        "indicator": "/id",
+        "value": "/value",
+        "risk": "/risk"
+      }
+    },
+    "rtf_objects": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "rtfobj",
+      "does_not_show": "what an object does when it is opened, or an object the parser cannot find; nothing is extracted or run",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "embedded_objects",
+      "places": {
+        "offset": "/start"
+      },
+      "read_only": true,
+      "routed_formats": [
+        "rtf"
+      ],
+      "rows": "/objects/*",
+      "shows": "the objects embedded in the RTF: each one's OLE class (Package, Equation.3, OLE2Link and others), the file name and paths a Package names, and its payload's sha256",
+      "values": {
+        "class_name": "/class_name",
+        "filename": "/filename",
+        "payload_sha256": "/payload_sha256"
+      }
+    },
+    "office_dde": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "msodde",
+      "does_not_show": "whether a link would run, or the links of an encrypted document",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "dde_links",
+      "read_only": true,
+      "routed_formats": [
+        "ole2",
+        "ooxml",
+        "rtf"
+      ],
+      "rows": "/links/*",
+      "shows": "the DDE links and field instructions in the document, DDEAUTO commands too",
+      "values": {
+        "instruction": "/text"
+      }
+    },
+    "js_deobfuscate": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "webcrack",
+      "does_not_show": "strings an obfuscator's decoder functions compute (decoding them would run the script, so those calls stay as written); with no sandbox, the control-flow flattening and dead code of a script guarded by an obfuscator-style string array, which stay as they are; VBScript, or JScript.Encode scripts",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "deobfuscated_script",
+      "long_running": true,
+      "places": {
+        "offset": "/start"
+      },
+      "read_only": true,
+      "routed_formats": [
+        "js",
+        "hta",
+        "wsf"
+      ],
+      "rows": "/scripts/*",
+      "shows": "the script (or each script block of an HTA or WSF) unminified, unpacked from its bundle and cleared of self-defending and debugger traps, as readable JavaScript",
+      "values": {
+        "language": "/language"
+      }
+    },
+    "container_scan": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "unblob",
+      "does_not_show": "what a chunk holds (nothing is unpacked), or a format unblob has no handler for; nothing is run",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "embedded_chunks",
+      "places": {
+        "offset": "/start_offset"
+      },
+      "read_only": true,
+      "rows": "/chunks/*",
+      "shows": "each chunk of a known format inside the file (archives, compressed streams, file systems, firmware containers, a payload appended to another file), found by its own bytes, with its byte range, and the ranges no format claims with their entropy",
+      "values": {
+        "handler": "/handler"
+      }
+    },
+    "container_extract": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "unblob",
+      "does_not_show": "what an extracted file does: nothing extracted is run or opened beyond its type; a format unblob has no handler for, an encrypted chunk's contents, or anything past the sample upload bound the extraction stops at",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "extracted_files",
+      "long_running": true,
+      "read_only": true,
+      "rows": "/files/*",
+      "shows": "every file the container's chunks hold, extracted recursively, each with its place in the container, size, sha256 and file type; links by what they name, and what unblob refused (a member whose path or link leaves the extraction, a device file)",
+      "values": {
+        "name": "/name",
+        "sha256": "/sha256",
+        "magic": "/magic"
+      }
+    },
+    "get_artefact": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "artefact_delivery",
+      "read_only": true
+    },
+    "android_classes": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "JADX",
+      "does_not_show": "what any of them does; classes loaded, decrypted or downloaded at run time (no code is run); the manifest, permissions and certificates, which apk_info reads",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "type_list",
+      "long_running": true,
+      "read_only": true,
+      "routed_formats": [
+        "apk",
+        "dex"
+      ],
+      "rows": "/classes/*",
+      "shows": "the classes the APK's or dex file's bytecode defines, each with its methods and their signatures, as JADX reads them",
+      "values": {
+        "name": "/name"
+      }
+    },
+    "android_decompile_class": {
+      "arguments": {
+        "path": "path"
+      },
+      "display_name": "JADX",
+      "does_not_show": "what runs at run time: code loaded, decrypted or downloaded while the app runs, or native libraries beside the bytecode; no code is run",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompile",
+      "read_only": true,
+      "report_sections": [
+        "cli_flags",
+        "discovery",
+        "persistence_detail",
+        "evasion_antiforensics",
+        "command_and_control",
+        "string_resolution",
+        "configuration",
+        "commands",
+        "payloads"
+      ],
+      "routed_formats": [
+        "apk",
+        "dex"
+      ],
+      "shows": "Java source JADX decompiled from one class's dex bytecode, inner classes too"
+    },
+    "add_struct_field": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "tool",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "utility"
+    },
+    "analysis_status": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "tool",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis_status"
+    },
+    "analyze_api_call_chains": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "call_chains",
+      "report_sections": [
+        "discovery",
+        "persistence_detail",
+        "communications",
+        "command_and_control",
+        "string_resolution",
+        "commands"
+      ]
+    },
+    "analyze_call_graph": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "call_graph"
+    },
+    "analyze_control_flow": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis"
+    },
+    "analyze_data_region": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis"
+    },
+    "analyze_dataflow": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "dataflow",
+      "report_sections": [
+        "encryption_scheme",
+        "configuration"
+      ]
+    },
+    "analyze_for_documentation": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis"
+    },
+    "analyze_function_complete": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_analysis",
+      "report_sections": [
+        "cli_flags",
+        "commands"
+      ]
+    },
+    "analyze_function_completeness": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "documentation_completeness",
+      "report_sections": [
+        "cli_flags",
+        "commands"
+      ]
+    },
+    "analyze_struct_field_usage": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis"
+    },
+    "apply_data_classification": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "apply_data_type": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "apply_function_documentation": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "batch_analyze_completeness": {
+      "aggregate_of": [
+        "analyze_function_completeness"
+      ],
+      "arguments": {
+        "program": "program"
+      },
+      "category": "batch",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "batch_analysis"
+    },
+    "batch_create_labels": {
+      "aggregate_of": [
+        "create_label"
+      ],
+      "arguments": {
+        "program": "program"
+      },
+      "category": "batch",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "batch_analysis"
+    },
+    "batch_decompile": {
+      "aggregate_of": [
+        "decompile_function"
+      ],
+      "arguments": {
+        "program": "program"
+      },
+      "category": "batch",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompile_batch",
+      "read_only": true
+    },
+    "batch_delete_labels": {
+      "aggregate_of": [
+        "delete_label"
+      ],
+      "arguments": {
+        "program": "program"
+      },
+      "category": "batch",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "batch_analysis"
+    },
+    "batch_rename_function_components": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "batch",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "batch_analysis"
+    },
+    "batch_set_comments": {
+      "aggregate_of": [
+        "set_decompiler_comment",
+        "set_disassembly_comment",
+        "set_plate_comment"
+      ],
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "batch",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "batch_analysis"
+    },
+    "batch_string_anchor_report": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "batch",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "holds_strings": true,
+      "kind": "batch_analysis",
+      "read_only": true
+    },
+    "bulk_fuzzy_match": {
+      "aggregate_of": [
+        "find_similar_functions_fuzzy"
+      ],
+      "category": "batch",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "batch_analysis"
+    },
+    "can_rename_at_address": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "check",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "check"
+    },
+    "clear_function_comments": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "clear_instruction_flow_override": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "clone_data_type": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "close_program": {
+      "category": "nav",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "project_navigation"
+    },
+    "close_project": {
+      "category": "nav",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "project_navigation"
+    },
+    "compare_programs_documentation": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis"
+    },
+    "convert_number": {
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_array_type": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_data_type_category": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_enum": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_folder": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_function": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_function_signature": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_label": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_memory_block": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_pointer_type": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_project": {
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_struct": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_typedef": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "create_union": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "decompile_function": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompile",
+      "read_only": true,
+      "report_sections": [
+        "cli_flags",
+        "discovery",
+        "persistence_detail",
+        "evasion_antiforensics",
+        "command_and_control",
+        "string_resolution",
+        "configuration",
+        "commands",
+        "payloads"
+      ]
+    },
+    "delete_bookmark": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "delete_data_type": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "delete_file": {
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "delete_function": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "delete_label": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "detect_array_bounds": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis"
+    },
+    "detect_crypto_constants": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "crypto_constants",
+      "report_sections": [
+        "encryption_scheme",
+        "configuration"
+      ]
+    },
+    "detect_malware_behaviors": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "behaviour_scan",
+      "report_sections": [
+        "packing_obfuscation",
+        "evasion_antiforensics"
+      ]
+    },
+    "diff_functions": {
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis"
+    },
+    "disassemble_bytes": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "byte_disassembly",
+      "read_only": true
+    },
+    "disassemble_function": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_disassembly",
+      "read_only": true
+    },
+    "emulate_function": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "emulation",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "emulation",
+      "report_sections": [
+        "encryption_scheme",
+        "string_resolution",
+        "configuration"
+      ]
+    },
+    "emulate_hash_batch": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "emulation",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "emulation",
+      "report_sections": [
+        "encryption_scheme",
+        "string_resolution",
+        "configuration"
+      ]
+    },
+    "extract_iocs_with_context": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "iocs_with_context",
+      "places": {
+        "address": "/address"
+      },
+      "report_sections": [
+        "ransom_note",
+        "communications",
+        "command_and_control",
+        "configuration",
+        "payloads",
+        "host_identifiers"
+      ],
+      "rows": "/iocs/*",
+      "values": {
+        "value": "/value"
+      }
+    },
+    "find_anti_analysis_techniques": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "anti_analysis_scan",
+      "report_sections": [
+        "packing_obfuscation",
+        "evasion_antiforensics"
+      ]
+    },
+    "find_code_gaps": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "code_gaps"
+    },
+    "find_dead_code": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis"
+    },
+    "find_next_undefined_function": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis"
+    },
+    "find_similar_functions": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis"
+    },
+    "find_similar_functions_fuzzy": {
+      "arguments": {
+        "address": "address"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analysis"
+    },
+    "find_undocumented_by_string": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "holds_strings": true,
+      "kind": "analysis"
+    },
+    "force_decompile": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompile_refresh"
+    },
+    "get_address_spaces": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "address_spaces",
+      "read_only": true
+    },
+    "get_assembly_context": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_bulk_function_hashes": {
+      "aggregate_of": [
+        "get_function_hash"
+      ],
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_hashes",
+      "read_only": true
+    },
+    "get_bulk_xrefs": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "xrefs",
+      "read_only": true
+    },
+    "get_current_program_info": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_info",
+      "read_only": true
+    },
+    "get_entry_points": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "entrypoints",
+      "read_only": true
+    },
+    "get_enum_values": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_external_location": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_field_access_context": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_full_call_graph": {
+      "aggregate_of": [
+        "get_function_call_graph"
+      ],
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "call_graph",
+      "read_only": true
+    },
+    "get_function_by_address": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_info",
+      "read_only": true
+    },
+    "get_function_call_graph": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "call_graph",
+      "read_only": true
+    },
+    "get_function_callees": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "callees",
+      "read_only": true
+    },
+    "get_function_callers": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "callers",
+      "read_only": true
+    },
+    "get_function_count": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_count",
+      "read_only": true
+    },
+    "get_function_documentation": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_function_hash": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_hash",
+      "read_only": true
+    },
+    "get_function_jump_targets": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_function_labels": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_function_signature": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_function_variables": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_function_xrefs": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "xrefs",
+      "read_only": true
+    },
+    "get_metadata": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_metadata",
+      "read_only": true
+    },
+    "get_plate_comment": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_project_info": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing"
+    },
+    "get_struct_layout": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_type_size": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "get_valid_data_types": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing"
+    },
+    "get_xrefs_from": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "xrefs",
+      "read_only": true
+    },
+    "get_xrefs_to": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "xrefs",
+      "read_only": true
+    },
+    "import_data_types": {
+      "category": "import",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "import"
+    },
+    "import_file": {
+      "arguments": {
+        "path": "file_path"
+      },
+      "category": "import",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "file_import"
+    },
+    "inspect_memory_content": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "memory_inspection",
+      "read_only": true
+    },
+    "list_analyzers": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing"
+    },
+    "list_bookmarks": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "list_calling_conventions": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "list_classes": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "class_list",
+      "read_only": true
+    },
+    "list_data_items": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "list_data_items_by_xrefs": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "list_data_type_categories": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "list_data_types": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "list_exports": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "export_listing",
+      "read_only": true
+    },
+    "list_external_locations": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "external_locations",
+      "read_only": true
+    },
+    "list_functions": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_list",
+      "read_only": true
+    },
+    "list_functions_enhanced": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_listing_detail",
+      "read_only": true
+    },
+    "list_globals": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "symbols",
+      "read_only": true
+    },
+    "list_imports": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "import_listing",
+      "read_only": true,
+      "report_sections": [
+        "discovery"
+      ]
+    },
+    "list_methods": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "method_list",
+      "read_only": true
+    },
+    "list_namespaces": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "list_open_programs": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_list"
+    },
+    "list_project_files": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing"
+    },
+    "list_scripts": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing"
+    },
+    "list_segments": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "segments",
+      "read_only": true,
+      "report_sections": [
+        "packing_obfuscation",
+        "payloads"
+      ]
+    },
+    "list_strings": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing_strings",
+      "read_only": true,
+      "report_sections": [
+        "cli_flags",
+        "persistence_detail",
+        "ransom_note",
+        "communications",
+        "command_and_control",
+        "string_resolution",
+        "host_identifiers"
+      ]
+    },
+    "load_program": {
+      "arguments": {
+        "path": "file"
+      },
+      "category": "nav",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "load_sample",
+      "long_running": true
+    },
+    "load_program_from_project": {
+      "arguments": {
+        "path": "path"
+      },
+      "category": "nav",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "project_load"
+    },
+    "modify_struct_field": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "move_data_type_to_category": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "open_program": {
+      "arguments": {
+        "path": "path"
+      },
+      "category": "nav",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "open_project_program"
+    },
+    "open_project": {
+      "category": "nav",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "project_navigation"
+    },
+    "read_memory": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "read",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "memory_read",
+      "read_only": true
+    },
+    "reanalyze": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "tool",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "reanalysis"
+    },
+    "remove_struct_field": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "rename_data": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "rename_external_location": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "rename_function": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "rename_function_by_address": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "rename_global_variable": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "rename_label": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "rename_or_label": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "rename_variable": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "rename_variables": {
+      "aggregate_of": [
+        "rename_variable"
+      ],
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "run_analysis": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "exec",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "analyse_sample",
+      "long_running": true
+    },
+    "run_ghidra_script": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "exec",
+      "effects": {
+        "why_undeclared": "it runs whatever script or command it is given, so what it does is whatever that does"
+      },
+      "kind": "script"
+    },
+    "run_script_inline": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "exec",
+      "effects": {
+        "why_undeclared": "it runs whatever script or command it is given, so what it does is whatever that does"
+      },
+      "kind": "script"
+    },
+    "save_all_programs": {
+      "category": "nav",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "project_navigation"
+    },
+    "save_program": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "nav",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "project_navigation"
+    },
+    "search_byte_patterns": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "byte_search",
+      "read_only": true
+    },
+    "search_data_types": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing",
+      "read_only": true
+    },
+    "search_functions": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_search",
+      "read_only": true
+    },
+    "search_functions_enhanced": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_search",
+      "read_only": true
+    },
+    "search_strings": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "string_search",
+      "read_only": true
+    },
+    "server_status": {
+      "category": "meta",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "status"
+    },
+    "set_bookmark": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "set_decompiler_comment": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "set_disassembly_comment": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "set_function_no_return": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "set_function_prototype": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "set_image_base": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "set_local_variable_type": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "set_parameter_type": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "set_plate_comment": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "set_variable_storage": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "set_variables": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "suggest_field_names": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "tool",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "utility"
+    },
+    "switch_program": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "nav",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "select_sample"
+    },
+    "validate_data_type": {
+      "arguments": {
+        "address": "address",
+        "program": "program"
+      },
+      "category": "check",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "check"
+    },
+    "validate_data_type_exists": {
+      "arguments": {
+        "program": "program"
+      },
+      "category": "check",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "check"
+    },
+    "validate_function_prototype": {
+      "arguments": {
+        "address": "function_address",
+        "program": "program"
+      },
+      "category": "check",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "check"
+    },
+    "analyze": {
+      "category": "analyze",
+      "effects": {
+        "executes": "emulation",
+        "network": false,
+        "third_party": "no",
+        "when": "at analysis level 2 and above, where radare2's aaa type matching (aaft) emulates each function with ESIL"
+      },
+      "kind": "analyse_sample"
+    },
+    "calculate": {
+      "category": "tool",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "calculator"
+    },
+    "close_file": {
+      "category": "nav",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sample_close"
+    },
+    "disassemble": {
+      "arguments": {
+        "address": "address"
+      },
+      "category": "analyze",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "disassembly",
+      "read_only": true
+    },
+    "get_current_address": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "current_address"
+    },
+    "get_function_prototype": {
+      "arguments": {
+        "address": "address"
+      },
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_prototype",
+      "read_only": true
+    },
+    "list_all_strings": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "listing_all_strings",
+      "read_only": true
+    },
+    "list_decompilers": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompiler_list"
+    },
+    "list_entrypoints": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "entrypoints",
+      "read_only": true
+    },
+    "list_files": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "file_list"
+    },
+    "list_functions_tree": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_tree",
+      "read_only": true
+    },
+    "list_libraries": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "library_list",
+      "read_only": true
+    },
+    "list_memory_maps": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "memory_maps",
+      "read_only": true
+    },
+    "list_sections": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "segments",
+      "read_only": true
+    },
+    "list_symbols": {
+      "category": "list",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "symbols",
+      "read_only": true
+    },
+    "open_file": {
+      "arguments": {
+        "path": "file_path"
+      },
+      "category": "nav",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "open_sample"
+    },
+    "rename_flag": {
+      "arguments": {
+        "address": "address"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "run_command": {
+      "category": "exec",
+      "effects": {
+        "why_undeclared": "it runs whatever script or command it is given, so what it does is whatever that does"
+      },
+      "kind": "command"
+    },
+    "set_comment": {
+      "arguments": {
+        "address": "address"
+      },
+      "category": "modify",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "program_edit"
+    },
+    "show_function_details": {
+      "category": "tool",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "function_info"
+    },
+    "show_info": {
+      "category": "tool",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "file_info"
+    },
+    "use_decompiler": {
+      "category": "tool",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "decompiler_choice"
+    },
+    "xrefs_to": {
+      "arguments": {
+        "address": "address"
+      },
+      "category": "tool",
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "xrefs",
+      "read_only": true
+    },
+    "get_cuckoo_status": {
+      "effects": {
+        "executes": "no",
+        "network": "operator_sandbox",
+        "third_party": "no"
+      }
+    },
+    "get_task_config": {
+      "effects": {
+        "executes": "no",
+        "network": "operator_sandbox",
+        "third_party": "no"
+      }
+    },
+    "get_task_iocs": {
+      "effects": {
+        "executes": "no",
+        "network": "operator_sandbox",
+        "third_party": "no"
+      }
+    },
+    "get_task_report": {
+      "effects": {
+        "executes": "no",
+        "network": "operator_sandbox",
+        "third_party": "no"
+      }
+    },
+    "get_task_status": {
+      "effects": {
+        "executes": "no",
+        "network": "operator_sandbox",
+        "third_party": "no"
+      }
+    },
+    "search_task": {
+      "effects": {
+        "executes": "no",
+        "network": "operator_sandbox",
+        "third_party": "no"
+      }
+    },
+    "anti_analysis_scan": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "anti_analysis_scan",
+      "report_sections": [
+        "packing_obfuscation",
+        "evasion_antiforensics"
+      ]
+    },
+    "function_matches": {
+      "effects": {
+        "executes": "no",
+        "network": "case_store",
+        "third_party": "no"
+      },
+      "kind": "function_matches"
+    },
+    "find_directed_text": {
+      "arguments": {
+        "path": "path"
+      },
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "directed_text",
+      "places": {
+        "offset": "/first/offset",
+        "place": "/first/place"
+      },
+      "rows": "/groups/*",
+      "values": {
+        "text": "/phrase",
+        "family": "/family"
+      }
+    },
+    "reputation": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "reputation_not_asked"
+    },
+    "sandbox_status": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_status"
+    },
+    "sandbox_sections": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_sections"
+    },
+    "behaviour_code_links": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "behaviour_code_links"
+    },
+    "sandbox_processes": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_processes",
+      "places": {
+        "pid": "/pid"
+      },
+      "rows": "/processes/*",
+      "values": {
+        "command_line": "/command_line",
+        "name": "/name"
+      }
+    },
+    "sandbox_network": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_network",
+      "reader": "flow_table"
+    },
+    "sandbox_signatures": {
+      "asserts_techniques": true,
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_signatures",
+      "source": "sandbox",
+      "techniques": [
+        {
+          "path": "/**6/technique_id",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/attck",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/technique_ids",
+          "format": "attck"
+        },
+        {
+          "path": "/**6/tags",
+          "format": "sigma_tag"
+        }
+      ]
+    },
+    "sandbox_dropped_files": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_dropped_files"
+    },
+    "sandbox_channels": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_channels"
+    },
+    "sandbox_report_section": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_report_section"
+    },
+    "sandbox_registry_ops": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_registry"
+    },
+    "sandbox_api_calls": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_api_calls"
+    },
+    "sandbox_mutexes": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_mutexes"
+    },
+    "sandbox_services_and_tasks": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_services"
+    },
+    "sandbox_items": {
+      "effects": {
+        "executes": "no",
+        "network": false,
+        "third_party": "no"
+      },
+      "kind": "sandbox_items",
+      "reader": "report_items"
+    }
+  },
+  "legacy_names": {
+    "evidence_roots._IMPORT_LISTINGS": [
+      "get_imports"
+    ],
+    "evidence_roots._EXPORT_LISTINGS": [
+      "get_exports"
+    ],
+    "evidence_roots._PROGRAM_TOOLS": [
+      "get_current_program",
+      "get_program_info",
+      "program_info"
+    ],
+    "ledger_report._FUNCTION_TOOLS": [
+      "analyze_function",
+      "decompile",
+      "get_function",
+      "pdc",
+      "pdf"
+    ],
+    "ledger_report._FUNCTION_LIST_TOOLS": [
+      "afl",
+      "get_functions"
+    ],
+    "validation._RULE_MATCH_SECTION_SOURCES": [
+      "yara"
+    ],
+    "markdown._REPUTATION_TOOLS": [
+      "file_report",
+      "hash_lookup"
+    ]
+  }
+}
