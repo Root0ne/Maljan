@@ -201,7 +201,7 @@ version) is a key item, checked for consistency, and is not counted as beyond.
 
 ### The all-tools series
 
-The same reference sample, key and verdict words as the iterations, with four
+The same reference sample, key and verdict words as the iterations, with five
 differences:
 
 - **Team.** The importable all-tools team (`docs/examples/profiles/all-tools.json`,
@@ -219,6 +219,22 @@ differences:
 - **Scoring surface.** The report body, the STIX bundle and the `/iocs` feed —
   what an analyst receives. Where the analysts' claims or the deterministic
   evidence held more than the report, the score file says so.
+- **Earlier runs.** A run is submitted with the job option
+  `ignore_earlier_runs` (`python scripts/benchmark/run.py job-config` prints
+  the config), so it is not shown what an earlier run on the same sample
+  stored, and its run summary says `earlier_runs_ignored: true`. A run
+  submitted without it may be shown the earlier run's technique list as
+  hypotheses, and its score is then partly that run's; its score file has to
+  say so on a line of its own, `**Earlier runs:** used`. The scoring tools
+  (`scripts/benchmark/run.py score` and `gate`) read the run summary stored
+  beside each score and name every run that neither says
+  `earlier_runs_ignored: true` nor states this, under `EARLIER RUNS NOT RULED
+  OUT`. The console's job form cannot set the switch, so a benchmark run is
+  submitted through the API (`POST /api/v1/jobs` with the printed config).
+  Each run still stores its own case when it completes, replacing the case of
+  the sample held by the account that submitted it (memory belongs to a job's
+  creator), so a series is best submitted under an account of its own, which
+  leaves the operators' case memory as it was.
 
 ## Results
 

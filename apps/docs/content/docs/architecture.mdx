@@ -3797,6 +3797,20 @@ carries the note "an earlier run on this sample also reported it; no source
 of this run stands behind it". A job with no earlier case, or whose store
 cannot be read, is briefed as before.
 
+A job submitted with `ignore_earlier_runs` (the job option, or
+`maljan analyze --ignore-earlier-runs`) starts without any earlier run's
+memory of its sample: `long_term_memory.earlier_case_of` answers no case for
+it without asking the store, so no prompt carries the block and the bundle
+records no earlier run. The similarity reads are not affected, since they
+already leave the sample's own case out. Once the job completes, its own case
+is stored as any job's is (`remember_the_run`), and so replaces the case its
+owner held for the sample, as on every job: the switch decides what a job
+reads, never what it writes, and a later job that wants independence sets it
+too. Its run summary
+carries `earlier_runs_ignored: true`, absent on every other job, so a score can
+state that the run did not see an earlier one. Every benchmark run sets it
+(`scripts/benchmark/jobs.py`).
+
 Another run's ids never reach a run in its own form. Ledger ids (`ev_0007`)
 and sandbox item ids (`net:4`) are each run's own sequence numbers, so a past
 case's `ev_0007` names a real entry of this run that says something else, and

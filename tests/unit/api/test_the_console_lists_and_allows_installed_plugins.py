@@ -1096,7 +1096,7 @@ class TestTheCommandLine:
         built: list[str] = []
 
         class _Stop:
-            def __init__(self, config: Any, mock: bool) -> None:
+            def __init__(self, config: Any, mock: bool, **_options: Any) -> None:
                 built.append(str(config.llm.provider))
                 raise RuntimeError("stopped before running")
 
@@ -1121,7 +1121,7 @@ class TestTheCommandLine:
         seen: list[tuple[str, str, str]] = []
 
         class _Stop:
-            def __init__(self, config: Any, mock: bool) -> None:
+            def __init__(self, config: Any, mock: bool, **_options: Any) -> None:
                 llm = config.llm
                 seen.append((str(llm.provider), llm.expert_model, llm.judge_model))
                 raise RuntimeError("stopped before running")

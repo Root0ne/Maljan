@@ -89,6 +89,7 @@ submit rather than a failed job minutes later. Unknown keys pass through.
 | `sandbox_report_id` | An uploaded report to attach. It forces `sandbox.provider` to `upload` for this job, and only a report attached to this job's own sample is read. |
 | `max_iterations` | The debate's round limit for this job (`negotiation.max_iterations`). |
 | `mock_mode` | Asks for the pipeline's mock path. It runs only when an administrator has also turned on `api.mock_mode_allowed`; a mock run cannot consume an uploaded report. |
+| `ignore_earlier_runs` | `true` starts the job without an earlier run's memory of its sample: no agent is shown the "AN EARLIER RUN ON THIS SAMPLE" block and the judge's bundle records no earlier run. Nothing stored is read for it. Once it completes, its own case is stored as any job's is, which replaces the case its owner (the account that submitted it) held for the sample. The run summary says so (`earlier_runs_ignored: true`). Off by default; every benchmark run sets it. |
 
 ## The checks made before a job is accepted
 
@@ -194,4 +195,5 @@ uv run maljan analyze sample_1 --mock --name test.exe
 
 It builds the core `Settings` model directly, so it reads the process
 environment (and a `.env` in the working directory) rather than the settings
-store.
+store. `--ignore-earlier-runs` is the job option `ignore_earlier_runs` for a
+command-line run.

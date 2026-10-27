@@ -421,10 +421,16 @@ def earlier_case_of(container: Any, sample_id: str) -> StoredCase | None:
 
     Kept on the container (``earlier_cases``) for the length of the job, so
     every agent briefed in it is shown the same case and the store is asked
-    once. A store that cannot be built or read is no earlier case.
+    once. A store that cannot be built or read is no earlier case, and so is
+    every sample of a job that ignores earlier runs (``ignore_earlier_runs``).
     """
     sha = str(sample_id or "").strip()
     if container is None or not sha:
+        return None
+    if getattr(container, "ignore_earlier_runs", False) is True:
+        # The job starts without an earlier run's memory: the store is not
+        # asked, and every reader (the agents' block, the bundle's record)
+        # sees no earlier case.
         return None
     kept = getattr(container, "earlier_cases", None)
     if isinstance(kept, dict) and sha in kept:
