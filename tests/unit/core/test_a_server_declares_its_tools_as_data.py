@@ -546,7 +546,8 @@ def test_a_stored_built_in_that_never_set_a_field_takes_the_shipped_value() -> N
     assert analysis.enabled is False
     assert analysis.reads_staged_sample is True
     assert analysis.platform_owned is True
-    assert analysis.tool_facts["capa"].kind == "capability_rules"
+    # Its tools are its server's to declare (T-418 PR1b): the block ships none.
+    assert analysis.tool_facts == {}
     assert "tool_facts" not in analysis.model_fields_set
 
 

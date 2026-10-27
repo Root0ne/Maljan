@@ -1796,11 +1796,19 @@ def _declared_fragment(handle: Any) -> str:
     return str(getattr(getattr(handle, "config", None), "prompt_fragment", "") or "")
 
 
+def _handle_tools_in_force(handle: Any) -> Mapping[str, Any]:
+    """The tool declarations in force for a handle's source: its block's, its server's under."""
+    from maljan.core.declared_reading import tools_in_force
+
+    source = getattr(handle, "declared_source", None) or f"mcp:{getattr(handle, 'name', '')}"
+    return tools_in_force(str(source), getattr(handle, "config", None))
+
+
 def _declared_aggregates(handle: Any) -> dict[str, tuple[str, ...]]:
     """What a handle's server's tools declare themselves the aggregate form of; {} for none."""
     from maljan.core.undeclared_tools import aggregates_of
 
-    return aggregates_of(getattr(getattr(handle, "config", None), "tool_facts", None))
+    return aggregates_of(_handle_tools_in_force(handle))
 
 
 def _offered_names(server: str, incoming: Sequence[Any], seen: dict[str, str]) -> dict[str, str]:
@@ -1911,7 +1919,8 @@ def _own_words(handle: Any, tools: list[BaseTool], seen: dict[str, str] | None =
     """What a server that declares no workflow text says about itself, for ``tools``.
 
     Only for a server whose block declares no ``prompt_fragment`` and that
-    offers a tool its block declares nothing for (``tool_facts``): its served
+    offers a tool nothing in force declares (its block's ``tool_facts``, and
+    what the server declares of itself under them): its served
     MCP ``instructions`` and its offered tools' own descriptions
     (``prompt_fragments.undeclared_server_text``), each tool named as the
     request offers it (:func:`offered_name` over ``seen``, before the merge
@@ -1924,7 +1933,7 @@ def _own_words(handle: Any, tools: list[BaseTool], seen: dict[str, str] | None =
     from maljan.agents.tool_pinning import DELIVERY_TOOLS
     from maljan.core.undeclared_tools import declares_a_kind
 
-    declared = getattr(getattr(handle, "config", None), "tool_facts", None) or {}
+    declared = _handle_tools_in_force(handle)
     undeclared = [
         tool
         for tool in tools

@@ -105,6 +105,9 @@ class MaljanApp:
             ignore_earlier_runs=ignore_earlier_runs,
         )
         self.graph = build_graph(self.container)
+        # Whether the caller already listed the servers this run reads as its
+        # own (the worker does, before the run): ``arun`` then lists none again.
+        self.servers_listed = False
         # What the report node built, with the state it built it from, as soon
         # as the node returned: kept so that a run which fails after the report
         # was built still has it (``_stream_the_graph``). ``None`` until then.
@@ -622,6 +625,16 @@ class MaljanApp:
             from maljan.tools.roots import add_sample_root
 
             add_sample_root(Path(sample_path).parent)
+
+        # Every server this run reads as its own has declared its tools before
+        # the pack decides by them: one nothing is kept for in this process is
+        # listed now (``providers.served_listing``). The worker has done so
+        # already (``servers_listed``); a run started here (the CLI) has not.
+        # A mock run attaches nothing of its own accord.
+        if not self.container.is_mock and not self.servers_listed:
+            from maljan.providers.served_listing import list_unlisted
+
+            await list_unlisted(self.config)
 
         # How long a failed ATT&CK index build is believed. Set here, before
         # the pipeline opens the sidecar registry, because the knowledge

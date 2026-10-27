@@ -1709,13 +1709,16 @@ def _reader_servers(container: Any) -> dict[str, str]:
     held = getattr(container, "_reader_servers_held", None)
     if isinstance(held, tuple) and held[0] == job:
         return dict(held[1])
+    from maljan.core.declared_reading import tools_in_force
+
     servers = container.config.mcp.servers
+    # Each block's declarations with what its server declares of itself under them.
     runners = {
         key: server
         for key, server in servers.items()
         if any(
             getattr(facts, "kind", None) == READER_DELIVERY_KIND
-            for facts in (getattr(server, "tool_facts", None) or {}).values()
+            for facts in tools_in_force(f"mcp:{key}", server).values()
         )
     }
     chosen: dict[str, str] = {}

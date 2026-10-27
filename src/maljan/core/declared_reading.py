@@ -245,6 +245,26 @@ def _in_process_blocks() -> Mapping[str, Mapping[str, ToolFacts]]:
     return {str(ref): dict(cfg.tool_facts) for ref, cfg in in_process_declarations().items()}
 
 
+def in_process_tools(source: Any) -> Mapping[str, ToolFacts]:
+    """The tools a platform in-process source (``pack`` …) declares in force; empty for another.
+
+    Its built-in block's, read as any source's are (:func:`tools_in_force`)
+    where something declared them as a server would; an in-process source is
+    never listed, so that is its block's own.
+    """
+    from maljan.core.served_declarations import served
+
+    held = _in_process_blocks().get(str(source))
+    if held is None:
+        return {}
+    if not served(str(source)):
+        return held
+    from maljan.core.builtin_declarations import in_process_declarations
+    from maljan.core.tool_declarations import SourceRef
+
+    return tools_in_force(str(source), in_process_declarations()[SourceRef.parse(str(source))])
+
+
 def _in_process_facts(source: str, tool: str) -> dict[str, Any] | None:
     """The stored record of a platform in-process source's tool, from built-in data alone.
 
@@ -474,19 +494,166 @@ def server_hints(entry: Any) -> dict[str, bool]:
 
 
 @cache
+def _builtin_blocks() -> Mapping[str, Any]:
+    """Each built-in server's block as it ships (``config._builtin_servers``), by its key."""
+    from maljan.core.config import _builtin_servers
+
+    return dict(_builtin_servers())
+
+
+def builtin_tools(key: str) -> Mapping[str, ToolFacts]:
+    """What the built-in server ``key`` declares of its tools as it ships; empty for any other key.
+
+    What its block ships, with what its server declared of itself when it
+    was last listed laid under it (``core.served_declarations``: kept past
+    the process, so it is read before any attach). Read through the block
+    the settings in force hold for ``key``, so a built-in pointed elsewhere
+    (its sidecar's own container, the block trusting what the server
+    declares) reads what the server declared there; through the block it
+    ships with only where the settings hold none. A server never listed yet
+    declares only what its block ships: the platform's own sidecars ship
+    none, so until each is first listed its tools are read as any undeclared
+    server's are.
+    """
+    import dataclasses
+
+    from maljan.core.builtin_declarations import server_declaration
+    from maljan.core.served_declarations import with_served
+    from maljan.core.tool_declarations import Declared, SourceRef, declaration_version
+
+    shipped_block = _builtin_blocks().get(str(key))
+    if shipped_block is None:
+        return {}
+    block = _block_in_force(str(key)) or shipped_block
+    # What the reading depends on: the declarations and how the block reaches
+    # its server (its launch identity and its trust), whichever object holds it.
+    version = declaration_version()
+    signature = (version, *_launch_and_trust(str(key), block, version))
+    with _LOCK:
+        held = _BUILTIN_TOOLS.get(str(key))
+        if held is not None and held[0] == signature:
+            return held[1]
+    shipped = {
+        str(name): raw if isinstance(raw, ToolFacts) else ToolFacts.model_validate(raw)
+        for name, raw in (server_declaration(str(key)).get("tool_facts") or {}).items()
+    }
+    own = Declared.of(SourceRef("mcp", str(key)), block, enabled=True)
+    tools = dict(with_served(dataclasses.replace(own, tools=shipped)).tools)
+    with _LOCK:
+        _BUILTIN_TOOLS[str(key)] = (signature, tools)
+        _READS[0] += 1
+    return tools
+
+
+# Each block's launch identity and trust, by the fields they are read from,
+# held for one declaration version (:func:`_launch_and_trust`).
+_LAUNCHES: dict[tuple[Any, ...], tuple[str, bool]] = {}
+_LAUNCHES_AT: list[int] = [-1]
+
+
+def _launch_and_trust(key: str, block: Any, version: int) -> tuple[str, bool]:
+    """``block``'s launch identity and whether it trusts its server, for :func:`builtin_tools`.
+
+    Read from the fields they depend on, so a block changed in place is read
+    anew. What a launch's command resolves to on disk (a link's target) is
+    read again at each declaration change (a listing, a load of the kept
+    declarations: each job's start, the API's reread every few seconds), not
+    at every read: a reader asks this for every entry it reads, and a link
+    rebuilt under a running process is read at its next change.
+    """
+    from maljan.core.tool_declarations import launch_identity, trusts_served
+
+    fields = (
+        key,
+        *(
+            repr(getattr(block, name, None))
+            for name in ("transport", "command", "args", "cwd", "url", "trusts_served_declaration")
+        ),
+        "trusts_served_declaration" in (getattr(block, "model_fields_set", None) or set()),
+    )
+    with _LOCK:
+        if _LAUNCHES_AT[0] != version:
+            _LAUNCHES.clear()
+            _LAUNCHES_AT[0] = version
+        held = _LAUNCHES.get(fields)
+    if held is not None:
+        return held
+    held = (launch_identity(block), trusts_served(f"mcp:{key}", block))
+    with _LOCK:
+        _LAUNCHES[fields] = held
+    return held
+
+
+# The settings a process that installs none reads its built-in blocks through
+# (the API, from the stored overrides: :func:`read_through_settings`).
+_READ_THROUGH: list[Any] = [None]
+
+
+def read_through_settings(settings: Any) -> None:
+    """Have built-in servers read through the blocks of ``settings`` in this process.
+
+    For a process that never installs its settings (``config.install_settings``,
+    which the worker does per job): the API hands over the settings it builds
+    from the stored overrides, so a built-in an operator pointed elsewhere is
+    read there as in the worker. ``None`` reads the installed settings again.
+    """
+    with _LOCK:
+        _READ_THROUGH[0] = settings
+
+
+def _block_in_force(key: str) -> Any:
+    """The block the settings in force hold for server ``key``; ``None`` where they hold none.
+
+    The settings handed over (:func:`read_through_settings`), else the
+    process's installed settings.
+    """
+    try:
+        held = _READ_THROUGH[0]
+        if held is None:
+            from maljan.core.config import get_settings
+
+            held = get_settings()
+        return held.mcp.servers.get(key)
+    except Exception:  # noqa: BLE001 — unreadable settings hold no block
+        return None
+
+
+# What each built-in server declares as it ships, held with the declaration
+# version, the launch identity and the trust it was read under (:func:`builtin_tools`).
+_BUILTIN_TOOLS: dict[str, tuple[tuple[Any, ...], dict[str, ToolFacts]]] = {}
+# How many times a built-in server's reading was read anew (:func:`shipped_by_name`).
+_READS: list[int] = [0]
+
+
+# The facts per bare tool name of the declarations in force, held with the
+# declaration version they were read at (``tool_declarations.declaration_version``).
+_BY_NAME: list[Any] = [-1, None]
+
+
 def shipped_by_name() -> Mapping[str, ToolFacts]:
-    """The facts the platform ships per bare tool name, from the declarations shipped now.
+    """The facts the platform's own sources declare per bare tool name, as in force now.
 
     Never the legacy reading of a stored entry, which reads the snapshot
     these gave when it was cut (:func:`legacy_by_name`).
 
-    Every built-in source's declared tools (the built-in servers, the
-    provider-owned blocks, the in-process sources). A name two built-in
-    sources share carries one kind and one reading in both (held by
+    Every built-in source's declared tools (the built-in servers as each
+    declares them, :func:`builtin_tools`; the provider-owned blocks; the
+    in-process sources). A name two built-in sources share carries one kind
+    and one reading in both (held by
     ``tests/unit/core/test_entries_are_read_by_their_declared_kind.py``); the
-    first source in that order gives its facts.
+    first source in that order gives its facts. Read again whenever what a
+    server declares changes.
     """
     from maljan.core import builtin_declarations as shipped
+    from maljan.core.tool_declarations import declaration_version
+
+    keys = shipped.builtin_server_names()
+    servers: list[Mapping[str, ToolFacts]] = [builtin_tools(key) for key in keys]
+    # Held as long as no server's reading was read anew.
+    signature = (declaration_version(), _READS[0])
+    with _LOCK:
+        if _BY_NAME[0] == signature and _BY_NAME[1] is not None:
+            return _BY_NAME[1]  # type: ignore[no-any-return]
 
     out: dict[str, ToolFacts] = {}
 
@@ -495,12 +662,14 @@ def shipped_by_name() -> Mapping[str, ToolFacts]:
             if name not in out:
                 out[name] = raw if isinstance(raw, ToolFacts) else ToolFacts.model_validate(raw)
 
-    for key in shipped.builtin_server_names():
-        _take(shipped.server_declaration(key).get("tool_facts") or {})
+    for tools in servers:
+        _take(tools)
     for provider in shipped.provider_names():
         _take(shipped.provider_declaration(provider).get("tool_facts") or {})
     for cfg in shipped.in_process_declarations().values():
         _take(cfg.tool_facts)
+    with _LOCK:
+        _BY_NAME[0], _BY_NAME[1] = signature, out
     return out
 
 
@@ -550,11 +719,13 @@ def read_by_name(entry: Any) -> bool:
 
 @cache
 def _shipped_tools_by_source() -> Mapping[str, frozenset[str]]:
-    """Each built-in source, by its recorded text, and the tool names it ships a declaration for.
+    """Each built-in source, by its recorded text, and the tool names its block ships.
 
     The built-in servers (``mcp:<key>``), the provider-owned blocks
     (``provider:<id>``) and the platform's in-process sources, from built-in
-    data alone.
+    data alone: what a block holds, never what its server serves, so an
+    operator's removal of a tool a block ships is read against the block
+    (``core.served_declarations.laid_under``).
     """
     from maljan.core import builtin_declarations as shipped
     from maljan.core.tool_declarations import shipped_provider_blocks
@@ -572,7 +743,7 @@ def _shipped_tools_by_source() -> Mapping[str, frozenset[str]]:
 
 
 def shipped_tools_of(source: str) -> frozenset[str]:
-    """The tool names the built-in ``source`` ships a declaration for; empty for any other."""
+    """The tool names the built-in ``source``'s block ships a declaration for; empty for others."""
     return _shipped_tools_by_source().get(str(source), frozenset())
 
 
@@ -585,8 +756,9 @@ def shipped_under_its_source(entry: Any) -> bool:
     ships a declaration for its tool (its bare name, the collision prefix
     taken off). An operator's tool of the same name, recorded under the
     operator's server, never is; nor is an entry that recorded no source.
-    Read from the entry and built-in data, never the reading process's
-    settings.
+    Read from the entry, built-in data and what the platform's own servers
+    declare of themselves (:func:`builtin_tools`), never the reading
+    process's settings.
     """
     source = ToolDeclarations.source_of(entry)
     if source is None:
@@ -598,24 +770,24 @@ def ships_tool(source: str, tool: Any) -> bool:
     """Whether the built-in ``source`` (``mcp:<key>``, ``pack`` …) ships ``tool``.
 
     By the tool's bare name; ``False`` for a source that is not built-in, and
-    for a tool the source ships no declaration for.
+    for a tool the source declares nothing for: its block ships none, and, for
+    a built-in server, its server declares none of itself (:func:`builtin_tools`).
     """
     held = _shipped_tools_by_source().get(str(source))
-    return held is not None and bare_name(tool) in held
+    if held is None:
+        return False
+    name = bare_name(tool)
+    if name in held:
+        return True
+    kind, _, key = str(source).partition(":")
+    return kind == "mcp" and name in builtin_tools(key)
 
 
-@cache
-def _shipped_routed_formats() -> Mapping[tuple[str, str], frozenset[str]]:
-    """``(mcp:<key>, tool)`` → the routed formats the platform ships for a built-in's tool."""
-    from maljan.core import builtin_declarations as shipped
-
-    out: dict[tuple[str, str], frozenset[str]] = {}
-    for key in shipped.builtin_server_names():
-        for tool, facts in (shipped.server_declaration(key).get("tool_facts") or {}).items():
-            formats = facts.get("routed_formats") if isinstance(facts, Mapping) else None
-            if formats:
-                out[(f"mcp:{key}", str(tool))] = frozenset(str(f) for f in formats)
-    return out
+def _shipped_routed_formats(source: str, tool: str) -> frozenset[str]:
+    """The routed formats a built-in server's ``tool`` declares as it ships (``builtin_tools``)."""
+    kind, _, key = str(source).partition(":")
+    facts = builtin_tools(key).get(tool) if kind == "mcp" else None
+    return frozenset(str(f) for f in facts.routed_formats) if facts is not None else frozenset()
 
 
 def routed_formats_of(source: str, tool: str) -> frozenset[str]:
@@ -626,14 +798,15 @@ def routed_formats_of(source: str, tool: str) -> frozenset[str]:
     of a built-in tool's formats, even to none, is in force. A built-in
     server's tool whose live declaration does not set the field (a map an
     earlier release stored whole, before the field existed, or one that leaves
-    the tool out) is read with the formats the platform ships for it. The tool
-    is the name its server gives it.
+    the tool out) is read with the formats it declares as it ships, its own
+    server's declaration of itself included. The tool is the name its server
+    gives it.
     """
     held = declarations().source(str(source))
     facts = held.tools.get(tool) if held is not None else None
     if facts is not None and "routed_formats" in facts.model_fields_set:
         return frozenset(facts.routed_formats)
-    return _shipped_routed_formats().get((str(source), tool), frozenset())
+    return _shipped_routed_formats(str(source), tool)
 
 
 @lru_cache(maxsize=4096)

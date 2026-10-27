@@ -36,8 +36,8 @@ from typing import Any
 import pytest
 
 from maljan.agents.tool_pinning import DELIVERY_TOOLS
-from maljan.core.builtin_declarations import server_declaration
-from maljan.core.config import MCPServerConfig, Settings
+from maljan.core.config import Settings
+from maljan.core.declared_reading import builtin_tools
 from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.core.tool_declarations import ToolFacts
 from maljan.pipeline.artefacts import ArtefactStore
@@ -1018,7 +1018,8 @@ def _advertised(module: Any) -> dict[str, dict[str, Any]]:
 
 
 def _declared(key: str) -> dict[str, ToolFacts]:
-    return MCPServerConfig(**server_declaration(key)).tool_facts
+    # What the server declares of itself, as the platform reads it (kept from its listing).
+    return dict(builtin_tools(key))
 
 
 @pytest.mark.parametrize("key", sorted(SERVERS))
@@ -1077,7 +1078,7 @@ def test_jadx_leaves_the_manifest_to_apk_info() -> None:
     facts = _declared("jadx")
     assert "apk_info" in facts["android_classes"].does_not_show
     assert set(facts["android_classes"].routed_formats) == {"apk", "dex"}
-    shipped = Settings(_env_file=None).mcp.servers["analysis"].tool_facts
+    shipped = builtin_tools("analysis")
     assert "apk_info" in shipped and "android_classes" not in shipped
 
 

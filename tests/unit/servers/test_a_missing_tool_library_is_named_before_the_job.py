@@ -197,11 +197,20 @@ class TestReadinessNamesWhatTheJobWouldCall:
     def test_a_reading_runs_on_its_server_when_that_is_reached_at_an_address(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from maljan.core.declared_reading import builtin_tools
+        from maljan.core.served_declarations import register_served
+        from maljan.core.tool_declarations import launch_identity
+
         _without(monkeypatch, "capa")
         settings = Settings()
         analysis = settings.mcp.servers["analysis"]
+        declared = dict(builtin_tools("analysis"))
         analysis.transport = "streamable-http"
         analysis.url = "http://analysis-mcp:8080/mcp"
+        # Pointed at its own container, the block trusts what the server
+        # declares, and the server, listed there, declares its tools as anywhere.
+        analysis.trusts_served_declaration = True
+        register_served("mcp:analysis", declared, launch_identity(analysis))
         assert unavailable_tools(settings) == []
         analysis.enabled = False
         assert [u.tool for u in unavailable_tools(settings)] == ["capa"]

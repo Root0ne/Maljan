@@ -29,8 +29,8 @@ from typing import Any
 
 import pytest
 
-from maljan.core.builtin_declarations import server_declaration
-from maljan.core.config import MCPServerConfig, Settings
+from maljan.core.config import Settings
+from maljan.core.declared_reading import builtin_tools
 from maljan.core.tool_declarations import ToolFacts
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -812,7 +812,8 @@ def _advertised(module: Any) -> dict[str, dict[str, Any]]:
 
 
 def _declared(key: str) -> dict[str, ToolFacts]:
-    return MCPServerConfig(**server_declaration(key)).tool_facts
+    # What the server declares of itself, as the platform reads it (kept from its listing).
+    return dict(builtin_tools(key))
 
 
 @pytest.mark.parametrize("key", sorted(SERVERS))
@@ -873,7 +874,7 @@ def test_yara_x_matches_are_read_as_the_shipped_yara_scans_are(
     roots: Path, bin_dir: Path, rules: Path
 ) -> None:
     """Signature rules, in yara_scan's row shape, corroborating as the one YARA layer."""
-    shipped = Settings(_env_file=None).mcp.servers["analysis"].tool_facts["yara_scan"]
+    shipped = builtin_tools("analysis")["yara_scan"]
     facts = _declared("yarax")["yarax_scan"]
     assert (facts.kind, facts.asserts_techniques, facts.source) == (
         shipped.kind,

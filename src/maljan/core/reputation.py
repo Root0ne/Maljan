@@ -467,12 +467,18 @@ class Lookup:
 
 
 def _shipped_rank(server: str, tool: str) -> int | None:
-    """The rank the platform ships for ``server``'s lookup ``tool``, or ``None``."""
-    from maljan.core.builtin_declarations import server_declaration
+    """The rank built-in ``server``'s lookup ``tool`` declares as it ships, or ``None``.
 
-    shipped = (server_declaration(server).get("tool_facts") or {}).get(tool) or {}
-    rank = (shipped.get("reputation") or {}).get("rank")
-    return rank if isinstance(rank, int) and not isinstance(rank, bool) else None
+    Its shipped block's, else what its server declares of itself
+    (``declared_reading.builtin_tools``).
+    """
+    from maljan.core.declared_reading import builtin_tools
+
+    shipped = builtin_tools(server).get(tool)
+    declared = shipped.reputation if shipped is not None else None
+    if declared is None or "rank" not in declared.model_fields_set:
+        return None
+    return declared.rank
 
 
 def _rank(server: str, tool: str, facts: ToolFacts) -> int:

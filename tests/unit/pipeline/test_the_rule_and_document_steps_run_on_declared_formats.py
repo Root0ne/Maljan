@@ -24,6 +24,7 @@ from maljan.agents.composition import servers_a_job_calls
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.core import config as config_module
 from maljan.core.config import Settings
+from maljan.core.declared_reading import builtin_tools
 from maljan.core.pack_steps import (
     OFFICE_FORMATS,
     RTF_FORMATS,
@@ -56,9 +57,19 @@ STEPS: dict[str, tuple[str, tuple[str, ...]]] = {
 OTHER_FORMATS = ("pe", "elf", "pdf", "zip", "ps1", "vbs", "unknown")
 
 
+def _launch(key: str) -> dict[str, Any]:
+    """How the server ``key`` ships started or reached, as an operator's stored entry holds it.
+
+    A stored entry is held whole: one pointed where the server ships keeps the
+    trust in what the server declares of its tools (T-418).
+    """
+    shipped = Settings(_env_file=None).mcp.servers[key]
+    return shipped.model_dump(mode="json", include={"transport", "url", "command", "args", "cwd"})
+
+
 def _settings(*on: str) -> Settings:
     """The shipped settings with the servers in ``on`` switched on."""
-    servers = {key: {"enabled": True} for key in on}
+    servers = {key: {**_launch(key), "enabled": True} for key in on}
     return build_settings({"mcp.servers": servers}) if servers else Settings(_env_file=None)
 
 
@@ -185,12 +196,11 @@ class TestTheyRunOnTheRoutedFormat:
         assert result.facts.hits.get("signature_rules") == 2
 
     def test_each_steps_formats_are_its_tools_declared_formats(self) -> None:
-        servers = Settings(_env_file=None).mcp.servers
         for step_id, (server, formats) in STEPS.items():
             step = shipped_step(step_id)
             assert step is not None and (step.server, step.called) == (server, step_id)
             assert step.formats == formats and not step.when
-            declared = servers[server].tool_facts[step.called]
+            declared = builtin_tools(server)[step.called]
             assert tuple(declared.routed_formats) == formats, step_id
 
 

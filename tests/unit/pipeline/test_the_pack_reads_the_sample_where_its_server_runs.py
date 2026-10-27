@@ -276,12 +276,11 @@ def test_a_reading_runs_on_its_tools_server_only_when_that_server_is_reached_at_
     # Shipped: every server a child of the worker, every reading in process.
     assert nodes.sample_readers(container(servers), "/w/x.exe").places == {}
     isolated = dict(servers)
-    isolated["analysis"] = servers["analysis"].model_copy(
-        update={
-            "transport": "streamable-http",
-            "url": "http://analysis-mcp:8098/mcp",
-            "sample_mount": "/data/samples",
-        }
+    isolated["analysis"] = _in_its_container(
+        servers["analysis"],
+        transport="streamable-http",
+        url="http://analysis-mcp:8098/mcp",
+        sample_mount="/data/samples",
     )
     held = nodes.sample_readers(container(isolated), "/w/x.exe")
     for reading in ("identify_file", "pe_info", "capa", "unpack_upx", "directed_scan", "toolchain"):
@@ -354,6 +353,21 @@ def test_a_reading_runs_only_on_a_server_that_runs_readings(
     assert held.places == {}
 
 
+def _in_its_container(block: Any, **launch: Any) -> Any:
+    """``block`` pointed at its sidecar's own container, as the compose file says to.
+
+    The block trusts what its server declares (``trusts_served_declaration``),
+    and the server, listed there, declares its tools as it does anywhere.
+    """
+    from maljan.core.declared_reading import builtin_tools
+    from maljan.core.served_declarations import register_served
+    from maljan.core.tool_declarations import launch_identity
+
+    moved = block.model_copy(update={**launch, "trusts_served_declaration": True})
+    register_served("mcp:analysis", dict(builtin_tools("analysis")), launch_identity(moved))
+    return moved
+
+
 def test_where_each_reading_runs_is_resolved_once_per_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -361,8 +375,8 @@ def test_where_each_reading_runs_is_resolved_once_per_job(
     from maljan.pipeline import nodes
 
     servers = dict(Settings(_env_file=None).mcp.servers)
-    servers["analysis"] = servers["analysis"].model_copy(
-        update={"transport": "streamable-http", "url": "http://analysis-mcp:8098/mcp"}
+    servers["analysis"] = _in_its_container(
+        servers["analysis"], transport="streamable-http", url="http://analysis-mcp:8098/mcp"
     )
     asked: list[str] = []
     real = nodes._declaring_server_key

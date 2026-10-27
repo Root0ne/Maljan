@@ -8,6 +8,7 @@ from app.models.model_probe import ModelProbe
 from app.models.report import AgentFinding, AnalysisReport
 from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
+from app.models.served_declaration import ServedDeclaration
 from app.models.settings import RuntimeSetting
 from app.models.user import User
 
@@ -27,4 +28,5 @@ __all__ = [
     "AuditLog",
     "APIKey",
     "RuntimeSetting",
+    "ServedDeclaration",
 ]

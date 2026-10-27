@@ -456,14 +456,15 @@ def test_ghidras_open_tools_are_its_long_running_tools(declared: ToolDeclaration
 
 
 def test_the_analysis_servers_long_running_tools_and_budgets_are_its_manifests() -> None:
-    from maljan.core.builtin_declarations import server_declaration
+    from maljan.core.declared_reading import builtin_tools
 
-    # The sidecar's manifest is declared where a check before a job reads it too.
+    # The sidecar's manifest is declared where a check before a job reads it too;
+    # the server declares the same of its tools itself.
     manifest = (ROOT / "src" / "maljan" / "tools" / "sidecar_needs.py").read_text(encoding="utf-8")
-    facts = server_declaration("analysis")["tool_facts"]
-    assert {n for n, f in facts.items() if f.get("long_running")} == {"capa", "floss"}
+    facts = builtin_tools("analysis")
+    assert {n for n, f in facts.items() if f.long_running} == {"capa", "floss"}
     assert manifest.count("long_running=True") == 2
-    assert facts["yara_scan"]["timeout_seconds"] == int(
+    assert facts["yara_scan"].timeout_seconds == int(
         re.search(r"^YARA_TIMEOUT_S = (\d+)", manifest, re.M).group(1)  # type: ignore[union-attr]
     )
 
@@ -500,7 +501,7 @@ def test_the_categories_are_the_mcp_clients_tags(declared: ToolDeclarations) -> 
 
 
 def test_the_rule_match_display_names_are_the_assertion_words(declared: ToolDeclarations) -> None:
-    from maljan.pipeline.validation import _RULE_MATCH_ASSERTION_RE
+    from maljan.pipeline.validation import _rule_match_assertion_re, shipped_matcher_names
 
     # YARA-X, a rule matcher shipped switched off, is among them.
     one_program = [
@@ -514,7 +515,8 @@ def test_the_rule_match_display_names_are_the_assertion_words(declared: ToolDecl
         if facts.kind in _kinds("validation._RULE_MATCH_SECTION_SOURCES")  # type: ignore[attr-defined]
     }
     # A name with a hyphen (YARA-X) stands escaped in the pattern.
-    alternation = re.search(r"\\b\(\?:([a-z|\\-]+)\)\\b", _RULE_MATCH_ASSERTION_RE.pattern)
+    pattern = _rule_match_assertion_re(shipped_matcher_names()).pattern
+    alternation = re.search(r"\\b\(\?:([a-z|\\-]+)\)\\b", pattern)
     assert alternation is not None
     assert names == set(alternation.group(1).replace("\\-", "-").split("|"))
 

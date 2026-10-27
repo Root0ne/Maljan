@@ -3730,7 +3730,7 @@ are ever removed.
 | `variable_names` | environment variable names of the server's that are not secrets; those a shipped declaration or a registered provider class (`variable_names`) names are kept whole in published text, read from those so the redaction does not depend on a run's settings |
 | `reads_staged_sample` | whether the server's path-taking tools read the sample the platform staged |
 | `platform_owned` | whether the server is the platform's own, whose answers are the platform's code |
-| `trusts_served_declaration` | whether what the server declares of its own tools when it lists them (each tool's `_meta` at `maljan/tool_facts`) is read as this block's declaration, under what the block itself says; off, only its cautious claims are read, as the server's own statement, and the rest is proposed (see [Writing a tool server](#writing-a-tool-server)). Shipped on for the platform's own sidecars, and that shipped trust holds only while the block still starts or reaches the server it shipped with (its transport, command, arguments, working directory and address); a block pointed at another server trusts it only where you set the flag yourself |
+| `trusts_served_declaration` | whether what the server declares of its own tools when it lists them (each tool's `_meta` at `maljan/tool_facts`) is read as this block's declaration, under what the block itself says; off, only its cautious claims are read, as the server's own statement, and the rest is proposed (see [Writing a tool server](#writing-a-tool-server)). Shipped on for the platform's own sidecars, and that shipped trust holds only while the block still starts or reaches the server it shipped with (its transport, command, arguments, working directory and address); a block pointed at another server trusts it only where you set the flag yourself, so set it when you point a built-in block at that sidecar's own container: the platform ships no table of its sidecars' tools, and an untrusted block reads only their cautious claims |
 | `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`); every server's join the shipped ones (`FUN_`, `fcn.`, `sub_`, `func.`, `loc.`, `LAB_`) wherever a function's auto-name is read as its address |
 | `reference_urls` | sample lookup URL templates, `https://` and naming `{sha256}`, `{md5}` or `{sha1}`; a report links them, under the name its lookup's record gives (else the server's label), only when the run recorded an entry from this server. `reporting.reference_urls` holds the lookups linked on every report (shipped with VirusTotal's and MalwareBazaar's) |
 | `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
@@ -4636,9 +4636,16 @@ The client reads it for every server alike, whenever it attaches one,
 leniently (a field this version does not know is left out with a warning; a
 declaration the model refuses declares nothing, with a warning), and keeps it
 under the launch identity of the block that reached the server (its transport,
-command, arguments, working directory and address), so a block pointed at
-another server reads none of the last one's. How much of it is read is the
-block's choice, `trusts_served_declaration` (in the table above):
+command, arguments, working directory and address; a command is read as the
+file it runs, so `bin/python` and its link `bin/python3` in one directory are
+one launch), so a block pointed at another server reads none of the last
+one's. What it keeps outlives the process: each server's last declaration is
+kept in the database (`served_tool_declarations`, one row per source), read
+by the worker at the start of each job and by the API before it answers what
+depends on it, and written back after each job and connection test. A block
+whose launch identity changed forgets what its server declared. How much of
+it is read is the block's choice, `trusts_served_declaration` (in the table
+above):
 
 - **A block that trusts it** (the platform's own sidecars ship it set; set it
   for a server you vouch for) reads it as a declaration, under what the block
@@ -4676,17 +4683,37 @@ server's declaration again; a run's recorded declaration digests are of the
 blocks alone, and what each server declared is recorded by its own digest
 beside the name and version it gave (the run fingerprint's server versions).
 
-What reads a server's declaration: the facts each entry stores, every reading
-of the live declarations (`core.declared_reading.declarations`), the call
-guard's per-tool budgets and long-running flags (from the attach on), the
-description tags of its tools and the tool names the prompts know. Read from
-the block alone for now: the static pre-pass's tool choice
-(`prepass_tools`), the triage pack's choice of the server whose environment
-an in-process step reads, its server steps' tools, and a Ghidra block's own
-reads of its tools. In FastMCP, `maljan.tools.declared_facts.tool_declaration`
-writes both parts for `@mcp.tool(...)`; every built-in sidecar declares its
-tools so, and a test holds what each declares equal, field by field, to what
-the platform read for it before.
+What reads a server's declaration: everything that reads a tool's
+declaration, before any server attaches too: the facts each entry stores,
+every reading of the live declarations (`core.declared_reading.declarations`),
+the call guard's per-tool budgets and long-running flags, the description
+tags of its tools, the tool names the prompts know, the static pre-pass's
+tools (`prepass_tools`), the triage pack's choice of the server whose
+environment an in-process step reads and of the server its readings run on,
+the reputation lookups it asks and their order, the formats a tool serves,
+the servers a capability reference binds and the check of a pack step's
+kind. In FastMCP, `maljan.tools.declared_facts.tool_declaration` writes both
+parts for `@mcp.tool(...)`; every built-in sidecar declares its tools so, and
+a test holds what each declares equal, field by field, to what the platform
+read for it before. The platform ships no table of its own sidecars' tools:
+what it reads of them is what each serves.
+
+**Before a server's first listing.** On a fresh install nothing is kept yet,
+and a server is read as any undeclared server is: nothing about it is
+refused, and its tools are offered and called as an undeclared server's are.
+So that no run is weaker for it, a job that runs for real (never a mock run)
+lists, before it starts, each enabled server whose block trusts its
+declaration and for which nothing is kept (the handshake a connection test
+makes; no tool is called), at most four at a time within thirty seconds, and
+keeps what each declares; a server that cannot be reached then, or whose
+listing declares nothing, is read as undeclared until it attaches, is never
+refused, and is not reached early again for ten minutes. A server whose block
+does not trust it is not reached early: only its cautious claims would be
+read, and its own attach reads them. A row listed through the launch a server
+ships with is read under the shipped launch of the host that reads it, so an
+API on the host and a worker in a container read the same row. A connection
+test keeps what it listed only where the entry tested is the saved block, as
+saved; a staged or unsaved entry's listing is not kept.
 
 **The budget meter** needs nothing from a server. The tool loop emits
 `budget_tick` every five steps and once more when it ends (steps used against

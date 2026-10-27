@@ -2972,6 +2972,13 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # install its own.
         install_settings(core_settings)
         remember_configured_secrets(core_settings)
+        # What each server declared of its tools, kept, read before anything
+        # decides by it, and a block pointed elsewhere forgets the last one's
+        # (``app.services.served_declarations_store``). No server is reached
+        # here: the listing of the unlisted ones waits for the mock decision.
+        from app.services import served_declarations_store
+
+        await served_declarations_store.prepare_job(db_session, core_settings)
         # Read once, from this job's own settings: a value saved while the job
         # runs applies to the next job, and this one keeps what it started with.
         _job_timeout: int | None = getattr(core_settings, "job_timeout", None)
@@ -3025,6 +3032,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             _said_job,
             _said_allowed,
         )
+        # A run for real lists each trusted server nothing is kept for, once,
+        # before the pack decides by its tools; a mock run reaches none of its
+        # own accord.
+        if not _mock_active:
+            await served_declarations_store.list_before_run(db_session, core_settings)
         # The sink is what turns a 30-minute silent run into a readable
         # transcript: each node reports its own findings as it produces
         # them, straight onto the same PubSub channel the Live tab is
@@ -3062,6 +3074,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 recorder=transcript,
             ),
         )
+        # Listed above, where a listing was due: the run lists nothing again.
+        app.servers_listed = True
         # What the run shortens, blanks or drops from a ledger entry's answer
         # is kept whole in object storage under this job's prefix, and the
         # entry references it (``maljan.schemas.evidence_spill``).
@@ -4024,6 +4038,13 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 gc.collect()
                 reclaimed = memprobe.malloc_trim()
                 memprobe.probe("job:end", job_id=job_id, trim_reclaimed_mb=reclaimed)
+
+            # What the servers this job attached declared of their tools, kept
+            # for the next job and the API. Last, once nothing is left to tear
+            # down; it never raises.
+            from app.services import served_declarations_store
+
+            await served_declarations_store.keep(db_session)
 
         finally:
             # What the sidecars staged and carved for this job, its sandbox

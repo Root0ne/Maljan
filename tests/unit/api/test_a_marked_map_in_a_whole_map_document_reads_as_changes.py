@@ -65,7 +65,7 @@ def _import(fmt: str, values: dict[str, Any]) -> dict[str, Any]:
 def _server_entry(tool_facts: Any) -> dict[str, Any]:
     from app.services.server_map import validate_server_map
 
-    shipped = validate_server_map({})["analysis"]
+    shipped = validate_server_map({})["virustotal"]
     return {**{k: v for k, v in shipped.items() if k != "tool_facts"}, "tool_facts": tool_facts}
 
 
@@ -89,13 +89,13 @@ def test_a_marked_provider_leaf_reads_as_its_changes(
 def test_a_marked_server_map_entry_reads_as_its_changes(
     tool_facts: dict[str, Any], added: set[str]
 ) -> None:
-    values = {SERVER_MAP: {"analysis": _server_entry(tool_facts)}}
+    values = {SERVER_MAP: {"virustotal": _server_entry(tool_facts)}}
     stored = _import("maljan-settings/1", values)
     assert stored == _import("maljan-settings/2", values)
     built = so.build_settings({"mcp.servers": stored[SERVER_MAP]})
-    shipped = set(so.shipped_tool_facts("mcp.servers.analysis"))
+    shipped = set(so.shipped_tool_facts("mcp.servers.virustotal"))
     assert shipped
-    assert set(built.mcp.servers["analysis"].tool_facts) == shipped | added
+    assert set(built.mcp.servers["virustotal"].tool_facts) == shipped | added
 
 
 def test_an_unmarked_whole_map_document_still_removes_what_it_does_not_name() -> None:

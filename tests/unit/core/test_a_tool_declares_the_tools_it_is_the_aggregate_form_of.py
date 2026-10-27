@@ -288,10 +288,11 @@ class TestTheDigests:
         # The knowledge server declares no aggregate; its digest as dev records it.
         # (The analysis server's moved when two of its tools declared what their
         # answers show and do not show.)
-        # Its trust in its server's own declaration (T-418) is the one change,
-        # and moves its digest; without it the block is as dev records it.
+        # Its trust in its server's own declaration (T-418) moved its digest,
+        # and so did its tool table's removal: the server declares its tools
+        # itself (T-418 PR1b), so its block is its trust, roles and launch alone.
         settings = Settings(_env_file=None)
         assert settings.mcp.servers["knowledge"].trusts_served_declaration is True
         object.__setattr__(settings.mcp.servers["knowledge"], "trusts_served_declaration", False)
         digests = ToolDeclarations.from_settings(settings).digests()
-        assert digests["mcp:knowledge"] == "2fbd76f41eddabe6"
+        assert digests["mcp:knowledge"] == "b261c17f07e13ef9"

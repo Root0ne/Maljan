@@ -794,8 +794,8 @@ def servers_of_capability(server_keys: Iterable[str], capability: str) -> list[s
     the console draws which servers a capability reference stands for
     without a rule of its own.
     """
-    from maljan.core.builtin_declarations import server_declaration
     from maljan.core.config import _builtin_servers
+    from maljan.core.declared_reading import builtin_tools
     from maljan.core.reputation import kinds_of_capability
 
     kinds = kinds_of_capability(capability)
@@ -805,8 +805,8 @@ def servers_of_capability(server_keys: Iterable[str], capability: str) -> list[s
         seed = seeds.get(str(name))
         if seed is None or list(seed.agents or []):
             continue
-        shipped = server_declaration(str(name)).get("tool_facts") or {}
-        if any(str((facts or {}).get("kind") or "") in kinds for facts in shipped.values()):
+        # As the server ships: its block's, and what it declares of itself.
+        if any(facts.kind in kinds for facts in builtin_tools(str(name)).values()):
             out.append(str(name))
     return out
 

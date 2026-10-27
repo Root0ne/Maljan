@@ -57,10 +57,22 @@ def declared_tool(block: Any, which: str) -> str:
     return str(getattr(declared, which, "") or "") if declared is not None else ""
 
 
-def block_declaration(block: Any, tool: str) -> ToolFacts | None:
-    """The declaration ``block`` gives ``tool``, or ``None``."""
-    held = getattr(block, "tool_facts", None) or {}
-    facts = held.get(tool) if tool else None
+def block_declaration(block: Any, tool: str, source: str = "") -> ToolFacts | None:
+    """The declaration in force for ``tool`` under ``block``, or ``None``.
+
+    With ``source`` (``mcp:<key>``), what the block's server declares of
+    itself is laid under the block's own (``declared_reading.tools_in_force``);
+    without, the block's own alone.
+    """
+    if not tool:
+        return None
+    if source:
+        from maljan.core.declared_reading import tools_in_force
+
+        held: Any = tools_in_force(source, block)
+    else:
+        held = getattr(block, "tool_facts", None) or {}
+    facts = held.get(tool)
     return facts if isinstance(facts, ToolFacts) else None
 
 

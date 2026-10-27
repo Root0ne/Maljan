@@ -64,8 +64,9 @@ def test_a_snapshot_whose_digest_is_not_the_pinned_one_is_refused(
         legacy_tool_facts._document.cache_clear()
 
 
-def test_the_snapshot_names_every_shipped_tool_in_the_shipped_order() -> None:
-    assert list(legacy_tool_facts.facts_by_name()) == list(declared_reading.shipped_by_name())
+def test_the_snapshot_names_every_tool_the_platform_s_own_sources_declare() -> None:
+    # The own servers' declarations are kept per tool, in no order of a table.
+    assert set(legacy_tool_facts.facts_by_name()) == set(declared_reading.shipped_by_name())
 
 
 @pytest.mark.parametrize("tool", sorted(declared_reading.shipped_by_name()))
@@ -94,7 +95,8 @@ def test_the_snapshot_holds_legacy_names_only_for_a_consumer_the_tables_name() -
 
 
 def _forget_shipped() -> None:
-    declared_reading.shipped_by_name.cache_clear()
+    declared_reading._BY_NAME[:] = [-1, None]
+    declared_reading._BUILTIN_TOOLS.clear()
     declared_reading._shipped_tools_by_source.cache_clear()
     declared_reading._in_process_blocks.cache_clear()
 
@@ -165,6 +167,21 @@ def _reshaped(declaration: Callable[[str], dict[str, Any]]) -> Callable[[str], d
     return changed
 
 
+def _serve_changed(change: Callable[..., Any]) -> None:
+    """What the platform's own servers serve, changed as ``change`` changes the shipped tables."""
+    from maljan.core import served_declarations
+
+    for source, (launch, facts) in dict(served_declarations._SERVED).items():
+        if change is _emptied:
+            served_declarations.forget_served(source)
+        elif change is _reshaped:
+            reshaped = {n: _reshape(n, f) for n, f in facts.items()}
+            served_declarations.register_served(source, reshaped, launch)
+        else:
+            rekinded = {n: ToolFacts(kind="reference") for n in facts}
+            served_declarations.register_served(source, rekinded, launch)
+
+
 def _in_process(change: Callable[..., Any]) -> Callable[[], dict[Any, Any]]:
     """The in-process sources as ``change`` leaves them: reshaped in place, else none."""
     if change is not _reshaped:
@@ -203,6 +220,7 @@ def test_a_changed_shipped_table_leaves_a_source_less_entry_reading_as_before(
         patch.setattr(shipped, "server_declaration", change(shipped.server_declaration))
         patch.setattr(shipped, "provider_declaration", change(shipped.provider_declaration))
         patch.setattr(shipped, "in_process_declarations", _in_process(change))
+        _serve_changed(change)
         for spec in CONSUMER_KINDS.values():
             if "legacy_names" in spec:
                 patch.setitem(spec, "legacy_names", [])
@@ -228,7 +246,7 @@ def test_a_stored_run_names_its_rule_matchers_as_the_snapshot_does_whatever_ship
     stored = validation._stored_matcher_names()
     assert stored
     # A shipped matcher renamed: the names built from the live tables are another.
-    monkeypatch.setattr(validation, "SHIPPED_MATCHER_NAMES", ("renamed matcher",))
+    monkeypatch.setattr(validation, "shipped_matcher_names", lambda: ("renamed matcher",))
     named = set(validation.matcher_names([_stored_entry("an_unknown_tool")]))
     assert stored <= named
     for name in stored:
@@ -240,7 +258,7 @@ def test_a_stored_run_names_its_rule_matchers_as_the_snapshot_does_whatever_ship
 def test_a_run_with_no_stored_entry_names_no_frozen_matcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(validation, "SHIPPED_MATCHER_NAMES", ("renamed matcher",))
+    monkeypatch.setattr(validation, "shipped_matcher_names", lambda: ("renamed matcher",))
     declared = SimpleNamespace(tool="an_unknown_tool", source="mcp:somewhere", facts={"v": 1})
     assert validation.matcher_names([declared]) == ("renamed matcher",)
 
@@ -268,6 +286,7 @@ def test_a_stored_run_reads_produced_layers_by_the_argument_names_the_snapshot_d
         patch.setattr(shipped, "server_declaration", _emptied(shipped.server_declaration))
         patch.setattr(shipped, "provider_declaration", _emptied(shipped.provider_declaration))
         patch.setattr(shipped, "in_process_declarations", lambda: {})
+        _serve_changed(_emptied)
         _forget_shipped()
         assert frozen <= coverage._layer_names([_stored_entry("an_unknown_tool")])
         declared = SimpleNamespace(tool="an_unknown_tool", source="mcp:somewhere", facts={"v": 1})
@@ -294,6 +313,7 @@ def test_a_live_entry_with_stored_facts_keeps_its_reading_branch_when_shipped_pl
         patch.setattr(shipped, "server_declaration", _reshaped(shipped.server_declaration))
         patch.setattr(shipped, "provider_declaration", _reshaped(shipped.provider_declaration))
         patch.setattr(shipped, "in_process_declarations", _in_process(_reshaped))
+        _serve_changed(_reshaped)
         _forget_shipped()
         assert all(
             f.places == {"reshaped": "/reshaped"}
