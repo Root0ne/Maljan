@@ -54,6 +54,8 @@ from maljan.core.declared_reading import (
     bare_name,
     consumer_kinds,
     facts_of,
+    legacy_by_name,
+    read_by_name,
     reads_as,
     shipped_by_name,
 )
@@ -3289,15 +3291,30 @@ SHIPPED_MATCHER_NAMES: tuple[str, ...] = tuple(
 )
 
 
+@cache
+def _stored_matcher_names() -> frozenset[str]:
+    """The rule matchers the platform shipped, as the frozen legacy reading names them."""
+    return frozenset(
+        _matcher_name(name, facts)
+        for name, facts in legacy_by_name().items()
+        if facts.kind in consumer_kinds(_RULE_MATCH_SECTIONS)
+    )
+
+
 def matcher_names(ledger: Iterable[Any] | None = None) -> tuple[str, ...]:
     """The rule matchers a sentence may name: the shipped ones and every one the run used.
 
     An entry of ``ledger`` whose tool is a rule matcher (a kind of
     ``validation._RULE_MATCH_SECTION_SOURCES``) names it by its stored display
-    name, else its own name; read from the entries, never from settings.
+    name, else its own name; read from the entries, never from settings. A
+    ledger holding an entry read by the legacy reading (a stored run's) also
+    names the matchers the frozen snapshot names, so a stored run reads the
+    same whatever a shipped matcher is called now.
     """
     names = set(SHIPPED_MATCHER_NAMES)
     for entry in ledger or ():
+        if read_by_name(entry):
+            names |= _stored_matcher_names()
         facts = facts_of(entry)
         if facts is not None and facts.kind in consumer_kinds(_RULE_MATCH_SECTIONS):
             names.add(_matcher_name(bare_name(getattr(entry, "tool", "")), facts))

@@ -604,14 +604,28 @@ def _call(
 
 
 def _layer_names(ledger: Sequence[Any]) -> set[str]:
-    """The argument names declared under :data:`LAYER_ROLE`, shipped or on the run's entries."""
-    from maljan.core.declared_reading import kind_free_facts, shipped_by_name
+    """The argument names declared under :data:`LAYER_ROLE`, shipped or on the run's entries.
+
+    A ledger holding an entry read by the legacy reading (a stored run's) also
+    takes the names the frozen snapshot declares, so a stored run reads the
+    same whatever the shipped declarations say now.
+    """
+    from maljan.core.declared_reading import (
+        kind_free_facts,
+        legacy_by_name,
+        read_by_name,
+        shipped_by_name,
+    )
 
     names: set[str] = set()
-    for facts in shipped_by_name().values():
-        name = (getattr(facts, "arguments", None) or {}).get(LAYER_ROLE)
-        if name:
-            names.add(str(name))
+    tables = [shipped_by_name()]
+    if any(read_by_name(entry) for entry in ledger):
+        tables.append(legacy_by_name())
+    for table in tables:
+        for facts in table.values():
+            name = (getattr(facts, "arguments", None) or {}).get(LAYER_ROLE)
+            if name:
+                names.add(str(name))
     for entry in ledger:
         name = (getattr(kind_free_facts(entry), "arguments", None) or {}).get(LAYER_ROLE)
         if name:

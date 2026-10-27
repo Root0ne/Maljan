@@ -68,8 +68,8 @@ LEGACY_READS: dict[tuple[str, str], tuple[int, str]] = {
     ("startswith", "tool.startswith(MARKDOWN_SANDBOX_TOOLS)"): (1, _TABLE + ": the sandbox tools"),
     ("compares", "tool not in REPUTATION_TOOLS"): (1, _TABLE + ": the reputation lookups"),
     ("compares", "hint in tool"): (1, _TABLE + ": the composer's section hints"),
-    ("compares", "tool in spec.get('legacy_names', ())"): (1, "a consumer's legacy names"),
-    ("looks", "_builtin_by_name().get(str(tool or ''))"): (1, "a stored tool's shipped facts"),
+    ("compares", "tool in legacy_names(consumer)"): (1, "a consumer's legacy names, frozen"),
+    ("looks", "_builtin_by_name().get(str(tool or ''))"): (1, "a stored tool's frozen facts"),
 }
 
 

@@ -28,13 +28,15 @@ An entry with a source and no facts (written before facts were stored, or
 whose settings could not be read) reads as an undeclared tool, never by its
 name. An entry with no source and no facts (every entry written before sources
 were recorded: the stored runs) is read by the **legacy reading**: the
-facts the platform ships for its bare tool name (the server prefix a name
-collision adds taken off), from the built-in declarations alone. Those are the
-name tables the code read before (``builtin_declarations.CONSUMER_KINDS``, held
-tool by tool by
+facts the platform shipped for its bare tool name (the server prefix a name
+collision adds taken off), as frozen in one versioned snapshot
+(``core.legacy_tool_facts``), never from the declarations shipped now. Those
+are the name tables the code read before (``builtin_declarations.CONSUMER_KINDS``,
+held tool by tool by
 ``tests/unit/core/test_every_built_in_declares_what_its_name_tables_say.py``),
-so a stored entry reads as it always did; a consumer table's ``legacy_names``
-count for such an entry only.
+so a stored entry reads as it always did, whatever later changes a shipped
+declaration; a consumer table's ``legacy_names``, frozen with them, count for
+such an entry only.
 
 The platform's in-process sources (``pack``, ``sandbox``,
 ``provider:capa_yara``) are declared by built-in data only, so their records
@@ -327,7 +329,10 @@ def server_hints(entry: Any) -> dict[str, bool]:
 
 @cache
 def shipped_by_name() -> Mapping[str, ToolFacts]:
-    """The facts the platform ships per bare tool name: the legacy reading of a stored entry.
+    """The facts the platform ships per bare tool name, from the declarations shipped now.
+
+    Never the legacy reading of a stored entry, which reads the snapshot
+    these gave when it was cut (:func:`legacy_by_name`).
 
     Every built-in source's declared tools (the built-in servers, the
     provider-owned blocks, the in-process sources). A name two built-in
@@ -351,6 +356,35 @@ def shipped_by_name() -> Mapping[str, ToolFacts]:
     for cfg in shipped.in_process_declarations().values():
         _take(cfg.tool_facts)
     return out
+
+
+def legacy_by_name() -> Mapping[str, ToolFacts]:
+    """The legacy reading of a stored entry: the facts per bare tool name, frozen.
+
+    What :func:`shipped_by_name` gave when the snapshot was cut
+    (``core.legacy_tool_facts``), read for an entry with no source and no
+    facts only, so no later change to a shipped declaration changes how a
+    stored run reads.
+    """
+    from maljan.core.legacy_tool_facts import facts_by_name
+
+    return facts_by_name()
+
+
+@cache
+def reader_reference_facts(kind: str) -> ToolFacts | None:
+    """The facts a kind's built-in reader code was written for; ``None`` for a kind with none.
+
+    The first tool of ``kind`` in the frozen snapshot (:func:`legacy_by_name`).
+    A kind's own reading reads answers in the shape the built-in tool of that
+    kind had when that reading was written, which is the shape the snapshot
+    froze, so this is the code's reference shape, for a live entry and a
+    stored one alike, never the declarations shipped now. Read by
+    ``analysis.evidence_roots`` to ask whether a tool is shaped otherwise.
+    Once the kind-keyed builders read every answer by its declared values
+    (T-418 PR2), nothing needs it.
+    """
+    return next((facts for facts in legacy_by_name().values() if facts.kind == kind), None)
 
 
 def has_stored_facts(entry: Any) -> bool:
@@ -502,7 +536,7 @@ def facts_of(entry: Any) -> ToolFacts | None:
         return _parsed(text)
     if recorded(entry):
         return None
-    return shipped_by_name().get(bare_name(_field(entry, "tool")))
+    return legacy_by_name().get(bare_name(_field(entry, "tool")))
 
 
 def kind_free_facts(entry: Any) -> ToolFacts:
@@ -608,10 +642,15 @@ def consumer_kinds(consumer: str) -> frozenset[str]:
     return frozenset(_consumer(consumer)["kinds"])
 
 
-@cache
 def legacy_names(consumer: str) -> frozenset[str]:
-    """The names a consumer's table held that no built-in tool has, for stored entries only."""
-    return frozenset(_consumer(consumer).get("legacy_names", ()))
+    """The names a consumer's table held that no built-in tool has, for stored entries only.
+
+    Frozen with the legacy reading (``core.legacy_tool_facts``), never read
+    from the consumer tables shipped now.
+    """
+    from maljan.core.legacy_tool_facts import legacy_names as frozen
+
+    return frozen(consumer)
 
 
 def reads_as(entry: Any, consumer: str) -> bool:

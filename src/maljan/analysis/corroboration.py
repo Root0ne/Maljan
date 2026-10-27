@@ -93,14 +93,16 @@ def _stored_signature_layers() -> frozenset[str]:
 
     A rule-strings row stored before rows recorded the layer that matched
     them was written only by a shipped signature-rule tool, so it is read as
-    that tool's: the label its shipped declaration gives (``source`` of a
-    ``signature_rules`` declaration that asserts techniques).
+    that tool's: the label its shipped declaration gave (``source`` of a
+    ``signature_rules`` declaration that asserts techniques), read from the
+    frozen legacy reading, so a later change to a shipped declaration leaves
+    a stored row as it read.
     """
-    from maljan.core.declared_reading import shipped_by_name
+    from maljan.core.declared_reading import legacy_by_name
 
     return frozenset(
         facts.source
-        for facts in shipped_by_name().values()
+        for facts in legacy_by_name().values()
         if facts.kind == "signature_rules" and facts.asserts_techniques and facts.source
     )
 

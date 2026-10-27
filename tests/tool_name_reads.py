@@ -46,7 +46,12 @@ from functools import cache
 from pathlib import Path
 from typing import NamedTuple
 
-LEGACY_MODULES = ("legacy_tool_names", "legacy_tool_tables", "legacy_reputation")
+LEGACY_MODULES = (
+    "legacy_tool_names",
+    "legacy_tool_tables",
+    "legacy_reputation",
+    "legacy_tool_facts",
+)
 
 _TOOL_FIELDS = ("tool", "tool_name")
 _TOOL_CALLS = ("tool_of", "section_tool", "declared_name", "_tool", "bare_name", "_base_tool_name")
