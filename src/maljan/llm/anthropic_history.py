@@ -53,7 +53,12 @@ turn, unless its newest turn says no later request sends the conversation
 again (:data:`LAST_REQUEST`): an entry written there would never be read. A
 tool loop's first user turn is sent as a one-block list on every request, so
 it can carry a breakpoint on the first request without changing shape on the
-next. A single-shot call carries none and pays no write premium
+next; the turn written as one string before a request's newest assistant
+turn is sent the same way where a breakpoint goes on it and no thinking block
+follows it, and any turn so listed is sent so on every later request
+(:func:`_turns_listed`), so a tools-free retry's first turn, sent again by the
+questions after it, is read from the cache. A single-shot call carries none
+and pays no write premium
 (https://platform.claude.com/docs/en/build-with-claude/prompt-caching) — except
 where its first user turn is noted with a head that other requests repeat
 (:data:`SHARED_HEAD`, the report composer's sections): that turn is sent as two
@@ -119,6 +124,9 @@ class Memory:
         self.sent_turns: dict[str, dict[str, Any]] = {}
         # digests of the first user turns sent as a one-block list.
         self.listed_first: set[str] = set()
+        # digests of the other user turns sent as a one-block list to carry a
+        # breakpoint, as they read when written as a string.
+        self.listed_turns: set[str] = set()
         # signature digests of blocks the API was asked to drop.
         self.stale: set[str] = set()
 
@@ -127,6 +135,7 @@ class Memory:
             self.produced_after.clear()
             self.sent_turns.clear()
             self.listed_first.clear()
+            self.listed_turns.clear()
             self.stale.clear()
 
 
@@ -247,8 +256,22 @@ def _without_markers(value: Any) -> Any:
     return value
 
 
+def _as_blocks(value: Any) -> Any:
+    """A message whose content is one string as the one text block the API reads it as.
+
+    The API takes a turn's string content and a single text block holding
+    the same text as the same turn, so a turn sent once in each shape digests
+    the same: the binding check then never reads a shape change as an edit.
+    """
+    if isinstance(value, dict) and "role" in value and isinstance(value.get("content"), str):
+        return {**value, "content": [{"type": "text", "text": value["content"]}]}
+    return value
+
+
 def _dump(value: Any) -> bytes:
-    text = json.dumps(_without_markers(value), sort_keys=True, ensure_ascii=False, default=str)
+    text = json.dumps(
+        _without_markers(_as_blocks(value)), sort_keys=True, ensure_ascii=False, default=str
+    )
     return text.encode("utf-8")
 
 
@@ -469,9 +492,8 @@ def _drop_mismatched(payload: dict[str, Any]) -> None:
 def _marked(message: dict[str, Any], marker: dict[str, str]) -> dict[str, Any]:
     """``message`` with ``marker`` on its last block.
 
-    A turn whose content is a string is left as it is: turning it into a block
-    list here would send a turn already sent in another shape, which is an
-    edit of the history before every later thinking block.
+    A turn whose content is a string is left as it is: :func:`_turns_listed`
+    lists it first where that edits no history a thinking block was written after.
     """
     content = message.get("content")
     if isinstance(content, list) and content and isinstance(content[-1], dict):
@@ -530,6 +552,76 @@ def _shared_heads(messages: list[Any], heads: dict[str, int], marker: dict[str, 
     return out
 
 
+def _breakpoint_turns(roles: list[Any], loop: bool, last: bool) -> set[int]:
+    """The indexes of the user turns a request's breakpoints go on, by its turns' roles.
+
+    None on a single-shot call or a request that no later request sends again
+    (``last``); else the newest user turn, and the user turn before the
+    newest assistant turn.
+    """
+    if last or ("assistant" not in roles and not loop):
+        return set()
+    users = [i for i, role in enumerate(roles) if role == "user"]
+    marks = {users[-1]} if users else set()
+    if "assistant" in roles:
+        last_assistant = max(i for i, role in enumerate(roles) if role == "assistant")
+        before = [i for i in users if i < last_assistant]
+        if before:
+            marks.add(before[-1])
+    return marks
+
+
+def _listed(message: dict[str, Any]) -> dict[str, Any]:
+    """A user turn written as one string, as a one-block list holding the same text."""
+    return {**message, "content": [{"type": "text", "text": message["content"]}]}
+
+
+def _turns_listed(memory: Memory, messages: list[Any], loop: bool, last: bool) -> list[Any]:
+    """The user turn before the newest answer, and each listed before, as a one-block list.
+
+    A turn written as one string carries no marker, so a tools-free request
+    built from text (a validation retry, and the drops question and the
+    whole-answer question that send its first turn again) would read nothing
+    from the cache. The turn before the newest assistant turn, the part of
+    the conversation every request that continues it sends again, is sent
+    as a list holding the same text where a breakpoint goes on it
+    (:func:`_breakpoint_turns`) and no thinking block follows it in the
+    request, so a turn sent before a block was written keeps the shape it had
+    and the cache prefix keeps its bytes (the binding digest reads both
+    shapes as one, :func:`_as_blocks`). Any other turn, the newest included,
+    is listed only where an earlier request of the model listed it
+    (``Memory.listed_turns``), marked or not, so a listed turn's shape never
+    changes again. Run before the thinking check, which so reads the turns as
+    they are sent. One pass over the turns.
+    """
+    roles = [m.get("role") if isinstance(m, dict) else None for m in messages]
+    with memory.lock:
+        listed = set(memory.listed_turns)
+    assistants = [i for i, role in enumerate(roles) if role == "assistant"]
+    resent = {i for i in _breakpoint_turns(roles, loop, last) if assistants and i < assistants[-1]}
+    thought = [
+        i
+        for i in assistants
+        if isinstance(messages[i].get("content"), list)
+        and any(_is_thinking(block) for block in messages[i]["content"])
+    ]
+    newest_thought = thought[-1] if thought else -1
+    out = list(messages)
+    for i, role in enumerate(roles):
+        if role != "user" or not isinstance(out[i].get("content"), str):
+            continue
+        if not listed and i not in resent:
+            continue
+        key = _digest(out[i])
+        if key in listed:
+            out[i] = _listed(out[i])
+        elif i in resent and i > newest_thought:
+            with memory.lock:
+                memory.listed_turns.add(key)
+            out[i] = _listed(out[i])
+    return out
+
+
 def _cache_breakpoints(
     messages: list[Any], marker: dict[str, str], loop: bool, last: bool = False
 ) -> list[Any]:
@@ -539,15 +631,7 @@ def _cache_breakpoints(
     so a breakpoint here would write an entry nothing reads.
     """
     roles = [m.get("role") if isinstance(m, dict) else None for m in messages]
-    if last or ("assistant" not in roles and not loop):
-        return messages
-    users = [i for i, role in enumerate(roles) if role == "user"]
-    marks = {users[-1]} if users else set()
-    if "assistant" in roles:
-        last_assistant = max(i for i, role in enumerate(roles) if role == "assistant")
-        before = [i for i in users if i < last_assistant]
-        if before:
-            marks.add(before[-1])
+    marks = _breakpoint_turns(roles, loop, last)
     return [_marked(m, marker) if i in marks else m for i, m in enumerate(messages)]
 
 
@@ -668,6 +752,8 @@ def prepared(
         messages = _first_turn_listed(memory, messages, loop, attached)
         if bound:
             messages = _keep_run_state_appended(memory, messages, attached)
+        messages = _turns_listed(memory, messages, loop, last)
+        if bound:
             messages, ask_to_drop, whole = _settle_thinking(memory, payload, messages)
             if ask_to_drop:
                 _drop_mismatched(payload)

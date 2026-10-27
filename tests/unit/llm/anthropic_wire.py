@@ -138,9 +138,17 @@ def _unmarked(value: Any) -> Any:
     return value
 
 
+def _as_blocks(turn: Any) -> Any:
+    # The API reads a turn's string content as the one text block holding it.
+    if isinstance(turn, dict) and isinstance(turn.get("content"), str):
+        return {**turn, "content": [{"type": "text", "text": turn["content"]}]}
+    return turn
+
+
 def _prefix(body: dict[str, Any], messages: list[Any]) -> str:
+    turns = [_as_blocks(turn) for turn in messages]
     return json.dumps(
-        _unmarked({"system": body.get("system"), "tools": body.get("tools"), "messages": messages}),
+        _unmarked({"system": body.get("system"), "tools": body.get("tools"), "messages": turns}),
         sort_keys=True,
     )
 

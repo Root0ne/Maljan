@@ -39,7 +39,16 @@ from maljan.llm.anthropic_provider import AnthropicProvider
 from maljan.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END
 from maljan.pipeline.turns import with_question
 
-from .anthropic_wire import BINDING_BETA, CLEAR_AT_BETA, MODEL, Wire, install, message, refusal
+from .anthropic_wire import (
+    BINDING_BETA,
+    CLEAR_AT_BETA,
+    MODEL,
+    Wire,
+    _prefix,
+    install,
+    message,
+    refusal,
+)
 
 _ = CLEAR_AT_BETA
 
@@ -191,15 +200,12 @@ class TestTheStandInChecksWhatTheApiChecks:
         wire = Wire(_answer)
         tools = [{"name": "lookup"}]
         first = {"model": MODEL, "tools": tools, "messages": [{"role": "user", "content": "t"}]}
-        wire.issued["s1"] = json.dumps(
-            {"messages": first["messages"], "system": None, "tools": tools}, sort_keys=True
-        )
+        # Written after each history as the stand-in reads one (its ``_prefix``).
+        wire.issued["s1"] = _prefix(first, first["messages"])
         turn_1 = {"role": "assistant", "content": [{"type": "thinking", "signature": "s1"}]}
         turn_1_bare = {"role": "assistant", "content": [{"type": "text", "text": "r"}]}
         without = [{"role": "user", "content": "t"}, turn_1_bare, {"role": "user", "content": "u"}]
-        wire.issued["s2"] = json.dumps(
-            {"messages": without, "system": None, "tools": tools}, sort_keys=True
-        )
+        wire.issued["s2"] = _prefix(first, without)
         turn_2 = {"role": "assistant", "content": [{"type": "thinking", "signature": "s2"}]}
         still_gone = {
             "model": MODEL,
