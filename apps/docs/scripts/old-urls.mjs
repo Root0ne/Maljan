@@ -60,7 +60,7 @@ export const REDIRECTS = Object.fromEntries([
   same('/benchmark/scores/latrodectus-iteration2-r2/'),
   same('/benchmark/scores/latrodectus-iteration1-default/'),
   same('/benchmark/scores/latrodectus-iteration1-small/'),
-  same('/paper/'),
+  ['/paper/', '/benchmark/'],
 ]);
 
 const page = (path) => join(out, path, 'index.html');
