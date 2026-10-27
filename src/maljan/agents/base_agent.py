@@ -1457,6 +1457,108 @@ def _drained_ids_of(agent: Any) -> list[str] | None:
     return held
 
 
+def _answer_items(isr: AgentISR) -> tuple[tuple[Any, ...], tuple[str, ...]]:
+    """What an answer states, by value, in order: its claims and its findings' titles.
+
+    Each claim by its words, technique, confidence and evidence. Two answers
+    stating the same are the same answer, whatever objects hold them.
+    """
+    claims = tuple(
+        (str(c.claim), c.technique_id, c.confidence, str(c.evidence_ref or "")) for c in isr.claims
+    )
+    return claims, tuple(str(f.title) for f in isr.findings or [])
+
+
+# The heading the in-force report puts the written revision's other sections
+# under: its disputes, rebuttals and what it accepted, never its claims.
+WRITTEN_BESIDES_CLAIMS = "Written in this answer besides its claims:"
+
+
+def answer_in_force_text(written: str, before: tuple[str, tuple[Any, ...]], kept: AgentISR) -> str:
+    """The text of a revision's answer in force, the one its peers and the judge read.
+
+    ``written`` is what the revision wrote, ``before`` that answer's recorded
+    text and what it states (:func:`_answer_items`) as the validation turn was
+    given it, and ``kept`` what the turn left in force. Unchanged by the turn,
+    the answer in force is the one written, and ``written`` is it, as before.
+    Otherwise the turn kept a retry, merged one into the answer, or settled
+    what a kept retry left out or withdrew: no text the analyst wrote holds
+    those claims, so they are rendered as a first answer's are
+    (:meth:`AgentISR.to_text_summary`), numbered as every summary of them is,
+    with the findings in force after them (:func:`with_findings`); a kept
+    retry with no claim is its own words. After them, under
+    :data:`WRITTEN_BESIDES_CLAIMS`, what the revision wrote besides its claims
+    (its disputes and rebuttals, what it accepted from its peers, its other
+    sections: ``claim_headings.besides_claims``), never its replaced claims. A
+    revision that wrote nothing stays nothing.
+    """
+    if not str(written or "").strip():
+        return written
+    if (kept.answer_text, _answer_items(kept)) == before:
+        return written
+    if kept.claims or kept.answer_text == before[0]:
+        summary = kept.to_text_summary()
+        kept.note_rendered_summary(summary)
+        rendered = with_findings(summary, kept)
+    else:
+        from maljan.agents.findings_block import has_findings_block
+
+        # A kept retry with no claim is its own words: its prose, the findings
+        # block taken out of it, with the findings in force after it.
+        words = kept.unparsed_answer or (
+            kept.answer_text if not has_findings_block(kept.answer_text) else ""
+        )
+        rendered = with_findings(words or kept.to_text_summary(), kept)
+    from maljan.agents.claim_headings import besides_claims
+    from maljan.agents.findings_block import parse_findings_block
+
+    besides = besides_claims(parse_findings_block(written).prose)
+    return f"{rendered}\n{WRITTEN_BESIDES_CLAIMS}\n{besides}" if besides else rendered
+
+
+def report_rendered_again(report: str, isr: AgentISR | None) -> str:
+    """``report`` with the claims summary the platform put at its head rendered again.
+
+    A report whose head is the claims summary the platform rendered when the
+    answer was kept (a first answer's, a revision's answer in force: recorded
+    on the ISR, ``AgentISR.rendered_summary``) has that exact prefix rendered
+    again from the ISR, so a mark the platform set on a claim since (a
+    technique the catalogue does not know, a claim restating a peer's entry)
+    is shown; what follows it is kept as written. Text the analyst wrote is
+    never rendered again, whatever it opens with.
+    """
+    if isr is None or not isr.rendered_summary or not report.startswith(isr.rendered_summary):
+        return report
+    return isr.to_text_summary() + report[len(isr.rendered_summary) :]
+
+
+def _finding_line(finding: Any) -> str:
+    """One finding in force as a report line: its title, its words and what it rests on."""
+    said = [f"technique {', '.join(finding.technique_ids)}"] if finding.technique_ids else []
+    if finding.evidence_ids:
+        said.append(f"evidence {', '.join(finding.evidence_ids)}")
+    if finding.confidence is not None:
+        said.append(f"confidence {finding.confidence:.2f}")
+    if finding.category:
+        said.append(f"category {finding.category}")
+    detail = f": {finding.detail}" if finding.detail else ""
+    rests = f" ({'; '.join(said)})" if said else ""
+    return f"    - {finding.title}{detail}{rests}"
+
+
+def with_findings(summary: str, kept: AgentISR) -> str:
+    """``summary`` with the findings in force after it, each once, or as it is with none.
+
+    The claims summary (:meth:`AgentISR.to_text_summary`) carries no
+    findings; the answer it stands for does, so they follow it, each with
+    its words, techniques, evidence, confidence and category.
+    """
+    findings = list(kept.findings or [])
+    if not findings:
+        return summary
+    return "\n".join([summary, "  Findings:", *(_finding_line(f) for f in findings)])
+
+
 def _flagged_blocks(isr: AgentISR, indexes: Sequence[int]) -> int:
     """How many claim blocks of ``isr`` the claims at ``indexes`` are in, each block once."""
     blocks = claim_block_indexes(isr.claims)
@@ -10823,10 +10925,29 @@ class BaseAnalyst(BudgetMeter, ABC):
                 and not isr.confidence_unreadable
                 and count_claims_begun(str(text or "")) == 0
             )
-            checked = self._validate_isr(self._apply_consistency_gate(isr, grounds), grounds)
+            gated = self._apply_consistency_gate(isr, grounds)
+            # The revision's own answer as the validation turn is given it,
+            # read before the turn: what the turn leaves in force is compared
+            # with this, whatever the turn does to the object it was given.
+            written = (gated.answer_text, _answer_items(gated))
+            checked = self._validate_isr(gated, grounds)
             checked = self._drain_findings(checked)
             if wrote_no_claim:
                 checked.note_revision_wrote_no_claim()
+                # A revision that decided nothing is settled by the revision
+                # node, which keeps what it wrote on the record as written.
+                return text, checked
+            # The written answer goes back as written, for the record; the
+            # answer in force, when the turn changed it, is noted on the ISR
+            # for the prompts, with the kept retry's own words.
+            in_force = answer_in_force_text(text, written, checked)
+            if in_force != text:
+                retry_words = (
+                    checked.answer_text
+                    if checked.answer_text and checked.answer_text != written[0]
+                    else ""
+                )
+                checked.note_report_in_force(in_force, retry_words)
             return text, checked
         except AnalystError:
             raise

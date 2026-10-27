@@ -194,7 +194,6 @@ from maljan.schemas.isr_models import (
     FAILED_CALLS_MARKER,
     AgentISR,
     ClaimEvidence,
-    claim_summary_line,
     retry_added_marker,
 )
 from maljan.schemas.stix_models import Bundle, SimilarCases
@@ -977,22 +976,67 @@ def answer_with_retry_additions(in_force: AgentISR, retried: Any, revision_round
     return combined
 
 
-def retry_additions_text(combined: AgentISR, added: int, revision_round: int) -> str:
-    """The claims a retry added, as text to follow the answer in force in the reports.
+# The record of a revision whose kept retry is in force: the retry's own words
+# first, then the answer the revision wrote. The record's report is cut at
+# ``events.REPORT_CHAR_LIMIT`` (and says so), so the shorter part that is in
+# force goes first and survives a long written answer.
+RETRY_WORDS_HEAD = "The validation retry kept in force, as it wrote it:"
+WRITTEN_ANSWER_HEAD = "The answer the revision wrote, which the retry replaced:"
 
-    Numbered on from the claims in force, each with its evidence, confidence
-    and the marker, so the next round and the mediator read them as added.
+
+def written_record(written: str, retry_words: str = "") -> str:
+    """What a revision wrote, for the run record, with the kept retry's words when there are any.
+
+    The prompts read the answer in force (``AgentISR.report_in_force``); the
+    record keeps what the analyst wrote, so neither the revision nor the
+    retry the validation turn kept is lost. The retry's words come first.
     """
-    claims = list(combined.claims)
-    start = len(claims) - added
-    lines = [
-        f"Claims added by the round-{int(revision_round)} validation retry, written without "
-        "tools, beside the claims in force:"
-    ]
-    lines += [
-        f"  {claim_summary_line(start + i + 1, claim)}" for i, claim in enumerate(claims[start:])
-    ]
-    return "\n".join(lines)
+    if not retry_words:
+        return written
+    return f"{RETRY_WORDS_HEAD}\n{retry_words}\n\n{WRITTEN_ANSWER_HEAD}\n{written}"
+
+
+def retry_additions_text(combined: AgentISR, added: int, revision_round: int) -> str:
+    """The line saying which claims of ``combined``'s summary a retry added, for its report.
+
+    Said after the summary (:func:`retry_additions_report`), by the numbers
+    the summary gives them, so the next round and the mediator read them as
+    added and read each claim once.
+    """
+    total = len(list(combined.claims))
+    first = total - int(added) + 1
+    which = (
+        f"Claim {total} above was" if first == total else f"Claims {first} to {total} above were"
+    )
+    return (
+        f"{which} added by the round-{int(revision_round)} validation retry, written without "
+        "tools, beside the claims in force; none replaces a claim in force."
+    )
+
+
+def retry_additions_report(
+    prior: str, prior_isr: AgentISR | None, combined: AgentISR, added: int, revision_round: int
+) -> str:
+    """The report of an answer in force a retry added claims to, built from ``combined``.
+
+    Its claims summary (each claim once, the added ones numbered on), the line
+    saying which were added, then what the report in force held besides its
+    claims: after a summary the platform rendered, what followed it as it
+    was; after text the analyst wrote, its sections other than its claims
+    (``claim_headings.besides_claims``) and the findings in force.
+    """
+    from maljan.agents.base_agent import WRITTEN_BESIDES_CLAIMS, with_findings
+    from maljan.agents.claim_headings import besides_claims
+
+    summary = combined.to_text_summary()
+    combined.note_rendered_summary(summary)
+    said = retry_additions_text(combined, added, revision_round)
+    rendered = prior_isr.rendered_summary if prior_isr is not None else ""
+    if rendered and prior.startswith(rendered):
+        return f"{summary}\n{said}{prior[len(rendered) :]}"
+    besides = besides_claims(prior)
+    tail = f"\n{WRITTEN_BESIDES_CLAIMS}\n{besides}" if besides else ""
+    return f"{with_findings(summary, combined)}\n{said}{tail}"
 
 
 def retry_additions_sentence(name: str, revision_round: int, in_force: Any, added: int) -> str:
@@ -4275,6 +4319,9 @@ def make_stage_agent_node(
 
             if isr.claims:
                 report = isr.to_text_summary()
+                # The report is the platform's rendering: a prompt renders it
+                # again with the marks set since (``report_rendered_again``).
+                isr.note_rendered_summary(report)
             elif isr.unparsed_answer:
                 # The analyst's answer in its own words, which is what it
                 # wrote: nothing in it could be read as a claim, and nothing
@@ -5879,8 +5926,12 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     logger.warning("%s", sentence)
                     retry_added[name] = added
                     in_force_report = kept_texts.get(name) or original_reports.get(name, "")
-                    revised[name] = (
-                        f"{in_force_report}\n\n{retry_additions_text(combined, added, iteration)}"
+                    revised[name] = retry_additions_report(
+                        in_force_report,
+                        in_force_isr if isinstance(in_force_isr, AgentISR) else None,
+                        combined,
+                        added,
+                        iteration,
                     )
                     revised_isrs[name] = combined
                     if name in not_asked:
@@ -5914,7 +5965,14 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     )
                     continue
                 in_force_text = kept_texts.get(name) or original_reports.get(name, "")
-                revised[name] = revised_text
+                # The answer in force as the prompts read it: the written one,
+                # or, when the validation turn changed it, the claims in force
+                # with what the revision wrote besides them
+                # (``base_agent.answer_in_force_text``). The written answer,
+                # and a kept retry's own words, go on the record below.
+                noted = isr if isinstance(isr, AgentISR) else None
+                report_now = (noted.report_in_force if noted else "") or revised_text
+                revised[name] = report_now
                 revised_isrs[name] = isr
                 if name in not_asked:
                     # Its answer from before the round, handed back unasked:
@@ -5923,10 +5981,10 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 else:
                     made += 1
                     revised_names.append(name)
-                    identical = identical and answer_unchanged(in_force_text, revised_text)
+                    identical = identical and answer_unchanged(in_force_text, report_now)
                     reworded = reworded and unchanged_in_substance(kept_isrs.get(name), isr)
                 dropped_here = dropped_values(
-                    kept_isrs.get(name), isr, revised_text, revision_round=iteration
+                    kept_isrs.get(name), isr, report_now, revision_round=iteration
                 )
                 if dropped_here:
                     logger.info(
@@ -5970,7 +6028,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     # entirely: ``revised_reports`` never reached the database,
                     # so what an agent said *after* the negotiation existed only
                     # inside the run.
-                    report=revised_text,
+                    report=written_record(revised_text, noted.retry_words if noted else ""),
                     stage=stage_key_of(stage, "debate"),
                     display_name=label_of(container, name),
                 )

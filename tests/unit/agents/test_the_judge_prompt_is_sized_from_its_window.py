@@ -85,7 +85,7 @@ class TestThePartsAreWhole:
 
         assert LONG_REPORT in seen[0], "the conclusion at the end of the report reached it"
         assert SUMMARY in seen[0]
-        assert str(history) in seen[0]
+        assert all(entry in seen[0] for entry in history)
         assert judge.verdict_prompt_notice == ""
         assert "did not fit" not in seen[0]
 
