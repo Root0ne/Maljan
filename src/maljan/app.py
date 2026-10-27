@@ -314,6 +314,8 @@ class MaljanApp:
         self.container.sandbox_signature_scale = None
         self.container.sample_uploads = []
         self.container.sandbox_failure = None
+        self.container.artefact_fetch_failures = []
+        self.container.sandbox_target_claim = None
         if not sample_path or self.container.is_mock:
             return None
 
@@ -327,6 +329,7 @@ class MaljanApp:
         # it was (an unreachable sandbox, a task that never finished, a report
         # that could not be read) and not only that there was one.
         stage = "choosing the sandbox"
+        claim: dict[str, str] | None = None
         try:
             provider = self.container.get_sandbox_provider()
             caps = provider.capabilities
@@ -379,6 +382,12 @@ class MaljanApp:
             # silently degrading every run to static-only.
             stage = "waiting for the analysis"
             budget = self._poll_arguments(provider, task_id)
+            # The job's sandbox deadline: the poll's own budget, from when the
+            # wait began. An artefact fetched after the report is retried only
+            # inside it (``_fetch_capture``).
+            sandbox_deadline = time.monotonic() + float(
+                budget.get("timeout_seconds", self.config.sandbox.cape2.timeout_seconds)
+            )
             status = await asyncio.to_thread(
                 lambda: provider.wait_for_completion(task_id, **budget)
             )
@@ -386,6 +395,16 @@ class MaljanApp:
                 stage = "fetching the report"
                 run = await asyncio.to_thread(provider.fetch, task_id)
                 self._note_the_reader(provider, run)
+                if not (run.report.synthetic or run.report.recorded_fixture):
+                    # The target the sandbox says it ran, for the worker to
+                    # compare with the sample, kept once the report is used
+                    # (below); a stand-in or a recorded fixture ran nothing
+                    # during this run and names none.
+                    claim = {
+                        "provider": str(provider.id),
+                        "task_id": str(run.task_id),
+                        "sha256": str(run.report.target.sha256 or ""),
+                    }
                 result = SubmissionResult(
                     task_id=run.task_id,
                     sample_sha256=run.sample_sha256,
@@ -400,11 +419,16 @@ class MaljanApp:
                 # MCP (per-packet beaconing / tunnelling / TLS-SNI) — the
                 # structured ``network`` block can't express that. Best
                 # effort: a missing/failed PCAP just leaves the analyst on
-                # the structured IOCs. Only CAPE-style providers declare it.
+                # the structured IOCs. A capture offered and not fetched is
+                # never lost silently: it is kept as a degradation reason
+                # that names why (``ArtefactFetchFailed``), apart from a
+                # sandbox that offers none. Only providers that declare it.
                 if caps.can_fetch_pcap and isinstance(result.report, dict):
-                    try:
-                        from maljan.tools import staging
+                    from maljan.providers.errors import PACKET_CAPTURE, ArtefactFetchFailed
+                    from maljan.tools import staging
 
+                    pcap_path: str | None = None
+                    try:
                         # This job's own capture directory, inside its staging
                         # directory: named as a root for this job's sidecars
                         # and for no later one, removed with everything else
@@ -416,14 +440,38 @@ class MaljanApp:
                         # between jobs was one instruction inside a sample away
                         # from an earlier job's traffic.
                         pcap_dir = staging.open_capture_dir(self.container.job_key())
-                        pcap_path = provider.fetch_pcap(task_id, str(pcap_dir))
-                        if pcap_path:
+                        # Off the event loop, as every other sandbox call is:
+                        # a retried fetch waits, and the worker's heartbeat,
+                        # cancel poller and job clock run on this loop.
+                        pcap_path = await asyncio.to_thread(
+                            self._fetch_capture, provider, task_id, str(pcap_dir), sandbox_deadline
+                        )
+                    except ArtefactFetchFailed as exc:
+                        # Logged with its cause where it failed.
+                        self.container.artefact_fetch_failures.append(exc.record())
+                    except Exception as exc:
+                        logger.warning("PCAP fetch failed (non-fatal): %s", type(exc).__name__)
+                        self.container.artefact_fetch_failures.append(
+                            ArtefactFetchFailed(PACKET_CAPTURE, type(exc).__name__).record()
+                        )
+                    if pcap_path:
+                        try:
                             staging.make_private(Path(pcap_path))
                             net = result.report.setdefault("network", {})
-                            if isinstance(net, dict):
-                                net["pcap_local_path"] = pcap_path
-                    except Exception as exc:
-                        logger.warning("PCAP fetch/attach failed (non-fatal): %s", exc)
+                            if not isinstance(net, dict):
+                                raise TypeError("the report's network section is not a mapping")
+                            net["pcap_local_path"] = pcap_path
+                        except Exception as exc:
+                            # Fetched, and then not attached: no reader will
+                            # open it, so it goes, and the run says which step
+                            # lost it.
+                            logger.warning("PCAP attach failed (non-fatal): %s", type(exc).__name__)
+                            Path(pcap_path).unlink(missing_ok=True)
+                            self.container.artefact_fetch_failures.append(
+                                ArtefactFetchFailed(
+                                    PACKET_CAPTURE, f"attach {type(exc).__name__}"
+                                ).record()
+                            )
             else:
                 result = SubmissionResult(
                     task_id=task_id,
@@ -448,6 +496,7 @@ class MaljanApp:
                     len(result.report.get("signatures", [])),
                     len(result.report.get("ttp_tags", [])),
                 )
+                self.container.sandbox_target_claim = claim
                 return result.report  # type: ignore[no-any-return]
             logger.warning("Sandbox task ended with status=%s: %s", result.status, result.error)
             ended = f"sandbox task {result.task_id} ended with status {result.status!r}"
@@ -461,6 +510,29 @@ class MaljanApp:
             logger.error("Sandbox submission failed: %s", exc)
             self._sandbox_failed(f"{stage}: {str(exc) or type(exc).__name__}")
             return None
+
+    def _fetch_capture(
+        self, provider: Any, task_id: str, dest_dir: str, deadline: float
+    ) -> str | None:
+        """``provider.fetch_pcap`` under the job's bounds; run in a worker thread.
+
+        Its retries stop at ``deadline`` (``time.monotonic``) and wait on the
+        job's cancellation, so a cancel ends a wait at once and no try follows
+        it, and each try is tracked by it, so a cancel ends the request in
+        flight too (``providers.sandbox.triage.FetchBudget``).
+        """
+        from maljan.providers.sandbox.triage import FetchBudget, fetch_budget
+
+        cancellation = self.container.cancellation
+        bounds = FetchBudget(
+            deadline=deadline,
+            now=time.monotonic,
+            sleep=cancellation.wait,
+            cancelled=lambda: cancellation.is_cancelled,
+            track=cancellation.track,
+        )
+        with fetch_budget(bounds):
+            return cast("str | None", provider.fetch_pcap(task_id, dest_dir))
 
     def _sandbox_failed(self, reason: str) -> None:
         """Keep why this job has no sandbox report, for its degradation reason.
@@ -657,6 +729,7 @@ class MaljanApp:
             "verdict_fallback": None,
             "degraded_mode": False,
             "degradation_reasons": [],
+            "operator_choices": [],
             # F10: declared AnalysisState channels, populated later by the
             # attribution/RAG nodes. Must be initialised so the TypedDict is
             # complete (and the LangGraph channels exist from the first step).

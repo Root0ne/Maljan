@@ -89,7 +89,7 @@ def test_an_old_report_s_stored_table_does_not_decide_the_feed() -> None:
     stored table; its sections still hold the analyst's listing, and the
     report prints the row. So does the feed.
     """
-    from app.services.report_service import _with_the_analysts_listed_rows
+    from app.services.report_service import ioc_feed_rows
     from maljan.reporting.models import ConsolidatedIOC, MalwareReport
     from maljan.reporting.renderers.markdown import MarkdownRenderer
 
@@ -103,9 +103,7 @@ def test_an_old_report_s_stored_table_does_not_decide_the_feed() -> None:
             ],
         }
     )
-    out: list[dict[str, Any]] = []
-
-    _with_the_analysts_listed_rows(out, stored, None)
+    out = [r for r in ioc_feed_rows(stored.model_dump(mode="json")) if r["source"] == "analyst"]
 
     assert [row["value"] for row in out] == [MUTEX]
     assert str(out[0]["notes"]).startswith("no: named only by an analyst")
@@ -113,7 +111,7 @@ def test_an_old_report_s_stored_table_does_not_decide_the_feed() -> None:
 
 
 def test_a_stored_row_the_report_no_longer_prints_is_not_served() -> None:
-    from app.services.report_service import _with_the_analysts_listed_rows
+    from app.services.report_service import ioc_feed_rows
     from maljan.reporting.models import ConsolidatedIOC, FileHashes, MalwareReport, SampleIdentity
     from maljan.reporting.renderers.markdown import MarkdownRenderer
 
@@ -131,16 +129,14 @@ def test_a_stored_row_the_report_no_longer_prints_is_not_served() -> None:
             )
         ],
     )
-    out: list[dict[str, Any]] = []
-
-    _with_the_analysts_listed_rows(out, stored, None)
+    out = [r for r in ioc_feed_rows(stored.model_dump(mode="json")) if r["source"] == "analyst"]
 
     assert out == []
     assert "relay-mutex-7f3c-stored" not in MarkdownRenderer().render(stored)
 
 
 def test_the_stored_table_is_read_when_the_rebuild_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.services.report_service import _with_the_analysts_listed_rows
+    from app.services.report_service import ioc_feed_rows
     from maljan.reporting import builder
     from maljan.reporting.models import ConsolidatedIOC, FileHashes, MalwareReport, SampleIdentity
 
@@ -161,8 +157,7 @@ def test_the_stored_table_is_read_when_the_rebuild_fails(monkeypatch: pytest.Mon
             )
         ],
     )
-    out: list[dict[str, Any]] = []
+    out = ioc_feed_rows(stored.model_dump(mode="json"))
 
-    _with_the_analysts_listed_rows(out, stored, None)
-
-    assert [row["value"] for row in out] == [f"{MUTEX}-stored"]
+    # The stored rows, after the sample's own digest, which no rule decides.
+    assert [row["value"] for row in out] == [f"sha256:{'f' * 64}", f"{MUTEX}-stored"]

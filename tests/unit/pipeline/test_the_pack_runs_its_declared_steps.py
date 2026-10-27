@@ -94,10 +94,22 @@ SHIPPED_IDS = [
     "find_directed_text",
     "behaviour_code_links",
 ]
-# The shipped steps of a server's tool, beside the format readers: each is off
-# while its server is not switched on (``pack_steps.steps_on_servers``).
-SHIPPED_SERVER_STEPS = ["die_scan", "dotnet_types", "go_symbols"]
+# The shipped steps of a server's tool, beside the format readers, and YARA-X's
+# right after the shipped YARA scan: each is off while its server is not
+# switched on (``pack_steps.steps_on_servers``).
+SHIPPED_SERVER_STEPS = [
+    "die_scan",
+    "dotnet_types",
+    "go_symbols",
+    "ole_vba",
+    "office_dde",
+    "rtf_objects",
+    "js_deobfuscate",
+    "container_extract",
+    "android_classes",
+]
 _AFTER_THE_READERS = SHIPPED_IDS.index("archive_list") + 1
+_AFTER_YARA = SHIPPED_IDS.index("yara_scan") + 1
 
 INVENTORY = {
     "command": "invented-inventory",
@@ -230,7 +242,9 @@ class TestTheShippedList:
         assert [step.id for step in default_steps()] == (
             SHIPPED_IDS[:_AFTER_THE_READERS]
             + SHIPPED_SERVER_STEPS
-            + SHIPPED_IDS[_AFTER_THE_READERS:]
+            + SHIPPED_IDS[_AFTER_THE_READERS:_AFTER_YARA]
+            + ["yarax_scan"]
+            + SHIPPED_IDS[_AFTER_YARA:]
         )
         assert effective_steps() == default_steps()
 

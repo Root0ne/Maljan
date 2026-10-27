@@ -96,13 +96,16 @@ def _report(
         evidence_ledger=[],
     ).build_deterministic()
     report.network = NetworkIOCs(urls=urls)
-    # What a sandbox saw written: the second source the one publish rule asks
-    # of the judge's file names and digests, as of any other row's.
+    # What a sandbox saw the sample's process write: the record the judge's
+    # file names stand on, and the second source of its digests. A row the
+    # judge does not name is not published, so the export carries only the
+    # judge's.
     report.dynamic = DynamicBehavior(
+        process_tree=[{"pid": 1, "name": "sample.exe"}],
         file_operations=[
-            {"operation": "write", "path": f"judge{n}.exe", "sha1": f"{n:040x}"}
+            {"operation": "write", "path": f"judge{n}.exe", "sha1": f"{n:040x}", "pid": 1}
             for n in range(MAX_TOTAL_INDICATORS + 5)
-        ]
+        ],
     )
     return report
 
@@ -458,11 +461,29 @@ class TestNothingCapsTheExport:
             for n in range(count)
         ]
 
+    @staticmethod
+    def _named(report: MalwareReport, base: Bundle) -> MalwareReport:
+        """``report`` with the judge's values, as the builder reads them off its bundle."""
+        from maljan.reporting.models import JudgeIndicator
+        from maljan.reporting.renderers.stix_renderer import exported_indicator_values
+
+        report.judge_indicators = [
+            JudgeIndicator(kind=v.kind, value=v.value, algorithm=v.algorithm)
+            for v in exported_indicator_values(base.model_dump(mode="json"))
+        ]
+        return report
+
     def test_every_published_value_is_carried_whatever_their_number(self) -> None:
         """No total cap: fifteen used to be the most a bundle carried."""
         base = Bundle.model_validate({"objects": self._judge_indicators(4)})
-        report = _report(
-            [NetworkURL(url=f"https://host{n}.example.org/p", source="sandbox") for n in range(20)]
+        report = self._named(
+            _report(
+                [
+                    NetworkURL(url=f"https://host{n}.example.org/p", source="sandbox")
+                    for n in range(20)
+                ]
+            ),
+            base,
         )
 
         patterns = _patterns(ExtendedSTIXRenderer().render(report, base_bundle=base))
@@ -476,13 +497,14 @@ class TestNothingCapsTheExport:
 
     def test_a_bundle_under_the_cap_keeps_everything(self) -> None:
         base = Bundle.model_validate({"objects": self._judge_indicators(2)})
-        report = _report([NetworkURL(url=REAL[0], source="sandbox")])
+        report = self._named(_report([NetworkURL(url=REAL[0], source="sandbox")]), base)
 
         patterns = _patterns(ExtendedSTIXRenderer().render(report, base_bundle=base))
 
-        # The sample's hash, the URL and the judge's two file names. The URL's
-        # host is a well-known one, which does not follow its URL unless a
-        # model kept the host itself.
+        # The sample's hash, the URL and the judge's two file names. The other
+        # files the sandbox saw written are no indicator the judge names, so
+        # the table does not publish them. The URL's host is a well-known one,
+        # which does not follow its URL unless a model kept the host itself.
         assert len(patterns) == 4
 
     def test_every_judge_hash_is_carried_beside_the_sample_s_own(self) -> None:
@@ -503,6 +525,9 @@ class TestNothingCapsTheExport:
             )
         )
 
+        # The sample's own and the twenty judge digests, each recorded by the
+        # sandbox's writes; the written files themselves are no indicator the
+        # judge names, so the table does not publish them.
         assert len(patterns) == 21
         assert patterns[0] == f"[file:hashes.'SHA-256' = '{'b' * 64}']"
 
@@ -591,4 +616,4 @@ class TestWhatTheCapSpendsItsBudgetOn:
 
         patterns = _patterns(ExtendedSTIXRenderer().render(report, base_bundle=base))
 
-        assert not any("judge" in pattern for pattern in patterns)
+        assert not any("judge" in pattern for pattern in patterns if pattern.startswith("[url:"))

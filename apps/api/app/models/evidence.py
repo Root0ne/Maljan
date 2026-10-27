@@ -117,6 +117,19 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # The role and console tab the calling agent's definition declared.
     agent_role: Mapped[str | None] = mapped_column(String, nullable=True)
     agent_tab: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The fields of the call whose ``null`` the tool boundary dropped, and the
+    # top-level ones it admitted that the transport did not send, each by its
+    # path segments (``maljan.agents.null_arguments``). NULL where there were
+    # none and on every row older than the columns; the chain digest seals
+    # each only when set.
+    args_nulls_dropped: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    args_nulls_withheld: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    # Where the platform's own readings behind a triage pack entry ran, as
+    # sources (``mcp:<server key>``, ``pack`` for the worker beside one;
+    # ``maljan.tools.readers``). NULL where every reading ran in the worker
+    # and on every row older than the column; the chain digest seals it only
+    # when set.
+    ran_on: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
     # Where the parts of the answer this row does not keep whole are kept
     # whole in object storage (``maljan.schemas.evidence_spill``): one
     # reference per part with the object key, the byte length and the SHA-256,

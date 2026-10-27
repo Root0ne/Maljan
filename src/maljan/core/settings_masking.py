@@ -6,7 +6,9 @@ and the JSON export all show settings to someone other than the store. Each of
 them masks with these functions, so what one hides the others hide too:
 
 * every URL in a string: its user name and password, every query value (the
-  keys stay) and its fragment, each replaced by the mask, never removed;
+  keys stay) and its fragment, each replaced by the mask, never removed; an
+  address written with no scheme (``user:pw@host:8080/v1``) loses its
+  userinfo too (:func:`bare_userinfo`);
 * a tool server's command arguments: the value after a flag whose name marks
   a credential (``--api-key T``), the value of such a ``--flag=T``, and every
   URL in them;
@@ -98,8 +100,144 @@ def _masked_one_url(url: str, mask: str) -> str:
     return out
 
 
+# What follows the last "@" of an address written with no scheme: a host or a
+# bracketed IPv6 address, an optional port, then an optional path, query or
+# fragment; punctuation that closes a sentence, a quote or a JSON object may
+# trail a bare host.
+_BARE_AUTHORITY_TAIL = re.compile(
+    r"(?:\[[0-9A-Fa-f:.%]+\]|[A-Za-z0-9][A-Za-z0-9.-]*)(?P<port>:\d{1,5})?"
+    r"(?:(?P<path>[/?#]\S*)|[)\]}>\"'.,;:]*)"
+)
+# What may open a token before an address's first character: a quote, a
+# bracket, or a JSON object's brace (``{"u":"user:pw@host"}``).
+_TOKEN_OPENERS = "\"'(<[{"
+# The words before a colon that open a mailbox rather than a user name: the
+# schemes whose address is one (``mailto:ops@example.com``) and the mail
+# headers that name one (``From:alice@example.com``), any case.
+_MAILBOX_WORDS = frozenset(
+    {"mailto", "xmpp", "sip", "sips", "im", "pres", "acct", "from", "to", "cc", "bcc", "sender"}
+)
+
+
+def bare_userinfo(token: str) -> tuple[str, str] | None:
+    """``(userinfo, rest)`` of an address written with no scheme, or ``None``.
+
+    ``user:pw@llm.internal:8080/v1`` is the address ``http://user:pw@...``
+    without its scheme, so everything before its last ``@`` is userinfo: a
+    password may itself hold ``@`` or an encoded ``%40``. Read as userinfo
+    where it holds a ``:`` before any ``/`` (a user name and a password), or
+    where the address after it names a port or a path (a token alone). A mail
+    address (``ops@example.com``), a package pin (``pkg@1.2.3``,
+    ``@scope/pkg@latest``), a Git remote (``git@host:org/repo``), a mailbox
+    after its scheme or header (``mailto:ops@example.com``,
+    ``From:alice@example.com``) and a Windows path (``C:\\Users\\bob@corp``)
+    are none.
+    """
+    head, at, tail = token.rpartition("@")
+    if not at or not head or not tail or "\\" in head:
+        return None
+    found = _BARE_AUTHORITY_TAIL.fullmatch(tail)
+    if found is None:
+        return None
+    slash = head.find("/")
+    colon = head.find(":")
+    word = head[:colon] if colon >= 0 else ""
+    # A mailbox after its scheme or header holds one name after the colon and
+    # names no port or path; a second colon or a port is a user name and a
+    # password behind a word that only looks like one (``to:pw@h:8080``).
+    mailbox = (
+        word.isascii()
+        and word.isalpha()
+        and word.lower() in _MAILBOX_WORDS
+        and not head.startswith("//", colon + 1)
+        and ":" not in head[colon + 1 :]
+        and not found.group("port")
+        and not found.group("path")
+    )
+    if 0 <= colon and (slash < 0 or colon < slash) and not mailbox:
+        return head, tail
+    if slash < 0 and not mailbox and (found.group("port") or found.group("path")):
+        return head, tail
+    return None
+
+
+def _address_in(word: str) -> int | None:
+    """Where the address written with no scheme in ``word`` begins, or ``None`` for none.
+
+    It begins after the last opener (:data:`_TOKEN_OPENERS`) before the word's
+    last ``@``, so a quoted value reads as the address it holds, where what
+    stands between the word's leading openers and that opener holds no ``:``.
+    Where it does, the opener may be a password's own character
+    (``user:p"ss@host``), so the address begins after the leading openers and
+    nothing of the password is left; a compact JSON member's key is then
+    masked with it (``{"***@host"}``).
+    """
+    last_at = word.rfind("@")
+    if last_at < 0:
+        return None
+    lead = len(word) - len(word.lstrip(_TOKEN_OPENERS))
+    start = max(word.rfind(opener, 0, last_at) for opener in _TOKEN_OPENERS) + 1
+    if start > lead and ":" in word[lead:start]:
+        start = lead
+    return start if bare_userinfo(word[start:]) is not None else None
+
+
+def bare_addresses(text: str) -> list[str]:
+    """Every address written with no scheme in ``text``, each as written.
+
+    Read word by word, as :func:`masked_bare_userinfo` reads them, so a phrase
+    around an address is never read as part of it. Linear in ``text``.
+    """
+    if "@" not in text:
+        return []
+    found: list[str] = []
+    for word in re.finditer(r"\S+", text):
+        if "://" in word.group(0):
+            continue
+        start = _address_in(word.group(0))
+        if start is not None:
+            found.append(word.group(0)[start:])
+    return found
+
+
+def masked_bare_userinfo(text: str, mask: str = SNAPSHOT_MASK) -> str:
+    """``text`` with the userinfo of every address written with no scheme masked.
+
+    Each whitespace-separated word outside a URL (:func:`url_spans`, which
+    :func:`masked_text` masks) is read by :func:`bare_userinfo` from its last
+    opener before its last ``@``; its userinfo is replaced by the mask, never
+    removed. Linear in ``text``.
+    """
+    if "@" not in text:
+        return text
+    spans = url_spans(text) if "://" in text else []
+    out: list[str] = []
+    last = 0
+    at = 0  # the first URL span that does not end before this word
+    for word in re.finditer(r"\S+", text):
+        begin, end = word.span()
+        while at < len(spans) and spans[at][1] <= begin:
+            at += 1
+        if at < len(spans) and spans[at][0] < end:
+            continue
+        token = word.group(0)
+        start = _address_in(token)
+        if start is None:
+            continue
+        out.append(text[last : begin + start])
+        out.append(f"{mask}@{token.rpartition('@')[2]}")
+        last = end
+    out.append(text[last:])
+    return "".join(out)
+
+
 def masked_text(text: str, mask: str = SNAPSHOT_MASK) -> str:
-    """``text`` with every URL in it masked: userinfo, query values and fragment."""
+    """``text`` with every URL in it masked: userinfo, query values and fragment.
+
+    An address written with no scheme has its userinfo masked too
+    (:func:`masked_bare_userinfo`).
+    """
+    text = masked_bare_userinfo(text, mask)
     if "://" not in text:
         return text
     out: list[str] = []

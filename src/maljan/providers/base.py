@@ -843,6 +843,14 @@ class SandboxProvider(ABC):
         raise ProviderError("this sandbox does not provide reports")
 
     def fetch_pcap(self, task_id: str, dest_dir: str) -> str | None:
+        """The task's packet capture, written under ``dest_dir``; its path.
+
+        ``None`` where the sandbox offers none. A capture it offered that could
+        not be fetched, after the transient failures were asked again, or that
+        came back too small to be one, raises ``ArtefactFetchFailed`` naming
+        why (``providers.sandbox.triage.fetch_artefact``): the job records it
+        as a degradation reason rather than losing it silently.
+        """
         return None
 
     def attach_report(self, blob: bytes, *, filename: str) -> SandboxRun:

@@ -65,6 +65,15 @@ class TestWhatACallCosts:
         expected = (10_000 * 0.5 + 120_000 * 0.05 + 20_000 * 0.625 + 2_000 * 2.5) / MILLION
         assert meter.spent() == pytest.approx(expected)
 
+    def test_a_call_names_the_tier_it_was_priced_at(self) -> None:
+        """A long prompt's charge names the long prompt's figures, a short one's the row's."""
+        meter = _meter()
+        long = meter.settle({"input_tokens": 150_000, "output_tokens": 0}, HAIKU)
+        short = meter.settle({"input_tokens": 100_000, "output_tokens": 0}, HAIKU)
+        assert long is not None and short is not None
+        assert "prompts over 100,000 tokens" in long["price_source"]
+        assert short["price_source"] == table_prices()[HAIKU].source
+
     def test_the_threshold_itself_is_the_short_price(self) -> None:
         meter = _meter()
         meter.settle({"input_tokens": 100_000, "output_tokens": 0}, HAIKU)

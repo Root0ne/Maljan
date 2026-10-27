@@ -1259,6 +1259,9 @@
         "path": [
           "C:\\Users\\Public\\360Safe.exe"
         ],
+        "pids": [
+          "3736"
+        ],
         "sha256": "d80ad5d19f0a95bfabbd77a52dbdf27193404af9c3236c266add5d036e969e16",
         "size": 5656040,
         "type": "PE32+ executable (GUI) x86-64, for MS Windows"

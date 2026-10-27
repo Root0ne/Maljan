@@ -570,12 +570,19 @@ def question_prompt_text(
     ledger: Iterable[Any] = (),
     isr_reports: Any = None,
 ) -> str:
-    """The round's human turn after the standing blocks: the findings, the calls, the questions."""
+    """The round's human turn after the standing blocks: the findings, the calls, the questions.
+
+    The claims carry the notes of what the ledger holds of anything they call
+    absent, as the narrative round's do (``validation.absence_holders_note``),
+    read over the entries' texts built once here.
+    """
     from maljan.reporting.narrative_agent import findings_lines
 
-    lines = findings_lines(report, isr_reports)
+    ledger = list(ledger or ())
+    entries = EntryTexts.from_ledger(ledger) if ledger else None
+    lines = findings_lines(report, isr_reports, entries)
     lines.append("Calls this run made (the ids a coverage record may name):")
-    calls = [_call_line(entry) for entry in ledger or ()]
+    calls = [_call_line(entry) for entry in ledger]
     lines.extend(calls or ["  (none)"])
     lines.append("")
     if evidence.open_questions:

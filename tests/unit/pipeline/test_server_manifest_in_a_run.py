@@ -221,17 +221,35 @@ class TestAStageRecordsWhatItCannotHave:
         assert note_unavailable_tools(_Container(_Registry({"analysis": None})), agent) == []
         assert note_unavailable_tools(_Container(_Registry({})), agent) == []
 
-    def test_an_unavailable_tool_does_not_degrade_the_run_by_itself(self) -> None:
+    def test_a_tool_missing_its_library_degrades_the_run(self) -> None:
+        """T-338: a library not installed is evidence the run would otherwise have had."""
         reason = "server.analysis.document_info_unavailable(olefile is not installed); install"
-        assert run_is_degraded([reason]) is False
-        assert run_is_degraded([reason, "mcp server 'analysis' unavailable"]) is True
+        assert run_is_degraded([reason]) is True
         assert run_is_degraded(["triage.identify_file_failed"]) is True
 
-    def test_an_unavailable_tool_beside_an_informational_note_does_not_degrade(self) -> None:
+    def test_a_key_its_manifest_marks_unset_does_not(self) -> None:
+        reason = "server.threatintel.check_hash_unavailable(VIRUSTOTAL_API_KEY is not configured)"
+        assert run_is_degraded([reason], not_configured=[reason]) is False
+        # The words alone, with no manifest code behind them, are a loss.
+        assert run_is_degraded([reason]) is True
+
+    def test_an_informational_note_beside_a_missing_tool_leaves_it_degraded(self) -> None:
         reason = "server.analysis.archive_list_unavailable(py7zr is not installed); install"
         note = "The x analyst's answer began 2 claim(s), and 1 were read; 1 could not be read."
-        assert run_is_degraded([reason, note], informational=[note]) is False
-        assert run_is_degraded([reason, note]) is True
+        assert run_is_degraded([note], informational=[note]) is False
+        assert run_is_degraded([reason, note], informational=[note]) is True
+
+    def test_a_tool_that_still_answers_part_degrades_only_where_the_part_applies(self) -> None:
+        """archive_list without py7zr still lists a zip; a 7z sample loses its reader (T-338)."""
+        reason = (
+            "server.analysis.archive_list_unavailable(py7zr is not installed (No module named "
+            "'py7zr')); still answers zip and tar members; 7z needs py7zr; install"
+        )
+        from maljan.pipeline.operator_choice import SampleFacts
+
+        assert run_is_degraded([reason], facts=SampleFacts("pe")) is False
+        assert run_is_degraded([reason], facts=SampleFacts("7z")) is True
+        assert run_is_degraded([reason, "triage.capa_failed"], facts=SampleFacts("pe")) is True
 
 
 class TestAServerReasonMeetsTheSample:

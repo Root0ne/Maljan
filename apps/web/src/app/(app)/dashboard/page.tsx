@@ -12,6 +12,7 @@ import { formatDuration, timeAgo } from "@/lib/report-utils";
 import { statusTone } from "@/lib/status";
 import { verdictBucket, verdictLabel, verdictTone } from "@/lib/verdict";
 import { enrichmentWorkerNotice } from "./enrichmentNotice";
+import { unavailableToolsNotice } from "./unavailableToolsNotice";
 import { mockModeNotice } from "./mockModeNotice";
 import { toolBars } from "./toolBars";
 import {
@@ -191,6 +192,7 @@ export default function DashboardPage() {
     systemStatus?.enrichment_worker,
     systemStatus?.enrichment_sources ?? [],
   );
+  const missingTools = unavailableToolsNotice(systemStatus?.unavailable_tools);
   const bars = toolBars(toolUsage);
   const mockMode = mockModeNotice(systemStatus, statusError);
 
@@ -246,6 +248,26 @@ export default function DashboardPage() {
           <span className="text-text-muted">
             Setting: <code>{enrichment.setting}</code>
           </span>
+        </div>
+      )}
+
+      {/* Tools the default team would call that this host cannot run: said
+          before a submit, with each tool's reason and remedy, rather than in a
+          paid run's degraded block afterwards. */}
+      {missingTools && (
+        <div
+          role="status"
+          className="mb-4 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
+        >
+          <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
+            <span className="font-semibold text-status-orange">{missingTools.label}</span>
+            <span className="text-text-secondary">{missingTools.detail}</span>
+          </div>
+          <ul className="mt-2 list-disc pl-5 text-text-secondary">
+            {missingTools.lines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
         </div>
       )}
 

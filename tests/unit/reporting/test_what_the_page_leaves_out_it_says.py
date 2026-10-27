@@ -35,6 +35,7 @@ class TestACutValue:
     def test_the_methodology_says_where_it_is_whole(self) -> None:
         assert "ends in …" in CUT_CELL_SENTENCE
         assert "JSON report" in CUT_CELL_SENTENCE and "evidence ledger" in CUT_CELL_SENTENCE
+        assert "Code is never cut to fit the page" in CUT_CELL_SENTENCE
 
 
 class TestAFigure:

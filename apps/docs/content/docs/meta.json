@@ -24,6 +24,8 @@
     "./tools/sandboxes",
     "./tools/virustotal",
     "./tools/identification",
+    "./tools/rules-and-documents",
+    "./tools/containers-and-android",
     "./tools/sidecars",
     "./tools/generic-mcp",
     "---Integrations---",

@@ -64,10 +64,12 @@ _COUNT_KEY = re.compile(r"(?:^|_)(?:total|count)(?:$|_)", re.IGNORECASE)
 _NOT_A_COUNT_KEY = re.compile(r"(?:^|_)(?:seconds?|secs?|ms|millis|bytes?|size|kb|mb)(?:$|_)", re.I)
 # The mark the mediator ends a line with, with any emphasis around it.
 # The reason may hold one level of bracketed text, such as a ledger id
-# written ``[ev_0021]``.
+# written ``[ev_0021]``. Read from its bracket: spaces or emphasis before it
+# are no part of it, and a search starting at each of them read the run
+# again, which made a long run of spaces quadratic.
 _REASON = r"(?:[^\[\]]|\[[^\[\]]*\])*"
 _MARK = re.compile(
-    r"\s*[*_`]*\[\s*(?P<kind>not\s+blocking|blocking)\s*(?::(?P<reason>" + _REASON + r"))?\]"
+    r"\[\s*+(?P<kind>not\s+blocking|blocking)\s*(?::(?P<reason>" + _REASON + r"))?\]"
     r"[*_`]*\s*\.?\s*$",
     re.IGNORECASE,
 )
@@ -78,10 +80,30 @@ _ANY_MARK = re.compile(
 # What a mark opens with: a line that holds it and no mark that reads was
 # written a mark the parser could not read.
 _MARK_OPENING = re.compile(r"\[\s*(?:not\s+)?blocking\b", re.IGNORECASE)
+# The [analysts: ...] field opening a line, after any list marker or emphasis.
+# A quoted line is never one.
+_LINE_FIELD_OPEN = re.compile(
+    r"^[\s*_`]*+(?:(?:[-*•]|\d+[.)])\s+)?[*_`]*+\[\s*analysts?\s*:", re.IGNORECASE
+)
 
 # The field the mediator writes on a listed line: the analysts who must
 # revise over it, by the names their reports are headed with.
 _ANALYSTS_FIELD = re.compile(r"\[\s*analysts?\s*:(?P<names>[^\[\]]*)\]", re.IGNORECASE)
+
+# The mark the mediator writes on a blocking line after a revision round: the
+# last mediation's line it raises again (``[carried: L2]``, by the number the
+# round's record gave it), or a point none of those lines raised (``[new]``).
+# No part of the point: it is read apart from the line's field, its words and
+# its numbers.
+_LINE_MARK = re.compile(
+    r"\[\s*+(?:carried\s*+:\s*+L?\s*+(?P<number>\d{1,9})\s*+|new\s*+)\]", re.IGNORECASE
+)
+
+
+def without_line_mark(line: str) -> str:
+    """``line`` with its carried-or-new mark (``_LINE_MARK``) taken out, or as it was."""
+    return _LINE_MARK.sub(" ", str(line))
+
 
 # The head of the facts a revision round is told, after the mediator's feedback.
 LEDGER_FACTS_HEAD = "The evidence ledger states these counts for the lines the mediator listed:"
@@ -371,6 +393,7 @@ def _line_counts(
 ) -> _LineCounts:
     """The counts the entries a line cites state that the line states too. Never raises."""
     try:
+        text = without_line_mark(text)
         idless = re.sub(r"\b0x[0-9a-fA-F]+\b", " ", _ENTRY_ID.sub(" ", text))
         bare = _CLAIM_NUMBERS.sub(" ", idless)
         numbers = {int(n) for n in _NUMBER.findall(bare)}
@@ -545,7 +568,8 @@ def read_marks(lines: Iterable[str]) -> list[Mark]:
     for line in lines:
         text = str(line)
         # The [analysts: ...] field is no part of the mark, wherever it stands.
-        marked = _ANALYSTS_FIELD.sub(" ", text)
+        # Nor is the carried-or-new mark.
+        marked = without_line_mark(_ANALYSTS_FIELD.sub(" ", text))
         kinds = {_kind(m) for m in _ANY_MARK.finditer(marked)}
         match = _MARK.search(marked)
         reason = (match.group("reason") or "").strip() if match is not None else ""
@@ -569,6 +593,31 @@ def read_marks(lines: Iterable[str]) -> list[Mark]:
                 Mark(line=text, blocking=_kind(match) == "blocking", marked=True, reason=reason)
             )
     return marks
+
+
+def carries_line_field(line: str) -> bool:
+    """Whether a line holds a field every listed line is asked for.
+
+    The ``[analysts: ...]`` field the line opens with (after a list marker or
+    emphasis; a quoted line is never one), or a ``[blocking ...]`` or ``[not blocking ...]``
+    mark that ends it. Prose between two lists, or after one, holds neither,
+    even where it names a field or a mark inside a sentence.
+    """
+    text = str(line)
+    if _LINE_FIELD_OPEN.match(text):
+        return True
+    # The carried-or-new mark is no field of its own, wherever it stands.
+    text = without_line_mark(text)
+    if _LINE_FIELD_OPEN.match(text):
+        return True
+    # Only the last mark opening can end the line: the mark is read from there
+    # alone and what follows it checked by hand, as ``_MARK`` reads its end, so
+    # a line costs one pass whatever it holds.
+    last = None
+    for opening in _MARK_OPENING.finditer(text):
+        last = opening
+    mark = _ANY_MARK.match(text, last.start()) if last is not None else None
+    return mark is not None and text[mark.end() :].lstrip("*_`").strip() in ("", ".")
 
 
 def with_ledger_facts(directive: str, facts: Sequence[str]) -> str:
@@ -793,7 +842,7 @@ def _field_key(name: str) -> str:
 
 def point_key(line: str) -> PointKey:
     """The ``PointKey`` of one listed line. Linear in the line."""
-    text = str(line)
+    text = without_line_mark(line)
     named = tuple(sorted({_field_key(n) for n in read_analysts_field(text) or [] if _key(n)}))
     body = _ANY_MARK.sub(" ", _ANALYSTS_FIELD.sub(" ", text))
     entries = tuple(sorted({i.lower() for i in _ENTRY_ID.findall(body)}))
@@ -819,7 +868,7 @@ def content_words(line: str) -> frozenset[str]:
     Its field, its mark, its ledger ids, hex values and numbers are left out,
     and so are the names its field gives and the words every line writes.
     """
-    text = str(line)
+    text = without_line_mark(line)
     named = {part for n in read_analysts_field(text) or [] for part in _key(n).split("_")}
     body = _ANY_MARK.sub(" ", _ANALYSTS_FIELD.sub(" ", text))
     bare = _HEX_VALUE.sub(" ", _ENTRY_ID.sub(" ", body)).lower()
@@ -1042,3 +1091,342 @@ def tools_taking_an_address(tools: Iterable[Any]) -> list[str]:
         if any(str(field).strip().lower() in taking for field in fields):
             names.append(str(getattr(tool, "name", "") or ""))
     return [n for n in names if n]
+
+
+# ---------------------------------------------------------------------------
+# The entries a contested line cites, shown to the analysts it names and to
+# the next mediation; what the round did on each line, told once
+# ---------------------------------------------------------------------------
+
+# Where a place fact's own words begin: after the line it quotes whole.
+_FACT_AFTER_LINE = '": '
+# A place a fact names, and the entries it says hold its listing.
+_LISTED_IN = re.compile(r"(0x[0-9a-fA-F]+) is listed in ((?:ev_\d+(?:, )?)+)")
+_PLACE_NAMED = re.compile(r"(0x[0-9a-fA-F]+) is (?:listed in|a function of)")
+
+
+def _fact_words(fact: str) -> str:
+    """The words a place fact says about its line, the line it quotes left out."""
+    text = str(fact)
+    at = text.rfind(_FACT_AFTER_LINE)
+    return text[at + len(_FACT_AFTER_LINE) :] if at >= 0 else ""
+
+
+def place_facts_for_line(line: str, facts: Iterable[str]) -> list[str]:
+    """The place facts stated for ``line`` itself (``place_facts`` quotes it whole)."""
+    head = f'For the line "{line}": '
+    return [str(f) for f in facts if str(f).startswith(head)]
+
+
+def line_entry_ids(
+    lines: Iterable[str], facts: Iterable[str] = (), *, every_listing: bool = True
+) -> list[str]:
+    """The ledger ids the lines cite, then the entries their place facts say list a function.
+
+    Lower-cased, each once, in the order first written. A function index a
+    fact names a function of is no listing of it and is not one of them.
+    With ``every_listing=False`` a function is listed once: one whose listing
+    is already among the ids (cited by a line, or listing another function)
+    adds none, and any other adds the first entry the fact names for it, so
+    a function read twice is not shown twice. Linear in the lines and the
+    facts.
+    """
+    found: dict[str, None] = {}
+    for line in lines:
+        for entry_id in _ENTRY_ID.findall(without_line_mark(line)):
+            found.setdefault(entry_id.lower(), None)
+    for fact in facts:
+        for match in _LISTED_IN.finditer(_fact_words(fact)):
+            listing = [i.lower() for i in _ENTRY_ID.findall(match.group(2))]
+            if not every_listing:
+                if any(i in found for i in listing):
+                    continue
+                listing = listing[:1]
+            for entry_id in listing:
+                found.setdefault(entry_id, None)
+    return list(found)
+
+
+def line_places(line: str, facts: Iterable[str] = ()) -> set[int]:
+    """The hex values a line writes and the functions its own place facts name, as numbers."""
+    places = {int(h, 16) for h in _HEX_VALUE.findall(without_line_mark(line))}
+    for fact in place_facts_for_line(line, facts):
+        places.update(int(m.group(1), 16) for m in _PLACE_NAMED.finditer(_fact_words(fact)))
+    return places
+
+
+# The head of the entries a revision shows the analysts a contested line names,
+# and what it says of one that does not fit beside the revision.
+DEBATE_ENTRIES_HEAD = (
+    "The ledger entries the contested lines naming you cite, and the listings of the functions "
+    "they name, as recorded, each whole:"
+)
+DEBATE_ENTRIES_UNFIT = (
+    "The ledger holds these entries the lines naming you cite; they do not fit beside this "
+    "revision and the entries shown above, so they are not shown here:"
+)
+# The same for the mediation after a revision round, for the lines the last
+# mediation marked blocking.
+MEDIATION_ENTRIES_HEAD = (
+    "The ledger entries the blocking lines of the last mediation cite, and the listings of "
+    "the functions they name, as recorded, each whole; the analysts those lines name were "
+    "shown them in the revision round where they fit:"
+)
+MEDIATION_ENTRIES_UNFIT = (
+    "The ledger holds these entries the blocking lines of the last mediation cite; they do "
+    "not fit beside this mediation and the entries shown above, so they are not shown here:"
+)
+
+
+def entries_block(
+    entries: Mapping[str, str], unfit: Sequence[str] = (), *, mediation: bool = False
+) -> str:
+    """The entries shown under their head, then the ones named as too large, or ``""``."""
+    head, unfit_head = (
+        (MEDIATION_ENTRIES_HEAD, MEDIATION_ENTRIES_UNFIT)
+        if mediation
+        else (DEBATE_ENTRIES_HEAD, DEBATE_ENTRIES_UNFIT)
+    )
+    lines: list[str] = []
+    if entries:
+        lines.append(head)
+        lines.extend(str(text).rstrip() for text in entries.values())
+    if unfit:
+        lines.append(f"{unfit_head} {', '.join(unfit)}.")
+    return "\n".join(lines)
+
+
+def fit_entries(
+    entries: Mapping[str, str], room: float | None, *, mediation: bool = False
+) -> tuple[dict[str, str], list[str]]:
+    """``(entries shown, ids named as too large)`` for the characters ``room`` leaves.
+
+    The names of every entry and the head are reserved first, so taking an
+    entry in never makes the turn outgrow the room; an entry that does not
+    fit beside those shown is named by id. With no room known (``None``)
+    every entry is shown. When none fits, none is named either: a line of
+    names alone only makes the turn longer. Nothing is cut. Linear in the
+    entries.
+    """
+    if room is None:
+        return dict(entries), []
+    used = len(entries_block({}, list(entries), mediation=mediation)) + 2
+    used += len(entries_block({"": ""}, mediation=mediation)) + 2
+    shown: dict[str, str] = {}
+    unfit: list[str] = []
+    for entry_id, text in entries.items():
+        taken = len(str(text).rstrip()) + 1
+        if used + taken <= room:
+            shown[entry_id] = text
+            used += taken
+        else:
+            unfit.append(entry_id)
+    if not shown:
+        return {}, []
+    return shown, unfit
+
+
+def with_entries(text: str, block: str) -> str:
+    """``text`` with an entries block after it, or as it was."""
+    if not block:
+        return text
+    return f"{text}\n\n{block}" if text else block
+
+
+def read_line_mark(line: str) -> int | str | None:
+    """The carried-or-new mark of a line: the earlier line's number, ``"new"``, or ``None``.
+
+    Two marks that say different things are no mark.
+    """
+    said: set[int | str] = set()
+    for match in _LINE_MARK.finditer(str(line)):
+        number = match.group("number")
+        said.add(int(number) if number is not None else "new")
+    return next(iter(said)) if len(said) == 1 else None
+
+
+def carried_marks(lines: Iterable[str], earlier: int) -> dict[str, int]:
+    """``{line: the earlier line's number}`` for each line marked carried from one of ``earlier``.
+
+    A number outside ``1..earlier`` names no line the mediator was shown and
+    is no mark.
+    """
+    found: dict[str, int] = {}
+    for line in lines:
+        mark = read_line_mark(line)
+        if isinstance(mark, int) and 1 <= mark <= int(earlier):
+            found[str(line)] = mark
+    return found
+
+
+def _named_in(line: str, participants: Sequence[str]) -> list[str] | None:
+    """The participants a line's field names, or ``None`` for no field or a name not read."""
+    written = read_analysts_field(line)
+    if written is None:
+        return None
+    names: list[str] = []
+    for name in written:
+        found = resolve_analyst(name, participants)
+        if found is None:
+            return None
+        if found not in names:
+            names.append(found)
+    return names
+
+
+def line_round_facts(
+    lines: Sequence[str],
+    facts: Sequence[str],
+    asked: Sequence[str],
+    revised: Sequence[str],
+    shown: Mapping[str, Sequence[str]],
+    changed: Any,
+    participants: Sequence[str],
+    filed: Mapping[str, Sequence[str]] | None = None,
+) -> list[dict[str, Any]]:
+    """One record per blocking line of the mediation a revision round answered.
+
+    ``named`` is who the line's field names (every analyst asked, for a line
+    whose names were not read), ``revised`` the ones of them whose revision
+    stood, ``shown`` the entries of the line (``line_entry_ids`` over the
+    line and its own place facts) each was shown, and ``changed`` the ones
+    ``changed(name, entry ids, places)`` reads as moved (the revision node
+    asks whether any claim of its answer changed, ``claim_drops
+    .changed_anywhere``). An analyst that filed entries in the round (``filed``)
+    read something new and is counted as changed; its claims citing those
+    entries are read with the line's. ``entries`` and ``places`` keep what
+    the line is about, for the carried mark to be read against. Linear in
+    the lines, the analysts and the claims ``changed`` reads.
+    """
+    out: list[dict[str, Any]] = []
+    stood = set(revised)
+    own_filed = {n: [str(i).lower() for i in ids or ()] for n, ids in (filed or {}).items()}
+    for line in lines:
+        text = str(line)
+        named = _named_in(text, participants)
+        if named is None:
+            named = list(asked)
+        mine = place_facts_for_line(text, facts)
+        ids = line_entry_ids([text], mine)
+        places = line_places(text, mine)
+        out.append(
+            {
+                "line": text,
+                "named": named,
+                "revised": [n for n in named if n in stood],
+                "shown": {n: [i for i in shown.get(n, ()) if i in ids] for n in named},
+                "changed": [
+                    n
+                    for n in named
+                    if n in stood
+                    and (
+                        bool(own_filed.get(n)) or changed(n, [*ids, *own_filed.get(n, [])], places)
+                    )
+                ],
+                "entries": ids,
+                "places": [_hex_text(p) for p in sorted(places)],
+            }
+        )
+    return out
+
+
+def _about(line: str, facts: Iterable[str] = ()) -> tuple[set[str], set[int]]:
+    """The entry ids and places a line is about: its own, and its own place facts'."""
+    mine = place_facts_for_line(line, facts)
+    return set(line_entry_ids([line], mine)), line_places(line, mine)
+
+
+# The head of what the next mediation is told the round did, and what it is asked.
+ROUND_FACTS_HEAD = (
+    "The run's record of the last revision round, for each blocking line of the last mediation "
+    "(numbered as below):"
+)
+LINE_MARK_RULE = (
+    "On each blocking line you list, write [carried: L<number>] right after its "
+    "[analysts: ...] field when it raises again the point of that line of the last mediation, "
+    "or [new] when it raises a point none of those lines raised."
+)
+
+
+def _names(names: Sequence[str]) -> str:
+    return ", ".join(names) if names else "none"
+
+
+def round_facts_text(record: Mapping[str, Any] | None) -> str:
+    """What the next mediation is told the revision round did on each line, or ``""``.
+
+    One line per blocking line of the mediation the round answered, numbered:
+    who it named, who revised, the entries of the line each was shown, and
+    who changed a claim of its answer; then the
+    entries the round filed, by agent, and the question for the
+    carried-or-new mark. Linear in the record.
+    """
+    lines = record.get("lines") if isinstance(record, Mapping) else None
+    if not isinstance(lines, list) or not lines:
+        return ""
+    said = [ROUND_FACTS_HEAD]
+    for number, fact in enumerate(lines, start=1):
+        if not isinstance(fact, Mapping):
+            continue
+        named = [str(n) for n in fact.get("named") or []]
+        shown = fact.get("shown") or {}
+        seen = "; ".join(f"{n}: {_names([str(i) for i in shown.get(n) or []])}" for n in named)
+        said.append(
+            f'- L{number} "{fact.get("line", "")}": named {_names(named)}; revised '
+            f"{_names([str(n) for n in fact.get('revised') or []])}; entries of the line shown "
+            f"({seen or 'none'}); changed a claim of its answer in the round: "
+            f"{_names([str(n) for n in fact.get('changed') or []])}."
+        )
+    filed = (record or {}).get("filed") or {}
+    by_agent = "; ".join(f"{a}: {', '.join(map(str, ids))}" for a, ids in filed.items() if ids)
+    said.append(f"Entries the round filed: {by_agent or 'none'}.")
+    said.append(LINE_MARK_RULE)
+    return "\n".join(said)
+
+
+def carried_unmoved(
+    lines: Sequence[str],
+    carried: Mapping[str, int],
+    record: Mapping[str, Any] | None,
+    facts_now: Sequence[str] = (),
+) -> bool:
+    """Whether every blocking line raises again a line of the last mediation nobody moved on.
+
+    Each of ``lines`` must be marked carried (``carried``: the earlier line's
+    number in the round's record). A mark counts only where the line shares
+    an entry id or a place with the earlier line it names (its own and its
+    place facts', ``facts_now`` for this mediation's lines); a mark naming a
+    line about other things is read as no mark. Every analyst the line's
+    field names must have been named on that earlier line, every analyst the
+    earlier line named must have revised in the round, and none of them may
+    have changed a claim on it (``line_round_facts``). A line not marked, an
+    analyst that has not answered the earlier line yet, or a record without
+    the facts is no such line; no line is not either. Linear in the lines.
+    """
+    facts = record.get("lines") if isinstance(record, Mapping) else None
+    if not lines or not isinstance(facts, list) or not facts:
+        return False
+    participants = [
+        *map(str, record.get("revised") or []),  # type: ignore[union-attr]
+        *map(str, (record.get("not_revised") or {}).keys()),  # type: ignore[union-attr]
+    ]
+    for line in lines:
+        number = carried.get(str(line))
+        if number is None or not 1 <= int(number) <= len(facts):
+            return False
+        fact = facts[int(number) - 1]
+        if not isinstance(fact, Mapping):
+            return False
+        ids, places = _about(str(line), facts_now)
+        earlier_ids = {str(i).lower() for i in fact.get("entries") or []}
+        earlier_places = {int(str(p), 16) for p in fact.get("places") or []}
+        if not (ids & earlier_ids or places & earlier_places):
+            return False
+        before = {str(n) for n in fact.get("named") or []}
+        answered = {str(n) for n in fact.get("revised") or []}
+        named = _named_in(str(line), participants)
+        if not named or not set(named) <= before or not before <= answered:
+            return False
+        if fact.get("changed"):
+            return False
+    return True

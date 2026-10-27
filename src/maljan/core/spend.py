@@ -630,6 +630,17 @@ class Price:
         ) / MILLION
 
 
+def prompt_tier_tokens(price: Price | None) -> int | None:
+    """The first prompt length past which ``price`` bills a request higher, or ``None``.
+
+    A row's ``tiers`` (``over_prompt_tokens``): the smallest boundary. A row
+    without tiers, or no row, has none.
+    """
+    if price is None or not price.tiers:
+        return None
+    return int(price.tiers[0][0])
+
+
 def _window_from(row: Any, parent_source: str) -> PriceWindow | None:
     read = row.model_dump() if hasattr(row, "model_dump") else row
     if not isinstance(read, Mapping):
@@ -1189,7 +1200,10 @@ class SpendMeter:
             # split by lifetime (``message_delta``'s usage carries none); where
             # every write is an hour's, it is settled as one.
             usage = {**usage, "cache_write_1h_input_tokens": usage["cache_write_input_tokens"]}
-        return in_force.cost(usage), in_force.source
+        # The source is the tier's the call was priced at: a long prompt is
+        # not said to be priced at the short prompt's figures.
+        tier = in_force.for_prompt(int(usage.get("input_tokens") or 0))
+        return in_force.cost(usage), tier.source
 
     def _cost(self, usage: Mapping[str, Any] | None, model: str) -> tuple[float, str] | None:
         if usage is None:

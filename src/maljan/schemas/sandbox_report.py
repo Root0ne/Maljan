@@ -857,6 +857,18 @@ def _is_the_sample(proc: dict[str, Any], sample: dict[str, Any]) -> bool:
     return False
 
 
+def runs_the_submitted_file(image: str, command_line: str, file_name: str, sha256: str) -> bool:
+    """The file lineage fact for one process of any sandbox: it runs the submitted file.
+
+    The test the flows' attribution reads (:func:`_is_the_sample`), over a
+    process's image and command line and the name and digest the sample was
+    submitted under.
+    """
+    return _is_the_sample(
+        {"image": image, "cmd": command_line}, {"target": file_name, "sha256": sha256}
+    )
+
+
 # Which of the two facts alone names a flow's process as the sample's, on a
 # row whose attribution is therefore not stated: ``"marked"`` when the sandbox
 # marks it as the sample's and it runs none of the submitted file's names and

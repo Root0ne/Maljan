@@ -24,6 +24,7 @@ from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
 from dataclasses import dataclass, replace
+from functools import lru_cache, partial
 from types import MappingProxyType, SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -46,9 +47,11 @@ from maljan.agents.prompt_fragments import (
 )
 from maljan.agents.tool_answer_clearing import (
     CLEARED_FOR_REFUSAL,
+    CLEARED_FOR_TIER,
     Clearing,
     ToolAnswerClearing,
     read_evidence_tool,
+    tier_clear_pays,
 )
 from maljan.analysis.sandbox_sections import item_index_of
 from maljan.analysis.technique_ids import ID_BODY
@@ -127,6 +130,7 @@ from maljan.pipeline.validation import (
     RETRY_DROP_NOT_ANSWERED,
     RETRY_DROP_WITHDRAWN,
     RETRY_DROPPED_CODE,
+    RETRY_RESTATED_FEW_CODE,
     TECHNIQUE_LINE_UNREAD_CODE,
     VALIDATION_TURN_NOT_RUN_CODE,
     VALIDITY_CODE,
@@ -149,15 +153,18 @@ from maljan.pipeline.validation import (
     library_only_claims,
     parse_violations,
     read_retry_drop_answers,
+    retry_drop_cited,
     retry_drop_question,
     retry_drop_row,
     retry_drops,
+    retry_restated_few_question,
     retry_unplaced_question,
     retry_with_feedback_sync,
     retry_withdrawn_row,
     run_image_bases,
     settle_validation_marks,
     unparsed_answer_rows,
+    validation_entries_text,
     validity_check_available,
     whole_answer_questions,
 )
@@ -429,6 +436,22 @@ def _reported_request(messages: list, per_token: int) -> tuple[int, int]:
             after = _chars_of(messages[index:])
             return chars_for_tokens(prompt, max(1, per_token)) + after, index
     return 0, -1
+
+
+def _mean_turn_output(messages: list) -> int:
+    """The mean answer, in output tokens, of the model turns a conversation holds that report one."""
+    answers: list[int] = []
+    for message in messages:
+        if getattr(message, "type", "") != "ai":
+            continue
+        usage = getattr(message, "usage_metadata", None) or {}
+        try:
+            out = int(usage.get("output_tokens") or 0)
+        except (AttributeError, TypeError, ValueError):
+            out = 0
+        if out > 0:
+            answers.append(out)
+    return sum(answers) // len(answers) if answers else 0
 
 
 def _reported_request_chars(messages: list, per_token: int) -> int:
@@ -1434,6 +1457,108 @@ def _drained_ids_of(agent: Any) -> list[str] | None:
     return held
 
 
+def _answer_items(isr: AgentISR) -> tuple[tuple[Any, ...], tuple[str, ...]]:
+    """What an answer states, by value, in order: its claims and its findings' titles.
+
+    Each claim by its words, technique, confidence and evidence. Two answers
+    stating the same are the same answer, whatever objects hold them.
+    """
+    claims = tuple(
+        (str(c.claim), c.technique_id, c.confidence, str(c.evidence_ref or "")) for c in isr.claims
+    )
+    return claims, tuple(str(f.title) for f in isr.findings or [])
+
+
+# The heading the in-force report puts the written revision's other sections
+# under: its disputes, rebuttals and what it accepted, never its claims.
+WRITTEN_BESIDES_CLAIMS = "Written in this answer besides its claims:"
+
+
+def answer_in_force_text(written: str, before: tuple[str, tuple[Any, ...]], kept: AgentISR) -> str:
+    """The text of a revision's answer in force, the one its peers and the judge read.
+
+    ``written`` is what the revision wrote, ``before`` that answer's recorded
+    text and what it states (:func:`_answer_items`) as the validation turn was
+    given it, and ``kept`` what the turn left in force. Unchanged by the turn,
+    the answer in force is the one written, and ``written`` is it, as before.
+    Otherwise the turn kept a retry, merged one into the answer, or settled
+    what a kept retry left out or withdrew: no text the analyst wrote holds
+    those claims, so they are rendered as a first answer's are
+    (:meth:`AgentISR.to_text_summary`), numbered as every summary of them is,
+    with the findings in force after them (:func:`with_findings`); a kept
+    retry with no claim is its own words. After them, under
+    :data:`WRITTEN_BESIDES_CLAIMS`, what the revision wrote besides its claims
+    (its disputes and rebuttals, what it accepted from its peers, its other
+    sections: ``claim_headings.besides_claims``), never its replaced claims. A
+    revision that wrote nothing stays nothing.
+    """
+    if not str(written or "").strip():
+        return written
+    if (kept.answer_text, _answer_items(kept)) == before:
+        return written
+    if kept.claims or kept.answer_text == before[0]:
+        summary = kept.to_text_summary()
+        kept.note_rendered_summary(summary)
+        rendered = with_findings(summary, kept)
+    else:
+        from maljan.agents.findings_block import has_findings_block
+
+        # A kept retry with no claim is its own words: its prose, the findings
+        # block taken out of it, with the findings in force after it.
+        words = kept.unparsed_answer or (
+            kept.answer_text if not has_findings_block(kept.answer_text) else ""
+        )
+        rendered = with_findings(words or kept.to_text_summary(), kept)
+    from maljan.agents.claim_headings import besides_claims
+    from maljan.agents.findings_block import parse_findings_block
+
+    besides = besides_claims(parse_findings_block(written).prose)
+    return f"{rendered}\n{WRITTEN_BESIDES_CLAIMS}\n{besides}" if besides else rendered
+
+
+def report_rendered_again(report: str, isr: AgentISR | None) -> str:
+    """``report`` with the claims summary the platform put at its head rendered again.
+
+    A report whose head is the claims summary the platform rendered when the
+    answer was kept (a first answer's, a revision's answer in force: recorded
+    on the ISR, ``AgentISR.rendered_summary``) has that exact prefix rendered
+    again from the ISR, so a mark the platform set on a claim since (a
+    technique the catalogue does not know, a claim restating a peer's entry)
+    is shown; what follows it is kept as written. Text the analyst wrote is
+    never rendered again, whatever it opens with.
+    """
+    if isr is None or not isr.rendered_summary or not report.startswith(isr.rendered_summary):
+        return report
+    return isr.to_text_summary() + report[len(isr.rendered_summary) :]
+
+
+def _finding_line(finding: Any) -> str:
+    """One finding in force as a report line: its title, its words and what it rests on."""
+    said = [f"technique {', '.join(finding.technique_ids)}"] if finding.technique_ids else []
+    if finding.evidence_ids:
+        said.append(f"evidence {', '.join(finding.evidence_ids)}")
+    if finding.confidence is not None:
+        said.append(f"confidence {finding.confidence:.2f}")
+    if finding.category:
+        said.append(f"category {finding.category}")
+    detail = f": {finding.detail}" if finding.detail else ""
+    rests = f" ({'; '.join(said)})" if said else ""
+    return f"    - {finding.title}{detail}{rests}"
+
+
+def with_findings(summary: str, kept: AgentISR) -> str:
+    """``summary`` with the findings in force after it, each once, or as it is with none.
+
+    The claims summary (:meth:`AgentISR.to_text_summary`) carries no
+    findings; the answer it stands for does, so they follow it, each with
+    its words, techniques, evidence, confidence and category.
+    """
+    findings = list(kept.findings or [])
+    if not findings:
+        return summary
+    return "\n".join([summary, "  Findings:", *(_finding_line(f) for f in findings)])
+
+
 def _flagged_blocks(isr: AgentISR, indexes: Sequence[int]) -> int:
     """How many claim blocks of ``isr`` the claims at ``indexes`` are in, each block once."""
     blocks = claim_block_indexes(isr.claims)
@@ -1600,20 +1725,23 @@ def _field(
 _ONE_TECHNIQUE_RE = re.compile(ID_BODY, re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
-# A line that opens with "none" and words after it ("none asserted", "none
-# (capability only)"): it claims none whatever the words say, when no
-# technique id and no catalogue technique name stands anywhere on it; with an
-# id or a name on it ("None; Process Injection is likely"), the words may name
-# one and the line is asked about.
-_NONE_WITH_WORDS_RE = re.compile(r"none\b", re.IGNORECASE)
+# A line that opens with "none", or with a dash before a bracketed note, and
+# words after it ("none asserted", "none (capability only)", "— (provenance)"):
+# it claims none
+# whatever the words say, when no technique id and no catalogue technique name
+# stands anywhere on it; with an id or a name on it ("None; Process Injection
+# is likely"), the words may name one and the line is asked about, unless the
+# id stands in a closing note that says it is not asserted (``_read_noted_line``).
+_NONE_WITH_WORDS_RE = re.compile(r"none\b|[—–-]\s*+(?=\()", re.IGNORECASE)
 _ANY_TECHNIQUE_ID_RE = re.compile(rf"(?<![\w.]){ID_BODY}(?!\w)", re.IGNORECASE)
 # What separates the ids of a list on one TECHNIQUE line: a comma, "and", both
-# ("T1027, T1140, and T1106"), or a slash ("T1027 / T1140"). Every part must be
+# ("T1027, T1140, and T1106"), a slash ("T1027 / T1140") or a semicolon
+# ("T1027; T1140"). Every part must be
 # an id and nothing else; "or", "and/or", a doubled or trailing slash, or any
 # word beside an id leaves the line whole and asked about.
 # Each run of whitespace is read from its start and possessively (linear time).
 _TECHNIQUE_LIST_SEPARATOR_RE = re.compile(
-    r"(?<!\s)\s*+,\s*+(?:and\s++)?|(?<!\s)\s++and\s++|(?<!\s)\s*+/\s*+", re.IGNORECASE
+    r"(?<!\s)\s*+,\s*+(?:and\s++)?|(?<!\s)\s++and\s++|(?<!\s)\s*+[/;]\s*+", re.IGNORECASE
 )
 # The claim format's own block separator, "---", written at the end of a
 # TECHNIQUE line with a dot or bar before it ("TECHNIQUE: T1027 · ---", the
@@ -1663,19 +1791,46 @@ def _catalogue_names_for(technique_id: str) -> set[str]:
     return {name for name in names if name}
 
 
+@lru_cache(maxsize=1)
+def _catalogue_name_index() -> tuple[frozenset[str], frozenset[str], int]:
+    """The vendored catalogue's names folded, the one-word names that are ordinary
+    English words (the vendored stopword list: "At"), and the longest name's
+    length in words. Read once."""
+    from maljan.memory.attck_loader import _folded_name, technique_names
+    from maljan.pipeline.validation import english_stopwords
+
+    stopwords = english_stopwords()
+    folded = {_folded_name(name) for name in technique_names().values()}
+    folded.discard("")
+    ordinary = frozenset(name for name in folded if " " not in name and name in stopwords)
+    names = frozenset(folded - ordinary)
+    longest = max((len(name.split()) for name in names), default=0)
+    return names, ordinary, longest
+
+
+# A word written with a capital: an ordinary word that is a one-word catalogue
+# name ("At") names it only so.
+_CAPITALISED_WORD_RE = re.compile(r"\b[A-Z][A-Za-z]*\b")
+
+
 def _names_a_technique(text: str) -> bool:
     """Whether ``text`` writes a vendored catalogue technique's name anywhere, folded.
 
     Every run of words up to the longest name's length is looked up once in
-    the set of folded names: linear in the text.
+    the set of folded names: linear in the text. A one-word name that is an
+    ordinary English word ("At") names it only written with its capital
+    ("none (At job)"); in small letters it is the word ("none asserted at this
+    level").
     """
-    from maljan.memory.attck_loader import _folded_name, technique_names
+    from maljan.memory.attck_loader import _folded_name
 
-    names = {_folded_name(name) for name in technique_names().values()}
-    names.discard("")
+    names, ordinary, longest = _catalogue_name_index()
+    if ordinary and any(
+        word.group(0).lower() in ordinary for word in _CAPITALISED_WORD_RE.finditer(text)
+    ):
+        return True
     if not names:
         return False
-    longest = max(len(name.split()) for name in names)
     words = _folded_name(text).split()
     for start in range(len(words)):
         for size in range(1, min(longest, len(words) - start) + 1):
@@ -1832,6 +1987,211 @@ def _numbered_in_order(chunks: list[Any]) -> list[Any]:
     return out
 
 
+# A note in brackets closing one id of a TECHNIQUE line ("T1071.001 (configured
+# channel)"). What it says decides how the id is read (``_note_reading``).
+_NOTE_RE = re.compile(r"\(([^()]*+)\)")
+_NOTED_PART_RE = re.compile(rf"(?P<id>{ID_BODY})(?:\s*+\(\x00(?P<note>\d++)\))?", re.IGNORECASE)
+# A note that says the id before it is not asserted, and what may follow that
+# phrase: where it was said or by what ("by the traced code", "from my round-0
+# claim 11", "to the sample"), and nothing else. A second clause, a contrast or
+# a list after it ("rejected by peer but I keep it", "withdrawn earlier, now
+# reinstated") leaves the line asked.
+_NOTE_NEGATES_RE = re.compile(
+    r"\b(?:(?:is|are)\s++)?not\s++(?:supported|established|asserted|attributed|claimed|adopted"
+    r"|applicable)\b|\b(?:unsupported|withdrawn|refuted|rejected|ruled\s++out)\b",
+    re.IGNORECASE,
+)
+_NEGATED_TAIL_RE = re.compile(
+    r"\s*+(?:(?:by|from|in|to|for)(?:\s++(?:the|my|this|these|its|our|a|an|peers?|sample|code"
+    r"|traced|evidence|artefacts?|artifacts?|static|round-\d++|round|claim|\d++)){1,5})?\s*+\.?\s*+",
+    re.IGNORECASE,
+)
+# A note with any word that bears on whether, how surely or on whose word the
+# id is asserted: a doubt, an observation state, a provenance, a condition, a
+# negation of anything else, a confidence or another id. Such a line is asked
+# about as before.
+_NOTE_BEARS_RE = re.compile(
+    r"\b(?:candidates?|possibl[ey]|likely|probabl[ey]|maybe|may|might|could|would|should|if"
+    r"|unless|suspect\w*|potential\w*|tentativ\w*|uncertain\w*|unconfirmed|unproven|unverified"
+    r"|unvalidated|unattributed|unexercised|hypothes\w*|pending|only|leads?|capabilit\w*"
+    r"|assess\w*|inferr?\w*|presen\w*|absen\w*|negative|observ\w*|seen|exercised|executed|run"
+    r"|ran|attribut\w*|assert\w*|mapp\w*|label\w*|associat\w*|catalogue|context|reference\w*"
+    r"|confidence|confirm\w*|validat\w*|verif\w*|corroborat\w*|disput\w*|contest\w*|not|no"
+    r"|never|nor|neither|without|none|lacks?|missing|partial\w*|partly|perhaps|formerly"
+    r"|rather|except\w*|whether|seem\w*|less|otherwise|cannot|can't|nothing|however"
+    r"|although|though|yet|almost|against|nearly|hardly|barely|somewhat|instead)\b"
+    r"|[?%]|\d\.\d|(?<![\w.])T\d{4}",
+    re.IGNORECASE,
+)
+# The words of a note written as a name: each word of it capitalised.
+_NOTE_WORD_RE = re.compile(r"[A-Za-z][\w'’-]*")
+_NAME_JOINING_WORDS = frozenset({"and", "or", "of", "the", "a", "an", "to", "for", "with", "via"})
+# A note's tokens, the reference and layout words a neutral note may hold beside
+# the id's own vendored words, and the function words it may hold between
+# them: closed sets. No other word is skipped: a hedge or a negation
+# ("perhaps", "cannot", "formerly", "rather") leaves the line asked.
+_NOTE_TOKEN_RE = re.compile(r"[^\s,;:.()\[\]`\"“”]++")
+_NOTE_LAYOUT_WORDS = frozenset(
+    {
+        "claim",
+        "round",
+        "command",
+        "routine",
+        "listed",
+        "above",
+        "same",
+        "per",
+        "one",
+        "each",
+        "separate",
+        "entry",
+        "path",
+        "channel",
+        "step",
+        "as",
+    }
+)
+_NOTE_FUNCTION_WORDS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "of",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "by",
+        "from",
+        "with",
+        "via",
+        "and",
+        "this",
+        "these",
+        "that",
+        "its",
+        "it",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+    }
+)
+_NOTE_CITATION_RE = re.compile(r"ev_\d++|\d++", re.IGNORECASE)
+_NOTE_NEUTRAL = "neutral"
+_NOTE_NEGATED = "negated"
+
+
+def _note_holds_only_the_id_s_words(note: str, technique_id: str) -> bool:
+    """Whether every content word of ``note`` is a word the vendored data writes for
+    ``technique_id`` (``validation.technique_vocabulary``) or a reference and layout
+    word (``_NOTE_LAYOUT_WORDS``); a function word (``_NOTE_FUNCTION_WORDS``) is no
+    content word. A word of fewer than three letters outside those sets, or a
+    slash inside a word ("n/a"), is no such word."""
+    from maljan.pipeline.validation import _stem, technique_vocabulary
+
+    vocabulary = technique_vocabulary(technique_id)
+    tokens = _NOTE_TOKEN_RE.findall(note)
+    if not tokens:
+        return False
+    for token in tokens:
+        token = re.sub(r"['’]s$", "", token)
+        if _NOTE_CITATION_RE.fullmatch(token):
+            continue
+        if "/" in token:
+            return False
+        for part in token.split("-"):
+            lowered = part.lower()
+            if part.isdigit() or lowered in _NOTE_LAYOUT_WORDS or lowered in _NOTE_FUNCTION_WORDS:
+                continue
+            if len(part) < 3 or not part.isalpha():
+                return False
+            if _stem(part) not in vocabulary:
+                return False
+    return True
+
+
+def _note_reading(note: str, technique_id: str = "") -> str | None:
+    """How a note closing an id is read: ``"neutral"`` when every content word of
+    it is the id's own vendored word or a reference or layout word
+    (:func:`_note_holds_only_the_id_s_words`), ``"negated"`` when it says the id is
+    not asserted and only where or by what follows (``_NEGATED_TAIL_RE``), and
+    ``None`` otherwise. A note with a doubt, a provenance or an observation word,
+    one that names a catalogue technique, or one written as a name (every word
+    capitalised) is ``None``."""
+    negation = _NOTE_NEGATES_RE.search(note)
+    if negation is not None:
+        left = note[: negation.start()] + " " + note[negation.end() :]
+        return _NOTE_NEGATED if _NEGATED_TAIL_RE.fullmatch(left) else None
+    if _NOTE_BEARS_RE.search(note) or _names_a_technique(note):
+        return None
+    words = [w for w in _NOTE_WORD_RE.findall(note) if w.lower() not in _NAME_JOINING_WORDS]
+    if len(words) >= 2 and all(w[:1].isupper() for w in words):
+        return None
+    if not technique_id or not _note_holds_only_the_id_s_words(note, technique_id):
+        return None
+    return _NOTE_NEUTRAL
+
+
+# A line that opens with "none" or a dash and closes with one note naming the
+# ids it sets aside ("none (T1547.001 not supported)").
+_NONE_WITH_NOTE_RE = re.compile(
+    rf"(?:none\b|[—–-])(?P<before>[^()]*+)\(\s*+(?P<ids>{ID_BODY}(?:\s*+(?:,|/|and)\s*+{ID_BODY})*+)"
+    r"(?P<note>[^()]*+)\)\s*+\.?",
+    re.IGNORECASE,
+)
+
+
+def _read_noted_line(bare: str) -> tuple[str, ...] | None:
+    """The ids of a TECHNIQUE line whose ids carry notes in brackets, or ``None`` to ask.
+
+    Each part of the list is an id with at most one closing note. An id whose
+    note holds only its own vendored words and reference words is read; one
+    whose note says it is not asserted, and only where or by what, is not; any
+    other note, or anything else on the line, leaves it asked about. A negating
+    note on a list where another id has no note of its own may be said of every
+    id: asked. ``()`` when every id is set aside, which claims none, as a line
+    that opens with "none" and closes with a note setting its ids aside does.
+    """
+    opening = _NONE_WITH_NOTE_RE.fullmatch(bare)
+    if opening is not None:
+        note = opening.group("note")
+        if (
+            not _ANY_TECHNIQUE_ID_RE.search(opening.group("before"))
+            and not _names_a_technique(opening.group("before"))
+            and _note_reading(note) == _NOTE_NEGATED
+        ):
+            return ()
+        return None
+    notes: list[str] = []
+
+    def _hold(match: re.Match[str]) -> str:
+        notes.append(match.group(1))
+        return f"(\x00{len(notes) - 1})"
+
+    held = _NOTE_RE.sub(_hold, bare)
+    if not notes:
+        return None
+    readings: list[tuple[str, str | None]] = []
+    for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(held):
+        found = _NOTED_PART_RE.fullmatch(_bare_technique(part))
+        if found is None:
+            return None
+        if found.group("note") is None:
+            readings.append((found.group("id").upper(), None))
+            continue
+        reading = _note_reading(notes[int(found.group("note"))], found.group("id").upper())
+        if reading is None:
+            return None
+        readings.append((found.group("id").upper(), reading))
+    said = [reading for _id, reading in readings]
+    if _NOTE_NEGATED in said and None in said:
+        return None
+    return tuple(dict.fromkeys(i for i, reading in readings if reading != _NOTE_NEGATED))
+
+
 def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     """``(technique ids, unread line)`` for one claim's TECHNIQUE line as written.
 
@@ -1846,8 +2206,16 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     (``isr.technique_line_unread``). An id followed by the vendored
     catalogue's own name for it, in brackets or not ("T1027 (Obfuscated Files
     or Information)", "T1106 Native API"), is that id: the name names the id
-    and decides nothing. A line that opens with "none" and holds no technique
-    id ("none asserted") claims none.
+    and decides nothing. Ids separated by commas, "and", slashes or semicolons
+    are a list. A line that opens with "none", or with a dash before a
+    bracketed note, and holds no technique id ("none asserted", "— (provenance)")
+    claims none. An id with a closing note in brackets is read by what the note
+    says (``_read_noted_line``): a note whose every content word is the id's own
+    vendored word or a reference or layout word ("T1071.001 (configured
+    channel)", "(one per command, as listed)") leaves the id read; a note that
+    says the id is not asserted, followed only by where or by what ("T1547.001
+    (not supported by the traced code)", "none (T1055 withdrawn)"), claims none
+    of it; any other note keeps the line whole and asked about.
     """
     text = str(line or "").strip()
     bare = _bare_technique(_without_catalogue_names(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text)))
@@ -1862,6 +2230,9 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]
     if parts and all(_ONE_TECHNIQUE_RE.fullmatch(part) for part in parts):
         return tuple(dict.fromkeys(part.upper() for part in parts)), None
+    noted = _read_noted_line(bare)
+    if noted is not None:
+        return noted, None
     return (), text
 
 
@@ -2024,6 +2395,10 @@ class ClaimRead:
     unread only when none of the answer's own claims was read: then they may
     be the answer's only claims, and saying nothing would lose them silently.
 
+    ``without_evidence`` is the blocks the stricter reading turned away for
+    citing no ledger id, on an EVIDENCE line or in brackets in the claim. They are
+    unread, and the sentence saying so names them.
+
     ``blocks_read`` is the blocks the claims were read from. A block whose
     TECHNIQUE line lists several ids is one claim per id, so it is the blocks,
     not the claims, that are counted against the claims begun. ``None`` (a
@@ -2036,6 +2411,7 @@ class ClaimRead:
     after_disputes: int = 0
     confidence_unreadable: tuple[str, ...] = ()
     blocks_read: int | None = None
+    without_evidence: int = 0
 
     @property
     def read(self) -> int:
@@ -2063,16 +2439,24 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
     lists; the heading count says how many the model began, so a block the
     reader could not split is visible.
 
+    A block without an ``EVIDENCE:`` line, or with one that was nothing but
+    tool-call scaffolding, cites what its claim sentence cites in brackets:
+    those ledger ids (``ledger_ids_cited``) are its evidence, as they would be
+    on the line. An id named in the prose is no citation.
+
     ``require_evidence`` is the static, dynamic and network analysts'
-    stricter reading: a block without an ``EVIDENCE:`` line, or with one that
-    was nothing but tool-call scaffolding, is not their claim. Everywhere else
-    such a block is still a finding, recorded as unsourced. Neither reading
+    stricter reading: a block that cites no ledger id, on an EVIDENCE line or
+    in brackets in its sentence, is not their claim. It is counted
+    (``ClaimRead.without_evidence``), and the sentence naming the claims not
+    read says so. Everywhere else such a block is still a finding, recorded as
+    unsourced. Neither reading
     puts a confidence on a block that states none: the confidence on a claim
     is the analyst's own statement, so such blocks are counted instead, and
     the count is what the validation turn asks the analyst about.
     """
     claims: list[ClaimEvidence] = []
     without_confidence = 0
+    without_evidence = 0
     unreadable: list[str] = []
     blocks_read = 0
     # Stripped per field rather than over the whole text: removing a block
@@ -2106,7 +2490,13 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         evidence_text = (
             strip_tool_call_scaffolding(evidence_value).strip() if evidence_value else ""
         )
+        if not evidence_text:
+            # No EVIDENCE line, or one that cleaned to nothing: the ledger ids
+            # the claim's own sentence cites in brackets are its citation, the
+            # one part of the line the run checks.
+            evidence_text = ledger_ids_cited(claim_text)
         if require_evidence and not evidence_text:
+            without_evidence += 1
             continue
         stated = _field(tail, _LINE_CONFIDENCE_RE, _BLOCK_CONFIDENCE_RE)
         if stated is None:
@@ -2153,7 +2543,37 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         after_disputes=count_claims_after_disputes(text or ""),
         confidence_unreadable=tuple(unreadable),
         blocks_read=blocks_read,
+        without_evidence=without_evidence,
     )
+
+
+# A citation in a sentence: what one pair of square or round brackets holds,
+# on one line ("[ev_0028, ev_0012]", "(ev_0017)"), with at most one pair of the
+# other kind nested in it ("[ev_0021 (blob 0xfac0)]", "(see [ev_0005])"); where
+# brackets nest deeper or do not close, the innermost pair. Each part is read
+# possessively and stops at a bracket it does not hold, so a run of unclosed or
+# nested ones costs time linear in its length.
+_PLAIN = r"[^\[\]()\n]"
+_CITATION_RE = re.compile(
+    rf"\[(?:{_PLAIN}|\({_PLAIN}*+\))*+\]"
+    rf"|\((?:{_PLAIN}|\[{_PLAIN}*+\])*+\)"
+    rf"|[\[(]{_PLAIN}*+[\])]"
+)
+
+
+def ledger_ids_cited(text: str) -> str:
+    """The ledger ids ``text`` cites in brackets, each once in the order written, as an evidence line.
+
+    Only an id written as a citation, inside ``[...]`` or ``(...)``, counts: an
+    id named in the prose ("unlike ev_0012 suggests") is not a citation. ``""``
+    when the text cites none.
+    """
+    cited = dict.fromkeys(
+        found.lower()
+        for citation in _CITATION_RE.findall(text or "")
+        for found in ENTRY_ID_RE.findall(citation)
+    )
+    return ", ".join(f"[{found}]" for found in cited)
 
 
 def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0) -> str:
@@ -2172,10 +2592,13 @@ def claims_unread_sentence(agent: str, read: ClaimRead, revision_round: int = 0)
         if read.confidence_unreadable
         else ""
     )
+    uncited = (
+        f" {read.without_evidence} of them cite no ledger id." if read.without_evidence else ""
+    )
     return (
         f"The {agent} analyst's answer{stage} began {read.begun} claim(s){quoted}, and "
         f"{read.read} were read{declined}; {read.unread} could not be read as a "
-        f"claim and are not in its findings.{unreadable}"
+        f"claim and are not in its findings.{uncited}{unreadable}"
     )
 
 
@@ -3147,6 +3570,128 @@ def current_run_state(agent: Any) -> str:
         return render_run_state({**source, "evidence_ledger": [*rows, *added]}) or body
     except Exception:  # noqa: BLE001 — the block the agent was briefed with still holds
         return body
+
+
+# One item of a drops question as ``RetryDrops.labelled`` gives it.
+_DropRow = tuple[str, str, Any, tuple[str, ...]]
+
+
+def _read_in_loop(agent: Any, rows: Sequence[Any]) -> set[str]:
+    """The ids of the entries ``agent`` had in view past a pack summary: its own calls, and every
+    entry a row of its own read again.
+
+    Judged from the ledger's rows alone: a row the agent filed is its own call,
+    and a row of its own that repeats another entry (``repeated_of``: a read of
+    a stored answer, a decompile answered from an earlier one) touched that
+    entry, whether it read it whole, in pages or cut. A chain of repeats is
+    followed to the entry that holds the answer (``repeat_holders``).
+    """
+    from maljan.schemas.evidence import repeat_holders
+
+    name = str(getattr(agent, "name", "") or "")
+    if not name:
+        return set()
+    holders = repeat_holders(rows)
+    touched: set[str] = set()
+    for row in rows:
+        if str(getattr(row, "agent", "") or "") != name:
+            continue
+        row_id = str(getattr(row, "id", "") or "").lower()
+        touched.add(row_id)
+        first = str(getattr(row, "repeated_of", "") or "").lower()
+        if first:
+            touched.add(holders.get(row_id) or first)
+    touched.discard("")
+    return touched
+
+
+# What a pack entry shown as its summary line says of the rest of it.
+PACK_SUMMARY_NOTE = (
+    "is in your brief above as its summary line, as you had it in view when you wrote the "
+    "claim; the whole entry is in the ledger"
+)
+
+
+def cited_entry_texts(
+    agent: Any, cited: Sequence[str], messages: Sequence[Any], *, summary_lines: bool = True
+) -> dict[str, str]:
+    """The cited entries a tools-free turn does not hold, each as the agent had it in view, by id.
+
+    The ledger is the agent's own entries and the run's as the agent was
+    briefed with it (``run_state_source``); a repeat is shown as the entry
+    that holds its answer. An entry from the agent's own calls, or one it read
+    again in its loop, whole, in pages or cut (:func:`_read_in_loop`), is shown
+    whole, as recorded and marked when the ledger holds only part of it, unless
+    the conversation
+    (``messages``, every run-state block aside) carries its stored output
+    verbatim. A pack entry the agent saw only as its summary line (a line of
+    the conversation opening with its bracketed id) is named with a note
+    that the line is in its brief and the whole entry in the ledger: that
+    line is what its claims were written from, and the conversation already
+    carries it. Any other entry is shown whole. Keyed by id in the order
+    first cited. Never raises: an unreadable ledger shows nothing.
+
+    ``summary_lines=False`` is a turn for a reader that wrote no claim from such
+    a line (a debate's revision or mediation): a pack entry whose summary
+    line the conversation carries is left out rather than named with the
+    note, as the conversation already holds what the brief gave everyone.
+    """
+    from maljan.agents.judge_agent import NO_ENTRY_TEXT, PARTIAL_ENTRY_MARK, question_evidence
+    from maljan.agents.tool_fence import fenced
+    from maljan.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END
+
+    wanted = list(dict.fromkeys(str(entry_id).lower() for entry_id in cited if entry_id))
+    if not wanted:
+        return {}
+    try:
+        rows: list[Any] = [
+            *(getattr(agent, "_evidence_entries", None) or ()),
+            *(getattr(agent, "_live_map_entries", None) or ()),
+        ]
+        source = getattr(agent, "run_state_source", None)
+        if isinstance(source, Mapping):
+            for row in source.get("evidence_ledger") or ():
+                try:
+                    rows.append(
+                        row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
+                    )
+                except Exception:  # noqa: BLE001 — one unreadable row is not a lost question
+                    continue
+        ledger = question_evidence(rows)
+        touched = _read_in_loop(agent, rows)
+        block = re.compile(re.escape(RUN_STATE_BEGIN) + r".*?" + re.escape(RUN_STATE_END), re.S)
+        conversation = "\n".join(
+            block.sub("", content if isinstance(content, str) else answer_text(content))
+            for content in (getattr(m, "content", m) for m in messages)
+        )
+        summaries: dict[str, str] = {}
+        for line in conversation.splitlines():
+            found = re.match(rf"\s*\[({ENTRY_ID_RE.pattern})\]", line, re.IGNORECASE)
+            if found:
+                summaries.setdefault(found.group(1).lower(), line.strip())
+    except Exception:  # noqa: BLE001 — no ledger read is the question as it was
+        return {}
+    texts: dict[str, str] = {}
+    for entry_id in wanted:
+        shown = ledger.get(entry_id)
+        if shown is None:
+            continue
+        if entry_id not in touched and entry_id in summaries:
+            if summary_lines:
+                texts[entry_id] = f"[{entry_id}] {PACK_SUMMARY_NOTE}."
+            continue
+        body = shown.text.strip()
+        # Shown through the one view of a tool answer (``agents.tool_fence``):
+        # the text is the sample's and the tools', so a line in it that reads
+        # as the platform's (a run-state block, a heading) stays data.
+        view = fenced(entry_id, shown.text) if body else ""
+        held = body in conversation or (view and view in conversation)
+        if body and not shown.partial and not shown.lowered and held:
+            continue
+        mark = f" ({PARTIAL_ENTRY_MARK})" if shown.partial else ""
+        tool = f" {shown.tool}" if shown.tool else ""
+        texts[entry_id] = f"[{entry_id}]{tool}{mark}:\n{view or NO_ENTRY_TEXT}"
+    return texts
 
 
 def own_earlier_entries(agent: Any) -> list[LedgerEntry]:
@@ -4524,12 +5069,61 @@ class BudgetMeter:
         A provider's refusal of a request as over its window clears whatever
         else is known. The window point is the window the agent's own model
         serves (:meth:`_own_window_tokens`), in the budget's characters: a
-        prompt past it is refused by every server.
+        prompt past it is refused by every server. The tier point is the first
+        prompt length past which the agent's own model is priced higher
+        (:meth:`_own_price`, its row's ``tiers``), in the same characters, and
+        a clear for it is made only where the request it sends costs less at
+        those prices (``tool_answer_clearing.tier_clear_pays``), a write priced
+        for an hour where the model's cache entries live that long.
         """
+        from maljan.core.spend import prompt_tier_tokens
+        from maljan.llm.anthropic_history import writes_hour_caches
+
         window = self._own_window_tokens()
+        per_token = self._clearing_per_token()
+        price = self._own_price()
+        tier = prompt_tier_tokens(price)
+        pays: Callable[[int, int, int, list[Any]], bool] | None = None
+        if tier is not None and price is not None:
+            hour = writes_hour_caches(getattr(self, "llm", None))
+
+            def pays(before: int, cached: int, after: int, messages: list[Any]) -> bool:
+                return tier_clear_pays(
+                    price,
+                    before // per_token,
+                    cached // per_token,
+                    after // per_token,
+                    _mean_turn_output(messages),
+                    hour_writes=hour,
+                )
+
         return ToolAnswerClearing(
-            window_chars=chars_for_tokens(window, self._clearing_per_token()) if window else None
+            window_chars=chars_for_tokens(window, per_token) if window else None,
+            tier_chars=chars_for_tokens(tier, per_token) if tier is not None else None,
+            tier_pays=pays,
         )
+
+    def _own_price(self) -> Any | None:
+        """The price row of the model this agent calls first, as the job prices it, or ``None``.
+
+        The job's spend meter answers (the operator's ``llm.model_prices``, then
+        the vendored table), in force now; outside a job, the vendored table and
+        the process's settings. Never raises.
+        """
+        from maljan.core.spend import SpendMeter
+
+        try:
+            label = str(self._model_label() or "")
+            if not label:
+                return None
+            meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+            if not isinstance(meter, SpendMeter):
+                llm_settings = getattr(get_settings(), "llm", None)
+                meter = SpendMeter(prices=getattr(llm_settings, "model_prices", None) or {})
+            return meter.price_now(label)
+        except Exception as exc:  # noqa: BLE001 — no price is no tier point, never a lost loop
+            logger.debug("%s: its model's price is not known (%s).", getattr(self, "name", ""), exc)
+            return None
 
     def _cleared_request(
         self,
@@ -4586,6 +5180,9 @@ class BudgetMeter:
         why = (
             "the model server refused the request as over its window"
             if clearing.why == CLEARED_FOR_REFUSAL
+            else "the request's prompt is past the length its model is priced higher above, "
+            "and the answers cleared were already cited"
+            if clearing.why == CLEARED_FOR_TIER
             else "the request's prompt is past the model's own window"
         )
         self.logger.info(
@@ -5720,6 +6317,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             repair_invalid_tool_calls,
             seeded_repeat_guard,
         )
+        from maljan.agents.image_range import ImageRangeReader
+
+        # Read again only when the run's entries grew (``ImageRangeReader``).
+        image_range = ImageRangeReader()
 
         # An agent built outside a container has no counter attached, and one
         # per loop would issue ``ev_0001`` twice to the same buffer. It keeps
@@ -5823,6 +6424,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             repairs,
             self._context_budget(),
             on_question=self._count_question,
+            # The loaded image's range by the facts the run holds, read when a
+            # call given an address failed: the pack's and this agent's own.
+            image_range=lambda: image_range(
+                list(getattr(self, "pack_entries", None) or ()),
+                [*(getattr(self, "_evidence_entries", None) or ()), *recorder.entries],
+            ),
         )
         # Sent with every request of this loop, so counted with its conversation.
         self._tool_definition_chars = tool_definition_chars(recorded)
@@ -8716,7 +9323,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # saying it was not asked, and the technique goes through as claimed.
             return _settle_an_unanswered_turn(self, isr, initial, detail)
 
-        from langchain_core.messages import HumanMessage, SystemMessage
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
         # The validation turn is one tools-free call over the evidence text: it
         # asks for a fix to an answer, not for more looking, so the prompt it is
@@ -8786,6 +9393,27 @@ class BaseAnalyst(BudgetMeter, ABC):
         ):
             cards = False
             sent = with_question(messages, feedback_text(initial, closing=closing, cards=False))
+        # The retry is a tools-free turn, and the tool results the answer was
+        # written from are not in the conversation it is sent in: the ledger
+        # entries the answer cites are shown in front of the closing, as the
+        # analyst had them in view, as many as fit beside an answer of the cap
+        # the cards were measured with. What fitted before still fits.
+        bare_closing = closing
+        with_entries = BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
+            self,
+            isr,
+            messages,
+            closing,
+            lambda text: [
+                *messages,
+                AIMessage(content=str(_PriorAnswer(isr).content or "")),
+                HumanMessage(content=feedback_text(initial, closing=text, cards=cards)),
+            ],
+            max(widest, int(self.output_cap_tokens() or 0)),
+        )
+        if with_entries != closing:
+            closing = with_entries
+            sent = with_question(messages, feedback_text(initial, closing=closing, cards=cards))
         too_big = (loop_cuts or loop_repeat is not None) and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
             self, sent, widest
         )
@@ -8968,21 +9596,36 @@ class BaseAnalyst(BudgetMeter, ABC):
                 whole_answer_after_retry_question,
             )
 
-            asked = _with_feedback(
-                messages,
-                first_answer.answer_text or first_answer.to_text_summary(),
-                shown,
-                closing=closing,
-                cards=cards,
-            )
             retried_answer = raw_answers.get(id(retried), "")
             question = whole_answer_after_retry_question(why, techniques=techniques)
-            # A retry answer with no text is not sent back (``_with_feedback``'s
-            # rule): the question is asked at the end of the turn before it.
-            turns = (
-                [*asked, AIMessage(content=retried_answer), HumanMessage(content=question)]
-                if answer_text(retried_answer).strip()
-                else with_question(asked, question)
+
+            def _turns(text: str) -> list[Any]:
+                asked = _with_feedback(
+                    messages,
+                    first_answer.answer_text or first_answer.to_text_summary(),
+                    shown,
+                    closing=text,
+                    cards=cards,
+                )
+                # A retry answer with no text is not sent back (``_with_feedback``'s
+                # rule): the question is asked at the end of the turn before it.
+                return (
+                    [*asked, AIMessage(content=retried_answer), HumanMessage(content=question)]
+                    if answer_text(retried_answer).strip()
+                    else with_question(asked, question)
+                )
+
+            # The entries are fitted again: this turn also carries the retry's
+            # own answer and the question after it, beside a whole answer.
+            turns = _turns(
+                BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
+                    self,
+                    first_answer,
+                    messages,
+                    bare_closing,
+                    _turns,
+                    int(self.output_cap_tokens() or 0),
+                )
             )
             self.validation_retries += 1
             try:
@@ -9517,31 +10160,73 @@ class BaseAnalyst(BudgetMeter, ABC):
         each it keeps, and each it does not answer for, is put back into the
         answer as the first answer wrote it, and each it withdraws stays out.
         Every item is recorded with its state and the analyst's reason.
+
+        A retry that restates fewer of the first answer's claims than it
+        leaves out does not replace the first answer (:meth:`_restated_few`):
+        the question says so, and that the items stand beside the retry's
+        claims unless withdrawn. It also names each claim of the first answer
+        that holds no value and whose sentence no claim of the retry writes, so
+        no claim leaves the answer unasked.
         """
         drops = retry_drops(first_answer, retried, answer, asked_about, set_aside)
         if not drops:
             return retried
-        self.logger.warning(
-            "Validation: the kept retry for '%s' no longer states %d claim(s) and %d "
-            "finding(s) of the first answer; asking once whether to keep each.",
-            self.name,
-            len(drops.claims),
-            len(drops.findings),
+        restated = BaseAnalyst._restated_few(  # type: ignore[arg-type]
+            self, first_answer, retried, answer, drops, set_aside
         )
-        said = (
-            f"The kept retry no longer states {len(drops.claims)} claim(s) and "
-            f"{len(drops.findings)} finding(s) of the first answer; each is named to the "
-            "analyst once, to keep or withdraw with a reason."
-        )
+        question: Callable[..., str] = retry_drop_question
+        restated_said = ""
+        if restated is not None:
+            left_out = len(drops.claims)
+            drops = BaseAnalyst._with_unwritten_plain_claims(  # type: ignore[arg-type]
+                first_answer, retried, drops, set_aside
+            )
+            plain = len(drops.claims) - left_out
+            question = partial(
+                retry_restated_few_question, restated=restated, left_out=left_out, plain=plain
+            )
+            said = (
+                f"The retry restated {restated} of the first answer's claims that hold a value "
+                f"and left out {left_out}, so it does not replace the first answer: those "
+                f"{left_out} claim(s), {plain} claim(s) holding no value that the retry does not "
+                f"write and {len(drops.findings)} finding(s) stand beside the retry's claims, and "
+                "each is named to the analyst once, to keep or withdraw with a reason."
+            )
+            restated_said = said
+            self.logger.warning("Validation: for '%s', %s", self.name, said)
+            BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
+                self,
+                "validation_retry_restated",
+                {
+                    "restated_claims": restated,
+                    "left_out_claims": left_out,
+                    "plain_claims_asked": plain,
+                    "left_out_findings": len(drops.findings),
+                },
+            )
+        else:
+            self.logger.warning(
+                "Validation: the kept retry for '%s' no longer states %d claim(s) and %d "
+                "finding(s) of the first answer; asking once whether to keep each.",
+                self.name,
+                len(drops.claims),
+                len(drops.findings),
+            )
+            said = (
+                f"The kept retry no longer states {len(drops.claims)} claim(s) and "
+                f"{len(drops.findings)} finding(s) of the first answer; each is named to the "
+                "analyst once, to keep or withdraw with a reason."
+            )
         withdrawn = BaseAnalyst._ask_retry_drops(  # type: ignore[arg-type]
             self,
             drops,
-            retry_drop_question(drops),
+            question,
             said,
             answer,
             messages,
             left,
             int(retried.revision_round or 0),
+            restated=restated_said,
         )
         restored_claims: list[ClaimEvidence] = []
         restored_findings: list[Finding] = []
@@ -9560,6 +10245,71 @@ class BaseAnalyst(BudgetMeter, ABC):
                 "findings": [*(retried.findings or []), *restored_findings],
             }
         )
+
+    def _restated_few(
+        self,
+        first_answer: AgentISR,
+        retried: AgentISR,
+        answer: str,
+        drops: RetryDrops,
+        set_aside: Sequence[Any],
+    ) -> int | None:
+        """How many of the first answer's claims a retry restated, when fewer than it left out.
+
+        Restated by the values a claim holds (``claim_drops.dropped_claims``,
+        the identity ``retry_drops`` reads): a claim of the first answer that
+        holds a value, every one of which the retry states, and that is not set
+        aside. Left out: a claim among ``drops``. A claim whose only values the
+        retry states nowhere are technique ids it was asked about answered its
+        question, and is counted neither way, nor is a claim that holds no
+        value. A retry that restates fewer claims than it leaves out is more
+        another answer than a fix of this one, written in a tools-free turn,
+        and does not replace the first answer: what it left out stands beside
+        its claims unless the analyst withdraws it; ``None`` otherwise. The
+        caller says it once, in the run log and on the loop's record. Linear in
+        both answers.
+        """
+        from maljan.pipeline.claim_drops import dropped_claims
+
+        dropped = {id(claim) for claim, _missing in dropped_claims(first_answer, retried, answer)}
+        aside = {id(item) for item in set_aside}
+        restated = sum(
+            1
+            for claim in first_answer.claims
+            if id(claim) not in dropped
+            and id(claim) not in aside
+            and values_as_written(str(claim.claim), claim.technique_id or "")
+        )
+        if restated >= len(drops.claims):
+            return None
+        return restated
+
+    @staticmethod
+    def _with_unwritten_plain_claims(
+        first_answer: AgentISR, retried: AgentISR, drops: RetryDrops, set_aside: Sequence[Any]
+    ) -> RetryDrops:
+        """``drops`` with each first-answer claim that holds no value and the retry does not write.
+
+        ``retry_drops`` reads a claim by its values, so a claim that holds none
+        is never among them. Beside a retry that does not replace the first
+        answer, such a claim whose sentence (spacing aside) no claim of the
+        retry writes is named too, with no value, so the analyst keeps or
+        withdraws it. In the first answer's order. Linear in both answers.
+        """
+        sentences = {" ".join(str(c.claim).split()) for c in retried.claims}
+        aside = {id(item) for item in set_aside}
+        named = {id(claim): missing for claim, missing in drops.claims}
+        claims: list[tuple[Any, tuple[str, ...]]] = []
+        for claim in first_answer.claims:
+            if id(claim) in named:
+                claims.append((claim, named[id(claim)]))
+            elif (
+                id(claim) not in aside
+                and not values_as_written(str(claim.claim), claim.technique_id or "")
+                and " ".join(str(claim.claim).split()) not in sentences
+            ):
+                claims.append((claim, ()))
+        return RetryDrops(claims=tuple(claims), findings=drops.findings)
 
     def _settle_unplaced(
         self,
@@ -9599,7 +10349,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         withdrawn = BaseAnalyst._ask_retry_drops(  # type: ignore[arg-type]
             self,
             drops,
-            retry_unplaced_question(drops),
+            retry_unplaced_question,
             said,
             answer,
             messages,
@@ -9652,10 +10402,194 @@ class BaseAnalyst(BudgetMeter, ABC):
             }
         )
 
+    def _window_room_chars(self, cap: int) -> float | None:
+        """The characters a prompt may take beside an answer of ``cap`` tokens, or ``None``.
+
+        The job's learned window first, in the budget's own characters per
+        token; with none learned, the window recorded on the model as the
+        settings declared it or its server reported it, then the vendored
+        table's row for its family. ``None`` when no window is known.
+        """
+        from maljan.llm.context_window import WindowFact, built_window, table_window
+
+        budget = BaseAnalyst._context_budget(self)  # type: ignore[arg-type]
+        per_token = float(CHARS_PER_TOKEN)
+        tokens = 0
+        try:
+            learned = isinstance(getattr(budget, "window", None), WindowFact)
+            if budget is not None and learned and getattr(budget, "derives", False) is True:
+                per_token = float(budget.chars_per_token)
+                tokens = int(budget.window.tokens)
+            else:
+                model = getattr(self, "llm", None)
+                named = getattr(model, "model", None) or getattr(model, "model_name", None)
+                fact = built_window(model) or table_window(named if isinstance(named, str) else "")
+                tokens = int(fact.tokens) if fact is not None else 0
+        except Exception:  # noqa: BLE001 — a window that cannot be read is not known
+            return None
+        if tokens <= 0:
+            return None
+        return (tokens - int(cap)) * per_token
+
+    def _with_cited_entries(
+        self,
+        isr: AgentISR,
+        messages: list[Any],
+        closing: str,
+        turns: Callable[[str], list[Any]],
+        cap: int,
+    ) -> str:
+        """``closing`` with the ledger entries ``isr`` cites in front of it, as many as fit.
+
+        The entries are the ones its claims and findings cite that the
+        conversation does not hold, each as the analyst had it in view
+        (:func:`cited_entry_texts`), in the order first cited. ``turns`` is the
+        conversation the turn is sent as, for a closing; it is measured framed,
+        run-state block and all, against :meth:`_window_room_chars` for an
+        answer of ``cap`` tokens. The names of every entry are reserved first,
+        so taking an entry in never makes the turn outgrow the room; an entry
+        that does not fit beside those shown is named by id. When none fits,
+        ``closing`` is returned as it was: a line of names alone would only
+        make the turn longer. With no window known every entry is shown.
+        Nothing is cut. Linear in the entries.
+        """
+        cited = [
+            entry_id
+            for item in [*isr.claims, *(isr.findings or [])]
+            for entry_id in retry_drop_cited(item)
+        ]
+        entries = cited_entry_texts(self, cited, messages)
+        if not entries:
+            return closing
+
+        def _closing(shown: Mapping[str, str], unfit: Sequence[str]) -> str:
+            return f"{validation_entries_text(shown, unfit)}\n{closing}"
+
+        room = BaseAnalyst._window_room_chars(self, cap)  # type: ignore[arg-type]
+        if room is None:
+            return _closing(entries, ())
+        named = list(entries)
+        framed = frame_messages(turns(_closing({}, named)), run_state=current_run_state(self))
+        used = sum(len(str(getattr(m, "content", m) or "")) for m in framed)
+        # The head is written once any entry is shown.
+        used += len(validation_entries_text({"": ""})) + 1
+        shown: dict[str, str] = {}
+        unfit: list[str] = []
+        for entry_id, text in entries.items():
+            taken = len(text.rstrip()) + 1
+            if used + taken <= room:
+                shown[entry_id] = text
+                used += taken
+            else:
+                unfit.append(entry_id)
+        if not shown:
+            self.logger.warning(
+                "Validation: none of the %d ledger entries '%s' cites fits beside its "
+                "validation turn; it is asked without them.",
+                len(entries),
+                self.name,
+            )
+            return closing
+        if unfit:
+            self.logger.warning(
+                "Validation: %d of the %d ledger entries '%s' cites do not fit beside its "
+                "validation retry and are named by id: %s.",
+                len(unfit),
+                len(entries),
+                self.name,
+                ", ".join(unfit),
+            )
+        return _closing(shown, unfit)
+
+    def _retry_drop_parts(
+        self,
+        drops: RetryDrops,
+        question: Callable[..., str],
+        entries: Mapping[str, str],
+        answer: str,
+        messages: list[Any],
+    ) -> list[tuple[RetryDrops, dict[str, str], list[str]]]:
+        """The question's items in parts that each fit the window beside their own entries.
+
+        Each part is ``(items, entries shown, entries named as too large)``,
+        built when it is closed, so an entry named for a later item stays shown
+        in the part that was measured with it. Every turn is measured framed,
+        run-state block and all, against :meth:`_window_room_chars`: the framed
+        conversation once, and each part's question beside it. With no window
+        known the items are one part. Items are taken in order while the part
+        still fits; an item that does not fit alone first has named each entry
+        that cannot fit beside it even alone, then, if it still does not fit,
+        its largest entries, one at a time, until it does. Nothing is cut.
+        """
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        rows = drops.labelled()
+        room = BaseAnalyst._window_room_chars(  # type: ignore[arg-type]
+            self, int(self.output_cap_tokens() or 0)
+        )
+        unfit: set[str] = set()
+        framed = frame_messages(
+            [*messages, AIMessage(content=str(answer or "")), HumanMessage(content="")],
+            run_state=current_run_state(self),
+        )
+        conversation = sum(len(str(getattr(m, "content", m) or "")) for m in framed)
+
+        def _built(
+            part: list[_DropRow], named: set[str]
+        ) -> tuple[RetryDrops, dict[str, str], list[str]]:
+            items = RetryDrops(
+                claims=tuple((item, miss) for _l, kind, item, miss in part if kind == "claim"),
+                findings=tuple(item for _l, kind, item, _m in part if kind == "finding"),
+            )
+            cited = list(
+                dict.fromkeys(
+                    entry_id
+                    for _l, _k, item, _m in part
+                    for entry_id in retry_drop_cited(item)
+                    if entry_id in entries
+                )
+            )
+            shown = {entry_id: entries[entry_id] for entry_id in cited if entry_id not in named}
+            return items, shown, [entry_id for entry_id in cited if entry_id in named]
+
+        def _fits(part: list[_DropRow], named: set[str]) -> bool:
+            if room is None:
+                return True
+            items, shown, left_out = _built(part, named)
+            # Measured as a part of several: the longest form the turn takes.
+            asked = question(items, shown, unfit=left_out, part=(1, 2))
+            return conversation + len(asked) <= room
+
+        batches: list[tuple[RetryDrops, dict[str, str], list[str]]] = []
+        current: list[_DropRow] = []
+        # Named in the current part only, to let its item fit; an entry that
+        # cannot fit beside its item even alone is named wherever it is cited.
+        in_part: set[str] = set()
+        for row in rows:
+            if _fits([*current, row], unfit | in_part):
+                current.append(row)
+                continue
+            if current:
+                batches.append(_built(current, unfit | in_part))
+            current, in_part = [row], set()
+            own = [e for e in retry_drop_cited(row[2]) if e in entries and e not in unfit]
+            for entry_id in own:
+                if not _fits(current, unfit | (set(own) - {entry_id})):
+                    unfit.add(entry_id)
+            for entry_id in sorted(
+                (e for e in own if e not in unfit), key=lambda e: len(entries[e]), reverse=True
+            ):
+                if _fits(current, unfit | in_part):
+                    break
+                in_part.add(entry_id)
+        if current:
+            batches.append(_built(current, unfit | in_part))
+        return batches
+
     def _ask_retry_drops(
         self,
         drops: RetryDrops,
-        question: str,
+        question: Callable[..., str],
         said: str,
         answer: str,
         messages: list[Any],
@@ -9663,14 +10597,40 @@ class BaseAnalyst(BudgetMeter, ABC):
         revision_round: int,
         *,
         merged: bool = False,
+        restated: str = "",
     ) -> set[int]:
-        """Ask once about ``drops``, record every item, and return the ids of the items withdrawn.
+        """Ask about ``drops``, record every item, and return the ids of the items withdrawn.
 
-        The question follows the retry as the analyst wrote it. Each item is
+        The question follows the retry as the analyst wrote it, and shows the
+        ledger entries the items cite that the conversation does not hold,
+        whole: the retry and this question are tools-free turns, and the tool
+        results the first answer read are in neither. Items whose entries do
+        not fit beside the conversation together are asked in parts, each
+        beside its own entries (:meth:`_retry_drop_parts`). Each item is
         recorded (``retry_drop_row``) as kept, withdrawn or not answered, with
         the analyst's reason; an item not answered is not withdrawn.
+
+        ``restated`` is the message of ``RETRY_RESTATED_FEW_CODE`` when the
+        question is also asked under it: it then has the drops code's events,
+        retried then resolved or survived, and is counted as fed back as it is.
         """
+        from langchain_core.messages import AIMessage, HumanMessage
+
         labelled = drops.labelled()
+        cited = [entry_id for _l, _k, item, _m in labelled for entry_id in retry_drop_cited(item)]
+        entries = cited_entry_texts(self, cited, messages)
+        asked_in = BaseAnalyst._retry_drop_parts(  # type: ignore[arg-type]
+            self, drops, question, entries, answer, messages
+        )
+        named = sorted({entry_id for _items, _shown, unfit in asked_in for entry_id in unfit})
+        if len(asked_in) > 1 or named:
+            self.logger.warning(
+                "Validation: the kept-retry drops question for '%s' is asked in %d part(s), each "
+                "beside the entries its items cite; %s.",
+                self.name,
+                len(asked_in),
+                f"too large to show even alone: {', '.join(named)}" if named else "all shown",
+            )
         from maljan.pipeline.events import (
             VALIDATION_RESOLVED,
             VALIDATION_RETRIED,
@@ -9679,58 +10639,73 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
 
         stage = str(getattr(self, "pipeline_stage", "") or "analysis")
-        emit_validation_feedback(
-            self._event_sink(),
-            stage=stage,
-            agent=str(self.name),
-            code=RETRY_DROPPED_CODE,
-            message=said,
-            retry_index=1,
-            state=VALIDATION_RETRIED,
-        )
-        decided: dict[str, tuple[str, str]] = {}
-        try:
-            from langchain_core.messages import AIMessage, HumanMessage
 
-            turns = [
-                *messages,
-                AIMessage(content=str(answer or "")),
-                HumanMessage(content=question),
-            ]
-            reply = self._invoke_llm_with_timeout(
-                frame_messages(turns, run_state=current_run_state(self)),
-                left,
-                what=RETRY_DROPS_QUESTION_CALL,
+        def _emit(state: str) -> None:
+            emit_validation_feedback(
+                self._event_sink(),
+                stage=stage,
+                agent=str(self.name),
+                code=RETRY_DROPPED_CODE,
+                message=said,
+                retry_index=1,
+                state=state,
             )
-            decided = read_retry_drop_answers(
-                answer_text(getattr(reply, "content", reply)), [row[0] for row in labelled]
+            if restated:
+                emit_validation_feedback(
+                    self._event_sink(),
+                    stage=stage,
+                    agent=str(self.name),
+                    code=RETRY_RESTATED_FEW_CODE,
+                    message=restated,
+                    retry_index=1,
+                    state=state,
+                )
+
+        _emit(VALIDATION_RETRIED)
+        decided: dict[int, tuple[str, str]] = {}
+        for number, (items, shown, unfit) in enumerate(asked_in, start=1):
+            part_rows = items.labelled()
+            asked = question(
+                items,
+                shown,
+                unfit=unfit,
+                part=(number, len(asked_in)) if len(asked_in) > 1 else None,
             )
-        except Exception as exc:  # noqa: BLE001 — unanswered, the first answer's items stay
-            self.logger.warning(
-                "Validation: the kept-retry drops question for '%s' was not answered (%s).",
-                self.name,
-                describe_exception_for_log(exc),
-            )
-        emit_validation_feedback(
-            self._event_sink(),
-            stage=stage,
-            agent=str(self.name),
-            code=RETRY_DROPPED_CODE,
-            message=said,
-            retry_index=1,
-            state=(
-                VALIDATION_RESOLVED
-                if all(row[0] in decided for row in labelled)
-                else VALIDATION_SURVIVED
-            ),
+            try:
+                turns = [
+                    *messages,
+                    AIMessage(content=str(answer or "")),
+                    HumanMessage(content=asked),
+                ]
+                reply = self._invoke_llm_with_timeout(
+                    frame_messages(turns, run_state=current_run_state(self)),
+                    left,
+                    what=RETRY_DROPS_QUESTION_CALL,
+                )
+                read = read_retry_drop_answers(
+                    answer_text(getattr(reply, "content", reply)), [row[0] for row in part_rows]
+                )
+            except Exception as exc:  # noqa: BLE001 — unanswered, the first answer's items stay
+                self.logger.warning(
+                    "Validation: the kept-retry drops question for '%s' was not answered (%s).",
+                    self.name,
+                    describe_exception_for_log(exc),
+                )
+                continue
+            for label, _kind, item, _missing in part_rows:
+                if label in read:
+                    decided[id(item)] = read[label]
+        _emit(
+            VALIDATION_RESOLVED
+            if all(id(row[2]) in decided for row in labelled)
+            else VALIDATION_SURVIVED
         )
         self.validation_retries += 1
-        self.validation_fed_back[RETRY_DROPPED_CODE] = (
-            self.validation_fed_back.get(RETRY_DROPPED_CODE, 0) + 1
-        )
+        for code in (RETRY_DROPPED_CODE, *((RETRY_RESTATED_FEW_CODE,) if restated else ())):
+            self.validation_fed_back[code] = self.validation_fed_back.get(code, 0) + 1
         withdrawn: set[int] = set()
-        for label, kind, item, missing in labelled:
-            decision, reason = decided.get(label, ("", ""))
+        for _label, kind, item, missing in labelled:
+            decision, reason = decided.get(id(item), ("", ""))
             if decision == "WITHDRAW":
                 state = RETRY_DROP_WITHDRAWN
                 withdrawn.add(id(item))
@@ -9848,6 +10823,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         revision_round: int = 1,
         *,
         read_places: bool = False,
+        cited_entries: Mapping[str, str] | None = None,
     ) -> tuple[str, AgentISR]:
         """Wrapper around revise_isr() with error handling, checked like a first answer.
 
@@ -9864,6 +10840,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         holds no listing of (``debate_facts.place_facts``): the revision is
         given this agent's tools (``revision_answer``), and the model decides
         whether to read it.
+
+        ``cited_entries`` are the stored texts of the ledger entries the
+        contested lines naming this agent cite (``debate_facts.line_entry_ids``),
+        by id: shown after the feedback, whole, as many as the input room
+        leaves beside the raw data, which they never shorten
+        (:meth:`_revision_entries`).
         """
         self.current_round = int(revision_round)
         with lock_for(self):
@@ -9880,6 +10862,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     mediator_feedback,
                     revision_round,
                     read_places=read_places,
+                    cited_entries=cited_entries,
                 )
             finally:
                 self._measured_peers = ()
@@ -9894,14 +10877,29 @@ class BaseAnalyst(BudgetMeter, ABC):
         revision_round: int,
         *,
         read_places: bool,
+        cited_entries: Mapping[str, str] | None = None,
     ) -> tuple[str, AgentISR]:
         """:meth:`safe_revise_isr`'s body, run under the agent's lock."""
+        self.revision_entries_shown: tuple[str, ...] = ()
         try:
             # The raw data sits beside the reports and the feedback in the
             # revision prompt, so it has the input room less them.
             beside = len(own_report or "") + len(mediator_feedback or "")
             beside += sum(len(str(r)) for r in (peer_reports or {}).values() if r)
             truncated = self._truncate_input(original_data, beside)
+            # The entries come after the raw data has its room: what is left
+            # of the room is theirs, so they never shorten it.
+            block = (
+                self._revision_entries(cited_entries, original_data, truncated, beside)
+                if cited_entries
+                else ""
+            )
+            if block:
+                mediator_feedback = (
+                    f"{mediator_feedback}\n\n{block}" if mediator_feedback else block
+                )
+            # The entries shown are text the revision read, as its raw data is.
+            grounds = f"{truncated}\n\n{block}" if block else truncated
             self._last_loop_deadline = None
             self._answer_unstructured = False
             self._revision_reads = bool(read_places)
@@ -9914,13 +10912,84 @@ class BaseAnalyst(BudgetMeter, ABC):
             isr = self._drain_findings(isr)
             if not isr.answer_text:
                 isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))
-            checked = self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
-            return text, self._drain_findings(checked)
+            # Read before the validation turn: a retry it asks for may write
+            # claims, and the revision node must still know that the revision
+            # itself wrote none and so decided nothing about the claims in force.
+            # A claim block the parser could not read (no confidence, or one
+            # it cannot read) is a claim the revision wrote: only a revision
+            # that began none is one that decided nothing.
+            wrote_no_claim = (
+                not isr.claims
+                and str(isr.status or "") == NO_STRUCTURED_REPORT_STATUS
+                and not isr.blocks_without_confidence
+                and not isr.confidence_unreadable
+                and count_claims_begun(str(text or "")) == 0
+            )
+            gated = self._apply_consistency_gate(isr, grounds)
+            # The revision's own answer as the validation turn is given it,
+            # read before the turn: what the turn leaves in force is compared
+            # with this, whatever the turn does to the object it was given.
+            written = (gated.answer_text, _answer_items(gated))
+            checked = self._validate_isr(gated, grounds)
+            checked = self._drain_findings(checked)
+            if wrote_no_claim:
+                checked.note_revision_wrote_no_claim()
+                # A revision that decided nothing is settled by the revision
+                # node, which keeps what it wrote on the record as written.
+                return text, checked
+            # The written answer goes back as written, for the record; the
+            # answer in force, when the turn changed it, is noted on the ISR
+            # for the prompts, with the kept retry's own words.
+            in_force = answer_in_force_text(text, written, checked)
+            if in_force != text:
+                retry_words = (
+                    checked.answer_text
+                    if checked.answer_text and checked.answer_text != written[0]
+                    else ""
+                )
+                checked.note_report_in_force(in_force, retry_words)
+            return text, checked
         except AnalystError:
             raise
         except Exception as e:
             self.logger.error("ISR revision failed: %s", e)
             raise AnalystError(f"{self.name} ISR revision failed: {e}") from e
+
+    def _revision_entries(
+        self, entries: Mapping[str, str], data: str, truncated: str, beside: int
+    ) -> str:
+        """The entries block a revision shows after its feedback, or ``""``.
+
+        Sized by the input room (:meth:`_input_room_chars`) less what the
+        request already carries beside its raw data and the raw data as it is
+        sent: the entries take what the raw data leaves (``debate_facts
+        .fit_entries``), each whole, an entry that does not fit named by id.
+        With no room known every entry is shown. What was shown, and what was
+        named, is kept on ``revision_entries_shown`` for the round's record.
+        """
+        from maljan.pipeline.debate_facts import entries_block, fit_entries
+
+        room = self._input_room_chars(data)
+        left = None if room is None else max(0, room - max(0, int(beside)) - len(truncated))
+        shown, unfit = fit_entries(entries, left)
+        self.revision_entries_shown = tuple(shown)
+        if unfit:
+            self.logger.warning(
+                "Revision: %d of the %d ledger entries the lines naming '%s' cite do not fit "
+                "beside its revision and are named by id: %s.",
+                len(unfit),
+                len(entries),
+                self.name,
+                ", ".join(unfit),
+            )
+        elif not shown:
+            self.logger.warning(
+                "Revision: none of the %d ledger entries the lines naming '%s' cite fits beside "
+                "its revision; it revises without them.",
+                len(entries),
+                self.name,
+            )
+        return entries_block(shown, unfit)
 
     # ------------------------------------------------------------------
     # Private helpers

@@ -47,6 +47,18 @@ class EnrichmentSourceStatus(BaseModel):
     configured: bool
 
 
+class UnavailableToolStatus(BaseModel):
+    """A tool the stored team would call that this host cannot run, with why and the remedy."""
+
+    server: str
+    tool: str
+    reason: str
+    remediation: str = ""
+    still_answers: str = ""
+    degradation_reason: str
+    manifest_code: str = ""
+
+
 class SystemStatusResponse(BaseModel):
     app_name: str
     app_version: str
@@ -85,6 +97,17 @@ class SystemStatusResponse(BaseModel):
             "its label and whether it is configured. Never a credential. Signed-in "
             "callers only — omitted for anonymous requests, and when the sources "
             "could not be read."
+        ),
+    )
+    unavailable_tools: list[UnavailableToolStatus] | None = Field(
+        default=None,
+        description=(
+            "Every tool the stored default team would call that the host running "
+            "its server cannot run: the server, the tool, the server's own reason, "
+            "the remedy, what it still answers and the words a run's degraded block "
+            "would use. Checked without starting anything (an import path lookup, "
+            "an executable looked for). Signed-in callers only — omitted for "
+            "anonymous requests, and when the settings could not be read."
         ),
     )
     throttle: dict[str, object] | None = Field(
@@ -217,6 +240,23 @@ async def _enrichment_sources() -> list[EnrichmentSourceStatus] | None:
     ]
 
 
+async def _unavailable_tools() -> list[UnavailableToolStatus] | None:
+    """The tools the stored team would call that this host lacks; ``None`` when unknown.
+
+    The same check ``POST /jobs`` makes for the job it accepts
+    (``services.tool_availability``), here for the team a job gets when it
+    names none, so the console says it before anyone submits.
+    """
+    try:
+        from app.services.tool_availability import as_rows, unavailable_tools
+
+        found = unavailable_tools(await runtime_config.core())
+    except Exception as exc:  # noqa: BLE001 — the status degrades, it never fails
+        logger.warning("tool availability could not be read (%s)", type(exc).__name__)
+        return None
+    return [UnavailableToolStatus(**row) for row in as_rows(found)]
+
+
 @router.get("/status", response_model=SystemStatusResponse, response_model_exclude_none=True)
 async def system_status(
     user: User | None = Depends(optional_current_user),
@@ -245,6 +285,8 @@ async def system_status(
         ),
         # Source keys and labels are an operator's own names: signed-in callers only.
         enrichment_sources=sources if user is not None else None,
+        # Which libraries the host lacks is an operator's detail: signed-in callers only.
+        unavailable_tools=await _unavailable_tools() if user is not None else None,
         throttle=throttle_state() if is_admin else None,
         audit_write_failures=observability.counters.audit_write_failures if is_admin else None,
         jwt_grace_secret=_grace_secret_state() if is_admin else None,

@@ -63,11 +63,16 @@ from maljan.pipeline.validation import (
     SECTION_CUT_CODE,
     UNPUBLISHED_VALUE_CODE,
     CapabilityGrounding,
+    ComparedValues,
     EntryTexts,
     ValidationTally,
     Validator,
     Violation,
+    absence_holders_note,
+    both_bases,
     citation_violations,
+    command_value_violations,
+    compared_values,
     configuration_citation_violations,
     flow_voice_violations,
     identifier_citation_violations,
@@ -271,7 +276,12 @@ _INSTRUCTIONS: dict[str, str] = {
         "claim above says what the sample uses the value for, in that claim's sense, and "
         "leave the purpose empty where neither says."
     ),
-    "commands": "Extract the commands the sample accepts from its operator.",
+    "commands": (
+        "Extract the commands the sample accepts from its operator. Where the code you are "
+        "shown takes one branch per command value, give each command the value its branch is "
+        "taken on as its id, in one base for every row, and describe what that branch's own "
+        "code does."
+    ),
     "encryption_scheme": "Extract the encryption scheme.",
     "cli_flags": "Extract command-line flags.",
     "ransom_note": "Extract the ransom note.",
@@ -534,7 +544,14 @@ def _bundle_text(
             claim = f"{c.get('claim', '')} — {c.get('evidence_ref', '')}"
             label = f"[{c['label']}] " if c.get("label") else ""
             shown = _within_view(claim, item_chars, quoted_value)
-            lines.append(f"- {label}{shown}" + _where_quoted(claim, entries))
+            # What the ledger holds of anything the claim says is absent: the
+            # analyst's view is not the run's (``absence_holders_note``). It
+            # shares the claim's room: what the claim's view left of it.
+            held = absence_holders_note(claim, entries)
+            if held and item_chars is not None:
+                left = item_chars - (len(shown) - len(quoted_value(""))) if item_chars >= 0 else -1
+                held = _within_view(held, left, str) if left != 0 else ""
+            lines.append(f"- {label}{shown}" + _where_quoted(claim, entries) + held)
         lines.append("")
     tools = bundle.get("tool_outputs") or []
     if tools:
@@ -544,8 +561,130 @@ def _bundle_text(
             shown = _within_view(str(t.get("output", "") or ""), item_chars, _captured_view)
             lines.append(f"- {quoted_value(str(t.get('tool', '') or ''))}{sym}:")
             lines.append(shown)
+            lines.extend(_output_facts(str(t.get("output", "") or ""), item_chars)[0])
         lines.append("")
+    lines.extend(_function_lines(bundle, measuring=item_chars is not None and item_chars < 0))
     return "\n".join(lines)
+
+
+# The headings of the batch functions a section is shown (``evidence_bundles.function_table``).
+FUNCTION_CODE_HEADING = (
+    "FUNCTION CODE (each function a batch decompiled, shown once in the report's sections; "
+    "cite it as written after it):"
+)
+FUNCTION_INDEX_HEADING = (
+    "FUNCTIONS WHOSE CODE ANOTHER SECTION IS SHOWN (cite one as written; its code is not here):"
+)
+
+
+def _function_lines(bundle: dict[str, Any], *, measuring: bool = False) -> list[str]:
+    """The batch functions a section is shown, each whole, and the ones another section shows.
+
+    Each function's code is shown whole, never cut to a share of the window:
+    it is shown in one section of the report, and the claims and the tool
+    answers keep the share they had without it (``ReportComposer._section``
+    measures the prompt with this block out, ``measuring``, and states a
+    prompt the block takes past the window). Each function says how it is
+    cited: its entries, then the function.
+    """
+    if measuring:
+        return []
+    lines: list[str] = []
+    shown = bundle.get("function_code") or []
+    if shown:
+        lines.append(FUNCTION_CODE_HEADING)
+        for row in shown:
+            cites = "; ".join(quoted_value(str(c)) for c in row.get("cites") or [])
+            notes = "; ".join(str(n) for n in row.get("notes") or [])
+            lines.append(
+                f"- {quoted_value(str(row.get('tool', '')))} [{quoted_value(str(row['symbol']))}]"
+                + (f" (cite as {cites})" if cites else "")
+                + (f" ({notes})" if notes else "")
+                + ":"
+            )
+            lines.append(_captured_view(str(row.get("output", "") or "")))
+            lines.extend(_compared_lines(str(row.get("output", "") or "")))
+        lines.append("")
+    listed = bundle.get("function_index") or []
+    if listed:
+        lines.append(FUNCTION_INDEX_HEADING)
+        for row in listed:
+            cites = "; ".join(quoted_value(str(c)) for c in row.get("cites") or [])
+            lines.append(
+                f"- {quoted_value(str(row['symbol']))}"
+                + (f" — {cites}" if cites else "")
+                + f" — {int(row.get('chars') or 0):,} characters"
+                + f" — shown in {', '.join(row.get('shown_in') or [])}"
+            )
+        lines.append("")
+    return lines
+
+
+# Said under a piece of code a section is shown whole that compares one
+# expression with two or more whole numbers (``validation.compared_values``):
+# the values as the platform read them, each in hex with its decimal, so a
+# table built on them needs no conversion between bases of the writer's own.
+COMPARED_VALUES_LEAD = "Read by the platform from the code above:"
+
+
+def _compared_lines(code: str) -> list[str]:
+    """The fact lines stated under ``code``: each expression it compares, with the values."""
+    return _lines_of(compared_values(code))
+
+
+def _lines_of(compared: list[tuple[str, tuple[int, ...]]]) -> list[str]:
+    return [
+        f"{COMPARED_VALUES_LEAD} it compares {quoted_value(subject)} for equality with "
+        f"{len(values)} values: {', '.join(both_bases(value) for value in values)}."
+        for subject, values in compared
+    ]
+
+
+def _output_facts(
+    text: str, chars: int | None
+) -> tuple[list[str], list[tuple[str, tuple[int, ...]]]]:
+    """The fact lines stated under a captured output, and what they state, within ``chars``.
+
+    Stated only under an output :func:`_within_view` shows whole, and only
+    when the output's view and the lines together fit the output's own share
+    ``chars``: the lines are charged to that share, so a prompt measured with
+    each output empty still holds them. ``None`` is a share with no bound.
+    Linear in the length of ``text``.
+    """
+    if chars is not None and (chars <= 0 or len(text) > chars):
+        return [], []
+    compared = compared_values(text)
+    lines = _lines_of(compared)
+    if not lines:
+        return [], []
+    if chars is not None:
+        shown = len(_captured_view(text)) - len(_captured_view(""))
+        if shown + sum(len(line) + 1 for line in lines) > chars:
+            return [], []
+    return lines, compared
+
+
+def code_compared_values(bundle: dict[str, Any], item_chars: int | None) -> list[ComparedValues]:
+    """The values the code a section's prompt shows whole compares, as its fact lines state them.
+
+    Each function a batch decompiled (always shown whole), named by its place
+    and how it is cited, and each captured tool output whose facts its share
+    of the window holds (:func:`_output_facts`), named by its tool and symbol,
+    as the prompt names them.
+    """
+    found: list[ComparedValues] = []
+    for row in bundle.get("function_code") or []:
+        cites = "; ".join(str(c) for c in row.get("cites") or [])
+        where = str(row.get("symbol") or "") + (f" (cite as {cites})" if cites else "")
+        found.extend(
+            ComparedValues(where, subject, values)
+            for subject, values in compared_values(str(row.get("output", "") or ""))
+        )
+    for t in bundle.get("tool_outputs") or []:
+        _lines, compared = _output_facts(str(t.get("output", "") or ""), item_chars)
+        where = str(t.get("tool") or "") + (f" [{t['symbol']}]" if t.get("symbol") else "")
+        found.extend(ComparedValues(where, subject, values) for subject, values in compared)
+    return found
 
 
 def _fact_line(key: str, value: Any) -> str:
@@ -976,6 +1115,9 @@ class ReportComposer:
         # The IOC table's answers, set per ``compose`` call; ``None`` asks no
         # section about a value's publish state.
         self._answers: Any = None
+        # The values each section's code compares one expression with, as the
+        # section was shown that code, by section; set when its prompt is built.
+        self._compared: dict[str, list[ComparedValues]] = {}
         # What this report lost or had trimmed, in the words the report's own
         # degradation reasons are written in. A section dropped after its
         # retries used to leave the report with no conclusion and nothing
@@ -1208,7 +1350,17 @@ class ReportComposer:
                 ],
                 _identifiers,
             ),
-            _Planned("commands", _CommandsOut, _INSTRUCTIONS["commands"], None, _commands),
+            _Planned(
+                "commands",
+                _CommandsOut,
+                _INSTRUCTIONS["commands"],
+                [
+                    lambda p: command_value_violations(
+                        p, (getattr(self, "_compared", None) or {}).get("commands") or []
+                    )
+                ],
+                _commands,
+            ),
             _Planned(
                 "encryption_scheme",
                 EncryptionScheme,
@@ -1549,6 +1701,20 @@ class ReportComposer:
         human = "\n\n".join(
             [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars)]
         )
+        # The values the code this prompt shows compares, as its fact lines state them.
+        compared = getattr(self, "_compared", None)
+        if compared is None:
+            compared = self._compared = {}
+        compared[section] = code_compared_values(bundle, item_chars)
+        whole = len(_SYSTEM) + len(human)
+        if room is not None and bundle.get("function_code") and whole > room:
+            # The functions' code is shown whole beside the share the rest
+            # keeps: a prompt it takes past the window is stated, never cut.
+            self._note_degradation(
+                f"The {section} section's prompt with the code of the functions it is shown "
+                f"({whole} characters) exceeds the {room} its model's context window leaves "
+                "after the reply."
+            )
         # How much of the text is the head the other sections of its group
         # repeat, noted on the request for a provider that caches a prefix
         # only at a breakpoint (``anthropic_history.SHARED_HEAD``); no request

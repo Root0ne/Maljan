@@ -1453,6 +1453,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\1555DJ6s.exe"
         ],
+        "pids": [
+          "5492"
+        ],
         "sha256": "d3c020abb8e00145bd42bf8e1860cd36e3dd62821cbaeade1e72bd61d217ba69",
         "size": 6192640,
         "type": "PE32 executable (GUI) Intel 80386, for MS Windows"
@@ -1463,6 +1466,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\~DF4E9A04EDBE452AAF.TMP"
+        ],
+        "pids": [
+          "3832"
         ],
         "sha256": "bfb307f23d27f5df4596266bdb312b5731ba4ca60eff8a2ab4a718041d4e83a6",
         "size": 5632,
@@ -1475,6 +1481,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\ntWsIHhF.exe"
         ],
+        "pids": [
+          "5492"
+        ],
         "sha256": "82e7d163af4dc995fc8be34f7ec340262a02aa66626eec1a5267c2b3cff51240",
         "size": 3152384,
         "type": "PE32 executable (GUI) Intel 80386, for MS Windows"
@@ -1485,6 +1494,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\~DFB1C2847C3A089CE7.TMP"
+        ],
+        "pids": [
+          "7100"
         ],
         "sha256": "9151bb9babc4d684600a80e11587fdfbb64ceeca9ffeb447f4ee6d78342a3dcb",
         "size": 5632,
@@ -1497,6 +1509,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\rML9rAf4.ico"
         ],
+        "pids": [
+          "5492"
+        ],
         "sha256": "fa70c31948f97e4584ea5cbc429399b0a5e744bb5532277cbfd4f91efeb372db",
         "size": 4286,
         "type": "MS Windows icon resource - 1 icon, 32x32, 32 colors"
@@ -1507,6 +1522,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\ntWsIHhF.ico"
+        ],
+        "pids": [
+          "5492"
         ],
         "sha256": "f8e34236737e8222b4d63ae761020b3846f4e0acf0a85a210155b5a4c2ea2503",
         "size": 4286,
@@ -1519,6 +1537,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\Cs4xLjJN.exe"
         ],
+        "pids": [
+          "5492"
+        ],
         "sha256": "f57267dc5f679a2e1e0be7fa56a4c790e9690968b2d7cdf4e0064a008e88a2b7",
         "size": 2202112,
         "type": "PE32 executable (GUI) Intel 80386, for MS Windows"
@@ -1529,6 +1550,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\~DF6065BD10926E4605.TMP"
+        ],
+        "pids": [
+          "9124"
         ],
         "sha256": "e6d5ca403b988a0cad6da0b4b00305f846f5aa1e9309bc78c3343486c68fe870",
         "size": 5632,
@@ -1541,6 +1565,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\rML9rAf4.exe"
         ],
+        "pids": [
+          "5492"
+        ],
         "sha256": "34de8ad63d1f37555bd24fa542da1994539cb07c771770885f82a08f308df99c",
         "size": 61627392,
         "type": "PE32 executable (GUI) Intel 80386, for MS Windows"
@@ -1551,6 +1578,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\Cs4xLjJN.ico"
+        ],
+        "pids": [
+          "5492"
         ],
         "sha256": "df12f1737dd2df348d1b7daea5425a4851af0f51ab7a540360ca3a7e686f590c",
         "size": 4286,
@@ -1563,6 +1593,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\~DFEA38329409505EEC.TMP"
         ],
+        "pids": [
+          "6376"
+        ],
         "sha256": "ec78ebc8d86a7adef5fd1e204bea834476ec73f52385de7bd61c995514ddcb0a",
         "size": 5632,
         "type": "Composite Document File V2 Document, Cannot read section info"
@@ -1573,6 +1606,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\1555DJ6s.ico"
+        ],
+        "pids": [
+          "5492"
         ],
         "sha256": "61d741dc4ecb3a0e7028e0f02352aef68bad60b99ed4b80b48e795956042bd08",
         "size": 4286,

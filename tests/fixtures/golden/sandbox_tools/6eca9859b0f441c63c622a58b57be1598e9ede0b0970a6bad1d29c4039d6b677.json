@@ -1291,6 +1291,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\gobioid"
         ],
+        "pids": [
+          "1484"
+        ],
         "sha256": "d0ac4c168fc9d836b185fdb4f5221f81ee1c18e0ef3598b6e7dbaee860e91cf1",
         "size": 269312,
         "type": "data"

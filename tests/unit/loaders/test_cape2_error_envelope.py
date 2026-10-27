@@ -288,3 +288,71 @@ class TestTheCapeReportIsReadWhole:
         out = c.fetch_pcap("7", tmp_path)
         assert out is not None
         assert os.stat(out).st_mode & 0o777 == 0o600
+
+
+class TestACaptureThatFailsToFetchIsNeverLostSilently:
+    """T-336: a capture CAPE offered and did not hand over is said, with why."""
+
+    def _client(self, answers: list[Any]) -> tuple[CAPEv2Client, list[float]]:
+        import httpx
+
+        pending = list(answers)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            answer = pending.pop(0) if len(pending) > 1 else pending[0]
+            if isinstance(answer, Exception):
+                raise answer
+            if isinstance(answer, bytes):
+                return httpx.Response(200, content=answer, headers={"content-type": OCTETS})
+            return httpx.Response(answer)
+
+        with patch("httpx.Client"):
+            c = CAPEv2Client(base_url="http://cape.invalid:8000", api_token="t")
+        c._http = httpx.Client(
+            base_url="http://cape.invalid:8000", transport=httpx.MockTransport(handler)
+        )
+        slept: list[float] = []
+        c._sleep = slept.append
+        return c, slept
+
+    def test_a_502_then_success_fetches_the_capture(self, tmp_path) -> None:
+        c, slept = self._client([502, PCAP_HEAD + b"\0" * 60])
+        out = c.fetch_pcap("7", tmp_path, poll_interval_seconds=4)
+        assert out is not None and os.path.getsize(out) == 64
+        assert slept == [4.0]
+
+    def test_a_502_every_time_is_the_degraded_reason_with_the_status(self, tmp_path) -> None:
+        from maljan.providers.errors import ArtefactFetchFailed
+
+        c, slept = self._client([502])
+        with pytest.raises(ArtefactFetchFailed) as exc:
+            c.fetch_pcap("7", tmp_path, poll_interval_seconds=4)
+        assert exc.value.reason == "packet capture not fetched (HTTP 502)"
+        assert slept == [4.0, 6.0]
+        assert not list(tmp_path.iterdir())
+
+    def test_an_exception_is_the_degraded_reason_with_its_type(self, tmp_path) -> None:
+        import httpx
+
+        from maljan.providers.errors import ArtefactFetchFailed
+
+        c, _slept = self._client([httpx.ReadTimeout("timed out")])
+        with pytest.raises(ArtefactFetchFailed) as exc:
+            c.fetch_pcap("7", tmp_path)
+        assert exc.value.reason == "packet capture not fetched (ReadTimeout)"
+
+    def test_an_empty_file_is_its_own_reason(self, tmp_path) -> None:
+        from maljan.providers.errors import ArtefactFetchFailed
+
+        c, slept = self._client([b"\0" * 10])
+        with pytest.raises(ArtefactFetchFailed) as exc:
+            c.fetch_pcap("7", tmp_path)
+        assert exc.value.reason == "packet capture fetched empty (10 bytes)"
+        assert exc.value.empty is True
+        assert slept == []
+        assert not list(tmp_path.iterdir())
+
+    def test_no_capture_offered_stays_none(self, tmp_path) -> None:
+        c, slept = self._client([404])
+        assert c.fetch_pcap("7", tmp_path) is None
+        assert slept == []

@@ -61,6 +61,10 @@ MEDIATION_FAILED = "mediation_failed"
 NOT_APPLICABLE_PHRASE = "not applicable; no agreement was measured"
 NOT_APPLICABLE_SENTENCE = f"Consensus: {NOT_APPLICABLE_PHRASE}."
 
+# What every surface heads the operator's choices with: what the configuration
+# left out, apart from what limited the run (``pipeline.operator_choice``).
+OPERATOR_CHOICES_HEADING = "Not configured or withheld by choice"
+
 
 @dataclass
 class NegotiationMetrics:
@@ -115,6 +119,11 @@ class NegotiationMetrics:
     dropped_value_counts: list[dict[str, Any]] = field(default_factory=list)
     # The lines written with a mark the platform did not honour; they blocked.
     unread_marks: list[str] = field(default_factory=list)
+    # Each mediator answer, whole and masked (``AgentArgument.answer``), with
+    # its round: the argument's position in ``discussion_history``, counted
+    # from 1 as ``negotiation_log`` counts it. The text the final block can be
+    # read again from after the run.
+    mediator_answers: list[dict[str, str]] = field(default_factory=list)
     # How many lines the last mediation marked not blocking.
     not_blocking_at_end: int = 0
     # The blocking lines every count of which the ledger states, after the
@@ -531,12 +540,19 @@ def usage_totals(calls: Iterable[Any], meter: Callable[[], Any]) -> dict[str, An
 
 
 def server_rest_sentence(row: dict[str, Any]) -> str:
-    """One rested tool server, in the words the report and the console print."""
+    """One rested tool server, in the words the report and the console print.
+
+    Named by its display name and its key (``Label (key)``) where the row
+    carries a label other than the key, else by its key alone.
+    """
     failures = int(row.get("failures") or 0)
     noun = "call" if failures == 1 else "calls"
     reason = str(row.get("reason") or "").strip()
+    key = str(row.get("server", "") or "")
+    label = str(row.get("label") or "")
+    name = f"{label} ({key})" if label and label != key else key
     return (
-        f"Tool server {row.get('server', '')!s} was rested for "
+        f"Tool server {name!s} was rested for "
         f"{float(row.get('cooldown_s') or 0):.0f} s after {failures} {noun} in a row it did not "
         "answer" + (f" (the last: {reason})" if reason else "") + "."
     )
@@ -1170,6 +1186,10 @@ class RunSummary:
                             errors).
         degradation_reasons: Human-readable bullets explaining why this run
                             is flagged as degraded.
+        operator_choices:   What the operator's configuration left out (a key
+                            never set, a server switched off, a tool a shared
+                            server withholds by policy): listed, never a
+                            degradation (``pipeline.operator_choice``).
         failed_analysts:    Names of analysts whose ``reports[name]`` started
                             with ``[ERROR]``.
         techniques_by_layer: How many techniques each source named, so the
@@ -1199,6 +1219,11 @@ class RunSummary:
     timestamp: float = field(default_factory=time.time)
     degraded_mode: bool = False
     degradation_reasons: list[str] = field(default_factory=list)
+    operator_choices: list[str] = field(default_factory=list)
+    # What the judge node decided which missing tools cost the sample on
+    # (``operator_choice.facts_record``): the tools that answered short of a
+    # library and what each tool's missing part reads. ``None`` when nothing.
+    loss_facts: dict[str, Any] | None = None
     failed_analysts: list[str] = field(default_factory=list)
     techniques_by_layer: dict[str, int] = field(default_factory=dict)
     profile: dict[str, Any] | None = None
@@ -1330,6 +1355,12 @@ class RunSummary:
                 for reason in self.degradation_reasons:
                     lines.append(f"- {reason}")
                 lines.append("")
+        # Listed whether or not the run is degraded, and never under the
+        # banner: they cost the run no evidence its configuration would give.
+        if self.operator_choices:
+            lines += [f"**{OPERATOR_CHOICES_HEADING}:**", ""]
+            lines.extend(f"- {reason}" for reason in self.operator_choices)
+            lines.append("")
 
         # Negotiation
         n = self.negotiation
@@ -1698,6 +1729,11 @@ class RunSummary:
                     else {}
                 ),
                 **({"unread_marks": list(n.unread_marks)} if n.unread_marks else {}),
+                **(
+                    {"mediator_answers": [dict(r) for r in n.mediator_answers]}
+                    if n.mediator_answers
+                    else {}
+                ),
                 **({"not_blocking_at_end": n.not_blocking_at_end} if n.not_blocking_at_end else {}),
                 **({"ledger_stated": list(n.ledger_stated)} if n.ledger_stated else {}),
             },
@@ -1722,6 +1758,10 @@ class RunSummary:
             "tokens": None,
             "degraded_mode": self.degraded_mode,
             "degradation_reasons": list(self.degradation_reasons),
+            # Absent when there are none, so a summary stored before the list
+            # existed, or a run with nothing left out, reads as it did.
+            **({"operator_choices": list(self.operator_choices)} if self.operator_choices else {}),
+            **({"loss_facts": dict(self.loss_facts)} if self.loss_facts else {}),
             "failed_analysts": list(self.failed_analysts),
             "techniques_by_layer": dict(self.techniques_by_layer),
             "profile": dict(self.profile) if self.profile else None,
@@ -1863,6 +1903,8 @@ class RunSummaryBuilder:
         self._corroboration: dict[str, dict[str, list[str]]] = {}
         self._degraded_mode: bool = False
         self._degradation_reasons: list[str] = []
+        self._operator_choices: list[str] = []
+        self._loss_facts: dict[str, Any] | None = None
         self._failed_analysts: list[str] = []
         self._techniques_by_layer: dict[str, int] = {}
         self._tokens: TokenUsageMetrics | None = None
@@ -2069,9 +2111,26 @@ class RunSummaryBuilder:
     def set_degraded_mode(
         self, degraded: bool, reasons: list[str] | None = None
     ) -> RunSummaryBuilder:
-        """Mark the run as degraded with optional human-readable reasons."""
+        """Mark the run as degraded with optional human-readable reasons.
+
+        A reason that is the operator's choice (``pipeline.operator_choice``)
+        is listed apart, whichever caller handed it in: it is no degradation.
+        """
+        from maljan.pipeline.operator_choice import split_operator_choices
+
         self._degraded_mode = bool(degraded)
-        self._degradation_reasons = list(reasons or [])
+        self._degradation_reasons, chosen = split_operator_choices(reasons or [])
+        return self.set_operator_choices(chosen)
+
+    def set_loss_facts(self, record: dict[str, Any] | None) -> RunSummaryBuilder:
+        """What the degraded flag was decided on (``operator_choice.facts_record``)."""
+        self._loss_facts = dict(record) if record else None
+        return self
+
+    def set_operator_choices(self, reasons: list[str] | None) -> RunSummaryBuilder:
+        """What the operator's configuration left out, apart from the degradations."""
+        held = [*self._operator_choices, *(str(r) for r in reasons or [])]
+        self._operator_choices = list(dict.fromkeys(held))
         return self
 
     def set_token_usage(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
@@ -2398,6 +2457,12 @@ class RunSummaryBuilder:
                 if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                 for line in getattr(arg, "unread_marks", None) or []
             ],
+            mediator_answers=[
+                {"round": str(index + 1), "answer": str(getattr(arg, "answer", ""))}
+                for index, arg in enumerate(discussion_history)
+                if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
+                and getattr(arg, "answer", "")
+            ],
             not_blocking_at_end=next(
                 (
                     len(getattr(arg, "not_blocking", None) or [])
@@ -2513,6 +2578,8 @@ class RunSummaryBuilder:
             truncation=self._truncation,
             degraded_mode=self._degraded_mode,
             degradation_reasons=self._degradation_reasons,
+            operator_choices=self._operator_choices,
+            loss_facts=self._loss_facts,
             failed_analysts=self._failed_analysts,
             techniques_by_layer=self._techniques_by_layer,
             profile=self._profile,

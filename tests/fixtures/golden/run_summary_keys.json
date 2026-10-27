@@ -173,6 +173,9 @@
       ],
       "v": null
     },
+    "endpoint_labels": [
+      null
+    ],
     "enrichment": {
       "asked": [
         {

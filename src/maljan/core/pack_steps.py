@@ -59,10 +59,11 @@ before any analyst starts. Each step is declared here as a :class:`PackStep`:
 * ``after``: where a step not in the shipped list goes: after the step it
   names, else after every shipped step.
 
-:func:`default_steps` is the shipped list. Three of its steps, after the
-format readers, call servers' tools (the identification servers); each is
-off, with why, while its server
-is not configured, switched off or does not offer the tool
+:func:`default_steps` is the shipped list. Ten of its steps call servers'
+tools: the identification servers', the document servers' and the container
+and Android servers' after the format readers, YARA-X's after the shipped YARA
+scan. Each is off, with why, while its server is not configured, switched off
+or does not offer the tool
 (:func:`steps_on_servers`), so a deployment without the server runs the list
 as it was. ``triage.steps`` holds the
 operator's declarations (:func:`effective_steps`): one under a shipped step's
@@ -218,6 +219,17 @@ _STEP_REFERENCES = ("id", "after", "starts_after", "reads")
 IDENTIFY_STEP = "die_scan"
 DOTNET_RUNTIMES: tuple[str, ...] = (".NET Framework", ".NET Core")
 GO_COMPILERS: tuple[str, ...] = ("Go",)
+# The routed formats the document servers' steps run on: the Office
+# containers (OLE, OOXML), RTF, and the scripts webcrack reads (JavaScript, and
+# the HTA and WSF files whose script blocks it reads).
+OFFICE_FORMATS: tuple[str, ...] = ("ole2", "ooxml")
+RTF_FORMATS: tuple[str, ...] = ("rtf",)
+SCRIPT_FORMATS: tuple[str, ...] = ("js", "hta", "wsf")
+# The routed formats JADX's step runs on: an Android package and a dex file.
+ANDROID_FORMATS: tuple[str, ...] = ("apk", "dex")
+# Where unblob's answer names each file it extracted, as the artefact store
+# reads it back (``outputs``).
+EXTRACTED_FILES = "/files/*/path"
 
 # Why a shipped step of a server's tool is off (:func:`steps_on_servers`).
 SERVER_NOT_CONFIGURED = "no tool server is configured as {server}"
@@ -537,9 +549,68 @@ def _shipped() -> tuple[PackStep, ...]:
             when=(StepCondition(step=IDENTIFY_STEP, value="name", equals=GO_COMPILERS),),
             display_name="Go symbols",
         ),
+        # The document servers' steps (``builtin_declarations``), each off
+        # while its server is not switched on, as the identification steps
+        # are, and each on the routed formats its tool reads: oletools' macro
+        # source and analysis of an Office container, its DDE links of an
+        # Office container or an RTF, its embedded objects of an RTF; and
+        # webcrack's rewrite of a JavaScript file, or of an HTA's or WSF's
+        # script blocks.
+        _o(
+            id="ole_vba",
+            server="oletools",
+            tool="ole_vba",
+            formats=OFFICE_FORMATS,
+            display_name="VBA macros",
+        ),
+        _o(
+            id="office_dde",
+            server="oletools",
+            tool="office_dde",
+            formats=(*OFFICE_FORMATS, *RTF_FORMATS),
+            display_name="DDE links",
+        ),
+        _o(
+            id="rtf_objects",
+            server="oletools",
+            tool="rtf_objects",
+            formats=RTF_FORMATS,
+            display_name="RTF objects",
+        ),
+        _o(
+            id="js_deobfuscate",
+            server="webcrack",
+            tool="js_deobfuscate",
+            formats=SCRIPT_FORMATS,
+            display_name="deobfuscated script",
+        ),
+        # The container and Android servers' steps, each off while its server
+        # is not switched on: unblob's extraction on every sample (it finds a
+        # chunk of a format it knows by the chunk's own bytes, whatever the
+        # router called the file), each file it wrote taken into the job's
+        # artefact store for a later step to read; and JADX's class list of an
+        # Android package or dex file.
+        _o(
+            id="container_extract",
+            server="unblob",
+            tool="container_extract",
+            outputs=EXTRACTED_FILES,
+            display_name="extracted files",
+        ),
+        _o(
+            id="android_classes",
+            server="jadx",
+            tool="android_classes",
+            formats=ANDROID_FORMATS,
+            display_name="Android classes",
+        ),
         _o(id="strings", renderer="string_runs", display_name="strings"),
         _o(id="iocs_from_file", renderer="file_iocs", display_name="iocs"),
         _o(id="yara_scan", renderer="signature_rules", display_name="yara", wall_clock=True),
+        # The operator's own YARA rule files, matched by YARA-X on every
+        # sample, right after the shipped corpus's scan; off while its server
+        # is not switched on.
+        _o(id="yarax_scan", server="yarax", tool="yarax_scan", display_name="YARA-X"),
         _o(id="capa", renderer="capability_rules", display_name="capa", wall_clock=True),
         _o(id="sigma_match_sandbox", renderer="event_rules", display_name="sigma"),
         _o(id="api_capability", renderer="api_catalogue", display_name="api catalogue"),

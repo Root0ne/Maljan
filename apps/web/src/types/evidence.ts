@@ -33,6 +33,12 @@ export interface EvidenceEntry {
    *  before the call ran; `args_raw` is what it wrote. */
   args_repaired?: boolean;
   args_raw?: string | null;
+  /** The fields whose `null` the tool boundary dropped (each took its
+   *  declared default), and the top-level ones the schema admitted that the
+   *  transport did not send, each by its path segments. Absent where the
+   *  call had none and on rows written before the fields. */
+  args_nulls_dropped?: string[][] | null;
+  args_nulls_withheld?: string[][] | null;
   /** The model whose turn asked for this call, as `provider/model`. Absent
    *  where nothing named it, including every row written before the column. */
   model?: string | null;
@@ -60,6 +66,10 @@ export interface EvidenceEntry {
    *  record, and the operator's pack step, as the entry recorded them. Absent
    *  where the entry carried none and on rows older than the columns. */
   source?: string;
+  /** Where the platform's own readings behind a triage pack entry ran, as
+   *  sources (`mcp:<server key>`, `pack` for the worker beside one). Absent
+   *  where every reading ran in the worker and on rows older than the column. */
+  ran_on?: string[] | null;
   facts?: Record<string, unknown>;
   reputation?: Record<string, unknown>;
   pack_step?: Record<string, unknown>;

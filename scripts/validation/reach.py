@@ -341,10 +341,18 @@ def _published(record: RunRecord) -> dict[str, str]:
         "markdown": record.markdown,
         "stix": json.dumps(record.stix_bundle or {}, ensure_ascii=False, default=str),
         "stix_extended": json.dumps(record.stix_extended or {}, ensure_ascii=False, default=str),
-        "degradations": json.dumps(
-            record.malware_report.get("degradation_reasons") or [], ensure_ascii=False
-        ),
+        "degradations": json.dumps(listed_reasons(record.malware_report), ensure_ascii=False),
     }
+
+
+def listed_reasons(report: dict[str, Any]) -> list[str]:
+    """The report's degradation reasons and the operator's choices (T-338), as text.
+
+    A sentence that says a source is unavailable is checked wherever the
+    report lists it, among the losses or among what the configuration left out.
+    """
+    reasons = [*(report.get("degradation_reasons") or []), *(report.get("operator_choices") or [])]
+    return [str(r) for r in reasons]
 
 
 def absent_names(record: RunRecord, names: Iterable[str]) -> dict[str, list[str]]:
@@ -537,7 +545,7 @@ def reach(
         "reputation_rows": reputation_rows,
     }
 
-    degradations = [str(d) for d in mr.get("degradation_reasons") or []]
+    degradations = listed_reasons(mr)
     naming = [
         d for d in degradations if server_key and server_key in d and "unavailable" in d.lower()
     ]

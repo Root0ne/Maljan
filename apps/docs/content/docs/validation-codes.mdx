@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**99 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 3 · [isr](#isr) 13 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 12 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 13 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**103 codes in 11 families:** [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 14 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 14 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## attck
 
@@ -110,6 +110,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 - **Docs** none
 
 ## composer
+
+### `composer.command_values`
+
+A command table whose numbered ids leave out a value the code it was shown compares the command value with, or name a value that code compares it with nowhere. A row whose id was converted between bases by hand can name another case's value, and a case the table leaves out is a command the reader never learns of. Asked once with the values the platform read from the code; the model decides which branch is a command and what it does, and the table is kept as written with the finding beside it.
+
+- **Raised at** `maljan.pipeline.validation:command_value_violations`
+- **Constant** `maljan.pipeline.validation:COMMAND_VALUES_CODE`
+- **Docs** none
 
 ### `composer.cut_at_output_cap`
 
@@ -213,13 +221,21 @@ A reverser's answer was mostly one-line claims of the form "uses `x.dll` APIs fo
 
 A retry kept as the analyst's answer that no longer states claims or findings its first answer had. The platform states which, per analyst, and asks the analyst once to keep or withdraw each with a reason; its answer stands. Unanswered, the first answer's items stay, their state said.
 
-- **Raised at** `maljan.agents.base_agent:BaseAnalyst._ask_retry_drops`, `maljan.pipeline.events:emit_validation_feedback`
+- **Raised at** `maljan.agents.base_agent:BaseAnalyst._ask_retry_drops._emit`, `maljan.pipeline.events:emit_validation_feedback`
 - **Constant** `maljan.pipeline.validation:RETRY_DROPPED_CODE`
 - **Docs** [Architecture](/architecture/), [Replaying a stored run](/replay/)
 
+### `isr.retry_restated_few`
+
+A whole retry that restates fewer of the first answer's claims than it leaves out (by the claim's values: restated when the retry states every value it holds; a claim that holds none, or whose only values left out are technique ids the retry was asked about, is counted neither way) is more another answer than a fix of this one, written in a tools-free turn. It does not replace the first answer: what it left out stands beside the retry's own claims, which stand for the claims they restate. The one question about those items says so, and also names each claim with no value whose sentence the retry does not write; it is asked under this code beside the drops code, with the same events. Each item the analyst withdraws stays out, every other stays as first written.
+
+- **Raised at** `maljan.agents.base_agent:BaseAnalyst._ask_retry_drops._emit`, `maljan.pipeline.events:emit_validation_feedback`
+- **Constant** `maljan.pipeline.validation:RETRY_RESTATED_FEW_CODE`
+- **Docs** [Architecture](/architecture/)
+
 ### `isr.technique_line_unread`
 
-A claim whose TECHNIQUE line is more than ids or NONE. No id is read from it, and the analyst is asked once for ids alone. A list of ids separated by commas or "and" is read (`base_agent.read_technique_line`) and not asked.
+A claim whose TECHNIQUE line is more than ids or NONE. No id is read from it, and the analyst is asked once for ids alone. A list of ids separated by commas, "and", slashes or semicolons is read (`base_agent.read_technique_line`) and not asked, and so is an id with a closing note in brackets that decides nothing or says the id is not asserted.
 
 - **Raised at** `maljan.pipeline.validation:technique_line_violation`
 - **Constant** `maljan.pipeline.validation:TECHNIQUE_LINE_UNREAD_CODE`
@@ -361,11 +377,19 @@ A reply names an open question the analysts did not leave.
 
 ### `report.absence_contradicts_ledger`
 
-A report sentence that says a routine was not read, or that something is not in the ledger, or that a cited entry does not confirm a value, while an answered entry of this run holds it (`ledger_absence_contradictions`). Asked once, naming the entry; a sentence kept after it is recorded.
+A report sentence that says a routine was not read (or its decompile not obtained, or its body not in the evidence), or that something is not in the ledger, or that a cited entry does not confirm (or verify) a value, or that an address is unresolved, while an answered entry of this run holds it (`ledger_absence_contradictions`). Asked once, naming the entry and showing what it holds (the routine's code, the object that names the address); a sentence kept after it is recorded.
 
 - **Raised at** `maljan.pipeline.validation:ledger_absence_contradictions`
 - **Constant** `maljan.pipeline.validation:ABSENCE_CONTRADICTS_LEDGER_CODE`
 - **Docs** [Architecture](/architecture/)
+
+### `report.category_type_unstated`
+
+The report's category names a STIX malware type the judge's malware object, published as written, does not carry; marked beside the category line.
+
+- **Raised at** `maljan.reporting.prose_decisions:category_types_unstated`
+- **Constant** `maljan.reporting.prose_decisions:CATEGORY_TYPE_UNSTATED_CODE`
+- **Docs** none
 
 ### `report.citation_not_evidence`
 
@@ -422,6 +446,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:persist
 - **Raised at** `maljan.pipeline.validation:persistence_not_observed_violations`
 - **Constant** `maljan.pipeline.validation:PERSISTENCE_NOT_OBSERVED_CODE`
 - **Docs** [Architecture](/architecture/)
+
+### `report.published_technique_doubted`
+
+No comment of its own names its meaning; the comment over the group of constants it belongs to, on `maljan.reporting.prose_decisions:PUBLISHED_TECHNIQUE_DOUBTED_CODE`, reads: "A sentence of the report model's prose that calls a technique this run publishes a candidate or not confirmed; marked in place with the publication."
+
+- **Raised at** `maljan.reporting.prose_decisions:statements_against_publication`
+- **Constant** `maljan.reporting.prose_decisions:PUBLISHED_TECHNIQUE_DOUBTED_CODE`
+- **Docs** none
 
 ### `report.rule_match_as_action`
 
@@ -523,7 +555,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:indicat
 
 ### `stix.indicator_unattributed_flow`
 
-A judge indicator naming a value the sandbox recorded and attributes no flow of the sample to. The judge is asked once, with the sandbox's own fact beside the value; what it answers decides whether the value is published. A keep it was never asked about publishes nothing (`stix_renderer.sandbox_row_kwargs`).
+A judge indicator naming a value the sandbox recorded and attributes no flow, or no process, of the sample to. The judge is asked once, with the sandbox's own fact beside the value; what it answers decides whether the value is published. A keep it was never asked about publishes nothing (`stix_renderer.sandbox_row_kwargs`).
 
 - **Raised at** `maljan.pipeline.validation:unattributed_indicator_violations`
 - **Constant** `maljan.pipeline.validation:UNATTRIBUTED_INDICATOR_CODE`
@@ -881,5 +913,6 @@ Each of these is a code position whose value the register could not follow to a 
 - `maljan.pipeline.validation:validation_metrics`: `"code": violation.code`, an attribute of a value.
 - `maljan.providers.sandbox.upload:UploadSandboxProvider.__init__`: `'report.json'`, a code-shaped string where no code position is, nor a read.
 - `maljan.providers.sandbox.upload:UploadSandboxProvider.set_pending_blob`: `'report.json'`, a code-shaped string where no code position is, nor a read.
+- `maljan.reporting.evidence_bundles:function_table`: `FunctionCode(part.code, …)`, an attribute of a value.
 - `maljan.reporting.renderers.markdown:_Context.__init__`: `"code": str(row.get('code', ''))`, the result of a call.
 - `maljan.tools.errors:normalise_error`: `"code": code`, the result of a call.

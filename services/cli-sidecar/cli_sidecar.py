@@ -1,9 +1,11 @@
 """One command-line analysis program, served over MCP from a container of its own.
 
 Shared by the sidecars that each wrap one program (``die-mcp``, ``ilspy-mcp``,
-``goresym-mcp``). It imports nothing of the platform: each image holds this
-module, its server and the program, and nothing else, so a sidecar holds no
-platform code, credential or setting beyond its own token.
+``goresym-mcp``, ``yarax-mcp``, ``oletools-mcp``, ``webcrack-mcp``,
+``unblob-mcp``, ``jadx-mcp``). It imports
+nothing of the platform: each image holds this module, its server and the
+program, and nothing else, so a sidecar holds no platform code, credential or
+setting beyond its own token.
 
 What every such server does the same way:
 
@@ -13,8 +15,11 @@ What every such server does the same way:
   mount); anything else is refused, and the refusal names no host path.
 * **The program reads the file; nothing runs it.** The program is started
   with the path as an argument, its standard input closed, a scratch working
-  directory of its own and only the variables it needs. Nothing here writes,
-  copies or changes the mode of a sample.
+  directory of its own (or one its server made for the call, where the
+  program writes files the server reads back), only the variables it needs
+  and any resource limit its server sets (a machine-safety bound, such as the
+  largest file it may write). Nothing here writes, copies or changes the mode
+  of a sample.
 * **A failure is an answer in one shape.** ``{"error": {"code", "message",
   "remediation"}, "tool"}``, with the codes the platform's own tool servers
   use: a program that is not installed is ``missing_dependency`` with the
@@ -41,6 +46,7 @@ import hmac
 import json
 import logging
 import os
+import resource
 import shutil
 import signal
 import sys
@@ -177,27 +183,49 @@ def timeout_seconds() -> float | None:
     return value if value > 0 else None
 
 
-async def run(program: Program, arguments: Sequence[str]) -> Ran:
+async def run(
+    program: Program,
+    arguments: Sequence[str],
+    *,
+    workdir: str | None = None,
+    limits: Mapping[int, int] | None = None,
+) -> Ran:
     """Run ``program`` with ``arguments`` and wait for it; raises :class:`ToolFailure`.
 
     Missing, it is ``missing_dependency`` with the install hint; past the
     operator's bound, ``timeout``. A caller that gives up (a cancelled call)
-    kills it, so no run outlives the call that started it.
+    kills it, so no run outlives the call that started it. ``workdir`` is a
+    directory the caller made for this call and removes itself (where the
+    program writes files the caller reads after the run); without one, the run
+    gets a scratch directory that goes with it. ``limits`` are resource
+    limits the run (and every process it starts) is held to, each a
+    ``resource.RLIMIT_*`` and its value: a machine-safety bound its server
+    sets, such as the largest file it may write. They are set by util-linux's
+    ``prlimit``, which the command is started under (:func:`limited`), so
+    nothing runs in this process between the fork and the program.
     """
     absent = program.absent()
     if absent:
         raise ToolFailure(MISSING_DEPENDENCY, absent, program.install)
+    command = limited(program.command, limits)
+    if limits and not shutil.which(command[0]):
+        raise ToolFailure(MISSING_DEPENDENCY, f"{command[0]} is not on PATH", PRLIMIT_INSTALL)
     env = {
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
         "LANG": "C.UTF-8",
         **program.env,
     }
-    with tempfile.TemporaryDirectory(prefix=f"{program.name}-") as scratch:
+    held = (
+        contextlib.nullcontext(workdir)
+        if workdir
+        else tempfile.TemporaryDirectory(prefix=f"{program.name}-")
+    )
+    with held as scratch:
         env.setdefault("HOME", scratch)
         env.setdefault("TMPDIR", scratch)
         try:
             process = await asyncio.create_subprocess_exec(
-                *program.command,
+                *command,
                 *arguments,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
@@ -236,9 +264,32 @@ async def _stop(process: asyncio.subprocess.Process) -> None:
         await process.wait()
 
 
-async def run_ok(program: Program, arguments: Sequence[str]) -> Ran:
+# The resource limits a run may be held to, by the ``prlimit`` option that sets
+# each (soft and hard alike).
+PRLIMIT_OPTIONS: dict[int, str] = {
+    resource.RLIMIT_FSIZE: "--fsize",
+    resource.RLIMIT_NOFILE: "--nofile",
+    resource.RLIMIT_AS: "--as",
+    resource.RLIMIT_CPU: "--cpu",
+}
+PRLIMIT_INSTALL = "install util-linux, whose prlimit sets a run's resource limits"
+
+
+def limited(command: Sequence[str], limits: Mapping[int, int] | None) -> tuple[str, ...]:
+    """``command`` started under ``prlimit`` with ``limits``; as it is without any."""
+    if not limits:
+        return tuple(command)
+    options = []
+    for which, value in sorted(limits.items()):
+        if which not in PRLIMIT_OPTIONS:
+            raise ValueError(f"no prlimit option sets resource limit {which}")
+        options.append(f"{PRLIMIT_OPTIONS[which]}={int(value)}")
+    return ("prlimit", *options, "--", *command)
+
+
+async def run_ok(program: Program, arguments: Sequence[str], *, workdir: str | None = None) -> Ran:
     """:func:`run`, with a non-zero exit status a ``tool_failed`` naming the program's words."""
-    ran = await run(program, arguments)
+    ran = await run(program, arguments, workdir=workdir)
     if ran.returncode != 0:
         said = ran.said or "no output"
         raise ToolFailure(TOOL_FAILED, f"{program.name} exited with {ran.returncode}: {said}")

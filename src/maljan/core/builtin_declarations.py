@@ -355,7 +355,7 @@ _PCAP_SUMMARY: dict[str, Any] = {
 
 # The analysis sidecar's tools. Answer shapes from ``analysis.evidence_roots``
 # ``_read_entry``; capa and FLOSS long-running and YARA's own budget as the
-# sidecar's manifest (``services/analysis-mcp/server.py`` TOOL_NEEDS) declares.
+# sidecar's manifest (``maljan.tools.sidecar_needs.ANALYSIS``) declares.
 _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
     "apk_info": _file("format_info"),
     "archive_list": _file("archive_listing"),
@@ -391,7 +391,12 @@ _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
     "put_sample_begin": {"kind": "sample_delivery"},
     "put_sample_chunk": {"kind": "sample_delivery"},
     "put_sample_finish": {"kind": "sample_delivery"},
+    # What those readings staged here for a job, removed at its end.
+    "release_job": {"kind": "staging_release"},
     "resolve_api_hashes": _API_HASHES,
+    # The triage pack's own readings of the sample, run on this server when it
+    # is a container of its own (``tools.readers``): a delivery primitive.
+    "run_reader": {"kind": "reader_delivery"},
     "sigma_match": _event_rules("events"),
     "sigma_match_sandbox": _event_rules("report"),
     "signing_info": _file("signing"),
@@ -430,6 +435,8 @@ _NETWORK_TOOLS: dict[str, dict[str, Any]] = {
     "extract_http": {"kind": "http", "arguments": {"path": "pcap_path"}},
     "pcap_summary": _PCAP_SUMMARY,
     "read_pcap_summary": {**_PCAP_SUMMARY, "kind": "packet_overview", "reader": "packet_lines"},
+    "release_job": {"kind": "staging_release"},
+    "run_reader": {"kind": "reader_delivery"},
 }
 
 # The threat-intel sidecar's hash lookup answers JSON
@@ -687,6 +694,217 @@ _GORESYM_TOOLS: dict[str, dict[str, Any]] = {
     },
 }
 
+# The rule and document servers, shipped switched off as the identification
+# servers are (``services/yarax-mcp``, ``services/oletools-mcp``,
+# ``services/webcrack-mcp``). YARA-X matches the operator's own rule files and
+# answers in the row shape of ``yara_scan``: its rule matches are signature
+# rules, and corroborate as the one YARA layer (``source``), never as a second
+# independent one beside ``yara_scan``'s. oletools parses Office and RTF
+# documents and runs no macro; webcrack rewrites a script's syntax tree and is
+# handed no sandbox to evaluate any of it in.
+_YARAX_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "yarax_scan": {
+        # Its rows and places are yara_scan's, so a claim citing a match is
+        # read as one citing yara_scan's is.
+        **_SIGNATURE_RULES,
+        "arguments": _SAMPLE_PATH,
+        "display_name": "YARA-X",
+        "shows": (
+            "the operator's own YARA rules (the rule files mounted on the server) that match "
+            "the file, with each matching string's offset and the rule's metadata"
+        ),
+        "does_not_show": (
+            "rules that are not in the mounted rule files, or that YARA-X could not compile "
+            "(named in rules_not_compiled); a match is the rule author's claim, not a verdict"
+        ),
+    },
+}
+_OFFICE_FORMATS = ["ole2", "ooxml"]
+_OFFICE_AND_RTF_FORMATS = ["ole2", "ooxml", "rtf"]
+_OLETOOLS_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "ole_vba": {
+        "kind": "vba_macros",
+        "rows": "/indicators/*",
+        "values": {"type": "/type", "keyword": "/keyword"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _OFFICE_FORMATS,
+        "display_name": "olevba",
+        "shows": (
+            "the VBA source of each macro module and olevba's keyword analysis of it (auto-run "
+            "triggers, suspicious calls, IOCs, encoded strings), Excel 4 macro sheets and VBA "
+            "stomping"
+        ),
+        "does_not_show": (
+            "what a macro does when it runs: no macro is run, so code it builds or downloads "
+            "at run time is not seen"
+        ),
+    },
+    "ole_macro_risk": {
+        "kind": "macro_risk",
+        "rows": "/matches/*",
+        "values": {"flag": "/flag", "keyword": "/keyword"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _OFFICE_FORMATS,
+        "display_name": "MacroRaptor",
+        "shows": "whether the macros run on their own and write or execute, by keyword rules",
+        "does_not_show": (
+            "whether a macro is malicious or what it does: a keyword match on the source, with "
+            "no macro run"
+        ),
+    },
+    "ole_indicators": {
+        "kind": "document_indicators",
+        "rows": "/indicators/*",
+        "values": {"indicator": "/id", "value": "/value", "risk": "/risk"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _OFFICE_AND_RTF_FORMATS,
+        "display_name": "oleid",
+        "shows": (
+            "the document's format, encryption, VBA and XLM macros, external relationships, "
+            "Flash and object pools, each with oleid's risk rating"
+        ),
+        "does_not_show": "the content behind an indicator, or anything oleid has no check for",
+    },
+    "rtf_objects": {
+        "kind": "embedded_objects",
+        "rows": "/objects/*",
+        "places": {"offset": "/start"},
+        "values": {
+            "class_name": "/class_name",
+            "filename": "/filename",
+            "payload_sha256": "/payload_sha256",
+        },
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": ["rtf"],
+        "display_name": "rtfobj",
+        "shows": (
+            "the objects embedded in the RTF: each one's OLE class (Package, Equation.3, "
+            "OLE2Link and others), the file name and paths a Package names, and its payload's "
+            "sha256"
+        ),
+        "does_not_show": (
+            "what an object does when it is opened, or an object the parser cannot find; "
+            "nothing is extracted or run"
+        ),
+    },
+    "office_dde": {
+        "kind": "dde_links",
+        "rows": "/links/*",
+        "values": {"instruction": "/text"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _OFFICE_AND_RTF_FORMATS,
+        "display_name": "msodde",
+        "shows": "the DDE links and field instructions in the document, DDEAUTO commands too",
+        "does_not_show": "whether a link would run, or the links of an encrypted document",
+    },
+}
+_WEBCRACK_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "js_deobfuscate": {
+        "kind": "deobfuscated_script",
+        "long_running": True,
+        "rows": "/scripts/*",
+        "places": {"offset": "/start"},
+        "values": {"language": "/language"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": ["js", "hta", "wsf"],
+        "display_name": "webcrack",
+        "shows": (
+            "the script (or each script block of an HTA or WSF) unminified, unpacked from its "
+            "bundle and cleared of self-defending and debugger traps, as readable JavaScript"
+        ),
+        "does_not_show": (
+            "strings an obfuscator's decoder functions compute (decoding them would run the "
+            "script, so those calls stay as written); with no sandbox, the control-flow "
+            "flattening and dead code of a script guarded by an obfuscator-style string array, "
+            "which stay as they are; VBScript, or JScript.Encode scripts"
+        ),
+    },
+}
+
+# The container and Android servers, shipped switched off as the others are
+# (``services/unblob-mcp``, ``services/jadx-mcp``). unblob carves and extracts
+# what a container or firmware image holds into a directory of its own in its
+# container, never beside the sample, and runs nothing it extracts; a written
+# file reaches another server only through the job's artefact store, which
+# reads it back over ``get_artefact`` (a delivery primitive, never a model's).
+# JADX decompiles dex bytecode to Java and loads no class; an APK's manifest,
+# permissions and certificates stay ``apk_info``'s.
+_UNBLOB_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "container_scan": {
+        "kind": "embedded_chunks",
+        "rows": "/chunks/*",
+        "places": {"offset": "/start_offset"},
+        "values": {"handler": "/handler"},
+        "arguments": _SAMPLE_PATH,
+        "display_name": "unblob",
+        "shows": (
+            "each chunk of a known format inside the file (archives, compressed streams, file "
+            "systems, firmware containers, a payload appended to another file), found by its "
+            "own bytes, with its byte range, and the ranges no format claims with their entropy"
+        ),
+        "does_not_show": (
+            "what a chunk holds (nothing is unpacked), or a format unblob has no handler for; "
+            "nothing is run"
+        ),
+    },
+    "container_extract": {
+        "kind": "extracted_files",
+        "long_running": True,
+        "rows": "/files/*",
+        "values": {"name": "/name", "sha256": "/sha256", "magic": "/magic"},
+        "arguments": _SAMPLE_PATH,
+        "display_name": "unblob",
+        "shows": (
+            "every file the container's chunks hold, extracted recursively, each with its place "
+            "in the container, size, sha256 and file type; links by what they name, and what "
+            "unblob refused (a member whose path or link leaves the extraction, a device file)"
+        ),
+        "does_not_show": (
+            "what an extracted file does: nothing extracted is run or opened beyond its type; "
+            "a format unblob has no handler for, an encrypted chunk's contents, or anything "
+            "past the sample upload bound the extraction stops at"
+        ),
+    },
+    "get_artefact": {"kind": "artefact_delivery"},
+}
+_ANDROID_FORMATS = ["apk", "dex"]
+_JADX_TOOLS: dict[str, dict[str, Any]] = {
+    "capabilities": _CAPABILITIES,
+    "android_classes": {
+        "kind": "type_list",
+        "long_running": True,
+        "rows": "/classes/*",
+        "values": {"name": "/name"},
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _ANDROID_FORMATS,
+        "display_name": "JADX",
+        "shows": (
+            "the classes the APK's or dex file's bytecode defines, each with its methods and "
+            "their signatures, as JADX reads them"
+        ),
+        "does_not_show": (
+            "what any of them does; classes loaded, decrypted or downloaded at run time (no "
+            "code is run); the manifest, permissions and certificates, which apk_info reads"
+        ),
+    },
+    "android_decompile_class": {
+        "kind": "decompile",
+        "arguments": _SAMPLE_PATH,
+        "routed_formats": _ANDROID_FORMATS,
+        "report_sections": _DECOMPILED_CODE_SECTIONS,
+        "display_name": "JADX",
+        "shows": "Java source JADX decompiled from one class's dex bytecode, inner classes too",
+        "does_not_show": (
+            "what runs at run time: code loaded, decrypted or downloaded while the app runs, "
+            "or native libraries beside the bytecode; no code is run"
+        ),
+    },
+}
+
 # The triage pack's steps (``pipeline.triage_pack``), each recorded under the
 # pack's own source. The in-process implementations answer as the sidecar's
 # tools of the same name do, so they declare the same facts.
@@ -876,6 +1094,7 @@ CONSUMER_KINDS: dict[str, dict[str, Any]] = {
         "kinds": ["emulated_strings", "decoded_strings", "strings", "file_iocs"]
     },
     "stix_renderer.DECODER_TOOL": {"kinds": ["decoded_strings"]},
+    "call_bindings": {"kinds": ["decoded_strings", "function_index"]},
     "stix_renderer._STRING_SWEEP_TOOLS": {"kinds": ["strings", "file_iocs", "text_iocs"]},
     "figures.code_listing": {"kinds": ["decompile"]},
     "ledger_projection.technique_hits": {"kinds": ["capability_rules"]},
@@ -1094,8 +1313,8 @@ def _with_effects(
     return out
 
 
-def _identification_block(role: str, tools: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """An identification server's declaration: its role, its mount and its tools, read-only."""
+def _one_program_block(role: str, tools: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """A one-program sidecar's declaration: its role, its mount and its tools, read-only."""
     return {
         "roles": [role],
         "sample_mount": "/data/samples",
@@ -1193,12 +1412,18 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         ),
         "credential_bootstrap": _VIRUSTOTAL_BOOTSTRAP,
     },
-    # The identification servers: each reads the sample the worker mirrors
+    # The identification servers, the rule and document servers and the
+    # container and Android servers: each reads the sample the worker mirrors
     # under the samples directory its container mounts read-only at
     # /data/samples (``docker/docker-compose.yml``), and none runs it.
-    "die": _identification_block("identifier", _DIE_TOOLS),
-    "ilspy": _identification_block("decompiler", _ILSPY_TOOLS),
-    "goresym": _identification_block("symbol_recovery", _GORESYM_TOOLS),
+    "die": _one_program_block("identifier", _DIE_TOOLS),
+    "ilspy": _one_program_block("decompiler", _ILSPY_TOOLS),
+    "goresym": _one_program_block("symbol_recovery", _GORESYM_TOOLS),
+    "yarax": _one_program_block("rule_matcher", _YARAX_TOOLS),
+    "oletools": _one_program_block("document_reader", _OLETOOLS_TOOLS),
+    "webcrack": _one_program_block("deobfuscator", _WEBCRACK_TOOLS),
+    "unblob": _one_program_block("extractor", _UNBLOB_TOOLS),
+    "jadx": _one_program_block("decompiler", _JADX_TOOLS),
 }
 
 # The static providers' own blocks (``static.ghidra``, ``static.r2``) and the

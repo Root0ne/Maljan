@@ -32,6 +32,19 @@ ABSENCE_TECHNIQUE_MARKER = (
 # analyst stated them, and the note travels with them to the judge's summary
 # and the report's ATT&CK table.
 FAILED_CALLS_MARKER = "the claim cites only tool calls that failed"
+
+
+def retry_added_marker(revision_round: int) -> str:
+    """The note on a claim a validation retry added beside the answer in force.
+
+    The retry is a turn with no tools, written after a revision that wrote no
+    claim (``ClaimEvidence.added_by_retry_in_round``). The claim is published
+    as the analyst wrote it; the note travels with it to the judge's summary,
+    the transcript and the report.
+    """
+    return f"added by a tool-less retry, round {int(revision_round)}"
+
+
 # The note on a technique the judge named in its bundle and no analyst claimed.
 # The rule it is published by: a technique the judge states is the judge's own
 # claim, asked the catalogue and platform questions every claim is asked, and
@@ -150,6 +163,33 @@ class ClaimEvidence(BaseModel):
     cites_only_failed_calls: bool = Field(
         default=False,
         description="True when every entry the claim cites is a tool call that failed.",
+        exclude_if=lambda value: not value,
+    )
+    # The revision round whose validation retry added this claim beside the
+    # answer in force, after the revision itself wrote no claim
+    # (``nodes.answer_with_retry_additions``). The retry is a turn with no tools: what
+    # it writes is added and replaces no claim the answer in force holds.
+    # Left out of the serialised claim when unset.
+    added_by_retry_in_round: int | None = Field(
+        default=None,
+        description=(
+            "The revision round whose validation retry, written without tools, added this "
+            "claim beside the answer in force."
+        ),
+        exclude_if=lambda value: value is None,
+    )
+    # The entries a debate showed this claim's analyst from another agent's
+    # calls, when they are every entry the claim cites
+    # (``nodes._mark_claims_on_shown_entries``): the claim restates what it
+    # was shown, and is no support of its own for corroboration
+    # (``validation.shown_claim_unbacked``). Left out of the serialised claim
+    # when empty.
+    rests_on_shown_entries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The entries of other agents a debate round showed this claim's analyst, when they "
+            "are every entry the claim cites."
+        ),
         exclude_if=lambda value: not value,
     )
     # What the ATT&CK index made of the claim text against the id the analyst
@@ -370,9 +410,14 @@ def claim_summary_line(number: int, claim: ClaimEvidence) -> str:
         tech = f" ({claim.technique_id} — {ABSENCE_TECHNIQUE_MARKER})"
     noted = f" {claim.heading_note}" if claim.heading_note else ""
     failed = f" ({FAILED_CALLS_MARKER})" if claim.cites_only_failed_calls else ""
+    retried = (
+        f" ({retry_added_marker(claim.added_by_retry_in_round)})"
+        if claim.added_by_retry_in_round is not None
+        else ""
+    )
     return (
         f"Claim {number}{noted}: {claim.claim}{tech}"
-        f" | Evidence: {claim.evidence_ref}{failed}"
+        f" | Evidence: {claim.evidence_ref}{failed}{retried}"
         f" | Confidence: {claim.confidence:.2f}"
     )
 
@@ -474,6 +519,58 @@ class AgentISR(BaseModel):
     # question never put leaves their status unknown, and the judge node
     # states them as a degradation reason (``nodes.claims_under_disputes_unasked``).
     _claims_under_disputes_asked: bool = PrivateAttr(default=False)
+    # Whether the revision this ISR answers for wrote no claim and no
+    # structured report itself, before any validation retry wrote claims for
+    # it. Such a revision decided nothing about the claims in force: the
+    # revision node keeps them and adds what the retry wrote beside them.
+    _revision_wrote_no_claim: bool = PrivateAttr(default=False)
+
+    # The report a revision's answer in force is read as, when the validation
+    # turn changed the answer the revision wrote (``base_agent
+    # .answer_in_force_text``), and the kept retry's own words when the answer
+    # in force is a retry; both ``""`` when the written answer stands. The
+    # revision node puts the report in the prompts and keeps the written
+    # answer, and the retry's words, on the record.
+    _report_in_force: str = PrivateAttr(default="")
+    _retry_words: str = PrivateAttr(default="")
+    # The claims summary the platform put at the head of this answer's report
+    # (a first answer's report, a revision's answer in force), exactly as it
+    # was rendered: the part a prompt may render again with marks set since.
+    # ``""`` when the report is text the analyst wrote.
+    _rendered_summary: str = PrivateAttr(default="")
+
+    @property
+    def rendered_summary(self) -> str:
+        """The claims summary the platform put at the head of this answer's report, or ``""``."""
+        return self._rendered_summary
+
+    def note_rendered_summary(self, summary: str) -> None:
+        """Record the claims summary the platform put at the head of this answer's report."""
+        self._rendered_summary = str(summary or "")
+
+    @property
+    def report_in_force(self) -> str:
+        """The report this answer in force is read as, or ``""`` when the written one stands."""
+        return self._report_in_force
+
+    @property
+    def retry_words(self) -> str:
+        """The kept validation retry's own words, or ``""`` when no retry is in force."""
+        return self._retry_words
+
+    def note_report_in_force(self, report: str, retry_words: str = "") -> None:
+        """Record the report this answer in force is read as, and the kept retry's words."""
+        self._report_in_force = str(report or "")
+        self._retry_words = str(retry_words or "")
+
+    @property
+    def revision_wrote_no_claim(self) -> bool:
+        """Whether the revision itself wrote no claim, whatever a retry wrote after it."""
+        return self._revision_wrote_no_claim
+
+    def note_revision_wrote_no_claim(self) -> None:
+        """Record that the revision itself wrote no claim and no structured report."""
+        self._revision_wrote_no_claim = True
 
     @property
     def unparsed_answer(self) -> str:

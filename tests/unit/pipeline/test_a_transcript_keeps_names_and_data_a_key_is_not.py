@@ -181,17 +181,23 @@ _REDOS_UNITS = {
 
 
 @pytest.mark.parametrize("unit", list(_REDOS_UNITS.values()), ids=list(_REDOS_UNITS))
-def test_a_megabyte_of_a_hostile_unit_costs_ten_times_a_tenth(unit: str) -> None:
-    import time
+def test_a_megabyte_of_a_hostile_unit_costs_in_proportion_to_its_size(unit: str) -> None:
+    from collections.abc import Callable
 
-    took = []
-    for size in (100_000, 1_000_000):
+    from tests.linear_cost import TIME_RATIO_LIMIT, cpu_seconds
+
+    def _scrubbed(size: int) -> Callable[[], None]:
         text = unit * (size // len(unit))
-        started = time.perf_counter()
-        scrub(text)
-        scrub_keeping_layout(text)
-        took.append(time.perf_counter() - started)
-    assert took[1] <= max(took[0], 0.01) * 20, took
+
+        def _run() -> None:
+            scrub(text)
+            scrub_keeping_layout(text)
+
+        return _run
+
+    small = cpu_seconds(_scrubbed(250_000), repeats=3)
+    large = cpu_seconds(_scrubbed(1_000_000), repeats=3)
+    assert large <= max(small, 0.01) * TIME_RATIO_LIMIT, (small, large)
 
 
 _NAME_FORMS = (

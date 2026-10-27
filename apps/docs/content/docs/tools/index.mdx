@@ -3,7 +3,7 @@ title: "Tools"
 description: "Static providers, sandboxes, VirusTotal, the built-in sidecars and generic MCP servers."
 ---
 
-import { Fingerprint, FlaskConical, Globe, Plug, Puzzle, ScanSearch, ShieldCheck, SquareTerminal } from 'lucide-react';
+import { FileSearch, Fingerprint, FlaskConical, Globe, PackageOpen, Plug, Puzzle, ScanSearch, ShieldCheck, SquareTerminal } from 'lucide-react';
 
 Agents reach analysis tools in three ways, and each is configuration rather
 than code:
@@ -58,6 +58,22 @@ VirusTotal's own MCP server, registered with an agent token.
 
 Detect It Easy, ILSpy and GoReSym, one container each, shipped switched off,
 with their own pack steps.
+
+</Card>
+
+<Card icon={<FileSearch />} title="Rule and document servers" href="/tools/rules-and-documents/">
+
+YARA-X over your own rule files, oletools over Office and RTF documents,
+webcrack over JavaScript droppers, one container each, shipped switched off,
+with their own pack steps.
+
+</Card>
+
+<Card icon={<PackageOpen />} title="Container and Android servers" href="/tools/containers-and-android/">
+
+unblob carving and extracting what a container or firmware image holds, JADX
+decompiling an APK's or dex file's code, one container each, shipped switched
+off, with their own pack steps.
 
 </Card>
 

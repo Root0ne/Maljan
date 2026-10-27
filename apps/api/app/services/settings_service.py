@@ -288,6 +288,61 @@ def changed_declaration_refusals(
             tools=listed if isinstance(listed, list) else None,
         ).items():
             errors[f"{key}.{where}"] = message
+    errors.update(provider_block_refusals(changes, current))
+    return errors
+
+
+PROVIDER_BLOCKS_KEY = "core.providers"
+
+
+def provider_block_refusals(changes: dict[str, Any], current: dict[str, Any]) -> dict[str, str]:
+    """What a save of the third-party provider blocks (``core.providers``) may not hold.
+
+    Read as the server map's entries are (``server_map.validate_server_map``):
+    a block keyed by a built-in provider's id is refused (that provider keeps
+    its own block or declaration; an early form of the model's own check), so
+    is one for a provider whose class registered another block, which would
+    never be read (``tool_declarations.elsewhere_declared``), and each tool
+    declaration the save adds or changes is held to the strict rules, one the
+    save leaves as stored is not (``tool_declarations.changed_declaration_errors``).
+    Every other rule of a block is the settings model's own
+    (``Settings._provider_blocks_are_their_own``).
+    Keys are ``core.providers.<id>[.tool_facts.<tool>[.<field>]]``.
+    """
+    from maljan.core.tool_declarations import changed_declaration_errors, elsewhere_declared
+    from maljan.providers.registry import built_in_ids
+
+    value = changes.get(PROVIDER_BLOCKS_KEY)
+    if not isinstance(value, dict):
+        return {}
+    held = current.get(PROVIDER_BLOCKS_KEY)
+    stored = held if isinstance(held, dict) else {}
+    built_in = built_in_ids("static") | built_in_ids("sandbox")
+    errors: dict[str, str] = {}
+    for name, entry in value.items():
+        where = f"{PROVIDER_BLOCKS_KEY}.{name}"
+        if name in built_in:
+            errors[where] = (
+                f"{name!r} is a built-in provider; it keeps its own block or declaration"
+            )
+            continue
+        other = elsewhere_declared(name)
+        if other:
+            errors[where] = (
+                f"provider {name!r} declares its tools in its own block {other!r}; "
+                "an entry here would never be read"
+            )
+            continue
+        facts = entry.get("tool_facts") if isinstance(entry, dict) else None
+        if not isinstance(facts, dict):
+            continue
+        before = stored.get(name)
+        before_facts = before.get("tool_facts") if isinstance(before, dict) else None
+        tools = entry.get("tools")
+        for path, message in changed_declaration_errors(
+            facts, [before_facts], tools=tools if isinstance(tools, list) else None
+        ).items():
+            errors[f"{where}.tool_facts.{path}"] = message
     return errors
 
 

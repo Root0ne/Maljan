@@ -107,14 +107,24 @@ SAMPLE_ARG_NAMES = frozenset(
 
 
 # How the worker hands a server that cannot see this filesystem the sample's
-# bytes, and reads back a file the server wrote (``get_artefact``, for the
-# job's artefact store, ``pipeline.artefacts``). They are the platform's
-# delivery primitives and never an analysis step, so they are not in the
-# toolbox the model is shown — a live run called ``put_sample`` with
+# bytes, reads back a file the server wrote (``get_artefact``, for the job's
+# artefact store, ``pipeline.artefacts``), and runs one of the platform's own
+# readings of the sample there (``run_reader``, ``tools.readers``) and removes
+# what they staged there at the job's end (``release_job``). They are
+# the platform's delivery primitives and never an analysis step, so they are
+# not in the toolbox the model is shown — a live run called ``put_sample`` with
 # ``{"sha256": "null", "content_b64": ""}`` and was told, correctly, that the
 # empty string's digest is not the sample's.
 DELIVERY_TOOLS = frozenset(
-    {"put_sample", "put_sample_begin", "put_sample_chunk", "put_sample_finish", "get_artefact"}
+    {
+        "put_sample",
+        "put_sample_begin",
+        "put_sample_chunk",
+        "put_sample_finish",
+        "get_artefact",
+        "run_reader",
+        "release_job",
+    }
 )
 
 
@@ -359,18 +369,18 @@ def _unreadable_filled_capture(tool: str, reply: Any, supplied: dict[str, str]) 
 
 def _capture_arguments(tool: Any) -> tuple[str, ...]:
     """The arguments of ``tool`` that name a packet capture, in its declared order."""
-    fields = getattr(getattr(tool, "args_schema", None), "model_fields", None)
-    if not isinstance(fields, dict):
-        return ()
-    return tuple(name for name in fields if name.strip().lower() in CAPTURE_ARG_NAMES)
+    from maljan.agents.server_names import server_names
+
+    names = server_names(getattr(tool, "args_schema", None))
+    return tuple(name for name in names if name.strip().lower() in CAPTURE_ARG_NAMES)
 
 
 def _sample_arguments(tool: Any) -> tuple[str, ...]:
     """The arguments of ``tool`` that name the sample, in its declared order."""
-    fields = getattr(getattr(tool, "args_schema", None), "model_fields", None)
-    if not isinstance(fields, dict):
-        return ()
-    return tuple(name for name in fields if names_the_sample(name))
+    from maljan.agents.server_names import server_names
+
+    names = server_names(getattr(tool, "args_schema", None))
+    return tuple(name for name in names if names_the_sample(name))
 
 
 def _schema_without(args_schema: Any, hidden: tuple[str, ...]) -> Any:
@@ -381,14 +391,27 @@ def _schema_without(args_schema: Any, hidden: tuple[str, ...]) -> Any:
     shared with the server registry, and the platform's own calls still go
     through the unwrapped tool.
     """
-    from pydantic import create_model
+    from maljan.agents.null_arguments import argument_model, rules_of, without_fields
 
     fields = getattr(args_schema, "model_fields", None)
     if not isinstance(fields, dict):
         return None
-    kept = {name: (field.annotation, field) for name, field in fields.items() if name not in hidden}
+    # ``hidden`` names the server's arguments (``agents.server_names``).
+    kept = {
+        name: (field.annotation, field)
+        for name, field in fields.items()
+        if (name if field.alias is None else field.alias) not in hidden
+    }
     try:
-        return create_model(getattr(args_schema, "__name__", "Args"), **kept)  # type: ignore[call-overload]
+        # What the tool does with a ``null`` goes with the fields it keeps
+        # (``agents.null_arguments``): a hidden field is the platform's to
+        # fill, so a ``null`` the model wrote for it is neither dropped nor
+        # withheld.
+        return argument_model(
+            getattr(args_schema, "__name__", "Args"),
+            kept,
+            without_fields(rules_of(args_schema), hidden),
+        )
     except Exception as exc:  # noqa: BLE001 — a guardrail never costs a tool
         logger.warning("tool_pinning: the schema for a pinned tool could not be narrowed: %s", exc)
         return None
@@ -418,7 +441,7 @@ def _pin_tool(
     this sample's path into the next agent that borrows it. Fail-safe —
     anything unexpected keeps the original tool.
     """
-    from langchain_core.tools import StructuredTool
+    from maljan.agents.server_names import ServerNamedTool, to_server_names
 
     func = getattr(tool, "func", None)
     coroutine = getattr(tool, "coroutine", None)
@@ -462,7 +485,11 @@ def _pin_tool(
             return False
         return not os.path.exists(value)
 
+    held = args_schema
+
     def _correct(kwargs: dict[str, Any]) -> dict[str, Any]:
+        # By the server's names, as ``hidden`` and ``supplied`` are.
+        kwargs = to_server_names(held, kwargs)
         out = dict(kwargs)
         # The sample's own path, supplied rather than asked for.
         for key in hidden:
@@ -502,7 +529,7 @@ def _pin_tool(
             return _told(await coroutine(**_correct(kwargs)))
 
     try:
-        return StructuredTool.from_function(
+        return ServerNamedTool.from_function(
             func=wrapped_func,
             coroutine=wrapped_coroutine,
             name=name,

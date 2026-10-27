@@ -1579,6 +1579,10 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Roaming\\kingsoft\\office6\\log\\logdata"
         ],
+        "pids": [
+          "1536",
+          "908"
+        ],
         "sha256": "91bfdfaa233b4c71e71d5b16eb753a9614a1eb04f59a3e4bd5dcbdd08bc198b7",
         "size": 96,
         "type": "data"
@@ -1589,6 +1593,10 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Roaming\\kingsoft\\office6\\log\\klogindex"
+        ],
+        "pids": [
+          "1536",
+          "908"
         ],
         "sha256": "748304d15a9abdf7a0498afdb152d489455667d71630cc364fd787bb1982e837",
         "size": 767,
@@ -1601,6 +1609,9 @@
         "path": [
           "C:\\Windows\\System32\\drivers\\etc\\hosts"
         ],
+        "pids": [
+          "1188"
+        ],
         "sha256": "cc67886f0602a3d1c0ba8ea5a0220558b2571af3c4b8e39ca1fcff193e3d91db",
         "size": 884,
         "type": "ASCII text, with CRLF line terminators"
@@ -1612,6 +1623,10 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Roaming\\kingsoft\\wps\\addons\\data\\win-x64\\kconfigcenter\\kccsdkdb\\kccsdkpriortydb\\mdbx.dat"
         ],
+        "pids": [
+          "1536",
+          "908"
+        ],
         "sha256": "67f1c74f9af2705669342e8b7dceeb9effbf02040c5fc8a01bf886ce6006b13e",
         "size": 131072,
         "type": "data"
@@ -1622,6 +1637,10 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Roaming\\kingsoft\\office6\\log\\ksomisc\\ksomisc_2026_07_25.log"
+        ],
+        "pids": [
+          "1536",
+          "908"
         ],
         "sha256": "35b91747b75911abed0370252f794fba332856323caa56c48d90823cb2e712b2",
         "size": 5602,

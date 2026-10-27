@@ -35,6 +35,7 @@ from pydantic import ValidationError
 
 from maljan.agents.claim_headings import claim_blocks, count_claims_begun
 from maljan.agents.run_evidence_corpus import CorpusState, both_searched
+from maljan.agents.tool_fence import quoted_value
 
 # The row helpers live with the shape (``analysis.corroboration``) and are
 # re-exported here, where every reader of a run's validation looks for them.
@@ -202,6 +203,12 @@ class Violation:
     # run record keeps it (``unparsed_answer_rows``); the event that asks says
     # only where. Never shown to the producer and never stored on the channel.
     answer: str = ""
+    # What the question shows after the finding's words: the ledger's own text
+    # the finding is about (a routine's code, the object that names an
+    # address), so the producer can state what the entry shows. Only the
+    # question sent carries it (:func:`feedback_text`); the finding recorded,
+    # stored and printed is the message alone.
+    shown: str = ""
 
     def __post_init__(self) -> None:
         # A row written by a validator has no route, and its message is its
@@ -328,7 +335,8 @@ def feedback_text(
         card = _card_after(violation) if cards and violation.subject not in carded else ""
         if card:
             carded.add(violation.subject)
-        lines.append(f"- [{violation.code}]{where} {violation.message}{card}")
+        shown = f" {violation.shown}" if violation.shown else ""
+        lines.append(f"- [{violation.code}]{where} {violation.message}{card}{shown}")
     lines.append(closing)
     return "\n".join(lines)
 
@@ -407,7 +415,9 @@ UNPARSED_ANSWER_CODE = "isr.unparsed_answer"
 CLAIM_WITHOUT_CONFIDENCE_CODE = "isr.claim_without_confidence"
 # A claim whose TECHNIQUE line is more than ids or NONE. No id is read from
 # it, and the analyst is asked once for ids alone. A list of ids separated by
-# commas or "and" is read (``base_agent.read_technique_line``) and not asked.
+# commas, "and", slashes or semicolons is read (``base_agent.read_technique_line``)
+# and not asked, and so is an id with a closing note in brackets that decides
+# nothing or says the id is not asserted.
 TECHNIQUE_LINE_UNREAD_CODE = "isr.technique_line_unread"
 # Claim headings under the DISPUTES section, beside the analyst's own claims.
 # Not read as its own: they may be a peer's claims it quotes, or its own
@@ -599,7 +609,11 @@ def _cites_a_ledger_entry(
     for the id, and the findings block is where the same analyst may already
     have cited one for this technique. The claim's own prose is deliberately
     not searched: "as ev_0001 does not show, this may be injection" is not a
-    citation, and reading it as one is how a validator stops validating.
+    citation, and reading it as one is how a validator stops validating. An id
+    the claim sentence writes in brackets counts only for a block with no
+    EVIDENCE line (or one that cleaned to nothing): the reader puts those ids on
+    the evidence line (``base_agent.ledger_ids_cited``), and they are checked
+    here as any id on it is.
 
     The id has to be one this run issued. The feedback names three real ones,
     so the shape of an id is no proof of anything, and an ``ev_9999`` the run
@@ -1091,7 +1105,11 @@ def _in_a_negated_object(text: str, start: int) -> bool:
     return _NegationReader(text).in_a_negated_object(start)
 
 
-def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
+def states_absence(
+    text: str,
+    pattern: re.Pattern[str] | None,
+    another_s: Callable[[str], bool] | None = None,
+) -> bool:
     """Whether ``text`` names the behaviour only to say it is absent.
 
     The capability check's own reader (:func:`_is_negated`), asked of every
@@ -1105,11 +1123,17 @@ def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
     behaviour is there, and one is enough. A text that never names the
     behaviour states nothing about it. The reading decides only whether the
     analyst is asked (``ABSENCE_CLAIM_CODE``); what the analyst answers stands.
+    A mention ``another_s`` says belongs to another technique is not read
+    (:func:`_another_member_s_word`).
     """
     if not text or pattern is None:
         return False
     text = _read_dashes(text)
-    matches = list(pattern.finditer(text))
+    matches = [
+        match
+        for match in pattern.finditer(text)
+        if another_s is None or not another_s(match.group(0))
+    ]
     if not matches:
         return False
     reader = _NegationReader(text)
@@ -1146,7 +1170,8 @@ def absence_claim_violation(
     the technique when asked. The platform withholds nothing on this reading.
     """
     text = str(getattr(claim, "claim", "") or "")
-    if not states_absence(text, behaviour_pattern(technique_id, attck)):
+    pattern = behaviour_pattern(technique_id, attck)
+    if not states_absence(text, pattern, _another_member_s_word(technique_id, text)):
         return None
     tid = safe_finding_value(technique_id)
     # On a claim whose TECHNIQUE line lists other ids, NONE would take them
@@ -1168,6 +1193,79 @@ def absence_claim_violation(
         path=path,
         subject=str(technique_id).strip().upper(),
     )
+
+
+@cache
+def _family_name_stems(technique_id: str) -> tuple[frozenset[str], frozenset[str]]:
+    """The stems of the catalogue names that are ``technique_id``'s own (its name
+    and, for a sub-technique, its parent's) and those of the other members of
+    its family (its sub-techniques, or its siblings), built from the catalogue."""
+    from maljan.memory.attck_loader import sub_technique_entries, technique_entry
+
+    tid = str(technique_id or "").strip().upper()
+    parent = _family(tid)
+    own_ids = {tid, parent}
+    own: set[str] = set()
+    for one in own_ids:
+        entry = technique_entry(one)
+        if entry is not None:
+            own |= _name_stems(entry.name)
+    others: set[str] = set()
+    for entry in sub_technique_entries(parent):
+        if entry.technique_id.upper() not in own_ids:
+            others |= _name_stems(entry.name)
+    return frozenset(own), frozenset(others - own)
+
+
+def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool]:
+    """Whether a mention of ``technique_id``'s behaviour in ``text`` names only another
+    member of its family: every word of it whose stem a catalogue name of the
+    family holds is in a sub-technique's or sibling's name and in none of its own
+    ("packed" under Dynamic API Resolution is Software Packing's word). The
+    absence question is not asked of such a mention.
+
+    For a sub-technique a sibling's word is never its absence. For a parent a
+    child's word may be ("The DLL is not packed." under Obfuscated Files or
+    Information is asked), so it is set aside only when ``text`` also names the
+    family's behaviour, neither named as absent nor after a negating word of its
+    own clause, by a word whose stem is a stem of a family member's name, a word
+    the vendored data writes for the parent itself (:func:`technique_vocabulary`),
+    and in no more technique families' names than the rarest family stem of the
+    word it would set aside ("strings XOR-encoded; not packed": "encod", two
+    families, beside "pack", two). Read from the catalogue's names and the
+    vendored data, for every parent and child, with no number of its own."""
+    own, others = _family_name_stems(technique_id)
+    families = _name_stem_families()
+    parent = "." not in str(technique_id or "")
+    affirmed: list[int] = []
+    if parent:
+        text = _read_dashes(text)
+        vocabulary = technique_vocabulary(technique_id)
+        reader: _NegationReader | None = None
+        negated: Callable[[int], bool] | None = None
+        for match in re.finditer(r"[A-Za-z]{3,}", text):
+            stem = _stem(match.group(0))
+            if (stem not in own and stem not in others) or stem not in vocabulary:
+                continue
+            reader = reader or _NegationReader(text)
+            negated = negated or _negated_in_its_clause(text)
+            if not reader.named_as_absent(match.start(), match.end()) and not negated(
+                match.start()
+            ):
+                affirmed.append(families.get(stem, 0))
+        if not affirmed:
+            return lambda _mention: False
+
+    def another_s(mention: str) -> bool:
+        stems = {_stem(word) for word in re.findall(r"[A-Za-z]+", mention) if len(word) >= 3}
+        if not stems & others or stems & own:
+            return False
+        if not parent:
+            return True
+        rarest = min(families.get(stem, 0) for stem in stems & others)
+        return any(count <= rarest for count in affirmed)
+
+    return another_s
 
 
 CLAIM_DOES_NOT_DESCRIBE_CODE = "attck.claim_does_not_describe"
@@ -1200,8 +1298,16 @@ _WORD_ENDINGS = (
 )
 
 
+# An acronym's plural: capitals and a closing small "s" ("APIs", "DLLs"). Its
+# stem is the acronym ("api"), which keeps fewer than four letters.
+_ACRONYM_PLURAL_RE = re.compile(r"[A-Z]{2,}s")
+
+
 def _stem(word: str) -> str:
-    """``word`` lower-cased with its common endings taken off, four letters kept."""
+    """``word`` lower-cased with its common endings taken off, four letters kept; an
+    acronym's plural is the acronym (``_ACRONYM_PLURAL_RE``)."""
+    if _ACRONYM_PLURAL_RE.fullmatch(word):
+        return word[:-1].lower()
     stem = word.lower()
     changed = True
     while changed:
@@ -1321,13 +1427,31 @@ _CALL_SPELLINGS = ("", "a", "w", "ex", "exa", "exw")
 # "imported but never referenced", "firing at run time not observed"). A
 # procedure word in such a sentence names what the sample could do, so it
 # shares no term with the technique on its own and the sentence is asked as
-# before.
+# before. It reaches the sentence it stands in (``_said_not_seen``): "This is a
+# code path only and was not observed." after a sentence naming the call says
+# nothing of that sentence's words.
 _NOT_SEEN_RE = re.compile(
     r"\b(?:no|not|never|nothing)\b(?:\s+[\w-]+){0,3}?\s+(?:seen|observed|exercised|invoked"
     r"|executed|called|referenced|used|fired|triggered|sent|performed)\b"
     r"|\b(?:is|are|was|were)\s+(?:not|never)\s+(?:read|run|made)\b|\bunobserved\b",
     re.IGNORECASE,
 )
+
+
+def _said_not_seen(text: str) -> Callable[[int], bool]:
+    """For ``text``, whether the sentence a position stands in says the behaviour was
+    not seen (``_NOT_SEEN_RE``). Each sentence is searched once."""
+    starts = [0, *(found.end() for found in _SENTENCE_END_RE.finditer(text))]
+    ends = [*starts[1:], len(text)]
+    unseen = [
+        _NOT_SEEN_RE.search(text, start, end) is not None
+        for start, end in zip(starts, ends, strict=True)
+    ]
+
+    def said(at: int) -> bool:
+        return unseen[bisect.bisect_right(starts, at) - 1]
+
+    return said
 
 
 @dataclass(frozen=True)
@@ -1549,6 +1673,32 @@ def procedure_words(technique_id: str) -> ProcedureWords:
     )
 
 
+@cache
+def technique_vocabulary(technique_id: str) -> frozenset[str]:
+    """Every word the vendored data writes for ``technique_id``, as :func:`_stem` reads it.
+
+    The catalogue name and the texts :func:`_procedure_sources` reads (the
+    technique card's requirements and indicators, the API catalogue's rule),
+    the id's own and, for a sub-technique, its parent's, each word of three
+    letters or more. The technique line's reader reads a note beside an id by
+    them (``base_agent._read_noted_line``).
+    """
+    from maljan.memory.attck_loader import technique_entry
+
+    tid = str(technique_id or "").strip().upper()
+    ids = [tid, _family(tid)] if "." in tid else [tid]
+    sources = _procedure_sources()
+    texts: list[str] = []
+    for one in ids:
+        entry = technique_entry(one)
+        if entry is not None and entry.name:
+            texts.append(entry.name)
+        texts.extend(sources.get(one, ()))
+    return frozenset(
+        _stem(word) for text in texts for word in re.findall(r"[A-Za-z]+", text) if len(word) >= 3
+    )
+
+
 # An identifier written as joined words names each of them ("BeingDebugged"
 # writes "Being" and "Debugged"). Each is compared with the stems of the
 # technique's name that the vendored names of one technique family only hold:
@@ -1626,19 +1776,25 @@ def _description_stopwords() -> frozenset[str]:
     """The words no description is compared by: the vendored generic English
     stopword list (``data/english_stopwords_v1.json``: ``very``, ``few``,
     ``made``), the catalogue index's stopwords and a name's filler words."""
-    from maljan.core.paths import resolve_data
     from maljan.memory.attck_index import _STOPWORDS
 
-    try:
-        document = json.loads(resolve_data(ENGLISH_STOPWORDS_FILE).read_text(encoding="utf-8"))
-        english = {str(word).lower() for word in document.get("words") or []}
-    except (OSError, ValueError, AttributeError) as exc:
-        logger.warning("validation: the English stopword list could not be read (%s).", exc)
-        english = set()
-    return frozenset(english | _STOPWORDS | _NAME_FILLER_WORDS)
+    return frozenset(english_stopwords() | _STOPWORDS | _NAME_FILLER_WORDS)
 
 
 ENGLISH_STOPWORDS_FILE = "data/english_stopwords_v1.json"
+
+
+@lru_cache(maxsize=1)
+def english_stopwords() -> frozenset[str]:
+    """The vendored generic English stopword list, lower-cased; empty when it cannot be read."""
+    from maljan.core.paths import resolve_data
+
+    try:
+        document = json.loads(resolve_data(ENGLISH_STOPWORDS_FILE).read_text(encoding="utf-8"))
+        return frozenset(str(word).lower() for word in document.get("words") or [])
+    except (OSError, ValueError, AttributeError) as exc:
+        logger.warning("validation: the English stopword list could not be read (%s).", exc)
+        return frozenset()
 
 
 def _description_words(text: str) -> Iterator[tuple[str, re.Match[str]]]:
@@ -1764,7 +1920,7 @@ def described_by_its_words(text: str, technique_id: str) -> bool:
     weight (see above).
 
     Read as a procedure word is read: nothing counts in a sentence that says the
-    behaviour was not seen, run or used (``_NOT_SEEN_RE``), and a word named to
+    behaviour was not seen, run or used (``_said_not_seen``), and a word named to
     say it is absent ("no string is encoded", "without a decode loop") is no
     hit (:func:`_named_as_absent`), nor is one after a negating word of its own
     clause ("and nothing is decoded"). The absence reading is asked of the
@@ -1775,8 +1931,7 @@ def described_by_its_words(text: str, technique_id: str) -> bool:
     if not phrases:
         return False
     text = _read_dashes(text)
-    if _NOT_SEEN_RE.search(text):
-        return False
+    unseen = _said_not_seen(text)
     vocabulary = {stem for phrase in phrases for stem in phrase}
     negated = _negated_in_its_clause(text)
     breaks = [(found.start(), found.end()) for found in _CLAUSE_BREAK_RE.finditer(text)]
@@ -1787,7 +1942,7 @@ def described_by_its_words(text: str, technique_id: str) -> bool:
     readers: dict[tuple[int, int], _NegationReader] = {}
     for stem, match in _description_words(text):
         start, end = match.span()
-        if stem in written or stem not in vocabulary or negated(start):
+        if stem in written or stem not in vocabulary or negated(start) or unseen(start):
             continue
         cut = bisect.bisect_right(break_ends, start)
         begin = break_ends[cut - 1] if cut else 0
@@ -1843,17 +1998,16 @@ def _names_a_procedure(text: str, technique_id: str, stems: Collection[str]) -> 
     """Whether ``text`` names the technique by one of its procedure words or joined words
     in a statement that the sample does it.
 
-    A sentence that says the behaviour was not seen (``_NOT_SEEN_RE``) names a
+    A sentence that says the behaviour was not seen (``_said_not_seen``) names a
     capability only, and a mention named to say it is absent asserts nothing:
     neither counts, and such a sentence is asked as it was before these words
     were read.
     """
     text = _read_dashes(text)
-    if _NOT_SEEN_RE.search(text):
-        return False
+    unseen = _said_not_seen(text)
     reader = _NegationReader(text)
     return any(
-        not reader.named_as_absent(start, end)
+        not unseen(start) and not reader.named_as_absent(start, end)
         for start, end in _procedure_places(text, technique_id, stems)
     )
 
@@ -5963,6 +6117,457 @@ def repeated_item_violations(
     return found
 
 
+# A command table whose numbered ids leave out a value the code it was shown
+# compares the command value with, or name a value that code compares it with
+# nowhere. A row whose id was converted between bases by hand can name another
+# case's value, and a case the table leaves out is a command the reader never
+# learns of. Asked once with the values the
+# platform read from the code; the model decides which branch is a command and
+# what it does, and the table is kept as written with the finding beside it.
+COMMAND_VALUES_CODE = "composer.command_values"
+
+# The parts of C-like code that are not code: comments, and string and
+# character literals, each read to its end or to the end of its line (an
+# unclosed comment to the end of the text), so one pass reads them all.
+_CODE_NOT_CODE_RE = re.compile(
+    r"/\*(?:[^*]|\*(?!/))*(?:\*/)?|//[^\n]*|\"(?:\\.|[^\"\\\n])*\"?|'(?:\\.|[^'\\\n])*'?"
+)
+# A whole number a 64-bit value holds, as C writes it: hex after ``0x``, octal
+# after a leading zero, else decimal. A longer literal, and a leading-zero form
+# that is no octal, is not read: what is read is held to that width.
+_CODE_INT = (
+    r"-?(?:0[xX][0-9a-fA-F]{1,16}(?![0-9a-fA-F])|0[0-7]{1,22}(?![0-9])"
+    r"|(?:0|[1-9][0-9]{0,19})(?![0-9]))"
+)
+_CODE_INT_SUFFIX = r"[uUlL]{0,3}(?![\w.])"
+# One name tested for equality with one number, the whole of a condition or
+# of one of its ``||`` parts: ``param_2 == 0x12``.
+_CODE_PLAIN_EQUALITY_RE = re.compile(
+    rf"([A-Za-z_]\w*)\s*==\s*({_CODE_INT}){_CODE_INT_SUFFIX}", re.ASCII
+)
+# One name compared with one number by order, the whole of a condition:
+# ``param_2 < 0x10``. It splits the values it is compared with by range and
+# compares it with none of them.
+_CODE_PLAIN_RANGE_RE = re.compile(
+    rf"([A-Za-z_]\w*)\s*[<>]=?\s*{_CODE_INT}{_CODE_INT_SUFFIX}", re.ASCII
+)
+# What the code is read by, in one pass: the head of a switch and of an if,
+# ``else``, the braces round each block, the end of a statement, each case
+# label, and a case label that is not one number (a name, a character, a
+# range, a number wider than 64 bits).
+_CODE_TOKEN_RE = re.compile(
+    rf"\b(switch|if)\s*\(|\belse\b|[{{}};]"
+    rf"|\bcase\s+({_CODE_INT}){_CODE_INT_SUFFIX}\s*:|\bcase\b",
+    re.ASCII,
+)
+# Every equality and inequality test in the code.
+_CODE_EQUALITY_OP_RE = re.compile(r"[!=]=")
+# A word of code: a name or a number with its suffix.
+_CODE_WORD_RE = re.compile(r"[A-Za-z0-9_]+", re.ASCII)
+_CODE_NAME_RE = re.compile(r"[A-Za-z_]\w*", re.ASCII)
+_CODE_NUMBER_RE = re.compile(rf"({_CODE_INT}){_CODE_INT_SUFFIX}", re.ASCII)
+# What may stand before an operand of a test, past spaces, and after one: the
+# operand is then the whole operand, not a field, a pointee, a cast's result
+# or a term of a sum.
+_OPERAND_BEFORE = frozenset("(|&,?:;{=")
+_OPERAND_AFTER = frozenset(")|&,?:;}")
+# A command id read as a number, in the forms the code's numbers are read in.
+_ROW_NUMBER_RE = re.compile(_CODE_INT, re.ASCII)
+# The owner of a block inside a switch whose head was not read: its labels are
+# not read either.
+_UNREAD_SWITCH = (-1, "")
+
+
+@dataclass(frozen=True)
+class ComparedValues:
+    """The values one piece of code compares one expression with, as a section was shown it.
+
+    ``where`` names the code as the section's prompt names it; ``subject`` is
+    the expression as the code writes it.
+    """
+
+    where: str
+    subject: str
+    values: tuple[int, ...]
+
+
+def _code_number(text: str) -> int:
+    """A whole number as :data:`_CODE_INT` reads it, any suffix aside."""
+    digits = text.rstrip("uUlL")
+    negative = digits.startswith("-")
+    digits = digits.lstrip("-")
+    if digits[:2].lower() == "0x":
+        value = int(digits, 16)
+    elif len(digits) > 1 and digits[0] == "0":
+        value = int(digits, 8)
+    else:
+        value = int(digits)
+    return -value if negative else value
+
+
+def _bare(text: str, pairs: dict[int, int], start: int, stop: int) -> tuple[int, int]:
+    """``text[start:stop]`` past its spaces and the brackets that enclose the whole of it."""
+    while True:
+        while start < stop and text[start].isspace():
+            start += 1
+        while stop > start and text[stop - 1].isspace():
+            stop -= 1
+        if start < stop and text[start] == "(" and pairs.get(start) == stop - 1:
+            start, stop = start + 1, stop - 1
+        else:
+            return start, stop
+
+
+def _rung(condition: str) -> tuple[str, str, frozenset[int]] | None:
+    """What one if's condition tests, read whole or not at all.
+
+    ``("eq", name, values)`` for one name tested for equality with numbers,
+    alone or in parts joined by ``||`` at any depth; ``("range", name, {})``
+    for one name compared with one number by order; ``None`` for any other
+    condition. Linear in its length: each part is walked once at its depth,
+    a bracketed part jumped over.
+    """
+    pairs: dict[int, int] = {}
+    opened: list[int] = []
+    for at, char in enumerate(condition):
+        if char == "(":
+            opened.append(at)
+        elif char == ")":
+            if not opened:
+                return None
+            pairs[opened.pop()] = at
+    if opened:
+        return None
+    name: str | None = None
+    values: set[int] = set()
+    todo = [_bare(condition, pairs, 0, len(condition))]
+    whole = True
+    while todo:
+        start, stop = _bare(condition, pairs, *todo.pop())
+        parts: list[tuple[int, int]] = []
+        cut = at = start
+        while at < stop:
+            if condition[at] == "(":
+                at = pairs[at] + 1
+            elif condition.startswith("||", at):
+                parts.append((cut, at))
+                at += 2
+                cut = at
+            else:
+                at += 1
+        if parts:
+            whole = False
+            todo.extend([*parts, (cut, stop)])
+            continue
+        found = _CODE_PLAIN_EQUALITY_RE.fullmatch(condition, start, stop)
+        if found is None or (name is not None and found.group(1) != name):
+            ranged = _CODE_PLAIN_RANGE_RE.fullmatch(condition, start, stop) if whole else None
+            return ("range", ranged.group(1), frozenset()) if ranged else None
+        name = found.group(1)
+        values.add(_code_number(found.group(2)))
+    return ("eq", name, frozenset(values)) if name else None
+
+
+@dataclass
+class _Ladder:
+    """One if and the else-ifs that follow it: the name its rungs test, and what they test."""
+
+    name: str | None = None
+    values: set[int] = field(default_factory=set)
+    rungs: int = 0
+    # A rung on another condition was met, and a rung on the name after it.
+    interrupted: bool = False
+    broken: bool = False
+
+
+def _is_code_word_char(char: str) -> bool:
+    return char.isascii() and (char.isalnum() or char == "_")
+
+
+def _operand(word: str, whole: bool, negative: bool = False) -> tuple[str, str, int]:
+    """One side of a test: ``("name", name, 0)``, ``("num", "", value)`` or ``("other", name, 0)``.
+
+    ``whole`` says the word is the whole side. A side that is not ``other``
+    still names the name it holds, so a test of a name the reader cannot
+    read marks that name.
+    """
+    if _CODE_NAME_RE.fullmatch(word):
+        return ("name" if whole and not negative else "other", word, 0)
+    number = _CODE_NUMBER_RE.fullmatch(word)
+    if number is not None and whole:
+        value = _code_number(number.group(1))
+        return ("num", "", -value if negative else value)
+    return ("other", "", 0)
+
+
+def _left_operand(text: str, at: int) -> tuple[str, str, int]:
+    """The side of the test written before ``text[at]``."""
+    at -= 1
+    while at >= 0 and text[at].isspace():
+        at -= 1
+    closed = at >= 0 and text[at] == ")"
+    while at >= 0 and (text[at] == ")" or text[at].isspace()):
+        at -= 1
+    end = at + 1
+    while at >= 0 and _is_code_word_char(text[at]):
+        at -= 1
+    word = text[at + 1 : end]
+    if not word:
+        return ("other", "", 0)
+    if closed:
+        # A cast's result or a bracketed expression: the name in it is tested
+        # in a form this reader does not read.
+        return ("other", word if _CODE_NAME_RE.fullmatch(word) else "", 0)
+    while at >= 0 and text[at].isspace():
+        at -= 1
+    whole = at < 0 or (
+        text[at] in _OPERAND_BEFORE and not (text[at] == "=" and at > 0 and text[at - 1] in "<>!=")
+    )
+    return _operand(word, whole)
+
+
+def _right_operand(text: str, at: int) -> tuple[str, str, int]:
+    """The side of the test written from ``text[at]`` on."""
+    size = len(text)
+    while at < size and text[at].isspace():
+        at += 1
+    negative = at < size and text[at] == "-"
+    if negative:
+        at += 1
+    start = at
+    while at < size and _is_code_word_char(text[at]):
+        at += 1
+    word = text[start:at]
+    if not word:
+        return ("other", "", 0)
+    while at < size and text[at].isspace():
+        at += 1
+    return _operand(word, at >= size or text[at] in _OPERAND_AFTER, negative)
+
+
+def _read_compared_values(code: str) -> list[tuple[str, tuple[int, ...]]]:
+    """:func:`compared_values` without its guard."""
+    text = _CODE_NOT_CODE_RE.sub(" ", str(code or ""))
+    # A top-level block opened by no if or switch head is a function's body:
+    # what one function compares is never joined to another's. Where each
+    # body opens, so a test anywhere is placed in its function.
+    scope = 0
+    opens: list[tuple[int, int]] = []
+    # Per open block: the switch whose labels it holds, and the ladder it is a
+    # rung of when it is an if's body.
+    frames: list[tuple[tuple[int, str] | None, _Ladder | None]] = []
+    pending: tuple[str, Any] | None = None
+    closed_if: _Ladder | None = None
+    else_of: _Ladder | None = None
+    # What a switch or a ladder chooses by, per function and expression, and
+    # the ones some test or label of which this reader cannot read.
+    held: dict[tuple[int, str], set[int]] = {}
+    ladders: list[tuple[int, _Ladder]] = []
+    unread: set[tuple[int, str]] = set()
+    end = 0
+    for match in _CODE_TOKEN_RE.finditer(text):
+        if match.start() < end:
+            continue
+        token = match.group(0)
+        # Each holds for the one token that follows what set it.
+        just_closed, closed_if = closed_if, None
+        after_else, else_of = else_of, None
+        head = match.group(1)
+        if head:
+            # A switch's expression closes on its line; an if's condition may
+            # run over lines. Either is read once, to its closing bracket.
+            depth, at = 1, match.end()
+            line_end = text.find("\n", at) if head == "switch" else -1
+            stop = len(text) if line_end < 0 else line_end
+            while at < stop and depth:
+                depth += {"(": 1, ")": -1}.get(text[at], 0)
+                at += 1
+            inside = text[match.end() : at - 1] if not depth else None
+            end = at
+            if head == "switch":
+                subject = " ".join(inside.split()) if inside else ""
+                pending = ("switch", (scope, subject) if subject else _UNREAD_SWITCH)
+                continue
+            # An else-if ladder: ``if (x == a) {…} else if (x == b || x == c) {…}``.
+            ladder = after_else
+            if ladder is None:
+                ladder = _Ladder()
+                ladders.append((scope, ladder))
+            rung = _rung(inside) if inside is not None else None
+            if rung is not None and ladder.name in (None, rung[1]):
+                ladder.name = rung[1]
+                if rung[0] == "eq":
+                    ladder.broken = ladder.broken or ladder.interrupted
+                    ladder.values |= rung[2]
+                    ladder.rungs += 1
+            else:
+                ladder.interrupted = True
+            pending = ("if", ladder)
+        elif token == "else":
+            else_of = just_closed
+            pending = None
+        elif token == "{":
+            owner = frames[-1][0] if frames else None
+            ladder = None
+            if pending is not None and pending[0] == "switch":
+                owner = pending[1]
+            elif pending is not None:
+                ladder = pending[1]
+            elif not frames:
+                scope += 1
+                opens.append((match.start(), scope))
+            frames.append((owner, ladder))
+            pending = None
+        elif token == "}":
+            if frames:
+                _owner, closed_if = frames.pop()
+            pending = None
+        elif token == ";":
+            pending = None
+        else:
+            owner = frames[-1][0] if frames else None
+            if owner is None or owner == _UNREAD_SWITCH:
+                continue
+            if match.group(2) is None:
+                unread.add(owner)
+            else:
+                held.setdefault(owner, set()).add(_code_number(match.group(2)))
+    for at_scope, ladder in ladders:
+        if ladder.name is not None and ladder.rungs > 1:
+            key = (at_scope, ladder.name)
+            held.setdefault(key, set()).update(ladder.values)
+            if ladder.broken:
+                unread.add(key)
+    # Every other test of a name in its function: one with a number adds the
+    # number, any other marks the name, so no set is stated short of a value.
+    tested: dict[tuple[int, str], set[int]] = {}
+    current, index = 0, 0
+    for match in _CODE_EQUALITY_OP_RE.finditer(text):
+        while index < len(opens) and opens[index][0] < match.start():
+            current = opens[index][1]
+            index += 1
+        left = _left_operand(text, match.start())
+        right = _right_operand(text, match.end())
+        if left[0] == "name" and right[0] == "num":
+            tested.setdefault((current, left[1]), set()).add(right[2])
+        elif right[0] == "name" and left[0] == "num":
+            tested.setdefault((current, right[1]), set()).add(left[2])
+        else:
+            unread.update((current, side[1]) for side in (left, right) if side[1])
+    return [
+        (subject, tuple(sorted(values | tested.get((at_scope, subject), set()))))
+        for (at_scope, subject), values in held.items()
+        if (at_scope, subject) not in unread
+        and len(values | tested.get((at_scope, subject), set())) > 1
+    ]
+
+
+def compared_values(code: str) -> list[tuple[str, tuple[int, ...]]]:
+    """The expressions ``code`` chooses among two or more whole numbers by, each with its numbers.
+
+    Read from C-like code, the form a decompiler writes, one function body
+    (a top-level block no if or switch opens) apart from another: the case
+    labels of a switch on an expression (``switch (param_2)`` … ``case
+    0x12:``), and an else-if ladder on one name (``if (param_2 == 0x12) {…}
+    else if (param_2 == 0xe || param_2 == 0xc) {…}``), each rung's whole
+    condition equality tests of that name joined by ``||``, or one range test
+    of it. Every other test of that name in the function with a number adds
+    the number. The set is stated whole or not at all: a case label that is
+    not one number, a test of the name in any other form (a cast, another
+    name, a symbol), or a rung on another condition with the ladder going on
+    after it, and the expression is not returned. A label inside a switch
+    whose head does not close on its line is not read. An expression compared
+    with a single number is a test, not a choice among values, and is not
+    returned; nor is a name no switch or ladder chooses by. Comments and
+    string and character literals are not read, nor a number wider than 64
+    bits. Each expression is returned once per function, a switch's in the
+    order of its first label and a ladder's after them in the order the
+    ladders begin, with its numbers ascending. Linear in the
+    length of ``code``; code in any other form returns nothing, and code this
+    reader fails on returns nothing too, so no section is lost to it.
+    """
+    try:
+        return _read_compared_values(code)
+    except Exception as exc:  # noqa: BLE001 — a fact not read is no fact, never a lost section
+        logger.debug("validation: the compared values were not read (%s).", type(exc).__name__)
+        return []
+
+
+def both_bases(value: int) -> str:
+    """A whole number in hex with its decimal beside it: ``0x15 (21)``."""
+    return f"{hex(value)} ({value})"
+
+
+def command_value_violations(payload: Any, compared: Sequence[ComparedValues]) -> list[Violation]:
+    """A command table whose ids and the values its code compares disagree, as one question.
+
+    Each row's id is read as a number as written, alone or as its last word
+    (``0x15``, ``COMMAND 21``), as the code's numbers are read
+    (:data:`_CODE_INT`); any other id is not read. A table whose ids are 1 to
+    N, which row numbers would be too, is not checked. The code the table is
+    checked against is the one expression whose values hold the most of the
+    table's distinct numbered ids, more than half of them and at least two;
+    with two different value sets holding as many, the table is not checked.
+    The question names the values no row's id is and the ids that are none
+    of the values, every value in hex and decimal, and asks the model to read
+    each branch of that code again: the model decides which value is a
+    command and what its branch does.
+    """
+    numbered: list[tuple[int, str, int]] = []
+    for index, row in enumerate(_rows_of(payload, "commands")):
+        written = str(row.get("id") or "").strip()
+        last = written.rsplit(None, 1)[-1] if written else ""
+        if _ROW_NUMBER_RE.fullmatch(last):
+            numbered.append((index + 1, written, _code_number(last)))
+    ids = {value for _number, _written, value in numbered}
+    if len(ids) < 2 or not compared:
+        return []
+    if sorted(ids) == list(range(1, len(ids) + 1)):
+        # Ids 1 to N cannot be told from row numbers.
+        return []
+    best = max(len(ids.intersection(c.values)) for c in compared)
+    if best * 2 <= len(ids):
+        return []
+    chosen = [c for c in compared if len(ids.intersection(c.values)) == best]
+    if len({c.values for c in chosen}) > 1:
+        return []
+    values = chosen[0].values
+    unnamed = [value for value in values if value not in ids]
+    stray = [(number, written) for number, written, value in numbered if value not in values]
+    if not unnamed and not stray:
+        return []
+    where = "; ".join(
+        dict.fromkeys(
+            f"{quoted_value(safe_finding_value(c.where))}, which compares "
+            f"{quoted_value(safe_finding_value(c.subject))}"
+            for c in chosen
+        )
+    )
+    said = [
+        f"The code you were shown at {where} for equality with {len(values)} values, read by "
+        f"the platform from that code: {', '.join(both_bases(v) for v in values)}. {best} of "
+        f"your table's {len(ids)} numbered ids are among them, each id read as written: 0x and "
+        "hex digits as hex, a leading 0 and octal digits as octal, other digits as decimal."
+    ]
+    if unnamed:
+        said.append(f"No row's id is {', '.join(both_bases(v) for v in unnamed)}.")
+    if stray:
+        said.append(
+            "These rows' ids are none of those values: "
+            + "; ".join(
+                f"row {number} ({quoted_value(safe_finding_value(w))})" for number, w in stray
+            )
+            + "."
+        )
+    said.append(
+        "Read each value's branch in that code again. Give each row the value its branch is "
+        "taken on as its id, in one base for every row, and describe what that branch's own "
+        "code does; write a row for each value whose branch carries out a command, and none "
+        "for a value that is not one. Answer again with the whole list."
+    )
+    return [Violation(code=COMMAND_VALUES_CODE, message=" ".join(said), path="commands")]
+
+
 CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
 # A recommendation or hunting note that acts on a value this run does not
 # publish. Asked once with the IOC table's own answer; a value kept after it
@@ -5982,10 +6587,13 @@ STATED_VALUE_UNHELD_CODE = "report.value_not_in_cited_entry"
 # sentence kept after it is marked where it stands with the state.
 UNPUBLISHED_VALUE_CODE = "report.unpublished_value"
 TECHNIQUE_NAME_CODE = "report.technique_name"
-# A report sentence that says a routine was not read, or that something is not
-# in the ledger, or that a cited entry does not confirm a value, while an
-# answered entry of this run holds it (``ledger_absence_contradictions``).
-# Asked once, naming the entry; a sentence kept after it is recorded.
+# A report sentence that says a routine was not read (or its decompile not
+# obtained, or its body not in the evidence), or that something is not in the
+# ledger, or that a cited entry does not confirm (or verify) a value, or that
+# an address is unresolved, while an answered entry of this run holds it
+# (``ledger_absence_contradictions``).
+# Asked once, naming the entry and showing what it holds (the routine's code,
+# the object that names the address); a sentence kept after it is recorded.
 ABSENCE_CONTRADICTS_LEDGER_CODE = "report.absence_contradicts_ledger"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
@@ -6011,6 +6619,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         TECHNIQUE_NAME_CODE,
         RULE_MATCH_AS_ACTION_CODE,
         REPEATED_ITEMS_CODE,
+        COMMAND_VALUES_CODE,
         UNPUBLISHED_RECOMMENDATION_CODE,
         UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE,
         PERSISTENCE_NOT_OBSERVED_CODE,
@@ -6973,6 +7582,9 @@ class EntryTexts:
     _runs: dict[str, frozenset[str]] = field(default_factory=dict, compare=False, repr=False)
     # Each entry's place in ``texts``, for reading candidates in ledger order.
     _order: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
+    # What the answered entries hold by address (``_LedgerHolds``), read on the
+    # first statement of absence any check of this report meets, then kept.
+    _holds: list[_LedgerHolds] = field(default_factory=list, compare=False, repr=False)
 
     @classmethod
     def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
@@ -7970,24 +8582,50 @@ def misstated_entry_contents(
 # A sentence that says the ledger lacks what an answered entry holds
 # ---------------------------------------------------------------------------
 
-# The three statements of absence read, each by what makes it false: a routine
-# "not read" is false when a decompile of it answered; a thing "not in the
-# ledger" when an answered entry holds it; a value "not confirmed by" (or "not
-# shown in", "not listed in") the entry a sentence cites when that entry
-# holds the value.
+# The four statements of absence read, each by what makes it false: a routine
+# "not read" (or its decompile "not obtained", or its body "not in the
+# evidence") is false when a decompile of it answered; a thing "not in the
+# ledger" (or "not in my rows", or "no X is in the evidence") when an answered
+# entry holds it; a value "not confirmed by" (or "not verified by", "not shown
+# in", "not listed in") the entry a sentence cites when that entry holds the
+# value; an address "unresolved" (or "unnamed", "unidentified") when an
+# answered entry's object pairs it with a name.
 _NOT_READ = "read"
 _NOT_IN_LEDGER = "ledger"
 _NOT_CONFIRMED = "confirmed"
+_UNNAMED = "unnamed"
 _ABSENCE_RE = re.compile(
     r"\b(?:is|are|was|were|be|been)\s++(?:not|never)\s++(?:yet\s++)?(?:been\s++)?"
     r"(?P<read>read|decompiled|disassembled)\b"
     r"|\b(?:has|have|had)\s++(?:not|never)\s++(?:yet\s++)?been\s++"
     r"(?P<read_perfect>read|decompiled|disassembled)\b"
+    r"|\b(?:is|are|was|were|be|been)\s++(?:not|never)\s++(?:yet\s++)?(?:been\s++)?"
+    r"(?P<obtained>obtained|returned|retrieved|produced)\b"
+    r"|\b(?:has|have|had)\s++(?:not|never)\s++(?:yet\s++)?been\s++"
+    r"(?P<obtained_perfect>obtained|returned|retrieved|produced)\b"
     r"|\b(?:is|are|was|were)\s++(?:not\s++(?:in|on|among|found\s++in)|absent\s++from|"
-    r"missing\s++from)\s++(?:the\s++)?(?P<ledger>ledger|evidence)\b"
-    r"|\b(?:is|are|was|were)\s++not\s++(?P<confirmed>confirmed|shown|listed|named)\s++(?:by|in)\b",
+    r"missing\s++from)\s++(?:the\s++|my\s++)?(?P<ledger>ledger|evidence|rows)\b"
+    r"|\bno\s++(?P<no_subject>(?:[^\s.;:!?]++\s++){1,8}?)(?:is|are|was|were)\s++"
+    r"(?:in|on|among|found\s++in)\s++(?:the\s++|my\s++)?(?P<no_ledger>ledger|evidence|rows)\b"
+    r"|\b(?:is|are|was|were)\s++not\s++(?P<confirmed>confirmed|verified|shown|listed|named)"
+    r"\s++(?:by|in)\b"
+    r"|\b(?:is|are|was|were|remains?|remained|stays?|stayed)\s++(?:still\s++)?"
+    r"(?P<unnamed>unresolved|unnamed|unidentified)\b",
     re.IGNORECASE,
 )
+# A subject that is the decompile of a routine ("the decompile of init 0x3868",
+# "decompile results for 0x5a10", "the body of 0xb670"): the routine is the
+# head, and a statement that its decompile is not in the ledger says the
+# routine was not read. A routine is said "not obtained" only through its
+# decompile; any other subject of "not obtained" ("the capture") names nothing
+# the ledger answers for.
+_DECOMPILE_OF_RE = re.compile(
+    r"\s*+(?:the\s++)?(?:decompil(?:e|ation)s?|disassembl(?:y|ies)|pseudo-?code|listings?"
+    r"|bod(?:y|ies)|code)(?:\s++results?)?\s++(?:of|for)\s++",
+    re.IGNORECASE,
+)
+# A routine's own name written before its address in that subject ("init 0x3868").
+_LABEL_BEFORE_ADDRESS_RE = re.compile(r"\s*+([a-z][a-z_]*+)\s++(?=0x[0-9a-f]+\b)", re.IGNORECASE)
 # Where the clause a statement belongs to begins, so its subject is the
 # clause's own words: a semicolon, a colon, a dash, or a comma before a word
 # that joins two clauses. Commas inside brackets are not read: a bracketed
@@ -8067,6 +8705,107 @@ class _AddressIndex:
         return list(self.by_form.get(key, ()))
 
 
+class _NameIndex(_AddressIndex):
+    """The addresses an answered entry's objects name, and each object that names one.
+
+    An object of an entry's JSON answer names an address in two shapes only:
+    it is a table keyed by address, every key an address, that maps the
+    address to a name as a program writes one (``{"0x10c60": "CreateMutexW"}``;
+    :data:`_IDENTIFIER_VALUE_RE`, never a decompiler's generic name), or it
+    holds exactly one address-valued field and exactly one name-valued field,
+    and that field's key says it is a name (:data:`_NAME_KEYS`, exactly). An
+    object of several addresses, a decoded string beside its offset, a
+    thread's start beside the API that starts it and an answer's own fields
+    (``tool``, ``scheme``) beside an address pair nothing: which address a name
+    is of is not said. The object is kept, its plain values only, as the fact a
+    question shows. Entries are read in ledger order, each object once.
+    """
+
+    def __init__(self, bases: Sequence[int]) -> None:
+        super().__init__(bases)
+        self.by_entry: dict[tuple[int, str], list[str]] = {}
+        self._kept: set[tuple[int, str, str]] = set()
+
+    def add_fact(self, address: int, entry_id: str, fact: str) -> None:
+        self.add(address, entry_id)
+        for form in self._forms(address):
+            if (form, entry_id, fact) not in self._kept:
+                self._kept.add((form, entry_id, fact))
+                self.by_entry.setdefault((form, entry_id), []).append(fact)
+
+    def facts(self, address: int, entry_id: str) -> list[str]:
+        key = address % _IMAGE_BASE_ALIGNMENT if not self.bases else address
+        return list(self.by_entry.get((key, entry_id), ()))
+
+    @classmethod
+    def of(cls, entries: EntryTexts, answered: frozenset[str], bases: Sequence[int]) -> _NameIndex:
+        """Read once, every answered entry's JSON answer in ledger order, each object once."""
+        index = cls(bases)
+        for key, entry in entries.entries.items():
+            if key not in answered:
+                continue
+            output = str(getattr(entry, "output", "") or "")
+            if not output.lstrip().startswith(("{", "[")):
+                continue
+            try:
+                stack: list[Any] = [json.loads(output)]
+            except (ValueError, TypeError):
+                continue
+            while stack:
+                node = stack.pop()
+                if isinstance(node, list):
+                    stack.extend(reversed(node))
+                    continue
+                if not isinstance(node, dict):
+                    continue
+                stack.extend(reversed([v for v in node.values() if isinstance(v, dict | list)]))
+                keyed = {k: _address_key_of(str(k)) for k in node}
+                if node and all(address is not None for address in keyed.values()):
+                    for field_key, value in node.items():
+                        address = keyed[field_key]
+                        if address is not None and isinstance(value, str) and _is_a_name(value):
+                            index.add_fact(address, key, f"{field_key}: {value}")
+                    continue
+                addresses: list[int] = []
+                names: list[str] = []
+                for field_key, value in node.items():
+                    if not isinstance(value, str):
+                        continue
+                    if _HEX_ADDRESS.fullmatch(value.strip()):
+                        addresses.append(int(value.strip(), 16))
+                    elif _is_a_name(value):
+                        names.append(str(field_key))
+                if len(addresses) == 1 and len(names) == 1 and _names_a_thing(names[0]):
+                    plain = {k: v for k, v in node.items() if isinstance(v, str | int | float)}
+                    index.add_fact(addresses[0], key, json.dumps(plain, ensure_ascii=False))
+        return index
+
+
+def _address_key_of(key: str) -> int | None:
+    """The address a table's key writes (``0x`` and hex digits), or ``None``."""
+    return int(key.strip(), 16) if _HEX_ADDRESS.fullmatch(key.strip()) else None
+
+
+# The keys of a field whose value is the symbol its object is about: a name
+# the program itself carries or resolves (``api_name``, the API a hash
+# resolves to). Exact keys only: a key such as ``task_name`` or ``file_name``
+# holds a string the sample made, which names nothing at an address.
+_NAME_KEYS = frozenset({"name", "symbol", "api", "api_name", "import", "export", "label"})
+
+
+def _names_a_thing(field_key: str) -> bool:
+    """Whether an object's field key is one of :data:`_NAME_KEYS`, whatever its case."""
+    return field_key.strip().lower() in _NAME_KEYS
+
+
+def _is_a_name(value: str) -> bool:
+    """Whether a value is a name as a program writes one, never a decompiler's generic name."""
+    return (
+        _IDENTIFIER_VALUE_RE.fullmatch(value) is not None
+        and generic_function_name().fullmatch(value) is None
+    )
+
+
 @dataclass
 class _LedgerHolds:
     """What this run's answered entries hold, read once per report when a statement needs it."""
@@ -8074,6 +8813,27 @@ class _LedgerHolds:
     read: _AddressIndex
     named: _AddressIndex
     answered: frozenset[str]
+    bases: tuple[int, ...] = ()
+    # The addresses the entries' objects pair with a name, read on the first
+    # statement that an address is unresolved (:meth:`names_of`).
+    names: _NameIndex | None = None
+
+    def names_of(self, entries: EntryTexts) -> _NameIndex:
+        if self.names is None:
+            self.names = _NameIndex.of(entries, self.answered, self.bases)
+        return self.names
+
+    def listing(self, entries: EntryTexts, entry_id: str, address: int) -> str:
+        """The code of the function at ``address`` that one decompile entry holds, or ``""``."""
+        output = str(getattr(entries.entries.get(entry_id), "output", "") or "")
+        shown, listings = _batch_listings(output)
+        if not shown:
+            return _listing_text(output).strip()
+        key = address % _IMAGE_BASE_ALIGNMENT if not self.read.bases else address
+        for at, text in listings.items():
+            if key in self.read._forms(at):
+                return text.strip()
+        return ""
 
     @classmethod
     def of(cls, entries: EntryTexts) -> _LedgerHolds:
@@ -8102,7 +8862,7 @@ class _LedgerHolds:
                 held = named.by_form.setdefault(form, [])
                 if entry_id not in held:
                     held.append(entry_id)
-        return cls(read=read, named=named, answered=frozenset(answered))
+        return cls(read=read, named=named, answered=frozenset(answered), bases=tuple(bases))
 
 
 def _argument_addresses(entry: Any) -> list[int]:
@@ -8192,6 +8952,8 @@ _KIND_NOUNS = frozenset(
         "names",
         "entry",
         "entries",
+        "slot",
+        "slots",
     }
 )
 # Of those, the ones a routine is named by: "the routine at 0x1400" is 0x1400.
@@ -8382,6 +9144,11 @@ def _subject_head(subject: str, relative: bool, kind: str) -> tuple[str, list[st
         if at > 0 and _modifies(tokens[at - 1 : at]):
             return "", []
         return _HEAD_IDS, ids
+    # An aside between commas that opens on a relative word ("routine 0x1400,
+    # which the claims say appends the body,") says something of the head and
+    # is no part of it.
+    tokens = _without_asides(tokens)
+    bracketed = _bracket_list(tokens)
     # A closing bracket that is no list of identifiers is a modifier of what
     # it follows ("Routine 0x1400 (the unpacked copy)"): it may name another
     # object, so a head it follows is not judged.
@@ -8411,6 +9178,23 @@ def _subject_head(subject: str, relative: bool, kind: str) -> tuple[str, list[st
         ):
             return _HEAD_PRONOUN, []
         return "", []
+    # Plain words before a slot's kind noun describe it ("the indirect slots
+    # 0x10c60"), and so do they before any kind noun but a routine's for an
+    # address called unresolved: the kind noun and the identifiers after it are
+    # read as without them. Before a routine's noun they may name another
+    # object ("the unpacked routine 0x6f48", a child's routine at a parent's
+    # address), as a parenthetical may: that head is not judged.
+    described = at
+    while described < len(tokens) and _describes(tokens[described]):
+        described += 1
+    if described > at and described < len(tokens):
+        noun = tokens[described].lower()
+        if noun in _SLOT_NOUNS or (
+            kind == _UNNAMED and noun in _KIND_NOUNS and noun not in _ROUTINE_NOUNS
+        ):
+            at = described
+        elif noun in _KIND_NOUNS:
+            return "", []
     kind_noun = False
     while at < len(tokens) and tokens[at].lower() in _KIND_NOUNS:
         kind_noun = kind_noun or tokens[at].lower() in _ROUTINE_NOUNS
@@ -8423,6 +9207,51 @@ def _subject_head(subject: str, relative: bool, kind: str) -> tuple[str, list[st
     if listed and not _modifies(tokens):
         return _HEAD_IDS, listed
     return "", []
+
+
+# The kind nouns of a slot, which plain words before them only describe.
+_SLOT_NOUNS = frozenset({"slot", "slots"})
+# The words that open an aside after a comma: a non-restrictive relative clause.
+_ASIDE_WORDS = frozenset({"which", "who", "whose"})
+
+
+def _without_asides(tokens: list[str]) -> list[str]:
+    """``tokens`` without each aside a comma and a relative word open, to the next comma or the end.
+
+    A comma inside a bracket does not end an aside. One pass.
+    """
+    out: list[str] = []
+    at = 0
+    while at < len(tokens):
+        if tokens[at] == "," and at + 1 < len(tokens) and tokens[at + 1].lower() in _ASIDE_WORDS:
+            depth = 0
+            at += 2
+            while at < len(tokens) and not (tokens[at] == "," and depth == 0):
+                if tokens[at] in ("(", "["):
+                    depth += 1
+                elif tokens[at] in (")", "]") and depth:
+                    depth -= 1
+                at += 1
+            at += 1
+            continue
+        out.append(tokens[at])
+        at += 1
+    return out
+
+
+def _describes(token: str) -> bool:
+    """Whether a subject's token is a plain word that may describe the kind noun after it."""
+    word = token.lower()
+    return (
+        token.isalpha()
+        and token.islower()
+        and word not in _KIND_NOUNS
+        and word not in _MODIFIER_WORDS
+        and word not in _COORDINATORS
+        and word not in _PRONOUNS
+        and word not in _POSSESSIVES
+        and word not in _DETERMINERS
+    )
 
 
 def _head_values(tokens: Sequence[str]) -> list[str]:
@@ -8450,10 +9279,151 @@ def _head_entry_ids(tokens: Sequence[str]) -> list[str]:
     return [t.lower() for t in tokens if _EVIDENCE_ID_RE.fullmatch(t)]
 
 
+@dataclass(frozen=True)
+class _Absence:
+    """One sentence's statement of absence that answered entries contradict."""
+
+    kind: str
+    # What the sentence says is absent, each an address, an entry id or a value.
+    whats: tuple[str, ...]
+    # The answered entries that hold it.
+    holders: tuple[str, ...]
+    sentence: str
+
+
+def _ledger_holds(entries: EntryTexts) -> _LedgerHolds:
+    """The ledger's holdings by address, read once per report's entry texts."""
+    if not entries._holds:
+        entries._holds.append(_LedgerHolds.of(entries))
+    return entries._holds[0]
+
+
 def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> list[Violation]:
     """Sentences that say the ledger lacks what an answered entry of this run holds.
 
-    Read in every string of the answer, sentence by sentence. Three statements
+    The statements are read as :func:`ledger_absences` reads them. The model is
+    asked once, with the entry named; the sentence is never rewritten. The
+    question shows what the entry holds of the thing (:func:`_held_texts`):
+    a routine's code, the object that names an address.
+    """
+    if payload is None or entries is None or not entries.entries:
+        return []
+    said = {
+        _NOT_READ: ("was not read", "were not read"),
+        _NOT_IN_LEDGER: ("is not in the ledger", "are not in the ledger"),
+        _NOT_CONFIRMED: (
+            "is not confirmed by the entry it cites",
+            "are not confirmed by the entry they cite",
+        ),
+        _UNNAMED: ("is unresolved", "are unresolved"),
+    }
+    out: list[Violation] = []
+    for found in ledger_absences(payload, entries):
+        whats, holders = found.whats, found.holders
+        out.append(
+            Violation(
+                code=ABSENCE_CONTRADICTS_LEDGER_CODE,
+                message=(
+                    f"The text says {safe_finding_value(_named_ids(whats))} "
+                    f"{safe_finding_value(said[found.kind][len(whats) > 1])} "
+                    f"({safe_finding_value(marked_cut(found.sentence, 200))!r}); "
+                    f"{safe_finding_value(_named_ids(entries.named(i) for i in holders))} "
+                    f"{safe_finding_value('holds' if len(holders) == 1 else 'hold')} "
+                    f"{safe_finding_value('it' if len(whats) == 1 else 'them')} in this run. "
+                    "State what that entry shows, or say exactly what is absent."
+                ),
+                path="prose",
+                shown=" ".join(f"{text}." for text in _held_texts(found, entries)),
+            )
+        )
+    return out
+
+
+def _held_texts(found: _Absence, entries: EntryTexts) -> list[str]:
+    """What a question shows of each holder: a routine's code, an address's named objects.
+
+    One text per holder, the first it holds, whole, quoted as the tool's
+    text, and each distinct text once: a writer told only that an entry holds
+    a routine cannot say what it shows, and the question grows with the
+    holders, never with how many objects an entry repeats. A value or an entry
+    id said to be absent is named with its holders alone.
+    """
+    if found.kind not in (_NOT_READ, _UNNAMED):
+        return []
+    holds = _ledger_holds(entries)
+    out: list[str] = []
+    seen: set[str] = set()
+    for what in found.whats:
+        if not what.startswith("0x"):
+            continue
+        address = int(what, 16)
+        if found.kind == _NOT_READ:
+            holders = holds.read.holders(address)
+        else:
+            holders = holds.names_of(entries).holders(address)
+        for entry_id in holders:
+            if found.kind == _NOT_READ:
+                texts = [holds.listing(entries, entry_id, address)]
+                lead = f"{entries.named(entry_id)} holds the code of {what}: "
+            else:
+                texts = holds.names_of(entries).facts(address, entry_id)[:1]
+                lead = f"{entries.named(entry_id)} names {what}: "
+            for text in texts:
+                if text and text not in seen:
+                    seen.add(text)
+                    out.append(lead + quoted_value(text))
+    return out
+
+
+# What a note after another model's words opens with: the platform's fact.
+ABSENCE_HELD_LEAD = "the run's ledger holds what this says is absent: "
+
+
+def absence_holders_note(text: str, entries: EntryTexts | None) -> str:
+    """What the ledger holds of each thing ``text`` says is absent, as a note after it, or ``""``.
+
+    For another model's words shown to a writer (an analyst's claim): "the
+    body-build routine 0xb984 has not been read" is that analyst's view, and a
+    writer shown only the claim repeats it as the run's. The note states the
+    fact the platform can state: which answered entries hold the thing, and,
+    for an address an entry names, the first object of the first entry that
+    names it (a question about the writer's own sentence shows them all,
+    :func:`_held_texts`). A claim whose statements the ledger does not
+    contradict gets no note.
+    """
+    if entries is None or not entries.entries or not text:
+        return ""
+    notes: list[str] = []
+    for found in ledger_absences(text, entries):
+        where = ", ".join(entries.named(entry_id) for entry_id in found.holders)
+        if found.kind == _NOT_READ:
+            notes.append(f"a decompile of {', '.join(found.whats)} is in {where}")
+        elif found.kind == _UNNAMED:
+            holds = _ledger_holds(entries).names_of(entries)
+            named = [
+                f"{entries.named(entry_id)} names {what}: {quoted_value(fact)}"
+                for what in found.whats
+                if what.startswith("0x")
+                for entry_id in holds.holders(int(what, 16))[:1]
+                for fact in holds.facts(int(what, 16), entry_id)[:1]
+            ]
+            notes.append("; ".join(named) if named else f"{', '.join(found.whats)} is in {where}")
+        else:
+            # An address or an entry id is the platform's; a value the model's.
+            whats = ", ".join(
+                what
+                if what.startswith("0x") or _EVIDENCE_ID_RE.fullmatch(what)
+                else quoted_value(what)
+                for what in found.whats
+            )
+            notes.append(f"{whats} is in {where}")
+    return f" ({ABSENCE_HELD_LEAD}{'; '.join(notes)})" if notes else ""
+
+
+def ledger_absences(payload: Any, entries: EntryTexts | None) -> list[_Absence]:
+    """Sentences that say the ledger lacks what an answered entry of this run holds.
+
+    Read in every string of the answer, sentence by sentence. Four statements
     are read, each for the head of its subject, taken from its own clause
     (:func:`_subject_head`: never an identifier inside a modifier; a relative
     clause's head is the identifier that ends the words before it; a
@@ -8467,21 +9437,23 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
       answered entry holds it (for an address, an entry given it whose answer
       names another address, or a decompile of it);
     * a value "not confirmed by", "not shown in" or "not listed in" the entry
-      the sentence cites: false when that entry holds the value.
+      the sentence cites: false when that entry holds the value;
+    * an address "unresolved" (or "unnamed", "unidentified"): false when an
+      answered entry's object pairs it with a name (:class:`_NameIndex`).
 
-    The model is asked once, with the entry named; the sentence is never
-    rewritten, and a statement whose subject this cannot read is not judged.
+    A subject that is a routine's decompile, listing or body ("the body of
+    0xb670 is not in the evidence") says the routine was not read, and an
+    aside a comma and a relative word open in a subject is no part of it.
+    A statement whose subject this cannot read is not judged. ``payload`` is
+    an answer, or one text.
     """
     if payload is None or entries is None or not entries.entries:
         return []
-    found: list[tuple[str, list[str], list[str], str]] = []
-    holds: list[_LedgerHolds] = []
+    found: list[_Absence] = []
     asked: set[tuple[str, str]] = set()
 
     def _holds() -> _LedgerHolds:
-        if not holds:
-            holds.append(_LedgerHolds.of(entries))
-        return holds[0]
+        return _ledger_holds(entries)
 
     def _read(text: str) -> None:
         sentences = _SENTENCE_END_RE.split(text)
@@ -8507,20 +9479,49 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
             # A sentence scoped to the text around it says nothing of the run.
             scoped = _SCOPED_TO_THE_TEXT_RE.search(sentence) is not None
             for match in statements:
+                obtained = bool(match.group("obtained") or match.group("obtained_perfect"))
                 kind = (
                     _NOT_READ
-                    if match.group("read") or match.group("read_perfect")
+                    if match.group("read") or match.group("read_perfect") or obtained
                     else _NOT_IN_LEDGER
-                    if match.group("ledger")
+                    if match.group("ledger") or match.group("no_ledger")
+                    else _UNNAMED
+                    if match.group("unnamed")
                     else _NOT_CONFIRMED
                 )
                 while at_start < len(starts) and starts[at_start] <= match.start():
                     at_start += 1
                 begins = max(starts[at_start - 1] if at_start else 0, done)
                 done = match.end()
-                relative_at = _relative_word_at(sentence, match.start())
+                if match.group("no_ledger"):
+                    # "No X is in the evidence": X is the subject, read as "X is
+                    # not in the evidence" is.
+                    relative_at = None
+                    subject = match.group("no_subject")
+                else:
+                    relative_at = _relative_word_at(sentence, match.start())
+                    subject = sentence[
+                        begins : relative_at
+                        if relative_at is not None and relative_at >= begins
+                        else match.start()
+                    ]
                 relative = relative_at is not None and relative_at >= begins
-                subject = sentence[begins : relative_at if relative else match.start()]
+                decompile = (
+                    _DECOMPILE_OF_RE.match(subject) if kind in (_NOT_READ, _NOT_IN_LEDGER) else None
+                )
+                if decompile is not None and not relative:
+                    # "The body of 0xb670 is not in the evidence" says the
+                    # routine was not read.
+                    kind = _NOT_READ
+                    subject = subject[decompile.end() :]
+                    label = _LABEL_BEFORE_ADDRESS_RE.match(subject)
+                    if label is not None and label.group(1).lower() not in (
+                        _KIND_NOUNS | _DETERMINERS | _MODIFIER_WORDS
+                    ):
+                        subject = subject[label.end() :]
+                elif obtained:
+                    last_begins = begins
+                    continue
                 if relative and not subject.strip(" ,"):
                     # The relative word opens the clause: its subject is what
                     # the clause before it names last.
@@ -8552,7 +9553,7 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
                         whats.append(what)
                         held.extend(i for i in holders if i not in held)
                 if whats:
-                    found.append((kind, whats, held, sentence.strip()))
+                    found.append(_Absence(kind, tuple(whats), tuple(held), sentence.strip()))
 
     def _contradicted(
         kind: str, tokens: list[str], cited: list[str]
@@ -8562,6 +9563,10 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
         if kind == _NOT_READ:
             for address in addresses:
                 out.append((hex(address), _holds().read.holders(address)))
+            return out
+        if kind == _UNNAMED:
+            for address in addresses:
+                out.append((hex(address), _holds().names_of(entries).holders(address)))
             return out
         if kind == _NOT_IN_LEDGER:
             ledger = _holds()
@@ -8608,32 +9613,11 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
             for value in node.values():
                 _walk(value, depth + 1)
 
-    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
-    _walk(data)
-    said = {
-        _NOT_READ: ("was not read", "were not read"),
-        _NOT_IN_LEDGER: ("is not in the ledger", "are not in the ledger"),
-        _NOT_CONFIRMED: (
-            "is not confirmed by the entry it cites",
-            "are not confirmed by the entry they cite",
-        ),
-    }
-    return [
-        Violation(
-            code=ABSENCE_CONTRADICTS_LEDGER_CODE,
-            message=(
-                f"The text says {safe_finding_value(_named_ids(whats))} "
-                f"{safe_finding_value(said[kind][len(whats) > 1])} "
-                f"({safe_finding_value(marked_cut(sentence, 200))!r}); "
-                f"{safe_finding_value(_named_ids(entries.named(i) for i in holders))} "
-                f"{safe_finding_value('holds' if len(holders) == 1 else 'hold')} "
-                f"{safe_finding_value('it' if len(whats) == 1 else 'them')} in this run. State "
-                "what that entry shows, or say exactly what is absent."
-            ),
-            path="prose",
-        )
-        for kind, whats, holders, sentence in found
-    ]
+    if isinstance(payload, str):
+        _walk(payload)
+    else:
+        _walk(payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {})
+    return found
 
 
 # ---------------------------------------------------------------------------
@@ -11246,6 +12230,18 @@ RETRY_DROP_RECORD = "retry_drop"
 RETRY_DROP_KEPT = "kept when asked"
 RETRY_DROP_WITHDRAWN = "withdrawn when asked"
 RETRY_DROP_NOT_ANSWERED = "not answered; kept as the first answer wrote it"
+# A whole retry that restates fewer of the first answer's claims than it
+# leaves out (by the claim's values: restated when the retry states every value
+# it holds; a claim that holds none, or whose only values left out are
+# technique ids the retry was asked about, is counted neither way) is more
+# another answer than a fix of this one, written in a tools-free turn. It does
+# not replace the first answer: what it left out stands beside the retry's own
+# claims, which stand for the claims they restate. The one question about
+# those items says so, and also names each claim with no value whose sentence
+# the retry does not write; it is asked under this code beside the drops code,
+# with the same events. Each item the analyst withdraws stays out, every other
+# stays as first written.
+RETRY_RESTATED_FEW_CODE = "isr.retry_restated_few"
 # One answer line: ``KEEP C2: reason``, ``WITHDRAW F1 - reason``,
 # ``KEEP C1, C2 and F1: reason``, ``KEEP C3 because reason``, ``C2: WITHDRAW -
 # reason`` or ``1. KEEP C1: reason``, marks allowed.
@@ -11391,58 +12387,199 @@ def retry_drops(
     return RetryDrops(claims=tuple(claims), findings=findings)
 
 
-def retry_drop_question(drops: RetryDrops) -> str:
-    """The one question a kept retry's dropped items are put to the analyst with."""
+def retry_drop_cited(item: Any) -> list[str]:
+    """The entry ids one dropped claim or finding cites, lower-cased, in the order written."""
+    if hasattr(item, "claim"):
+        text = f"{getattr(item, 'claim', '')} {getattr(item, 'evidence_ref', '') or ''}"
+    else:
+        ids = " ".join(str(i) for i in getattr(item, "evidence_ids", None) or ())
+        text = f"{ids} {getattr(item, 'title', '')} {getattr(item, 'detail', '') or ''}"
+    return list(dict.fromkeys(found.lower() for found in ENTRY_ID_RE.findall(text)))
+
+
+def _whole_line(value: Any) -> str:
+    """A model-written value on one line, masked as the record masks an answer, never cut.
+
+    The question is the analyst's own words put back to it: a claim cut at a
+    finding row's bound is a claim it cannot judge.
+    """
+    return " ".join(safe_answer_text(value).split())
+
+
+def _retry_drop_item_lines(drops: RetryDrops, *, numbered: bool, values: bool) -> list[str]:
     lines = []
     for label, kind, item, missing in drops.labelled():
         if kind == "claim":
-            stated = safe_finding_value(", ".join(missing))
+            block = getattr(item, "block", None)
+            number = f" {int(block) + 1}" if numbered and block is not None else ""
             technique = str(getattr(item, "technique_id", "") or "")
-            on_line = f", TECHNIQUE {safe_finding_value(technique)}" if technique else ""
-            values = f" (it stated {stated}, which your retry states nowhere)"
-            lines.append(f"{label}. CLAIM: {safe_finding_value(item.claim)}{on_line}{values}")
+            on_line = f", TECHNIQUE {_whole_line(technique)}" if technique else ""
+            stated = (
+                f" (it stated {_whole_line(', '.join(missing))}, which your retry states nowhere)"
+                if values and missing
+                else ""
+            )
+            lines.append(f"{label}. CLAIM{number}: {_whole_line(item.claim)}{on_line}{stated}")
+            ref = str(getattr(item, "evidence_ref", "") or "").strip()
+            if ref:
+                lines.append(f"    EVIDENCE: {_whole_line(ref)}")
         else:
             detail = str(getattr(item, "detail", "") or "").strip()
             said = f": {detail}" if detail else ""
-            lines.append(f"{label}. FINDING: {safe_finding_value(f'{item.title}{said}')}")
-    return (
-        "Your retry stands as your answer, and it no longer states these items of your first "
-        "answer:\n"
-        + "\n".join(lines)
-        + "\nFor each item, write one line: KEEP <label>: <reason> to keep it in your answer "
-        "as your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
-        "nothing else."
+            lines.append(f"{label}. FINDING: {_whole_line(f'{item.title}{said}')}")
+            ids = [str(i) for i in getattr(item, "evidence_ids", None) or () if str(i).strip()]
+            if ids:
+                lines.append(f"    EVIDENCE: {_whole_line(', '.join(ids))}")
+    return lines
+
+
+# The head of the entries a drops question shows, what it says of an entry that
+# does not fit beside the conversation and the entries shown, and of a question
+# asked in parts.
+RETRY_DROP_ENTRIES_HEAD = (
+    "The ledger entries these items cite, as recorded. Your retry was written without them "
+    "in view; read them again here:"
+)
+RETRY_DROP_ENTRIES_UNFIT = (
+    "The ledger holds these entries the items cite; they do not fit beside this conversation "
+    "and the entries shown above, so they are not shown here:"
+)
+RETRY_DROP_PART = (
+    "This question is asked in {total} parts, each beside the entries its items cite; this "
+    "is part {number}."
+)
+
+
+def _cited_entry_lines(
+    head: str, unfit_head: str, entries: Mapping[str, str] | None, unfit: Sequence[str]
+) -> list[str]:
+    """The entries a tools-free turn shows under ``head``, then the ones named as unfit."""
+    lines: list[str] = []
+    if entries:
+        lines.append(head)
+        lines.extend(text.rstrip() for text in entries.values())
+    if unfit:
+        lines.append(f"{unfit_head} {', '.join(unfit)}.")
+    return lines
+
+
+# The head of the entries a validation retry shows beside its questions, and
+# what it says of a cited entry that does not fit beside the conversation and
+# the entries shown. The retry is a tools-free turn: the tool results the
+# answer was written from are not in it.
+VALIDATION_ENTRIES_HEAD = (
+    "The ledger entries your answer cites, as recorded. This turn carries no tools and the "
+    "tool results you read are not in it; read the entries here:"
+)
+VALIDATION_ENTRIES_UNFIT = (
+    "The ledger holds these entries your answer cites; they do not fit beside this "
+    "conversation and the entries shown above, so they are not shown here:"
+)
+
+
+def validation_entries_text(entries: Mapping[str, str], unfit: Sequence[str] = ()) -> str:
+    """The cited entries a validation retry shows in front of its closing, or ``""``."""
+    return "\n".join(
+        _cited_entry_lines(VALIDATION_ENTRIES_HEAD, VALIDATION_ENTRIES_UNFIT, entries, unfit)
     )
 
 
-def retry_unplaced_question(drops: RetryDrops) -> str:
-    """The one question about what a merged retry left as it was, item by item.
+def _retry_drop_closing(
+    entries: Mapping[str, str] | None, unfit: Sequence[str], part: tuple[int, int] | None
+) -> str:
+    parts: list[str] = []
+    if part is not None:
+        parts.append(RETRY_DROP_PART.format(number=part[0], total=part[1]))
+    parts.extend(
+        _cited_entry_lines(RETRY_DROP_ENTRIES_HEAD, RETRY_DROP_ENTRIES_UNFIT, entries, unfit)
+    )
+    parts.append(
+        "For each item, write one line: KEEP <label>: <reason> to keep it in your answer as "
+        "your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
+        "nothing else."
+    )
+    return "\n".join(parts)
+
+
+def retry_drop_question(
+    drops: RetryDrops,
+    entries: Mapping[str, str] | None = None,
+    *,
+    unfit: Sequence[str] = (),
+    part: tuple[int, int] | None = None,
+) -> str:
+    """The question a kept retry's dropped items are put to the analyst with.
+
+    Each item whole, with the entries it cites: ``entries`` maps each cited id
+    the conversation does not hold to its text as recorded, shown once under
+    the items. ``unfit`` names the cited entries that do not fit beside the
+    conversation and the entries shown; ``part`` is ``(number, total)`` when the items
+    are asked in several parts, each beside its own entries.
+    """
+    return (
+        "Your retry stands as your answer, and it no longer states these items of your first "
+        "answer:\n"
+        + "\n".join(_retry_drop_item_lines(drops, numbered=False, values=True))
+        + "\n"
+        + _retry_drop_closing(entries, unfit, part)
+    )
+
+
+def retry_restated_few_question(
+    drops: RetryDrops,
+    entries: Mapping[str, str] | None = None,
+    *,
+    unfit: Sequence[str] = (),
+    part: tuple[int, int] | None = None,
+    restated: int = 0,
+    left_out: int = 0,
+    plain: int = 0,
+) -> str:
+    """The question about what a retry that restated few claims left out, item by item.
+
+    The retry restated ``restated`` of the first answer's claims that hold a
+    value and left out ``left_out``, more; ``plain`` claims that hold no value
+    and that it does not write are named too. The counts are the answer's
+    whole, the same in every part. It does not replace the first answer: each
+    item stands
+    beside the retry's claims as the first answer wrote it, shown whole with
+    the entries it cites as :func:`retry_drop_question` shows them. The answer
+    is read as that question's is (:func:`read_retry_drop_answers`).
+    """
+    return (
+        f"Your retry restated {restated} of your first answer's claims that state a value "
+        f"and leaves out {left_out}"
+        + (f", and leaves out {plain} that state none" if plain else "")
+        + ", so it does not replace your first answer: these items of your first answer "
+        "stand in your answer as you wrote them, beside your retry's claims:\n"
+        + "\n".join(_retry_drop_item_lines(drops, numbered=False, values=True))
+        + "\n"
+        + _retry_drop_closing(entries, unfit, part)
+    )
+
+
+def retry_unplaced_question(
+    drops: RetryDrops,
+    entries: Mapping[str, str] | None = None,
+    *,
+    unfit: Sequence[str] = (),
+    part: tuple[int, int] | None = None,
+) -> str:
+    """The question about what a merged retry left as it was, item by item.
 
     The claims a question was about that the retry neither wrote again nor
     withdrew, each named with its claim number, and the findings it did not
-    write again while it wrote findings under new titles. The answer is read
+    write again while it wrote findings under new titles, with the entries
+    they cite as :func:`retry_drop_question` shows them. The answer is read
     as :func:`retry_drop_question`'s is (:func:`read_retry_drop_answers`).
     """
-    lines = []
-    for label, kind, item, _missing in drops.labelled():
-        if kind == "claim":
-            block = getattr(item, "block", None)
-            number = f" {int(block) + 1}" if block is not None else ""
-            technique = str(getattr(item, "technique_id", "") or "")
-            on_line = f", TECHNIQUE {safe_finding_value(technique)}" if technique else ""
-            lines.append(f"{label}. CLAIM{number}: {safe_finding_value(item.claim)}{on_line}")
-        else:
-            detail = str(getattr(item, "detail", "") or "").strip()
-            said = f": {detail}" if detail else ""
-            lines.append(f"{label}. FINDING: {safe_finding_value(f'{item.title}{said}')}")
     return (
         "Your retry neither wrote again nor withdrew these items of your answer: the claims "
         "you were asked to fix, and the findings your findings block did not write again "
         "while it wrote findings under new titles. Each stands as your first answer wrote it:\n"
-        + "\n".join(lines)
-        + "\nFor each item, write one line: KEEP <label>: <reason> to keep it in your answer "
-        "as your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
-        "nothing else."
+        + "\n".join(_retry_drop_item_lines(drops, numbered=True, values=False))
+        + "\n"
+        + _retry_drop_closing(entries, unfit, part)
     )
 
 
@@ -11824,9 +12961,12 @@ def corroboration(
 
     # The ledger's roots, read once for both readings below.
     read = run_roots(list(ledger)) if ledger else None
-    roots = technique_roots(isrs, ledger, read)
-    traced = technique_sources(isrs, ledger, read)
-    sayers = _independent_sayers(isrs)
+    # A claim a tool-less retry added is support only where it cites what its
+    # own analyst's tool calls read (``tool_backed_answers``).
+    backed = tool_backed_answers(isrs, ledger)
+    roots = technique_roots(backed, ledger, read)
+    traced = technique_sources(backed, ledger, read)
+    sayers = _independent_sayers(backed)
     out: dict[str, dict[str, list[str]]] = {}
     collected = collect(isrs, ledger)
     for tid in associations:
@@ -11836,6 +12976,9 @@ def corroboration(
         claimed: list[str] = []
         for source, _confidence in sources:
             if source in agents:
+                # ``claimed_by`` is read over every claim, a tool-less retry's
+                # included, on purpose: it records who said what, and no
+                # decision reads it (the sayers and sources below do).
                 if source not in claimed:
                     claimed.append(source)
             else:
@@ -11875,6 +13018,80 @@ def corroboration(
             if summary.support:
                 row["support"] = summary.support
         out[tid] = row
+    return out
+
+
+def retry_claim_unbacked(claim: Any, agent: str, ledger: Sequence[Any] | None) -> bool:
+    """Whether a claim a tool-less retry added cites nothing its own analyst's tools read.
+
+    A claim with no ``added_by_retry_in_round`` is never one. A marked claim
+    is backed when one of the ledger entries it cites is a call ``agent``
+    made itself; one citing only other agents' entries, sandbox items or
+    nothing is not.
+    """
+    if getattr(claim, "added_by_retry_in_round", None) is None:
+        return False
+    own = {
+        str(getattr(entry, "id", "") or "").lower()
+        for entry in ledger or ()
+        if str(getattr(entry, "agent", "") or "") == agent
+    }
+    said = f"{getattr(claim, 'claim', '') or ''} {getattr(claim, 'evidence_ref', '') or ''}"
+    return not any(i.lower() in own for i in entry_ids_in(said))
+
+
+def shown_claim_unbacked(claim: Any, agent: str, ledger: Sequence[Any] | None) -> bool:
+    """Whether a claim rests only on other agents' entries a debate showed its analyst.
+
+    A claim with no ``rests_on_shown_entries`` is never one. A marked claim
+    is backed only when one of the entries it cites is a call ``agent`` made
+    itself: restating a peer's tool result it was shown is not a reading of
+    its own.
+    """
+    if not getattr(claim, "rests_on_shown_entries", None):
+        return False
+    own = {
+        str(getattr(entry, "id", "") or "").lower()
+        for entry in ledger or ()
+        if str(getattr(entry, "agent", "") or "") == agent
+    }
+    said = f"{getattr(claim, 'claim', '') or ''} {getattr(claim, 'evidence_ref', '') or ''}"
+    return not any(i.lower() in own for i in entry_ids_in(said))
+
+
+def tool_backed_answers(
+    isrs: dict[str, Any] | None, ledger: Sequence[Any] | None
+) -> dict[str, Any] | None:
+    """``isrs`` with each claim a tool-less retry added and nothing of its own backs left out.
+
+    The corroboration reading (sayers, sources and roots) counts the answers
+    this returns, so a claim written in a turn with no tools, after a
+    revision that wrote none, is never independent tool-backed support for
+    its technique unless it cites an entry its analyst's own calls filed
+    (:func:`retry_claim_unbacked`). Nor is a claim that cites only other
+    agents' entries a debate round showed its analyst
+    (:func:`shown_claim_unbacked`): a sayer counts once, however many restate
+    its result. The answers in force are not changed: an answer with such a
+    claim is read as a copy without it.
+    """
+    if not isrs:
+        return isrs
+    out: dict[str, Any] = {}
+    for name, isr in isrs.items():
+        claims = list(getattr(isr, "claims", None) or [])
+        agent = str(getattr(isr, "agent_id", "") or name)
+        kept = [
+            c
+            for c in claims
+            if not retry_claim_unbacked(c, agent, ledger)
+            and not shown_claim_unbacked(c, agent, ledger)
+        ]
+        if len(kept) == len(claims) or not hasattr(isr, "model_copy"):
+            out[name] = isr
+            continue
+        view = isr.model_copy()
+        view.claims = kept
+        out[name] = view
     return out
 
 
@@ -12202,8 +13419,8 @@ def unsupported_malware_violations(
     ]
 
 
-# A judge indicator naming a value the sandbox recorded and attributes no flow
-# of the sample to. The judge is asked once, with the sandbox's own fact beside
+# A judge indicator naming a value the sandbox recorded and attributes no flow,
+# or no process, of the sample to. The judge is asked once, with the sandbox's own fact beside
 # the value; what it answers decides whether the value is published. A keep it
 # was never asked about publishes nothing (``stix_renderer.sandbox_row_kwargs``).
 UNATTRIBUTED_INDICATOR_CODE = "stix.indicator_unattributed_flow"
@@ -12219,12 +13436,14 @@ def unattributed_indicator_violations(
     ``""`` otherwise (``stix_renderer.sandbox_facts_for_the_judge``). Each such
     value is one question, with the fact written beside it; ``subject`` names
     the value the fact is about, which is what the report's publish rule reads.
+    A file, a digest, a key or a mutex no process of the sample's tree is
+    recorded as making is asked the same way, in the words of a host record.
     Nothing is removed: a keep after the question is the judge's answer.
     """
     if facts is None:
         return []
     from maljan.reporting.ledger_projection import value_key
-    from maljan.reporting.renderers.stix_renderer import rule_values, url_host
+    from maljan.reporting.renderers.stix_renderer import HOST_KINDS, rule_values, url_host
 
     out: list[Violation] = []
     seen: set[str] = set()
@@ -12233,6 +13452,28 @@ def unattributed_indicator_violations(
             continue
         name = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "pattern", ""))
         for value in rule_values(str(getattr(obj, "pattern", "") or "")):
+            if value.kind in HOST_KINDS:
+                said = facts(value.kind, value.value)
+                subject = f"{value.kind}:{value_key(value.kind, value.value)}"
+                if not said or subject in seen:
+                    continue
+                seen.add(subject)
+                out.append(
+                    Violation(
+                        code=UNATTRIBUTED_INDICATOR_CODE,
+                        message=(
+                            f"the indicator {name!r} names {safe_finding_value(value.value)!r} "
+                            f"and {safe_finding_value(said)}: the sandbox's record of it names "
+                            "no process of the sample's tree. Keep the indicator only if an "
+                            "entry of this run shows a process of the sample's tree made it, "
+                            "and cite that entry in the indicator's description; otherwise "
+                            "remove the indicator."
+                        ),
+                        path=f"objects.{subject}",
+                        subject=subject,
+                    )
+                )
+                continue
             if value.kind not in ("ip", "domain", "url"):
                 continue
             kind, about, host = value.kind, value.value, ""

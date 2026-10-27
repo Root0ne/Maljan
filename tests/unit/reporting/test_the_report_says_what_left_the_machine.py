@@ -226,12 +226,30 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # of Markdown's own characters. haiku4 re-pinned when an analyst's listing came
 # to be read by its headings (AUD-43): its six persistence rows headed "Type |
 # Value | Offset" no longer print the offset as the payload.
+# Re-pinned when every IOC-table row came to carry a publish answer and the
+# export to name the sample by its identity digests (T-344, T-345): a dropped file's
+# digest row the record names no process for now prints its refusal, so does
+# a command line, the sample's indicator adds its SHA-1 and MD5, its imphash
+# is an anomalous-activity indicator of its own, and an indicator's reason is
+# read from the rebuilt table.
+# Re-pinned when §10.2's introduction came to say that each draft rule's body
+# is printed as written, its network values not defanged (T-357): that one
+# line is the only change in each run's Markdown and HTML.
+# run4 re-pinned when a key finding came to print only the entries its text
+# does not cite itself (T-337): its eight key findings each wrote their
+# citations into the sentence, and those lines are the only change.
+# Re-pinned when Appendix A came to draw held code whole as listings and to say
+# under a section with a value cut where it is whole, and the methodology to say
+# code is never cut (T-384): only Appendix A and Appendix D changed.
+# Re-pinned when the report model's host identifier table came to mark each
+# row the IOC table publishes and its footer to say the table publishes
+# nothing itself (T-386): only that table's marked rows and footer changed.
 STORED_RENDERS = {
-    "run7": ("10450fac1da78b0d", "c898eb0ef67822cf"),
-    "run5": ("5ccad835542f23f0", "a06ab76f09a2cb09"),
-    "run4": ("1e0160478a729008", "e32e52a8e99b4a47"),
-    "local8": ("9e6cf8ded02592af", "d1dce0f05d49d9d0"),
-    "haiku4": ("230d0d43a8a40244", "269dc8fdf849c364"),
+    "run7": ("cdd9515862d5af1d", "dea1f998fc174103"),
+    "run5": ("83588faa188377b2", "b771abbf5ef82b73"),
+    "run4": ("db8c93d83f3b8f4e", "8f930558dc551ae8"),
+    "local8": ("0de08c4dc87e22cd", "4cb8cd5f0fb12432"),
+    "haiku4": ("75b9157b1a863aca", "b47768bbf80581cb"),
 }
 
 

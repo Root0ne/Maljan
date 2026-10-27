@@ -17,6 +17,7 @@ from maljan.agents.judge_agent import JudgeVerdict
 from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger
 from maljan.pipeline.nodes import make_judge_node
+from maljan.providers.sample_open import UNCOVERED, withheld_unpinned
 from maljan.schemas.evidence import EvidenceCounter, build_entry, format_entry_id
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.stix_models import Bundle
@@ -101,12 +102,13 @@ def _run(state: dict[str, Any]) -> dict[str, Any]:
 
 
 class TestACapaFailureAlone:
-    def test_the_token_is_on_the_record_and_the_run_is_not_degraded(self) -> None:
+    def test_the_token_is_on_the_record_and_the_run_is_degraded(self) -> None:
+        """T-338: a run that went without capa lost evidence it would have had."""
         update = _run(_state(["triage.capa_failed"]))
         assert "triage.capa_failed" in update["degradation_reasons"]
-        assert update["degraded_mode"] is False
+        assert update["degraded_mode"] is True
         summary = update["run_summary"]
-        assert summary["degraded_mode"] is False
+        assert summary["degraded_mode"] is True
         assert "triage.capa_failed" in summary["degradation_reasons"]
 
     def test_a_failed_identity_entry_degrades_the_run(self) -> None:
@@ -132,6 +134,239 @@ class TestTheJudgeRecordsItsOwnUncheckedIds:
             reason.startswith("the ATT&CK catalogue could not be read")
             for reason in update["degradation_reasons"]
         )
+
+
+class TestACaptureNotFetchedDegradesTheRun:
+    """T-336: an artefact the sandbox offered and the job could not fetch is a reason."""
+
+    def _update(self, failures: list[dict[str, str]]) -> dict[str, Any]:
+        container = _Container(EvidenceCounter())
+        container.artefact_fetch_failures = failures
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=Bundle(objects=[]), violations=[], retries=0, fed_back={}
+            )
+        )
+        return asyncio.run(make_judge_node(container)(_state([])))
+
+    def test_the_reason_reaches_the_run_and_its_summary(self) -> None:
+        from maljan.providers.errors import PACKET_CAPTURE, ArtefactFetchFailed
+
+        lost = ArtefactFetchFailed(PACKET_CAPTURE, "HTTP 502").record()
+        update = self._update([lost])
+        assert "packet capture not fetched (HTTP 502)" in update["degradation_reasons"]
+        assert update["degraded_mode"] is True
+        summary = update["run_summary"]
+        assert "packet capture not fetched (HTTP 502)" in summary["degradation_reasons"]
+
+    def test_none_recorded_adds_nothing(self) -> None:
+        update = self._update([])
+        assert not any("packet capture" in r for r in update["degradation_reasons"])
+        assert update["degraded_mode"] is False
+
+
+class TestAnOperatorChoiceIsNoDegradation:
+    """T-338: a tool withheld by policy or a key never set costs the run no evidence."""
+
+    WITHHELD = withheld_unpinned(
+        "remote http://localhost:8089 (backend 1)", "open_project", UNCOVERED
+    )
+    UNSET = (
+        "server.threatintel.check_hash_unavailable(VIRUSTOTAL_API_KEY is not configured); "
+        "set the credential or setting this tool needs in Settings and run the probe again"
+    )
+    LOST = "mcp server 'analysis' unavailable"
+
+    def _judged(self, server_reasons: list[str]) -> tuple[dict[str, Any], str]:
+        container = _Container(EvidenceCounter())
+        container.server_degradation_reasons = lambda: list(server_reasons)  # type: ignore[method-assign]
+        # The manifests' code marks the key unset (``ServerHandle.not_configured_reasons``).
+        container.server_not_configured_reasons = lambda: [self.UNSET]  # type: ignore[attr-defined]
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=Bundle(objects=[]), violations=[], retries=0, fed_back={}
+            )
+        )
+        update = asyncio.run(make_judge_node(container)(_state([])))
+        return update, str(judge.give_verdict.call_args.kwargs.get("degradation_note") or "")
+
+    def test_it_is_listed_apart_and_the_run_is_not_degraded(self) -> None:
+        update, _note = self._judged([self.WITHHELD, self.UNSET])
+
+        assert update["degradation_reasons"] == []
+        assert update["operator_choices"] == [self.WITHHELD, self.UNSET]
+        assert update["degraded_mode"] is False
+        summary = update["run_summary"]
+        assert summary["degraded_mode"] is False
+        assert summary["degradation_reasons"] == []
+        assert summary["operator_choices"] == [self.WITHHELD, self.UNSET]
+
+    def test_a_loss_beside_it_still_degrades_the_run(self) -> None:
+        update, _note = self._judged([self.WITHHELD, self.LOST])
+
+        assert update["degradation_reasons"] == [self.LOST]
+        assert update["operator_choices"] == [self.WITHHELD]
+        assert update["degraded_mode"] is True
+
+    def test_the_judge_is_told_it_as_an_absence_not_a_degradation(self) -> None:
+        _update, note = self._judged([self.UNSET])
+
+        assert self.UNSET in note
+        assert "degraded" not in note
+        assert "Left out by the operator's configuration" in note
+
+    def test_a_judge_that_fails_keeps_it_apart_too(self) -> None:
+        container = _Container(EvidenceCounter())
+        container.server_degradation_reasons = lambda: [self.UNSET, self.LOST]  # type: ignore[method-assign]
+        container.server_not_configured_reasons = lambda: [self.UNSET]  # type: ignore[attr-defined]
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(side_effect=TimeoutError())
+        update = asyncio.run(make_judge_node(container)(_state([])))
+
+        assert self.UNSET not in update["degradation_reasons"]
+        assert self.LOST in update["degradation_reasons"]
+        assert update["operator_choices"] == [self.UNSET]
+        summary = update["run_summary"]
+        assert summary["operator_choices"] == [self.UNSET]
+        assert self.UNSET not in summary["degradation_reasons"]
+
+
+class TestARunThatWentWithoutCapaAmongOperatorChoices:
+    """T-338, the haiku5 shape: capa missing is a loss, the rest is the operator's.
+
+    Capa failed in the pack and is not installed on the analysis server, py7zr
+    is missing for a tool that still answers zip and tar, sixteen Ghidra tools
+    are withheld by the shared server's policy and three threat-intel tools
+    have no key. The run is degraded, its banner names capa and nothing else,
+    and the nineteen choices are listed apart.
+    """
+
+    SHARED = "remote http://localhost:8089 (backend 1)"
+    UNCOVERED_TOOLS = (
+        "close_program",
+        "close_project",
+        "create_project",
+        "delete_file",
+        "get_project_info",
+        "import_data_types",
+        "list_open_programs",
+        "list_project_files",
+        "load_program_from_project",
+        "open_program",
+        "open_project",
+        "save_all_programs",
+        "server_status",
+    )
+    LISTED_TOOLS = ("create_folder", "run_ghidra_script", "run_script_inline")
+
+    def _losses(self) -> list[str]:
+        from maljan.tools.capabilities import Unavailable
+        from maljan.tools.errors import MISSING_DEPENDENCY, REMEDIATIONS
+
+        install = REMEDIATIONS[MISSING_DEPENDENCY]
+        return [
+            "triage.capa_failed",
+            Unavailable(
+                "analysis",
+                "capa",
+                "capa is not installed (No module named 'capa')",
+                install,
+            ).degradation_reason,
+            Unavailable(
+                "analysis",
+                "archive_list",
+                "py7zr is not installed (No module named 'py7zr')",
+                install,
+                without="zip and tar members; 7z needs py7zr",
+            ).degradation_reason,
+        ]
+
+    def _choices(self) -> list[str]:
+        from maljan.providers.sample_open import LISTED_SHARED_WITHHELD
+        from maljan.tools.capabilities import Unavailable
+        from maljan.tools.errors import NOT_CONFIGURED, REMEDIATIONS
+
+        withheld = [withheld_unpinned(self.SHARED, t, UNCOVERED) for t in self.UNCOVERED_TOOLS]
+        withheld += [
+            withheld_unpinned(self.SHARED, t, LISTED_SHARED_WITHHELD) for t in self.LISTED_TOOLS
+        ]
+        unset = [
+            Unavailable("threatintel", tool, why, REMEDIATIONS[NOT_CONFIGURED]).degradation_reason
+            for tool, why in (
+                ("check_domain_reputation", "VIRUSTOTAL_API_KEY is not configured"),
+                ("check_hash", "VIRUSTOTAL_API_KEY is not configured"),
+                (
+                    "check_ip_reputation",
+                    "VIRUSTOTAL_API_KEY is not configured; ABUSEIPDB_API_KEY is not configured",
+                ),
+            )
+        ]
+        return sorted(withheld) + unset
+
+    def test_it_is_degraded_with_capa_in_the_banner_and_the_choices_apart(self) -> None:
+        from maljan.reporting.models import MalwareReport
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        pack, *server = self._losses()
+        choices = self._choices()
+        assert len(choices) == 19
+        container = _Container(EvidenceCounter())
+        container.server_degradation_reasons = lambda: [*server, *choices]  # type: ignore[method-assign]
+        unset = [c for c in choices if c.startswith("server.threatintel.")]
+        container.server_not_configured_reasons = lambda: unset  # type: ignore[attr-defined]
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=Bundle(objects=[]), violations=[], retries=0, fed_back={}
+            )
+        )
+        update = asyncio.run(make_judge_node(container)({**_state([pack]), "file_type": "pe"}))
+
+        assert update["degraded_mode"] is True
+        assert update["degradation_reasons"] == [pack, *server]
+        assert update["operator_choices"] == choices
+        assert update["run_summary"]["operator_choices"] == choices
+
+        report = MalwareReport.model_validate(
+            {
+                "verdict": "Malware",
+                "overall_confidence": 0.9,
+                "identity": {"hashes": {"sha256": "e" * 64}, "file_type": "pe"},
+                "degraded_mode": update["degraded_mode"],
+                "degradation_reasons": update["degradation_reasons"],
+                "operator_choices": update["operator_choices"],
+            }
+        )
+        rendered = MarkdownRenderer().render(report)
+        head = rendered.split("\n## 1.", 1)[0]
+        banner = next(line for line in head.splitlines() if "[DEGRADED RUN]" in line)
+        assert "the run went without capa;" in banner.lower()
+        for other in ("archive_list", "py7zr", "threatintel", "check_hash", *self.LISTED_TOOLS):
+            assert other not in head, other
+        after = rendered.split("**Not configured or withheld by choice:**\n\n", 1)[1]
+        listed = after.split("\n\n", 1)[0].splitlines()
+        assert len(listed) == 19 and all(line.startswith("- ") for line in listed)
+
+
+class TestAKeyNoManifestMarksUnset:
+    """T-338: the words "is not configured" without the manifest's code are a loss."""
+
+    def test_it_stays_a_degradation_and_degrades_the_run(self) -> None:
+        unset = TestAnOperatorChoiceIsNoDegradation.UNSET
+        container = _Container(EvidenceCounter())
+        container.server_degradation_reasons = lambda: [unset]  # type: ignore[method-assign]
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=Bundle(objects=[]), violations=[], retries=0, fed_back={}
+            )
+        )
+        update = asyncio.run(make_judge_node(container)(_state([])))
+        assert update["degradation_reasons"] == [unset]
+        assert update["operator_choices"] == []
+        assert update["degraded_mode"] is True
 
 
 class TestTheZeroCorroborationNoteCountsClaims:

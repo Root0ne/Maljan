@@ -98,6 +98,18 @@ class AgentArgument(BaseModel):
             "flag was kept, where only ``converged`` says."
         ),
     )
+    carried: dict[str, int] = Field(
+        default_factory=dict,
+        repr=False,
+        description=(
+            "For the mediator: each blocking line it marked [carried: L<number>], with the "
+            "number of the last mediation's line it raises again, as the revision round's record "
+            "numbered those lines for it (``debate_facts.carried_marks``). A line marked [new] "
+            "or not marked is not in it. When every blocking line is in it and no analyst a "
+            "line names changed a claim on the earlier line, the debate ends as "
+            "``contested_points_unchanged``."
+        ),
+    )
     revise: list[str] | None = Field(
         default=None,
         repr=False,
@@ -113,6 +125,18 @@ class AgentArgument(BaseModel):
         default="",
         repr=False,
         description="For the mediator: the platform's sentence on why ``revise`` was not read.",
+    )
+    answer: str = Field(
+        default="",
+        repr=False,
+        description=(
+            "For the mediator: its answer whole whenever it answered, the text its final "
+            "CONTRADICTIONS: block is read from (with its reply to the one question for that "
+            "block, when it was asked), masked as model text in the run record is "
+            "(``events.safe_answer_text``). Kept in ``run_summary.negotiation.mediator_answers`` "
+            "so the block can be read again after the run. Empty on a round the mediator wrote "
+            "no answer for, and on state written before it was kept."
+        ),
     )
     note: str = Field(
         default="",
@@ -367,6 +391,11 @@ class AnalysisState(TypedDict):
     # reflects it, and rendered in the report header so a reader sees why.
     degraded_mode: bool
     degradation_reasons: list[str]
+    # What the operator's configuration left out — a key never set, a server
+    # switched off, a tool a shared server withholds by policy. Written by the
+    # judge node beside the reasons and listed apart from them: it cost the run
+    # no evidence it would have had (``pipeline.operator_choice``).
+    operator_choices: list[str]
 
     # F10 (2026-07-05): attribution side-channels written by the judge node
     # (``make_judge_node``) and read back by the report node to populate

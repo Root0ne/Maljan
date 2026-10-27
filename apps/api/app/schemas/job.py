@@ -143,10 +143,47 @@ class RosterStage(BaseModel):
 
 
 class JobRoster(BaseModel):
-    """Everyone who can speak in one run, and the stages they speak in."""
+    """Everyone who can speak in one run, and the stages they speak in.
+
+    ``servers`` names each tool server whose display name is not its key, by
+    its key; ``None`` when no server has a label of its own.
+    """
 
     agents: list[RosterAgent] = []
     stages: list[RosterStage] = []
+    servers: dict[str, str] | None = None
+
+    @field_validator("servers", mode="before")
+    @classmethod
+    def _labels_or_none(cls, value: Any) -> Any:
+        # A roster is how the console draws names: anything but a map of
+        # labels is read as none, and a label that is not text is left out,
+        # rather than failing the response it is in.
+        if not isinstance(value, dict):
+            return None
+        return {str(k): str(v) for k, v in value.items() if isinstance(v, str)}
+
+
+class UnavailableTool(BaseModel):
+    """A tool a job would call that the host running its server cannot run.
+
+    Named when the job is submitted (``services.tool_availability``), before
+    any of it runs: the job is still accepted, and this is the warning.
+    """
+
+    server: str
+    tool: str
+    # The server's own words: "capa is not installed (No module named 'capa')".
+    reason: str
+    # What to do about it: "... uv sync --extra capa".
+    remediation: str = ""
+    # What the tool still answers without it; empty when it answers nothing.
+    still_answers: str = ""
+    # The words the run's degraded block would use for the same tool.
+    degradation_reason: str
+    # The manifest's code: ``not_configured`` for a setting left unset, which
+    # a run lists as the operator's choice rather than as a degradation.
+    manifest_code: str = ""
 
 
 class JobResponse(BaseModel):
@@ -172,6 +209,10 @@ class JobResponse(BaseModel):
     # where the team can be resolved; ``None`` in a listing, which is a page
     # of rows rather than a run somebody is watching.
     roster: JobRoster | None = None
+    # The tools this job would call that this host cannot run, each with why
+    # and the remedy. Filled on the answer to ``POST /jobs`` alone, and only
+    # when there is one to name; ``None`` everywhere else.
+    unavailable_tools: list[UnavailableTool] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -425,6 +466,11 @@ class ReportDetailResponse(BaseModel):
     # the report is served, never stored; a section it does not name is
     # placed by its key, as before. ``None`` when no section is placed.
     section_tabs: dict[str, str] | None = None
+    # Set on a report stored before its IOC table, ``/iocs`` and MISP
+    # attributes were built by the current publish rule: they are rebuilt when
+    # served, while the stored STIX bundle is served as it was rendered then,
+    # and this says so. ``None`` on a report built under the current rule.
+    stix_note: str | None = None
     # A report kept from a run that failed after the report was built says so
     # here: where the run failed and the error id. ``None`` on a report of a
     # completed run.
@@ -443,9 +489,9 @@ class ReportDetailResponse(BaseModel):
 class IOCEntry(BaseModel):
     """One flattened IOC row used by the ``/iocs`` endpoint."""
 
-    # "domain" | "ip" | "url" | "user_agent" | "ja3" | "ja3s" | "hash", and for
-    # a value the STIX export carries from the judge's objects "email" |
-    # "path" | "registry" | "mutex" | "command" as well.
+    # The row kind of the report's IOC table the row is: "hash" | "domain" |
+    # "ip" | "url" | "email" | "user_agent" | "ja3" | "ja3s" | "path" |
+    # "registry" | "mutex" | "scheduled_task" | "service" | "command" | ...
     kind: str
     value: str
     is_suspicious: bool = False

@@ -34,7 +34,7 @@ from maljan.pipeline.triage_pack import (
     run_pack,
 )
 from maljan.schemas.evidence import EvidenceCounter
-from maljan.tools import emulated_strings, rules, staging, upx
+from maljan.tools import emulated_strings, readers, rules, staging, upx
 
 from ..tools import synthetic_upx as su
 from ..tools.synthetic_pe import SyntheticPE
@@ -102,7 +102,7 @@ def test_the_unpacking_comes_last_and_writes_beside_the_carved_files(tmp_path: P
     assert entry.ok and entry.args == {"path": path}
     child = entry.structured["child"]
     written = Path(child["carved_path"])
-    digest = triage_pack._file_digest(path)
+    digest = readers._file_digest(path)
     tree = staging.job_staging_dir(tmp_path / "staging", JOB) / staging.CARVED_DIRECTORY / digest
     assert written.parent == tree
     assert stat.S_IMODE(written.stat().st_mode) == 0o600
@@ -135,7 +135,7 @@ def test_the_ids_before_it_are_the_ids_a_pack_without_it_gives(
     path = _sample(tmp_path, su.build().data)
     with_step = _pack(path, tmp_path)
     monkeypatch.setattr(triage_pack, "_names_upx", lambda facts: False)
-    monkeypatch.setattr(triage_pack, "_holds_a_pack_header", lambda path: False)
+    monkeypatch.setattr(upx, "has_pack_header_at", lambda path: False)
     without = _pack(path, tmp_path)
     last = "find_directed_text"
     assert [(e.id, e.tool) for e in with_step.entries if e.tool != last][:-1] == [
@@ -242,7 +242,7 @@ def test_a_sample_the_packer_reader_does_not_name_upx_gets_no_step(tmp_path: Pat
     assert upx.TOOL not in [e.tool for e in _pack(path, tmp_path).entries]
 
 
-def test_a_damaged_file_is_a_failed_pass_that_does_not_degrade_the_run(tmp_path: Path) -> None:
+def test_a_damaged_file_is_a_failed_pass_that_degrades_the_run(tmp_path: Path) -> None:
     packed = su.build()
     data = bytearray(packed.data)
     data[packed.header_offset + 32 + 7] ^= 0x01
@@ -250,4 +250,4 @@ def test_a_damaged_file_is_a_failed_pass_that_does_not_degrade_the_run(tmp_path:
     assert not _entry(result).ok
     assert "UPX unpacking: no: the pass failed: the compressed data's adler32 is" in _line(result)
     assert failure_reason(upx.TOOL) in result.degradation_reasons
-    assert not degrades_run(failure_reason(upx.TOOL))
+    assert degrades_run(failure_reason(upx.TOOL))

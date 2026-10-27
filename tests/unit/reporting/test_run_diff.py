@@ -431,6 +431,69 @@ class TestRunFacts:
             "the sandbox was unreachable"
         ]
 
+    def test_operator_choices_are_paired_in_a_section_of_their_own(self, stored) -> None:
+        """T-338: a reason a newer run lists as a choice is shown there, not as one lost."""
+        unset = "server.threatintel.check_hash_unavailable(VIRUSTOTAL_API_KEY is not configured)"
+
+        def edit(doc: dict[str, Any]) -> None:
+            doc["operator_choices"] = [unset]
+
+        diff = _pair(stored, edit)
+
+        assert [r["key"] for r in _rows(diff, "operator_choices", ONLY_IN_B)] == [unset]
+        assert _rows(diff, "degradation", ONLY_IN_A) == []
+
+    def test_a_stored_unset_key_pairs_with_the_choice_a_newer_run_lists(self, stored) -> None:
+        """The stored record cannot prove the key was a choice; the newer run's manifest can."""
+        unset = "server.threatintel.check_hash_unavailable(VIRUSTOTAL_API_KEY is not configured)"
+
+        def older(doc: dict[str, Any]) -> None:
+            doc["degradation_reasons"] = [unset, "triage.capa_failed"]
+
+        def newer(doc: dict[str, Any]) -> None:
+            doc["degradation_reasons"] = ["triage.capa_failed"]
+            doc["operator_choices"] = [unset]
+
+        for first, second in ((older, newer), (newer, older)):
+            doc_a = copy.deepcopy(stored["document"])
+            doc_b = copy.deepcopy(stored["document"])
+            first(doc_a)
+            second(doc_b)
+            diff = diff_runs(
+                _record(doc_a, stored["bundle"], rid="1"),
+                _record(doc_b, stored["second_bundle"], rid="2"),
+            )
+            for status in (ONLY_IN_A, ONLY_IN_B):
+                assert _rows(diff, "degradation", status) == []
+                assert _rows(diff, "operator_choices", status) == []
+
+    def test_a_choice_a_stored_run_lists_among_its_reasons_pairs_with_the_newer_choice(
+        self, stored
+    ) -> None:
+        from maljan.providers.sample_open import UNCOVERED, withheld_unpinned
+
+        withheld = withheld_unpinned("remote http://localhost:8089 (backend 1)", "x", UNCOVERED)
+
+        def older(doc: dict[str, Any]) -> None:
+            doc["degradation_reasons"] = [withheld]
+
+        def newer(doc: dict[str, Any]) -> None:
+            doc["degradation_reasons"] = []
+            doc["operator_choices"] = [withheld]
+
+        doc_a = copy.deepcopy(stored["document"])
+        doc_b = copy.deepcopy(stored["document"])
+        older(doc_a)
+        newer(doc_b)
+        diff = diff_runs(
+            _record(doc_a, stored["bundle"], rid="1"),
+            _record(doc_b, stored["second_bundle"], rid="2"),
+        )
+
+        assert _rows(diff, "degradation", ONLY_IN_A) == []
+        assert _rows(diff, "operator_choices", ONLY_IN_A) == []
+        assert _rows(diff, "operator_choices", ONLY_IN_B) == []
+
 
 class TestSamples:
     def test_different_files_are_allowed_and_said_plainly(self, stored) -> None:

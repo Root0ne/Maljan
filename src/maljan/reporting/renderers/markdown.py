@@ -57,6 +57,7 @@ from maljan.analysis.run_summary import (
     NOT_APPLICABLE,
     NOT_APPLICABLE_PHRASE,
     NOT_APPLICABLE_SENTENCE,
+    OPERATOR_CHOICES_HEADING,
     bundle_loss_sentence,
     corpus_held_sentence,
     generation_lines,
@@ -68,6 +69,13 @@ from maljan.analysis.technique_ids import ID_BODY
 from maljan.analysis.tool_effects import INTRO_SENTENCE as EFFECTS_INTRO
 from maljan.analysis.tool_effects import effects_lines
 from maljan.core.logger import logger
+from maljan.core.undeclared_tools import (
+    CODE_LISTING_KINDS,
+    DECOMPILE_KINDS,
+    CodePart,
+    function_address,
+    names_itself,
+)
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes, distinct_signatures
 from maljan.reporting.defang import ProseDefanger, defang
@@ -100,8 +108,14 @@ from maljan.reporting.models import (
     outcome_words,
     stated_family,
 )
+from maljan.reporting.prose_decisions import (
+    CATEGORY_TYPE_UNSTATED_CODE,
+    PUBLISHED_TECHNIQUE_DOUBTED_CODE,
+    with_decided_statements,
+)
 from maljan.schemas.evidence import is_guard_answer
 from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
+from maljan.utils.marked_cut import CUT_MARK
 
 # ---------------------------------------------------------------------------
 # Voices
@@ -325,16 +339,18 @@ class MarkdownRenderer:
             self._safe_section("appendix_methodology", lambda: self._appendix_method(report, ctx)),
         ]
         # Every value a viewer could follow, wherever a section printed it, is
-        # read once more by the report's defanger: a cell or a code span a
-        # sandbox, the sample's bytes or a model filled prints defanged even
-        # where its section did not pass it through the context. What this
+        # read once more by the report's defanger, the run's own values first:
+        # a cell or a code span a sandbox, the sample's bytes or a model filled
+        # prints defanged even where its section did not pass it through the
+        # context, a value the reader of every host would leave as written
+        # ("loader.sh", a name under a TLD it does not know) too. What this
         # renderer itself wrote to print as written — each draft rule's body,
         # a configured model endpoint where a rate line names its model — was
         # set aside under a token no text can name, and only that comes back
         # unread. A character reference ("&#58;", "&colon;") is escaped in the
         # same pass: a viewer decodes one after the defanger has read the text,
         # so "https&#58;//evil&#46;example" would become a live link there.
-        defanged = [_defanged_text(text) for text in sections]
+        defanged = [_defanged_text(text, ctx.run_values) for text in sections]
         # Code is read only where no line may open an HTML block, anywhere in
         # the render; the fences are followed across the sections in order.
         looked = _ReferenceScan()
@@ -377,14 +393,14 @@ class MarkdownRenderer:
         else:
             lines.append(f"Generated {report.generated_at.isoformat()}  ")
         lines.append(
-            f"**Sample:** {_code_span(sha256)} ({_inline_safe(ident.file_type)}, "
+            f"**Sample:** {_code_span(sha256)} ({_inline_safe(ident.file_type, plain=ctx.plain)}, "
             f"{ident.file_size_bytes:,} bytes)  "
         )
         lines.append(_verdict_line(report))
         for row in ctx.verdict_findings:
             lines.append(
                 f"  \n_Unresolved on the verdict: {_code_span(row['code'])}: "
-                f"{_one_line(_finding_text(row))}_"
+                f"{_one_line(_finding_text(row, ctx.plain))}_"
             )
 
         if report.verdict_not_assessed:
@@ -484,7 +500,7 @@ class MarkdownRenderer:
         # not headed as if it were: each of its lines names its own voice.
         lines = [_heading(1, "Key findings", REPORT_MODEL if written else PER_ROW), ""]
         for finding in report.key_findings:
-            lines.append(_item(f"{ctx.line(finding.text)} {_cite(finding.evidence_ids)}"))
+            lines.append(_item(_cited(ctx.line(finding.text), finding.evidence_ids, finding.text)))
         if summary:
             if report.key_findings:
                 lines.append("")
@@ -492,7 +508,7 @@ class MarkdownRenderer:
             if not report.key_findings and not _EV_RE.search(summary):
                 lines.extend(["", _UNCITED_NOTE])
         if written:
-            lines.extend(_findings_beside(ctx.narrative_findings))
+            lines.extend(_findings_beside(ctx.narrative_findings, ctx.plain))
             return "\n".join(lines)
 
         # No summary was written. Said, with the reason, and the verdict's
@@ -650,7 +666,7 @@ class MarkdownRenderer:
                 [
                     "",
                     f"**Category:** {_one_line(report.malware_category)} "
-                    "_(a behavioural class, not a family)_",
+                    f"_(a behavioural class, not a family)_{ctx.category_mark}",
                 ]
             )
         lines.extend(["", "**Family:** " + _family_words(report)])
@@ -689,7 +705,7 @@ class MarkdownRenderer:
         if ctx.verdict_findings:
             lines.extend(["", "**Unresolved findings on the verdict:**", ""])
             lines.extend(
-                _item(f"{_code_span(row['code'])}: {_finding_text(row)}")
+                _item(f"{_code_span(row['code'])}: {_finding_text(row, ctx.plain)}")
                 for row in ctx.verdict_findings
             )
         return "\n".join(lines)
@@ -726,7 +742,11 @@ class MarkdownRenderer:
             else:
                 note = ""
             lines.append(
-                _step(index, f"{ctx.line(step.action)} ({mark}) {_cite(step.evidence_refs)}{note}")
+                _step(
+                    index,
+                    _cited(f"{ctx.line(step.action)} ({mark})", step.evidence_refs, step.action)
+                    + note,
+                )
             )
         return "\n".join(lines)
 
@@ -1046,10 +1066,14 @@ class MarkdownRenderer:
             for u in observed_urls[:20]:
                 measured.append(
                     _row(
-                        _inline_safe(u.method or "-", pipes=False),
+                        _inline_safe(u.method or "-", pipes=False, plain=ctx.plain),
                         _code_span(defang(_truncate(u.url, _CELL_LIMIT), "url")),
-                        _inline_safe(u.status or "-", pipes=False),
-                        _inline_safe(_truncate(u.user_agent or "-", _CELL_LIMIT), pipes=False),
+                        _inline_safe(u.status or "-", pipes=False, plain=ctx.plain),
+                        _inline_safe(
+                            _truncate(u.user_agent or "-", _CELL_LIMIT),
+                            pipes=False,
+                            plain=ctx.plain,
+                        ),
                     )
                 )
             measured.extend(_left_out(len(observed_urls), 20, "requests"))
@@ -1109,7 +1133,9 @@ class MarkdownRenderer:
         # What the carver's own cap left out, stated beside what it carved.
         carve_notes = [r for r in (static.embedded_resources if static else []) if is_carve_note(r)]
         if carve_notes:
-            measured.extend(["", *(_item(_inline_safe(str(r["type"]))) for r in carve_notes)])
+            measured.extend(
+                ["", *(_item(_inline_safe(str(r["type"]), plain=ctx.plain)) for r in carve_notes)]
+            )
         blocks.append(
             _subsection(
                 "5.8",
@@ -1405,7 +1431,7 @@ class MarkdownRenderer:
                     kind = res.get("type") or res.get("kind") or "resource"
                     size = res.get("size")
                     said = f"{kind}" + (f" ({size} bytes)" if size else "")
-                    lines.append(_item(_inline_safe(said)))
+                    lines.append(_item(_inline_safe(said, plain=ctx.plain)))
                 lines.extend(_left_out(len(plain), 20, "resources"))
                 lines.append("")
 
@@ -1453,7 +1479,10 @@ class MarkdownRenderer:
         if static.obfuscation_indicators:
             lines.append(
                 "Obfuscation indicators: "
-                + ", ".join(_inline_safe(_one_line(x)) for x in static.obfuscation_indicators)
+                + ", ".join(
+                    _inline_safe(_one_line(x), plain=ctx.plain)
+                    for x in static.obfuscation_indicators
+                )
             )
         return "\n".join(lines).rstrip()
 
@@ -1695,7 +1724,8 @@ class MarkdownRenderer:
             body = [_subheading("10.2", "Draft detection rules", GENERATED), ""]
             body.append(
                 "_Generated from templates over this report's own values and not reviewed "
-                "by an analyst. Test before deploying._"
+                "by an analyst. Test before deploying. Each rule's body is printed as "
+                "written, its network values not defanged, so it compiles as deployed._"
             )
             body.append("")
             for rule in report.detection_signatures:
@@ -1810,7 +1840,7 @@ class MarkdownRenderer:
             family.append("")
             family.append(
                 f"**Category:** {_one_line(report.malware_category)} "
-                "_(a behavioural class, not a family)_"
+                f"_(a behavioural class, not a family)_{ctx.category_mark}"
             )
         blocks.append("\n".join(family))
 
@@ -1968,6 +1998,13 @@ class MarkdownRenderer:
             lines.extend(["**What limited this run:**", ""])
             lines.extend(_item(reason) for reason in report.degradation_reasons)
             lines.append("")
+        if report.operator_choices:
+            # What the operator's configuration left out: listed whole, apart
+            # from what limited the run, since it cost no evidence the run's
+            # configuration would have given.
+            lines.extend([f"**{OPERATOR_CHOICES_HEADING}:**", ""])
+            lines.extend(_item(reason) for reason in report.operator_choices)
+            lines.append("")
 
         evidence = summary.get("evidence") or {}
         if evidence:
@@ -2049,7 +2086,7 @@ class MarkdownRenderer:
                 lines.append(
                     _item(
                         f"{_code_span(str(row.get('code', '')))} ({row.get('agent', '')}){advisory}"
-                        f"{_times(row)}: {_finding_text(row)}"
+                        f"{_times(row)}: {_finding_text(row, ctx.plain)}"
                     )
                 )
             for row in answered:
@@ -2057,7 +2094,7 @@ class MarkdownRenderer:
                     _item(
                         f"{_code_span(str(row.get('code', '')))} ({row.get('agent', '')})"
                         " (answered)"
-                        f"{_times(row)}: {_finding_text(row)}"
+                        f"{_times(row)}: {_finding_text(row, ctx.plain)}"
                     )
                 )
             if others or answered:
@@ -2082,7 +2119,8 @@ class MarkdownRenderer:
         if exports:
             lines.extend(["**Export decisions:**", ""])
             for row in exports:
-                lines.append(_item(f"{_code_span(str(row.get('code', '')))}: {_finding_text(row)}"))
+                said = _finding_text(row, ctx.plain)
+                lines.append(_item(f"{_code_span(str(row.get('code', '')))}: {said}"))
             lines.append("")
         lines.append(
             "Values in Measured sections come from tools and are reported as the tools "
@@ -2136,7 +2174,13 @@ class MarkdownRenderer:
                 lines.extend([analyst_list_note(analysts, kind), ""])
             elif is_open_question_section(section):
                 lines.extend([OPEN_QUESTIONS_NOTE, ""])
-            lines.extend(_evidence_body(section, ctx.plain))
+            lines.extend(
+                _evidence_body(
+                    section,
+                    ctx.plain,
+                    declared_code=declares_code(section.evidence_ids, report.evidence_index),
+                )
+            )
             if section.evidence_ids:
                 lines.extend(["", f"_Evidence: {_ids(section.evidence_ids)}_"])
             lines.append("")
@@ -2316,10 +2360,11 @@ class MarkdownRenderer:
         # (``_AnalystStates``), so the block and the rest of the report agree.
         recorded = run_summary.get("coverage")
         states = _AnalystStates(report) if isinstance(recorded, dict) else None
+        plain = ctx.plain if ctx is not None else _defanged_text
         missing, looked, negatives = coverage_lines(
             recorded,
             lambda text: _code_span(_one_line(text)),
-            lambda text: _inline_safe(_one_line(text)),
+            lambda text: _inline_safe(_one_line(text), plain=plain),
             (states.failed, states.skipped, states.silent) if states is not None else None,
         )
         if unbuilt := not_built_line("coverage", recorded):
@@ -2534,21 +2579,21 @@ class _Context:
         read = _indicator_rows(report)
         self._table_read = read is not None
         self.iocs = read or []
-        indicators = [
-            (row.value, row.kind or "") for row in self.iocs if row.kind in _NETWORK_KINDS
-        ]
-        net = report.network
-        if net is not None:
-            indicators += [(d.fqdn, "domain") for d in net.domains]
-            indicators += [(ip.address, "ip") for ip in net.ips]
-            indicators += [(u.url, "url") for u in net.urls]
-        # Every value a recovering tool decoded, row or not, so a decoded C2
-        # printed in a FLOSS or decoder table is never printed live.
-        recovered = report.emulated_strings
-        for key in recovered.recovered_by if recovered is not None else {}:
-            indicators += [(value, kind) for kind, value in cell_network_values(key, None)]
+        indicators = run_network_values(report, self.iocs)
         self.indicators = indicators
         run_values = ProseDefanger(indicators)
+        # The same pass, for the closing read of every section (``_render``),
+        # over each value as written and as an escaped cell writes it
+        # ("cdn\_.example.zip"): a section that escaped a value before the
+        # run's values were read leaves it for this pass to find.
+        self.run_values = ProseDefanger(
+            indicators
+            + [
+                (escaped, kind)
+                for value, kind in indicators
+                if (escaped := _escaped_spelling(value)) != value
+            ]
+        )
         # The run's own values first, then every other URL, mailbox, address
         # and host the text names: a model's prose can name one the run never
         # recorded, and it is printed for reading like any other.
@@ -2557,17 +2602,26 @@ class _Context:
         # The report model's sentences a check asked about and the retry left
         # standing, each with the mark printed after it. Longest first, so a
         # sentence that holds another is marked as itself.
+        # The statements a check of the finished report finds against what the
+        # run published (``prose_decisions``) are marked the same way; the
+        # category's row is marked on the category line (``category_mark``),
+        # not wherever its word stands in prose.
         marks: dict[str, list[str]] = {}
-        for row in getattr(report, "flagged_statements", None) or []:
-            if row.sentence.strip():
+        self.category_mark = ""
+        stored = list(getattr(report, "flagged_statements", None) or [])
+        for statement in with_decided_statements(stored, report):
+            if statement.sentence.strip():
                 try:
-                    label = _inline_safe(row.label, pipes=False)
+                    label = _inline_safe(statement.label, pipes=False, plain=self._defang)
                 except Exception as exc:  # noqa: BLE001 — the sentence is marked all the same
                     logger.debug("markdown: a mark's label was not written (%s).", exc)
                     label = STATE_UNKNOWN
-                mark = _flag_mark(row.code, label, asked=row.asked)
-                if mark not in marks.setdefault(row.sentence, []):
-                    marks[row.sentence].append(mark)
+                mark = _flag_mark(statement.code, label, asked=statement.asked)
+                if statement.code == CATEGORY_TYPE_UNSTATED_CODE:
+                    self.category_mark = f" {mark}"
+                    continue
+                if mark not in marks.setdefault(statement.sentence, []):
+                    marks[statement.sentence].append(mark)
         # The IOC table's answers, read on first use by ``publish_state``.
         self._answers: Any = None
         self.flagged = sorted(
@@ -2686,7 +2740,7 @@ class _Context:
                 said = found[0][2]
             else:
                 said = "; ".join(f"{defang(value, kind)}: {state}" for kind, value, state in found)
-            return f" ({_inline_safe(said, pipes=False)})"
+            return f" ({_inline_safe(said, pipes=False, plain=self.plain)})"
         except Exception as exc:  # noqa: BLE001 — the cell says what is not known
             logger.debug("markdown: a cell's publish state was not read (%s).", exc)
             return f" ({STATE_UNKNOWN})" if _names_a_network_value(text) else ""
@@ -2702,7 +2756,7 @@ class _Context:
         balanced backtick pair stays a code span (:func:`_escaped_keeping_spans`);
         the table separator is left to the row (:func:`_cell`).
         """
-        return self._defang(_escaped_keeping_spans(text))
+        return _emphasis_escaped(self._defang(_escaped_keeping_spans(text)))
 
     def line(self, text: Any) -> str:
         """Model prose that has to stay on one line: a list item, a step."""
@@ -2724,9 +2778,12 @@ class _Context:
         """A model's recorded name, its endpoint set aside where it is a configured one.
 
         A run records a model as ``<model> @ <label>``. Only a label equal to
-        one the settings configure (``model_assignments.configured_endpoint_labels``),
-        as the whole of what follows the last `` @ ``, is kept from the closing
-        pass; the same text anywhere else in the report is defanged.
+        one the run's own settings configured, as the whole of what follows the
+        last `` @ ``, is kept from the closing pass; the same text anywhere else
+        in the report is defanged. The labels are the ones the record took from
+        the run's snapshot when it was built (``disclosure.endpoint_labels``),
+        so a later render prints the same on any machine; a record that holds
+        none keeps no endpoint.
         """
         name, sep, label = model.rpartition(" @ ")
         if sep and label in self._endpoint_labels():
@@ -2754,16 +2811,11 @@ class _Context:
         return self._hosts
 
     def _endpoint_labels(self) -> set[str]:
-        """The configured model endpoints' labels, read once per render."""
+        """The model endpoints the run's settings configured, as the record holds them."""
         if self._labels is None:
-            try:
-                from maljan.core.config import get_settings
-                from maljan.core.model_assignments import configured_endpoint_labels
-
-                self._labels = set(configured_endpoint_labels(get_settings()))
-            except Exception as exc:  # noqa: BLE001 — with none read, every value is defanged
-                logger.debug("markdown: the configured model endpoints were not read (%s).", exc)
-                self._labels = set()
+            record = (self.report.run_summary or {}).get("disclosure")
+            held = record.get("endpoint_labels") if isinstance(record, dict) else None
+            self._labels = {str(label) for label in held} if isinstance(held, list) else set()
         return self._labels
 
     def cell(self, text: Any) -> str:
@@ -3020,13 +3072,31 @@ def _joined(names: list[str]) -> str:
 def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
     """The header's one sentence about a degraded run, built from what ran.
 
-    Built from the stage and agent records and the sandbox's state, not from
-    the degradation reasons: those are the operator's, carry codes and install
-    commands, and are listed whole in §13.
+    Built from the stage and agent records and the sandbox's state, and from
+    the reasons only the bare name of each tool the run went without: the
+    reasons are the operator's, carry codes and install commands, and are
+    listed whole in §13.
     """
+    from maljan.pipeline.operator_choice import facts_from_record, lost_tools
+
     parts = ctx.analysts.clauses()
     if not ctx.sandbox_observed and ctx.sandbox_state in ("empty", "not_called"):
         parts.append(ctx.no_sandbox_clause())
+    # A tool the run went without, by its bare name: capa missing on its host
+    # is the run's loss even when nothing else was, and the header says so.
+    # The same facts the judge node decided the run degraded on, as the run
+    # summary kept them; a summary written before it kept them reads its
+    # tool-failure rows and the shipped declarations.
+    summary = report.run_summary or {}
+    failures = (summary.get("evidence") or {}).get("failures") or []
+    facts = facts_from_record(
+        summary.get("loss_facts"),
+        report.identity.file_type or "",
+        [r for r in failures if isinstance(r, dict)],
+    )
+    lost = lost_tools(report.degradation_reasons, facts)
+    if lost:
+        parts.append(f"the run went without {_joined(lost)}")
     if not parts:
         parts.append("this run had less evidence than a full analysis")
     said = _joined(parts)
@@ -3041,6 +3111,8 @@ _FLAG_WORDS = {
     "narrative.ungrounded_capability": "not established by this run",
     "report.rule_match_as_action": "a rule match only, stated as an action",
     "report.unpublished_value": "not published by this run",
+    PUBLISHED_TECHNIQUE_DOUBTED_CODE: "published by this run",
+    CATEGORY_TYPE_UNSTATED_CODE: "not the export's malware type",
 }
 
 
@@ -3073,6 +3145,11 @@ _EMAIL_IN_TEXT = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 # image, an HTML tag, a table cell, emphasis, and the backslash itself.
 _INLINE_META = re.compile(r"([\\`\[\]<>*" + _PIPE + r"])")
 _INLINE_META_NO_PIPE = re.compile(r"([\\`\[\]<>*])")
+# An underscore that can open or close emphasis: one without a letter or digit
+# on both sides of it ("FUN_00401310" holds none). Escaped after the defanger
+# has read the value (:func:`_emphasis_escaped`), so a host such as
+# "_ldap._tcp.example.com" is still read, and defanged, as a host.
+_EMPHASIS_UNDERSCORE = re.compile(r"(?<![^\W_])_" + _PIPE + r"_(?![^\W_])")
 # A link a reference service may own: https, at no scheme character's end.
 _REFERENCE_CANDIDATE = re.compile(r"(?i)(?<![a-z0-9+.-])https://[^\s<>()\[\]`'\"" + _PIPE + r"]+")
 # What ends the authority of a URL, or of a "//" target: a separator, a space,
@@ -3082,7 +3159,7 @@ _AUTHORITY_END = frozenset("/?#\\<>()[]{}\"'`" + _PIPE)
 _DEFANGED_MARKS = ("[.]", "[:]", "[@]")
 
 
-def _defanged_text(text: str) -> str:
+def _defanged_text(text: str, run_values: Callable[[str], str] | None = None) -> str:
     """``text`` with every network indicator in it defanged, as the report does.
 
     A URL, a mailbox, a host under a real top-level domain (the string sweep's
@@ -3093,14 +3170,20 @@ def _defanged_text(text: str) -> str:
     service's own lookup (``_REFERENCE_LOOKUPS``) stays a link, exactly as it
     was checked; the text is split around those links and only the pieces
     between them are read. A value the run itself recorded is defanged before
-    this, by the context's own pass, wherever it stands.
+    this, by the context's own pass, wherever it stands; ``run_values`` is that
+    pass for the closing read of a whole section, applied to each piece
+    between the kept links, so a kept link stays exactly as it was checked.
     """
+
+    def piece(part: str) -> str:
+        return _defanged_piece(run_values(part) if run_values is not None else part)
+
     out: list[str] = []
     at = 0
     for start, end in _reference_spans(text):
-        out += [_defanged_piece(text[at:start]), text[start:end]]
+        out += [piece(text[at:start]), text[start:end]]
         at = end
-    out.append(_defanged_piece(text[at:]))
+    out.append(piece(text[at:]))
     return "".join(out)
 
 
@@ -3569,6 +3652,13 @@ def _mark_hosts(text: str, marks: dict[int, str]) -> None:
     for pattern in (_WWW_HOST, _ONION_HOST):
         for found in pattern.finditer(text):
             _bracket_dots(text, found.start(), found.end(), marks)
+    # A name with an underscore in a label ("_ldap._tcp.dc._msdcs.example.com",
+    # "cdn_.example.net"): no registrar hands one out, but DNS serves one under
+    # a registered name. Read whole where what follows its last underscore
+    # label is a host this reader takes alone (:func:`_underscore_host`).
+    for found in _UNDERSCORE_HOST.finditer(text):
+        if "_" in found.group(0) and _underscore_host(found.group(0)):
+            _bracket_dots(text, found.start(), found.end(), marks)
     # Any run an IPv6 address could be is defanged, a short one too ("fe80::1"):
     # only its first colon is bracketed, and the publish checks' stricter
     # reader (``validation.ipv6_addresses_in``) decides which is a value.
@@ -3728,6 +3818,15 @@ def _reference_lookup(url: str) -> bool:
 _DOTTED_TOKEN = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 _SHOUTED_HOST = re.compile(r"(?<![\w.-])[A-Z0-9-]+(?:\.[A-Z0-9-]+)+(?![\w-])")
 _ONION_HOST = re.compile(r"(?i)(?<![\w.-])(?:[a-z0-9-]+\.)+onion(?![\w-])")
+# A dotted name whose labels may hold an underscore, ending in letters; read
+# as a host only by :func:`_underscore_host`. A sentence's full stop after it
+# is no label. It may follow a path's slash or a run of dots ("dir/_dmarc.",
+# "./_a.", ".._a."), never a label's dot, so it starts where a name starts.
+_UNDERSCORE_HOST = re.compile(
+    r"(?<![\w@-])(?<![\w-]\.)(?:[A-Za-z0-9_-]{1,63}\.)+[A-Za-z]{2,24}(?![\w-]"
+    + _PIPE
+    + r"\.[A-Za-z0-9])"
+)
 # A .NET technology's name, which ends in a real top-level domain.
 _DOTNET_NAME = re.compile(r"(?i)(?:" + _PIPE.join(("ASP", "ADO", "VB")) + r")\.NET")
 # The top-level domains that are also common files' extensions: a two-label
@@ -3761,15 +3860,78 @@ def _file_name_host(kind: str, value: str) -> bool:
     return kind == "domain" and len(labels) == 2 and labels[-1] in _FILE_EXTENSION_TLDS
 
 
-def _inline_safe(text: Any, *, pipes: bool = True) -> str:
+def _underscore_host(name: str) -> bool:
+    """Whether a dotted name with an underscore label is a host under a name this reader reads.
+
+    The labels after the last one holding an underscore must be two or more
+    and be, alone, a host the reader of every host takes (the string sweep's
+    TLD list and shape rules, the file-extension rule above): ``victimcorp.com``
+    in ``_ldap._tcp.dc._msdcs.victimcorp.com``. A registered name never holds
+    an underscore, so a name whose underscore is in its last two labels
+    (``my_site.com``, ``foo._bar.com``) is no host, and neither is a dunder, a
+    decompiler's function or a module path (``__init__.py``, ``FUN_00401310``,
+    ``self._data.items``): nothing after the underscore is a host.
+    """
+    from maljan.pipeline.validation import network_values_in
+
+    labels = name.split(".")
+    last = max(index for index, label in enumerate(labels) if "_" in label)
+    tail = ".".join(labels[last + 1 :])
+    if tail.count(".") < 1:
+        return False
+    # The tail is read in lower case, as a resolver reads it: a host written
+    # in capitals or mixed case ("VictimCorp.Com") is the host it spells.
+    read = tail.lower()
+    return any(
+        kind == "domain" and value == read and not _file_name_host(kind, value)
+        for kind, value in network_values_in(read)
+    )
+
+
+def run_network_values(
+    report: MalwareReport, rows: list[ConsolidatedIOC] | None = None
+) -> list[tuple[str, str]]:
+    """Every network value the run recorded, ``(value, kind)``: what the run's defanger reads.
+
+    The IOC table's network rows (``rows``, or the table rebuilt when none
+    are given), the network block's domains, addresses and URLs, and every
+    value a recovering tool decoded, row or not, so a decoded C2 printed in a
+    FLOSS or decoder table is never printed live. The render's context, a
+    listing figure and the HTML renderer's read of stored figures all read it.
+    """
+    if rows is None:
+        rows = _indicator_rows(report) or []
+    values = [(row.value, row.kind or "") for row in rows if row.kind in _NETWORK_KINDS]
+    net = report.network
+    if net is not None:
+        values += [(d.fqdn, "domain") for d in net.domains]
+        values += [(ip.address, "ip") for ip in net.ips]
+        values += [(u.url, "url") for u in net.urls]
+    recovered = report.emulated_strings
+    for key in recovered.recovered_by if recovered is not None else {}:
+        values += [(value, kind) for kind, value in cell_network_values(key, None)]
+    return values
+
+
+def _escaped_spelling(value: Any) -> str:
+    """A recorded value as a tool's escaped text writes it: Markdown escaped, then underscores."""
+    return _emphasis_escaped(_escaped_keeping_spans(str(value or "")))
+
+
+def _inline_safe(
+    text: Any, *, pipes: bool = True, plain: Callable[[str], str] = _defanged_text
+) -> str:
     """A value this report's checks wrote about the sample: escaped, then defanged.
 
     Markdown's own characters are escaped first, so a sample's value cannot
     open a link, a tag or a code span; ``pipes=False`` leaves the table
-    separator to the row, which escapes it itself (:func:`_cell`).
+    separator to the row, which escapes it itself (:func:`_cell`). ``plain``
+    is the render's own defanger (``ctx.plain``) wherever a section has it,
+    so the run's recorded values are read before the escape of an underscore
+    could hide one from the closing pass.
     """
     meta = _INLINE_META if pipes else _INLINE_META_NO_PIPE
-    return _defanged_text(meta.sub(r"\\\1", str(text or "")))
+    return _emphasis_escaped(plain(meta.sub(r"\\\1", str(text or ""))))
 
 
 def _escaped_keeping_spans(text: Any, meta: re.Pattern[str] = _INLINE_META_NO_PIPE) -> str:
@@ -3807,6 +3969,52 @@ def _escaped_keeping_spans(text: Any, meta: re.Pattern[str] = _INLINE_META_NO_PI
         at = runs[closer][1]
         index = closer + 1
     out.append(meta.sub(r"\\\1", raw[at:]))
+    return "".join(out)
+
+
+# What stands around the run of backticks that closes a code span: no backtick.
+_NOT_A_TICK_BEFORE = "(?<!" + chr(96) + ")"
+_NOT_A_TICK_AFTER = "(?!" + chr(96) + ")"
+
+
+def _emphasis_escaped(text: str) -> str:
+    """Escaped, defanged text with each underscore that could open emphasis escaped too.
+
+    Run after the defanger, which has to read a value's underscores as the
+    value's (``_ldap._tcp.example.com`` is a host), and whose marks hold none.
+    A pair a backslash already escapes is left as it is, and so is a code span:
+    a run of backticks and the next run of the same length, which no escape
+    inside it reaches.
+    """
+    out: list[str] = []
+    plain: list[str] = []
+
+    def flush() -> None:
+        out.append(_EMPHASIS_UNDERSCORE.sub(r"\\_", "".join(plain)))
+        plain.clear()
+
+    at = 0
+    while at < len(text):
+        char = text[at]
+        if char == "\\":
+            flush()
+            out.append(text[at : at + 2])
+            at += 2
+            continue
+        if char == "`":
+            opened = at
+            while opened < len(text) and text[opened] == "`":
+                opened += 1
+            ticks = text[at:opened]
+            closer = re.compile(_NOT_A_TICK_BEFORE + ticks + _NOT_A_TICK_AFTER).search(text, opened)
+            flush()
+            end = closer.end() if closer is not None else opened
+            out.append(text[at:end])
+            at = end
+            continue
+        plain.append(char)
+        at += 1
+    flush()
     return "".join(out)
 
 
@@ -3882,8 +4090,8 @@ def _directed_text_lines(rows: list[Any], ctx: _Context) -> list[str]:
                 row.family,
                 _code_span(text),
                 row.count,
-                _inline_safe(row.where) or "-",
-                _inline_safe(notes) or "-",
+                _inline_safe(row.where, plain=ctx.plain) or "-",
+                _inline_safe(notes, plain=ctx.plain) or "-",
                 row.evidence_id or "-",
             )
         )
@@ -3947,18 +4155,20 @@ def _held_by_clauses(
     return "the rule does not match it" + (f" ({counted})." if declared else ".")
 
 
-def _finding_text(row: dict[str, Any]) -> str:
+def _finding_text(row: dict[str, Any], plain: Callable[[str], str] = _defanged_text) -> str:
     """A finding's message as the report prints it: escaped, then every network value defanged.
 
     A message quotes the claim, the value or the object it is about, which a
     sample, a tool or a model wrote: its Markdown is escaped like any such
     value, so a quote cannot open a link or a tag, a balanced backtick pair
     stays a code span no backtick inside can close, and a claim's URL, once
-    printed live in the list of findings, is defanged.
+    printed live in the list of findings, is defanged. ``plain`` is the
+    render's own defanger (``ctx.plain``): the run's recorded values first,
+    as a tool's text is read (``ctx.inline``), then every other value.
     """
     message = str(row.get("message") or "")
     try:
-        return _defanged_text(_escaped_keeping_spans(message, _INLINE_META))
+        return _emphasis_escaped(plain(_escaped_keeping_spans(message, _INLINE_META)))
     except Exception as exc:  # noqa: BLE001 — never the raw values
         logger.debug("markdown: a finding was not written (%s).", exc)
         return STATE_UNKNOWN
@@ -3975,12 +4185,12 @@ def _flag_mark(code: str, label: str, *, asked: bool = True) -> str:
     return f"**[{said}; not asked]**" if not asked else f"**[{said}]**"
 
 
-def _findings_beside(rows: list[dict[str, str]]) -> list[str]:
+def _findings_beside(rows: list[dict[str, str]], plain: Callable[[str], str]) -> list[str]:
     """The platform's unresolved findings on a section, printed under it."""
     if not rows:
         return []
     lines = ["", f"_The platform's unresolved findings on this section ({MEASURED}):_", ""]
-    lines.extend(_item(f"{_code_span(row['code'])}: {_finding_text(row)}") for row in rows)
+    lines.extend(_item(f"{_code_span(row['code'])}: {_finding_text(row, plain)}") for row in rows)
     return lines
 
 
@@ -4082,6 +4292,7 @@ def _title_heading(title: str) -> str:
 def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[str]:
     """The claims in force whose code the body does not name, each whole, with what it lacks."""
     from maljan.reporting.claim_coverage import COVERAGE_RULE, carried_sentence, claim_label
+    from maljan.schemas.isr_models import retry_added_marker
 
     rows = list(getattr(report, "claims_not_discussed", None) or [])
     if not rows:
@@ -4092,9 +4303,11 @@ def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[st
             f"confidence {row.confidence:.2f}; " if isinstance(row.confidence, int | float) else ""
         )
         evidence = f" Evidence: {row.evidence_ref}" if row.evidence_ref.strip() else ""
+        retried = getattr(row, "added_by_retry_in_round", None)
+        added = f"{retry_added_marker(retried)}; " if isinstance(retried, int) else ""
         lines.append(
             _item(
-                f"**{claim_label(row.agent, row.claim_number)}** ({stated}"
+                f"**{claim_label(row.agent, row.claim_number)}** ({added}{stated}"
                 f"{carried_sentence(row)}): {ctx.plain(row.claim)}{ctx.plain(evidence)}"
             )
         )
@@ -4392,6 +4605,23 @@ def _ids(ids: Iterable[Any]) -> str:
 def _cite(ids: Iterable[str]) -> str:
     listed = _ids(ids)
     return f"[{listed}]" if listed else _NO_CITATION
+
+
+def _cited(text: str, ids: Iterable[str], written: str) -> str:
+    """``text`` with the entries of ``ids`` its words (``written``) do not cite printed after it.
+
+    A report model writes its citations into a bullet and lists them again
+    beside it; printed twice, every bullet cited each entry twice. An entry
+    the words already cite is not printed again, a text citing every one gets
+    nothing after it, and a text citing none gets them all, or the note that
+    nothing is cited. The words are read as the model wrote them, so an entry
+    a mark beside them names is no citation of theirs. They are not changed.
+    """
+    cited = set(_EV_RE.findall(written))
+    rest = [i for i in ids if str(i).strip() and _one_line(i).strip() not in cited]
+    if cited and not rest:
+        return text
+    return f"{text} {_cite(rest)}"
 
 
 def _ids_in(texts: Iterable[str]) -> list[str]:
@@ -4789,7 +5019,10 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
     The model's own table, under its own voice: the platform copies no string
     into it and publishes none of it. Host values are never defanged. A row
     the validator asked about and the model kept says so beside its evidence.
+    A row whose whole value the IOC table publishes names the table of this
+    section that does (:func:`_published_in`).
     """
+    published = _published_in(ctx)
     lines = [_subheading("", "Host identifiers read by the report model", REPORT_MODEL), ""]
     lines.append(_row("Kind", "Value", "Purpose", "Evidence"))
     lines.append(_divider(4))
@@ -4799,10 +5032,13 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
             cited += " (unresolved: report.identifier_uncited)"
         if index + 1 in ctx.identifier_unheld:
             cited += " (unresolved: report.value_not_in_cited_entry)"
+        where = published(item.value)
         lines.append(
             _row(
                 ctx.cell(item.kind),
-                _code_span(ctx.plain(_one_line(item.value))) + ctx.publish_state(item.value),
+                _code_span(ctx.plain(_one_line(item.value)))
+                + (f" (published in the {where} table)" if where else "")
+                + ctx.publish_state(item.value),
                 ctx.cell(item.purpose) if item.purpose.strip() else PURPOSE_NOT_STATED,
                 cited,
             )
@@ -4811,12 +5047,46 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
         [
             "",
             "_Read out of this run's evidence by the report model and cited to the entries it "
-            "names. These rows are not published: the export and `/iocs` carry the indicators "
-            "above._",
+            "names. This table publishes nothing itself: a value it lists is published only "
+            "where the IOC table of this section publishes it, and such a row is marked here "
+            "with the table that does. The export and `/iocs` carry the IOC table's published "
+            "rows._",
             "",
         ]
     )
     return lines
+
+
+def _published_in(ctx: _Context) -> Callable[[Any], str]:
+    """``value -> the §9 table that publishes it whole``, or ``""`` when none does.
+
+    Read off the IOC table's own answers, row by row, in the one spelling
+    every lookup uses (``ledger_projection.value_key``): a value is marked
+    only where a row holds it whole and that row's answer publishes. A table
+    that could not be read marks nothing, and its cell states say why.
+    """
+    from maljan.reporting.ledger_projection import value_key
+    from maljan.reporting.renderers.stix_renderer import publishes
+
+    held: dict[tuple[str, str], str] = {}
+    for row in ctx.iocs if ctx._table_read else []:
+        kind = str(row.kind or "")
+        if publishes(row.published):
+            table = "Network indicators" if kind in _NETWORK_KINDS else "File and host indicators"
+            held.setdefault((kind, value_key(kind, row.value)), table)
+    kinds = sorted({kind for kind, _ in held})
+
+    def _where(value: Any) -> str:
+        text = _one_line(str(value or "")).strip()
+        if not text:
+            return ""
+        for kind in kinds:
+            table = held.get((kind, value_key(kind, text)))
+            if table:
+                return table
+        return ""
+
+    return _where
 
 
 def _port_or_path(row: ConsolidatedIOC, report: MalwareReport) -> str:
@@ -5000,7 +5270,6 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     if mapping is None:
         return words
     from maljan.analysis.evidence_roots import layers_and_roots, roots_phrase
-    from maljan.extractors.capability_matrix import JUDGE_SOURCE
 
     roots = list(getattr(mapping, "evidence_roots", None) or [])
     unread = list(getattr(mapping, "roots_not_read", None) or [])
@@ -5012,8 +5281,26 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     if words:
         return f"{words} ({phrase})"
     independent = len(getattr(mapping, "independent_layers", None) or [])
-    named = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
-    return f", {layers_and_roots(independent or named, roots, unread)}"
+    return f", {layers_and_roots(independent or _named_layers(mapping), roots, unread)}"
+
+
+def _named_layers(mapping: Any) -> int:
+    """How many analyst layers name a row's technique, the judge aside.
+
+    A layer that named it only in claims a tool-less retry added, which
+    nothing of its own backs (``TTPMapping.retry_only_layers``), is not
+    counted as naming it.
+    """
+    from maljan.extractors.capability_matrix import JUDGE_SOURCE
+
+    retry_only = set(getattr(mapping, "retry_only_layers", None) or [])
+    return len(
+        [
+            lyr
+            for lyr in mapping.contributing_layers
+            if lyr != JUDGE_SOURCE and lyr not in retry_only
+        ]
+    )
 
 
 def support_words(support: str, kinds: Any, sources: int, named: int, listed: str = "") -> str:
@@ -5061,9 +5348,8 @@ def _layer_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     """
     if mapping is None:
         return ""
-    from maljan.extractors.capability_matrix import JUDGE_SOURCE
 
-    named = len([lyr for lyr in mapping.contributing_layers if lyr != JUDGE_SOURCE])
+    named = _named_layers(mapping)
     independent = len(getattr(mapping, "independent_layers", None) or [])
     identical = int(getattr(mapping, "identical_statements", 0) or 0)
     repeated = (
@@ -5435,48 +5721,215 @@ def _as_is(text: str) -> str:
     return text
 
 
-def _evidence_body(section: Any, write: Callable[[str], str] = _as_is) -> list[str]:
-    """One evidence section's rows, in whichever shape it carries.
+def _evidence_body(
+    section: Any, write: Callable[[str], str] = _as_is, *, declared_code: bool = False
+) -> list[str]:
+    """One evidence section's rows, items and text, whichever of them it carries.
 
-    A section may carry both. Rows are what a tool found; the text beside them
-    is what this system has to say about how it got them — that the answer was
-    too big for the prompt and the table below is a page of it. It goes above
-    the rows, as prose rather than as a fenced block, because a reader has to
-    know a table is partial before they read it as complete. A section with
-    nothing but text is a tool's own output and keeps its fence.
+    A section may carry more than one. Rows are what a tool found; the text
+    beside them is what this system has to say about how it got them — that
+    the answer was too big for the prompt and the table below is a page of
+    it. It goes above the rows, as prose rather than as a fenced block,
+    because a reader has to know a table is partial before they read it as
+    complete. A section with nothing but text is a tool's own output and
+    keeps its fence, and so does the text of a section opened by such an
+    output that a later call of the same tool answered with records: the
+    section keeps the kind of its first answer, and its rows follow the fence.
+
+    Code the section holds is drawn whole, each function as a listing under
+    the table (:func:`_evidence_rows`); ``declared_code`` is whether an entry
+    the section cites declares its answer code (:func:`declares_code`).
     """
-    rows = _evidence_rows(section, write)
+    rows = _evidence_rows(section, write, listings=True, declared_code=declared_code)
     if not rows:
         return _fenced(write(section.text)) if section.text else []
-    return [_escape_block(write(section.text)), ""] + rows if section.text else rows
+    if not section.text:
+        return rows
+    if section.kind == "text":
+        return [*_fenced(write(section.text)), "", *rows]
+    return [_escape_block(write(section.text)), ""] + rows
 
 
-def _evidence_rows(section: Any, write: Callable[[str], str] = _as_is) -> list[str]:
-    """The tabular or bulleted half of a section, or nothing.
+# How much of one table cell, and of one list item, the page prints. Only a
+# one-line value is ever cut so: code a section holds is drawn whole as a
+# listing (``_evidence_rows``), and a section with a cut value says where it
+# is whole (``_cut_note``).
+CELL_WIDTH = 160
+ITEM_WIDTH = 200
+
+
+def _evidence_rows(
+    section: Any,
+    write: Callable[[str], str] = _as_is,
+    *,
+    listings: bool = False,
+    declared_code: bool = False,
+) -> list[str]:
+    """The tabular and bulleted parts of a section, or nothing.
+
+    Drawn whatever kind the section was opened as: a tool keyed to one
+    section can answer it in more than one shape, and a part the kind does
+    not name is still a part of the answer. Every cell of a row is drawn, a
+    cell past the declared columns under its position (``Column 4``), so a
+    table merged from listings of other widths loses none of them.
 
     ``write`` is how a cell's text is written: the report's own network
     indicators defanged in it, where a section is printed for reading.
+
+    With ``listings`` (Appendix A), a cell or an item that holds code
+    (:func:`holds_code`) is no cell: the table points to a listing under
+    it, and the listing draws the code whole in a fence, headed by the
+    function it is. A one-line value is still cut to the page, and a
+    section with a value cut says under it where the value is whole.
     """
-    if section.kind in {"table", "kv"} and section.rows:
-        columns = section.columns or [f"Column {i + 1}" for i in range(len(section.rows[0]))]
-        out = [_row(*columns), _divider(len(columns))]
+    out: list[str] = []
+    code: list[tuple[str, str]] = []
+    cut = False
+    if section.rows:
+        columns = list(section.columns or [])
+        widest = max(len(row) for row in section.rows)
+        columns += [f"Column {i + 1}" for i in range(len(columns), widest)]
+        out += [_row(*columns), _divider(len(columns))]
         # The columns of a section that hold the sample's or a sandbox's own
         # text, each written as one code span after its cut, so the value
         # cannot open a link, a tag or a fence (``ledger_report``).
         spans, plain = _SAMPLE_TEXT_COLUMNS.get(str(getattr(section, "key", "") or ""), ((), ()))
         for row in section.rows:
-            cells = [
-                _code_span(_one_line(_truncate(write(str(cell)), 160)))
-                if at in spans and str(cell) and str(cell) not in plain
-                else _truncate_escaped(write(_escaped(cell)), 160)
-                for at, cell in enumerate(row)
-            ]
+            cells: list[str] = []
+            for at, cell in enumerate(row):
+                if listings and holds_code(cell, row, declared_code):
+                    code.append((_listing_where(row, at), str(cell)))
+                    cells.append(f"code: Listing {len(code)} below")
+                    continue
+                if at in spans and str(cell) and str(cell) not in plain:
+                    whole = write(str(cell))
+                    shown = _truncate(whole, CELL_WIDTH)
+                    cells.append(_code_span(_one_line(shown)))
+                else:
+                    whole = _emphasis_escaped(write(_escaped(cell)))
+                    shown = _truncate_escaped(whole, CELL_WIDTH)
+                    cells.append(shown)
+                cut = cut or shown != whole
             cells += [""] * (len(columns) - len(cells))
-            out.append(_row(*cells[: len(columns)]))
-        return out
-    if section.kind == "list" and section.items:
-        return [_item(_truncate_escaped(write(_escaped(item)), 200)) for item in section.items]
-    return []
+            out.append(_row(*cells))
+    if section.items:
+        out += [""] if out else []
+        for item in section.items:
+            if listings and holds_code(item, (), declared_code):
+                code.append(("", str(item)))
+                out.append(_item(f"code: Listing {len(code)} below"))
+                continue
+            whole = _emphasis_escaped(write(_escaped(item)))
+            shown = _truncate_escaped(whole, ITEM_WIDTH)
+            cut = cut or shown != whole
+            out.append(_item(shown))
+    if listings and cut:
+        out += ["", _cut_note(section)]
+    for number, (where, body) in enumerate(code, 1):
+        out += ["", _listing_heading(number, where, body, section), ""]
+        out += _fenced(write(body.strip("\n")))
+        if body.rstrip().endswith(CUT_MARK):
+            out += ["", _stored_cut_note(section)]
+    return out
+
+
+def declares_code(evidence_ids: Iterable[Any], evidence_index: Iterable[Any]) -> bool:
+    """Whether an entry a section cites (``evidence_ids``) declares that its answer is code.
+
+    Read from the kind the entry stored with its facts when it was written
+    (``EvidenceIndexRow.facts``): decompiled code, of one function or of a
+    batch, or code listed as instructions. An index row read from a stored
+    report's JSON is read as the model's is.
+    """
+    cited = {str(i) for i in (evidence_ids or [])}
+    if not cited:
+        return False
+    kinds = DECOMPILE_KINDS | CODE_LISTING_KINDS
+    for row in evidence_index or []:
+        said = row if isinstance(row, dict) else {"id": row.id, "facts": row.facts}
+        if str(said.get("id")) in cited and str((said.get("facts") or {}).get("kind")) in kinds:
+            return True
+    return False
+
+
+def holds_code(value: Any, row: Iterable[Any] = (), declared: bool = False) -> bool:
+    """Whether one value of a section is code, drawn whole as a listing rather than as a cell.
+
+    Code spans lines: a one-line value is a table's fact whatever its
+    section. Where an entry the section cites declares code
+    (:func:`declares_code`), every value of more than one line is code;
+    anywhere else a value is code when it names the function another value
+    of its row names (``FUN_<address>`` under the address, or its first
+    instruction at it). Read by the declared kind and the content, never by
+    a tool's name.
+    """
+    text = str(value or "").strip()
+    if "\n" not in text:
+        return False
+    if declared:
+        return True
+    return any(
+        names_itself(CodePart(str(other).strip(), text, False))
+        for other in row
+        if "\n" not in str(other).strip()
+    )
+
+
+# The name a listing's first line declares its function under: the first
+# word an opening parenthesis follows (``int FUN_00401000(int a)``).
+_DECLARED_NAME_RE = re.compile(r"([A-Za-z_][\w.@$?]*)\s*\(")
+
+
+def _listing_where(row: Sequence[Any], at: int) -> str:
+    """The function a row's code stands under: an address another cell gives, else its first."""
+    others = [str(c).strip() for i, c in enumerate(row) if i != at]
+    others = [c for c in others if c and "\n" not in c]
+    return next((c for c in others if function_address(c) is not None), others[0] if others else "")
+
+
+def _listing_heading(number: int, where: str, body: str, section: Any) -> str:
+    """One listing's heading: its number, the function's address and name, and its entry.
+
+    The entry is named when the section cites one; a section merged from
+    several calls names them all under it (``_Evidence:``).
+    """
+    first = next((line for line in body.splitlines() if line.strip()), "")
+    declared = _DECLARED_NAME_RE.search(first)
+    name = declared.group(1) if declared else ""
+    parts = [f"**Listing {number}**"]
+    parts += [_code_span(_one_line(where))] if where else []
+    parts += [_code_span(name)] if name and name != where else []
+    ids = [str(i) for i in (getattr(section, "evidence_ids", None) or []) if str(i).strip()]
+    parts += [_ids(ids)] if len(ids) == 1 else []
+    return " · ".join(parts)
+
+
+def _whole_at(section: Any) -> str:
+    """Where a value the page shows cut is whole: the section's entry or entries, else the JSON.
+
+    A section that cites several entries names them once, on its own
+    ``_Evidence:`` line under it, and is pointed to there.
+    """
+    ids = [str(i) for i in (getattr(section, "evidence_ids", None) or []) if str(i).strip()]
+    if len(ids) == 1:
+        return f"the evidence ledger carries it whole under {_ids(ids)}"
+    if ids:
+        return "the evidence ledger carries it whole under the entries cited below"
+    key = _one_line(getattr(section, "key", "") or "")
+    return f"the JSON report carries it whole under the section {_code_span(key)}"
+
+
+def _cut_note(section: Any) -> str:
+    """The line under a section with a value cut to the page: where that value is whole."""
+    return (
+        f"_A value above that ends in … is cut to fit the page ({CELL_WIDTH} characters "
+        f"a cell, {ITEM_WIDTH} an item; no code is cut to fit it); {_whole_at(section)}._"
+    )
+
+
+def _stored_cut_note(section: Any) -> str:
+    """The line under a listing the report was built with cut: where the code is whole."""
+    return f"_The report was built with this listing cut at the …; {_whole_at(section)}._"
 
 
 # The sections whose table columns hold the sample's or a sandbox's own text,
@@ -5648,7 +6101,8 @@ LEFT_OUT_LINE = "_{rest:,} more {what} not shown here; the JSON report carries e
 # mark.
 CUT_CELL_SENTENCE = (
     "A table value that ends in … is cut to fit the page; the JSON report and the "
-    "evidence ledger (Appendix A's ids) carry it whole."
+    "evidence ledger (Appendix A's ids) carry it whole. Code is never cut to fit the page: "
+    "Appendix A draws each function's code whole, as a listing."
 )
 
 
@@ -5666,13 +6120,26 @@ def _left_out(total: int, shown: int, what: str) -> list[str]:
     return ["", LEFT_OUT_LINE.format(rest=rest, what=what)]
 
 
+def _outside_marks(text: str, cut: int) -> int:
+    """``cut``, or the start of the defang mark it would fall inside.
+
+    A cell is defanged before it is cut, and ``skinnyjeanso[.…`` is neither
+    the value nor a defanged spelling of it: the cut falls before the mark.
+    """
+    for mark in _DEFANGED_MARKS:
+        for start in range(max(0, cut - len(mark) + 1), cut):
+            if text.startswith(mark, start):
+                return start
+    return cut
+
+
 def _truncate(value: Any, length: int) -> str:
     if value is None:
         return ""
     s = str(value)
     if len(s) <= length:
         return s
-    return s[: length - 1] + "…"
+    return s[: _outside_marks(s, length - 1)] + "…"
 
 
 def _truncate_escaped(text: str, length: int) -> str:
@@ -5680,7 +6147,7 @@ def _truncate_escaped(text: str, length: int) -> str:
 
     Every backslash in such text escapes the character after it, and the pair
     is one character on the page: the cut counts it once, and never falls
-    between the two.
+    between the two, nor inside a defang mark.
     """
     cut = None
     index = visible = 0
@@ -5691,7 +6158,7 @@ def _truncate_escaped(text: str, length: int) -> str:
         visible += 1
     if visible <= length or cut is None:
         return text
-    return text[:cut] + "…"
+    return text[: _outside_marks(text, cut)] + "…"
 
 
 def _process_tree_lines(

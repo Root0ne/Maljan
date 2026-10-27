@@ -92,6 +92,17 @@ _ACLOSE_BUDGET = 20.0
 # worker thread's, not the event loop's.
 _CLOSE_ALL_BUDGET = 45.0
 
+# What the job's end waits for the servers its readings ran on to remove what
+# those readings staged there (``pipeline.nodes.release_reader_staging``). Every
+# server is asked at once, each call capped at 5 s (``RELEASE_CALL_CAP_SECONDS``:
+# a 4 s answer and a second of crossing), so the whole release is one call's
+# time; a second more covers attaching a handle that rested. Against the
+# worker's 60 s teardown cap (``WORKER_TEARDOWN_TIMEOUT``): the release's 6 s
+# runs before the synchronous sweep's 45 s, 51 s in all, which leaves 9 s for
+# the agents' and providers' closes that normally take a moment; a release that
+# runs out of time is abandoned on its threads and never extends the sweep.
+_RELEASE_BUDGET = 6.0
+
 
 # Whether the load running on this thread is the outermost one: an agent's
 # input is stated once, where the whole of it is known (``_note_chunking``),
@@ -588,6 +599,9 @@ class ServiceContainer:
         # The case an earlier run stored for this job's sample, by sha256,
         # read once (``long_term_memory.earlier_case_of``); ``None`` for none.
         self.earlier_cases: dict[str, Any] = {}
+        # The similar cases of other samples the judge is shown, by the job's
+        # sha256, read once (``long_term_memory.similar_cases``).
+        self.similar_cases: dict[str, Any] = {}
         # The function-hash corpus write the judge decided on, as
         # ``(store, sample_id, family, functions)``, held for the same reason.
         self.pending_function_hashes: Any = None
@@ -647,6 +661,20 @@ class ServiceContainer:
         # degradation reason (``pipeline.nodes.sandbox_degradation_reason``).
         # ``None`` where the sandbox answered or was never asked.
         self.sandbox_failure: str | None = None
+        # The artefacts the sandbox offered beside its report that could not
+        # be fetched, one ``ArtefactFetchFailed.record()`` each; set by
+        # ``app._submit_to_sandbox`` and carried into the run's degradation
+        # reasons and its coverage record. Empty where every offered artefact
+        # was fetched, or none was offered.
+        self.artefact_fetch_failures: list[dict[str, str]] = []
+        # The target a detonating sandbox's report names
+        # (``{"provider", "task_id", "sha256"}``, the hash as the provider's
+        # reader put it in the neutral report), set by ``app._submit_to_sandbox``
+        # and compared with the sample by the worker
+        # (``analysis.sample_integrity.sandbox_target_record``). ``None`` for an
+        # attached report, a stand-in, a recorded fixture, a task that ended
+        # without a report, or no sandbox.
+        self.sandbox_target_claim: dict[str, str] | None = None
         # Each submission of the sample to the job's sandbox provider
         # (``analysis.disclosure.upload_record``), set by ``app.arun`` as it
         # submits and read by the run's disclosure block. Empty outside a job.
@@ -1299,6 +1327,19 @@ class ServiceContainer:
         """
         registry = self._server_registry_cache
         return list(registry.degradation_reasons) if registry is not None else []
+
+    def server_not_configured_reasons(self) -> list[str]:
+        """The reasons the attached servers' manifests mark unset settings, the operator's choice.
+
+        Reads the cached registry only, as ``server_degradation_reasons`` does.
+        """
+        registry = self._server_registry_cache
+        return list(registry.not_configured_reasons()) if registry is not None else []
+
+    def server_without_reads(self) -> dict[tuple[str, str], frozenset[str]]:
+        """By ``(server, tool)``, what a tool's missing part reads, from the cached registry."""
+        registry = self._server_registry_cache
+        return dict(registry.declared_without_reads()) if registry is not None else {}
 
     def server_rests(self) -> list[dict[str, Any]]:
         """Every tool-server rest this job gave, in order, or an empty list.
@@ -1971,6 +2012,28 @@ class ServiceContainer:
             for (name, _), result in zip(closing, results, strict=True):
                 if isinstance(result, Exception):
                     logger.warning("%s did not close cleanly: %s", name, result)
+
+        # What this job's readings staged on a server of their own, removed
+        # there now rather than at that server's staging TTL, while its handle
+        # is still attached (``pipeline.nodes.release_reader_staging``). In an
+        # executor and bounded, like the sweep below: a server that does not
+        # answer costs a worker thread, never the job or the fences.
+        if self._server_registry_cache is not None:
+            from maljan.pipeline.nodes import release_reader_staging
+
+            try:
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, release_reader_staging, self),
+                    timeout=_RELEASE_BUDGET,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "Releasing the readings' staging exceeded %.0fs; it is left to the "
+                    "servers' staging TTL.",
+                    _RELEASE_BUDGET,
+                )
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("Releasing the readings' staging failed (non-fatal): %s", exc)
 
         # Same rule as the providers above: close the *cached* registry, never
         # ``get_server_registry()`` — a job that never attached a tool server

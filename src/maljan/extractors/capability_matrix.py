@@ -60,9 +60,11 @@ from maljan.schemas.isr_models import (
     judge_and_findings_note,
     judge_dropped_reason,
     judge_kept_note,
+    retry_added_marker,
 )
 from maljan.schemas.stix_models import (
     EARLIER_RUN_PROPERTY,
+    SIMILAR_CASES_PROPERTY,
     TECHNIQUE_REVIEW_PROPERTY,
     TechniqueReview,
     stated_confidence,
@@ -128,7 +130,7 @@ def build_capability_matrix(
     beside the layers that named it; nothing reads the count to decide.
     Without it the row states none.
     """
-    techniques = _collect_techniques(stix_output, isr_reports)
+    techniques = _collect_techniques(stix_output, isr_reports, ledger)
     if not techniques:
         return [], []
     roots_of = run_roots(ledger) if ledger else None
@@ -137,6 +139,7 @@ def build_capability_matrix(
     out_of_scope = _out_of_scope(list(techniques), sample)
     review = technique_review(stix_output)
     earlier = earlier_run_techniques(stix_output)
+    similar = similar_case_techniques(stix_output)
 
     cells: list[CapabilityCell] = []
     mappings: list[TTPMapping] = []
@@ -165,6 +168,15 @@ def build_capability_matrix(
         layers = info.get("layers") or []
         valid = bool(info.get("valid", True))
         independent, identical = independent_statements(info.get("statements") or [])
+        # The layers that named it only in claims a tool-less retry added and
+        # nothing of their own backs: named, and not counted as naming it.
+        backed_layers = info.get("backed_layers") or set()
+        retry_only = [
+            str(layer)
+            for (layer, _text), _round in info.get("retry_statements") or []
+            if str(layer) not in backed_layers
+        ]
+        retry_only = list(dict.fromkeys(retry_only))
         counted = RootCount()
         if roots_of is not None:
             for text, ids in info.get("cited") or []:
@@ -247,12 +259,23 @@ def build_capability_matrix(
             # Every analyst claim naming it cites only calls that failed.
             # Published all the same: the analyst decided; the row says so.
             notes.append(FAILED_CALLS_MARKER)
+        retried = info.get("retry_unbacked") or []
+        if retried and all(r is not None for r in retried):
+            # Every analyst claim naming it was added by a tool-less retry and
+            # cites nothing its analyst's own calls read. Published all the
+            # same: the analyst decided; the row says so.
+            notes.append(retry_added_marker(min(retried)))
         if tid.upper() in earlier and _no_source_of_this_run(row, bool(rows)):
             # An earlier run on this sample also reported it, and nothing of
             # this run stands behind it. Published by the same rules as any
             # technique: the earlier run is a fact beside the row, never a
             # reason to publish or to withhold.
             notes.append(EARLIER_RUN_UNSUPPORTED_NOTE)
+        if tid.upper() in similar and _no_source_of_this_run(row, bool(rows)):
+            # A similar case of another sample the judge was shown carried it,
+            # and nothing of this run stands behind it. The same rule as the
+            # earlier run: a fact beside the row, never a reason either way.
+            notes.append(SIMILAR_CASE_UNSUPPORTED_NOTE)
         if undescribed and not not_published:
             notes.append(undescribed)
         if decided is not None and decided.decision == "keep":
@@ -277,7 +300,14 @@ def build_capability_matrix(
                 note="; ".join(notes),
                 # Each analyst statement naming it, verbatim, by analyst: what
                 # the analysts said is theirs to weigh, never classified here.
-                statements=[f"{who}: {text}" for who, text in info.get("statements") or [] if text],
+                statements=[
+                    *(f"{who}: {text}" for who, text in info.get("statements") or [] if text),
+                    *(
+                        f"{who}: {text} ({retry_added_marker(round_)})"
+                        for (who, text), round_ in info.get("retry_statements") or []
+                        if text
+                    ),
+                ],
                 independent_layers=independent,
                 identical_statements=identical,
                 evidence_roots=list(counted.roots),
@@ -316,6 +346,7 @@ def build_capability_matrix(
                 independent_sources=int(row.get("independent_sources", 0) or 0),
                 source_kinds=dict(row.get("source_kinds") or {}),
                 support=support,
+                retry_only_layers=retry_only,
             )
         )
 
@@ -476,6 +507,36 @@ def earlier_run_techniques(stix_output: dict[str, Any] | None) -> set[str]:
     return {str(tid or "").strip().upper() for tid in techniques if str(tid or "").strip()}
 
 
+# The note on a technique a similar case of another sample also carried when
+# no source of this run stands behind it. A note, not a reason: the judge was
+# shown the case as a weighted prior (``judge_agent.JudgeAgent._memory_block``),
+# and the publish rules read this run alone, so the published set is the one a
+# run without the similar cases would publish.
+SIMILAR_CASE_UNSUPPORTED_NOTE = (
+    "a similar case from another sample also reported it; no source of this run stands behind it"
+)
+
+
+def similar_case_techniques(stix_output: dict[str, Any] | None) -> set[str]:
+    """The techniques of the similar cases the judge was shown, from the bundle's record.
+
+    Empty for a bundle with no record (no similar case, memory off, a stored
+    run from before the record) and for one that cannot be read.
+    """
+    raw = (stix_output or {}).get(SIMILAR_CASES_PROPERTY)
+    cases = raw.get("cases") if isinstance(raw, dict) else getattr(raw, "cases", None)
+    if not isinstance(cases, list):
+        return set()
+    out: set[str] = set()
+    for case in cases:
+        techniques = (
+            case.get("techniques") if isinstance(case, dict) else getattr(case, "techniques", None)
+        )
+        if isinstance(techniques, list):
+            out |= {str(tid or "").strip().upper() for tid in techniques if str(tid or "").strip()}
+    return out
+
+
 def _no_source_of_this_run(row: dict[str, Any], read: bool) -> bool:
     """Whether the run's corroboration record says no independent source stands behind it.
 
@@ -576,13 +637,22 @@ def _unknown_to_the_catalogue(ids: list[str]) -> set[str]:
 def _collect_techniques(
     stix_output: dict[str, Any] | None,
     isr_reports: dict[str, Any] | None,
+    ledger: Sequence[Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Merge the judge's technique list and the analysts' claims, by technique.
 
     Each row collects what every source said — the evidence quotes, the source
     names, and every confidence — without deciding anything. The caller reduces
     the confidences to one number, once.
+
+    A claim a tool-less retry added that cites nothing its own analyst's
+    tools read (``validation.retry_claim_unbacked`` over ``ledger``) is
+    collected like any claim, but its statement is not one the row counts
+    independent layers or evidence roots over: the row reads the same answers
+    corroboration reads (``validation.tool_backed_answers``).
     """
+    from maljan.pipeline.validation import retry_claim_unbacked
+
     techniques: dict[str, dict[str, Any]] = {}
 
     def _row(tid: str) -> dict[str, Any]:
@@ -675,6 +745,14 @@ def _collect_techniques(
                 row.setdefault("failed_only", []).append(
                     bool(getattr(claim, "cites_only_failed_calls", False))
                 )
+                # Whether each claim naming it is one a tool-less retry added
+                # that nothing of its analyst's own calls backs, with its
+                # round: a note on the row, and not an independent layer.
+                agent = str(getattr(isr, "agent_id", "") or agent_name)
+                unbacked = retry_claim_unbacked(claim, agent, ledger)
+                row.setdefault("retry_unbacked", []).append(
+                    getattr(claim, "added_by_retry_in_round", None) if unbacked else None
+                )
                 # An id the catalogue does not have stays in the matrix and is
                 # marked. Dropping it deleted the analyst's answer from the one
                 # surface a reader looks at, which is the behaviour this whole
@@ -689,9 +767,18 @@ def _collect_techniques(
                 quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
                 if quote and quote not in row["evidence"]:
                     row["evidence"].append(str(quote))
-                statement, cited = _claim_statement(str(layer), claim)
-                row.setdefault("statements", []).append(statement)
-                row.setdefault("cited", []).append(cited)
+                if not unbacked:
+                    statement, cited = _claim_statement(str(layer), claim)
+                    row.setdefault("statements", []).append(statement)
+                    row.setdefault("cited", []).append(cited)
+                    row.setdefault("backed_layers", set()).add(str(layer))
+                else:
+                    # Still listed among the row's statements, with its note;
+                    # never counted as a layer's own statement.
+                    statement, _cited = _claim_statement(str(layer), claim)
+                    row.setdefault("retry_statements", []).append(
+                        (statement, claim.added_by_retry_in_round)
+                    )
             # 3. The findings' own technique ids. An ISR carries ids in two
             # places, and this was the one no check ever saw: the report's
             # Findings table and the corroboration metric are both built from
@@ -718,6 +805,7 @@ def _collect_techniques(
                         row["stated_by"].append(f"the {layer} analyst, on a finding")
                     if layer and str(layer) not in row["layers"]:
                         row["layers"].append(str(layer))
+                    row.setdefault("backed_layers", set()).add(str(layer))
                     named_by = str(getattr(isr, "agent_id", "") or agent_name or "")
                     if named_by and named_by not in row.setdefault("finding_named_by", []):
                         row["finding_named_by"].append(named_by)

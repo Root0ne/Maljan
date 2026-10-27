@@ -123,8 +123,12 @@ class ServerGuard:
         on_open: Callable[[dict[str, Any]], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         explicit_call_timeout: bool = False,
+        label: str = "",
     ) -> None:
         self.server = server
+        # The server's display name (``MCPServerConfig.label``), given to the
+        # rest's record beside the key where it names the server otherwise.
+        self.label = str(label or "").strip()
         self.failures_to_open = max(1, int(failures_to_open))
         self.cooldown_seconds = max(0.0, float(cooldown_seconds))
         self.max_concurrent_calls = max(0, int(max_concurrent_calls))
@@ -379,6 +383,8 @@ class ServerGuard:
                 "cooldown_s": self.cooldown_seconds,
                 "reason": str(reason),
             }
+            if self.label and self.label != self.server:
+                record["label"] = self.label
         logger.warning(
             "tool server '%s' is resting for %.0f s after %d unanswered call(s) in a row (%s).",
             self.server,
@@ -513,6 +519,7 @@ def guard_from_settings(
     on_open: Callable[[dict[str, Any]], None] | None = None,
     sample_open: Any = None,
     block: Any = None,
+    label: str = "",
 ) -> ServerGuard:
     """A guard for ``server`` with the thresholds ``cfg.mcp.breaker`` sets.
 
@@ -521,7 +528,8 @@ def guard_from_settings(
     block, whose ``call_timeout_seconds`` is the budget each of its calls gets
     (:func:`server_call_budget`) and whose ``tool_facts`` declare each tool's
     own budget and long-running flag (:meth:`ServerGuard.declare_tool_facts`);
-    with none given it is ``cfg.mcp.servers[server]``.
+    with none given it is ``cfg.mcp.servers[server]``. ``label`` is the
+    server's display name, where it has one.
     """
     breaker = getattr(getattr(cfg, "mcp", None), "breaker", None)
     if block is None:
@@ -535,6 +543,7 @@ def guard_from_settings(
         call_timeout_seconds=server_call_budget(cfg, block),
         on_open=on_open,
         explicit_call_timeout=explicit_call_timeout(cfg) > 0,
+        label=label,
     )
     guard.declare_sample_open(sample_open)
     guard.declare_tool_facts(getattr(block, "tool_facts", None))
@@ -548,6 +557,7 @@ def operator_guard(
     block: Any = None,
     on_open: Callable[[dict[str, Any]], None] | None = None,
     sample_open: Any = None,
+    label: str = "",
 ) -> ServerGuard:
     """A guard that limits only what the operator set; for a server outside the job's registry.
 
@@ -575,6 +585,7 @@ def operator_guard(
         call_timeout_seconds=explicit or own,
         on_open=on_open,
         explicit_call_timeout=explicit > 0,
+        label=label,
     )
     guard.declare_sample_open(sample_open)
     guard.declare_tool_facts(getattr(block, "tool_facts", None))

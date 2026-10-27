@@ -112,6 +112,8 @@ class CAPEv2Client:
 
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        # How a retried artefact fetch waits; a test hands in its own.
+        self._sleep = time.sleep
         self._upload_timeout = max(int(upload_timeout), int(timeout))
         self._headers: dict[str, str] = {}
         if token_value:
@@ -398,67 +400,77 @@ class CAPEv2Client:
             report=report,
         )
 
-    def fetch_pcap(self, task_id: str, dest_dir: str | Path) -> str | None:
+    def fetch_pcap(
+        self, task_id: str, dest_dir: str | Path, poll_interval_seconds: float = 10
+    ) -> str | None:
         """Download the task's raw PCAP into ``dest_dir``; return the local path.
 
         ``GET /apiv2/tasks/get/pcap/{task_id}/`` streams the libpcap capture of
         the detonation's traffic. The network analyst's local PCAP MCP
         (read_pcap_summary / extract_dns / extract_http) then deep-inspects it
         for beaconing / tunnelling that the structured ``network`` block can't
-        express. Returns None when the task has no PCAP (404), the payload is
-        empty, or the download fails — the analyst then works from the
-        structured IOCs alone (never a hard failure).
+        express. Returns None when the task has no PCAP (404, or CAPE's own
+        refusal envelope). A transient failure (5xx, 429, a dropped transport)
+        is asked again, ``poll_interval_seconds`` apart and backed off as the
+        status poll is; one that lasts, any other error, or a payload too small
+        to be a capture raises ``ArtefactFetchFailed`` naming why — the analyst
+        then works from the structured IOCs alone, and the run says so.
         """
+        from maljan.providers.errors import PACKET_CAPTURE
+        from maljan.providers.sandbox.triage import fetch_artefact, stop_if_cancelled
+
+        stop_if_cancelled(PACKET_CAPTURE)
         dest = Path(dest_dir)
         dest.mkdir(parents=True, exist_ok=True)
         out = dest / f"cape_task_{task_id}.pcap"
-        try:
-            with self._http.stream("GET", f"/apiv2/tasks/get/pcap/{task_id}/", timeout=120) as resp:
-                if resp.status_code == 404:
-                    logger.info("CAPEv2Client: task %s has no PCAP (404).", task_id)
-                    return None
-                if resp.status_code >= 400:
-                    logger.warning(
-                        "CAPEv2Client: PCAP fetch HTTP %d for task %s.",
-                        resp.status_code,
-                        task_id,
-                    )
-                    return None
-                # A refusal comes back as CAPE's JSON envelope with HTTP 200;
-                # written to disk it would pass the size floor as a capture.
-                if "json" in str(resp.headers.get("content-type") or "").lower():
-                    logger.warning(
-                        "CAPEv2Client: no PCAP for task %s: %s",
-                        task_id,
-                        self._refusal_of(resp.read(), "fetch_pcap"),
-                    )
-                    return None
-                # 0o600 from the first byte, with ``O_NOFOLLOW``: a capture
-                # is the whole of a detonation's traffic, and writing it at
-                # the process umask leaves it readable for as long as the
-                # download takes. Streamed to disk, never held in memory.
-                flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
-                with os.fdopen(os.open(out, flags, 0o600), "wb") as f:
-                    for chunk in resp.iter_bytes(65536):
-                        f.write(chunk)
-        except Exception as exc:
-            logger.warning("CAPEv2Client: PCAP download failed for task %s: %s", task_id, exc)
-            out.unlink(missing_ok=True)
-            return None
 
-        # libpcap/pcapng global header is 24 bytes; anything smaller is empty,
-        # and the bytes go with the answer rather than waiting for a sweep.
-        size = out.stat().st_size if out.exists() else 0
-        if size < 24:
+        def keep(resp: Any) -> bool:
+            # A refusal comes back as CAPE's JSON envelope with HTTP 200;
+            # written to disk it would pass the size floor as a capture.
+            if "json" in str(resp.headers.get("content-type") or "").lower():
+                logger.warning(
+                    "CAPEv2Client: no PCAP for task %s: %s",
+                    task_id,
+                    self._refusal_of(resp.read(), "fetch_pcap"),
+                )
+                return False
+            self._write_capture(resp, out)
+            return True
+
+        # Whatever is left of a failed or empty fetch is removed with the
+        # answer rather than waiting for a sweep (``fetch_artefact``).
+        path = fetch_artefact(
+            lambda: self._http.stream("GET", f"/apiv2/tasks/get/pcap/{task_id}/", timeout=120),
+            keep,
+            out,
+            artefact=PACKET_CAPTURE,
+            what=f"CAPEv2Client: task {task_id}",
+            sleep=self._sleep,
+            interval=float(poll_interval_seconds),
+            client=self._http,
+        )
+        if path is not None:
             logger.info(
-                "CAPEv2Client: PCAP for task %s empty/too small (%d bytes) — skipping.",
+                "CAPEv2Client: PCAP for task %s -> %s (%d bytes).",
                 task_id,
-                size,
+                out,
+                out.stat().st_size,
             )
-            out.unlink(missing_ok=True)
-            return None
-        logger.info("CAPEv2Client: PCAP for task %s -> %s (%d bytes).", task_id, out, size)
-        return str(out)
+        return path
+
+    @staticmethod
+    def _write_capture(resp: Any, out: Path) -> None:
+        """Stream a capture to ``out``, owner-only from the first byte.
+
+        0o600 with ``O_NOFOLLOW``: a capture is the whole of a detonation's
+        traffic, and writing it at the process umask leaves it readable for as
+        long as the download takes. Streamed to disk, never held in memory; a
+        partial file is removed by the caller.
+        """
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+        with os.fdopen(os.open(out, flags, 0o600), "wb") as f:
+            for chunk in resp.iter_bytes(65536):
+                f.write(chunk)
 
     def close(self) -> None:
         """Close the underlying HTTP client connection pool."""

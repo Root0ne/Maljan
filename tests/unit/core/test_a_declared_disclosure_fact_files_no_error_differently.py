@@ -33,7 +33,26 @@ UNDECLARED = "zz_not_declared"
 # The built-in sources shipped after the golden was captured (the
 # identification servers): each tool of theirs declares a kind and files as a
 # declared tool of dev's did, and their undeclared tool as dev's undeclared one.
-SHIPPED_SINCE = frozenset({"mcp:die", "mcp:ilspy", "mcp:goresym"})
+SHIPPED_SINCE = frozenset(
+    {
+        "mcp:die",
+        "mcp:ilspy",
+        "mcp:goresym",
+        "mcp:yarax",
+        "mcp:oletools",
+        "mcp:webcrack",
+        "mcp:unblob",
+        "mcp:jadx",
+    }
+)
+# The tools added since to a source dev had, each filed as the dev tool it is
+# like: the readers' delivery primitives as the sample's (``tools.readers``).
+ADDED_SINCE = {
+    "mcp:analysis::run_reader": "mcp:analysis::put_sample",
+    "mcp:network::run_reader": "mcp:analysis::put_sample",
+    "mcp:analysis::release_job": "mcp:analysis::put_sample",
+    "mcp:network::release_job": "mcp:analysis::put_sample",
+}
 
 
 @pytest.fixture
@@ -68,6 +87,8 @@ def test_every_built_in_tool_files_every_answer_as_dev_did(declared: ToolDeclara
                 assert tool == UNDECLARED or held.tools[tool].kind, key
                 like = UNDECLARED if tool == UNDECLARED else "strings"
                 dev = DEV["filed"][f"mcp:analysis::{like}"]
+            elif key in ADDED_SINCE:
+                dev = DEV["filed"][ADDED_SINCE[key]]
             else:
                 dev = DEV["filed"].get(key) or DEV["filed"][f"{source}::{UNDECLARED}"]
             now = [_filed(held.source, tool, answer) for answer in DEV["answers"]]

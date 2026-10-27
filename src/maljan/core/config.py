@@ -58,9 +58,11 @@ from maljan.core.pack_steps import (
 )
 from maljan.core.platform_secrets import platform_secrets_refusal
 from maljan.core.plugins import (
+    NAME_RULE,
     PluginsConfig,
     id_refusal,
     install_allow_list,
+    is_plugin_name,
     shipped_ids,
     unloaded_plugin,
 )
@@ -1848,6 +1850,13 @@ def _declared(key: str, **fields: Any) -> MCPServerConfig:
     return MCPServerConfig(**fields, **server_declaration(key))
 
 
+# The analysts a built-in sidecar of one analysis program is offered to: the
+# static analyst and the reverser, and for the code of an APK or dex file
+# (JADX) the Android static analyst and the reverser.
+_STATIC = ("static", "reverser")
+_ANDROID = ("android_static", "reverser")
+
+
 def _builtin_servers() -> dict[str, MCPServerConfig]:
     """The servers a deployment starts with, as settings rather than constants.
 
@@ -1954,9 +1963,13 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             agents=[],
             label=virustotal.SERVER_LABEL,
         ),
-        # The identification sidecars, one analysis program each in an image
-        # of its own (``services/die-mcp``, ``services/ilspy-mcp``,
-        # ``services/goresym-mcp``), each reached over streamable HTTP at the
+        # The sidecars of one analysis program each, in an image of its own:
+        # the identification servers (``services/die-mcp``,
+        # ``services/ilspy-mcp``, ``services/goresym-mcp``), the rule and
+        # document servers (``services/yarax-mcp``, ``services/oletools-mcp``,
+        # ``services/webcrack-mcp``) and the container and Android servers
+        # (``services/unblob-mcp``, ``services/jadx-mcp``), each reached over
+        # streamable HTTP at the
         # address the shipped compose file gives it under its profile. Off
         # until an operator starts the container and switches the block on with
         # the container's token as ``auth_token``: a block on with nothing
@@ -1969,13 +1982,19 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
                 enabled=False,
                 transport="streamable-http",
                 url=url,
-                agents=["static", "reverser"],
+                agents=list(agents),
                 label=label,
             )
-            for key, url, label in (
-                ("die", "http://die-mcp:8090/mcp", "Detect It Easy MCP"),
-                ("ilspy", "http://ilspy-mcp:8091/mcp", "ILSpy MCP"),
-                ("goresym", "http://goresym-mcp:8092/mcp", "GoReSym MCP"),
+            for key, url, label, agents in (
+                ("die", "http://die-mcp:8090/mcp", "Detect It Easy MCP", _STATIC),
+                ("ilspy", "http://ilspy-mcp:8091/mcp", "ILSpy MCP", _STATIC),
+                ("goresym", "http://goresym-mcp:8092/mcp", "GoReSym MCP", _STATIC),
+                ("yarax", "http://yarax-mcp:8093/mcp", "YARA-X MCP", _STATIC),
+                ("oletools", "http://oletools-mcp:8094/mcp", "oletools MCP", _STATIC),
+                ("webcrack", "http://webcrack-mcp:8095/mcp", "webcrack MCP", _STATIC),
+                ("unblob", "http://unblob-mcp:8096/mcp", "unblob MCP", _STATIC),
+                # The code of an APK or dex file: the Android static analyst's.
+                ("jadx", "http://jadx-mcp:8097/mcp", "JADX MCP", _ANDROID),
             )
         },
     }
@@ -4724,6 +4743,11 @@ class Settings(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     # The installed provider plugins this deployment loads; none by default.
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
+    # A server block per third-party provider, keyed by the provider's id: how
+    # its server is reached and what it declares about its tools, read under
+    # ``provider:<id>`` as a shipped provider's own block is
+    # (``core.tool_declarations.provider_declarations``). Empty by default.
+    providers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
     @classmethod
     def settings_customise_sources(
@@ -4894,6 +4918,62 @@ class Settings(BaseSettings):
                     "tool server of mcp.servers, whose route performs it; a provider's own "
                     "block takes none"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _provider_blocks_are_their_own(self) -> "Settings":
+        """Each ``providers`` block is a third-party provider's, and holds no credential.
+
+        The key is a provider id. One a shipped provider's block is read under
+        is refused: that provider keeps its own block; so is any other built-in
+        provider's id, which keeps its own declaration. The map is stored as one
+        clear row, so a token, an ``env`` value or a URL carrying a user name or
+        password is refused here; a credential reaches the provider's server by
+        name, through ``env_allow``. A credential bootstrap is refused as on
+        every provider's block.
+        """
+        from urllib.parse import urlsplit
+
+        from maljan.core.tool_declarations import shipped_provider_blocks
+
+        if not self.providers:
+            return self
+        from maljan.providers.registry import built_in_ids
+
+        shipped = shipped_provider_blocks()
+        built_in = built_in_ids("static") | built_in_ids("sandbox")
+        no_credential = (
+            "a provider block holds no credential; name the variable in env_allow so "
+            "the server reads it from the worker's environment"
+        )
+        for key, block in self.providers.items():
+            where: tuple[str | int, ...] = ("providers", key)
+            if not is_plugin_name(key):
+                _refuse_at(where, f"a provider id is {NAME_RULE}", key)
+            held = shipped.get(f"provider:{key}")
+            if held is not None:
+                _refuse_at(where, f"{key!r} is declared by its shipped block {held!r}")
+            if key in built_in:
+                _refuse_at(where, f"{key!r} is a built-in provider; it keeps its own declaration")
+            try:
+                parts = urlsplit(block.url)
+                userinfo = bool(parts.username or parts.password)
+            except ValueError:
+                userinfo = False
+            if block.auth_token.get_secret_value() or block.env or userinfo:
+                _refuse_at(where, no_credential)
+            if block.credential_bootstrap is not None:
+                _refuse_at(
+                    (*where, "credential_bootstrap"),
+                    "a credential bootstrap is declared on a tool server of mcp.servers, whose "
+                    "route performs it; a provider's own block takes none",
+                )
+            try:
+                check_own_prefix(key, block.tool_facts)
+                for pattern in block.error_patterns:
+                    check_own_prefix(key, pattern.tools)
+            except ValueError as exc:
+                _refuse_at((*where, "tool_facts"), str(exc))
         return self
 
     @model_validator(mode="after")

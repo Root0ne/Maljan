@@ -304,6 +304,7 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
             timestamp=run_summary_dict.get("timestamp", 0.0),
             degraded_mode=bool(run_summary_dict.get("degraded_mode", False)),
             degradation_reasons=[str(r) for r in run_summary_dict.get("degradation_reasons") or []],
+            operator_choices=[str(r) for r in run_summary_dict.get("operator_choices") or []],
         )
 
         Path(report_path).write_text(summary.to_markdown(), encoding="utf-8")

@@ -293,7 +293,8 @@ export async function spilledProblem(
  * identical one (`repeated_of`), and that the model's arguments arrived cut
  * off and were closed before the call ran (`args_repaired`). A reader of the
  * row saw a whole answer, a fresh call and the model's own arguments in all
- * four cases. Each is a sentence here; a row that carries none of them says
+ * four cases. The nulls a call left out (`args_nulls_dropped`,
+ * `args_nulls_withheld`) are said the same way. Each is a sentence here; a row that carries none of them says
  * nothing, because what is not recorded is not asserted.
  */
 export function entryNotes(entry: EvidenceEntry): string[] {
@@ -321,6 +322,20 @@ export function entryNotes(entry: EvidenceEntry): string[] {
   }
   if (entry.args_repaired) {
     notes.push("The model's arguments arrived cut off and were closed before the call ran.");
+  }
+  const named = (paths: string[][] | null | undefined): string =>
+    (paths ?? []).map((path) => path.join(" › ")).join(", ");
+  const nullsDropped = named(entry.args_nulls_dropped);
+  if (nullsDropped) {
+    notes.push(
+      `The model gave null for ${nullsDropped}, which the tool's schema does not allow; each was left out and took its default.`,
+    );
+  }
+  const nullsWithheld = named(entry.args_nulls_withheld);
+  if (nullsWithheld) {
+    notes.push(
+      `The model gave null for ${nullsWithheld}; it was not sent, so the server applied its own default.`,
+    );
   }
   return notes;
 }

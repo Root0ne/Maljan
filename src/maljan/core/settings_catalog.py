@@ -473,6 +473,33 @@ def _reads_as_a_credential(value: str) -> bool:
         return True
 
 
+def _bare_secrets(address: str) -> list[str]:
+    """The credentials an address written with no scheme carries (``bare_userinfo``).
+
+    Its password, read from its userinfo rather than by a URL parser, which
+    refuses a password holding a bracket: everything after the first ``:``,
+    and also what follows the last one, where a word before a mailbox's
+    colon stands in front of a user name (``to:user:pw@host:8080``). A token
+    alone in its user name slot where it has a token's shape, and each query
+    value whose key names a credential, as in a URL with a scheme.
+    """
+    from maljan.core.settings_masking import bare_userinfo
+
+    parts = bare_userinfo(address)
+    if parts is None:
+        return []
+    head, tail = parts
+    found: list[str] = []
+    if ":" in head:
+        found.extend(
+            dict.fromkeys(p for p in (head.partition(":")[2], head.rpartition(":")[2]) if p)
+        )
+    elif _reads_as_a_credential(head):
+        found.append(head)
+    found.extend(_url_secrets("//host" + tail[len(tail.split("?", 1)[0]) :]))
+    return found
+
+
 def _url_secrets(url: str) -> list[str]:
     """The credentials a configured URL carries: its password of any length, a token
     written alone in its username slot, and each query value whose key names a credential."""
@@ -551,6 +578,7 @@ def configured_secret_values(*sources: Any) -> set[str]:
     read. The scrub masks these values by exact value
     (``pipeline.events.remember_secret_values``).
     """
+    from maljan.core.settings_masking import bare_addresses
 
     found: set[str] = set()
 
@@ -591,9 +619,16 @@ def configured_secret_values(*sources: Any) -> set[str]:
         elif isinstance(value, str):
             if named_secret:
                 _add(value)
-            elif "://" in value:
-                for secret in _url_secrets(value):
-                    _add(secret)
+            else:
+                if "://" in value:
+                    for secret in _url_secrets(value):
+                        _add(secret)
+                # Each word that is an address written with no scheme is read
+                # as one with it (``settings_masking.bare_addresses``); the
+                # rest of a free-text value holds no address.
+                for address in bare_addresses(value):
+                    for secret in _bare_secrets(address):
+                        _add(secret)
 
     for source in sources:
         _walk(source, "", False)

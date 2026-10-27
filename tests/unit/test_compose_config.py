@@ -31,23 +31,60 @@ OPTIONAL_ENV = {
     "DIE_MCP_AUTH_TOKEN": "e" * 32,
     "ILSPY_MCP_AUTH_TOKEN": "i" * 32,
     "GORESYM_MCP_AUTH_TOKEN": "g" * 32,
+    "YARAX_MCP_AUTH_TOKEN": "y" * 32,
+    "OLETOOLS_MCP_AUTH_TOKEN": "o" * 32,
+    "WEBCRACK_MCP_AUTH_TOKEN": "w" * 32,
+    "UNBLOB_MCP_AUTH_TOKEN": "u" * 32,
+    "JADX_MCP_AUTH_TOKEN": "j" * 32,
+    "ANALYSIS_MCP_AUTH_TOKEN": "a" * 32,
+    "NETWORK_MCP_AUTH_TOKEN": "n" * 32,
 }
 
-# The identification sidecars, each under its own profile, by profile: the
+# The sidecars of one analysis program each (the identification sidecars and
+# the rule and document sidecars), each under its own profile, by profile: the
 # sidecar, its published-port relay and the port the server listens on.
-IDENTIFIERS = {
+ONE_PROGRAM = {
     "die": ("die-mcp", "die-port", 8090),
     "ilspy": ("ilspy-mcp", "ilspy-port", 8091),
     "goresym": ("goresym-mcp", "goresym-port", 8092),
+    "yarax": ("yarax-mcp", "yarax-port", 8093),
+    "oletools": ("oletools-mcp", "oletools-port", 8094),
+    "webcrack": ("webcrack-mcp", "webcrack-port", 8095),
+    "unblob": ("unblob-mcp", "unblob-port", 8096),
+    "jadx": ("jadx-mcp", "jadx-port", 8097),
 }
-# Each identification sidecar's memory-and-swap ceiling by default, in GiB, and
-# the variable that sets it.
-IDENTIFIER_MEMORY = {
+# Each one's memory-and-swap ceiling by default, in GiB, and the variable that
+# sets it.
+ONE_PROGRAM_MEMORY = {
     "die": ("DIE_MEM_LIMIT", 2),
     "ilspy": ("ILSPY_MEM_LIMIT", 4),
     "goresym": ("GORESYM_MEM_LIMIT", 2),
+    "yarax": ("YARAX_MEM_LIMIT", 2),
+    "oletools": ("OLETOOLS_MEM_LIMIT", 2),
+    "webcrack": ("WEBCRACK_MEM_LIMIT", 2),
+    "unblob": ("UNBLOB_MEM_LIMIT", 2),
+    "jadx": ("JADX_MEM_LIMIT", 4),
 }
-ALL_PROFILES = ("ghidra", "qdrant", *IDENTIFIERS)
+# The mounts a sidecar holds beside the samples directory, by profile: YARA-X
+# reads the operator's rule files, read-only, from the directory
+# YARA_X_RULES_DIR names (data/yara-x-rules by default).
+RULE_MOUNTS = {"yarax": ("YARA_X_RULES_DIR", ("data", "yara-x-rules"), "/data/rules")}
+# The variables a sidecar is handed beside its token, by profile, none of them
+# a secret: unblob's bound on what one extraction writes (the console's upload
+# bound) and how long it keeps an extraction's files.
+SIDECAR_SETTINGS = {"unblob": {"UPLOAD_MAX_BYTES", "CARVED_KEEP_SECONDS", "UNBLOB_MAX_ENTRIES"}}
+# The sidecars whose /tmp is a tmpfs sized below their memory ceiling, by
+# profile: the variable that sets it and its size by default, in MiB.
+TMPFS_SIZES = {"unblob": ("UNBLOB_TMPFS_SIZE", 1536), "jadx": ("JADX_TMPFS_SIZE", 1536)}
+# The platform's own sample readers (the analysis and network servers), each in
+# a container of its own under its profile, by profile: the server, its relay,
+# its port, its memory-and-swap ceiling's variable and default in GiB, and its
+# tmpfs's variable and default in MiB.
+READERS = {
+    "analysis": ("analysis-mcp", "analysis-port", 8098, ("ANALYSIS_MEM_LIMIT", 8), 2048),
+    "network": ("network-mcp", "network-port", 8099, ("NETWORK_MEM_LIMIT", 2), 512),
+}
+ALL_PROFILES = ("ghidra", "qdrant", *ONE_PROGRAM, *READERS)
 
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
@@ -318,7 +355,7 @@ def test_the_stack_renders_without_ghidra_and_qdrant_and_without_their_tokens(tm
     services = _render(tmp_path)["services"]
     assert "ghidra-mcp" not in services
     assert "qdrant" not in services
-    for sidecar, relay, _port in IDENTIFIERS.values():
+    for sidecar, relay, *_rest in (*ONE_PROGRAM.values(), *READERS.values()):
         assert sidecar not in services and relay not in services
     for name in ("backend-api", "backend-worker", "migrate", "enrichment-worker", "frontend"):
         assert name in services, name
@@ -327,7 +364,12 @@ def test_the_stack_renders_without_ghidra_and_qdrant_and_without_their_tokens(tm
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
 def test_no_service_waits_for_an_optional_one(tmp_path):
     services = _render(tmp_path, *ALL_PROFILES, env={**REQUIRED_ENV, **OPTIONAL_ENV})["services"]
-    optional = {"ghidra-mcp", "qdrant", *(names[0] for names in IDENTIFIERS.values())}
+    optional = {
+        "ghidra-mcp",
+        "qdrant",
+        *(names[0] for names in ONE_PROGRAM.values()),
+        *(names[0] for names in READERS.values()),
+    }
     assert optional <= set(services)
     for name, service in services.items():
         waits = set(service.get("depends_on") or {})
@@ -341,7 +383,7 @@ def test_each_optional_service_runs_under_its_own_profile(tmp_path):
     assert config["services"]["ghidra-port"]["profiles"] == ["ghidra"]
     assert config["services"]["qdrant"]["profiles"] == ["qdrant"]
     config = _render(tmp_path, *ALL_PROFILES, env={**REQUIRED_ENV, **OPTIONAL_ENV})
-    for profile, (sidecar, relay, _port) in IDENTIFIERS.items():
+    for profile, (sidecar, relay, _port) in ONE_PROGRAM.items():
         assert config["services"][sidecar]["profiles"] == [profile]
         assert config["services"][relay]["profiles"] == [profile]
     # Ghidra's port is published by its relay; ghidra-mcp publishes none.
@@ -465,11 +507,25 @@ def _mounts_samples(service: dict) -> bool:
     )
 
 
+# Where the platform's own services mount the samples directory: the API's
+# and the worker's working tree, whose mirrors they write, and volume-init's
+# hand-over. Every other mount of it is a container that opens the sample,
+# whatever image it runs, the backend's included.
+PLATFORM_SAMPLE_TARGETS = ("/app/", "/own/")
+
+
 def _sample_openers(config: dict) -> dict[str, dict]:
+    def platform(service: dict) -> bool:
+        return any(
+            str(volume.get("target") or "").startswith(PLATFORM_SAMPLE_TARGETS)
+            for volume in service.get("volumes") or []
+            if _mounts_samples({"volumes": [volume]})
+        )
+
     return {
         name: service
         for name, service in config["services"].items()
-        if service.get("image") != BACKEND_IMAGE and _mounts_samples(service)
+        if _mounts_samples(service) and not platform(service)
     }
 
 
@@ -497,7 +553,11 @@ def test_every_container_that_opens_the_sample_is_kept_from_the_platform(
     # The worker does hold them, so their absence below is not a render that dropped them.
     assert secrets["JWT_SECRET_KEY"] in yaml.safe_dump(config["services"]["backend-worker"])
     # Found from the mounts, so the checks below never pass on an empty set.
-    assert set(openers) == {"ghidra-mcp", *(names[0] for names in IDENTIFIERS.values())}
+    assert set(openers) == {
+        "ghidra-mcp",
+        *(names[0] for names in ONE_PROGRAM.values()),
+        *(names[0] for names in READERS.values()),
+    }
     for name, service in openers.items():
         # Not root, no capability, no way to gain one.
         uid = str(service.get("user") or "0").split(":", 1)[0]
@@ -547,10 +607,15 @@ def test_only_the_platforms_callers_share_a_network_with_a_sample_opener(
                     continue
                 assert _is_bare_relay(service), (name, network, other)
     # The API and the worker keep the project network and reach Ghidra and
-    # each identification sidecar on its own.
+    # each sidecar of one analysis program on its own.
     for caller in ("backend-api", "backend-worker"):
-        assert _networks_of(services[caller]) == {DEFAULT_NETWORK, "ghidra", *IDENTIFIERS}, caller
-    for network in ("ghidra", *IDENTIFIERS):
+        assert _networks_of(services[caller]) == {
+            DEFAULT_NETWORK,
+            "ghidra",
+            *ONE_PROGRAM,
+            *READERS,
+        }, caller
+    for network in ("ghidra", *ONE_PROGRAM, *READERS):
         assert config["networks"][network]["internal"] is True
 
 
@@ -622,13 +687,13 @@ def test_ghidra_starts_as_its_user_only_after_its_projects_changed_hands(tmp_pat
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
 @pytest.mark.parametrize("files", STACKS)
-@pytest.mark.parametrize("profile", sorted(IDENTIFIERS))
-def test_each_identification_sidecar_is_held_as_ghidra_is(
+@pytest.mark.parametrize("profile", sorted(ONE_PROGRAM))
+def test_each_one_program_sidecar_is_held_as_ghidra_is(
     tmp_path: Path, files: tuple[str, ...], profile: str
 ) -> None:
     from maljan.core.config import Settings
 
-    sidecar_name, relay_name, port = IDENTIFIERS[profile]
+    sidecar_name, relay_name, port = ONE_PROGRAM[profile]
     config = _render_with(tmp_path, *files, profiles=(profile,))
     sidecar, relay = config["services"][sidecar_name], config["services"][relay_name]
     # Built from its own directory under services/, as the worker's ids, with a
@@ -636,20 +701,52 @@ def test_each_identification_sidecar_is_held_as_ghidra_is(
     assert sidecar["build"]["dockerfile"] == f"{sidecar_name}/Dockerfile"
     assert Path(sidecar["build"]["context"]).name == "services"
     assert sidecar["user"] == config["services"]["backend-worker"]["user"]
-    assert sidecar["read_only"] is True and sidecar["tmpfs"] == ["/tmp"]
+    assert sidecar["read_only"] is True
+    if profile in TMPFS_SIZES:
+        # Sized below the memory ceiling, so too much written fills it, not memory.
+        size_variable, mib = TMPFS_SIZES[profile]
+        assert sidecar["tmpfs"] == [f"/tmp:size={mib}m"]
+        limit = ONE_PROGRAM_MEMORY[profile][1] * GIB
+        tmpfs = mib * 1024 * 1024
+        # The room each leaves beside its tmpfs: unblob's at most three
+        # quarters of its ceiling, JADX's its ceiling less its heap (half of
+        # it) and half a GiB for the runtime.
+        if profile == "unblob":
+            assert tmpfs <= limit * 3 // 4
+        else:
+            assert tmpfs <= limit - limit // 2 - GIB // 2
+        resized = _render_with(tmp_path, *files, profiles=(profile,), env={size_variable: "512m"})
+        assert resized["services"][sidecar_name]["tmpfs"] == ["/tmp:size=512m"]
+    else:
+        assert sidecar["tmpfs"] == ["/tmp"]
     # A memory ceiling the kernel enforces, swap pinned to it, as Ghidra's.
-    variable, gib = IDENTIFIER_MEMORY[profile]
+    variable, gib = ONE_PROGRAM_MEMORY[profile]
     assert int(sidecar["mem_limit"]) == int(sidecar["memswap_limit"]) == gib * GIB
     lighter = _render_with(tmp_path, *files, profiles=(profile,), env={variable: "1g"})
     held = lighter["services"][sidecar_name]
     assert int(held["mem_limit"]) == int(held["memswap_limit"]) == GIB
-    # The one variable it is handed is its own token.
-    assert set(sidecar["environment"]) == {"MCP_AUTH_TOKEN"}
-    # The samples directory, read-only, at the mount its block declares, and nothing else.
+    # The one secret it is handed is its own token; unblob's settings beside it.
+    settings = SIDECAR_SETTINGS.get(profile, set())
+    assert set(sidecar["environment"]) == {"MCP_AUTH_TOKEN", *settings}
+    if settings:
+        given = {name: "7" for name in settings}
+        held = _render_with(tmp_path, *files, profiles=(profile,), env=given)
+        assert {k: held["services"][sidecar_name]["environment"][k] for k in settings} == given
+    # The samples directory, read-only, at the mount its block declares, and
+    # nothing else but YARA-X's rule directory, read-only too.
     block = Settings(_env_file=None).mcp.servers[profile]
-    (mount,) = sidecar["volumes"]
+    mount, *others = sidecar["volumes"]
     assert _mounts_samples(sidecar) and mount["read_only"] is True
     assert mount["target"] == block.sample_mount
+    if profile in RULE_MOUNTS:
+        variable, source, target = RULE_MOUNTS[profile]
+        (rules,) = others
+        assert Path(rules["source"]).parts[-2:] == source and (ROOT / Path(*source)).is_dir()
+        assert (rules["target"], rules["read_only"]) == (target, True)
+        elsewhere = _render_with(tmp_path, *files, profiles=(profile,), env={variable: "/srv/r"})
+        assert elsewhere["services"][sidecar_name]["volumes"][1]["source"] == "/srv/r"
+    else:
+        assert others == []
     assert _networks_of(sidecar) == {profile}
     # The block reaches it by its service name on its own port.
     assert block.url == f"http://{sidecar_name}:{port}/mcp"
@@ -673,3 +770,79 @@ def test_each_identification_sidecar_is_held_as_ghidra_is(
     }
     assert others == {relay_name}
     assert DIGEST.search(relay["image"])
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+@pytest.mark.parametrize("files", STACKS)
+@pytest.mark.parametrize("profile", sorted(READERS))
+def test_each_sample_reader_is_held_as_the_sidecars_are(
+    tmp_path: Path, files: tuple[str, ...], profile: str
+) -> None:
+    server_name, relay_name, port, (variable, gib), mib = READERS[profile]
+    config = _render_with(tmp_path, *files, profiles=(profile,))
+    services = config["services"]
+    server, relay = services[server_name], services[relay_name]
+    # The worker's own image and ids, serving over HTTP from its own directory.
+    assert server["image"] == BACKEND_IMAGE
+    assert server["user"] == services["backend-worker"]["user"]
+    assert server["command"] == ["python", "server.py", "--http"]
+    assert server["working_dir"] == f"/app/services/{server_name}"
+    assert server["profiles"] == [profile] and relay["profiles"] == [profile]
+    # No capability, no way to gain one, a pids limit, a read-only root whose
+    # only writable place is a tmpfs sized well below its memory ceiling.
+    assert server["cap_drop"] == ["ALL"] and not server.get("cap_add")
+    assert "no-new-privileges:true" in server["security_opt"]
+    assert server.get("privileged") is not True
+    assert int(server["pids_limit"]) > 0
+    assert server["read_only"] is True
+    assert int(server["mem_limit"]) == int(server["memswap_limit"]) == gib * GIB
+    size = f"{mib // 1024}g" if mib % 1024 == 0 else f"{mib}m"
+    assert server["tmpfs"] == [f"/tmp:size={size}"]
+    assert mib * 1024 * 1024 <= gib * GIB // 4
+    lighter = _render_with(tmp_path, *files, profiles=(profile,), env={variable: "1g"})
+    held = lighter["services"][server_name]
+    assert int(held["mem_limit"]) == int(held["memswap_limit"]) == GIB
+    # Its only secret is its own token; the rest says where it listens and reads.
+    environment = server["environment"]
+    assert set(environment) == {
+        "MCP_AUTH_TOKEN",
+        "MCP_BIND_ADDRESS",
+        "MCP_PORT",
+        "MALJAN_SAMPLE_ROOTS",
+        "HOME",
+    }
+    assert environment["MCP_AUTH_TOKEN"] == OPTIONAL_ENV[f"{profile.upper()}_MCP_AUTH_TOKEN"]
+    assert str(environment["MCP_PORT"]) == str(port)
+    assert environment["MALJAN_SAMPLE_ROOTS"] == "/data/samples"
+    # Everything it mounts is read-only: the worker's source and data, and the
+    # samples at /data/samples, the mount its block is pointed at.
+    volumes = server["volumes"]
+    assert volumes and all(volume.get("read_only") is True for volume in volumes)
+    (samples,) = [volume for volume in volumes if _mounts_samples({"volumes": [volume]})]
+    assert samples["target"] == "/data/samples"
+    assert {volume["target"] for volume in volumes} == {
+        "/app/src",
+        "/app/services",
+        "/app/data",
+        "/data/samples",
+    }
+    # An internal network of its own, shared only with the API, the worker
+    # and its relay, and no port of its own.
+    assert _networks_of(server) == {profile}
+    assert config["networks"][profile]["internal"] is True
+    members = {name for name, service in services.items() if profile in _networks_of(service)}
+    assert members == {server_name, relay_name, "backend-api", "backend-worker"}
+    assert not server.get("ports")
+    # Its relay forwards that port and nothing else.
+    assert _is_bare_relay(relay) and not _mounts_samples(relay)
+    assert _networks_of(relay) == {profile, f"{profile}-publish"}
+    assert relay["command"] == [
+        f"tcp-listen:{port},fork,reuseaddr",
+        f"tcp-connect:{server_name}:{port}",
+    ]
+    (published,) = relay["ports"]
+    assert (published["host_ip"], str(published["published"]), published["target"]) == (
+        "127.0.0.1",
+        str(port),
+        port,
+    )

@@ -53,7 +53,13 @@ from app.logging_config import get_logger, setup_logging
 from app.runtime_config import runtime_config
 from app.services.job_events import STREAM_TTL_SECONDS, stream_key
 from app.worker.queues import ANALYSIS_QUEUE, build_redis_settings
-from app.worker.sample_integrity import SampleIntegrity, copies_of, ended_record, with_record
+from app.worker.sample_integrity import (
+    SampleIntegrity,
+    copies_of,
+    ended_record,
+    sandbox_target_of,
+    with_record,
+)
 
 logger = get_logger("worker")
 
@@ -1058,6 +1064,16 @@ def remember_configured_secrets(core_settings: Any) -> None:
         )
 
 
+# Which model answered, as ``model_assignments.model_label`` writes it:
+# ``provider/model`` and an endpoint's label. Not identity fields: the whole
+# scrub reads ``anthropic/claude-haiku-5-5`` as a key (26 characters of the
+# base64 alphabet with digit pieces), and an exemption would carry a key typed
+# into a model name through. A value here, each string of a list here and each
+# key of a mapping here (a per-model tally) is scrubbed as a model label
+# (``events.scrub_model_label``).
+MODEL_FIELDS = frozenset({"model", "models"})
+
+
 def scrubbed(value: Any, *, field: str = "") -> Any:
     """``value`` with every string inside it scrubbed, however deeply it sits.
 
@@ -1070,13 +1086,27 @@ def scrubbed(value: Any, *, field: str = "") -> Any:
     and so is each string of a list under one — ``agents: ["static", …]`` is
     the same kind of thing as ``agent: "static"``. The exemption stops there:
     a dict below an identity field is walked like any other, so its own fields
-    are judged by their own names.
+    are judged by their own names. Left alone by the shape rules, that is: a
+    value the operator configured as a secret is still masked by value.
+
+    A value under one of ``MODEL_FIELDS`` is scrubbed as a model label, and so
+    is each key of a mapping under one.
     """
-    from maljan.pipeline.events import scrub_keeping_layout
+    from maljan.pipeline.events import (
+        mask_configured_values,
+        scrub_keeping_layout,
+        scrub_model_label,
+    )
 
     if isinstance(value, str):
-        return value if field in IDENTITY_FIELDS else scrub_keeping_layout(value)
+        if field in MODEL_FIELDS:
+            return scrub_model_label(value)
+        if field in IDENTITY_FIELDS:
+            return mask_configured_values(value)
+        return scrub_keeping_layout(value)
     if isinstance(value, dict):
+        if field in MODEL_FIELDS:
+            return {scrub_model_label(key): scrubbed(item) for key, item in value.items()}
         return {key: scrubbed(item, field=str(key)) for key, item in value.items()}
     if isinstance(value, list | tuple):
         return [scrubbed(item, field=field) for item in value]
@@ -1275,12 +1305,19 @@ def _job_spill(container: Any) -> Any:
     return getter() if callable(getter) else None
 
 
+def _null_paths(value: Any) -> list[list[str]] | None:
+    """A ledger entry's ``args_nulls_*`` paths as the row stores them; ``None`` for none."""
+    if not isinstance(value, list) or not value:
+        return None
+    return [[str(part) for part in path] for path in value if isinstance(path, list)] or None
+
+
 def _evidence_row(
     entry: dict[str, Any], *, job_id: uuid.UUID, written_at: datetime | None = None
 ) -> Any:
     """One ledger entry as the row that keeps it.
 
-    Every one of the 31 fields ``maljan.schemas.evidence.LedgerEntry`` carries
+    Every one of the 34 fields ``maljan.schemas.evidence.LedgerEntry`` carries
     has a column here, which is what lets a reader of the stored ledger say why an output
     is empty instead of guessing. An absent value stays absent rather than
     becoming a default, for the same reason. ``written_at`` is the moment the
@@ -1341,6 +1378,17 @@ def _evidence_row(
         structured_from_server=(True if entry.get("structured_from_server") is True else None),
         agent_role=(str(entry["agent_role"]) if entry.get("agent_role") is not None else None),
         agent_tab=(str(entry["agent_tab"]) if entry.get("agent_tab") is not None else None),
+        # The nulls the tool boundary dropped or the transport withheld, by
+        # path segments; absent where the call had none.
+        args_nulls_dropped=_null_paths(entry.get("args_nulls_dropped")),
+        args_nulls_withheld=_null_paths(entry.get("args_nulls_withheld")),
+        # Where the pack's own readings behind the entry ran, as sources;
+        # absent where every one ran in the worker.
+        ran_on=(
+            [str(place) for place in entry["ran_on"]]
+            if isinstance(entry.get("ran_on"), list) and entry["ran_on"]
+            else None
+        ),
         # The references to the parts of the answer kept whole, as the entry
         # carries them; absent where nothing was taken.
         spilled=(list(entry["spilled"]) if entry.get("spilled") else None),
@@ -2219,6 +2267,7 @@ async def keep_the_built_report(
             hash_mismatch_reason=hash_mismatch_reason,
             scale_record=scale_record,
             sample_integrity=await ended_record(sample_integrity),
+            sandbox_target=sandbox_target_of(container),
         )
         _end_the_token_ledger(container)
         run_summary["degraded_mode"] = True
@@ -2359,6 +2408,7 @@ async def keep_the_stopped_run(
             hash_mismatch_reason=hash_mismatch_reason,
             scale_record=recorded_signature_scale(container),
             sample_integrity=await ended_record(sample_integrity),
+            sandbox_target=sandbox_target_of(container),
         )
         _end_the_token_ledger(container)
         async with db_session() as db:
@@ -3543,6 +3593,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             hash_mismatch_reason=_report_hash_mismatch_reason,
             scale_record=recorded_signature_scale(getattr(app, "container", None)),
             sample_integrity=await ended_record(_integrity),
+            sandbox_target=sandbox_target_of(getattr(app, "container", None)),
             enrichment=(
                 await enrichment_plan(core_settings)
                 if pipeline_result.get("malware_report")
@@ -3999,6 +4050,7 @@ def _roster_for(container: Any) -> dict[str, Any]:
             # The same bound the asks themselves run under, so the roster
             # names exactly the agents that can be reached and no more.
             depth=int(agents.delegation_depth),
+            servers=container.config.mcp.servers,
         )
     except Exception as exc:  # noqa: BLE001 — a roster never costs a run
         logger.warning("Could not build the roster for this run (%s).", exc)
@@ -4820,6 +4872,7 @@ def _report_inputs(
     scale_record: Mapping[str, Any] | None = None,
     enrichment: list[dict[str, Any]] | None = None,
     sample_integrity: Mapping[str, Any] | None = None,
+    sandbox_target: Mapping[str, Any] | None = None,
 ) -> tuple[dict | None, dict[str, Any]]:
     """The STIX bundle and the run summary a stored report carries.
 
@@ -4846,10 +4899,20 @@ def _report_inputs(
         if isinstance(stix_bundle_for_persist, dict):
             # The judge's draft, not the export: it did not pass the publish
             # rule, and whoever reads the stored bundle is told.
-            from maljan.schemas.stix_models import UNPUBLISHED_NOTICE, UNPUBLISHED_PROPERTY
+            # Without the run facts that name other runs' samples (the earlier
+            # run, the similar cases): the judge's own stored bundle keeps them.
+            from maljan.schemas.stix_models import (
+                JUDGE_ONLY_PROPERTIES,
+                UNPUBLISHED_NOTICE,
+                UNPUBLISHED_PROPERTY,
+            )
 
             stix_bundle_for_persist = {
-                **stix_bundle_for_persist,
+                **{
+                    key: value
+                    for key, value in stix_bundle_for_persist.items()
+                    if key not in JUDGE_ONLY_PROPERTIES
+                },
                 UNPUBLISHED_PROPERTY: False,
                 "x_maljan_notice": UNPUBLISHED_NOTICE,
             }
@@ -4894,6 +4957,13 @@ def _report_inputs(
     # The copies' readings at the job's start and end, said in the isolation
     # part (``sample_integrity``); a job that handed out no copy adds nothing.
     with_record(_run_summary, pipeline_result.get("malware_report"), sample_integrity)
+    # A detonating sandbox's report that named another target than the sample
+    # (``sandbox_target_of``), said in the same part; none adds nothing.
+    from maljan.analysis.sample_integrity import SANDBOX_KEY
+
+    with_record(
+        _run_summary, pipeline_result.get("malware_report"), sandbox_target, key=SANDBOX_KEY
+    )
     return stix_bundle_for_persist, _run_summary
 
 

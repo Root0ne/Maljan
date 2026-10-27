@@ -3,8 +3,9 @@
 The closing defang pass reads every section of the report. It leaves exactly
 three things as written, each set aside by the renderer when it wrote them:
 each draft rule's body, which is the rule to deploy, the configured model
-endpoints in the run summary's appendix, and the hosts of the appendix's
-disclosure block that the settings address
+endpoints in the run summary's appendix, as the run's disclosure record
+keeps their labels, and the hosts of the appendix's disclosure block that the
+settings address
 (``test_the_report_says_what_left_the_machine``). A heading or a fence written in the
 sample's text (a ransom note faking the draft-rules heading) creates no such
 region, and everything else in the appendix — the sandbox statement, the
@@ -79,12 +80,10 @@ def test_the_html_report_prints_the_faking_note_defanged() -> None:
 
 
 def test_the_run_summary_appendix_defangs_all_but_the_configured_endpoint() -> None:
-    from maljan.core.config import get_settings
-    from maljan.core.model_assignments import configured_endpoint_labels
-
-    endpoint = sorted(configured_endpoint_labels(get_settings()))[0]
+    endpoint = "http://127.0.0.1:8080"
     report = _report(
         run_summary={
+            "disclosure": {"endpoint_labels": [endpoint]},
             "sandbox": {"statement": f"The sandbox fetched {URL}."},
             "negotiation": {
                 "rounds_completed": 1,
@@ -113,9 +112,11 @@ _STARTS_WITH_A_LABEL = [
 ]
 
 
-def _with_label(label: str, value: str) -> MalwareReport:
+def _with_label(label: str, value: str, *, configured: str | None = None) -> MalwareReport:
+    """A summary naming ``label``'s model, whose record keeps ``configured`` (``label``)."""
     return _report(
         run_summary={
+            "disclosure": {"endpoint_labels": [label if configured is None else configured]},
             "sandbox": {"statement": f"The sandbox fetched {value} and then {label}."},
             "negotiation": {
                 "rounds_completed": 1,
@@ -137,17 +138,10 @@ def _with_label(label: str, value: str) -> MalwareReport:
     )
 
 
-def _configure(monkeypatch: pytest.MonkeyPatch, label: str) -> None:
-    import maljan.core.model_assignments as assignments
-
-    monkeypatch.setattr(assignments, "configured_endpoint_labels", lambda _settings: {label})
-
-
 @pytest.mark.parametrize(("label", "value"), _STARTS_WITH_A_LABEL)
 def test_a_value_beginning_with_a_configured_endpoint_prints_defanged(
-    monkeypatch: pytest.MonkeyPatch, label: str, value: str
+    label: str, value: str
 ) -> None:
-    _configure(monkeypatch, label)
     appendix = MarkdownRenderer().render(_with_label(label, value)).split("Run summary", 1)[1]
 
     assert value not in appendix
@@ -164,11 +158,10 @@ def test_a_value_beginning_with_a_configured_endpoint_prints_defanged(
 
 @pytest.mark.parametrize(("label", "value"), _STARTS_WITH_A_LABEL)
 def test_the_html_report_prints_a_value_beginning_with_a_label_defanged(
-    monkeypatch: pytest.MonkeyPatch, label: str, value: str
+    label: str, value: str
 ) -> None:
     from maljan.reporting.renderers.html import HtmlRenderer
 
-    _configure(monkeypatch, label)
     html = HtmlRenderer().render(_with_label(label, value))
 
     assert value not in html
@@ -178,15 +171,9 @@ def test_the_html_report_prints_a_value_beginning_with_a_label_defanged(
     assert html.count(label) == 2
 
 
-def test_an_endpoint_not_configured_prints_defanged_in_its_rate_line(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _configure(monkeypatch, "http://10.0.0.6")
-    appendix = (
-        MarkdownRenderer()
-        .render(_with_label("http://10.0.0.5", "http://10.0.0.50/gate"))
-        .split("Run summary", 1)[1]
-    )
+def test_an_endpoint_not_configured_prints_defanged_in_its_rate_line() -> None:
+    report = _with_label("http://10.0.0.5", "http://10.0.0.50/gate", configured="http://10.0.0.6")
+    appendix = MarkdownRenderer().render(report).split("Run summary", 1)[1]
 
     assert "http://10.0.0.5" not in appendix
     assert _live(appendix) == []

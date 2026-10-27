@@ -39,6 +39,8 @@ from maljan.schemas.evidence import build_entry
 # The invented reverser: one tool of every kind a technical section reads.
 REVERSER_TOOLS: dict[str, dict[str, Any]] = {
     "pseudo_c": {"kind": "decompile"},
+    "pseudo_c_of_many": {"kind": "decompile_batch"},
+    "pseudo_c_again": {"kind": "decompile_refresh"},
     "asm_of": {"kind": "function_disassembly"},
     "texts": {"kind": "listing_strings"},
     "regions": {"kind": "segments"},
@@ -187,8 +189,10 @@ def test_a_ghidra_output_with_its_source_reaches_every_section_its_name_did(
     by_name = _received(section, unsourced)
     by_kind = _received(section, sourced)
     assert by_name <= by_kind
-    # What the kinds add is a function's disassembly, beside its decompilation.
-    assert {ghidra.tools[name].kind for name in by_kind - by_name} <= {"function_disassembly"}
+    # What the kinds add is a function's disassembly, beside its decompilation,
+    # and decompiled code of any tool: a batch, a function decompiled afresh.
+    added = {ghidra.tools[name].kind for name in by_kind - by_name}
+    assert added <= {"function_disassembly", "decompile_batch", "decompile_refresh"}
 
 
 def test_an_undeclared_listing_reaches_the_code_sections_and_nothing_else_does(

@@ -46,6 +46,7 @@ import {
   questionAnswers,
 } from "@/components/analysis/reportProse";
 import { endpointCounts } from "@/components/analysis/networkFacts";
+import { mispAbsence } from "@/components/analysis/indicators";
 import { severityTone } from "@/lib/severity";
 import type { FpWarning, MalwareReport, NoToolCallAsk } from "@/types/malware-report";
 
@@ -611,6 +612,7 @@ function RunRecord({
     (block?.fallbacks ?? []).map((row) => ({ agent, reason: row.reason })),
   );
   const rests = runSummary.server_rests ?? [];
+  const operatorChoices = runSummary.operator_choices ?? [];
   const enrichmentAsked = enrichmentAsks(runSummary);
   const configRows = Object.entries(config ?? {}).filter(
     ([key]) => !SHOWN_IN_THE_HEADER.has(key),
@@ -637,6 +639,24 @@ function RunRecord({
                 </li>
               ))}
             </ul>
+          )}
+          {/* What the configuration left out (a key never set, a server
+              switched off, a tool a shared server withholds by policy). It
+              cost the run no evidence it would have had, so it is listed
+              here and never in the DEGRADED RUN banner. */}
+          {operatorChoices.length > 0 && (
+            <>
+              <h3 className="text-[11px] uppercase tracking-wider text-text-muted mt-3 mb-1.5">
+                Not configured or withheld by choice
+              </h3>
+              <ul className="space-y-1" data-testid="operator-choices">
+                {operatorChoices.map((reason, i) => (
+                  <li key={`choice-${i}`} className="text-text-muted break-words">
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </div>
         <div>
@@ -881,9 +901,7 @@ function DownloadBar({
         ↓ MISP attributes
       </button>
       {mispDisabled && (
-        <span className="text-[11px] text-text-muted">
-          this run generated no MISP attributes
-        </span>
+        <span className="text-[11px] text-text-muted">{mispAbsence(mr)}</span>
       )}
       <EnrichButton reportId={reportId} />
       {error && (

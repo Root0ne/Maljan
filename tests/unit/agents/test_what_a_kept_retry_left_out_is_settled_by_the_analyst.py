@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 from langchain_core.messages import AIMessage
 
 from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.tool_fence import fenced
 from maljan.pipeline.validation import (
     RETRY_DROP_KEPT,
     RETRY_DROP_NOT_ANSWERED,
@@ -508,3 +509,359 @@ class TestMoreClauseStarts:
             read_retry_drop_answers(line, self.LABELS)
         # Linear: about a second here; quadratic would take hours.
         assert time.perf_counter() - started < 20.0
+
+
+class TestTheQuestionShowsWhatTheItemsCite:
+    """haiku6: the reverser's retry, written without its decompiles, no longer stated 42 claims.
+
+    Asked about them without the entries they cite, the analyst withdrew 18 true
+    claims as resting "on bodies I could not re-read". The question now shows
+    each item whole with every entry it cites that the conversation does not
+    hold verbatim; the analyst's answer stands as it gives it.
+    """
+
+    BODY = "void FUN_3868(void) { CreateMutexW(0, 0); if (GetLastError() == 0xb7) ExitProcess(0); }"
+    PACK_BODY = "PE32+ DLL, 60,928 bytes, five sections, four exports"
+    CLAIM = (
+        "Routine 0x3868 creates a mutex and exits when GetLastError returns 0xb7, so a second "
+        "copy of the sample ends at once; the same routine then checks PEB.BeingDebugged, the "
+        "process count and the adapter list before it starts the beacon thread 0x5750."
+    )
+    RETRY = (
+        "CLAIM: The sample is a DLL.\nEVIDENCE: [ev_0001] identity\nCONFIDENCE: 0.9\n"
+        "TECHNIQUE: NONE\n---\n"
+    )
+
+    def _first(self) -> str:
+        return (
+            f"CLAIM: {self.CLAIM}\nEVIDENCE: [ev_0080] decompile of 0x3868; [ev_0001] identity\n"
+            "CONFIDENCE: 0.9\nTECHNIQUE: NONE\n---\n"
+            "CLAIM: The string at 0xf1f5 is Update_%x.\nEVIDENCE: [ev_0080] decompile\n"
+            "CONFIDENCE: 0.6\nTECHNIQUE: NONE\n---\n"
+        )
+
+    def _settle(
+        self,
+        reply: str,
+        conversation_text: str,
+        read: dict[str, Any] | None = None,
+        rows: tuple[Any, ...] = (),
+    ) -> Any:
+        from langchain_core.messages import HumanMessage
+
+        from maljan.schemas.evidence import LedgerEntry
+
+        name = "all_tools_reverser_ghidra"
+        analyst = _Analyst(name, [reply])
+        analyst.pack_ledger_ids = ["ev_0001"]
+        analyst._evidence_entries = [
+            LedgerEntry(id="ev_0001", tool="identify_file", output=self.PACK_BODY),
+            LedgerEntry(id="ev_0080", agent=name, tool="batch_decompile", output=self.BODY),
+        ]
+        analyst._evidence_entries.extend(rows)
+        if read is not None:
+            # The agent's own read of the pack entry, filed as a repeat of it.
+            analyst._evidence_entries.append(
+                LedgerEntry(
+                    id="ev_0102",
+                    agent=name,
+                    tool="read_evidence",
+                    args=read,
+                    output="read again: ev_0001",
+                    repeated_of="ev_0001",
+                )
+            )
+        first = analyst._text_to_isr(self._first(), 0)
+        retried = analyst._text_to_isr(self.RETRY, 0)
+        conversation = [HumanMessage(content=conversation_text)]
+        result = analyst._settle_retry_drops(first, retried, self.RETRY, [], conversation, None)
+        return analyst, result
+
+    def test_each_item_is_asked_whole_with_the_entries_it_cites(self) -> None:
+        from maljan.pipeline.validation import RETRY_DROP_ENTRIES_HEAD
+
+        analyst, _result = self._settle(
+            "KEEP C1: the decompile shows it\nKEEP C2: yes",
+            f"[ev_0001] identity:\n{self.PACK_BODY}",
+        )
+
+        (question,) = analyst.questions
+        assert f"C1. CLAIM: {self.CLAIM}" in question
+        assert "    EVIDENCE: [ev_0080] decompile of 0x3868; [ev_0001] identity" in question
+        assert RETRY_DROP_ENTRIES_HEAD in question
+        assert f"[ev_0080] batch_decompile:\n{fenced('ev_0080', self.BODY)}" in question
+        # Once, under the items, though both cite it; the conversation holds ev_0001 verbatim.
+        assert question.count(self.BODY) == 1
+        assert self.PACK_BODY not in question
+        assert "KEEP <label>: <reason>" in question
+        assert "part 1" not in question
+
+    def test_a_pack_entry_seen_as_its_summary_line_is_named_as_that_line(self) -> None:
+        from maljan.agents.base_agent import PACK_SUMMARY_NOTE
+
+        analyst, _result = self._settle(
+            "KEEP C1: yes\nKEEP C2: yes", "[ev_0001] identity: pe windows, dll\nmore pack"
+        )
+
+        (question,) = analyst.questions
+        assert f"[ev_0001] {PACK_SUMMARY_NOTE}." in question
+        assert question.count("pe windows, dll") == 0
+        assert self.PACK_BODY not in question
+        # The agent's own call is shown whole beside it.
+        assert f"[ev_0080] batch_decompile:\n{fenced('ev_0080', self.BODY)}" in question
+
+    def test_a_pack_entry_the_agent_read_whole_is_shown_whole(self) -> None:
+        analyst, _result = self._settle(
+            "KEEP C1: yes\nKEEP C2: yes",
+            "[ev_0001] identity: pe windows, dll",
+            read={"evidence_id": "ev_0001"},
+        )
+
+        assert (
+            f"[ev_0001] identify_file:\n{fenced('ev_0001', self.PACK_BODY)}" in analyst.questions[0]
+        )
+
+    def test_a_pack_entry_read_in_pages_is_shown_whole(self) -> None:
+        analyst, _result = self._settle(
+            "KEEP C1: yes\nKEEP C2: yes",
+            "[ev_0001] identity: pe windows, dll",
+            read={"evidence_id": "ev_0001", "offset": 0, "limit": 10},
+        )
+
+        assert (
+            f"[ev_0001] identify_file:\n{fenced('ev_0001', self.PACK_BODY)}" in analyst.questions[0]
+        )
+
+    def test_a_pack_entry_read_again_cut_is_shown_whole_and_marked_partial(self) -> None:
+        from maljan.agents.judge_agent import PARTIAL_ENTRY_MARK
+        from maljan.schemas.evidence import LedgerEntry
+
+        name = "all_tools_reverser_ghidra"
+        cut_read = LedgerEntry(
+            id="ev_0103",
+            agent=name,
+            tool="read_evidence",
+            args={"evidence_id": "ev_0002"},
+            output="read again: ev_0002",
+            repeated_of="ev_0002",
+            truncated=True,
+        )
+        held_part = LedgerEntry(
+            id="ev_0002", tool="floss", output="decoded text, first part", truncated=True
+        )
+        self._first = lambda: (  # type: ignore[method-assign]
+            "CLAIM: The string at 0xf1f5 is Update_%x.\nEVIDENCE: [ev_0002] floss\n"
+            "CONFIDENCE: 0.6\nTECHNIQUE: NONE\n---\n"
+        )
+        analyst, _result = self._settle(
+            "KEEP C1: yes", "[ev_0002] floss: 81 decodes", rows=(held_part, cut_read)
+        )
+
+        question = analyst.questions[0]
+        shown = fenced("ev_0002", "decoded text, first part")
+        assert f"[ev_0002] floss ({PARTIAL_ENTRY_MARK}):\n{shown}" in question
+
+    def test_a_chain_of_repeats_is_followed_to_the_entry_that_holds_the_answer(self) -> None:
+        from maljan.schemas.evidence import LedgerEntry
+
+        peer = LedgerEntry(
+            id="ev_0102", agent="static", tool="read_evidence", repeated_of="ev_0001"
+        )
+        own = LedgerEntry(
+            id="ev_0103",
+            agent="all_tools_reverser_ghidra",
+            tool="read_evidence",
+            repeated_of="ev_0102",
+        )
+        analyst, _result = self._settle(
+            "KEEP C1: yes\nKEEP C2: yes",
+            "[ev_0001] identity: pe windows, dll",
+            rows=(peer, own),
+        )
+
+        assert (
+            f"[ev_0001] identify_file:\n{fenced('ev_0001', self.PACK_BODY)}" in analyst.questions[0]
+        )
+
+    def test_an_entry_read_whole_that_the_pack_holds_cut_short_is_shown_whole(self) -> None:
+        analyst, _result = self._settle(
+            "KEEP C1: yes\nKEEP C2: yes",
+            f"[ev_0001] identity:\n{self.PACK_BODY[:20]}…",
+            read={"evidence_id": "ev_0001"},
+        )
+
+        assert self.PACK_BODY in analyst.questions[0]
+
+    def test_every_withdrawal_stands_as_the_analyst_gives_it(self) -> None:
+        reply = (
+            "WITHDRAW C1: the mutex exit is not in my retry and rests on a body I could not "
+            "re-read\nWITHDRAW C2: the first answer's offset 0xf1f5 was wrong"
+        )
+        analyst, result = self._settle(reply, "evidence")
+
+        assert [c.claim for c in result.claims] == ["The sample is a DLL."]
+        rows = _drop_rows(analyst)
+        assert [row["state"] for row in rows] == [RETRY_DROP_WITHDRAWN] * 2
+        assert rows[1]["reason"] == "the first answer's offset 0xf1f5 was wrong"
+
+
+def _budget(tokens: int) -> Any:
+    from maljan.llm.context_window import ContextBudget, WindowFact
+
+    return ContextBudget(WindowFact(tokens, "probed", "test"))
+
+
+class TestTheQuestionIsAskedInPartsThatFit:
+    """Measured framed against the real window budget; nothing cut, nothing hidden."""
+
+    BODY_A = "A" * 30_000
+    BODY_B = "B" * 30_000
+    HUGE = "H" * 200_000
+
+    def _first(self, *, huge: bool = False) -> str:
+        third = (
+            "CLAIM: The blob at 0x3000 decodes to a third configuration.\n"
+            "EVIDENCE: [ev_0090] dump; [ev_0081] decompile\nCONFIDENCE: 0.7\nTECHNIQUE: NONE\n---\n"
+            if huge
+            else ""
+        )
+        return (
+            "CLAIM: Routine 0x1000 builds the first configuration.\nEVIDENCE: [ev_0081] decompile"
+            "\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
+            "CLAIM: Routine 0x2000 builds the second configuration.\nEVIDENCE: [ev_0082] "
+            "decompile\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n" + third
+        )
+
+    def _analyst(self, replies: list[Any], window: Any) -> _Analyst:
+        from maljan.llm.context_window import ContextBudget
+        from maljan.schemas.evidence import LedgerEntry
+
+        analyst = _Analyst("all_tools_reverser_ghidra", replies)
+        analyst._evidence_entries = [
+            LedgerEntry(id="ev_0081", tool="batch_decompile", output=self.BODY_A),
+            LedgerEntry(id="ev_0082", tool="batch_decompile", output=self.BODY_B),
+            LedgerEntry(id="ev_0090", tool="read_memory", output=self.HUGE),
+        ]
+        if window is not None:
+            analyst._container = MagicMock(get_context_budget=lambda: ContextBudget(window))
+        return analyst
+
+    def _settle(self, analyst: _Analyst, *, huge: bool = False) -> AgentISR:
+        from langchain_core.messages import HumanMessage
+
+        retry = TestTheQuestionShowsWhatTheItemsCite.RETRY
+        first = analyst._text_to_isr(self._first(huge=huge), 0)
+        retried = analyst._text_to_isr(retry, 0)
+        return analyst._settle_retry_drops(
+            first, retried, retry, [], [HumanMessage(content="evidence")], None
+        )
+
+    @staticmethod
+    def _window(prompt_chars: int, source: str = "probed") -> Any:
+        from maljan.llm.context_window import WindowFact
+
+        # Room for ``prompt_chars`` beside the analyst's 16,384-token cap, at 3 chars a token.
+        return WindowFact(16_384 + prompt_chars // 3, source, "test")
+
+    def test_items_whose_entries_do_not_fit_together_are_asked_in_parts(self) -> None:
+        analyst = self._analyst(["KEEP C1: yes", "WITHDRAW C1: a guess"], self._window(45_000))
+
+        result = self._settle(analyst)
+
+        first_part, second_part = analyst.questions
+        assert "this is part 1." in first_part and "this is part 2." in second_part
+        assert self.BODY_A in first_part and self.BODY_B not in first_part
+        assert self.BODY_B in second_part and self.BODY_A not in second_part
+        assert "C1. CLAIM: Routine 0x2000" in second_part
+        claims = [c.claim for c in result.claims]
+        assert "Routine 0x1000 builds the first configuration." in claims
+        assert "Routine 0x2000 builds the second configuration." not in claims
+        assert [row["state"] for row in _drop_rows(analyst)] == [
+            RETRY_DROP_KEPT,
+            RETRY_DROP_WITHDRAWN,
+        ]
+
+    def test_an_entry_named_for_a_later_item_stays_shown_in_the_earlier_part(self) -> None:
+        """Room 42,000 beside the turn; ev_0081 30,000 chars, ev_0082 20,000 (the 4,200 case x10).
+
+        C1 cites ev_0081 and fits with it. C2 cites both, which do not fit
+        together beside it; each fits alone, so the larger is named in C2's
+        part only, and C1's part, measured with it shown, still shows it.
+        """
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        from maljan.agents.base_agent import current_run_state, frame_messages
+        from maljan.pipeline.validation import RETRY_DROP_ENTRIES_UNFIT
+        from maljan.schemas.evidence import LedgerEntry
+
+        retry = TestTheQuestionShowsWhatTheItemsCite.RETRY
+        analyst = _Analyst("all_tools_reverser_ghidra", ["KEEP C1: yes", "KEEP C1: yes"])
+        analyst._evidence_entries = [
+            LedgerEntry(id="ev_0081", tool="batch_decompile", output="A" * 30_000),
+            LedgerEntry(id="ev_0082", tool="batch_decompile", output="B" * 20_000),
+        ]
+        first = analyst._text_to_isr(
+            "CLAIM: Routine 0x1000 builds the first configuration.\nEVIDENCE: [ev_0081]\n"
+            "CONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
+            "CLAIM: Routine 0x2000 builds the second configuration.\nEVIDENCE: [ev_0081]; "
+            "[ev_0082]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n",
+            0,
+        )
+        conversation = [HumanMessage(content="evidence")]
+        framed = frame_messages(
+            [*conversation, AIMessage(content=retry), HumanMessage(content="")],
+            run_state=current_run_state(analyst),
+        )
+        base = sum(len(str(m.content)) for m in framed)
+        # 42,000 characters past the conversation and a 2,000-character question frame.
+        analyst._container = MagicMock(
+            get_context_budget=lambda: _budget(16_384 + (base + 44_000) // 3)
+        )
+
+        analyst._settle_retry_drops(
+            first, analyst._text_to_isr(retry, 0), retry, [], conversation, None
+        )
+
+        first_part, second_part = analyst.questions
+        assert "A" * 30_000 in first_part
+        assert "B" * 20_000 in second_part and "A" * 30_000 not in second_part
+        assert f"{RETRY_DROP_ENTRIES_UNFIT} ev_0081." in second_part
+
+    def test_a_window_that_holds_everything_asks_once(self) -> None:
+        analyst = self._analyst(["KEEP C1, C2: yes"], self._window(200_000))
+
+        self._settle(analyst)
+
+        (question,) = analyst.questions
+        assert self.BODY_A in question and self.BODY_B in question
+
+    def test_an_entry_too_large_even_alone_is_named_by_id(self) -> None:
+        from maljan.pipeline.validation import RETRY_DROP_ENTRIES_UNFIT
+
+        analyst = self._analyst(
+            ["KEEP C1: yes", "KEEP C1: yes", "KEEP C1: yes"], self._window(45_000)
+        )
+
+        self._settle(analyst, huge=True)
+
+        third = analyst.questions[-1]
+        assert f"{RETRY_DROP_ENTRIES_UNFIT} ev_0090." in third
+        assert self.HUGE not in third
+        assert self.BODY_A in third
+
+    def test_with_no_learned_window_the_model_s_declared_window_is_used(self) -> None:
+        from maljan.llm.context_window import record_built_window
+
+        analyst = self._analyst(["KEEP C1: yes", "KEEP C1: yes"], None)
+        record_built_window(analyst.llm, self._window(45_000, source="declared"))
+
+        self._settle(analyst)
+
+        assert len(analyst.questions) == 2
+
+    def test_with_no_window_known_the_question_is_asked_once(self) -> None:
+        analyst = self._analyst(["KEEP C1, C2: yes"], None)
+
+        self._settle(analyst)
+
+        assert len(analyst.questions) == 1

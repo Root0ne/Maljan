@@ -26,7 +26,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 from maljan.core.logger import logger
@@ -132,8 +132,10 @@ MODEL_USAGE = "model_usage"
 # (``agents.tool_answer_clearing``): the agent, the model turn, how many
 # answers, what the request weighed before and after in characters, and why —
 # ``refused`` (the provider refused the request as over its window and the
-# turn is sent again) or ``window`` (the prompt alone is past the agent's own
-# window). Telemetry; the clear itself is what the model reads.
+# turn is sent again), ``window`` (the prompt alone is past the agent's own
+# window) or ``tier`` (the prompt is past the length its model is priced higher
+# above, and only answers the model already cited were cleared). Telemetry; the
+# clear itself is what the model reads.
 TOOL_ANSWERS_CLEARED = "tool_answers_cleared"
 BUDGET_TICK_EVERY = 5
 CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "spend", "budget_seconds")
@@ -250,17 +252,21 @@ def announce_model_fallback(
 
 
 def emit_tool_server_rested(sink: EventSink | None, record: dict[str, Any]) -> None:
-    """A tool server is resting: which one, after how many failures, for how long and why."""
-    emit(
-        sink,
-        TOOL_SERVER_RESTED,
-        {
-            "server": str(record.get("server") or ""),
-            "failures": max(0, int(record.get("failures") or 0)),
-            "cooldown_s": round(max(0.0, float(record.get("cooldown_s") or 0.0)), 1),
-            "reason": str(record.get("reason") or ""),
-        },
-    )
+    """A tool server is resting: which one, after how many failures, for how long and why.
+
+    ``label`` is the server's display name, given only where it has one other
+    than its key; ``server`` stays the key.
+    """
+    data: dict[str, Any] = {
+        "server": str(record.get("server") or ""),
+        "failures": max(0, int(record.get("failures") or 0)),
+        "cooldown_s": round(max(0.0, float(record.get("cooldown_s") or 0.0)), 1),
+        "reason": str(record.get("reason") or ""),
+    }
+    label = str(record.get("label") or "")
+    if label:
+        data["label"] = label
+    emit(sink, TOOL_SERVER_RESTED, data)
 
 
 def emit_agent_message(
@@ -417,6 +423,11 @@ def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
             note = getattr(claim, "heading_note", None)
             if note:
                 out[-1]["heading_note"] = _cut_kept(str(note), 300)
+            # The round whose tool-less validation retry added it, beside the
+            # answer in force; only on such a claim.
+            retried = getattr(claim, "added_by_retry_in_round", None)
+            if isinstance(retried, int) and not isinstance(retried, bool):
+                out[-1]["added_by_retry_in_round"] = retried
         except Exception:  # noqa: BLE001 — one malformed claim must not drop the rest
             continue
     return out
@@ -1640,6 +1651,89 @@ def _mask_configured_values(line: str) -> str:
     return _CONFIGURED_PATTERN.sub(_REDACTED, line)
 
 
+def mask_configured_values(text: Any) -> str:
+    """``text`` with every configured value masked, and no shape rule read.
+
+    For a field that names something (``analysis_worker.IDENTITY_FIELDS``):
+    its value is kept from the shape rules, which read a long enough name as
+    a key, but a value the operator configured as a secret is masked wherever
+    it sits, a short one as a whole word.
+    """
+    return _mask_short_secrets(_mask_configured_values(str(text or "")))
+
+
+# The one shape ``model_assignments.endpoint_label`` gives an address: a scheme
+# and a host, with no userinfo, path or query.
+_ENDPOINT_LABEL = re.compile(r"\A[A-Za-z][A-Za-z0-9+.\-]*://[^\s/@?#]+\Z")
+# One part of a model id between ``-``, ``.``, ``_``, ``:`` or ``/`` that holds
+# a digit: a number, or a short run of letters and digits in one case
+# (``qwen3``, ``35b``, ``Q4``). A part of letters alone is a word as the shape
+# rules write one (``_WORD_PIECE``): lower case, capitals or one capital in
+# front, never mixed.
+_MODEL_NUMBER_PART = re.compile(r"\A[0-9]{1,8}\Z")
+_MODEL_MIXED_PART = re.compile(r"\A(?:[a-z0-9]{1,6}|[A-Z0-9]{1,6})\Z")
+# How many letter-and-digit parts a model id may hold; a key cut into short
+# groups (``a1b2c3-d4e5f6-…``) holds more.
+_MODEL_MIXED_PARTS_BELOW = 3
+
+
+def _is_a_model_id(run: str) -> bool:
+    """Whether ``run`` is word and number parts joined, as a model id is written.
+
+    No vendor key prefix in front of the run or of any of its ``/`` segments,
+    every part a word, a number or a short letter-and-digit run in one case,
+    and fewer than three of the last.
+    """
+    if not run or any(_has_a_vendor_prefix(segment) for segment in run.split("/")):
+        return False
+    mixed = 0
+    for part in re.split(r"[-._:/]", run):
+        if _WORD_PIECE.match(part) or _MODEL_NUMBER_PART.match(part):
+            continue
+        if not _MODEL_MIXED_PART.match(part):
+            return False
+        mixed += 1
+    return mixed < _MODEL_MIXED_PARTS_BELOW
+
+
+def _scrub_label_side(side: str) -> str:
+    """One side of `` @ `` in a model label: an endpoint label, or ``provider/model``.
+
+    Kept as written when it is an endpoint label, or when the provider in
+    front of the first ``/`` and the model id after it are each a model id
+    (``_is_a_model_id``); otherwise the whole scrub reads it, as it read every
+    label before.
+    """
+    if _ENDPOINT_LABEL.match(side):
+        return side
+    provider, slash, model = side.partition("/")
+    if not slash:
+        provider, model = "", side
+    if _is_a_model_id(model) and (not slash or _is_a_model_id(provider)):
+        return side
+    return scrub(side)
+
+
+def scrub_model_label(text: Any) -> str:
+    """A model label (``provider/model @ endpoint``) on its way into an event payload.
+
+    The whole scrub reads ``anthropic/claude-haiku-5-5`` as a key: 26
+    characters of the base64 alphabet with digit pieces. Here every
+    configured value is masked and a URL loses its userinfo and its
+    credential-named query values; then each side of `` @ `` is kept only
+    when it is an endpoint label or ``provider/model`` written as a model id
+    is (``claude-sonnet-4-20250514``), and is given the whole scrub
+    otherwise. With no configured values registered, or a scope that could
+    not be read (``secret_registration_failed``), the label is held to the
+    whole scrub.
+    """
+    label = str(text or "")
+    if not _rows_kept_as_written():
+        return scrub(label)
+    label = _URL_RUN.sub(_without_credentials, _mask_short_secrets(_mask_configured_values(label)))
+    return " @ ".join(_scrub_label_side(side) for side in label.split(" @ "))
+
+
 # How many times the passes are repeated at most before the text is taken as
 # settled. Each pass only removes or masks, so the text settles in two or three.
 _SCRUB_PASSES = 4
@@ -2146,6 +2240,8 @@ def emit_tool_call_started(
     tool: str,
     server: str | None = None,
     args_summary: str = "",
+    nulls_dropped: Sequence[Sequence[str]] = (),
+    nulls_withheld: Sequence[Sequence[str]] = (),
 ) -> None:
     """One tool call, as it starts.
 
@@ -2153,18 +2249,24 @@ def emit_tool_call_started(
     including the one where the repeat guard answers instead of the tool: a
     console that draws a spinner on the start and clears it on the finish must
     never be left holding one.
+
+    ``nulls_dropped`` and ``nulls_withheld`` name, by path segments, the
+    fields whose ``null`` the tool boundary dropped or the transport did not
+    send (``agents.null_arguments``); the event carries each only when there
+    are any.
     """
-    emit(
-        sink,
-        TOOL_CALL_STARTED,
-        {
-            "stage": str(stage),
-            "agent": str(agent),
-            "tool": str(tool),
-            "server": str(server) if server else None,
-            "args_summary": str(args_summary),
-        },
-    )
+    data: dict[str, Any] = {
+        "stage": str(stage),
+        "agent": str(agent),
+        "tool": str(tool),
+        "server": str(server) if server else None,
+        "args_summary": str(args_summary),
+    }
+    if nulls_dropped:
+        data["nulls_dropped"] = [[str(part) for part in path] for path in nulls_dropped]
+    if nulls_withheld:
+        data["nulls_withheld"] = [[str(part) for part in path] for path in nulls_withheld]
+    emit(sink, TOOL_CALL_STARTED, data)
 
 
 def emit_tool_call_finished(
@@ -2334,7 +2436,26 @@ def _asks_of(definition: Any) -> list[str]:
     return asked
 
 
-def roster_payload(profile: Any, definitions: Any, depth: int = 2) -> dict[str, Any]:
+def server_labels(servers: Any) -> dict[str, str]:
+    """Each tool server's display name, by key, for a server whose label is not its key.
+
+    Accepts the settings' ``mcp.servers`` map of models, the plain documents
+    they dump to, or a map of labels already read (a string per key). A server
+    with no label, or one equal to its key, is left out: it is named by its key
+    as before.
+    """
+    out: dict[str, str] = {}
+    for key, entry in (servers or {}).items() if isinstance(servers, Mapping) else ():
+        held = entry if isinstance(entry, str) else _field(entry, "label", "")
+        label = str(held or "").strip()
+        if label and label != str(key):
+            out[str(key)] = label
+    return out
+
+
+def roster_payload(
+    profile: Any, definitions: Any, depth: int = 2, servers: Any = None
+) -> dict[str, Any]:
     """Everyone who can speak in this run, and the stages they speak in.
 
     Read off the team the job runs rather than off the messages as they
@@ -2364,6 +2485,11 @@ def roster_payload(profile: Any, definitions: Any, depth: int = 2) -> dict[str, 
     Accepts the pydantic models or the plain documents they dump to, because
     the worker holds the models and the API holds the stored documents, and
     one shape of roster is the point.
+
+    ``servers`` is the run's tool-server map: ``servers`` in the roster names
+    each server's display name by its key (:func:`server_labels`), so the
+    console names a server as the operator labelled it; left out when no
+    server has a label of its own.
     """
     field = _field
 
@@ -2427,4 +2553,8 @@ def roster_payload(profile: Any, definitions: Any, depth: int = 2) -> dict[str, 
         frontier = next_frontier
         if not frontier:
             break
-    return {"agents": list(agents_out.values()), "stages": stages_out}
+    roster: dict[str, Any] = {"agents": list(agents_out.values()), "stages": stages_out}
+    labels = server_labels(servers)
+    if labels:
+        roster["servers"] = labels
+    return roster

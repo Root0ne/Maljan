@@ -836,6 +836,33 @@ def test_stored_degradation_reasons_are_decided_again_or_named(tmp_path: Path) -
     )
 
 
+def test_a_stored_operator_choice_is_moved_to_the_choices_and_named(tmp_path: Path) -> None:
+    """T-338: a run stored with a withheld tool among its reasons replays with it listed apart."""
+    from maljan.providers.sample_open import UNCOVERED, withheld_unpinned
+
+    withheld = withheld_unpinned(
+        "remote http://localhost:8089 (backend 1)", "open_project", UNCOVERED
+    )
+
+    def _stored(report: dict[str, Any]) -> None:
+        report["degradation_reasons"] = [withheld]
+        report["degraded_mode"] = True
+
+    moved = replay_run(read_run(_copy_run(tmp_path / "moved", report_json=_stored)))
+    assert moved["report"]["degraded"] is False
+    assert moved["report"]["degradation"] == {
+        "decided": 0,
+        "stored_decided_again": 0,
+        "kept_as_stored": 0,
+        "moved_to_choices": 1,
+    }
+    assert any(
+        row["part"] == "report"
+        and row["why"].startswith("1 stored degradation reason(s) are the operator's choice")
+        for row in moved["not_replayed"]
+    )
+
+
 def test_a_finding_the_analyst_was_not_shown_leaves_no_absence_note(tmp_path: Path) -> None:
     def _unshown(summary: dict[str, Any]) -> None:
         summary["validation"] = {

@@ -647,6 +647,18 @@ def _not_held(rows: list[dict[str, Any]], held: set[str]) -> list[dict[str, Any]
     return kept
 
 
+def _pids_of(value: Any) -> list[str]:
+    """The pids a sandbox tool's row names, as text, once each; ``[]`` for anything else."""
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for one in value:
+        text = "" if one is None or isinstance(one, bool) else str(one).strip()
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
 def _once[T](rows: list[T], key: Any) -> list[T]:
     """``rows`` with each key kept at its first occurrence, in order."""
     seen: set[Any] = set()
@@ -771,6 +783,7 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
                 ppid=_int(row.get("ppid")),
                 name=str(row.get("name") or ""),
                 command_line=str(row.get("command_line") or ""),
+                marked=row.get("marked") is True,
             )
             for row in data.get("processes") or []
             if isinstance(row, dict)
@@ -812,6 +825,7 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
                     key=key,
                     operation=_registry_operation(row.get("operation")),  # type: ignore[arg-type]
                     new_value=_opt(row.get("value")),
+                    pids=_pids_of(row.get("pids")),
                 )
             )
 
@@ -840,7 +854,17 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
         names = [str(name) for name in data.get("mutexes") or [] if name]
         if names:
             seen = True
-            mutexes: list[dict[str, Any]] = [{"operation": "mutex", "name": n} for n in names]
+            # The processes whose calls named each mutex, where the answer
+            # names them: the row keeps them, as a dropped file's does.
+            recorded = data.get("pids")
+            by_name: dict[str, Any] = recorded if isinstance(recorded, dict) else {}
+            mutexes: list[dict[str, Any]] = []
+            for n in names:
+                mutex: dict[str, Any] = {"operation": "mutex", "name": n}
+                made_by = _pids_of(by_name.get(n))
+                if made_by:
+                    mutex["pids"] = made_by
+                mutexes.append(mutex)
             dynamic.file_operations.extend(_not_held(mutexes, held_rows))
 
     for _entry, data in _payloads(ledger, "sandbox_dropped_files"):

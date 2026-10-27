@@ -6,6 +6,8 @@
     "extract_dns",
     "extract_http",
     "pcap_summary",
-    "read_pcap_summary"
+    "read_pcap_summary",
+    "release_job",
+    "run_reader"
   ]
 }

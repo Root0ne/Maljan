@@ -197,7 +197,7 @@ def count_claims_after_disputes(text: str) -> int:
     reader says when there are some and none of the analyst's own was read,
     which is the one case they could be the answer's only claims.
     """
-    return sum(1 for line in _split_at_disputes(text)[1] if CLAIM_HEAD_RE.match(line))
+    return _headings_in(_split_at_disputes(text)[1])
 
 
 def claims_headed(text: str) -> str:
@@ -211,6 +211,45 @@ def claims_headed(text: str) -> str:
     return claims_headed_with_notes(text)[0]
 
 
+def _is_bare_heading(line: str, heading: re.Match[str]) -> bool:
+    """Whether ``heading`` writes a delimiter and nothing after it (``CLAIM 7:``, ``**CLAIM 7:**``)."""
+    return heading.groupdict().get("delim") is not None and not heading_sentence(
+        line, heading
+    ).strip(" \t*_`")
+
+
+def _sentence_lines(lines: list[str]) -> dict[int, int]:
+    """``{bare heading's index: index of the CLAIM: line that writes its sentence}``.
+
+    A heading that writes only its number (``CLAIM 7:``), with a plain
+    ``CLAIM: <sentence>`` as its next written line, is one claim: claim 7, its
+    sentence on the line after. The retry that fixes claims by number asks for
+    each one "under its number (CLAIM 7:) as its own block of CLAIM, EVIDENCE:
+    ..." lines, and read as two headings it was an empty claim begun and not
+    read, and a claim with no number. Each line is read once.
+    """
+    pairs: dict[int, int] = {}
+    bare: int | None = None
+    for index, line in enumerate(lines):
+        if not line.strip():
+            continue
+        heading = CLAIM_HEAD_RE.match(line)
+        groups = heading.groupdict() if heading is not None else {}
+        if (
+            bare is not None
+            and heading is not None
+            and groups.get("number") is None
+            and groups.get("note") is None
+            and groups.get("delim") == ":"
+            and not _is_bare_heading(line, heading)
+        ):
+            pairs[bare] = index
+            bare = None
+            continue
+        bare = index if heading is not None and _is_bare_heading(line, heading) else None
+    return pairs
+
+
 def claims_headed_with_notes(
     text: str,
 ) -> tuple[str, list[tuple[int, str | None, str | None]]]:
@@ -218,15 +257,27 @@ def claims_headed_with_notes(
 
     One ``(offset, note, number)`` per heading, in order: ``offset`` is where
     its ``CLAIM:`` line starts in the text returned, ``note`` is
-    :func:`heading_note` and ``number`` is :func:`heading_number`.
+    :func:`heading_note` and ``number`` is :func:`heading_number`. A heading
+    that writes only its number, its ``CLAIM:`` line next, is one heading with
+    that line's sentence (:func:`_sentence_lines`).
     """
     out: list[str] = []
     notes: list[tuple[int, str | None, str | None]] = []
     at = 0
-    for line in before_disputes(text).splitlines():
+    lines = before_disputes(text).splitlines()
+    sentence_at = _sentence_lines(lines)
+    skip_to = -1
+    for index, line in enumerate(lines):
+        if index <= skip_to:
+            continue
         heading = CLAIM_HEAD_RE.match(line)
         if heading is not None:
-            written = "CLAIM: " + heading_sentence(line, heading)
+            sentence_line, sentence_heading = line, heading
+            if index in sentence_at:
+                skip_to = sentence_at[index]
+                sentence_line = lines[skip_to]
+                sentence_heading = CLAIM_HEAD_RE.match(sentence_line) or heading
+            written = "CLAIM: " + heading_sentence(sentence_line, sentence_heading)
             notes.append((at + len("---\n"), heading_note(heading), heading_number(heading)))
             out.extend(["---", written])
             at += len("---\n") + len(written) + 1
@@ -236,9 +287,14 @@ def claims_headed_with_notes(
     return "\n".join(out), notes
 
 
+def _headings_in(lines: list[str]) -> int:
+    """How many claim headings ``lines`` write, a bare heading and its ``CLAIM:`` line once."""
+    return sum(1 for line in lines if CLAIM_HEAD_RE.match(line)) - len(_sentence_lines(lines))
+
+
 def count_claims_begun(text: str) -> int:
     """How many claims ``text`` begins: every claim heading before its DISPUTES section."""
-    return sum(1 for line in before_disputes(text).splitlines() if CLAIM_HEAD_RE.match(line))
+    return _headings_in(before_disputes(text).splitlines())
 
 
 # A line that ends a claim's block: a ``---`` separator.
@@ -294,3 +350,58 @@ def claim_blocks(text: str) -> list[tuple[int, str]]:
                 current.append(bare)
         offset += len(line)
     return [(start, _block_key(lines)) for start, lines in blocks]
+
+
+def besides_claims(text: str) -> str:
+    """``text`` without the claim blocks it begins: its other sections, as written.
+
+    A claim block is its heading line, the lines of its sentence and its
+    field lines (EVIDENCE, CONFIDENCE, TECHNIQUE, DISSENT), up to a ``---``
+    separator or the first line that is not a field once its fields began.
+    The lines after a heading are its sentence only when a field line follows
+    them before a blank line or another heading; otherwise the block is its
+    heading line alone, and what follows (a rebuttal written right under it)
+    stays. Everything else before the DISPUTES section stays, and the
+    DISPUTES section and what follows it stay whole: a peer's claim quoted
+    there is a dispute, not this analyst's claim. Runs of blank lines are kept
+    to one. ``""`` when nothing besides the claims is written. Each line is
+    read at most twice: linear in the text.
+    """
+    own, disputes = _split_at_disputes(text)
+    kept: list[str] = []
+    index = 0
+    while index < len(own):
+        line = own[index]
+        if _SEPARATOR_RE.match(line):
+            index += 1
+            continue
+        if CLAIM_HEAD_RE.match(line) is None:
+            kept.append(line)
+            index += 1
+            continue
+        # The sentence's lines, when a field follows them before a blank
+        # line, a separator or another heading.
+        after = index + 1
+        while (
+            after < len(own)
+            and own[after].strip()
+            and not _FIELD_LABEL_RE.match(own[after])
+            and not CLAIM_HEAD_RE.match(own[after])
+            and not _SEPARATOR_RE.match(own[after])
+        ):
+            after += 1
+        if after < len(own) and _FIELD_LABEL_RE.match(own[after]):
+            # Its fields, blank lines between them included, up to the first
+            # other line.
+            index = after
+            while index < len(own) and (
+                not own[index].strip() or _FIELD_LABEL_RE.match(own[index])
+            ):
+                index += 1
+            continue
+        index += 1
+    out: list[str] = []
+    for line in [*kept, *disputes]:
+        if line.strip() or (out and out[-1].strip()):
+            out.append(line)
+    return "\n".join(out).strip("\n")

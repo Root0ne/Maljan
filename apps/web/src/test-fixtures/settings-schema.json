@@ -2643,10 +2643,15 @@
       "die",
       "goresym",
       "ilspy",
+      "jadx",
       "knowledge",
       "network",
+      "oletools",
       "threatintel",
-      "virustotal"
+      "unblob",
+      "virustotal",
+      "webcrack",
+      "yarax"
      ],
      "choices_from": "mcp_servers",
      "data_source_choices": null,
@@ -12270,6 +12275,64 @@
         ]
        },
        {
+        "display_name": "VBA macros",
+        "formats": [
+         "ole2",
+         "ooxml"
+        ],
+        "id": "ole_vba",
+        "server": "oletools",
+        "tool": "ole_vba"
+       },
+       {
+        "display_name": "DDE links",
+        "formats": [
+         "ole2",
+         "ooxml",
+         "rtf"
+        ],
+        "id": "office_dde",
+        "server": "oletools",
+        "tool": "office_dde"
+       },
+       {
+        "display_name": "RTF objects",
+        "formats": [
+         "rtf"
+        ],
+        "id": "rtf_objects",
+        "server": "oletools",
+        "tool": "rtf_objects"
+       },
+       {
+        "display_name": "deobfuscated script",
+        "formats": [
+         "js",
+         "hta",
+         "wsf"
+        ],
+        "id": "js_deobfuscate",
+        "server": "webcrack",
+        "tool": "js_deobfuscate"
+       },
+       {
+        "display_name": "extracted files",
+        "id": "container_extract",
+        "outputs": "/files/*/path",
+        "server": "unblob",
+        "tool": "container_extract"
+       },
+       {
+        "display_name": "Android classes",
+        "formats": [
+         "apk",
+         "dex"
+        ],
+        "id": "android_classes",
+        "server": "jadx",
+        "tool": "android_classes"
+       },
+       {
         "display_name": "strings",
         "id": "strings",
         "renderer": "string_runs"
@@ -12283,6 +12346,12 @@
         "display_name": "yara",
         "id": "yara_scan",
         "renderer": "signature_rules"
+       },
+       {
+        "display_name": "YARA-X",
+        "id": "yarax_scan",
+        "server": "yarax",
+        "tool": "yarax_scan"
        },
        {
         "display_name": "capa",
@@ -12441,6 +12510,10 @@
        }
       ],
       "shipped_compared": {
+       "android_classes": {
+        "called": "android_classes",
+        "server": "jadx"
+       },
        "anti_analysis_scan": {
         "called": "anti_analysis_scan",
         "server": ""
@@ -12464,6 +12537,10 @@
        "capa": {
         "called": "capa",
         "server": ""
+       },
+       "container_extract": {
+        "called": "container_extract",
+        "server": "unblob"
        },
        "decode_string_blobs": {
         "called": "decode_string_blobs",
@@ -12521,6 +12598,10 @@
         "called": "iocs_from_file",
         "server": ""
        },
+       "js_deobfuscate": {
+        "called": "js_deobfuscate",
+        "server": "webcrack"
+       },
        "lolbin_lookup": {
         "called": "lolbin_lookup",
         "server": ""
@@ -12528,6 +12609,14 @@
        "macho_info": {
         "called": "macho_info",
         "server": ""
+       },
+       "office_dde": {
+        "called": "office_dde",
+        "server": "oletools"
+       },
+       "ole_vba": {
+        "called": "ole_vba",
+        "server": "oletools"
        },
        "pcap_summary": {
         "called": "pcap_summary",
@@ -12548,6 +12637,10 @@
        "resolved_api_capability": {
         "called": "api_capability",
         "server": ""
+       },
+       "rtf_objects": {
+        "called": "rtf_objects",
+        "server": "oletools"
        },
        "sandbox_api_capability": {
         "called": "api_capability",
@@ -12600,6 +12693,10 @@
        "yara_scan": {
         "called": "yara_scan",
         "server": ""
+       },
+       "yarax_scan": {
+        "called": "yarax_scan",
+        "server": "yarax"
        }
       },
       "state_keys": [
@@ -14746,6 +14843,43 @@
      "subgroup": null,
      "title": "Allowed plugins",
      "type": "list"
+    },
+    {
+     "advanced": false,
+     "agent_keys": null,
+     "always_enabled_agent_keys": null,
+     "applies": "next_job",
+     "applies_when": null,
+     "builtin_agent_keys": null,
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "data_source_choices": null,
+     "editable": true,
+     "editor": null,
+     "group": "plugins",
+     "key": "core.providers",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "needs_current_password": false,
+     "nullable": false,
+     "order": 1,
+     "pack_step_vocabulary": null,
+     "path": "providers",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": null,
+     "title": "Third-party provider blocks",
+     "type": "json"
     }
    ],
    "key": "plugins",

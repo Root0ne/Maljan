@@ -134,7 +134,7 @@ def test_a_sentence_that_names_no_procedure_of_the_technique_is_still_asked(
         ("The code holds no BeingDebugged check.", "T1622"),
         # A contrast negation: the procedure word is negated, the claim is not.
         (
-            "0x8378 resolves APIs by hash, not an ordinary LoadLibrary/GetProcAddress pair.",
+            "0x8378 finds its imports by hash, not an ordinary LoadLibrary/GetProcAddress pair.",
             "T1027.007",
         ),
         (

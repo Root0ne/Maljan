@@ -1,0 +1,2940 @@
+{
+ "analysis-mcp": {
+  "apk_info": {
+   "type": "function",
+   "function": {
+    "name": "apk_info",
+    "description": "[TOOL] apk_info tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "certs": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "components": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "dex_strings": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      },
+      "limit": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 500
+      },
+      "manifest": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "native_libs": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "path": {
+       "type": "string"
+      },
+      "permissions": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "archive_list": {
+   "type": "function",
+   "function": {
+    "name": "archive_list",
+    "description": "[TOOL] archive_list tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "limit": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 500
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "capa": {
+   "type": "function",
+   "function": {
+    "name": "capa",
+    "description": "[TOOL] capa tool.",
+    "parameters": {
+     "properties": {
+      "backend": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": "auto"
+      },
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      },
+      "timeout_s": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  },
+  "carve_payloads": {
+   "type": "function",
+   "function": {
+    "name": "carve_payloads",
+    "description": "[TOOL] carve_payloads tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "decode_string_blobs": {
+   "type": "function",
+   "function": {
+    "name": "decode_string_blobs",
+    "description": "[TOOL] decode_string_blobs tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "include_unreferenced": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      },
+      "limit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "min_len": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 8
+      },
+      "offset": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 0
+      },
+      "path": {
+       "type": "string"
+      },
+      "schemes": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "document_info": {
+   "type": "function",
+   "function": {
+    "name": "document_info",
+    "description": "[TOOL] document_info tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "elf_info": {
+   "type": "function",
+   "function": {
+    "name": "elf_info",
+    "description": "[TOOL] elf_info tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "find_crypto_constants": {
+   "type": "function",
+   "function": {
+    "name": "find_crypto_constants",
+    "description": "[ANALYZE] find_crypto_constants tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "floss": {
+   "type": "function",
+   "function": {
+    "name": "floss",
+    "description": "[TOOL] floss tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "kinds": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "limit": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 150
+      },
+      "min_len": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 4
+      },
+      "offset": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 0
+      },
+      "path": {
+       "type": "string"
+      },
+      "pattern": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "timeout_s": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "function_index": {
+   "type": "function",
+   "function": {
+    "name": "function_index",
+    "description": "[TOOL] function_index tool.",
+    "parameters": {
+     "properties": {
+      "address": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "hashes": {
+   "type": "function",
+   "function": {
+    "name": "hashes",
+    "description": "[TOOL] hashes tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "identify_file": {
+   "type": "function",
+   "function": {
+    "name": "identify_file",
+    "description": "[TOOL] identify_file tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "iocs_from_file": {
+   "type": "function",
+   "function": {
+    "name": "iocs_from_file",
+    "description": "[TOOL] iocs_from_file tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "kinds": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "iocs_from_text": {
+   "type": "function",
+   "function": {
+    "name": "iocs_from_text",
+    "description": "[TOOL] iocs_from_text tool.",
+    "parameters": {
+     "properties": {
+      "kinds": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "text": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "text"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "macho_info": {
+   "type": "function",
+   "function": {
+    "name": "macho_info",
+    "description": "[TOOL] macho_info tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "pe_info": {
+   "type": "function",
+   "function": {
+    "name": "pe_info",
+    "description": "[TOOL] pe_info tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "exports": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "imports": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "overlay": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "path": {
+       "type": "string"
+      },
+      "pdb": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "resources": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "sections": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "put_sample": {
+   "type": "function",
+   "function": {
+    "name": "put_sample",
+    "description": "[TOOL] put_sample tool.",
+    "parameters": {
+     "properties": {
+      "content_b64": {
+       "type": "string"
+      },
+      "filename": {
+       "type": "string"
+      },
+      "sha256": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      }
+     },
+     "required": [
+      "content_b64",
+      "filename"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "put_sample_begin": {
+   "type": "function",
+   "function": {
+    "name": "put_sample_begin",
+    "description": "[TOOL] put_sample_begin tool.",
+    "parameters": {
+     "properties": {
+      "filename": {
+       "type": "string"
+      },
+      "sha256": {
+       "type": "string"
+      },
+      "size": {
+       "type": "integer"
+      }
+     },
+     "required": [
+      "filename",
+      "sha256",
+      "size"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "put_sample_chunk": {
+   "type": "function",
+   "function": {
+    "name": "put_sample_chunk",
+    "description": "[TOOL] put_sample_chunk tool.",
+    "parameters": {
+     "properties": {
+      "content_b64": {
+       "type": "string"
+      },
+      "seq": {
+       "type": "integer"
+      },
+      "upload_id": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "content_b64",
+      "seq",
+      "upload_id"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "put_sample_finish": {
+   "type": "function",
+   "function": {
+    "name": "put_sample_finish",
+    "description": "[TOOL] put_sample_finish tool.",
+    "parameters": {
+     "properties": {
+      "upload_id": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "upload_id"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "release_job": {
+   "type": "function",
+   "function": {
+    "name": "release_job",
+    "description": "[TOOL] release_job tool.",
+    "parameters": {
+     "properties": {
+      "job": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "job"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "resolve_api_hashes": {
+   "type": "function",
+   "function": {
+    "name": "resolve_api_hashes",
+    "description": "[TOOL] resolve_api_hashes tool.",
+    "parameters": {
+     "properties": {
+      "algorithms": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "hashes": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "limit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "offset": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 0
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "run_reader": {
+   "type": "function",
+   "function": {
+    "name": "run_reader",
+    "description": "[EXEC] run_reader tool.",
+    "parameters": {
+     "properties": {
+      "arguments": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "job": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "reader": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "reader"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "sigma_match": {
+   "type": "function",
+   "function": {
+    "name": "sigma_match",
+    "description": "[TOOL] sigma_match tool.",
+    "parameters": {
+     "properties": {
+      "events": {
+       "items": {},
+       "type": "array"
+      },
+      "ruleset": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": "default"
+      }
+     },
+     "required": [
+      "events"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "sigma_match_sandbox": {
+   "type": "function",
+   "function": {
+    "name": "sigma_match_sandbox",
+    "description": "[TOOL] sigma_match_sandbox tool.",
+    "parameters": {
+     "properties": {
+      "report": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "ruleset": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": "default"
+      }
+     },
+     "required": [
+      "report"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "signing_info": {
+   "type": "function",
+   "function": {
+    "name": "signing_info",
+    "description": "[TOOL] signing_info tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "file_type": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "strings": {
+   "type": "function",
+   "function": {
+    "name": "strings",
+    "description": "[TOOL] strings tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "encodings": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "end": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "limit": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 150
+      },
+      "min_len": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 6
+      },
+      "offset": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 0
+      },
+      "path": {
+       "type": "string"
+      },
+      "pattern": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "start": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "transform_bytes": {
+   "type": "function",
+   "function": {
+    "name": "transform_bytes",
+    "description": "[TOOL] transform_bytes tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "length": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "offset": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "path": {
+       "type": "string"
+      },
+      "rva": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "show_length": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "show_offset": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "steps": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "va": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "unpack_upx": {
+   "type": "function",
+   "function": {
+    "name": "unpack_upx",
+    "description": "[TOOL] unpack_upx tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "yara_scan": {
+   "type": "function",
+   "function": {
+    "name": "yara_scan",
+    "description": "[TOOL] yara_scan tool.",
+    "parameters": {
+     "properties": {
+      "carved_path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "ruleset": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": "default"
+      },
+      "text": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "timeout_s": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 60
+      }
+     },
+     "type": "object"
+    }
+   }
+  }
+ },
+ "die-mcp": {
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  },
+  "die_scan": {
+   "type": "function",
+   "function": {
+    "name": "die_scan",
+    "description": "[TOOL] die_scan tool.",
+    "parameters": {
+     "properties": {
+      "all_types": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      },
+      "deep_scan": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "heuristic_scan": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      },
+      "path": {
+       "type": "string"
+      },
+      "recursive_scan": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  }
+ },
+ "goresym-mcp": {
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  },
+  "go_strings": {
+   "type": "function",
+   "function": {
+    "name": "go_strings",
+    "description": "[TOOL] go_strings tool.",
+    "parameters": {
+     "properties": {
+      "go_version": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "go_symbols": {
+   "type": "function",
+   "function": {
+    "name": "go_symbols",
+    "description": "[TOOL] go_symbols tool.",
+    "parameters": {
+     "properties": {
+      "file_paths": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      },
+      "go_version": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      },
+      "standard_library": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "go_types": {
+   "type": "function",
+   "function": {
+    "name": "go_types",
+    "description": "[TOOL] go_types tool.",
+    "parameters": {
+     "properties": {
+      "go_version": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  }
+ },
+ "ilspy-mcp": {
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  },
+  "dotnet_decompile_assembly": {
+   "type": "function",
+   "function": {
+    "name": "dotnet_decompile_assembly",
+    "description": "[TOOL] dotnet_decompile_assembly tool.",
+    "parameters": {
+     "properties": {
+      "bundle_entry": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "il": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "dotnet_decompile_member": {
+   "type": "function",
+   "function": {
+    "name": "dotnet_decompile_member",
+    "description": "[TOOL] dotnet_decompile_member tool.",
+    "parameters": {
+     "properties": {
+      "bundle_entry": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "il": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      },
+      "member": {
+       "type": "string"
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "member",
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "dotnet_decompile_type": {
+   "type": "function",
+   "function": {
+    "name": "dotnet_decompile_type",
+    "description": "[TOOL] dotnet_decompile_type tool.",
+    "parameters": {
+     "properties": {
+      "bundle_entry": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "il": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      },
+      "path": {
+       "type": "string"
+      },
+      "type_name": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path",
+      "type_name"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "dotnet_metadata_table": {
+   "type": "function",
+   "function": {
+    "name": "dotnet_metadata_table",
+    "description": "[TOOL] dotnet_metadata_table tool.",
+    "parameters": {
+     "properties": {
+      "bundle_entry": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      },
+      "table": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path",
+      "table"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "dotnet_resources": {
+   "type": "function",
+   "function": {
+    "name": "dotnet_resources",
+    "description": "[TOOL] dotnet_resources tool.",
+    "parameters": {
+     "properties": {
+      "bundle_entry": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "dotnet_types": {
+   "type": "function",
+   "function": {
+    "name": "dotnet_types",
+    "description": "[TOOL] dotnet_types tool.",
+    "parameters": {
+     "properties": {
+      "bundle_entry": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "kinds": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": "cisde"
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  }
+ },
+ "jadx-mcp": {
+  "android_classes": {
+   "type": "function",
+   "function": {
+    "name": "android_classes",
+    "description": "[TOOL] android_classes tool.",
+    "parameters": {
+     "properties": {
+      "package": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "android_decompile_class": {
+   "type": "function",
+   "function": {
+    "name": "android_decompile_class",
+    "description": "[TOOL] android_decompile_class tool.",
+    "parameters": {
+     "properties": {
+      "class_name": {
+       "type": "string"
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "class_name",
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  }
+ },
+ "knowledge-mcp": {
+  "api_capability": {
+   "type": "function",
+   "function": {
+    "name": "api_capability",
+    "description": "[TOOL] api_capability tool.",
+    "parameters": {
+     "properties": {
+      "api_names": {
+       "items": {},
+       "type": "array"
+      },
+      "platform": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": "windows"
+      },
+      "resolved_names": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "api_names"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "attck_lookup": {
+   "type": "function",
+   "function": {
+    "name": "attck_lookup",
+    "description": "[TOOL] attck_lookup tool.",
+    "parameters": {
+     "properties": {
+      "technique_id": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "technique_id"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "attck_validate": {
+   "type": "function",
+   "function": {
+    "name": "attck_validate",
+    "description": "[TOOL] attck_validate tool.",
+    "parameters": {
+     "properties": {
+      "ids": {
+       "items": {},
+       "type": "array"
+      }
+     },
+     "required": [
+      "ids"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  },
+  "family_lookup": {
+   "type": "function",
+   "function": {
+    "name": "family_lookup",
+    "description": "[TOOL] family_lookup tool.",
+    "parameters": {
+     "properties": {
+      "k": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 5
+      },
+      "query": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "query"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "lolbin_lookup": {
+   "type": "function",
+   "function": {
+    "name": "lolbin_lookup",
+    "description": "[TOOL] lolbin_lookup tool.",
+    "parameters": {
+     "properties": {
+      "command_lines": {
+       "items": {},
+       "type": "array"
+      }
+     },
+     "required": [
+      "command_lines"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "resolve_technique": {
+   "type": "function",
+   "function": {
+    "name": "resolve_technique",
+    "description": "[TOOL] resolve_technique tool.",
+    "parameters": {
+     "properties": {
+      "domain": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "k": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 5
+      },
+      "text": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "text"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "similar_cases": {
+   "type": "function",
+   "function": {
+    "name": "similar_cases",
+    "description": "[TOOL] similar_cases tool.",
+    "parameters": {
+     "properties": {
+      "k": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 5
+      },
+      "text": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "text"
+     ],
+     "type": "object"
+    }
+   }
+  }
+ },
+ "network-mcp": {
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  },
+  "extract_dns": {
+   "type": "function",
+   "function": {
+    "name": "extract_dns",
+    "description": "[ANALYZE] extract_dns tool.",
+    "parameters": {
+     "properties": {
+      "packet_limit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "pcap_path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "pcap_path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "extract_http": {
+   "type": "function",
+   "function": {
+    "name": "extract_http",
+    "description": "[ANALYZE] extract_http tool.",
+    "parameters": {
+     "properties": {
+      "packet_limit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "pcap_path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "pcap_path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "pcap_summary": {
+   "type": "function",
+   "function": {
+    "name": "pcap_summary",
+    "description": "[TOOL] pcap_summary tool.",
+    "parameters": {
+     "properties": {
+      "packet_limit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "pcap_path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "pcap_path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "read_pcap_summary": {
+   "type": "function",
+   "function": {
+    "name": "read_pcap_summary",
+    "description": "[READ] read_pcap_summary tool.",
+    "parameters": {
+     "properties": {
+      "offset": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 0
+      },
+      "packet_limit": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "pcap_path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "pcap_path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "release_job": {
+   "type": "function",
+   "function": {
+    "name": "release_job",
+    "description": "[TOOL] release_job tool.",
+    "parameters": {
+     "properties": {
+      "job": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "job"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "run_reader": {
+   "type": "function",
+   "function": {
+    "name": "run_reader",
+    "description": "[EXEC] run_reader tool.",
+    "parameters": {
+     "properties": {
+      "arguments": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "job": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": ""
+      },
+      "reader": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "reader"
+     ],
+     "type": "object"
+    }
+   }
+  }
+ },
+ "oletools-mcp": {
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  },
+  "office_dde": {
+   "type": "function",
+   "function": {
+    "name": "office_dde",
+    "description": "[TOOL] office_dde tool.",
+    "parameters": {
+     "properties": {
+      "field_filter": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": "exclude_blacklisted"
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "ole_indicators": {
+   "type": "function",
+   "function": {
+    "name": "ole_indicators",
+    "description": "[TOOL] ole_indicators tool.",
+    "parameters": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "ole_macro_risk": {
+   "type": "function",
+   "function": {
+    "name": "ole_macro_risk",
+    "description": "[TOOL] ole_macro_risk tool.",
+    "parameters": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "ole_vba": {
+   "type": "function",
+   "function": {
+    "name": "ole_vba",
+    "description": "[TOOL] ole_vba tool.",
+    "parameters": {
+     "properties": {
+      "deobfuscate": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "rtf_objects": {
+   "type": "function",
+   "function": {
+    "name": "rtf_objects",
+    "description": "[TOOL] rtf_objects tool.",
+    "parameters": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  }
+ },
+ "threatintel-mcp": {
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  },
+  "check_domain_reputation": {
+   "type": "function",
+   "function": {
+    "name": "check_domain_reputation",
+    "description": "[TOOL] check_domain_reputation tool.",
+    "parameters": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "check_hash": {
+   "type": "function",
+   "function": {
+    "name": "check_hash",
+    "description": "[TOOL] check_hash tool.",
+    "parameters": {
+     "properties": {
+      "file_hash": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "file_hash"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "check_ip_reputation": {
+   "type": "function",
+   "function": {
+    "name": "check_ip_reputation",
+    "description": "[TOOL] check_ip_reputation tool.",
+    "parameters": {
+     "properties": {
+      "ip_address": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "ip_address"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "get_threatintel_status": {
+   "type": "function",
+   "function": {
+    "name": "get_threatintel_status",
+    "description": "[LIST] get_threatintel_status tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  }
+ },
+ "unblob-mcp": {
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  },
+  "container_extract": {
+   "type": "function",
+   "function": {
+    "name": "container_extract",
+    "description": "[TOOL] container_extract tool.",
+    "parameters": {
+     "properties": {
+      "depth": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 10
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "container_scan": {
+   "type": "function",
+   "function": {
+    "name": "container_scan",
+    "description": "[TOOL] container_scan tool.",
+    "parameters": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "get_artefact": {
+   "type": "function",
+   "function": {
+    "name": "get_artefact",
+    "description": "[LIST] get_artefact tool.",
+    "parameters": {
+     "properties": {
+      "length": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 4194304
+      },
+      "offset": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 0
+      },
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  }
+ },
+ "virustotal": {
+  "get_analysis": {
+   "type": "function",
+   "function": {
+    "name": "get_analysis",
+    "description": "[LIST] get_analysis tool.",
+    "parameters": {
+     "properties": {
+      "analysis_id": {
+       "type": "string"
+      },
+      "request_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "required": [
+      "analysis_id"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "get_domain_report": {
+   "type": "function",
+   "function": {
+    "name": "get_domain_report",
+    "description": "[LIST] get_domain_report tool.",
+    "parameters": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "get_file_report": {
+   "type": "function",
+   "function": {
+    "name": "get_file_report",
+    "description": "[LIST] get_file_report tool.",
+    "parameters": {
+     "properties": {
+      "hash": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "hash"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "get_ip_report": {
+   "type": "function",
+   "function": {
+    "name": "get_ip_report",
+    "description": "[LIST] get_ip_report tool.",
+    "parameters": {
+     "properties": {
+      "ip": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "ip"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "get_submission": {
+   "type": "function",
+   "function": {
+    "name": "get_submission",
+    "description": "[LIST] get_submission tool.",
+    "parameters": {
+     "properties": {
+      "request_id": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      },
+      "sha256": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null
+      }
+     },
+     "type": "object"
+    }
+   }
+  },
+  "get_url_report": {
+   "type": "function",
+   "function": {
+    "name": "get_url_report",
+    "description": "[LIST] get_url_report tool.",
+    "parameters": {
+     "properties": {
+      "url": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "url"
+     ],
+     "type": "object"
+    }
+   }
+  },
+  "submit_file": {
+   "type": "function",
+   "function": {
+    "name": "submit_file",
+    "description": "[TOOL] submit_file tool.",
+    "parameters": {
+     "properties": {
+      "content_base64": {
+       "type": "string"
+      },
+      "sha256": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "content_base64",
+      "sha256"
+     ],
+     "type": "object"
+    }
+   }
+  }
+ },
+ "webcrack-mcp": {
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  },
+  "js_deobfuscate": {
+   "type": "function",
+   "function": {
+    "name": "js_deobfuscate",
+    "description": "[TOOL] js_deobfuscate tool.",
+    "parameters": {
+     "properties": {
+      "deobfuscate": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "mangle": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": false
+      },
+      "path": {
+       "type": "string"
+      },
+      "unminify": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "unpack": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  }
+ },
+ "yarax-mcp": {
+  "capabilities": {
+   "type": "function",
+   "function": {
+    "name": "capabilities",
+    "description": "[TOOL] capabilities tool.",
+    "parameters": {
+     "properties": {},
+     "type": "object"
+    }
+   }
+  },
+  "yarax_scan": {
+   "type": "function",
+   "function": {
+    "name": "yarax_scan",
+    "description": "[TOOL] yarax_scan tool.",
+    "parameters": {
+     "properties": {
+      "ignore_invalid_rules": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": true
+      },
+      "path": {
+       "type": "string"
+      },
+      "string_chars": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": 120
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    }
+   }
+  }
+ }
+}

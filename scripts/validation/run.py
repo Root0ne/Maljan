@@ -333,6 +333,7 @@ def run_one(
             "job_error": record.job_error,
             "elapsed_s": round(record.elapsed_s, 1),
             "degradation_reasons": record.malware_report.get("degradation_reasons"),
+            "operator_choices": record.malware_report.get("operator_choices"),
             "empty_evidence_sections": record.empty_evidence_sections,
             "identity": record.malware_report.get("identity"),
             "reputation": record.malware_report.get("reputation"),
@@ -1180,7 +1181,7 @@ def scenario_d(ctx: Context) -> list[RunResult]:
             ) -> Gates:
                 wrote = store.writes[before:]
                 text = json.dumps(record.events, default=str) + json.dumps(
-                    record.malware_report.get("degradation_reasons") or []
+                    reach_mod.listed_reasons(record.malware_report)
                 )
                 own = {
                     "ltm_written_once": (len(wrote) == 1, f"writes this run: {wrote}"),
@@ -1256,7 +1257,7 @@ def expected_first_lookup(servers: dict[str, Any]) -> str:
             continue
         for facts in entry.tool_facts.values():
             if facts.kind == "reputation" and facts.reputation is not None:
-                service = facts.reputation.service or facts.display_name or key
+                service = facts.reputation.service or facts.display_name or entry.label or key
                 ranked.append((facts.reputation.rank, order, service))
     return min(ranked)[2] if ranked else ""
 
@@ -1266,11 +1267,10 @@ def expected_first_lookup(servers: dict[str, Any]) -> str:
 # and a pack lookup is the judge's to cite.
 REPUTATION_E = ("E1", "E3", "E4", "E5", "E6")
 STUB_SERVICE = "Stub reputation"
-# The stub's server key: the service an accepted proposal names the stub by,
-# since a probe proposes no display name for a tool whose server gives no
-# title (``core.reputation``: service, display name, then the server).
-STUB_KEY = "repstub"
-STUB_NAMES = frozenset({STUB_SERVICE, STUB_KEY})
+# An accepted proposal declares no display name for a tool whose server gives
+# no title, so its answers are named by the server's label, the same name
+# (``core.reputation``: service, display name, then the server's label).
+STUB_NAMES = frozenset({STUB_SERVICE})
 
 
 def scenario_e(ctx: Context) -> list[RunResult]:
@@ -1292,10 +1292,6 @@ def scenario_e(ctx: Context) -> list[RunResult]:
     results = []
     for name, servers, wires in variants:
         expected = expected_first_lookup(servers)
-        if name.startswith("e2p") and expected not in STUB_NAMES:
-            # An accepted proposal is held to what the hand declaration gets:
-            # the stub asked first, whatever name the accepted facts give it.
-            expected = STUB_SERVICE
         for wire in wires:
 
             def gates(
@@ -1444,7 +1440,7 @@ def _kit_gates(extra: dict[str, Any], declared: dict[str, Any]) -> Callable[...,
             str(e.get("tool")) for e in reach_mod.entries_of(record, reach_mod.by_server("kit"))
         ]
         findings = offered_name_findings(reach_mod.offers(dump), "kit", own, builtins)
-        degradations = [str(d) for d in record.malware_report.get("degradation_reasons") or []]
+        degradations = reach_mod.listed_reasons(record.malware_report)
         # A built-in renamed or hidden is a change the operator must be told
         # of; a degradation naming the kit's server unavailable is false.
         untold = [f for f in findings if not any(f.split()[2] in d for d in degradations)]

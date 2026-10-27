@@ -93,6 +93,13 @@ SHARED_HEAD = "maljan_shared_head"
 # again, in ``response_metadata``: an entry written at a breakpoint there would
 # never be read, so the request carries none but a shared head's.
 LAST_REQUEST = "maljan_last_request"
+# Where a chat model class this module built states how long its cache entries
+# live, in seconds: the lifetime its breakpoints ask for (``prompt_cache_ttl``).
+CACHE_LIFETIME_ATTR = "_maljan_cache_seconds"
+# The lifetimes a breakpoint may ask for, in seconds: five minutes unless an
+# hour is asked (https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+_FIVE_MINUTES = 300
+_ONE_HOUR = 3600
 
 _THINKING_KINDS = ("thinking", "redacted_thinking")
 
@@ -792,9 +799,56 @@ def with_preserved_thinking(chat_class: Any, cache_ttl: str = "5m") -> Any:
             "_generate_with_cache": _generate_with_cache,
             "_agenerate_with_cache": _agenerate_with_cache,
             "_maljan_keeps_turns": True,
+            CACHE_LIFETIME_ATTR: _ONE_HOUR if cache_ttl == "1h" else _FIVE_MINUTES,
         },
     )
     preserved.__module__ = __name__
     preserved.__qualname__ = chat_class.__qualname__
     _PRESERVED_CLASSES[(chat_class, cache_ttl)] = preserved
     return preserved
+
+
+def _stated_lifetime(model: Any) -> int | None:
+    """The lifetime ``model``'s class states, or ``None``.
+
+    Read on the class, as :func:`keeps_turns_as_received` reads its mark: a
+    pydantic model keeps an underscored class attribute as a private
+    attribute, whose default is the value set.
+    """
+    owner = model if isinstance(model, type) else type(model)
+    for holder in (owner, model):
+        stated = getattr(holder, CACHE_LIFETIME_ATTR, None)
+        stated = getattr(stated, "default", stated)
+        if isinstance(stated, int) and not isinstance(stated, bool) and stated > 0:
+            return stated
+    return None
+
+
+def prompt_cache_seconds(model: Any) -> int | None:
+    """How long a cache entry ``model``'s requests write lives, in seconds, or ``None``.
+
+    The lifetime the class this module built states (:data:`CACHE_LIFETIME_ATTR`);
+    a binding answers for the model it binds, and a model list for the models
+    it may call: the shortest, and ``None`` where any of them states none. A
+    model that states none caches at no breakpoint this module places.
+    """
+    models = getattr(model, "models", None)
+    candidates = list(models) if isinstance(models, list) and models else [model]
+    found: list[int] = []
+    for candidate in candidates:
+        seen = 0
+        while candidate is not None and seen < 8:
+            stated = _stated_lifetime(candidate)
+            if stated is not None:
+                found.append(stated)
+                break
+            candidate = getattr(candidate, "bound", None)
+            seen += 1
+        else:
+            return None
+    return min(found) if found and len(found) == len(candidates) else None
+
+
+def writes_hour_caches(model: Any) -> bool:
+    """Whether ``model``'s cache entries live an hour (:func:`prompt_cache_seconds`)."""
+    return prompt_cache_seconds(model) == _ONE_HOUR

@@ -51,10 +51,15 @@ def test_the_schema_carries_registry_ids_and_the_current_server_keys(client):
         "die",
         "goresym",
         "ilspy",
+        "jadx",
         "knowledge",
         "network",
+        "oletools",
         "threatintel",
+        "unblob",
         "virustotal",
+        "webcrack",
+        "yarax",
     ]
     assert entries["core.mcp.servers"]["editor"] == "server_map"
 

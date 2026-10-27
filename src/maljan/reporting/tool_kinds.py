@@ -207,6 +207,99 @@ def undeclared_code_kind(entry: Any, tool: str | None = None) -> str:
     return named_code_kind(declared_name(entry))
 
 
+def code_family_kind(entry: Any) -> str:
+    """The kind an entry's code is read as, whatever tool listed it; ``""`` for no code.
+
+    ``decompile`` for any decompiled code, of one function, of a batch or of
+    one decompiled afresh (``core.undeclared_tools.DECOMPILE_KINDS``); the
+    declared kind of a code listing as instructions. A tool its source
+    declares nothing for is read by its name (:func:`undeclared_code_kind`),
+    else by its answer: one that lists several functions' code, each naming
+    the function it stands under (:func:`_self_named_parts`), is decompiled
+    code. An entry read by the legacy tables has none here and is read by
+    those tables alone.
+    """
+    from maljan.core.undeclared_tools import CODE_LISTING_KINDS, DECOMPILE_KINDS
+
+    if read_by_name(entry):
+        return ""
+    facts = facts_of(entry)
+    if facts is not None:
+        if facts.kind in DECOMPILE_KINDS:
+            return "decompile"
+        return facts.kind if facts.kind in CODE_LISTING_KINDS else ""
+    named = undeclared_code_kind(entry)
+    if named:
+        return named
+    return "decompile" if _self_named_parts(entry) else ""
+
+
+def _self_named_parts(entry: Any) -> list[Any]:
+    """The functions an undeclared tool's answer lists, when each names the one it stands under.
+
+    A string table, a cross-reference map or a rule's matches keyed by
+    address holds other text under each key; a decompiler's batch holds each
+    function's own name or its first instruction's address there
+    (``core.undeclared_tools.names_itself``).
+    """
+    from maljan.core.undeclared_tools import code_parts, names_itself
+
+    parts = code_parts(_field(entry, "output"))
+    return parts if parts and all(names_itself(part) for part in parts) else []
+
+
+def reads_code(entry: Any, consumer: str) -> bool:
+    """Whether a consumer of a function's code reads this entry.
+
+    By :func:`is_of`, and by the kind the entry's code is read as
+    (:func:`code_family_kind`): a batch of decompiled functions is read where
+    one decompiled function is.
+    """
+    if is_of(entry, consumer):
+        return True
+    kind = code_family_kind(entry)
+    return bool(kind) and kind in consumer_kinds(consumer)
+
+
+def function_parts(entry: Any) -> list[Any]:
+    """The functions a batch's answer lists one by one (``core.undeclared_tools.CodePart``).
+
+    For a tool that declares itself a batch of decompiled functions
+    (``decompile_batch``), read at the paths its declaration names
+    (``values`` ``code``, ``address`` and ``name``, inside ``rows``); for a
+    tool its source declares nothing for, only when each function names the
+    one it stands under (:func:`_self_named_parts`). ``[]`` for every other
+    entry: a declared single decompile is one listing whatever its answer's
+    shape, and an entry read by the legacy tables is drawn as it always was.
+    """
+    from maljan.core.undeclared_tools import code_parts
+
+    if read_by_name(entry):
+        return []
+    facts = facts_of(entry)
+    if facts is None:
+        return _self_named_parts(entry)
+    if facts.kind != "decompile_batch":
+        return []
+    values = facts.values
+    named = (str(values.get("address", "") or ""), str(values.get("name", "") or ""))
+    return code_parts(
+        _field(entry, "output"), str(values.get("code", "") or ""), str(facts.rows or ""), named
+    )
+
+
+def part_citation(entry_id: str, part: Any) -> str:
+    """How one function of an entry's answer is cited: the entry, then the function.
+
+    The ledger's form for a part of an entry (``ev_0024 (row 0x3868)``): the
+    entry id, which a citation resolves by, and in brackets the function's
+    address or name, or its place in the answer.
+    """
+    where = str(part.where)
+    reference = where if where.startswith("item ") else f"function {where}"
+    return f"{entry_id} ({reference})"
+
+
 def is_of(entry: Any, consumer: str, tool: str | None = None) -> bool:
     """Whether a consumer reads this entry: by its stored kind, or by its legacy table.
 

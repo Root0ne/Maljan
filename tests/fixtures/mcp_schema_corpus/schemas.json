@@ -1,0 +1,2028 @@
+{
+ "analysis-mcp": {
+  "apk_info": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "certs": {
+     "default": true,
+     "title": "Certs",
+     "type": "boolean"
+    },
+    "components": {
+     "default": true,
+     "title": "Components",
+     "type": "boolean"
+    },
+    "dex_strings": {
+     "default": false,
+     "title": "Dex Strings",
+     "type": "boolean"
+    },
+    "limit": {
+     "default": 500,
+     "title": "Limit",
+     "type": "integer"
+    },
+    "manifest": {
+     "default": true,
+     "title": "Manifest",
+     "type": "boolean"
+    },
+    "native_libs": {
+     "default": true,
+     "title": "Native Libs",
+     "type": "boolean"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "permissions": {
+     "default": true,
+     "title": "Permissions",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "apk_infoArguments",
+   "type": "object"
+  },
+  "archive_list": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "limit": {
+     "default": 500,
+     "title": "Limit",
+     "type": "integer"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "archive_listArguments",
+   "type": "object"
+  },
+  "capa": {
+   "properties": {
+    "backend": {
+     "default": "auto",
+     "title": "Backend",
+     "type": "string"
+    },
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "timeout_s": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Timeout S"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "capaArguments",
+   "type": "object"
+  },
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  },
+  "carve_payloads": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "carve_payloadsArguments",
+   "type": "object"
+  },
+  "decode_string_blobs": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "include_unreferenced": {
+     "default": false,
+     "title": "Include Unreferenced",
+     "type": "boolean"
+    },
+    "limit": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Limit"
+    },
+    "min_len": {
+     "default": 8,
+     "title": "Min Len",
+     "type": "integer"
+    },
+    "offset": {
+     "default": 0,
+     "title": "Offset",
+     "type": "integer"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "schemes": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Schemes"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "decode_string_blobsArguments",
+   "type": "object"
+  },
+  "document_info": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "document_infoArguments",
+   "type": "object"
+  },
+  "elf_info": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "elf_infoArguments",
+   "type": "object"
+  },
+  "find_crypto_constants": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "find_crypto_constantsArguments",
+   "type": "object"
+  },
+  "floss": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "kinds": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Kinds"
+    },
+    "limit": {
+     "default": 150,
+     "title": "Limit",
+     "type": "integer"
+    },
+    "min_len": {
+     "default": 4,
+     "title": "Min Len",
+     "type": "integer"
+    },
+    "offset": {
+     "default": 0,
+     "title": "Offset",
+     "type": "integer"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "pattern": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Pattern"
+    },
+    "timeout_s": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Timeout S"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "flossArguments",
+   "type": "object"
+  },
+  "function_index": {
+   "properties": {
+    "address": {
+     "default": "",
+     "title": "Address",
+     "type": "string"
+    },
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "function_indexArguments",
+   "type": "object"
+  },
+  "hashes": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "hashesArguments",
+   "type": "object"
+  },
+  "identify_file": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "identify_fileArguments",
+   "type": "object"
+  },
+  "iocs_from_file": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "kinds": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Kinds"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "iocs_from_fileArguments",
+   "type": "object"
+  },
+  "iocs_from_text": {
+   "properties": {
+    "kinds": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Kinds"
+    },
+    "text": {
+     "title": "Text",
+     "type": "string"
+    }
+   },
+   "required": [
+    "text"
+   ],
+   "title": "iocs_from_textArguments",
+   "type": "object"
+  },
+  "macho_info": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "macho_infoArguments",
+   "type": "object"
+  },
+  "pe_info": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "exports": {
+     "default": true,
+     "title": "Exports",
+     "type": "boolean"
+    },
+    "imports": {
+     "default": true,
+     "title": "Imports",
+     "type": "boolean"
+    },
+    "overlay": {
+     "default": true,
+     "title": "Overlay",
+     "type": "boolean"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "pdb": {
+     "default": true,
+     "title": "Pdb",
+     "type": "boolean"
+    },
+    "resources": {
+     "default": true,
+     "title": "Resources",
+     "type": "boolean"
+    },
+    "sections": {
+     "default": true,
+     "title": "Sections",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "pe_infoArguments",
+   "type": "object"
+  },
+  "put_sample": {
+   "properties": {
+    "content_b64": {
+     "title": "Content B64",
+     "type": "string"
+    },
+    "filename": {
+     "title": "Filename",
+     "type": "string"
+    },
+    "sha256": {
+     "default": "",
+     "title": "Sha256",
+     "type": "string"
+    }
+   },
+   "required": [
+    "filename",
+    "content_b64"
+   ],
+   "title": "put_sampleArguments",
+   "type": "object"
+  },
+  "put_sample_begin": {
+   "properties": {
+    "filename": {
+     "title": "Filename",
+     "type": "string"
+    },
+    "sha256": {
+     "title": "Sha256",
+     "type": "string"
+    },
+    "size": {
+     "title": "Size",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "filename",
+    "sha256",
+    "size"
+   ],
+   "title": "put_sample_beginArguments",
+   "type": "object"
+  },
+  "put_sample_chunk": {
+   "properties": {
+    "content_b64": {
+     "title": "Content B64",
+     "type": "string"
+    },
+    "seq": {
+     "title": "Seq",
+     "type": "integer"
+    },
+    "upload_id": {
+     "title": "Upload Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "upload_id",
+    "seq",
+    "content_b64"
+   ],
+   "title": "put_sample_chunkArguments",
+   "type": "object"
+  },
+  "put_sample_finish": {
+   "properties": {
+    "upload_id": {
+     "title": "Upload Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "upload_id"
+   ],
+   "title": "put_sample_finishArguments",
+   "type": "object"
+  },
+  "release_job": {
+   "properties": {
+    "job": {
+     "title": "Job",
+     "type": "string"
+    }
+   },
+   "required": [
+    "job"
+   ],
+   "title": "release_jobArguments",
+   "type": "object"
+  },
+  "resolve_api_hashes": {
+   "properties": {
+    "algorithms": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Algorithms"
+    },
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "hashes": {
+     "anyOf": [
+      {
+       "items": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "integer"
+         }
+        ]
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Hashes"
+    },
+    "limit": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Limit"
+    },
+    "offset": {
+     "default": 0,
+     "title": "Offset",
+     "type": "integer"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "resolve_api_hashesArguments",
+   "type": "object"
+  },
+  "run_reader": {
+   "properties": {
+    "arguments": {
+     "anyOf": [
+      {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Arguments"
+    },
+    "job": {
+     "default": "",
+     "title": "Job",
+     "type": "string"
+    },
+    "reader": {
+     "title": "Reader",
+     "type": "string"
+    }
+   },
+   "required": [
+    "reader"
+   ],
+   "title": "run_readerArguments",
+   "type": "object"
+  },
+  "sigma_match": {
+   "properties": {
+    "events": {
+     "items": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "title": "Events",
+     "type": "array"
+    },
+    "ruleset": {
+     "default": "default",
+     "title": "Ruleset",
+     "type": "string"
+    }
+   },
+   "required": [
+    "events"
+   ],
+   "title": "sigma_matchArguments",
+   "type": "object"
+  },
+  "sigma_match_sandbox": {
+   "properties": {
+    "report": {
+     "additionalProperties": true,
+     "title": "Report",
+     "type": "object"
+    },
+    "ruleset": {
+     "default": "default",
+     "title": "Ruleset",
+     "type": "string"
+    }
+   },
+   "required": [
+    "report"
+   ],
+   "title": "sigma_match_sandboxArguments",
+   "type": "object"
+  },
+  "signing_info": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "file_type": {
+     "default": "",
+     "title": "File Type",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "signing_infoArguments",
+   "type": "object"
+  },
+  "strings": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "encodings": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Encodings"
+    },
+    "end": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "End"
+    },
+    "limit": {
+     "default": 150,
+     "title": "Limit",
+     "type": "integer"
+    },
+    "min_len": {
+     "default": 6,
+     "title": "Min Len",
+     "type": "integer"
+    },
+    "offset": {
+     "default": 0,
+     "title": "Offset",
+     "type": "integer"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "pattern": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Pattern"
+    },
+    "start": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Start"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "stringsArguments",
+   "type": "object"
+  },
+  "transform_bytes": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "length": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Length"
+    },
+    "offset": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Offset"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "rva": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Rva"
+    },
+    "show_length": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Show Length"
+    },
+    "show_offset": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Show Offset"
+    },
+    "steps": {
+     "anyOf": [
+      {
+       "items": {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Steps"
+    },
+    "va": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Va"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "transform_bytesArguments",
+   "type": "object"
+  },
+  "unpack_upx": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "unpack_upxArguments",
+   "type": "object"
+  },
+  "yara_scan": {
+   "properties": {
+    "carved_path": {
+     "default": "",
+     "title": "Carved Path",
+     "type": "string"
+    },
+    "path": {
+     "default": "",
+     "title": "Path",
+     "type": "string"
+    },
+    "ruleset": {
+     "default": "default",
+     "title": "Ruleset",
+     "type": "string"
+    },
+    "text": {
+     "default": "",
+     "title": "Text",
+     "type": "string"
+    },
+    "timeout_s": {
+     "default": 60,
+     "title": "Timeout S",
+     "type": "integer"
+    }
+   },
+   "title": "yara_scanArguments",
+   "type": "object"
+  }
+ },
+ "die-mcp": {
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  },
+  "die_scan": {
+   "properties": {
+    "all_types": {
+     "default": false,
+     "title": "All Types",
+     "type": "boolean"
+    },
+    "deep_scan": {
+     "default": true,
+     "title": "Deep Scan",
+     "type": "boolean"
+    },
+    "heuristic_scan": {
+     "default": false,
+     "title": "Heuristic Scan",
+     "type": "boolean"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "recursive_scan": {
+     "default": false,
+     "title": "Recursive Scan",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "die_scanArguments",
+   "type": "object"
+  }
+ },
+ "goresym-mcp": {
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  },
+  "go_strings": {
+   "properties": {
+    "go_version": {
+     "default": "",
+     "title": "Go Version",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "go_stringsArguments",
+   "type": "object"
+  },
+  "go_symbols": {
+   "properties": {
+    "file_paths": {
+     "default": false,
+     "title": "File Paths",
+     "type": "boolean"
+    },
+    "go_version": {
+     "default": "",
+     "title": "Go Version",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "standard_library": {
+     "default": false,
+     "title": "Standard Library",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "go_symbolsArguments",
+   "type": "object"
+  },
+  "go_types": {
+   "properties": {
+    "go_version": {
+     "default": "",
+     "title": "Go Version",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "go_typesArguments",
+   "type": "object"
+  }
+ },
+ "ilspy-mcp": {
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  },
+  "dotnet_decompile_assembly": {
+   "properties": {
+    "bundle_entry": {
+     "default": "",
+     "title": "Bundle Entry",
+     "type": "string"
+    },
+    "il": {
+     "default": false,
+     "title": "Il",
+     "type": "boolean"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "dotnet_decompile_assemblyArguments",
+   "type": "object"
+  },
+  "dotnet_decompile_member": {
+   "properties": {
+    "bundle_entry": {
+     "default": "",
+     "title": "Bundle Entry",
+     "type": "string"
+    },
+    "il": {
+     "default": false,
+     "title": "Il",
+     "type": "boolean"
+    },
+    "member": {
+     "title": "Member",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path",
+    "member"
+   ],
+   "title": "dotnet_decompile_memberArguments",
+   "type": "object"
+  },
+  "dotnet_decompile_type": {
+   "properties": {
+    "bundle_entry": {
+     "default": "",
+     "title": "Bundle Entry",
+     "type": "string"
+    },
+    "il": {
+     "default": false,
+     "title": "Il",
+     "type": "boolean"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "type_name": {
+     "title": "Type Name",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path",
+    "type_name"
+   ],
+   "title": "dotnet_decompile_typeArguments",
+   "type": "object"
+  },
+  "dotnet_metadata_table": {
+   "properties": {
+    "bundle_entry": {
+     "default": "",
+     "title": "Bundle Entry",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "table": {
+     "title": "Table",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path",
+    "table"
+   ],
+   "title": "dotnet_metadata_tableArguments",
+   "type": "object"
+  },
+  "dotnet_resources": {
+   "properties": {
+    "bundle_entry": {
+     "default": "",
+     "title": "Bundle Entry",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "dotnet_resourcesArguments",
+   "type": "object"
+  },
+  "dotnet_types": {
+   "properties": {
+    "bundle_entry": {
+     "default": "",
+     "title": "Bundle Entry",
+     "type": "string"
+    },
+    "kinds": {
+     "default": "cisde",
+     "title": "Kinds",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "dotnet_typesArguments",
+   "type": "object"
+  }
+ },
+ "jadx-mcp": {
+  "android_classes": {
+   "properties": {
+    "package": {
+     "default": "",
+     "title": "Package",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "android_classesArguments",
+   "type": "object"
+  },
+  "android_decompile_class": {
+   "properties": {
+    "class_name": {
+     "title": "Class Name",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path",
+    "class_name"
+   ],
+   "title": "android_decompile_classArguments",
+   "type": "object"
+  },
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  }
+ },
+ "knowledge-mcp": {
+  "api_capability": {
+   "properties": {
+    "api_names": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Api Names",
+     "type": "array"
+    },
+    "platform": {
+     "default": "windows",
+     "title": "Platform",
+     "type": "string"
+    },
+    "resolved_names": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Resolved Names"
+    }
+   },
+   "required": [
+    "api_names"
+   ],
+   "title": "api_capabilityArguments",
+   "type": "object"
+  },
+  "attck_lookup": {
+   "properties": {
+    "technique_id": {
+     "title": "Technique Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "technique_id"
+   ],
+   "title": "attck_lookupArguments",
+   "type": "object"
+  },
+  "attck_validate": {
+   "properties": {
+    "ids": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Ids",
+     "type": "array"
+    }
+   },
+   "required": [
+    "ids"
+   ],
+   "title": "attck_validateArguments",
+   "type": "object"
+  },
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  },
+  "family_lookup": {
+   "properties": {
+    "k": {
+     "default": 5,
+     "title": "K",
+     "type": "integer"
+    },
+    "query": {
+     "title": "Query",
+     "type": "string"
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "title": "family_lookupArguments",
+   "type": "object"
+  },
+  "lolbin_lookup": {
+   "properties": {
+    "command_lines": {
+     "items": {
+      "type": "string"
+     },
+     "title": "Command Lines",
+     "type": "array"
+    }
+   },
+   "required": [
+    "command_lines"
+   ],
+   "title": "lolbin_lookupArguments",
+   "type": "object"
+  },
+  "resolve_technique": {
+   "properties": {
+    "domain": {
+     "default": "",
+     "title": "Domain",
+     "type": "string"
+    },
+    "k": {
+     "default": 5,
+     "title": "K",
+     "type": "integer"
+    },
+    "text": {
+     "title": "Text",
+     "type": "string"
+    }
+   },
+   "required": [
+    "text"
+   ],
+   "title": "resolve_techniqueArguments",
+   "type": "object"
+  },
+  "similar_cases": {
+   "properties": {
+    "k": {
+     "default": 5,
+     "title": "K",
+     "type": "integer"
+    },
+    "text": {
+     "title": "Text",
+     "type": "string"
+    }
+   },
+   "required": [
+    "text"
+   ],
+   "title": "similar_casesArguments",
+   "type": "object"
+  }
+ },
+ "network-mcp": {
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  },
+  "extract_dns": {
+   "properties": {
+    "packet_limit": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Packet Limit"
+    },
+    "pcap_path": {
+     "title": "Pcap Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "pcap_path"
+   ],
+   "title": "extract_dnsArguments",
+   "type": "object"
+  },
+  "extract_http": {
+   "properties": {
+    "packet_limit": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Packet Limit"
+    },
+    "pcap_path": {
+     "title": "Pcap Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "pcap_path"
+   ],
+   "title": "extract_httpArguments",
+   "type": "object"
+  },
+  "pcap_summary": {
+   "properties": {
+    "packet_limit": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Packet Limit"
+    },
+    "pcap_path": {
+     "title": "Pcap Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "pcap_path"
+   ],
+   "title": "pcap_summaryArguments",
+   "type": "object"
+  },
+  "read_pcap_summary": {
+   "properties": {
+    "offset": {
+     "default": 0,
+     "title": "Offset",
+     "type": "integer"
+    },
+    "packet_limit": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Packet Limit"
+    },
+    "pcap_path": {
+     "title": "Pcap Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "pcap_path"
+   ],
+   "title": "read_pcap_summaryArguments",
+   "type": "object"
+  },
+  "release_job": {
+   "properties": {
+    "job": {
+     "title": "Job",
+     "type": "string"
+    }
+   },
+   "required": [
+    "job"
+   ],
+   "title": "release_jobArguments",
+   "type": "object"
+  },
+  "run_reader": {
+   "properties": {
+    "arguments": {
+     "anyOf": [
+      {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Arguments"
+    },
+    "job": {
+     "default": "",
+     "title": "Job",
+     "type": "string"
+    },
+    "reader": {
+     "title": "Reader",
+     "type": "string"
+    }
+   },
+   "required": [
+    "reader"
+   ],
+   "title": "run_readerArguments",
+   "type": "object"
+  }
+ },
+ "oletools-mcp": {
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  },
+  "office_dde": {
+   "properties": {
+    "field_filter": {
+     "default": "exclude_blacklisted",
+     "title": "Field Filter",
+     "type": "string"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "office_ddeArguments",
+   "type": "object"
+  },
+  "ole_indicators": {
+   "properties": {
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "ole_indicatorsArguments",
+   "type": "object"
+  },
+  "ole_macro_risk": {
+   "properties": {
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "ole_macro_riskArguments",
+   "type": "object"
+  },
+  "ole_vba": {
+   "properties": {
+    "deobfuscate": {
+     "default": false,
+     "title": "Deobfuscate",
+     "type": "boolean"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "ole_vbaArguments",
+   "type": "object"
+  },
+  "rtf_objects": {
+   "properties": {
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "rtf_objectsArguments",
+   "type": "object"
+  }
+ },
+ "threatintel-mcp": {
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  },
+  "check_domain_reputation": {
+   "properties": {
+    "domain": {
+     "title": "Domain",
+     "type": "string"
+    }
+   },
+   "required": [
+    "domain"
+   ],
+   "title": "check_domain_reputationArguments",
+   "type": "object"
+  },
+  "check_hash": {
+   "properties": {
+    "file_hash": {
+     "title": "File Hash",
+     "type": "string"
+    }
+   },
+   "required": [
+    "file_hash"
+   ],
+   "title": "check_hashArguments",
+   "type": "object"
+  },
+  "check_ip_reputation": {
+   "properties": {
+    "ip_address": {
+     "title": "Ip Address",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ip_address"
+   ],
+   "title": "check_ip_reputationArguments",
+   "type": "object"
+  },
+  "get_threatintel_status": {
+   "properties": {},
+   "title": "get_threatintel_statusArguments",
+   "type": "object"
+  }
+ },
+ "unblob-mcp": {
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  },
+  "container_extract": {
+   "properties": {
+    "depth": {
+     "default": 10,
+     "title": "Depth",
+     "type": "integer"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "container_extractArguments",
+   "type": "object"
+  },
+  "container_scan": {
+   "properties": {
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "container_scanArguments",
+   "type": "object"
+  },
+  "get_artefact": {
+   "properties": {
+    "length": {
+     "default": 4194304,
+     "title": "Length",
+     "type": "integer"
+    },
+    "offset": {
+     "default": 0,
+     "title": "Offset",
+     "type": "integer"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "get_artefactArguments",
+   "type": "object"
+  }
+ },
+ "virustotal": {
+  "get_analysis": {
+   "properties": {
+    "analysis_id": {
+     "title": "Analysis Id",
+     "type": "string"
+    },
+    "request_id": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Request Id"
+    }
+   },
+   "required": [
+    "analysis_id"
+   ],
+   "title": "get_analysisArguments",
+   "type": "object"
+  },
+  "get_domain_report": {
+   "properties": {
+    "domain": {
+     "title": "Domain",
+     "type": "string"
+    }
+   },
+   "required": [
+    "domain"
+   ],
+   "title": "get_domain_reportArguments",
+   "type": "object"
+  },
+  "get_file_report": {
+   "properties": {
+    "hash": {
+     "title": "Hash",
+     "type": "string"
+    }
+   },
+   "required": [
+    "hash"
+   ],
+   "title": "get_file_reportArguments",
+   "type": "object"
+  },
+  "get_ip_report": {
+   "properties": {
+    "ip": {
+     "title": "Ip",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ip"
+   ],
+   "title": "get_ip_reportArguments",
+   "type": "object"
+  },
+  "get_submission": {
+   "properties": {
+    "request_id": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Request Id"
+    },
+    "sha256": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Sha256"
+    }
+   },
+   "title": "get_submissionArguments",
+   "type": "object"
+  },
+  "get_url_report": {
+   "properties": {
+    "url": {
+     "title": "Url",
+     "type": "string"
+    }
+   },
+   "required": [
+    "url"
+   ],
+   "title": "get_url_reportArguments",
+   "type": "object"
+  },
+  "submit_file": {
+   "properties": {
+    "content_base64": {
+     "maxLength": 32000000,
+     "title": "Content Base64",
+     "type": "string"
+    },
+    "sha256": {
+     "title": "Sha256",
+     "type": "string"
+    }
+   },
+   "required": [
+    "sha256",
+    "content_base64"
+   ],
+   "title": "submit_fileArguments",
+   "type": "object"
+  }
+ },
+ "webcrack-mcp": {
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  },
+  "js_deobfuscate": {
+   "properties": {
+    "deobfuscate": {
+     "default": true,
+     "title": "Deobfuscate",
+     "type": "boolean"
+    },
+    "mangle": {
+     "default": false,
+     "title": "Mangle",
+     "type": "boolean"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "unminify": {
+     "default": true,
+     "title": "Unminify",
+     "type": "boolean"
+    },
+    "unpack": {
+     "default": true,
+     "title": "Unpack",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "js_deobfuscateArguments",
+   "type": "object"
+  }
+ },
+ "yarax-mcp": {
+  "capabilities": {
+   "properties": {},
+   "title": "capabilitiesArguments",
+   "type": "object"
+  },
+  "yarax_scan": {
+   "properties": {
+    "ignore_invalid_rules": {
+     "default": true,
+     "title": "Ignore Invalid Rules",
+     "type": "boolean"
+    },
+    "path": {
+     "title": "Path",
+     "type": "string"
+    },
+    "string_chars": {
+     "default": 120,
+     "title": "String Chars",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "path"
+   ],
+   "title": "yarax_scanArguments",
+   "type": "object"
+  }
+ }
+}

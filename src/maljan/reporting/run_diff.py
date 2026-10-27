@@ -167,6 +167,7 @@ MATCH_KEYS: dict[str, str] = {
     "run": "the fact name",
     "tools": "the tool name (run_summary.evidence.by_tool)",
     "degradation": "the exact text of the reason; nothing is paired by resemblance",
+    "operator_choices": "the exact text of the reason; nothing is paired by resemblance",
 }
 
 
@@ -983,12 +984,48 @@ def _tool_items(run: RunRecord) -> tuple[list[_Item], bool]:
     ], True
 
 
-def _degradation_items(run: RunRecord) -> list[_Item]:
+def _listed_reasons(run: RunRecord) -> list[str]:
     mr = _map(run.malware_report)
     reasons = _list(mr.get("degradation_reasons")) or _list(
         _map(run.run_summary).get("degradation_reasons")
     )
-    return [_Item(t, t, {"text": t}) for t in (_text(r) for r in reasons) if t]
+    return [t for t in (_text(r) for r in reasons) if t]
+
+
+def _own_choices(run: RunRecord) -> list[str]:
+    """What the run's report or summary lists as the operator's choices (T-338)."""
+    mr = _map(run.malware_report)
+    listed = _list(mr.get("operator_choices")) or _list(
+        _map(run.run_summary).get("operator_choices")
+    )
+    return [t for t in (_text(r) for r in listed) if t]
+
+
+def _reason_sides(a: RunRecord, b: RunRecord) -> tuple[list[list[_Item]], list[list[_Item]]]:
+    """Each run's degradation items and choice items, a reason paired across the two.
+
+    A run stored before the choices were listed apart carries them among its
+    degradation reasons. One is read as a choice when the classifier says so
+    from its words (a tool withheld by policy, a server switched off) or when
+    the other run lists the same text as a choice (a key a newer run's
+    manifest marks unset, which the stored record cannot prove): it is then
+    paired in the choices, not shown as a degradation one run has and the
+    other lacks.
+    """
+    from maljan.pipeline.operator_choice import is_operator_choice
+
+    runs = (a, b)
+    chosen = [set(_own_choices(run)) for run in runs]
+    either = chosen[0] | chosen[1]
+    degradations: list[list[_Item]] = []
+    choices: list[list[_Item]] = []
+    for run in runs:
+        moved = [t for t in _listed_reasons(run) if is_operator_choice(t) or t in either]
+        kept = [t for t in _listed_reasons(run) if t not in moved]
+        texts = dict.fromkeys([*_own_choices(run), *moved])
+        degradations.append([_Item(t, t, {"text": t}) for t in kept])
+        choices.append([_Item(t, t, {"text": t}) for t in texts])
+    return degradations, choices
 
 
 # ── The diff ─────────────────────────────────────────────────────────────────
@@ -1161,14 +1198,31 @@ def diff_runs(a: RunRecord, b: RunRecord) -> dict[str, Any]:
             recorded=(tools_rec_a, tools_rec_b),
         )
     )
+    degradation_sides, choice_sides = _reason_sides(a, b)
     sections.append(
         _section(
             "degradation",
             "Run",
             "Degradation reasons",
             _pair(
-                _degradation_items(a),
-                _degradation_items(b),
+                degradation_sides[0],
+                degradation_sides[1],
+                unmatched_a=ONLY_IN_A,
+                unmatched_b=ONLY_IN_B,
+            ),
+            keyed=False,
+        )
+    )
+    # A reason a newer run lists as the operator's choice is matched here, not
+    # read as one the degradations lost.
+    sections.append(
+        _section(
+            "operator_choices",
+            "Run",
+            "Not configured or withheld by choice",
+            _pair(
+                choice_sides[0],
+                choice_sides[1],
                 unmatched_a=ONLY_IN_A,
                 unmatched_b=ONLY_IN_B,
             ),

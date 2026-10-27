@@ -1,0 +1,168 @@
+---
+title: "Container and Android servers"
+description: "unblob carving and extracting what a container or firmware image holds, JADX decompiling an APK's or dex file's code: one container each, shipped switched off, with their own pack steps."
+---
+
+Two built-in tool servers open what a file carries inside it: unblob carves
+and extracts every file a container or firmware image holds, and JADX
+decompiles an Android package's or dex file's bytecode to Java. Each wraps one
+program in an image of its own under `services/`, over the same plumbing as
+the [identification servers](/tools/identification/); each ships **switched
+off**, and each is used at full strength once it is on: agents are offered
+every tool it advertises, and its triage pack step runs.
+
+| Server | Program | Offers | Pack step |
+| :-- | :-- | :-- | :-- |
+| `unblob` | unblob 26.6.4, with the extractors it calls | `container_scan`: each chunk of a known format inside the file, by its own bytes, with its byte range; `container_extract`: every file the chunks hold, extracted recursively, each with its size, sha256 and file type | `container_extract`, on every sample, each file it wrote taken into the job's artefact store |
+| `jadx` | JADX 1.5.6 on Java 21 | `android_classes`: the classes the bytecode defines, each with its methods; `android_decompile_class`: one class as Java | `android_classes`, on `apk` and `dex` |
+
+Neither runs what it reads:
+
+- unblob finds each chunk of a format it knows (archives, compressed streams,
+  file systems, firmware containers, a payload appended to another file) and
+  unpacks it with that format's extractor; nothing it unpacks is run or opened
+  beyond its file type.
+- JADX reads the dex bytecode and writes Java source; it loads no class into a
+  virtual machine. The manifest, permissions, components, signing
+  certificates and dex strings of an APK stay with the analysis sidecar's
+  `apk_info`: JADX adds the code, not a second reading of the manifest.
+  JADX is handed the file under a name of the server's choosing (`input.apk`
+  or `input.dex`, by its first bytes), with every input plugin but the dex
+  reader switched off, no configuration file read, no resource decoded, its
+  temporary files and home in the call's scratch, and no comment of its own
+  written into the code, so one file answers the same each time.
+
+## Where unblob's files go
+
+Never beside the sample: the samples directory is mounted read-only. Each
+`container_extract` call writes into a directory of its own, named by a fresh
+id, under the carve root (`/tmp/carved`, the container's tmpfs). unblob
+confines its own writes to that directory (Landlock, where the kernel offers
+it) and refuses an archive member whose path or link leaves it, and a device
+or other special file; the container's unprivileged user could not make a
+device file besides. The answer is made by walking the directory without
+following any link: a link is listed by what it names and never read through,
+a FIFO or other special file is named with its kind and never opened, and only
+a regular file is hashed or handed on. What unblob refused is listed under
+`problems`, by the report's name and the member's path.
+
+A file reaches another server only through the job's
+[artefact store](/integrations/mcp-servers/#files-a-server-wrote): the shipped
+step declares `outputs` `/files/*/path`, and the store reads each file back
+over the server's `get_artefact` tool, which opens it beneath the carve root
+component by component with no link followed and refuses anything but a
+regular file. A file of several names (a busybox link farm) is handed on
+once, under one name with the others in `also_named`, and only when every
+name is inside the same extraction; a name that is not UTF-8 is shown with
+its bytes escaped and handed on percent-encoded. `get_artefact` is a delivery primitive, never
+offered to a model. A step of your own that `reads` `container_extract` then
+runs once per file, `{artefact_path}` naming it. An extraction's directory is
+removed `CARVED_KEEP_SECONDS` after it was written (an hour unless set), and
+at once when it holds no file.
+
+Each run is held to machine-safety bounds, each the operator's to set, as the
+container's memory ceiling is. It stops once the files it wrote pass the
+larger of the sample's own size and the platform's sample upload bound (100
+MiB, or `UPLOAD_MAX_BYTES` where the console's `upload_max_bytes` was raised),
+or once it made more than `UNBLOB_MAX_ENTRIES` entries (100,000 unless set),
+counted at once and then twice a second; a stopped run lists only the files
+that fit under the bound and says so in `stopped`. No one file it writes may
+pass that byte bound (the run's file size limit): a file cut there is named
+under `not_handed_on` and the answer says it stopped. The carve root is the
+container's own tmpfs, sized below its memory ceiling (`UNBLOB_TMPFS_SIZE`,
+1536m), so what a run writes past the last count fills that file system, not
+the container's memory; a new run first removes the oldest finished
+extractions until there is room for its bound.
+
+## Turning one on
+
+<Steps>
+
+<Step>
+
+Add its profile to `COMPOSE_PROFILES` in `docker/.env` (`unblob`, `jadx`) and
+set its token there (`UNBLOB_MCP_AUTH_TOKEN`, `JADX_MCP_AUTH_TOKEN`). The
+container refuses to start without it.
+
+</Step>
+
+<Step>
+
+Start it: `docker compose -f docker/docker-compose.yml up -d unblob-mcp
+unblob-port` (or the `jadx-` pair). The first start builds the image.
+
+</Step>
+
+<Step>
+
+In **Settings → Configuration**, open the server block of the same name, set
+its `auth_token` to the same token, switch it on and test it. The block
+already points at the container (`http://unblob-mcp:8096/mcp`,
+`http://jadx-mcp:8097/mcp`); a worker run on the host uses the relay's port
+instead (`http://localhost:8096/mcp` and so on).
+
+</Step>
+
+</Steps>
+
+`unblob` is offered to the `static` and `reverser` agents, `jadx` to the
+`android_static` and `reverser` agents. A server that is switched off, not
+configured, or does not offer its step's tool leaves the step off: no call, no
+entry, and the reason in the worker's log and on the pack's result. A
+deployment without these servers runs the pack exactly as before.
+
+## What each container is held to
+
+Each is held as the identification servers are (see
+[Identification servers](/tools/identification/#what-each-container-is-held-to)):
+the worker's unprivileged ids, no Linux capability, a pids limit, a read-only
+root whose only writable place is a tmpfs sized below the memory ceiling
+(`UNBLOB_TMPFS_SIZE`, `JADX_TMPFS_SIZE`, 1536m each; unblob's carve root is in
+it), the samples directory read-only at `/data/samples`, its own token as its
+only secret, a memory ceiling with swap pinned to it (`UNBLOB_MEM_LIMIT` 2g,
+`JADX_MEM_LIMIT` 4g, JADX's heap half of it), and an internal network of its own shared only with the
+API and the worker, published by a bare relay. Each run is a process group of
+its own, so `TOOL_TIMEOUT_SECONDS` and a call the platform gave up on kill it
+with every process it started.
+
+## What their tools declare
+
+| Tool | Kind | Rows and values | Routed formats |
+| :-- | :-- | :-- | :-- |
+| `container_scan` | `embedded_chunks` | `/chunks/*`: `handler`, at `offset` (`/start_offset`) | every format |
+| `container_extract` | `extracted_files` | `/files/*`: `name`, `sha256`, `magic` | every format |
+| `android_classes` | `type_list` | `/classes/*`: `name` | `apk`, `dex` |
+| `android_decompile_class` | `decompile` | the class's Java `source` | `apk`, `dex` |
+
+Every tool is read-only, runs nothing, reaches no network and sends nothing to
+a third party, and says what it does not show: unblob that nothing extracted
+is run, and that a format it has no handler for, an encrypted chunk's contents
+and anything past the upload bound are not there; JADX that code loaded,
+decrypted or downloaded at run time is not seen, and that the manifest is
+`apk_info`'s.
+
+## Not shipped
+
+- binwalk: unblob covers the same containers and firmware formats with the
+  same extractors, and binwalk 3 publishes no release binary to pin by
+  checksum, so one extraction server ships.
+- A shortcut (`.lnk`) is read by no shipped reader: unblob carves a payload
+  appended to it, not the shortcut's own fields.
+- Library function names: capa's FLIRT signatures already name the library
+  functions of a PE in `capa`'s answer (`library_functions`), so no separate
+  signature server ships. A BinDiff comparison needs a BinExport of each
+  input made by a disassembler and a second sample to compare against, which
+  a run does not have; it is not shipped.
+
+## On the worker's host instead
+
+Each `server.py` also serves over stdio (`python3 services/unblob-mcp/server.py
+--stdio`) for an operator who installs the program on the worker's host: unblob
+and its extractors for the server's Python (`pip install --require-hashes -r
+services/unblob-mcp/requirements.txt`, then `unblob
+--show-external-dependencies`), or JADX's `jadx` command on `PATH`. Point the
+block's `transport` at `stdio` and its `command` and `args` at the script, clear
+its `sample_mount`, and add `MALJAN_SAMPLE_ROOTS` (and `UNBLOB_CARVE_ROOT`,
+`UPLOAD_MAX_BYTES`, `CARVED_KEEP_SECONDS`) to its `env_allow`. Run that way,
+unblob's files are on the host, under `UNBLOB_CARVE_ROOT` (a directory under
+the system's temporary directory unless set).

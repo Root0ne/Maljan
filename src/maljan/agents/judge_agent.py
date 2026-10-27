@@ -30,6 +30,7 @@ import contextlib
 import logging
 import re
 import uuid
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
@@ -100,13 +101,26 @@ from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model
 from maljan.llm.transient import as_call
 from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import (
+    StoredCase,
     a_past_case_technique,
     foreign_ids_written_out,
     foreign_quoted_value,
+    similar_case_head,
+    similar_cases_shown,
 )
 from maljan.memory.technique_cards import technique_card_lines
-from maljan.pipeline.debate_facts import read_marks, with_ledger_facts, with_ledger_stated
-from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
+from maljan.pipeline.debate_facts import (
+    carries_line_field,
+    read_marks,
+    with_ledger_facts,
+    with_ledger_stated,
+)
+from maljan.pipeline.events import (
+    emit_judge_question,
+    safe_answer_text,
+    safe_finding_value,
+    scrub,
+)
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
@@ -136,7 +150,7 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
 )
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, answers_held
-from maljan.schemas.isr_models import AgentISR
+from maljan.schemas.isr_models import AgentISR, retry_added_marker
 from maljan.schemas.stix_models import Bundle
 
 if TYPE_CHECKING:
@@ -638,6 +652,23 @@ _NONE_OPENING_RE = re.compile(r"^[\s*_`(]*none\b", re.IGNORECASE)
 _SUMMARY_LINE_RE = re.compile(r"^[\s*_`]*(?:summary|in summary|overall|in total)\b", re.I)
 
 _TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*$")
+# A Markdown heading line.
+_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
+
+
+def _next_line_continues(lines: list[str], index: int, *, listed: bool = False) -> bool:
+    """Whether the first non-blank line from ``index`` on is a block line with its fields.
+
+    With ``listed``, a list line is one too. The agreement line, the end of the
+    answer and any other line (``debate_facts.carries_line_field``) are not.
+    """
+    for at in range(index, len(lines)):
+        line = lines[at]
+        if line.strip():
+            if _AGREEMENT_LINE_RE.match(line):
+                return False
+            return bool(listed and _LIST_MARKER_RE.match(line)) or carries_line_field(line)
+    return False
 
 
 def _table_border_or_header(lines: list[str], index: int) -> bool:
@@ -674,7 +705,16 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
     the mediator's word. The label is matched in capitals, as the prompt spells
     it, so a prose heading such as "Contradictions:" in the reasoning is not
     taken for it. The block runs to the agreement line, the end of the answer,
-    or a blank line followed by a line that is not a list line.
+    or a blank line followed by a line that is neither a list line nor one
+    holding a field every line is asked for (opening with ``[analysts: ...]``
+    or ending with a ``[blocking ...]`` mark, ``debate_facts.carries_line_field``):
+    blank lines between plain lines that carry those fields do not end it, and
+    a remark after a blank line followed by such a line is read past and is no
+    item. A heading with no blank line above it is no item: inside the block it
+    is read past, and before the block's first line it heads the lines under
+    it when the next line is a list line or holds the fields and ends the
+    block otherwise, which leaves the block unreadable. After a NONE, a blank
+    line ends the block.
 
     Each line is one contradiction, bulleted, numbered or plain, the text on
     the label line included; an indented line under an item continues it. A
@@ -712,6 +752,7 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
             none_phrase = bool(_NONE_OPENING_RE.match(rest))
             found.append(rest.strip("*_`").strip())
     after_blank = False
+    ended_at_heading = False
     for index in range(start + 1, len(lines)):
         line = lines[index]
         if _AGREEMENT_LINE_RE.match(line):
@@ -719,9 +760,29 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
         if not line.strip():
             after_blank = True
             continue
-        listed = _LIST_MARKER_RE.match(line)
-        if after_blank and not listed:
+        if after_blank and said_none and not found:
+            # What follows a NONE and a blank line is a remark on the block.
             break
+        listed = _LIST_MARKER_RE.match(line)
+        fielded = not listed and carries_line_field(line)
+        if not listed and not fielded and after_blank:
+            # Prose after a blank line ends the block, unless the next line
+            # holds a field of the block's lines: then it is a heading or a
+            # remark between them and no item.
+            if not _next_line_continues(lines, index + 1):
+                break
+            after_blank = False
+            continue
+        if not listed and not fielded and _HEADING_RE.match(line):
+            # A heading with no blank line above it is no item. Inside the
+            # block it is read past, whatever follows it. Before the block's
+            # first line it heads the lines below it when the next is a list
+            # line or holds the fields, and otherwise ends the block.
+            if not found and not _next_line_continues(lines, index + 1, listed=True):
+                ended_at_heading = True
+                break
+            continue
+        new_paragraph = after_blank
         after_blank = False
         stripped = line.strip()
         if not listed:
@@ -731,9 +792,9 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
                 table_rows = table_rows or not _table_border_or_header(lines, index)
             elif _table_border_or_header(lines, index) or _SUMMARY_LINE_RE.match(stripped):
                 continue
-            elif line[:1].isspace() and found:
+            elif line[:1].isspace() and found and not new_paragraph:
                 found[-1] = f"{found[-1]} {stripped}"
-            else:
+            elif stripped.strip("*_`").strip():
                 found.append(stripped.strip("*_`").strip())
             continue
         item = line[listed.end() :].strip().strip("*_`").strip()
@@ -750,7 +811,9 @@ def read_contradictions_block(text: str) -> ContradictionsBlock:
         if none_phrase and len(found) == 1 and not said_none:
             return ContradictionsBlock(found, ambiguous="none_phrase")
         return ContradictionsBlock(found, mixed=said_none)
-    if table_rows and not said_none:
+    if (table_rows or ended_at_heading) and not said_none:
+        # Only table rows, or a heading the block ended at before any line:
+        # nothing says what stands, and the mediator is asked once.
         return ContradictionsBlock(None)
     return ContradictionsBlock([])
 
@@ -783,13 +846,16 @@ def verdict_report_parts(
     degradation note. Nothing here is cut; :func:`fit_prompt_parts` does
     that, and only when the judge's window cannot hold them.
     """
+    from maljan.agents.base_agent import report_rendered_again
     from maljan.utils.written_forms import markers_written_out
 
     parts: dict[str, str] = {}
     for name, report in reports.items():
         # A report is what a model wrote: a run-state marker in it is written
-        # out, so the judge never reads one as the platform's block.
-        parts[f"{name} report"] = f"--- {name.upper()} ANALYST ---\n{markers_written_out(report)}"
+        # out, so the judge never reads one as the platform's block. A claims
+        # summary is rendered again from its ISR, with every mark set since.
+        shown = report_rendered_again(report, (isr_reports or {}).get(name))
+        parts[f"{name} report"] = f"--- {name.upper()} ANALYST ---\n{markers_written_out(shown)}"
     if isr_reports:
         isr_block = "\n".join(
             f"[{name}] domain={isr.domain} | "
@@ -1086,12 +1152,78 @@ class QuestionEvidence(NamedTuple):
     partial: bool = False
     # The stored output was blanked and this is the run's lower-cased search copy.
     lowered: bool = False
+    # Whether the call answered: a failed call's text is its failure, which
+    # the pack row says in the platform's words.
+    ok: bool = True
 
 
 # What an entry's heading says when what is shown is not the whole answer as stored.
 PARTIAL_ENTRY_MARK = "incomplete: this run holds only part of this entry's answer"
 LOWERED_ENTRY_MARK = "the stored output was not kept; this is the run's lower-cased search copy"
 NO_ENTRY_TEXT = "(no text recorded in this run)"
+# What a pack row says after its head in the technique question when the
+# entry's stored output, from which the row is rendered, is shown whole under
+# EVIDENCE CITED.
+PACK_ROW_SHOWN_BELOW = (
+    "the items of this line are in its stored output, shown whole under EVIDENCE CITED below"
+)
+_PACK_ROW_RE = re.compile(r"\[([^\]\s]+)\] ")
+
+
+def pack_rows_shown_below(
+    facts_block: str, whole: Mapping[str, str], heads: Mapping[str, str] | None = None
+) -> str:
+    """``facts_block`` with each row whose entry is shown whole below cut to its head and a pointer.
+
+    The technique question shows the pack and, under EVIDENCE CITED, the
+    stored output of every entry a question cites. A pack row is rendered
+    from its entry's stored output, so where that output is shown whole
+    (``whole``: id, lower-cased, to the text shown) the row keeps its head and
+    says where the output is; the fuller text is shown once. The head is what
+    the row says besides the items it lists: a row of several lines, its
+    first line (the lines below it are its items); a row of one line, the
+    line its renderer writes with no item listed (``heads``,
+    ``triage_pack.pack_row_heads``), which keeps every sentence the renderer
+    adds of its own. A one-line row with no head given stays whole.
+
+    A row is a line of the pack (below its heading, up to the first blank
+    line: the earlier run's block after it is left as it is) opening with
+    ``[id] ``, with the list lines (``- ``) or indented lines right below it.
+    A row is left whole when its pointed form would be no shorter, or when the
+    output shown is shorter than the row: then the row is the fuller text.
+    Linear in the block.
+    """
+    from maljan.pipeline.triage_pack import PACK_HEADING
+
+    if not facts_block or not whole:
+        return facts_block
+    heads = heads or {}
+    lines = facts_block.split("\n")
+    out: list[str] = []
+    in_pack = False
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line == PACK_HEADING or not line.strip():
+            in_pack = line == PACK_HEADING
+        opened = _PACK_ROW_RE.match(line) if in_pack else None
+        end = index + 1
+        if opened is not None:
+            while end < len(lines) and lines[end][:1] in ("-", " ", "\t") and lines[end].strip():
+                end += 1
+        key = opened.group(1).lower() if opened is not None else ""
+        shown = whole.get(key, "") if opened is not None else ""
+        head = line if end > index + 1 else heads.get(key, "")
+        if opened is None or not shown or not head:
+            out.extend(lines[index:end])
+            index = end
+            continue
+        row = "\n".join(lines[index:end])
+        pointed = f"{head} — {PACK_ROW_SHOWN_BELOW}."
+        out.append(pointed if len(pointed) < len(row) and len(shown) >= len(row) else row)
+        index = end
+    return "\n".join(out)
+
 
 # The labels the question's head writes before its technique list.
 QUESTION_REPORTS_LABEL = "Expert Reports:"
@@ -1150,6 +1282,7 @@ def question_evidence(ledger: Iterable[Any], corpus: Any = None) -> dict[str, Qu
             tool=str(getattr(entry, "tool", "") or ""),
             partial=bool(getattr(entry, "truncated", False)),
             lowered=lowered,
+            ok=bool(getattr(entry, "ok", True)),
         )
     holders = repeat_holders(ledger)
     for repeat, holder in holders.items():
@@ -1661,8 +1794,15 @@ def mediation_reports_text(
     analyst's own words and its ISR the claims in force, which differ and are
     both kept. Empty ISRs are left out, as before.
     """
+    from maljan.agents.base_agent import report_rendered_again
     from maljan.utils.written_forms import markers_written_out
 
+    # A report that is an answer's claims summary is rendered again from its
+    # ISR, so a mark set since cannot make the two differ and show it twice.
+    isrs = isr_reports or {}
+    reports = {
+        name: report_rendered_again(report, isrs.get(name)) for name, report in reports.items()
+    }
     # A report and a claim's words are what a model wrote: a run-state marker
     # in them is written out, so the mediator never reads one as the
     # platform's block.
@@ -1673,14 +1813,199 @@ def mediation_reports_text(
     if not isr_reports:
         return reports_text
     shown = set(reports.values())
+
+    def _shown(name: str, summary: str) -> bool:
+        # A report that is the summary, or the summary with the findings in
+        # force after it (``base_agent.answer_in_force_text``), already holds it.
+        report = reports.get(name, "")
+        return summary in shown or report.startswith(f"{summary}\n")
+
     isr_block = "\n\n".join(
         f"[ISR] {markers_written_out(summary)}"
-        for summary in (isr.to_text_summary() for isr in isr_reports.values() if isr.claims)
-        if summary not in shown
+        for name, summary in (
+            (name, isr.to_text_summary()) for name, isr in isr_reports.items() if isr.claims
+        )
+        if not _shown(name, summary)
     )
     if not isr_block:
         return reports_text
     return f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
+
+
+# The standing of each line a mediation listed, as the history states it once
+# beside the line: the platform reads the mediator's mark and overrides it in
+# neither direction; a mark it could not read leaves the line blocking. Said
+# in words and parentheses, never in the mediator's bracketed mark syntax, so
+# a line copied from the history is read by its own mark alone.
+HISTORY_LINE_BLOCKING = "blocking"
+HISTORY_LINE_NOT_BLOCKING = "not blocking"
+HISTORY_LINE_MARK_UNREAD = "blocking, its mark was not read"
+_CONFIDENCE_TAIL_RE = re.compile(r"\nConfidence: (\d+\.\d+)\Z")
+
+
+def _listed_in_order(argument: AgentArgument) -> tuple[str, list[str], str] | None:
+    """The finding's own words, its listed lines in order and its confidence, or ``None``.
+
+    A mediation's finding ends with the lines it listed, joined by ``"; "``,
+    and the confidence it wrote (``JudgeAgent._mediate_round``); the lines are
+    also its ``contradictions`` and ``not_blocking``. When the finding's tail
+    is exactly those lines, in some order, that order is read off it and the
+    words before it are returned; any other finding (an error, a mediation
+    that did not apply, state written another way) is ``None``. Linear in the
+    finding.
+    """
+    finding = str(argument.finding or "")
+    at = finding.rfind("\n\nContradictions: ")
+    if at < 0:
+        return None
+    tail = finding[at + len("\n\nContradictions: ") :]
+    confidence = _CONFIDENCE_TAIL_RE.search(tail)
+    if confidence is None:
+        return None
+    joined = tail[: confidence.start()]
+    lines = list(dict.fromkeys([*argument.contradictions, *argument.not_blocking]))
+    if not lines:
+        return (finding[:at], [], confidence.group(1)) if joined == "None" else None
+    # The tail read from its start: at each "; " (and at its end) the text
+    # since the last line placed is a line when its length is one a line not
+    # yet placed has and it is that line. Each separator is visited once and a
+    # slice is taken only at a length that can match. Tail left over, or a
+    # line never placed, is no match.
+    left = set(lines)
+    lengths = Counter(len(line) for line in lines)
+    ends: list[int] = []
+    sep = joined.find("; ")
+    while sep >= 0:
+        ends.append(sep)
+        sep = joined.find("; ", sep + 2)
+    ends.append(len(joined))
+    ordered: list[str] = []
+    start = 0
+    for end in ends:
+        if end < start or not lengths.get(end - start):
+            continue
+        candidate = joined[start:end]
+        if candidate in left:
+            left.discard(candidate)
+            lengths[len(candidate)] -= 1
+            ordered.append(candidate)
+            start = end + 2
+    if left or start != len(joined) + 2:
+        return None
+    return finding[:at], ordered, confidence.group(1)
+
+
+_FACT_LINE_HEAD = 'For the line "'
+_FACT_LINE_END = '": '
+
+
+def _quoted_line(fact: str, lines: Iterable[str]) -> tuple[str, str] | None:
+    """The listed line a ledger fact quotes whole and what it says of it, or ``None``.
+
+    The debate's facts open ``For the line "<line>": `` (``debate_facts``).
+    The longest listed line the fact opens with is the one it quotes, so a
+    line that is the start of another (``says "abc`` and ``says "abc": def``)
+    never takes the other's fact. Linear in the lines.
+    """
+    if not fact.startswith(_FACT_LINE_HEAD):
+        return None
+    best = ""
+    for line in lines:
+        if len(line) > len(best) and fact.startswith(f"{_FACT_LINE_HEAD}{line}{_FACT_LINE_END}"):
+            best = line
+    if not best:
+        return None
+    return best, fact[len(_FACT_LINE_HEAD) + len(best) + len(_FACT_LINE_END) :]
+
+
+def _history_entry_text(argument: Any, number: int, total: int) -> str:
+    """One history entry as text: its words once, each listed line once with its standing."""
+    from maljan.utils.written_forms import markers_written_out
+
+    if not isinstance(argument, AgentArgument):
+        # Not an argument this module wrote: shown as it reads, under its head.
+        return f"--- entry {number} of {total} ---\n{argument}"
+    unread = set(argument.unread_marks)
+    not_blocking = set(argument.not_blocking)
+
+    def standing(line: str) -> str:
+        if line in unread:
+            return HISTORY_LINE_MARK_UNREAD
+        return HISTORY_LINE_NOT_BLOCKING if line in not_blocking else HISTORY_LINE_BLOCKING
+
+    # A ledger fact quoting a listed line whole is said under that line, the
+    # quote left out: the line is shown once.
+    held = {*argument.contradictions, *argument.not_blocking}
+    under: dict[str, list[str]] = {}
+    apart: list[str] = []
+    for fact in argument.ledger_facts:
+        quoted = _quoted_line(str(fact), held)
+        if quoted is None:
+            apart.append(str(fact))
+        else:
+            under.setdefault(quoted[0], []).append(quoted[1])
+
+    def listed(lines: Sequence[str]) -> list[str]:
+        rows: list[str] = []
+        for line in lines:
+            rows.append(f"- (standing: {standing(line)}) {markers_written_out(line)}")
+            rows.extend(f"  Ledger: {said}" for said in under.get(line, ()))
+        return rows
+
+    out = [f"--- {argument.agent_name} (entry {number} of {total}) ---"]
+    read = _listed_in_order(argument)
+    if read is not None:
+        words, lines, confidence = read
+        if words.strip():
+            out.append(markers_written_out(words))
+        out.append("Contradictions:" if lines else "Contradictions: None")
+        out.extend(listed(lines))
+        out.append(f"Confidence: {confidence}")
+        if argument.confidence_score is None:
+            out.append("Confidence score: none recorded")
+    else:
+        # A finding in no form the lines can be placed in (an error, a
+        # mediation consensus did not apply to, state written another way) is
+        # shown whole, then each line the platform holds with its standing.
+        finding = str(argument.finding or "")
+        if finding.strip():
+            out.append(markers_written_out(finding))
+        lines = list(dict.fromkeys([*argument.contradictions, *argument.not_blocking, *unread]))
+        if lines:
+            out.append("Contradictions:")
+            out.extend(listed(lines))
+        score = argument.confidence_score
+        out.append(f"Confidence score: {'none recorded' if score is None else f'{score:.2f}'}")
+    if argument.status != "complete":
+        out.append(f"Status: {argument.status}")
+    if argument.note:
+        out.append(f"Note: {argument.note}")
+    if apart:
+        out.append("Ledger facts:")
+        out.extend(f"- {fact}" for fact in apart)
+    return "\n".join(out)
+
+
+def negotiation_history_text(history: Sequence[Any]) -> str:
+    """The negotiation history as the mediator and the verdict read it, each line once.
+
+    One entry per argument, in order: the mediator's words, then every line
+    its final block listed, once, each with its standing (blocking, not
+    blocking, or blocking because its mark was not read), the confidence it
+    wrote, and the status, note and ledger facts where there are any (a fact
+    about one line under that line, its quote of the line left out). The
+    lines were shown up to four times before (in the finding, again in
+    ``contradictions``, ``not_blocking`` and ``unread_marks``, and quoted by
+    the ledger facts); the routing
+    fields the platform keeps for itself are not shown, as they never were.
+    Model words have their run-state markers written out, as the reports do.
+    Linear in the history.
+    """
+    items = list(history or [])
+    return "\n\n".join(
+        _history_entry_text(argument, number, len(items))
+        for number, argument in enumerate(items, 1)
+    )
 
 
 def mediator_system_prompt(
@@ -1902,6 +2227,10 @@ class JudgeAgent(BudgetMeter):
         # fit the judge's window whole, or ``""``; the judge node records it
         # as a degradation reason.
         self.verdict_prompt_notice: str = ""
+        # The similar cases of other samples whose techniques the last verdict
+        # prompt showed (``stix_models.SimilarCases``), or ``None``; the judge
+        # node records it on the bundle.
+        self.similar_cases_shown: Any = None
         # The judge calls tools too — threat intel on a disputed indicator, an
         # ATT&CK or family lookup — and a verdict that cites one has to be
         # checkable the same way an analyst's claim is. Same counter as the
@@ -2886,6 +3215,8 @@ class JudgeAgent(BudgetMeter):
         sample: Any = None,
         facts_block: str = "",
         run_state: str = "",
+        round_facts: str = "",
+        cited_entries: Mapping[str, str] | None = None,
     ) -> tuple[AgentArgument, bool | None]:
         """One mediation round (:meth:`_mediate_round`), or the round the mediator's ceiling ends.
 
@@ -2904,6 +3235,8 @@ class JudgeAgent(BudgetMeter):
                 sample=sample,
                 facts_block=facts_block,
                 run_state=run_state,
+                round_facts=round_facts,
+                cited_entries=cited_entries,
             )
         except AgentCeilingStop as stop:
             self.logger.warning("Mediator: %s; the round is not mediated.", stop)
@@ -2928,6 +3261,8 @@ class JudgeAgent(BudgetMeter):
         sample: Any = None,
         facts_block: str = "",
         run_state: str = "",
+        round_facts: str = "",
+        cited_entries: Mapping[str, str] | None = None,
     ) -> tuple[AgentArgument, bool | None]:
         """Find contradictions between expert reports and determine consensus.
 
@@ -2945,6 +3280,13 @@ class JudgeAgent(BudgetMeter):
             isr_reports: Optional structured ISR objects. When provided, their
                 summaries are appended to give the judge per-claim confidence
                 scores and explicit dissent signals.
+            round_facts: What the revision round before did on each blocking
+                line of the last mediation, with the question for the
+                carried-or-new mark (``debate_facts.round_facts_text``),
+                carried after the ledger's counts.
+            cited_entries: The stored texts of the entries those lines cite,
+                by id, shown after them whole, as many as the room the
+                reports and the history leave (``debate_facts.fit_entries``).
 
         Returns:
             Tuple of (AgentArgument with mediator findings, bool indicating
@@ -3001,6 +3343,8 @@ class JudgeAgent(BudgetMeter):
             _last_ledger_facts(history, "ledger_stated"),
         )
         carried_facts = f"{last_counts}\n\n" if last_counts else ""
+        if round_facts:
+            carried_facts += f"{round_facts}\n\n"
         system_text = mediator_system_prompt(
             identity_unanswered=identity_unanswered,
             lookup_attached=lookup_attached,
@@ -3008,15 +3352,18 @@ class JudgeAgent(BudgetMeter):
             sha256=_sha256_of(sample),
             tools=self.tools,
         )
-        history_text = str(history)
+        history_text = negotiation_history_text(history)
 
-        def _mediation_human(reports_shown: str, history_shown: str, notice: str) -> str:
+        def _mediation_human(
+            reports_shown: str, history_shown: str, notice: str, entries_shown: str = ""
+        ) -> str:
             note = f"{notice}\n\n" if notice else ""
+            entries = f"{entries_shown}\n\n" if entries_shown else ""
             return (
                 f"{_standing_blocks(run_state, facts_block)}"
                 f"{_identity_prefix(sample)}{note}"
                 f"Expert Reports:\n{reports_shown}\n\nPrevious Discussion:\n{history_shown}\n\n"
-                f"{carried_facts}"
+                f"{carried_facts}{entries}"
                 f"{MEDIATOR_HUMAN_CLOSING}"
             )
 
@@ -3032,12 +3379,30 @@ class JudgeAgent(BudgetMeter):
         )
         if fitted_notice:
             self.logger.warning("JudgeAgent mediation prompt: %s", fitted_notice)
+        # The entries take what the reports and the history leave of the room,
+        # so they never shorten either, less what the turns after this one
+        # need (``_mediation_entries_reserve``).
+        entries_text = ""
+        if cited_entries:
+            entries_text = self._mediation_entries(
+                cited_entries,
+                None
+                if mediation_room is None
+                else mediation_room
+                - len(fitted_parts["expert reports"])
+                - len(fitted_parts[_HISTORY_PART])
+                - len(fitted_notice)
+                - self._mediation_entries_reserve(),
+            )
         prompt_messages = [
             ("system", system_text),
             (
                 "human",
                 _mediation_human(
-                    fitted_parts["expert reports"], fitted_parts[_HISTORY_PART], fitted_notice
+                    fitted_parts["expert reports"],
+                    fitted_parts[_HISTORY_PART],
+                    fitted_notice,
+                    entries_text,
                 ),
             ),
         ]
@@ -3148,6 +3513,7 @@ class JudgeAgent(BudgetMeter):
                     # sentence in a field of its own rather than inside them.
                     finding=reasoning_text.strip(),
                     confidence_score=None,
+                    answer=safe_answer_text(reasoning_text) if reasoning_text.strip() else "",
                     note=(
                         f"Consensus: not applicable — {len(claimants)} of {len(reports)} "
                         "analyst(s) produced claims."
@@ -3321,6 +3687,8 @@ class JudgeAgent(BudgetMeter):
             contradictions=blocking,
             not_blocking=not_blocking,
             unread_marks=unread_marks,
+            # The words the block was read from, kept for the run record.
+            answer=safe_answer_text(reasoning_text),
             note=(
                 CONTRADICTIONS_BLOCK_MISSING_NOTE
                 if block_missing
@@ -3330,6 +3698,57 @@ class JudgeAgent(BudgetMeter):
             ),
         )
         return argument, is_consensus
+
+    def _mediation_entries_reserve(self) -> int:
+        """The characters the turns after a mediation's first need, kept free of its entries.
+
+        One tool answer's share of the conversation's room
+        (``context_window.ANSWER_SHARE`` of ``ContextBudget.tool_budget_chars``,
+        as an analyst's input room keeps it) for the tool loop, the first
+        answer at the output cap, and the question for a missing block
+        (:data:`CONTRADICTIONS_BLOCK_QUESTION`): the follow-up turn resends the
+        prompt with both. The second answer's cap is already out of the room.
+        No budget known keeps the question's length alone. Never raises.
+        """
+        from maljan.llm.context_window import ANSWER_SHARE, ContextBudget
+
+        reserve = len(CONTRADICTIONS_BLOCK_QUESTION)
+        try:
+            budget = self._context_budget()
+            if isinstance(budget, ContextBudget) and budget.derives:
+                reserve += int(budget.tool_budget_chars() * ANSWER_SHARE)
+                cap = int(self._built_cap_tokens() or 0)
+                reserve += int(cap * float(budget.chars_per_token))
+        except Exception as exc:  # noqa: BLE001 — a reserve not read keeps the question's
+            self.logger.debug("Mediator: the entries' reserve was not read (%s).", exc)
+        return reserve
+
+    def _mediation_entries(self, entries: Mapping[str, str], room: int | None) -> str:
+        """The entries block a mediation shows after the round's facts, or ``""``.
+
+        ``room`` is the characters the mediation's window leaves once its
+        reports and history are in; ``None`` is no window known, and every
+        entry is shown. An entry that does not fit is named by id; nothing
+        is cut (``debate_facts.fit_entries``).
+        """
+        from maljan.pipeline.debate_facts import entries_block, fit_entries
+
+        shown, unfit = fit_entries(entries, room, mediation=True)
+        if unfit:
+            self.logger.warning(
+                "Mediator: %d of the %d ledger entries the last mediation's blocking lines cite "
+                "do not fit beside this mediation and are named by id: %s.",
+                len(unfit),
+                len(entries),
+                ", ".join(unfit),
+            )
+        elif not shown:
+            self.logger.warning(
+                "Mediator: none of the %d ledger entries the last mediation's blocking lines "
+                "cite fits beside this mediation; it mediates without them.",
+                len(entries),
+            )
+        return entries_block(shown, unfit, mediation=True)
 
     async def _ask_mediation_again(
         self, messages: list[Any], timeout: float | None
@@ -3483,7 +3902,7 @@ class JudgeAgent(BudgetMeter):
         crediting an agent with a technique it never named is asked about
         against it, and ``None`` asks nothing. ``sandbox_facts`` is
         ``(kind, value) -> the sandbox's fact`` for a value the sandbox recorded
-        and attributes no flow of the sample to
+        and attributes no flow, or no process, of the sample to
         (``stix_renderer.sandbox_facts_for_the_judge``): an indicator naming one
         is asked about once, with the fact, and a keep after that question is
         recorded as the judge's answer, which is what publishes the value.
@@ -3503,17 +3922,21 @@ class JudgeAgent(BudgetMeter):
         # string when the store is empty or retrieval fails.
         from maljan.memory.long_term_memory import memory_owner_of
 
-        memory_block = self._build_memory_context(
+        self.similar_cases_shown = None
+        cases = self._similar_cases(
             isr_reports,
             memory_store,
             current_sample_id=current_sample_id,
             owner=memory_owner_of(self._container),
+            container=self._container,
         )
+        memory_block = MEMORY_UNAVAILABLE_NOTE if cases is None else self._memory_block(cases)
         if memory_block:
             parts["long-term memory"] = memory_block
         # The negotiation history whole, as its own part: a fixed cut at 800
         # characters kept the first round and none of the ones that decided.
-        history_text = str(history)
+        # Each listed line once, with its standing (``negotiation_history_text``).
+        history_text = negotiation_history_text(history)
 
         # Built as messages rather than through ``ChatPromptTemplate``: the
         # system turn now contains a JSON skeleton, and a template would read
@@ -3553,6 +3976,10 @@ class JudgeAgent(BudgetMeter):
             fitted["long-term memory"] = closed_memory_cut(
                 fitted["long-term memory"], whole["long-term memory"]
             )
+            # Which similar cases' techniques the prompt carries, as the
+            # judge is shown them: the node records it on the bundle, where
+            # it decides nothing (``long_term_memory.similar_cases_shown``).
+            self.similar_cases_shown = similar_cases_shown(cases or [], fitted["long-term memory"])
         self.verdict_prompt_notice = notice
         if notice:
             self.logger.warning("JudgeAgent verdict prompt: %s", notice)
@@ -4111,6 +4538,30 @@ class JudgeAgent(BudgetMeter):
         if notice:
             self.logger.warning("JudgeAgent technique question: %s", notice)
         fitted = {i: e._replace(text=texts[i]) for i, e in entries.items()}
+        # A pack row whose entry's stored output is shown whole below keeps its
+        # head and points there: the output the row is rendered from is shown
+        # once. Only after the fit, so it frees room and takes none; an entry
+        # shortened, incomplete, a lower-cased copy or a failed call leaves its
+        # row whole.
+        whole = {
+            i: texts[i]
+            for i, e in entries.items()
+            if e.ok and e.text and texts[i] == e.text and not e.partial and not e.lowered
+        }
+        heads: dict[str, str] = {}
+        if whole and ledger:
+            from maljan.pipeline.triage_pack import pack_row_heads
+
+            try:
+                heads = pack_row_heads(ledger)
+            except Exception as exc:  # noqa: BLE001 — no head, the row stays whole
+                self.logger.debug("Technique question: pack row heads not read (%s).", exc)
+        pointed = pack_rows_shown_below(facts_block, whole, heads)
+        if pointed != facts_block:
+            head = (
+                f"{_standing_blocks(run_state, pointed)}{_identity_prefix(sample)}"
+                + technique_question_head(join_prompt_parts(fitted_reports), decided, carried)
+            )
         # The technique cards are reference beside the claims: they go in only
         # where the window has room left after the reports and the evidence,
         # so they never shorten either.
@@ -4568,6 +5019,10 @@ class JudgeAgent(BudgetMeter):
         # A relationship this pipeline builds names the agents whose claims it
         # carries and nobody else.
         claimed_by: dict[str, list[str]] = {}
+        # The round of each claim naming a technique that a tool-less retry
+        # added (``ClaimEvidence.added_by_retry_in_round``), ``None`` for any
+        # other: a technique every claim of which a retry added says so.
+        retried: dict[str, list[int | None]] = {}
         if isr_reports:
             for name, isr in isr_reports.items():
                 source = str(getattr(isr, "agent_id", "") or name)
@@ -4577,6 +5032,9 @@ class JudgeAgent(BudgetMeter):
                         agents = claimed_by.setdefault(claim.technique_id, [])
                         if source not in agents:
                             agents.append(source)
+                        retried.setdefault(claim.technique_id, []).append(
+                            claim.added_by_retry_in_round
+                        )
         model_only = sorted(set(TECHNIQUE_WORD_RE.findall(text)) - tids)
         if model_only:
             self.logger.warning(
@@ -4638,22 +5096,25 @@ class JudgeAgent(BudgetMeter):
 
         for tid in sorted(tids):
             attack_id = f"attack-pattern--{uuid.uuid4()}"
-            objects.append(
-                {
-                    "type": "attack-pattern",
-                    "id": attack_id,
-                    "name": tid,
-                    "external_references": [
-                        {
-                            "source_name": "mitre-attack",
-                            "external_id": tid,
-                            "url": (
-                                f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
-                            ),
-                        }
-                    ],
-                }
-            )
+            pattern: dict[str, Any] = {
+                "type": "attack-pattern",
+                "id": attack_id,
+                "name": tid,
+                "external_references": [
+                    {
+                        "source_name": "mitre-attack",
+                        "external_id": tid,
+                        "url": (f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"),
+                    }
+                ],
+            }
+            rounds = retried.get(tid) or []
+            if rounds and all(r is not None for r in rounds):
+                # Only claims a tool-less retry added name it: the pattern
+                # carries the note those claims carry.
+                first = min(r for r in rounds if r is not None)
+                pattern["description"] = retry_added_marker(first)
+            objects.append(pattern)
             if not malware_id:
                 # Nothing to relate the technique to, and a relationship with a
                 # dangling source is a defect the integrity pass would prune.
@@ -4857,6 +5318,7 @@ class JudgeAgent(BudgetMeter):
         memory_store: MemoryStore | None,
         current_sample_id: str | None = None,
         owner: str | None = None,
+        container: Any = None,
     ) -> str:
         """Retrieve similar past cases and format them as a few-shot prompt block.
 
@@ -4874,13 +5336,36 @@ class JudgeAgent(BudgetMeter):
             memory_store: MemoryStore-protocol object, or None to skip.
             owner: Whose cases may be read: the job's owner, or ``None`` for
                 the unscoped ones (``long_term_memory.recall``).
+            container: The job's container, which keeps the cases read for
+                it (``long_term_memory.similar_cases``); ``None`` reads anew.
 
         Returns:
             Formatted prompt block string, or "" when store is None/empty or
             no similar cases are found.
         """
+        cases = JudgeAgent._similar_cases(
+            isr_reports,
+            memory_store,
+            current_sample_id=current_sample_id,
+            owner=owner,
+            container=container,
+        )
+        return MEMORY_UNAVAILABLE_NOTE if cases is None else JudgeAgent._memory_block(cases)
+
+    @staticmethod
+    def _similar_cases(
+        isr_reports: dict | None,
+        memory_store: MemoryStore | None,
+        current_sample_id: str | None = None,
+        owner: str | None = None,
+        container: Any = None,
+    ) -> list[StoredCase] | None:
+        """The similar past cases of other samples for this verdict; ``None`` when the read failed.
+
+        Empty when there is no store, nothing to search with, or no case.
+        """
         if memory_store is None or not isr_reports:
-            return ""
+            return []
 
         # Build search query from all current ISR claims
         query_parts: list[str] = []
@@ -4896,20 +5381,21 @@ class JudgeAgent(BudgetMeter):
         query = " ".join(query_parts)
 
         if not query.strip():
-            return ""
+            return []
 
         try:
             # Never retrieve the current sample's own past run as a "weighted
             # prior", and only the job's owner's cases (``recall``, which also
-            # serves a backend older than ``exclude_sample_id``).
-            from maljan.memory.long_term_memory import recall
+            # serves a backend older than ``exclude_sample_id``). Read once
+            # per job, so every verdict prompt of it shows the same cases.
+            from maljan.memory.long_term_memory import similar_cases
 
-            cases = recall(
+            return similar_cases(
                 memory_store,
                 query,
-                top_k=3,
                 exclude_sample_id=current_sample_id,
                 owner=owner,
+                container=container,
             )
         except Exception as exc:  # noqa: BLE001
             # Never let retrieval failure block verdict generation, and never
@@ -4920,8 +5406,11 @@ class JudgeAgent(BudgetMeter):
                 "without prior cases.",
                 describe_exception_for_log(exc),
             )
-            return MEMORY_UNAVAILABLE_NOTE
+            return None
 
+    @staticmethod
+    def _memory_block(cases: Sequence[StoredCase]) -> str:
+        """The similar past cases as the judge's prompt block, or ``""`` for none."""
         if not cases:
             return ""
 
@@ -4935,7 +5424,6 @@ class JudgeAgent(BudgetMeter):
         ]
 
         for idx, case in enumerate(cases, 1):
-            ttps = ", ".join(case.technique_ids) if case.technique_ids else "none"
             # Whole: the verdict prompt is fitted to the judge's window as a
             # whole, and a case's summary is shortened there only when it must be.
             # A past run's summary is built from that run's claims, which carry
@@ -4946,9 +5434,7 @@ class JudgeAgent(BudgetMeter):
             # issues too: each is renamed so none can be cited as this run's
             # (``long_term_memory.foreign_ids_written_out``).
             summary = foreign_quoted_value(case.summary_text)
-            category = foreign_quoted_value(case.malware_category)
-            lines.append(f"[{idx}/{total}] sample_id: {case.sample_id} (category: {category})")
-            lines.append(f"  Past techniques: {foreign_ids_written_out(ttps)}")
+            lines.append(similar_case_head(idx, total, case))
             lines.append(f"  Behavioral summary: {summary}")
 
         lines.append(_MEMORY_END)

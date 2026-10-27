@@ -26,6 +26,14 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from maljan.agents.mcp_client import structured_content_of
+from maljan.agents.null_arguments import (
+    NO_NULLS,
+    current_call_nulls,
+    noting_class,
+    nulls_of_call,
+    rules_of,
+    take_call_nulls,
+)
 from maljan.agents.tool_fence import fenced
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
@@ -44,6 +52,7 @@ from maljan.pipeline.validation import listed_function
 from maljan.schemas.evidence import (
     EvidenceCounter,
     LedgerEntry,
+    ServerChanges,
     build_entry,
     holds_its_answer,
     not_shown_record,
@@ -51,6 +60,8 @@ from maljan.schemas.evidence import (
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
+
+    from maljan.agents.image_range import ImageRange
 
 
 # The servers whose ``resolve_api_hashes`` is this platform's own: the triage
@@ -337,6 +348,7 @@ class EvidenceRecorder:
         self, *, tool: str, args: dict[str, Any] | None = None, server: str | None = None
     ) -> None:
         """Announce a call that is about to run. Never raises."""
+        nulls = current_call_nulls(self)
         emit_tool_call_started(
             self.sink,
             stage=self.stage,
@@ -344,6 +356,8 @@ class EvidenceRecorder:
             tool=tool,
             server=server,
             args_summary=summarize_args(args),
+            nulls_dropped=nulls.dropped,
+            nulls_withheld=nulls.withheld,
         )
 
     def holder_of(self, entry_id: str) -> str:
@@ -420,6 +434,7 @@ class EvidenceRecorder:
         whole: str | None = None,
         whole_structure: dict[str, Any] | None = None,
         hints: Any = None,
+        failure_note: Callable[[], str] | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id.
 
@@ -452,9 +467,21 @@ class EvidenceRecorder:
         neither; the entry it names holds the answer. ``hints`` are the MCP
         hints the tool's own server gave it when it was attached, kept on the
         entry's facts record beside the declaration.
+
+        ``failure_note`` is asked, only when the entry is a failure, for a
+        sentence the platform adds to its remediation (an address outside the
+        loaded image, ``agents.image_range``), after the server's own
+        remediation, which keeps the headline.
+
+        A call with a ``null`` the tool boundary dropped or the transport
+        withheld (``agents.null_arguments``) names each such field on
+        ``args_nulls_dropped`` or ``args_nulls_withheld``; ``args`` are the
+        call's arguments as validated, a withheld field never sent and
+        recorded as its default.
         """
         if repeated_of:
             repeated_of = self.holder_of(repeated_of)
+        nulls = current_call_nulls(self)
         entry_id, seq = self.counter.next_id()
         if guard_answer:
             repeated_of = entry_id
@@ -476,6 +503,8 @@ class EvidenceRecorder:
             remediation=remediation,
             args_repaired=args_repaired,
             args_raw=args_raw,
+            args_nulls_dropped=nulls.dropped,
+            args_nulls_withheld=nulls.withheld,
             model=self.model or None,
             not_shown=not_shown is not None,
             chars_dropped=int(cut or 0) if not_shown is None else 0,
@@ -486,6 +515,10 @@ class EvidenceRecorder:
             agent_tab=self.agent_tab,
             hints=hints,
         )
+        if failure_note is not None and not entry.ok and not repeated_of:
+            note = failure_note()
+            if note:
+                entry.remediation = f"{entry.remediation}; {note}" if entry.remediation else note
         entry._spill = self.spill
         if self.spill is not None and not repeated_of:
             self._keep_whole(
@@ -634,6 +667,224 @@ class EvidenceRecorder:
         )
 
 
+# An address written with its ``0x`` prefix, and a bare one: hex digits with
+# at least one decimal digit and at least one hex letter among them.
+_PREFIXED_ADDRESS = re.compile(r"\s*0[xX]([0-9a-fA-F]{1,16})\s*")
+_BARE_ADDRESS = re.compile(r"\s*((?=[0-9a-fA-F]*\d)(?=[0-9]*[a-fA-F])[0-9a-fA-F]{1,16})\s*")
+# The words of an argument's name, as ``named_as_address`` splits them.
+_NAME_WORDS = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
+
+
+def _address_spelling(name: str, value: Any, *, bare: bool = False) -> Any:
+    """``value`` as a repeat is keyed by: an address as ``0x`` and its value, else as written.
+
+    Only for an argument whose name says it takes an address in the binary,
+    read from the name alone (``undeclared_tools.named_as_address``). A value
+    written with ``0x`` is keyed by its value. A bare value is read as one only
+    for a lookup (``bare``), only where it holds a decimal digit and a hex
+    letter, and only for an argument whose name has no ``name`` word: a symbol
+    such as ``add`` is no address, and a tool nobody declared may read bare
+    digits in another base. Any other value is kept as written.
+    """
+    from maljan.core.undeclared_tools import named_as_address
+
+    if not isinstance(value, str) or not named_as_address(name):
+        return value
+    found = _PREFIXED_ADDRESS.fullmatch(value)
+    if found is None and bare and "name" not in _name_words(name):
+        found = _BARE_ADDRESS.fullmatch(value)
+    if found is None:
+        return value
+    return f"0x{int(found.group(1), 16):x}"
+
+
+def _name_words(name: str) -> set[str]:
+    return {word.lower() for word in _NAME_WORDS.findall(str(name or ""))}
+
+
+# A bare address no reading can take for a decimal number or a short word:
+# six hex digits or more, a decimal digit and a hex letter among them.
+_PLAIN_BARE_ADDRESS = re.compile(r"\s*((?=[0-9a-fA-F]*\d)(?=[0-9]*[a-fA-F])[0-9a-fA-F]{6,16})\s*")
+
+
+def _plain_address(value: Any) -> int | None:
+    """``value`` as an address only where no other reading of it exists, else ``None``.
+
+    ``0x`` and hex digits, or a bare spelling of six hex digits or more
+    holding both a decimal digit and a hex letter. A name, a short bare
+    spelling (``add1``), bare decimal digits and a number are no address: a
+    number in a call may be a decimal address, an offset or an index.
+    """
+    if not isinstance(value, str):
+        return None
+    found = _PREFIXED_ADDRESS.fullmatch(value) or _PLAIN_BARE_ADDRESS.fullmatch(value)
+    return int(found.group(1), 16) if found is not None else None
+
+
+def _address_list(value: Any) -> list[int] | None:
+    """The addresses an argument lists, when every item it holds is one; ``None`` otherwise.
+
+    A list, a JSON list written as a string, or a string with commas between
+    the addresses.
+    """
+    items: Any = value
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("["):
+            try:
+                items = json.loads(text)
+            except (ValueError, RecursionError):
+                return None
+        else:
+            items = text.split(",")
+    if not isinstance(items, list | tuple) or not items:
+        return None
+    found = [_plain_address(item) for item in items]
+    return (
+        None if any(address is None for address in found) else [a for a in found if a is not None]
+    )
+
+
+# The last line of a listing a tool cut short itself: it says so, or it ends
+# in an ellipsis.
+_CUT_SHORT_LINE = re.compile(r"trunc|partial|timed? ?out", re.IGNORECASE)
+_ELLIPSES = ("...", "…")
+
+
+def whole_code(text: str) -> bool:
+    """Whether ``text`` reads as a code listing, whole.
+
+    Pseudo-C or disassembly (``undeclared_tools.holds_code``,
+    ``holds_bare_listing``) that says no failure, whose last line neither
+    ends in an ellipsis or a cut mark (``undeclared_tools._STORAGE_CUT_MARKS``)
+    nor says it was cut, timed out or is partial, and that, where it holds a
+    brace, holds as many closing braces as opening ones and closes on its
+    last line. An empty answer, prose, or an answer a tool or a guardrail cut
+    short is not one: the call that gave it is worth making again. A brace in
+    a string literal may unbalance a whole listing, which then is not held:
+    a call made again costs less than an answer wrongly called whole.
+    """
+    from maljan.core.undeclared_tools import (
+        _STORAGE_CUT_MARKS,
+        holds_bare_listing,
+        holds_code,
+        prose_error,
+    )
+
+    said = str(text or "")
+    lines = [line.strip() for line in said.splitlines() if line.strip()]
+    if not lines or prose_error(said):
+        return False
+    last = lines[-1]
+    if last.endswith((*_STORAGE_CUT_MARKS, *_ELLIPSES)) or _CUT_SHORT_LINE.search(last):
+        return False
+    if "{" in said or "}" in said:
+        if said.count("{") != said.count("}") or not last.endswith("}"):
+            return False
+    return holds_code(said) or holds_bare_listing(said)
+
+
+def _declared_arguments(facts: Any) -> Mapping[str, Any]:
+    held = getattr(facts, "arguments", None)
+    return held if isinstance(held, Mapping) else {}
+
+
+def _roles_key(facts: Any, kwargs: Mapping[str, Any]) -> str:
+    """The values a call gives its declared argument roles other than ``address``, as one key.
+
+    A role given nothing (left out, or ``null``) is not in it, so two calls
+    agree on a role exactly when both give the same value or neither gives one.
+    """
+    pairs = sorted(
+        (str(role), json.dumps(kwargs[str(argument)], sort_keys=True, default=str))
+        for role, argument in _declared_arguments(facts).items()
+        if role != "address" and kwargs.get(str(argument)) is not None
+    )
+    return json.dumps(pairs)
+
+
+def member_request(facts: Any, kwargs: Mapping[str, Any]) -> tuple[int, str] | None:
+    """``(address, roles key)`` of a whole-function read an aggregate's member could answer.
+
+    Only a call of a tool that declares it reads one whole function
+    (``undeclared_tools.reads_a_whole_function``) and its ``address``
+    argument, given a plain address (:func:`_plain_address`), whose every
+    other argument is one of its declared roles or is given nothing: an
+    argument nothing declares may change what the tool answers.
+    """
+    from maljan.core.undeclared_tools import reads_a_whole_function
+
+    if not reads_a_whole_function(facts):
+        return None
+    declared = _declared_arguments(facts)
+    argument = str(declared.get("address") or "")
+    if not argument:
+        return None
+    address = _plain_address(kwargs.get(argument))
+    if address is None:
+        return None
+    roles = {str(name) for name in declared.values()}
+    if any(value is not None and name not in roles for name, value in kwargs.items()):
+        return None
+    return address, _roles_key(facts, kwargs)
+
+
+class _Pairs(list):  # type: ignore[type-arg]
+    """A JSON object's members in their order, duplicate keys and all."""
+
+
+def aggregate_members(
+    facts: Any, kwargs: Mapping[str, Any], text: str
+) -> tuple[str, dict[int, str]] | None:
+    """``(roles key, members)`` of an aggregate's answer keyed by function, else ``None``.
+
+    Read by the declared shape alone: a tool that declares the tools it is the
+    aggregate of (``ToolFacts.aggregate_of``), called with its declared roles
+    and exactly one other argument, which lists addresses, whose answer is one
+    whole JSON object every key of which is a plain address that list holds.
+    Any other argument nothing declares (an ``image_base``) may change what
+    the answer's keys mean, and nothing is read. Each member is that key's
+    text exactly as the answer holds it, where it is a whole listing
+    (:func:`whole_code`); an address two keys name, the same key twice or two
+    spellings of it, is left out. Linear in the answer.
+    """
+    if not getattr(facts, "aggregate_of", None):
+        return None
+    declared = _declared_arguments(facts)
+    if declared.get("address") and kwargs.get(str(declared["address"])) is not None:
+        return None
+    roles = {str(name) for name in declared.values()}
+    others = [value for name, value in kwargs.items() if value is not None and name not in roles]
+    if len(others) != 1:
+        return None
+    listed = _address_list(others[0])
+    if listed is None:
+        return None
+    try:
+        document = json.loads(text, object_pairs_hook=_Pairs)
+    except (ValueError, TypeError, RecursionError):
+        return None
+    if not isinstance(document, _Pairs) or not document:
+        return None
+    asked = set(listed)
+    read = [(_plain_address(key), value) for key, value in document]
+    keyed = [(address, value) for address, value in read if address in asked]
+    if len(keyed) != len(read):
+        return None
+    named: dict[int | None, int] = {}
+    for address, _value in keyed:
+        named[address] = named.get(address, 0) + 1
+    members = {
+        address: value
+        for address, value in keyed
+        if address is not None
+        and named[address] == 1
+        and isinstance(value, str)
+        and whole_code(value)
+    }
+    return _roles_key(facts, kwargs), members
+
+
 class RepeatGuard:
     """How often each ``(tool, arguments)`` pair has been asked for in one loop.
 
@@ -707,6 +958,14 @@ class RepeatGuard:
         # The characters the platform left out of each seeded answer
         # (``platform_cut``), which its replay states as its first showing did.
         self._cuts: dict[str, int] = {}
+        # The answers this loop's calls hold whole, by the server that gave
+        # them: a whole-function read's answer by its call's key, and each
+        # member of an aggregate's answer by the tool it stands in for, its
+        # address and the call's declared roles. A call one of them provably
+        # covers is answered from the entry before any tool runs.
+        # Each is kept with the server's change mark when its read started
+        # (``ServerChanges``): one whose mark has moved since is not handed out.
+        self._held: dict[str, dict[Any, tuple[str, str, str, Any]]] = {}
 
     def _seeded_count(self, key: str) -> int:
         """Where a seeded call's count starts: one served retry for a failure or an unkept result."""
@@ -763,7 +1022,7 @@ class RepeatGuard:
         kept; the ask is marked as told, and it is not a repeat. ``None``
         otherwise, and for every later ask of it.
         """
-        key = self._key(tool, kwargs)
+        key = self._lookup_key(tool, kwargs)
         entry = self._seeded.get(key)
         if entry is None or entry not in self._recorded or key in self._told:
             return None
@@ -781,7 +1040,7 @@ class RepeatGuard:
         served) and not counted as a repeat: the model has not yet been told
         in this conversation. An ask after it counts as any repeat does.
         """
-        key = self._key(tool, kwargs)
+        key = self._lookup_key(tool, kwargs)
         if key not in self._seeded or key in self._told:
             return False
         self._told.add(key)
@@ -808,6 +1067,61 @@ class RepeatGuard:
             if held.startswith(body):
                 return entry_id
         return None
+
+    def hold_answer(
+        self, server: str, tool: str, kwargs: dict[str, Any], entry_id: str, text: str, mark: Any
+    ) -> None:
+        """Record that ``entry_id`` holds whole ``text``, a whole-function read's answer to this call.
+
+        Keyed by the call exactly as it was written (:meth:`_key`): a bare
+        spelling of an address is never answered from a ``0x`` call's entry.
+        """
+        held = self._held.setdefault(str(server or ""), {})
+        held[("call", self._key(tool, kwargs))] = (str(entry_id), text, tool, mark)
+
+    def hold_members(
+        self,
+        server: str,
+        tool: str,
+        covers: Sequence[str],
+        roles: str,
+        members: Mapping[int, str],
+        entry_id: str,
+        mark: Any,
+    ) -> None:
+        """Record that ``entry_id`` holds each of ``members`` whole, for each tool it ``covers``."""
+        held = self._held.setdefault(str(server or ""), {})
+        for name in covers:
+            for address, text in members.items():
+                held[("member", str(name), address, roles)] = (str(entry_id), text, tool, mark)
+
+    def _still_held(self, server: str, key: Any, mark: Any) -> tuple[str, str, str] | None:
+        held = self._held.get(str(server or ""), {})
+        found = held.get(key)
+        if found is None:
+            return None
+        if found[3] != mark:
+            # Something may have changed the server since it was read.
+            del held[key]
+            return None
+        return found[0], found[1], found[2]
+
+    def held_answer(
+        self, server: str, tool: str, kwargs: dict[str, Any], mark: Any
+    ) -> tuple[str, str] | None:
+        """``(entry id, text)`` of the whole answer an identical earlier call holds, or ``None``.
+
+        ``mark`` is the server's change mark now: an answer held under another
+        is stale.
+        """
+        found = self._still_held(server, ("call", self._key(tool, kwargs)), mark)
+        return (found[0], found[1]) if found is not None else None
+
+    def held_member(
+        self, server: str, declared_name: str, address: int, roles: str, mark: Any
+    ) -> tuple[str, str, str] | None:
+        """``(entry id, text, its tool)`` of an aggregate's member that answers this read, or ``None``."""
+        return self._still_held(server, ("member", str(declared_name), address, roles), mark)
 
     def forget_round_seeds(self, server: str) -> int:
         """Drop every earlier round's seed made on ``server``: a call there may have changed it.
@@ -843,13 +1157,40 @@ class RepeatGuard:
         return str(entry_id) in self._seeded_failures
 
     @staticmethod
-    def _key(tool: str, kwargs: dict[str, Any]) -> str:
-        """The call, canonically: same arguments in any order are the same call."""
+    def _key(tool: str, kwargs: dict[str, Any], *, bare: bool = False) -> str:
+        """The call, canonically: same arguments in any order are the same call.
+
+        An argument named for an address in the binary
+        (``undeclared_tools.named_as_address``) is keyed by its value where it
+        is written with ``0x`` (:func:`_address_spelling`): ``0x1360BC03868``
+        and ``0x1360bc03868`` are one call. ``bare`` also reads a bare spelling
+        as its value, the key a lookup tries second (:meth:`_lookup_key`).
+        Every other argument is keyed as written.
+        """
+        canonical = {
+            name: _address_spelling(name, value, bare=bare) for name, value in kwargs.items()
+        }
         try:
-            arguments = json.dumps(kwargs, sort_keys=True, default=str)
+            arguments = json.dumps(canonical, sort_keys=True, default=str)
         except (TypeError, ValueError):
-            arguments = repr(sorted(kwargs.items()))
+            arguments = repr(sorted(canonical.items()))
         return f"{tool}({arguments})"
+
+    def _lookup_key(self, tool: str, kwargs: dict[str, Any]) -> str:
+        """The key an ask is counted and answered under.
+
+        Its own key, unless that names nothing yet and the ask spells an
+        address bare that an earlier call wrote with ``0x``: then that call's
+        key. Never the other way: a ``0x`` ask is not answered from a call
+        made with the bare spelling.
+        """
+        key = self._key(tool, kwargs)
+        if key in self._first or key in self._seeded:
+            return key
+        read = self._key(tool, kwargs, bare=True)
+        if read != key and (read in self._first or read in self._seeded):
+            return read
+        return key
 
     def answered_by(self, tool: str, kwargs: dict[str, Any]) -> str | None:
         """The entry that already answers this call, when it must not run again.
@@ -860,7 +1201,7 @@ class RepeatGuard:
         produced a guard that could reach 1 per call and never its own
         threshold.
         """
-        key = self._key(tool, kwargs)
+        key = self._lookup_key(tool, kwargs)
         if self._count.get(key, 0) < self.SERVED:
             return None
         return self._first.get(key)
@@ -873,7 +1214,7 @@ class RepeatGuard:
         sentence on: the answer still arrives, and the model is told not to ask
         a third time while it can still do something else with the step.
         """
-        key = self._key(tool, kwargs)
+        key = self._lookup_key(tool, kwargs)
         if not 0 < self._count.get(key, 0) < self.SERVED:
             return None
         return self._first.get(key)
@@ -899,7 +1240,7 @@ class RepeatGuard:
 
     def note(self, tool: str, kwargs: dict[str, Any], entry_id: str) -> None:
         """Record that the call ran, and which entry first answered it."""
-        key = self._key(tool, kwargs)
+        key = self._lookup_key(tool, kwargs)
         self._count[key] = self._count.get(key, 0) + 1
         # A retry of an earlier chunk's failure, or of a call whose result the
         # run did not keep, answers for the call from here on: its entry is
@@ -1047,6 +1388,25 @@ def _function_label(text: str, key: tuple[str, Any] | None) -> str:
     return f"the function at {key[1]:#x}" if key and key[0] == "start" else "the same function"
 
 
+def held_answer_sentence(tool: str, entry_id: str) -> str:
+    """The sentence under a whole-function read answered from an identical earlier call's entry."""
+    return (
+        f"This call to {tool} with these arguments was not run again: the text above is the "
+        f"result an earlier call recorded in [{entry_id}], answered from the ledger. Cite "
+        f"[{entry_id}] for it."
+    )
+
+
+def held_member_sentence(tool: str, entry_id: str, holder_tool: str, address: int) -> str:
+    """The sentence under a whole-function read answered from an aggregate's member."""
+    return (
+        f"This call to {tool} was not run: the function at {address:#x} is held whole in "
+        f"[{entry_id}], the answer of an earlier call to {holder_tool}, and the text above is "
+        f"that function exactly as [{entry_id}] recorded it, answered from the ledger. Cite "
+        f"[{entry_id}] for it."
+    )
+
+
 def same_function_notice(name: str, entry_id: str) -> str:
     """What a decompile is told when its answer is a function an earlier entry already holds."""
     return (
@@ -1110,6 +1470,16 @@ def earlier_chunk_sentence(tool: str, entry_id: str, *, origin: str = EARLIER_CH
 # What the model is told when its call ran on arguments that were closed off.
 # It is on the result rather than only in the ledger, because the model is the
 # one that can look at the answer and say the brackets were not what it meant.
+def out_of_image_notice(noted: Sequence[str]) -> str:
+    """The platform's line beside a failed answer given an address outside the image, else ``""``.
+
+    ``noted`` holds the note the entry's remediation was given
+    (``agents.image_range``), asked only of a failed entry.
+    """
+    note = noted[-1] if noted else ""
+    return f"\n\n[platform] {note}" if note else ""
+
+
 REPAIRED_NOTICE = (
     "\n\nThe arguments for this call stopped in the middle and were closed off "
     "before it ran. Read the answer against what you meant to ask, and call it "
@@ -1336,14 +1706,18 @@ def record_tools(
     repairs: ArgumentRepairs | None = None,
     context_budget: Any | None = None,
     on_question: Callable[[str], None] | None = None,
+    image_range: Callable[[], ImageRange | None] | None = None,
 ) -> list[BaseTool]:
     """Every tool, each writing its call to ``recorder`` and stamping the id.
 
     ``on_question`` is told the code of every question a call is answered with
     instead of being run, so the run summary counts what the model was asked.
+    ``image_range`` answers, when a call failed, the loaded image's range by
+    the facts the run holds (``agents.image_range``): a failed call given an
+    address outside it is told so.
     """
     return [
-        _record_tool(tool, recorder, repeats, repairs, context_budget, on_question)
+        _record_tool(tool, recorder, repeats, repairs, context_budget, on_question, image_range)
         for tool in tools
     ]
 
@@ -1355,6 +1729,7 @@ def _record_tool(
     repairs: ArgumentRepairs | None = None,
     context_budget: Any | None = None,
     on_question: Callable[[str], None] | None = None,
+    image_range: Callable[[], ImageRange | None] | None = None,
 ) -> Any:
     """One tool, rebuilt so its result is recorded and stamped.
 
@@ -1367,6 +1742,7 @@ def _record_tool(
     from langchain_core.tools import StructuredTool
 
     from maljan.agents.output_shortening import bounding_arguments, narrowing_arguments
+    from maljan.agents.server_names import ServerNamedTool, server_names, to_server_names
     from maljan.agents.tool_pinning import (
         declared_facts_of,
         declared_name_of,
@@ -1396,7 +1772,12 @@ def _record_tool(
     from maljan.agents.tool_pinning import SERVER_HINTS_METADATA_KEY
 
     hints = (getattr(tool, "metadata", None) or {}).get(SERVER_HINTS_METADATA_KEY)
-    accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
+    # By the server's names (``agents.server_names``), as every call below is.
+    accepted = server_names(args_schema)
+    # What the tool does with a ``null`` (``agents.null_arguments``): when it
+    # drops or withholds any, the boundary names each such field of a call.
+    null_rules = rules_of(args_schema)
+    notes_nulls = bool(null_rules)
 
     # The arguments of this tool that reach a part its answer left out, read
     # off the same schema the model was offered. Per tool rather than per call:
@@ -1418,6 +1799,42 @@ def _record_tool(
     from maljan.agents.tool_pinning import answers_again
 
     reads_only = answers_again(tool)
+    # What may be answered from the ledger before a call runs, by the tool's
+    # declaration alone (``_from_the_ledger``): a call of a tool that reads one
+    # whole function, and the tools whose calls an aggregate's answer stands in
+    # for. Neither for a tool that may change state or that declares nothing.
+    from maljan.core.undeclared_tools import reads_a_whole_function
+
+    whole_read = reads_only and reads_a_whole_function(facts)
+    covers = tuple(str(n) for n in getattr(facts, "aggregate_of", None) or ()) if reads_only else ()
+    held_from = str(server or source or "")
+    # What any agent of the job may have changed on each server
+    # (``schemas.evidence.ServerChanges``), shared by every guard of the run.
+    # A counter that keeps none cannot say what another agent changed: then
+    # nothing is held and every read runs.
+    shared = getattr(recorder.counter, "changes", None)
+    changes = shared if isinstance(shared, ServerChanges) else None
+    # Whether a failed call is held against the loaded image's range: the tool
+    # declares an address argument and that it does not run the sample's code.
+    from maljan.agents.image_range import locates_in_image, out_of_image_note
+
+    locates = image_range is not None and locates_in_image(facts)
+
+    def _outside(kwargs: dict[str, Any], noted: list[str]) -> Callable[[], str] | None:
+        """The failure note for this call (``EvidenceRecorder.record``), kept in ``noted``."""
+        if not locates or image_range is None:
+            return None
+
+        def _note() -> str:
+            try:
+                note = out_of_image_note(facts, kwargs, image_range())
+            except Exception as exc:  # noqa: BLE001 — a note is never worth a lost call
+                logger.debug("image range for '%s' not read (%s).", name, exc)
+                note = ""
+            noted.append(note)
+            return note
+
+        return _note
 
     def _charged(line: str, reserved: bool = False) -> str:
         """``line``, charged to this agent's conversation: it enters it beside the answer.
@@ -1585,6 +2002,130 @@ def _record_tool(
             if not reads_only:
                 repeats.forget_round_seeds(server or source or "")
 
+    def _from_the_ledger(kwargs: dict[str, Any]) -> str | None:
+        """The answer a whole-function read gets from an entry that provably holds it, if one does.
+
+        Two entries do: an identical earlier call of this tool, and an earlier
+        call of a tool on the same server that declares itself the aggregate of
+        this one (``ToolFacts.aggregate_of``) and whose answer holds this
+        address's function as a member, under the same declared roles
+        (``member_request``, ``aggregate_members``). Each holds the answer
+        whole: the call answered, settled, uncut and unshortened, and no call
+        that may change state, by this agent or any other, started or ended on
+        the server since its read started (``ServerChanges``). No
+        tool runs. The model reads the held text exactly as the entry recorded
+        it, stamped with that entry's id and told it came from an earlier
+        call; the call is filed as a repeat of that entry and counted as an
+        identical call that ran is. Where the conversation has no room for the
+        text, the tool runs and its guardrail decides, as for any call.
+        """
+        if repeats is None or not whole_read or changes is None:
+            return None
+        mark = changes.mark(held_from)
+        found = repeats.held_answer(held_from, name, kwargs, mark)
+        if found is not None:
+            holder, text = found
+            said = held_answer_sentence(name, holder)
+        else:
+            request = member_request(facts, kwargs)
+            member = (
+                repeats.held_member(held_from, declared_name, *request, mark) if request else None
+            )
+            if request is None or member is None:
+                return None
+            holder, text, holder_tool = member
+            # A member is a whole answer to this call only where nothing in it
+            # reads as partial to this call's own arguments.
+            if shortened_notice(text, narrowing=narrowing) or completeness_notice(
+                text, narrowing=narrowing, bounds=bounds, args=kwargs
+            ):
+                return None
+            said = held_member_sentence(name, holder, holder_tool, request[0])
+        if not recorder.filed(holder) or recorder.entry_failed(holder):
+            return None
+        shown = f"[{holder}]\n{fenced(holder, text)}\n\n{said}"
+        from maljan.llm.context_window import ContextBudget
+
+        if isinstance(context_budget, ContextBudget) and not context_budget.room_for(
+            len(shown), recorder.agent
+        ):
+            return None
+        repeated = _served_again(kwargs)
+        recorder.record_repeat(
+            tool=name,
+            args=kwargs,
+            server=server,
+            source=source,
+            declared_name=declared_name,
+            first=holder,
+            said=said,
+        )
+        _note(kwargs, holder)
+        # Charged whole: this answer went through no guardrail now.
+        return _charged(f"{shown}{_steering(kwargs, repeated)}")
+
+    def _hold(
+        kwargs: dict[str, Any],
+        entry: LedgerEntry,
+        text: str,
+        *,
+        partial: bool,
+        not_shown: int | None,
+        cut: int | None,
+        whole: str | None,
+        mark: Any,
+    ) -> None:
+        """Keep the answer this call's entry holds whole, for a later read it provably covers.
+
+        Only an answer the model read whole and the entry holds byte for byte:
+        settled (``holds_a_settled_answer``), no repeat, nothing cut,
+        shortened or left out, no line under it saying it is partial, and a
+        listing (:func:`whole_code`). ``mark`` is the server's change mark
+        when the read started: a call that may change state, by any agent,
+        that started or ended while it ran leaves nothing held.
+        """
+        from maljan.schemas.answer_completeness import platform_cut
+
+        if repeats is None or not (whole_read or covers) or mark is None or changes is None:
+            return
+        if changes.mark(held_from) != mark:
+            return
+        if partial or not_shown is not None or cut or whole is not None:
+            return
+        if entry.repeated_of or entry.truncated or platform_cut(entry) or entry.output != text:
+            return
+        if not holds_a_settled_answer(entry):
+            return
+        # An empty or prose answer to a whole-function read is one a retry
+        # may well better (a live run's first decompile answered nothing and
+        # its identical second call the function): only a listing is held.
+        if whole_read and whole_code(text):
+            repeats.hold_answer(held_from, name, kwargs, entry.id, text, mark)
+        if covers:
+            read = aggregate_members(facts, kwargs, text)
+            if read is not None:
+                roles, members = read
+                repeats.hold_members(held_from, name, covers, roles, members, entry.id, mark)
+
+    def _starting() -> Any:
+        """Note a call that is about to run on the job's change count; a read's mark, else ``None``.
+
+        A call that may change state is counted as it starts and again as it
+        ends (:func:`_ending`), so a read that ran beside it, by this agent or
+        any other of the job, is never held whole (``_hold``). With no shared
+        count nothing is noted and no read gets a mark.
+        """
+        if changes is None:
+            return None
+        if not reads_only:
+            changes.bump(held_from)
+            return None
+        return changes.mark(held_from) if whole_read or covers else None
+
+    def _ending() -> None:
+        if changes is not None and not reads_only:
+            changes.bump(held_from)
+
     def _served_again(kwargs: dict[str, Any]) -> str | None:
         """The first entry for a call being served a second time, counted as a repeat.
 
@@ -1703,6 +2244,7 @@ def _record_tool(
         whole_structure: dict[str, Any] | None = None,
         line_room: bool = False,
         waited_ms: int = 0,
+        mark: Any = None,
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
@@ -1732,6 +2274,7 @@ def _record_tool(
                 if repeated is not None and repeats is not None
                 else same_function_notice(_function_label(text, function), holder)
             )
+        noted: list[str] = []
         entry = recorder.record(
             tool=name,
             args=kwargs,
@@ -1739,6 +2282,7 @@ def _record_tool(
             source=source,
             declared_name=declared_name,
             hints=hints,
+            failure_note=_outside(kwargs, noted),
             # A repeat keeps the note, not a second copy of the listing the
             # entry it names already holds.
             output=same or text,
@@ -1791,17 +2335,25 @@ def _record_tool(
         # platform made, which the entry holds as the coverage record reads it.
         from maljan.schemas.answer_completeness import platform_cut
 
-        complete = _charged(
-            completeness_notice(
-                text,
-                narrowing=narrowing,
-                bounds=bounds,
-                args=kwargs,
-                cut=platform_cut(entry),
-                shortened=bool(shortened),
-                original=whole,
-            ),
-            line_room,
+        partial = completeness_notice(
+            text,
+            narrowing=narrowing,
+            bounds=bounds,
+            args=kwargs,
+            cut=platform_cut(entry),
+            shortened=bool(shortened),
+            original=whole,
+        )
+        complete = _charged(partial, line_room)
+        _hold(
+            kwargs,
+            entry,
+            text,
+            partial=bool(shortened or partial),
+            not_shown=not_shown,
+            cut=cut,
+            whole=whole,
+            mark=mark,
         )
         # The answer as the one view shows it (``agents.tool_fence``): a text
         # answer inside a fence its content cannot close, a JSON one with its
@@ -1809,7 +2361,7 @@ def _record_tool(
         text = fenced(entry.id, text)
         if raw is not None:
             text = f"{text}{REPAIRED_NOTICE}"
-        text = f"{text}{shortened}{complete}"
+        text = f"{text}{shortened}{complete}{_charged(out_of_image_notice(noted))}"
         # ``text``, not ``entry.output``: the ledger trims what it stores, and
         # what the model reads is not the ledger's business. The size of a tool
         # result in a prompt is decided where it has always been decided —
@@ -1832,6 +2384,7 @@ def _record_tool(
     ) -> str:
         message = f"{type(exc).__name__}: {exc}"
         raw = _was_repaired(kwargs)
+        noted: list[str] = []
         entry = recorder.record(
             tool=name,
             args=sent if sent is not None else kwargs,
@@ -1839,6 +2392,7 @@ def _record_tool(
             source=source,
             declared_name=declared_name,
             hints=hints,
+            failure_note=_outside(kwargs, noted),
             output=message,
             ok=False,
             error=message,
@@ -1854,12 +2408,16 @@ def _record_tool(
         # is shown as a tool answer is (``agents.tool_fence``), never as a line
         # of the platform's own. A refusal the platform composed is its own
         # sentence and stays as written (``platform_refusal``).
+        outside = _charged(out_of_image_notice(noted))
         if platform_refusal(exc):
-            return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated, failed=True)}"
+            return (
+                f"[{entry.id}] tool call failed: {message}{outside}"
+                f"{_steering(kwargs, repeated, failed=True)}"
+            )
         said = str(exc)
         shown = f"\n{fenced(entry.id, said)}" if said.strip() else ""
         return (
-            f"[{entry.id}] tool call failed: {type(exc).__name__}{shown}"
+            f"[{entry.id}] tool call failed: {type(exc).__name__}{shown}{outside}"
             f"{_steering(kwargs, repeated, failed=True)}"
         )
 
@@ -1907,6 +2465,13 @@ def _record_tool(
     if func is not None:
 
         def wrapped_func(**kwargs: Any) -> str:  # noqa: F811
+            nulls = take_call_nulls(kwargs, null_rules) if notes_nulls else NO_NULLS
+            # What is recorded, cited and keyed for a repeat is what is sent.
+            kwargs = to_server_names(args_schema, kwargs)
+            with nulls_of_call(recorder, nulls):
+                return _recorded_func(kwargs)
+
+        def _recorded_func(kwargs: dict[str, Any]) -> str:
             # The guards first. A call the repeat guard answers is filed and
             # announced as a repeat of the entry that holds its answer
             # (``record_repeat``); a call another guard answers is filed and
@@ -1919,7 +2484,7 @@ def _record_tool(
             question = _names_its_own_parameter(kwargs)
             if question is not None:
                 return question
-            answered = _already_answered(kwargs)
+            answered = _already_answered(kwargs) or _from_the_ledger(kwargs)
             if answered is not None:
                 return answered
             recorder.call_started(tool=name, args=kwargs, server=server)
@@ -1929,6 +2494,7 @@ def _record_tool(
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
             call_answer: CallAnswer | None = None
+            mark = _starting()
             try:
                 # Outside the analyst's repeated-claims watch: a model a tool
                 # calls (a summariser, another agent asked) is not the
@@ -1948,6 +2514,7 @@ def _record_tool(
                     call_answer.structure,
                     call_answer.line_room,
                     waited_ms=waited,
+                    mark=mark,
                 )
             except SampleNotOpened as exc:
                 ran, waited = _began(started, call_answer)
@@ -1955,23 +2522,33 @@ def _record_tool(
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
                 ran, waited = _began(started, call_answer)
                 return _stamp_error(kwargs, ran, wall_clock, exc, repeated, waited_ms=waited)
+            finally:
+                _ending()
 
     if coroutine is not None:
 
         async def wrapped_coroutine(**kwargs: Any) -> str:  # noqa: F811
+            nulls = take_call_nulls(kwargs, null_rules) if notes_nulls else NO_NULLS
+            # What is recorded, cited and keyed for a repeat is what is sent.
+            kwargs = to_server_names(args_schema, kwargs)
+            with nulls_of_call(recorder, nulls):
+                return await _recorded_coroutine(kwargs)
+
+        async def _recorded_coroutine(kwargs: dict[str, Any]) -> str:
             ended = _the_room_is_gone(kwargs)
             if ended is not None:
                 return ended
             question = _names_its_own_parameter(kwargs)
             if question is not None:
                 return question
-            answered = _already_answered(kwargs)
+            answered = _already_answered(kwargs) or _from_the_ledger(kwargs)
             if answered is not None:
                 return answered
             recorder.call_started(tool=name, args=kwargs, server=server)
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
             call_answer: CallAnswer | None = None
+            mark = _starting()
             try:
                 # Named for the length of the call so the guardrail — two
                 # layers down, behind a toolkit every agent of the job shares —
@@ -1993,6 +2570,7 @@ def _record_tool(
                     call_answer.structure,
                     call_answer.line_room,
                     waited_ms=waited,
+                    mark=mark,
                 )
             except SampleNotOpened as exc:
                 ran, waited = _began(started, call_answer)
@@ -2000,15 +2578,21 @@ def _record_tool(
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
                 ran, waited = _began(started, call_answer)
                 return _stamp_error(kwargs, ran, wall_clock, exc, repeated, waited_ms=waited)
+            finally:
+                _ending()
 
     try:
         # The tool's own class where it opts in (``keeps_named_args``): a tool
         # that keeps to the arguments a call named keeps doing so in the recorder.
+        # Any other is offered each argument under its server's own name
+        # (``agents.server_names``), as the tool it wraps was.
         builder = (
             type(tool)
             if isinstance(tool, StructuredTool) and getattr(tool, "keeps_named_args", False)
-            else StructuredTool
+            else ServerNamedTool
         )
+        if notes_nulls:
+            builder = noting_class(builder)
         return builder.from_function(
             func=wrapped_func,
             coroutine=wrapped_coroutine,

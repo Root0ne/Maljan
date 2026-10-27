@@ -96,7 +96,7 @@ def with_declared_errors(
 def _rebuilt(
     tool: Any, patterns: tuple[ErrorPattern, ...], sample_path: Callable[[], str | None] | None
 ) -> Any:
-    from langchain_core.tools import StructuredTool
+    from maljan.agents.server_names import ServerNamedTool
 
     coroutine = getattr(tool, "coroutine", None)
     args_schema = getattr(tool, "args_schema", None)
@@ -112,7 +112,7 @@ def _rebuilt(
         return json.dumps(failure) if failure is not None else reply
 
     try:
-        return StructuredTool.from_function(
+        return ServerNamedTool.from_function(
             func=None,
             coroutine=_call,
             name=name,

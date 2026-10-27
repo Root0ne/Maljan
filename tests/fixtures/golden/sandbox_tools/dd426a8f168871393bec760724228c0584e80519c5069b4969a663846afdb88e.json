@@ -355,6 +355,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\AppNotifications\\Metadata_1785513437.db"
         ],
+        "pids": [
+          "2244"
+        ],
         "sha256": "3e2748142e8fc7ee6c2051b5bdd699c2b3c88d27b3d147c462e1cb710a9913e7",
         "size": 7595,
         "type": "SQLite 3.x database, application id 1469008874, user version 1698649705, last written using SQLite version -30320172, page size 61049, writer version 157, read version 79, unused bytes 101, maximum payload 150, minimum payload 131, leaf payload 123, file counter 745517887, database pages 3758153755, 1st free page 1387660528, free pages 4240975698, cookie 0x14a0fe94, schema 2909902492, cache page size 1657615679, largest root page 3998436299, unknown 0xbb0da75a encoding, vacuum mode 3956745057, reserved 0xfa52791bdb44342a, version-valid-for 2868638154"
@@ -365,6 +368,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\AppNotifications\\Logs\\Session_1786408069.dat"
+        ],
+        "pids": [
+          "2244"
         ],
         "sha256": "5fdf0a62bfdde27d0ad79294e2335fea7cb2344c20981c87bc03680256e7b265",
         "size": 3746,
@@ -377,6 +383,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\AppNotifications\\EventLog_1786214509.log"
         ],
+        "pids": [
+          "2244"
+        ],
         "sha256": "610a0ea58c10ab061f1ac6ee3d73afe4cac46690bad3975cafce14bd455edcab",
         "size": 41,
         "type": "ASCII text"
@@ -387,6 +396,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\AppNotifications\\CachedData\\AppState_1784864373.xml"
+        ],
+        "pids": [
+          "2244"
         ],
         "sha256": "9f625156a259f6c95e265e58b2a922dfd8d11c1eb1038c6aee771b8d7dde4bdb",
         "size": 96,
@@ -399,6 +411,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\AppNotifications\\Temp\\NotifCache_1784590141.db"
         ],
+        "pids": [
+          "2244"
+        ],
         "sha256": "4cf1883517b001ddea72014eae5cd748b55ce5fcd1102f8378ffe4723c0182c4",
         "size": 1054,
         "type": "SQLite 3.x database, application id 3309979541, user version -1129388860, last written using SQLite version -1191558519, page size 2408, writer version 24, read version 10, unused bytes 81, maximum payload 197, minimum payload 201, leaf payload 98, file counter 423657545, database pages 388688722, 1st free page 3169947518, free pages 2116392699, cookie 0xc080230e, schema 1205097949, cache page size 1008415817, largest root page 1985305247, unknown 0x9c36f47f encoding, vacuum mode 890221844, reserved 0x1306aa4c9b6a1b25, version-valid-for 140047044"
@@ -409,6 +424,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\AppNotifications\\CachedData\\SystemCache.tmp"
+        ],
+        "pids": [
+          "2244"
         ],
         "sha256": "7b37aec2c5a8ee719c6d3195deecf750d00d0593581e0ce740391441766900bd",
         "size": 1261,
@@ -421,6 +439,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\AppNotifications\\Logs\\Preferences.json"
         ],
+        "pids": [
+          "2244"
+        ],
         "sha256": "6f4c7524bbad0effd5379636dfd93a0b23d14b3f4eb57625aa263b93a5d8760c",
         "size": 43,
         "type": "JSON text data"
@@ -431,6 +452,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\AppNotifications\\Analytics.log"
+        ],
+        "pids": [
+          "2244"
         ],
         "sha256": "4f3a0c11b0ce30f15bbcf248ccbc7db9cac63cc17e64fb98e58268166cad28db",
         "size": 41,
@@ -443,6 +467,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\AppNotifications\\AppCache.dat"
         ],
+        "pids": [
+          "2244"
+        ],
         "sha256": "ab7cebf8ac99e46addb5616cef84e8e0c34781a2ff80069e3e0fedbf1de18f3b",
         "size": 1695,
         "type": "DOS executable (COM), start instruction 0xeb0e9087 78fb81ad"
@@ -454,6 +481,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\AppNotifications\\Settings\\History.db"
         ],
+        "pids": [
+          "2244"
+        ],
         "sha256": "545972e290568142e8f019fa55b785c3f138f87e96d5fa97ea2b754749eff548",
         "size": 5038,
         "type": "SQLite 3.x database, application id 2595024155, user version 1180104785, last written using SQLite version 1438310879, page size 45724, writer version 154, read version 128, unused bytes 50, maximum payload 224, minimum payload 16, leaf payload 167, file counter 2567640269, database pages 1624786802, 1st free page 724679748, free pages 3068110351, cookie 0x418e96d7, schema 1947511674, cache page size 3168119402, largest root page 2670214419, unknown 0xdda4caef encoding, vacuum mode 1305251304, reserved 0x60d1efeccddea5af, version-valid-for 1871278379"
@@ -464,6 +494,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Microsoft\\AppNotifications\\Logs\\UserSettings_1785064434.config"
+        ],
+        "pids": [
+          "2244"
         ],
         "sha256": "265f611a6d5cc7f72fc25f475da384bbe3e996e386115905828d3d5bf12ebe62",
         "size": 2690,

@@ -26,7 +26,7 @@ import httpx
 
 from maljan.core.logger import logger
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
-from maljan.providers.errors import ProviderError
+from maljan.providers.errors import PACKET_CAPTURE, ProviderError
 from maljan.providers.registry import register_sandbox_provider
 from maljan.providers.sandbox.limits import read_capped, stream_to_file_capped
 from maljan.providers.sandbox.rest_mapping import compile_mapping
@@ -36,8 +36,10 @@ from maljan.providers.sandbox.triage import (
     POLL_TRANSPORT_ERRORS,
     _parse_retry_after,
     _safe_path_component,
+    fetch_artefact,
     poll_deadline_error,
     poll_failure,
+    stop_if_cancelled,
     wait_after_poll_failure,
 )
 
@@ -402,28 +404,32 @@ class RestSandboxProvider(SandboxProvider):
     def fetch_pcap(self, task_id: str, dest_dir: str | Path) -> str | None:
         if not self._cfg.report.pcap_path:
             return None
+        stop_if_cancelled(PACKET_CAPTURE)
         dest = Path(dest_dir)
         dest.mkdir(parents=True, exist_ok=True)
         safe = _safe_path_component(str(task_id))
         out = dest / f"rest_{safe}.pcap"
         url = _fill_task_id(self._cfg.report.pcap_path, safe)
-        try:
-            with self._get_http().stream("GET", url) as response:
-                if response.status_code >= 400:
-                    return None
-                # A capture past the cap degrades this call the way
-                # every other pcap failure does, rather than filling the disk.
-                stream_to_file_capped(response, out, what="The sandbox capture")
-        except Exception:  # noqa: BLE001 — never a hard failure, as for every sandbox
-            out.unlink(missing_ok=True)
-            return None
-        # libpcap/pcapng global header is 24 bytes; anything smaller is empty.
-        # The bytes go with the answer: what is left of a capture nobody will
-        # read is a file of somebody's traffic waiting for the sweep.
-        if not out.exists() or out.stat().st_size < 24:
-            out.unlink(missing_ok=True)
-            return None
-        return str(out)
+        http = self._get_http()
+
+        def keep(response: httpx.Response) -> bool:
+            # A capture past the cap fails this fetch rather than filling the disk.
+            stream_to_file_capped(response, out, what="The sandbox capture")
+            return True
+
+        # Never a hard failure of the run, as for every sandbox: a transient
+        # failure is asked again, a lasting one or an empty file is said
+        # (``ArtefactFetchFailed``), and the bytes go with the answer.
+        return fetch_artefact(
+            lambda: http.stream("GET", url),
+            keep,
+            out,
+            artefact=PACKET_CAPTURE,
+            what=f"Sandbox task {task_id}",
+            sleep=self._sleep,
+            interval=float(self._cfg.poll_interval_seconds),
+            client=http,
+        )
 
     async def probe(self) -> ProviderProbe:
         """Ask the status endpoint about a task that does not exist.

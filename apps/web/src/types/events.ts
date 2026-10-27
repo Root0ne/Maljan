@@ -59,7 +59,7 @@ export type WSEventType =
   | "model_fallback"
   /* A tool loop cleared its oldest tool answers to evidence-id references:
    * agent, turn, how many answers, the request's characters before and
-   * after, and why (`refused` or `window`). See
+   * after, and why (`refused`, `window` or `tier`). See
    * maljan/agents/tool_answer_clearing.py. */
   | "tool_answers_cleared"
   /* One model call's usage as the job's token ledger recorded it: agent,
@@ -227,9 +227,12 @@ export interface RosterStage {
 export interface RosterEventData {
   agents: RosterAgent[];
   stages: RosterStage[];
+  /** Each tool server's display name by its key, for a server whose label is
+   *  not its key. Absent (or null) when no server has a label of its own. */
+  servers?: Record<string, string> | null;
   seq?: number;
 }
 
 /** The roster as the job endpoint carries it, which is the same shape without
  *  the publisher's sequence number. */
-export type JobRoster = Pick<RosterEventData, "agents" | "stages">;
+export type JobRoster = Pick<RosterEventData, "agents" | "stages" | "servers">;

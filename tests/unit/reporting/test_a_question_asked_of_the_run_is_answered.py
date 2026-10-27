@@ -530,25 +530,29 @@ class TestTheReport:
         ids=lambda value: value[0] if isinstance(value, tuple) else str(value),
     )
     def test_a_job_asked_nothing_dumps_and_renders_byte_for_byte_as_before(
-        self, shape: tuple[str, Any]
+        self, shape: tuple[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # Rendered at 73efe759, the dev head this change was cut from, with
         # the generation time fixed: the dump and the Markdown of a report of
         # a job asked nothing must not move by a byte.
         name, build = shape
         golden = json.loads((GOLDEN / f"{name}.json").read_text(encoding="utf-8"))
+        # The build stamps today's date into the report number, and the
+        # version history and each MISP attribute's uuid are derived from it;
+        # the fixtures were rendered on 2026-10-22, so the build stamps that.
+        held = golden["dump"].get("front_matter")
+        if held:
+            stamp = MalwareReportBuilder._build_front_matter
+
+            def _stamped(builder: MalwareReportBuilder, report: MalwareReport) -> Any:
+                front = stamp(builder, report)
+                front.report_date = held["report_date"]
+                front.report_number = held["report_number"]
+                return front
+
+            monkeypatch.setattr(MalwareReportBuilder, "_build_front_matter", _stamped)
         report = build()
         report.generated_at = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
-        # The build stamps today's date into the front matter and the version
-        # history; the fixtures were rendered on 2026-10-22, so pin those too.
-        stamped = golden["dump"]
-        if report.front_matter is not None and stamped.get("front_matter"):
-            report.front_matter.report_date = stamped["front_matter"]["report_date"]
-            report.front_matter.report_number = stamped["front_matter"]["report_number"]
-        for entry, held in zip(
-            report.version_history, stamped.get("version_history", []), strict=True
-        ):
-            entry.date = held["date"]
 
         assert report.model_dump(mode="json") == golden["dump"]
         assert MarkdownRenderer().render(report) == golden["markdown"]

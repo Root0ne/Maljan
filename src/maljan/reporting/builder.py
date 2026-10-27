@@ -97,6 +97,7 @@ class MalwareReportBuilder:
             report = builder.apply_narrative(narrative_output)
         builder.render_extended_stix(report)  # mutates report.stix_bundle_extended
         report.consolidated_iocs = build_consolidated_iocs(report)  # reads the export
+        report.misp_attributes = build_misp_attributes(report, owner=job_id)  # published rows
         report = builder.attach_detection_signatures(report, sample)  # published rows only
     """
 
@@ -118,9 +119,11 @@ class MalwareReportBuilder:
         malware_category: str | None = None,
         degraded_mode: bool = False,
         degradation_reasons: list[str] | None = None,
+        operator_choices: list[str] | None = None,
         sample_platform: str | None = None,
         sample_file_type: str | None = None,
         evidence_ledger: list[LedgerEntry] | None = None,
+        job_id: str | None = None,
     ) -> None:
         self.file_hash = file_hash
         self.file_name = file_name
@@ -139,7 +142,12 @@ class MalwareReportBuilder:
         self.judge_assessment = judge_assessment
         self.malware_category = malware_category
         self.degraded_mode = degraded_mode
-        self.degradation_reasons = degradation_reasons or []
+        # A reason that is the operator's choice is listed apart whoever
+        # handed it in (``pipeline.operator_choice``): never a degradation.
+        from maljan.pipeline.operator_choice import split_operator_choices
+
+        self.degradation_reasons, chosen = split_operator_choices(degradation_reasons or [])
+        self.operator_choices = list(dict.fromkeys([*(operator_choices or []), *chosen]))
         self.sample_platform = sample_platform
         self.sample_file_type = sample_file_type
         # Every tool call the run made, in the order the ids were issued. The
@@ -148,6 +156,10 @@ class MalwareReportBuilder:
         # report body, which is the honest outcome for a run that gathered
         # nothing.
         self.evidence_ledger = list(evidence_ledger or [])
+        # The job the report is built for: what its MISP attributes' uuids are
+        # derived from. A build with none (the command line, a test) uses the
+        # report's own number.
+        self.job_id = job_id
 
     # ------------------------------------------------------------------
     # Deterministic build
@@ -185,6 +197,12 @@ class MalwareReportBuilder:
         # C2 URL FLOSS and the static decoder both recovered once had no row
         # anywhere, not even a refused one, while the record gave it standing.
         emulated = emulation_from_ledger(ledger)
+        # Each decoded text the code passes whole to an API argument of a known
+        # role, with the chain that binds it: such a value is an indicator row
+        # of its own, published with that chain on every surface.
+        from maljan.reporting.call_bindings import bound_values_from_ledger
+
+        bound = bound_values_from_ledger(ledger)
         # Where the run's tools saw each value an analyst listed: a listed
         # value stands on the answer that holds it, and "no tool saw it" is
         # said only when this search of the whole ledger found none.
@@ -238,6 +256,7 @@ class MalwareReportBuilder:
             severity=severity,
             degraded_mode=self.degraded_mode,
             degradation_reasons=self.degradation_reasons,
+            operator_choices=self.operator_choices,
             identity=identity,
             static=static,
             directed_text=directed,
@@ -262,6 +281,7 @@ class MalwareReportBuilder:
             ],
             rule_match_strings=yara_rule_strings(ledger),
             emulated_strings=emulated,
+            bound_values=bound,
             tool_sightings=sightings,
             tool_queries=queries,
             references=references,
@@ -322,6 +342,13 @@ class MalwareReportBuilder:
         report.tlp = report.front_matter.tlp
         report.version_history = _build_version_history(report.front_matter)
         report.consolidated_iocs = build_consolidated_iocs(report)
+        # The MISP attributes of the table's published rows and the published
+        # techniques, so the console's MISP export and the job package carry them.
+        from maljan.reporting.misp import build_misp_attributes, misp_owner
+
+        report.misp_attributes = build_misp_attributes(
+            report, owner=misp_owner(report, self.job_id)
+        )
         logger.info(
             "MalwareReportBuilder: deterministic build complete "
             "(verdict=%s, severity=%s, TTPs=%d, persistence=%d, IOCs=%d, "
@@ -709,17 +736,23 @@ def ioc_table(report: MalwareReport, *, raise_unread: bool = False) -> list[Cons
 
 def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.extractors.network_extractor import url_host
+    from maljan.reporting.call_bindings import BOUND_SOURCE, binding_context
     from maljan.reporting.ledger_projection import listed_non_network_values
     from maljan.reporting.ledger_report import artifact_sections, listed_headings, listed_rows
     from maljan.reporting.renderers.stix_renderer import (
+        UNATTRIBUTED_CAPTURE_VALUE,
+        bound_kwargs,
         corroborating_values,
+        digest_label,
         emulation_kwargs,
         emulation_record,
         listed_value_sightings,
         path_names_a_file,
+        persistence_run_keys,
         publish_answer,
         query_answers,
         recovered_by_words,
+        sandbox_host_kwargs,
         yes_because,
     )
 
@@ -795,38 +828,124 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     strings = list(static.interesting_strings) if static else []
     file_ops = [op for op in (dynamic.file_operations if dynamic else []) if isinstance(op, dict)]
 
+    # A file, a digest, a key or a mutex the sandbox recorded is published
+    # only as an indicator the judge names: one a record attributes to the
+    # sample's tree on that keep, one no record attributes only when the judge
+    # kept it when asked with that fact, as an unattributed flow is
+    # (``stix_renderer.sandbox_host_kwargs``). Every other is withheld with
+    # the reason.
+    def _sandbox_host(kind: str, value: str) -> str:
+        return publish_answer(kind, value, "sandbox", **sandbox_host_kwargs(report, kind, value))
+
+    def _digest_type(value: str) -> str:
+        # A digest is named by its length; any other length names none.
+        return digest_label(value) or "Hash"
+
     if static:
         for res in static.embedded_resources:
             if res.get("carved") and res.get("sha256"):
-                _add("SHA-256", "hash", str(res["sha256"]), "static", f"carved at {res.get('id')}")
+                carved = str(res["sha256"])
+                _add(_digest_type(carved), "hash", carved, "static", f"carved at {res.get('id')}")
     for op in file_ops:
         if op.get("operation") == "write" and op.get("sha256"):
             name = str(op.get("path") or op.get("name") or "")
-            _add("SHA-256", "hash", str(op["sha256"]), "sandbox", f"dropped {name}".strip())
+            digest = str(op["sha256"])
+            _add(
+                _digest_type(digest),
+                "hash",
+                digest,
+                "sandbox",
+                f"dropped {name}".strip(),
+                published=_sandbox_host("hash", digest),
+            )
+
+    # A decoded text the code passes whole to an API argument of its role: the
+    # binding's row, before any other row of its value, with the chain as its
+    # reason (``call_bindings``). A user agent is a network row, added there.
+    def _add_bound(network: bool) -> None:
+        for bound in report.bound_values:
+            if (bound.kind in _BOUND_NETWORK_KINDS) != network:
+                continue
+            if bound.kind == "path":
+                label = "File path" if path_names_a_file(bound.value) else "Directory"
+            else:
+                label = _BOUND_LABELS.get(bound.kind, bound.kind)
+            _add(
+                label,
+                bound.kind,
+                bound.value,
+                BOUND_SOURCE,
+                binding_context(bound),
+                published=publish_answer(
+                    bound.kind,
+                    bound.value,
+                    BOUND_SOURCE,
+                    **bound_kwargs(report, bound.kind, bound.value),
+                ),
+                is_network=network,
+            )
+
+    _add_bound(network=False)
 
     for op in file_ops:
         if op.get("operation") == "write" and op.get("path"):
-            _add("File path", "path", str(op["path"]), "sandbox", "written by the sample")
+            written_path = str(op["path"])
+            _add(
+                "File path",
+                "path",
+                written_path,
+                "sandbox",
+                "written by the sample",
+                published=_sandbox_host("path", written_path),
+            )
     for s in strings:
         if s.kind == "path" and not _is_pipe(s.value):
             ioc_type = "File path" if path_names_a_file(s.value) else "Directory"
             _add(ioc_type, "path", s.value, "strings", s.notes or "")
 
-    if dynamic:
-        for mod in dynamic.registry_mods:
-            if mod.operation in ("create", "modify") and mod.key:
-                target = f"{mod.key} ({mod.value_name})" if mod.value_name else mod.key
-                _add("Registry key", "registry", target, "sandbox", mod.operation)
-    for mech in report.persistence:
-        if mech.kind == "registry_run" and mech.target:
-            _add("Registry key", "registry", mech.target, "persistence", "run key")
+    # The key is the row's value, as every surface carries it (a STIX
+    # registry key, a MISP regkey, the Sigma selection); each value the sample
+    # wrote under it is named in the row's context. A key a persistence
+    # mechanism names is that mechanism's row, answered as a persistence
+    # record, with the sandbox's writes under it in its context.
+    written: dict[str, tuple[str, dict[str, None]]] = {}
+    for mod in dynamic.registry_mods if dynamic else []:
+        if mod.operation in ("create", "modify") and mod.key.strip():
+            said = f"{mod.operation} value {mod.value_name}" if mod.value_name else mod.operation
+            written.setdefault(mod.key.strip().lower(), (mod.key.strip(), {}))[1][said] = None
+    run_keys = persistence_run_keys(report.persistence)
+    for folded, (key, operations) in written.items():
+        if folded in run_keys:
+            continue
+        # A key is attributed by the pids of the calls that wrote it, where
+        # the sandbox kept them (``RegistryMod.pids``).
+        _add(
+            "Registry key",
+            "registry",
+            key,
+            "sandbox",
+            "; ".join(operations),
+            published=_sandbox_host("registry", key),
+        )
+    for folded, target in run_keys.items():
+        under = written.get(folded)
+        context = "; ".join(["run key", *(under[1] if under else [])])
+        _add("Registry key", "registry", target, "persistence", context)
     for s in strings:
         if s.kind == "registry":
             _add("Registry key", "registry", s.value, "strings", s.notes or "")
 
     for op in file_ops:
         if op.get("operation") == "mutex" and op.get("name"):
-            _add("Mutex", "mutex", str(op["name"]), "sandbox", "created at run time")
+            mutex = str(op["name"])
+            _add(
+                "Mutex",
+                "mutex",
+                mutex,
+                "sandbox",
+                "created at run time",
+                published=_sandbox_host("mutex", mutex),
+            )
     for s in strings:
         if s.kind == "mutex":
             _add("Mutex", "mutex", s.value, "strings", s.notes or "")
@@ -857,12 +976,19 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         elif s.kind == "crypto_wallet":
             _add("Cryptocurrency address", "crypto_wallet", s.value, "strings", s.notes or "")
 
-    # A string row of a kind the rule answers for is asked it; the sandbox's,
-    # the persistence mechanisms' and the identity's rows are observations
-    # and records the export reads on its own terms, and keep what they carry.
+    # Every row is asked the one rule: a string row as the string sweep's,
+    # with the run's second-source record, and a row the sandbox, a
+    # persistence record or a static carve recorded under the source that
+    # recorded it — the export carries the ones it publishes (a dropped
+    # file's digest, a path, a key, a mutex), and refuses a command line, a
+    # task and a service, for which it has no object.
     for row in rows:
-        if row.source == "strings" and row.kind in ("path", "registry", "mutex", "command"):
-            row.published = _from_strings(row.kind, row.value)
+        if row.published is not None:
+            continue
+        if row.source == "strings":
+            row.published = _from_strings(row.kind or "", row.value)
+        else:
+            row.published = publish_answer(row.kind or "", row.value, row.source)
 
     # What the analysts listed that no tool recorded: each value its own row,
     # in the analyst's name and with the rule's refusal, after every tool row
@@ -897,9 +1023,13 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
 
     net = report.network
     reputations: dict[str, Any] = {}
-    # A fingerprint and a user agent are the sandbox's own records of the
-    # traffic; no string sweep produces one, and the reason says so.
-    _seen = yes_because("sandbox")
+
+    # A fingerprint and a user agent are read out of the sandbox's capture,
+    # which names no process beside them: each is refused as an unattributed
+    # flow is, on every surface, and STIX has no object for one either.
+    def _captured(kind: str, value: str) -> str:
+        return publish_answer(kind, value, "sandbox", unattributed=UNATTRIBUTED_CAPTURE_VALUE)
+
     if net:
         for d in net.domains:
             reputations[d.fqdn.strip().lower().rstrip(".")] = d.reputation
@@ -970,12 +1100,23 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 ),
                 is_network=True,
             )
-        for ua in net.user_agents:
-            _add("User-Agent", "user_agent", ua, "sandbox", published=_seen, is_network=True)
-        for ja3 in net.ja3_fingerprints:
-            _add("JA3", "ja3", ja3, "sandbox", published=_seen, is_network=True)
-        for ja3s in net.ja3s_fingerprints:
-            _add("JA3S", "ja3s", ja3s, "sandbox", published=_seen, is_network=True)
+        _add_bound(network=True)
+        for label, kind, values in (
+            ("User-Agent", "user_agent", net.user_agents),
+            ("JA3", "ja3", net.ja3_fingerprints),
+            ("JA3S", "ja3s", net.ja3s_fingerprints),
+        ):
+            for value in values:
+                _add(
+                    label,
+                    kind,
+                    value,
+                    "sandbox",
+                    published=_captured(kind, value),
+                    is_network=True,
+                )
+    else:
+        _add_bound(network=True)
 
     labels = {"url": "URL", "domain": "Domain", "email": "Email"}
     for s in strings:
@@ -1000,6 +1141,12 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         else row
         for row in table
     ]
+
+
+# The table's type for each kind a bound value can be, and the kinds that are
+# network rows.
+_BOUND_LABELS = {"mutex": "Mutex", "user_agent": "User-Agent"}
+_BOUND_NETWORK_KINDS = frozenset({"user_agent"})
 
 
 # The table's type for each non-network kind an analyst's table lists.
@@ -1051,12 +1198,9 @@ def _with_the_judge_s_values(
             if (row.kind or "") == item.kind and row.value.strip().lower() == wanted
         ]
         if same:
-            # A row the table never asked the rule of — a sandbox's file write,
-            # an analyst's persistence target — is asked it now, because the
-            # export asks it of the judge's indicator for the same value.
-            for index in same:
-                if out[index].published is None:
-                    out[index] = out[index].model_copy(update={"published": answer})
+            # The row was asked the rule under the source that recorded it,
+            # with the judge's keep where the rule reads one: the same answer
+            # the judge's indicator for the value gets.
             continue
         if item.kind == "hash":
             label = item.algorithm or "Hash"

@@ -98,6 +98,42 @@ def format_entry_id(seq: int) -> str:
     return f"ev_{max(1, int(seq)):0{_ID_DIGITS}d}"
 
 
+class ServerChanges:
+    """How often each server may have been changed in one job, by any agent of it.
+
+    A call that may change state is counted when it starts and again when it
+    ends (:meth:`bump`), so a read that ran beside it, or an answer held
+    before it, is known to be stale by its mark (:meth:`mark`) having moved.
+    A change on an unknown server (``""``) or on the team server (an ``ask_``
+    call, whose agent reaches servers the asking agent cannot name) is a
+    change of every server.
+    """
+
+    # The servers a change on which is a change of every server
+    # (``agents.delegation.TEAM_SERVER`` is ``"team"``).
+    ANYWHERE = frozenset({"", "team"})
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._count: dict[str, int] = {}
+        self._anywhere = 0
+
+    def bump(self, server: str) -> None:
+        """Count one possible change on ``server``."""
+        key = str(server or "")
+        with self._lock:
+            if key in self.ANYWHERE:
+                self._anywhere += 1
+            else:
+                self._count[key] = self._count.get(key, 0) + 1
+
+    def mark(self, server: str) -> tuple[int, int]:
+        """Where ``server``'s count stands now: two equal marks mean nothing changed between."""
+        key = str(server or "")
+        with self._lock:
+            return self._count.get(key, 0), self._anywhere
+
+
 class EvidenceCounter:
     """The per-job source of entry ids.
 
@@ -116,6 +152,9 @@ class EvidenceCounter:
         # reason.
         self._lock = threading.Lock()
         self._seq = 0
+        # What any agent of the job may have changed on each server: one count
+        # per job, so a delegate's change reaches the agent that asked it.
+        self.changes = ServerChanges()
 
     def next_id(self) -> tuple[str, int]:
         """The next ``(entry_id, seq)`` pair, seq being 1-based."""
@@ -310,6 +349,27 @@ class LedgerEntry(BaseModel):
         default=None,
         description="The arguments as the model wrote them, kept when they were repaired.",
     )
+    # Both absent when empty, so an entry written before the fields existed
+    # (or a call with no such null) dumps exactly as it did.
+    args_nulls_dropped: list[list[str]] = Field(
+        default_factory=list,
+        exclude_if=lambda value: not value,
+        description=(
+            "Fields the model gave null that the tool's schema neither allows nor requires, "
+            "each by its path segments: dropped before validation, so the field took its "
+            "declared default as if the call had left it out, and ``args`` shows that "
+            "(agents.null_arguments)."
+        ),
+    )
+    args_nulls_withheld: list[list[str]] = Field(
+        default_factory=list,
+        exclude_if=lambda value: not value,
+        description=(
+            "Top-level fields the model gave null that the schema admits and the tool's "
+            "transport does not send, each by its path segments: never sent, so the server "
+            "applied its own default, and recorded as its default in ``args``."
+        ),
+    )
     model: str | None = Field(
         default=None,
         description=(
@@ -342,6 +402,19 @@ class LedgerEntry(BaseModel):
             "platform's sandbox report tools) or 'pack' (the triage pack). None on an entry "
             "written before sources were recorded, which is read by the legacy readers only "
             "(core.tool_declarations)."
+        ),
+    )
+    ran_on: list[str] = Field(
+        default_factory=list,
+        # Absent when empty, so an entry whose readings all ran in the worker,
+        # and every entry written before the field existed, dumps as it did.
+        exclude_if=lambda value: not value,
+        description=(
+            "Where the platform's own readings behind a triage pack entry ran (tools.readers), "
+            "in the order first run, as sources: 'mcp:<server key>' for a server reached at "
+            "an address, 'pack' for the worker beside one. Empty where every reading ran in "
+            "the worker, or the entry made none; the isolation part counts the entry under "
+            "these rather than under its source (analysis.isolation.sample_readers)."
         ),
     )
     facts: dict[str, Any] | None = Field(
@@ -496,6 +569,8 @@ def build_entry(
     remediation: str | None = None,
     args_repaired: bool = False,
     args_raw: str | None = None,
+    args_nulls_dropped: Sequence[Sequence[str]] = (),
+    args_nulls_withheld: Sequence[Sequence[str]] = (),
     model: str | None = None,
     not_shown: bool = False,
     chars_dropped: int = 0,
@@ -538,6 +613,10 @@ def build_entry(
     ``args_raw`` keeps them as the model wrote them. Both so a reader can see
     that a call was made on repaired arguments and check the repair against
     what arrived.
+
+    ``args_nulls_dropped`` and ``args_nulls_withheld`` name, by path segments,
+    the fields whose ``null`` the tool boundary dropped or the transport did
+    not send (``agents.null_arguments``).
 
     ``not_shown`` says the conversation had no room for any of the answer:
     ``output`` is then the statement of the cut (:func:`not_shown_record`),
@@ -624,6 +703,8 @@ def build_entry(
         repeated_of=repeated_of,
         args_repaired=bool(args_repaired),
         args_raw=args_raw if args_repaired else None,
+        args_nulls_dropped=[[str(part) for part in path] for path in args_nulls_dropped],
+        args_nulls_withheld=[[str(part) for part in path] for path in args_nulls_withheld],
         model=model or None,
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),
@@ -640,6 +721,7 @@ def build_entry(
             output=full,
             structured=structured,
             server=server,
+            source=source,
         ),
     )
 
@@ -680,7 +762,13 @@ def _declares_no_kind(facts: dict[str, Any] | None) -> bool:
 
 
 def _reputation_at_write(
-    facts: dict[str, Any] | None, *, ok: bool, output: str, structured: Any, server: str | None
+    facts: dict[str, Any] | None,
+    *,
+    ok: bool,
+    output: str,
+    structured: Any,
+    server: str | None,
+    source: str | None = None,
 ) -> dict[str, Any] | None:
     """A reputation lookup's answer read through its stored facts, to be stored with the entry.
 
@@ -691,7 +779,9 @@ def _reputation_at_write(
         return None
     from maljan.core.reputation import record_at_write
 
-    return record_at_write(facts, ok=ok, output=output, structured=structured, server=server)
+    return record_at_write(
+        facts, ok=ok, output=output, structured=structured, server=server, source=source
+    )
 
 
 def _structured_beside(content: Any, text: str, parsed: Any) -> dict[str, Any] | None:

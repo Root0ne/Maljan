@@ -288,6 +288,10 @@ def _view(report: Any) -> dict[str, Any]:
             report.technical_analysis.model_dump(mode="json") if report.technical_analysis else None
         ),
         "sections": [str(s.key) for s in report.sections or []],
+        # The summary's counts of the export and of the judge's bundle, which a
+        # rebuilt export and a rebuilt bundle change.
+        "stix_object_count": (report.run_summary or {}).get("stix_object_count"),
+        "judge_stix_object_count": (report.run_summary or {}).get("judge_stix_object_count"),
     }
 
 

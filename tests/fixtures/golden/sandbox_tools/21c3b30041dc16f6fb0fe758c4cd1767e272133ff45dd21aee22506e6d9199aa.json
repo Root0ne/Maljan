@@ -1534,6 +1534,10 @@
         "path": [
           "C:\\9898.vbs"
         ],
+        "pids": [
+          "1764",
+          "4632"
+        ],
         "sha256": "8cb47929648edd820748ac582e59c054a739de5a86c34a82b34259c92363af4b",
         "size": 500,
         "type": "ASCII text, with CR, LF line terminators"

@@ -53,6 +53,7 @@ from maljan.pipeline.validation import (
     EntryTexts,
     ValidationTally,
     Violation,
+    absence_holders_note,
     citation_violations,
     key_finding_citation_violations,
     ledger_absence_contradictions,
@@ -363,8 +364,13 @@ CLAIMS_IN_FORCE_HEADING = (
 )
 
 
-def claims_in_force_lines(isr_reports: Any) -> list[str]:
-    """Every claim in force, whole, under its label, for the narrative round's prompt."""
+def claims_in_force_lines(isr_reports: Any, entries: EntryTexts | None = None) -> list[str]:
+    """Every claim in force, whole, under its label, for the narrative round's prompt.
+
+    With ``entries``, a claim that says something is absent which an answered
+    entry holds carries the platform's note of what holds it
+    (``validation.absence_holders_note``).
+    """
     from maljan.reporting.claim_coverage import claims_in_force
 
     claims = claims_in_force(isr_reports)
@@ -375,7 +381,8 @@ def claims_in_force_lines(isr_reports: Any) -> list[str]:
         # Another model's words, which may carry the sample's text: each
         # quoted and escaped, one value on one line.
         evidence = f" — {quoted_value(claim.evidence_ref)}" if claim.evidence_ref.strip() else ""
-        lines.append(f"  - [{claim.label}] {quoted_value(claim.claim)}{evidence}")
+        held = absence_holders_note(f"{claim.claim} — {claim.evidence_ref}", entries)
+        lines.append(f"  - [{claim.label}] {quoted_value(claim.claim)}{evidence}{held}")
     lines.append("")
     return lines
 
@@ -384,7 +391,9 @@ def claims_in_force_lines(isr_reports: Any) -> list[str]:
 NO_SANDBOX_OBSERVATION = "not observed: this run has no sandbox observation"
 
 
-def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
+def build_prompt_text(
+    report: MalwareReport, isr_reports: Any = None, entries: EntryTexts | None = None
+) -> str:
     """Return the human-readable prompt body (used by ``_build_prompt`` and tests).
 
     Every published technique, signature, indicator and persistence entry,
@@ -393,7 +402,7 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     label, so the summary and the key findings are written over every claim
     the run holds.
     """
-    lines = findings_lines(report, isr_reports)
+    lines = findings_lines(report, isr_reports, entries)
     lines.extend(
         [
             "TASK",
@@ -405,7 +414,9 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
     return "\n".join(lines)
 
 
-def findings_lines(report: MalwareReport, isr_reports: Any = None) -> list[str]:
+def findings_lines(
+    report: MalwareReport, isr_reports: Any = None, entries: EntryTexts | None = None
+) -> list[str]:
     """The prompt body's lines before its task: what the run established, each fact whole.
 
     The narrative round's (:func:`build_prompt_text`) and the question
@@ -591,7 +602,7 @@ def findings_lines(report: MalwareReport, isr_reports: Any = None) -> list[str]:
         lines.append("")
 
     # --- The analysts' claims in force -----------------------------------
-    lines.extend(claims_in_force_lines(isr_reports))
+    lines.extend(claims_in_force_lines(isr_reports, entries))
     return lines
 
 
@@ -822,10 +833,11 @@ class NarrativeAgent:
         facts_block: str = "",
         run_state: str = "",
         isr_reports: Any = None,
+        evidence: EntryTexts | None = None,
     ) -> int:
         """The characters of this round's first prompt, as :meth:`generate` builds it."""
         try:
-            messages = self._build_prompt(report, facts_block, run_state, isr_reports)
+            messages = self._build_prompt(report, facts_block, run_state, isr_reports, evidence)
             return sum(len(str(message.content)) for message in messages)
         except Exception:  # noqa: BLE001 — a size is never worth a lost round
             return len(_SYSTEM_PROMPT) + len(facts_block) + len(run_state)
@@ -847,7 +859,7 @@ class NarrativeAgent:
         Both surfaces are wrapped in broad ``except`` so the report node can
         always rely on the fallback narrative.
         """
-        messages = self._build_prompt(report, facts_block, run_state, isr_reports)
+        messages = self._build_prompt(report, facts_block, run_state, isr_reports, evidence)
         self._note_room(sum(len(str(message.content)) for message in messages))
         # Where the sentences a check leaves standing are recorded, to be
         # marked where they stand.
@@ -1181,6 +1193,7 @@ class NarrativeAgent:
         facts_block: str = "",
         run_state: str = "",
         isr_reports: Any = None,
+        evidence: EntryTexts | None = None,
     ) -> list[BaseMessage]:
         """The system turn and the human turn, the two standing blocks leading the human turn.
 
@@ -1190,7 +1203,7 @@ class NarrativeAgent:
         """
         from maljan.pipeline.run_state import with_run_state
 
-        body = build_prompt_text(report, isr_reports)
+        body = build_prompt_text(report, isr_reports, evidence)
         if facts_block:
             body = f"{facts_block}\n\n{body}"
         if run_state:

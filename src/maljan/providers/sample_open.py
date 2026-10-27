@@ -653,7 +653,7 @@ def wrap_open_tool(
     server (``open_key``). With no declaration, no note store, or no open tool
     among ``tools``, ``tools`` come back as they were.
     """
-    from langchain_core.tools import StructuredTool
+    from maljan.agents.server_names import ServerNamedTool, to_server_names
 
     if not declared(spec) or notes is None:
         return list(tools)
@@ -681,13 +681,15 @@ def wrap_open_tool(
         return await found.ainvoke(arguments)
 
     async def open_once(**kwargs: Any) -> str:
+        # By the server's names, as the declaration names them.
+        kwargs = to_server_names(raw.args_schema, kwargs)
         path = kwargs.get(spec.path_argument)
         held = held_path() if held_path is not None else None
         rest = {k: v for k, v in kwargs.items() if k != spec.path_argument and v is not None}
         return await opener.aopen(path, call, rest, held=held or None)
 
     try:
-        wrapped = StructuredTool.from_function(
+        wrapped = ServerNamedTool.from_function(
             func=None,
             coroutine=open_once,
             name=raw.name,
@@ -790,7 +792,31 @@ def _input_names(tool: Any) -> set[str] | None:
         args = getattr(tool, "args", None)
     except Exception:  # noqa: BLE001 - a schema not read is said by the caller
         return None
-    return {str(name) for name in args} if isinstance(args, dict) else None
+    if not isinstance(args, dict):
+        return None
+    if not args and _declares_more_than_it_parsed(tool):
+        # An empty reading of a schema that refers elsewhere, combines others
+        # or requires arguments is a schema not read, not one that takes none.
+        return None
+    return {str(name) for name in args}
+
+
+# The JSON Schema keywords a schema reads its arguments through without
+# listing them under ``properties``.
+_INDIRECT_KEYWORDS = ("$ref", "allOf", "anyOf", "oneOf")
+
+
+def _declares_more_than_it_parsed(tool: Any) -> bool:
+    """Whether ``tool``'s raw input schema holds arguments its parsed ``args`` came out without."""
+    raw = getattr(tool, "args_schema", None)
+    try:
+        if raw is not None and not isinstance(raw, dict):
+            raw = raw.model_json_schema()
+    except Exception:  # noqa: BLE001 - a schema that cannot be dumped is not read either
+        return True
+    if not isinstance(raw, dict):
+        return False
+    return any(key in raw for key in _INDIRECT_KEYWORDS) or bool(raw.get("required"))
 
 
 def _program_refusal(code: str, message: str, tool: str, remediation: str) -> str:
@@ -802,10 +828,7 @@ def _program_refusal(code: str, message: str, tool: str, remediation: str) -> st
 
 def withheld_unpinned(server: str, tool: str, why: str) -> str:
     """Why ``tool`` is withheld on a shared server: ``why`` it cannot be held to the job."""
-    return (
-        f"{server}: {tool} is withheld: {why}, and on this server other jobs share it "
-        "could read or change another job's program"
-    )
+    return f"{server}: {tool}{_WITHHELD}{why}{_WITHHELD_TAIL}"
 
 
 # Why a tool is withheld, by what its schema declares.
@@ -819,6 +842,33 @@ LISTED_SHARED_WITHHELD = (
     "sample_open.shared_withheld_tools lists it: what it runs or changes reaches past "
     "the job's own program"
 )
+# The two of them that are the server's configured policy: the operator lists
+# a tool job-safe or shared-withheld. A schema not read, a job with no note
+# and a wrap that failed are losses, and stay degradations.
+WITHHELD_BY_POLICY = frozenset({UNCOVERED, LISTED_SHARED_WITHHELD})
+_WITHHELD = " is withheld: "
+_WITHHELD_TAIL = (
+    ", and on this server other jobs share it could read or change another job's program"
+)
+
+
+def withheld_tool(reason: str) -> str | None:
+    """The tool :func:`withheld_unpinned`'s sentence names, or ``None`` for another sentence."""
+    text = str(reason or "")
+    at = text.find(_WITHHELD)
+    if at < 0 or not text.endswith(_WITHHELD_TAIL):
+        return None
+    head = text[:at]
+    return head.rsplit(": ", 1)[1] if ": " in head else None
+
+
+def withheld_by_policy(reason: str) -> bool:
+    """Whether ``reason`` is :func:`withheld_unpinned`'s sentence for a policy reason."""
+    text = str(reason or "")
+    at = text.find(_WITHHELD)
+    if at < 0 or not text.endswith(_WITHHELD_TAIL):
+        return False
+    return text[at + len(_WITHHELD) : len(text) - len(_WITHHELD_TAIL)] in WITHHELD_BY_POLICY
 
 
 def pin_program_argument(
@@ -862,7 +912,7 @@ def pin_program_argument(
     ``tools`` come back as they were; a shared, declared server with no note
     store (``notes``) has every tool withheld.
     """
-    from langchain_core.tools import StructuredTool
+    from maljan.agents.server_names import ServerNamedTool, to_server_names
 
     if not shared or not declared(spec):
         return list(tools)
@@ -897,6 +947,8 @@ def pin_program_argument(
 
         async def call(**kwargs: Any) -> Any:
             own = ledger.current(server)
+            # By the server's names, as the declaration names them.
+            kwargs = to_server_names(tool.args_schema, kwargs)
             # Every declared argument the call carries, whether or not its
             # schema names it.
             sent = dict(kwargs)
@@ -939,7 +991,7 @@ def pin_program_argument(
                 ledger.make_current(server, sent.get(fill))
             return answer
 
-        return StructuredTool.from_function(
+        return ServerNamedTool.from_function(
             func=None,
             coroutine=call,
             name=name,

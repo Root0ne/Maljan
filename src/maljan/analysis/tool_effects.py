@@ -234,6 +234,31 @@ def _read_where(isolation: Mapping[str, Any] | None) -> dict[str, tuple[str, boo
     return out
 
 
+def _least_isolated(
+    places: list[str], source: str, placed: Mapping[str, tuple[str, bool, str]]
+) -> str:
+    """The place a row of several reads as: the least isolated, so none reads safer than it ran.
+
+    The entry's own source (the worker, for the pack) whenever it is among
+    them; otherwise a place the isolation part did not place, then one not
+    isolated, then the one nearest the worker. ``source`` with no places.
+    """
+    from maljan.analysis.isolation import _ORDER
+
+    if not places:
+        return source
+    if source in places:
+        return source
+
+    def exposure(place: str) -> tuple[int, int, int]:
+        held = placed.get(place)
+        if held is None:
+            return (0, 0, 0)
+        return (1, int(bool(held[1])), _ORDER.get(held[0], len(_ORDER)))
+
+    return min(places, key=exposure)
+
+
 def effects_part(
     entries: Iterable[Any],
     *,
@@ -248,6 +273,7 @@ def effects_part(
     ``partial_reason`` why the record may miss a call; ``places`` where the
     disclosure placed each ``(source, tool)`` it placed. Linear in the entries.
     """
+    from maljan.analysis.isolation import ran_on_sources
     from maljan.core.declared_reading import server_hints
 
     placed = _read_where(isolation)
@@ -278,7 +304,10 @@ def effects_part(
                 **dict.fromkeys(OUTCOMES, 0),
             }
             if effects.executes in (EXECUTES_NATIVE, EXECUTES_EMULATION):
-                where = placed.get(source) if source else None
+                # Placed where its readings ran when the entry names a server
+                # that ran them (``ran_on``), else by its source.
+                reading = _least_isolated(ran_on_sources(entry), source, placed)
+                where = placed.get(reading) if reading else None
                 row["read_where"] = where[0] if where is not None else None
                 row["read_isolated"] = where[1] if where is not None else False
                 row["read_isolated_by"] = where[2] if where is not None else ""

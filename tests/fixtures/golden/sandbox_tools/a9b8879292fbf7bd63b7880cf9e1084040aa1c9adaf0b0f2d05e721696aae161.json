@@ -598,6 +598,9 @@
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\aut32C6.tmp"
         ],
+        "pids": [
+          "20768"
+        ],
         "sha256": "710cc40bf10d7a602e604243b9d22b00e443bac3ff2e6f767ef56258f92fed30",
         "size": 207872,
         "type": "data"
@@ -608,6 +611,9 @@
         ],
         "path": [
           "C:\\Users\\Admin\\AppData\\Local\\Temp\\aut3334.tmp"
+        ],
+        "pids": [
+          "20768"
         ],
         "sha256": "89c0cd49fdc8f5124771326e0f47c776c06340db7579761dea88a30b10a630c8",
         "size": 11000,

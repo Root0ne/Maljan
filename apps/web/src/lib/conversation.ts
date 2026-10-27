@@ -15,6 +15,7 @@
  * here requires a number to exist.
  */
 
+import { restedServerName } from "@/lib/report-utils";
 import { rosterNames } from "@/lib/rosterNames";
 import type { RunEvent } from "@/lib/runStore";
 import type { JobRoster } from "@/types";
@@ -28,6 +29,14 @@ export interface TranscriptClaim {
   /** 0..1, or null when the speaker stated none. */
   confidence: number | null;
   technique_id: string | null;
+  /** The round whose tool-less validation retry added the claim beside the
+   *  answer in force; absent on every other claim. */
+  added_by_retry_in_round?: number;
+}
+
+/** The note a claim a tool-less retry added carries, as the report words it. */
+export function retryAddedLabel(round: number): string {
+  return `added by a tool-less retry, round ${round}`;
 }
 
 /** One `agent_messages` row, as the report endpoint returns it. */
@@ -231,6 +240,9 @@ export function normalizeClaims(value: unknown): TranscriptClaim[] {
             ? null
             : Number(c.confidence),
         technique_id: typeof c.technique_id === "string" ? c.technique_id : null,
+        ...(Number.isInteger(c.added_by_retry_in_round)
+          ? { added_by_retry_in_round: Number(c.added_by_retry_in_round) }
+          : {}),
       },
     ];
   });
@@ -469,12 +481,14 @@ export function fallbackLine(name: string, model: string, reason: string): strin
   return `${answered} — ${reason}.`;
 }
 
-/** The line a rested tool server gets, in the words the report prints. */
+/** The line a rested tool server gets, in the words the report prints: the
+ *  server named by its display name and key where the event gives a label,
+ *  else by its key. */
 export function restedLine(data: Record<string, unknown>): string {
   const failures = Number(data.failures ?? 0) || 0;
   const reason = text(data.reason);
   return (
-    `Tool server ${text(data.server)} is resting for ${Math.round(Number(data.cooldown_s ?? 0) || 0)} s ` +
+    `Tool server ${restedServerName(text(data.server), text(data.label))} is resting for ${Math.round(Number(data.cooldown_s ?? 0) || 0)} s ` +
     `after ${failures} ${failures === 1 ? "call" : "calls"} in a row it did not answer` +
     (reason ? ` (the last: ${reason})` : "") +
     "."

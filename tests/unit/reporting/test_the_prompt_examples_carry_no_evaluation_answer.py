@@ -166,6 +166,7 @@ from maljan.pipeline.nodes import (
     NO_STATIC_FIXTURE_NOTE,
     NOT_ASKED_TO_REVISE,
     NOT_NAMED_BY_MEDIATOR,
+    retry_additions_text,
     run_quality_note,
     skipped_analysts_reason,
 )
@@ -187,6 +188,7 @@ from maljan.pipeline.validation import (
     UNATTRIBUTED_INDICATOR_CODE,
     CapabilityGrounding,
     ClaimsRepeated,
+    ComparedValues,
     DecompiledFunction,
     EntryTexts,
     RetryDrops,
@@ -199,6 +201,7 @@ from maljan.pipeline.validation import (
     claim_does_not_describe_violation,
     claims_kept_under_disputes_finding,
     claims_under_disputes_violation,
+    command_value_violations,
     confidence_violation,
     decompiled_not_described_violation,
     feedback_text,
@@ -252,6 +255,7 @@ from maljan.reporting.composer import (
     _PROSE_SECTIONS,
     _SYSTEM,
     ANALYST_CLAIMS_HEADING,
+    COMPARED_VALUES_LEAD,
     PUBLISHED_TECHNIQUES_HEADING,
     RULE_ONLY_NOTE,
     SECTION_SCHEMAS,
@@ -319,6 +323,7 @@ from maljan.schemas.isr_models import (
     judge_and_findings_note,
     judge_dropped_reason,
     judge_kept_note,
+    retry_added_marker,
 )
 from maljan.schemas.sandbox_report import SECTION_IDS
 from maljan.schemas.stix_models import Bundle
@@ -1354,6 +1359,14 @@ PROMPTS: dict[str, str] = {
         v.message
         for v in repeated_item_violations({"items": [{"v": "x"}, {"v": "x"}]}, {"items": ("v",)})
     ),
+    "composer code-values fact lead": COMPARED_VALUES_LEAD,
+    "composer command-values question": " ".join(
+        v.message
+        for v in command_value_violations(
+            {"commands": [{"id": "2", "name": "a"}, {"id": "3", "name": "b"}]},
+            [ComparedValues("f", "v", (1, 2, 3))],
+        )
+    ),
     "analyst absence-claim question": " ".join(
         v.message
         for v in [
@@ -1437,6 +1450,7 @@ PROMPTS: dict[str, str] = {
             run_quality_note(["a reason", "a note"], degraded=False, informational=["a note"]),
             run_quality_note(["a reason"], degraded=True, notes=["a claim note"]),
             run_quality_note([], degraded=False, notes=["a claim note"]),
+            run_quality_note(["a reason"], degraded=False, choices=["a key never set"]),
         ]
     ),
     "judge malware object questions": " ".join(
@@ -1477,6 +1491,16 @@ PROMPTS: dict[str, str] = {
     ).message,
     "absence marker": ABSENCE_TECHNIQUE_MARKER,
     "failed-calls marker": FAILED_CALLS_MARKER,
+    "retry-added marker": retry_added_marker(2),
+    "retry additions after the answer in force": retry_additions_text(
+        AgentISR(
+            agent_id="a",
+            domain="a",
+            claims=[ClaimEvidence(claim="c", evidence_ref="e", confidence=0.5)],
+        ),
+        1,
+        2,
+    ),
     "sandbox-called api catalogue label": shipped_label("api_capability", CALLED_API_CATALOGUE),
     "capability questions for the anti-analysis and anti-forensics terms": " ".join(
         v.message

@@ -51,7 +51,16 @@ NEWLY_ROUTED_UNREAD = frozenset({"rtf"})
 FORMATS = sorted({*routed_formats(), "", "unknown", "PE", " Mach-O ", "  pe  ", "OLE2"})
 # The built-in servers shipped after the table (the identification servers):
 # no tool of theirs stood in it, and each declares the formats it serves.
-SHIPPED_SINCE = ("die", "ilspy", "goresym")
+SHIPPED_SINCE = (
+    "die",
+    "ilspy",
+    "goresym",
+    "yarax",
+    "oletools",
+    "webcrack",
+    "unblob",
+    "jadx",
+)
 
 
 def _declared_formats(server: str) -> dict[str, frozenset[str]]:

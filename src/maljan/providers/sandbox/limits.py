@@ -28,8 +28,12 @@ MAX_RESPONSE_BYTES = delivery_limits.MAX_RESPONSE_BYTES
 CHUNK_BYTES = 64 * 1024
 
 
+class ResponseTooLarge(ProviderError):
+    """A sandbox body past the cap, refused rather than read."""
+
+
 def _too_large(what: str, cap: int) -> ProviderError:
-    return ProviderError(
+    return ResponseTooLarge(
         f"{what} is larger than the {cap // (1024 * 1024)} MiB the sandbox providers "
         "will read; refusing it rather than reading the rest."
     )

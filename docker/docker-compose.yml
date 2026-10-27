@@ -21,14 +21,15 @@ x-backend-image: &backend-image
   security_opt:
     - no-new-privileges:true
 
-# What every identification sidecar (die-mcp, ilspy-mcp, goresym-mcp below)
-# is held to. Each opens the sample, so each is held as ghidra-mcp is (X2):
-# the worker's unprivileged ids (the worker writes its sample mirrors
+# What every sidecar that serves one analysis program (services/cli-sidecar:
+# die-mcp, ilspy-mcp, goresym-mcp, yarax-mcp, oletools-mcp, webcrack-mcp,
+# unblob-mcp and jadx-mcp below) is held to. Each opens the sample, so each is held as ghidra-mcp is
+# (X2): the worker's unprivileged ids (the worker writes its sample mirrors
 # 0700/0600 and these must read them), no Linux capability and no way to gain
 # one, a pids limit against a fork storm, and a read-only root whose only
 # writable place is a tmpfs for each run's scratch directory. Each holds no
 # platform credential: its only secret is its own token.
-x-identification-sidecar: &identification-sidecar
+x-cli-sidecar: &cli-sidecar
   restart: unless-stopped
   user: "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}"
   cap_drop:
@@ -43,7 +44,7 @@ x-identification-sidecar: &identification-sidecar
 # What each sidecar's published-port relay is held to, as ghidra-port is: it
 # forwards bytes and nothing else, mounts nothing and holds nothing.
 x-sidecar-relay: &sidecar-relay
-  image: alpine/socat:1.8.1.1@sha256:7f9a06753033f2b7de18edc2353f2c15153413d95a039163c6db270fc7a6c3b0
+  image: alpine/socat:1.8.1.3@sha256:22d77becaeeea8ef56b8c4bb2312323acafe85354be6a85714ff5050e3537842
   restart: unless-stopped
   user: "65534:65534"
   cap_drop:
@@ -80,7 +81,7 @@ services:
   # Redis 7 — Task queue, PubSub, cache
   # ─────────────────────────────────────────────
   redis:
-    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    image: redis:7-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
     container_name: maljan-redis
     restart: unless-stopped
     command:
@@ -125,7 +126,7 @@ services:
     # unpinned server drifted to 1.18.x while the pinned qdrant-client is
     # 1.17.1, which logged "Failed to obtain server version. Unable to check
     # client-server compatibility" on every run. Pinning removes that drift.
-    image: qdrant/qdrant:v1.18.2@sha256:75eab8c4ba42096724fdcfde8b4de0b5713d529dde32f285a1f86fdcb2c9e50c
+    image: qdrant/qdrant:v1.18.3@sha256:0bd98fa7977f1e75694779359ca4e212822e5a71334e28421182f72f209d5286
     container_name: maljan-qdrant
     restart: unless-stopped
     environment:
@@ -288,7 +289,7 @@ services:
   # stays internal.
   ghidra-port:
     profiles: [ghidra]
-    image: alpine/socat:1.8.1.1@sha256:7f9a06753033f2b7de18edc2353f2c15153413d95a039163c6db270fc7a6c3b0
+    image: alpine/socat:1.8.1.3@sha256:22d77becaeeea8ef56b8c4bb2312323acafe85354be6a85714ff5050e3537842
     container_name: maljan-ghidra-port
     restart: ${GHIDRA_RESTART:-unless-stopped}
     user: "65534:65534"
@@ -323,7 +324,7 @@ services:
   # runs and agents are offered its tools; nothing waits for it, and a block
   # switched on with no container behind it is a step that says it failed.
   #
-  # Held as x-identification-sidecar says, with the sample directory mounted
+  # Held as x-cli-sidecar says, with the sample directory mounted
   # read-only at the blocks' declared sample_mount (/data/samples), and on an
   # internal network of its own (no gateway) shared only with the API and the
   # worker, which reach it at http://<service>:<port>/mcp. It publishes no
@@ -338,7 +339,7 @@ services:
   # records the failure. Swap is pinned to the same value. DIE_MEM_LIMIT,
   # ILSPY_MEM_LIMIT and GORESYM_MEM_LIMIT set each (2g, 4g, 2g by default).
   die-mcp:
-    <<: *identification-sidecar
+    <<: *cli-sidecar
     profiles: [die]
     build:
       context: ../services
@@ -374,7 +375,7 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${DIE_MCP_PORT:-8090}:8090"
 
   ilspy-mcp:
-    <<: *identification-sidecar
+    <<: *cli-sidecar
     profiles: [ilspy]
     build:
       context: ../services
@@ -405,7 +406,7 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${ILSPY_MCP_PORT:-8091}:8091"
 
   goresym-mcp:
-    <<: *identification-sidecar
+    <<: *cli-sidecar
     profiles: [goresym]
     build:
       context: ../services
@@ -434,6 +435,340 @@ services:
       - goresym-publish
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${GORESYM_MCP_PORT:-8092}:8092"
+
+  # -────────────────────────────────────────────
+  # Rule and document sidecars — YARA-X, oletools, webcrack, each optional
+  # -────────────────────────────────────────────
+  # One analysis program each, served over MCP as the identification sidecars
+  # above are (services/yarax-mcp, services/oletools-mcp,
+  # services/webcrack-mcp): YARA-X matching the operator's own YARA rule
+  # files against any file, oletools reading an Office or RTF document's
+  # macros, indicators, embedded objects and DDE links, webcrack rewriting a
+  # JavaScript dropper into readable code. Each is off until its profile is in
+  # COMPOSE_PROFILES, its token set here and its built-in block (yarax,
+  # oletools, webcrack) switched on in the console with that token; held as
+  # x-cli-sidecar says, with the samples read-only at /data/samples and an
+  # internal network of its own, published by a bare relay. None runs what it
+  # reads: YARA-X matches rules, oletools parses (no macro runs), webcrack
+  # rewrites a syntax tree and is handed no sandbox to evaluate anything in.
+  #
+  # yarax-mcp also mounts the operator's rule directory read-only at
+  # /data/rules: data/yara-x-rules, or YARA_X_RULES_DIR. YARAX_MEM_LIMIT,
+  # OLETOOLS_MEM_LIMIT and WEBCRACK_MEM_LIMIT set each memory-and-swap
+  # ceiling (2g each by default), a machine-safety limit as the others are.
+  yarax-mcp:
+    <<: *cli-sidecar
+    profiles: [yarax]
+    build:
+      context: ../services
+      dockerfile: yarax-mcp/Dockerfile
+    image: maljan-yarax-mcp:1.21.0
+    container_name: maljan-yarax-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${YARAX_MCP_AUTH_TOKEN:-}
+    mem_limit: ${YARAX_MEM_LIMIT:-2g}
+    memswap_limit: ${YARAX_MEM_LIMIT:-2g}
+    networks:
+      - yarax
+    volumes:
+      - ../data/samples:/data/samples:ro
+      - ${YARA_X_RULES_DIR:-../data/yara-x-rules}:/data/rules:ro
+    healthcheck: *sidecar-health
+
+  yarax-port:
+    <<: *sidecar-relay
+    profiles: [yarax]
+    container_name: maljan-yarax-port
+    command:
+      - tcp-listen:8093,fork,reuseaddr
+      - tcp-connect:yarax-mcp:8093
+    networks:
+      - yarax
+      - yarax-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${YARAX_MCP_PORT:-8093}:8093"
+
+  oletools-mcp:
+    <<: *cli-sidecar
+    profiles: [oletools]
+    build:
+      context: ../services
+      dockerfile: oletools-mcp/Dockerfile
+    image: maljan-oletools-mcp:0.60.2
+    container_name: maljan-oletools-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${OLETOOLS_MCP_AUTH_TOKEN:-}
+    mem_limit: ${OLETOOLS_MEM_LIMIT:-2g}
+    memswap_limit: ${OLETOOLS_MEM_LIMIT:-2g}
+    networks:
+      - oletools
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  oletools-port:
+    <<: *sidecar-relay
+    profiles: [oletools]
+    container_name: maljan-oletools-port
+    command:
+      - tcp-listen:8094,fork,reuseaddr
+      - tcp-connect:oletools-mcp:8094
+    networks:
+      - oletools
+      - oletools-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${OLETOOLS_MCP_PORT:-8094}:8094"
+
+  webcrack-mcp:
+    <<: *cli-sidecar
+    profiles: [webcrack]
+    build:
+      context: ../services
+      dockerfile: webcrack-mcp/Dockerfile
+    image: maljan-webcrack-mcp:2.16.0
+    container_name: maljan-webcrack-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${WEBCRACK_MCP_AUTH_TOKEN:-}
+    mem_limit: ${WEBCRACK_MEM_LIMIT:-2g}
+    memswap_limit: ${WEBCRACK_MEM_LIMIT:-2g}
+    networks:
+      - webcrack
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  webcrack-port:
+    <<: *sidecar-relay
+    profiles: [webcrack]
+    container_name: maljan-webcrack-port
+    command:
+      - tcp-listen:8095,fork,reuseaddr
+      - tcp-connect:webcrack-mcp:8095
+    networks:
+      - webcrack
+      - webcrack-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${WEBCRACK_MCP_PORT:-8095}:8095"
+
+  # -────────────────────────────────────────────
+  # Container and Android sidecars — unblob, JADX, each optional
+  # -────────────────────────────────────────────
+  # One analysis program each, served over MCP as the sidecars above are
+  # (services/unblob-mcp, services/jadx-mcp): unblob carving and extracting
+  # every file a container or firmware image holds, JADX decompiling an
+  # Android package's or dex file's bytecode to Java. Each is off until its
+  # profile is in COMPOSE_PROFILES, its token set here and its built-in block
+  # (unblob, jadx) switched on in the console with that token; held as
+  # x-cli-sidecar says, with the samples read-only at /data/samples and an
+  # internal network of its own, published by a bare relay. Neither runs what
+  # it reads: unblob's extractors unpack, JADX decompiles and loads no class.
+  #
+  # unblob writes what it extracts into a directory of its own per call under
+  # /tmp/carved, never beside the sample. Machine-safety bounds, each the
+  # operator's to set: a run stops once the files written pass the larger of
+  # the sample's size and the platform's sample upload bound
+  # (UPLOAD_MAX_BYTES, the console's upload_max_bytes, 100 MiB when unset) or
+  # once it made more than UNBLOB_MAX_ENTRIES entries (100000 when unset); no
+  # one file may pass that byte bound; each directory goes CARVED_KEEP_SECONDS
+  # after it was written (an hour when unset), and the oldest goes first when
+  # a new run would not fit. Its /tmp is a tmpfs of its own, sized below the
+  # memory ceiling (UNBLOB_TMPFS_SIZE, 1536m), so a run that writes past the
+  # last check fills the file system rather than the container's memory.
+  # JADX's /tmp is sized the same way (JADX_TMPFS_SIZE, 1536m) beside a heap of
+  # half the container's memory. UNBLOB_MEM_LIMIT and JADX_MEM_LIMIT set each
+  # memory-and-swap ceiling (2g and 4g by default), a machine-safety limit as
+  # the others are.
+  unblob-mcp:
+    <<: *cli-sidecar
+    profiles: [unblob]
+    build:
+      context: ../services
+      dockerfile: unblob-mcp/Dockerfile
+    image: maljan-unblob-mcp:26.6.4
+    container_name: maljan-unblob-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${UNBLOB_MCP_AUTH_TOKEN:-}
+      UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-}
+      CARVED_KEEP_SECONDS: ${CARVED_KEEP_SECONDS:-}
+      UNBLOB_MAX_ENTRIES: ${UNBLOB_MAX_ENTRIES:-}
+    tmpfs:
+      - /tmp:size=${UNBLOB_TMPFS_SIZE:-1536m}
+    mem_limit: ${UNBLOB_MEM_LIMIT:-2g}
+    memswap_limit: ${UNBLOB_MEM_LIMIT:-2g}
+    networks:
+      - unblob
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  unblob-port:
+    <<: *sidecar-relay
+    profiles: [unblob]
+    container_name: maljan-unblob-port
+    command:
+      - tcp-listen:8096,fork,reuseaddr
+      - tcp-connect:unblob-mcp:8096
+    networks:
+      - unblob
+      - unblob-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${UNBLOB_MCP_PORT:-8096}:8096"
+
+  jadx-mcp:
+    <<: *cli-sidecar
+    profiles: [jadx]
+    build:
+      context: ../services
+      dockerfile: jadx-mcp/Dockerfile
+    image: maljan-jadx-mcp:1.5.6
+    container_name: maljan-jadx-mcp
+    environment:
+      MCP_AUTH_TOKEN: ${JADX_MCP_AUTH_TOKEN:-}
+    tmpfs:
+      - /tmp:size=${JADX_TMPFS_SIZE:-1536m}
+    mem_limit: ${JADX_MEM_LIMIT:-4g}
+    memswap_limit: ${JADX_MEM_LIMIT:-4g}
+    networks:
+      - jadx
+    volumes:
+      - ../data/samples:/data/samples:ro
+    healthcheck: *sidecar-health
+
+  jadx-port:
+    <<: *sidecar-relay
+    profiles: [jadx]
+    container_name: maljan-jadx-port
+    command:
+      - tcp-listen:8097,fork,reuseaddr
+      - tcp-connect:jadx-mcp:8097
+    networks:
+      - jadx
+      - jadx-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${JADX_MCP_PORT:-8097}:8097"
+
+  # -────────────────────────────────────────────
+  # Sample readers — the analysis and network servers, each optional
+  # -────────────────────────────────────────────
+  # The platform's own analysis server (services/analysis-mcp: the format
+  # readers, YARA, capa, FLOSS, the UPX unpacker, the byte readings) and its
+  # network server (services/network-mcp: the packet capture readers), in a
+  # container each instead of as children of the worker (X2). Each runs the
+  # worker's own image and source, read-only, with `--http`: streamable HTTP
+  # behind its token. Off until its profile (analysis, network) is in
+  # COMPOSE_PROFILES, its token set here, and its built-in block in the
+  # console pointed at it: transport streamable-http, url
+  # http://analysis-mcp:8098/mcp (http://network-mcp:8099/mcp), the token as
+  # auth_token and sample_mount /data/samples. The worker then copies the
+  # sample under the mount for it, and the triage pack's own readings of the
+  # sample (maljan.tools.readers) and every agent's call to that server run
+  # there. The worker still reads the sample for a few things of its own: its
+  # hashes and routing, and the readings tests/unit/test_sample_reading_guard.py
+  # lists as left for a later change.
+  #
+  # Each job's staging directory in the container's /tmp (capa's and FLOSS's
+  # scratch, the unpacked program, an uploaded capture) is removed when the
+  # job ends: the worker calls the server's release_job with the job's id. A
+  # release that fails leaves it to the server's own sweep once nothing in it
+  # changed for MALJAN_STAGING_TTL_HOURS (24 h unless set); it counts against
+  # the tmpfs, and so against the memory ceiling, until then. Size the tmpfs
+  # for the jobs that run at once, with room for a release that failed.
+  #
+  # Held as x-cli-sidecar says, on the backend image's account: no
+  # capability and no way to gain one, a pids limit, a read-only root whose
+  # only writable place is its /tmp, a tmpfs sized below its memory ceiling
+  # where each job's staging directory goes (capa's and FLOSS's scratch, what
+  # the unpacker writes), the samples read-only at /data/samples, an internal
+  # network of its own, and no platform credential: its only secret is its own
+  # token. A bare relay publishes its port for a worker run on the host.
+  # ANALYSIS_MEM_LIMIT and NETWORK_MEM_LIMIT set each memory-and-swap ceiling
+  # (8g and 2g by default, the analysis server's room for capa and FLOSS's
+  # 4 GiB address space beside its tmpfs), ANALYSIS_TMPFS_SIZE and
+  # NETWORK_TMPFS_SIZE each /tmp (2g and 512m).
+  analysis-mcp:
+    <<: *backend-image
+    profiles: [analysis]
+    container_name: maljan-analysis-mcp
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=${ANALYSIS_TMPFS_SIZE:-2g}
+    pids_limit: 512
+    working_dir: /app/services/analysis-mcp
+    command: ["python", "server.py", "--http"]
+    environment: &reader-environment
+      MCP_AUTH_TOKEN: ${ANALYSIS_MCP_AUTH_TOKEN:-}
+      MCP_BIND_ADDRESS: 0.0.0.0
+      MCP_PORT: "8098"
+      MALJAN_SAMPLE_ROOTS: /data/samples
+      HOME: /tmp
+    mem_limit: ${ANALYSIS_MEM_LIMIT:-8g}
+    memswap_limit: ${ANALYSIS_MEM_LIMIT:-8g}
+    networks:
+      - analysis
+    # The worker's own source and data, read-only, so the server runs the
+    # readings the worker would; then the samples, read-only, at the mount
+    # its block declares.
+    volumes: &reader-volumes
+      - ../src:/app/src:ro
+      - ../services:/app/services:ro
+      - ../data:/app/data:ro
+      - ../data/samples:/data/samples:ro
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    healthcheck: *sidecar-health
+
+  analysis-port:
+    <<: *sidecar-relay
+    profiles: [analysis]
+    container_name: maljan-analysis-port
+    command:
+      - tcp-listen:8098,fork,reuseaddr
+      - tcp-connect:analysis-mcp:8098
+    networks:
+      - analysis
+      - analysis-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${ANALYSIS_MCP_PORT:-8098}:8098"
+
+  network-mcp:
+    <<: *backend-image
+    profiles: [network]
+    container_name: maljan-network-mcp
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=${NETWORK_TMPFS_SIZE:-512m}
+    pids_limit: 256
+    working_dir: /app/services/network-mcp
+    command: ["python", "server.py", "--http"]
+    environment:
+      <<: *reader-environment
+      MCP_AUTH_TOKEN: ${NETWORK_MCP_AUTH_TOKEN:-}
+      MCP_PORT: "8099"
+    mem_limit: ${NETWORK_MEM_LIMIT:-2g}
+    memswap_limit: ${NETWORK_MEM_LIMIT:-2g}
+    networks:
+      - network
+    volumes: *reader-volumes
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    healthcheck: *sidecar-health
+
+  network-port:
+    <<: *sidecar-relay
+    profiles: [network]
+    container_name: maljan-network-port
+    command:
+      - tcp-listen:8099,fork,reuseaddr
+      - tcp-connect:network-mcp:8099
+    networks:
+      - network
+      - network-publish
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${NETWORK_MCP_PORT:-8099}:8099"
 
   # -────────────────────────────────────────────
   # Volume ownership — one-shot, before api, worker and Ghidra
@@ -573,14 +908,23 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # `default` as before; `ghidra` to reach Ghidra, which is on no other
-    # network these services share (see ghidra-mcp), and `die`, `ilspy` and
-    # `goresym` to reach the identification sidecars the same way.
+    # network these services share (see ghidra-mcp), `die`, `ilspy`,
+    # `goresym`, `yarax`, `oletools`, `webcrack`, `unblob` and `jadx` to reach
+    # the sidecars of one analysis program each the same way, and `analysis`
+    # and `network` the sample readers.
     networks:
       - default
       - ghidra
       - die
       - ilspy
       - goresym
+      - yarax
+      - oletools
+      - webcrack
+      - unblob
+      - jadx
+      - analysis
+      - network
     # The source trees are read-only: a process in this container that opens
     # hostile bytes cannot plant code the API or a later worker would run, or
     # change the host's working tree. data/ is read-only as well (its rule sets
@@ -691,14 +1035,23 @@ services:
     # F8 (2026-07-05): resolve host.docker.internal on Linux (see backend-api).
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # As on the API: `ghidra` is how the worker reaches Ghidra, and `die`,
-    # `ilspy` and `goresym` the identification sidecars.
+    # As on the API: `ghidra` is how the worker reaches Ghidra, `die`,
+    # `ilspy`, `goresym`, `yarax`, `oletools`, `webcrack`, `unblob` and `jadx`
+    # the sidecars of one analysis program each, and `analysis` and `network`
+    # the sample readers.
     networks:
       - default
       - ghidra
       - die
       - ilspy
       - goresym
+      - yarax
+      - oletools
+      - webcrack
+      - unblob
+      - jadx
+      - analysis
+      - network
     # Hard ceiling (2026-07-26). One analysis took this process from 3.4 GB to
     # 8.5 GB and never gave it back; two in a row exhausted a 30 GB host that
     # also runs a ~15 GB llama-server, and the machine locked up. The graceful
@@ -851,6 +1204,37 @@ networks:
   goresym:
     internal: true
   goresym-publish:
+    driver: bridge
+  # The rule and document sidecars' own, the same way.
+  yarax:
+    internal: true
+  yarax-publish:
+    driver: bridge
+  oletools:
+    internal: true
+  oletools-publish:
+    driver: bridge
+  webcrack:
+    internal: true
+  webcrack-publish:
+    driver: bridge
+  # The container and Android sidecars' own, the same way.
+  unblob:
+    internal: true
+  unblob-publish:
+    driver: bridge
+  jadx:
+    internal: true
+  jadx-publish:
+    driver: bridge
+  # The sample readers' own, the same way.
+  analysis:
+    internal: true
+  analysis-publish:
+    driver: bridge
+  network:
+    internal: true
+  network-publish:
     driver: bridge
 
 volumes:

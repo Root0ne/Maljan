@@ -106,7 +106,14 @@ COMPOSER_CHECKS: tuple[str, ...] = (
     "identifier_citation_violations",
     "stated_value_violations",
 )
-COMPOSER_NOT_REPLAYED: dict[str, str] = {"section_cut_violation": _CUT_NOT_STORED}
+COMPOSER_NOT_REPLAYED: dict[str, str] = {
+    "section_cut_violation": _CUT_NOT_STORED,
+    "command_value_violations": (
+        "the values the command table is checked against are read from the code its section "
+        "was shown, and which code that was, within the share of the window each output had, "
+        "is not in the stored record"
+    ),
+}
 TOOL_CHECKS: tuple[str, ...] = ("self_named_arguments",)
 
 # Where each composer section's answer stands in a stored report, and how the
@@ -1137,7 +1144,7 @@ def _judge(run: _Run, judged: _Judged) -> dict[str, Any]:
         searched=searched,
         corpus_state=corpus_state,
         technique_sources=sources,
-        sandbox_facts=judge_sandbox_facts(run.ledger, run.isrs, None),
+        sandbox_facts=judge_sandbox_facts(run.ledger, run.isrs, None, sample=dict(run.identity)),
         analyst_claims=claims,
         ledger_ids=ledger_ids,
     )
@@ -1325,8 +1332,8 @@ def _decided_by_the_corpus() -> Callable[[str], bool]:
 
 def _degradation(
     run: _Run, stored: Mapping[str, Any], decided: Sequence[str], grounding: str = ""
-) -> tuple[list[str], bool]:
-    """The report's degradation reasons and whether the run is degraded, as far as decidable.
+) -> tuple[list[str], list[str], bool]:
+    """The report's degradation reasons, the operator's choices and whether the run is degraded.
 
     The reasons the verdict carries are decided again (``decided``), and the
     stored ones of that kind are dropped first, so one these rules no longer
@@ -1336,12 +1343,16 @@ def _degradation(
     degraded is decided again over the reasons, by the platform's own rule
     (``run_is_degraded``), the verdict's reasons making it degraded as the
     judge node's do; a stored degraded report with no reason stays degraded.
+    A stored reason that is the operator's choice (``pipeline.operator_choice``)
+    is moved to the choices, as the judge node now lists it, and named.
     """
     from maljan.pipeline.nodes import informational_reasons_in_force
+    from maljan.pipeline.operator_choice import SampleFacts, split_operator_choices
     from maljan.pipeline.outcome import corrected_reasons
     from maljan.pipeline.triage_pack import run_is_degraded
 
-    stored_reasons = [str(r) for r in stored.get("degradation_reasons") or []]
+    stored_reasons, moved = split_operator_choices(stored.get("degradation_reasons") or [])
+    choices = list(dict.fromkeys([*(str(r) for r in stored.get("operator_choices") or []), *moved]))
     by_the_verdict = _decided_by_the_verdict()
     by_the_corpus = _decided_by_the_corpus()
     kept = [r for r in stored_reasons if not by_the_verdict(r) and not by_the_corpus(r)]
@@ -1355,16 +1366,31 @@ def _degradation(
         place = len([r for r in before[:at] if not by_the_corpus(r)]) if at is not None else None
         grounded.insert(len(grounded) if place is None else place, grounding)
     reasons = corrected_reasons([*grounded, *(r for r in decided if r not in grounded)], run.ledger)
-    degraded = run_is_degraded(grounded, informational=informational_reasons_in_force(run.isrs))
+    facts = SampleFacts(
+        file_type=str(run.identity.get("file_type") or ""),
+        failures=tuple(run.ledger),
+    )
+    degraded = run_is_degraded(
+        grounded, informational=informational_reasons_in_force(run.isrs), facts=facts
+    )
     degraded = degraded or bool(decided)
-    if stored.get("degraded_mode") and not stored_reasons:
+    if stored.get("degraded_mode") and not stored_reasons and not moved:
         degraded = True
         run.name("report", "the stored report is degraded and states no reason: it stays degraded")
     run.degradation = {
         "decided": len(decided) + bool(grounding),
         "stored_decided_again": len(stored_reasons) - len(kept),
         "kept_as_stored": len(kept),
+        **({"moved_to_choices": len(moved)} if moved else {}),
     }
+    if moved:
+        run.name(
+            "report",
+            f"{len(moved)} stored degradation reason(s) are the operator's choice (a key never "
+            "set, a server switched off, a tool a shared server withholds by policy): they cost "
+            "the run no evidence it would have had, so they are listed as choices and no longer "
+            "make the run degraded",
+        )
     if kept:
         run.name(
             "report",
@@ -1374,7 +1400,7 @@ def _degradation(
             "remove it here. The verdict's own reasons are decided again, and whether the run is "
             "degraded is decided again over the reasons",
         )
-    return reasons, degraded
+    return reasons, choices, degraded
 
 
 def _replayed_validation(run: _Run) -> dict[str, Any]:
@@ -1462,12 +1488,20 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
     grounding = (
         partial_grounding_reason(corpus_state) if run.ledger or corpus_state.missing_answers else ""
     )
-    reasons, degraded = _degradation(run, stored, decided, grounding)
+    reasons, choices, degraded = _degradation(run, stored, decided, grounding)
 
     summary = copy.deepcopy(run.stored.run_summary)
     summary["validation"] = _replayed_validation(run)
     summary["corroboration"] = corroboration(run.isrs, run.ledger)
+    # The rebuilt bundle's size, as the judge node counts it (``set_verdict``);
+    # the export's own replaces the first once it is built (``_report_values``).
+    from maljan.schemas.stix_models import Bundle
+
+    counted = len(bundle.objects) if isinstance(bundle, Bundle) else 0
+    summary["stix_object_count"] = summary["judge_stix_object_count"] = counted
     builder = MalwareReportBuilder(
+        # The job the run was, which its MISP attributes' uuids are derived from.
+        job_id=(run.stored.job or {}).get("id") or None,
         file_hash=run.identity.get("sha256"),
         file_name=run.identity.get("file_name"),
         sample_path=None,
@@ -1485,6 +1519,7 @@ def _build(run: _Run, judged: _Judged, built: _Built) -> dict[str, Any]:
         malware_category=getattr(assessment, "malware_category", None),
         degraded_mode=degraded,
         degradation_reasons=reasons,
+        operator_choices=choices,
         sample_platform=run.identity.get("platform"),
         sample_file_type=run.identity.get("file_type"),
         evidence_ledger=run.ledger,
@@ -1567,6 +1602,7 @@ def _report_values(run: _Run, built: _Built, judged: _Judged) -> dict[str, Any]:
     from maljan.pipeline.evidence_summary import collect as collect_technique_sources
     from maljan.pipeline.evidence_summary import technique_evidence
     from maljan.reporting.builder import build_consolidated_iocs
+    from maljan.reporting.misp import build_misp_attributes, misp_owner
     from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
     from maljan.schemas.stix_models import Bundle
 
@@ -1590,7 +1626,18 @@ def _report_values(run: _Run, built: _Built, judged: _Judged) -> dict[str, Any]:
             ledger_ids=[str(entry.id) for entry in run.ledger],
         )
         report.stix_bundle_extended = export.model_dump(mode="json")
+        # The summary counts the export, as the report node writes it once the
+        # export exists: a rebuilt export with the stored count is a stale summary.
+        # Only into a summary there is, as the node writes only a non-empty one.
+        if report.run_summary:
+            report.run_summary = {
+                **report.run_summary,
+                "stix_object_count": len(report.stix_bundle_extended.get("objects") or []),
+            }
         report.consolidated_iocs = build_consolidated_iocs(report)
+        report.misp_attributes = build_misp_attributes(
+            report, owner=misp_owner(report, (run.stored.job or {}).get("id"))
+        )
     else:
         run.name(
             "report",

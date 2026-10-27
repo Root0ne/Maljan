@@ -19,9 +19,9 @@ from typing import Any
 
 import httpx
 from langchain_core.tools import BaseTool, StructuredTool
-from pydantic import create_model
 
 from maljan.agents.mcp_client import tool_error_marker
+from maljan.agents.null_arguments import argument_model, params_rules
 from maljan.agents.output_shortening import narrowing_arguments
 from maljan.core.logger import logger
 from maljan.providers.server_guard import transport_failure
@@ -207,9 +207,14 @@ class GhidraHTTPClient:
             default_val = ... if required else None
             properties[name] = (py_type, default_val)
 
-        args_schema = create_model(
+        # An optional parameter given ``null`` is the parameter left out
+        # (``agents.null_arguments``): it takes its default, ``None``, which
+        # ``_call_endpoint`` does not send, so Ghidra applies its own. A
+        # required one given ``null`` is refused as before.
+        args_schema = argument_model(
             f"GhidraTool_{path.lstrip('/').replace('/', '_')}Schema",
-            **properties,  # type: ignore[call-overload]
+            properties,
+            params_rules(params),
         )
 
         async def arun_tool(

@@ -293,7 +293,9 @@ class CAPE2SandboxProvider(SandboxProvider):
         )
 
     def fetch_pcap(self, task_id: str, dest_dir: str | Path) -> str | None:
-        result = self._get_client().fetch_pcap(task_id, dest_dir)
+        result = self._get_client().fetch_pcap(
+            task_id, dest_dir, poll_interval_seconds=self._cfg.poll_interval_seconds
+        )
         return str(result) if result is not None else None
 
     async def probe(self) -> ProviderProbe:

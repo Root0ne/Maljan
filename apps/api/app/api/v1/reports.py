@@ -26,7 +26,7 @@ from app.schemas.job import (
     IOCListResponse,
     ReportDetailResponse,
 )
-from app.services.report_service import EnrichmentEnqueueError, ReportService
+from app.services.report_service import EnrichmentEnqueueError, ReportService, with_current_iocs
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -111,8 +111,14 @@ async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
     if isinstance(reading, str) and reading:
         detail = detail.model_copy(update={"verdict_reading": reading})
     served = with_source_servers(report.malware_report)
+    # The IOC table the console draws is the one /iocs serves, rebuilt by the
+    # current rule; a report stored before its MISP attributes were built has
+    # them built, and is told its STIX bundle is the one stored.
+    served, stix_note = with_current_iocs(served, str(report.id))
     if served is not report.malware_report:
         detail = detail.model_copy(update={"malware_report": served})
+    if stix_note:
+        detail = detail.model_copy(update={"stix_note": stix_note})
     placed = _section_tabs(report.malware_report)
     if placed:
         detail = detail.model_copy(update={"section_tabs": placed})
@@ -324,9 +330,10 @@ async def get_full_malware_report(
             detail="Report not found or no MalwareReport persisted",
         )
     # Read-time only, as in the detail: a stored run's sections say their
-    # server here too, and nothing stored changes.
-    served: dict = with_source_servers(mr)
-    return served
+    # server here too, its IOC table and MISP attributes are the current
+    # rule's, and nothing stored changes.
+    served, _note = with_current_iocs(with_source_servers(mr), str(report_id))
+    return dict(served)
 
 
 @router.get("/{report_id}/markdown", response_class=PlainTextResponse)
@@ -435,9 +442,9 @@ async def get_full_malware_report_iocs(
     kind: str | None = Query(
         default=None,
         description=(
-            "Filter to one of: hash, domain, ip, url, user_agent, ja3, ja3s; and, for a value "
-            "the STIX export carries from the judge's objects, email, path, registry, mutex, "
-            "command"
+            "Filter to one row kind of the report's IOC table: hash, domain, ip, url, email, "
+            "user_agent, ja3, ja3s, path, registry, mutex, scheduled_task, service, command; "
+            "and secret or crypto_wallet, which are served only when named here"
         ),
     ),
     include: str = Query(

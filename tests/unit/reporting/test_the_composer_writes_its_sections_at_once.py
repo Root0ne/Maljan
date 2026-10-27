@@ -501,7 +501,13 @@ class TestAgainstTheSequentialBase:
     with a shared head (pack facts and run state) on every request. Its
     request bodies were recaptured, written one after another, when the
     sections began to show the sample's and the tools' text quoted and fenced
-    (AUD-41); its report, Markdown and HTML digests did not change.
+    (AUD-41); its report, Markdown and HTML digests did not change. Its
+    Markdown and HTML digests were re-pinned when the methodology came to say
+    code is never cut to fit the page (T-384): that sentence is the only change.
+    They were re-pinned again when the host identifier table's footer came to
+    say the table publishes nothing itself (T-386): that line is the only change.
+    The commands request was re-pinned when its instruction came to ask for each
+    command's branch value as its id (T-378): that sentence is the only change.
     """
 
     def test_the_requests_and_the_report_are_those_of_the_base(self) -> None:

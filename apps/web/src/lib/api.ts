@@ -82,6 +82,28 @@ export interface JobDTO {
    *  where a non-admin reader gets names for the speakers without the
    *  admin-only settings endpoint; absent from a listing. */
   roster?: JobRoster | null;
+  /** The tools this job would call that the host running their server cannot
+   *  run, each with why and the remedy. On the answer to `POST /jobs` alone,
+   *  and only when there is one; the job was accepted all the same. */
+  unavailable_tools?: UnavailableToolDTO[] | null;
+}
+
+/** A tool a job would call that the host running its server cannot run. */
+export interface UnavailableToolDTO {
+  server: string;
+  tool: string;
+  /** The server's own words: "capa is not installed (No module named 'capa')". */
+  reason: string;
+  /** What to run to clear it: "... uv sync --extra capa". */
+  remediation: string;
+  /** What the tool still answers without it; empty when it answers nothing. */
+  still_answers: string;
+  /** The words a run's degraded block uses for the same tool. */
+  degradation_reason: string;
+  /** The manifest's code: `not_configured` for a setting left unset, which a
+   *  run lists as the operator's choice, not as a degradation. Absent from an
+   *  older API. */
+  manifest_code?: string;
 }
 
 export interface SandboxReportDTO {
@@ -227,6 +249,10 @@ export interface SystemStatusDTO {
    *  whether each is configured. Signed-in callers only; absent otherwise, or
    *  when the sources could not be read. */
   enrichment_sources?: EnrichmentSourceStatusDTO[];
+  /** Every tool the stored default team would call that the host running its
+   *  server cannot run. Signed-in callers only; absent otherwise, from an API
+   *  older than the field, or when the settings could not be read. */
+  unavailable_tools?: UnavailableToolDTO[];
 }
 
 export interface EnrichmentSourceStatusDTO {
@@ -399,6 +425,7 @@ const _SYSTEM_STATUS_SCHEMA: Record<string, ExpectedShape> = {
   enrichment_worker: "string?",
   enrichment_configured: "number?",
   enrichment_sources: "array?",
+  unavailable_tools: "array?",
 };
 
 /* ── API Client ───────────────────────────────────────── */

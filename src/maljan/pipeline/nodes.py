@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 from maljan.agents.base_agent import (
@@ -80,6 +81,7 @@ from maljan.memory.long_term_memory import build_stored_case, earlier_run_of, ea
 from maljan.pipeline import triage_pack
 from maljan.pipeline.claim_drops import (
     answer_unchanged,
+    changed_anywhere,
     dropped_values,
     dropped_values_sentence,
     unchanged_in_substance,
@@ -96,14 +98,19 @@ from maljan.pipeline.conditions import (
 from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
     analysts_to_revise,
+    carried_marks,
     contested_input,
     facts_naming,
     ledger_count_facts,
     ledger_stated,
     ledger_stated_sentence,
+    line_entry_ids,
+    line_round_facts,
     names_an_unlisted_place,
     place_facts,
     place_facts_for,
+    points_naming,
+    round_facts_text,
     tools_taking_an_address,
     with_ledger_facts,
     with_place_facts,
@@ -123,6 +130,7 @@ from maljan.pipeline.mediation_models import (
     MEDIATOR_NO_ANSWER,
     consensus_applies,
 )
+from maljan.pipeline.operator_choice import SampleFacts, facts_record, split_operator_choices
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
     corrected_reasons,
@@ -181,8 +189,14 @@ from maljan.schemas.evidence import (
     fit_structures_to_budget,
     is_guard_answer,
 )
-from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, FAILED_CALLS_MARKER, AgentISR
-from maljan.schemas.stix_models import Bundle
+from maljan.schemas.isr_models import (
+    ABSENCE_TECHNIQUE_MARKER,
+    FAILED_CALLS_MARKER,
+    AgentISR,
+    ClaimEvidence,
+    retry_added_marker,
+)
+from maljan.schemas.stix_models import Bundle, SimilarCases
 from maljan.schemas.tool_evidence import trim_output
 
 if TYPE_CHECKING:
@@ -200,12 +214,21 @@ if TYPE_CHECKING:
 # deadline bounds the round. It was a fixed 600 s, a default limit nobody set;
 # a cut at ten minutes sent a slow model's round to the template.
 def _narrative_timeout(
-    narrative_agent: Any, report: Any, facts: str, run_state: str, isr_reports: Any = None
+    narrative_agent: Any,
+    report: Any,
+    facts: str,
+    run_state: str,
+    isr_reports: Any = None,
+    evidence: Any = None,
 ) -> float | None:
-    """The narrative round's outer wait: the configured one, and none is configured."""
+    """The narrative round's outer wait: the configured one, and none is configured.
+
+    Sized on the prompt :meth:`NarrativeAgent.generate` sends: ``evidence`` is
+    the entry texts it is handed.
+    """
     try:
         seconds = narrative_agent.round_timeout(
-            None, narrative_agent.prompt_chars(report, facts, run_state, isr_reports)
+            None, narrative_agent.prompt_chars(report, facts, run_state, isr_reports, evidence)
         )
         return None if seconds is None else float(seconds)
     except Exception as exc:  # noqa: BLE001 — a wait that cannot be sized is no wait
@@ -417,22 +440,47 @@ def skipped_analysts_reason(why: str, names: Sequence[str]) -> str:
 SAMPLE_FED_ROLES: tuple[str, ...] = ("static", *PROMPT_ROLES)
 
 
-def judge_sandbox_facts(ledger: Any, isr_reports: Any, sandbox_report: Any) -> Any:
+def judge_facts_identity(state: Any) -> dict[str, str]:
+    """The name and digest the sample's process tree is found by, as the report's identity has them.
+
+    The name the sample arrived with, else the file name of its path, as the
+    report builder's identity falls back (``ledger_projection.identity_from_ledger``),
+    so the tree the question reads is the tree the report's rows are decided by.
+    """
+    path = str(state.get("sample_path") or "")
+    return {
+        "file_name": str(state.get("file_name") or (Path(path).name if path else "")),
+        "sha256": str(state.get("file_hash") or ""),
+    }
+
+
+def judge_sandbox_facts(
+    ledger: Any, isr_reports: Any, sandbox_report: Any, sample: Any = None
+) -> Any:
     """What the sandbox says about each value it recorded, for the judge's indicator question.
 
-    The network block the report will be built from, read before the verdict
-    exists (``ledger_projection.network_from_ledger``), and the publish rule's
-    own words for a value the sandbox attributes no flow of the sample to
-    (``stix_renderer.sandbox_facts_for_the_judge``). ``None`` when no network
-    block can be read: then nothing is asked, and nothing such a question
-    would have decided is published.
+    The network and dynamic blocks the report will be built from, read before
+    the verdict exists (``ledger_projection.network_from_ledger`` and
+    ``dynamic_from_ledger``), and the publish rule's own words for a value the
+    sandbox attributes no flow, or no process, of the sample to
+    (``stix_renderer.sandbox_facts_for_the_judge``), with the persistence a
+    Run key is answered under and the routed identity (``sample``) the
+    sample's process tree is found by. ``None`` when neither block can be read: then
+    nothing is asked, and nothing such a question would have decided is
+    published. A block that cannot be read asks nothing of its own values.
     """
-    from maljan.reporting.ledger_projection import network_from_ledger
+    from maljan.reporting.ledger_projection import (
+        dynamic_from_ledger,
+        network_from_ledger,
+        persistence_from_ledger,
+    )
     from maljan.reporting.renderers.stix_renderer import sandbox_facts_for_the_judge
 
+    # Read as the report builder reads it: a repeat holds a note, not an answer.
+    answered = [e for e in ledger or [] if not getattr(e, "repeated_of", None)]
     try:
         network = network_from_ledger(
-            list(ledger or []),
+            answered,
             isr_reports,
             sandbox_report=sandbox_report if isinstance(sandbox_report, dict) else None,
         )
@@ -442,8 +490,18 @@ def judge_sandbox_facts(ledger: Any, isr_reports: Any, sandbox_report: Any) -> A
             "indicator question (%s).",
             type(exc).__name__,
         )
-        return None
-    return sandbox_facts_for_the_judge(network)
+        network = None
+    try:
+        dynamic = dynamic_from_ledger(answered)
+        persistence = persistence_from_ledger(answered) if dynamic is not None else []
+    except Exception as exc:  # noqa: BLE001 — a fact not read asks nothing
+        logger.warning(
+            "Judge verdict: the sandbox's host record could not be read for the "
+            "indicator question (%s).",
+            type(exc).__name__,
+        )
+        dynamic, persistence = None, []
+    return sandbox_facts_for_the_judge(network, dynamic, persistence, sample)
 
 
 def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
@@ -532,6 +590,30 @@ def sandbox_degradation_reason(report: Any, failure: str | None = None) -> str |
             "— static-only evidence"
         )
     return None
+
+
+def _artefact_fetch_failures(container: Any) -> list[dict[str, str]]:
+    held = getattr(container, "artefact_fetch_failures", None)
+    return [r for r in held if isinstance(r, dict)] if isinstance(held, list) else []
+
+
+def artefact_fetch_reasons(container: Any) -> list[str]:
+    """One degradation reason per artefact the sandbox offered and the job could not fetch.
+
+    Composed by the provider (``ArtefactFetchFailed``): the artefact and an HTTP
+    status, an exception's type or the size of a file too small to be it.
+    """
+    return [str(r["reason"]) for r in _artefact_fetch_failures(container) if r.get("reason")]
+
+
+def capture_fetch_statement(container: Any) -> str:
+    """What the coverage record says of a capture offered and not fetched, or ``""``."""
+    from maljan.providers.errors import PACKET_CAPTURE
+
+    for record in _artefact_fetch_failures(container):
+        if record.get("artefact") == PACKET_CAPTURE and record.get("statement"):
+            return str(record["statement"])
+    return ""
 
 
 def _sandbox_fed(role: str) -> bool:
@@ -808,6 +890,165 @@ def revision_replacement_sentence(
     )
 
 
+def revision_decided_nothing(isr: Any) -> bool:
+    """Whether a revision wrote no claim and no structured report of its own.
+
+    Read from the revision itself (``AgentISR.revision_wrote_no_claim``), not
+    from the answer its validation retry left: a retry asked for after an
+    empty revision writes claims, and those are not a decision about the
+    claims in force. An agent whose revision path does not record it is read
+    from the answer it returned, as it always was.
+    """
+    if getattr(isr, "revision_wrote_no_claim", False) is True:
+        return True
+    return (
+        not list(getattr(isr, "claims", None) or [])
+        and str(getattr(isr, "status", "") or "") == NO_STRUCTURED_REPORT_STATUS
+    )
+
+
+def answer_with_retry_additions(in_force: AgentISR, retried: Any, revision_round: int) -> AgentISR:
+    """The answer in force with what a validation retry wrote after an empty revision added.
+
+    The revision wrote no claim, so the claims in force stand, every one. The
+    retry's claims are added after them, each marked with the round
+    (``ClaimEvidence.added_by_retry_in_round``): the retry is a turn with no
+    tools, so what it writes replaces nothing a tool call backed. A claim
+    that states one in force again in substance (``claim_drops.claim_substance``:
+    its values, the entries it cites, its technique and the rest of the key
+    ``unchanged_in_substance`` compares) is not written twice; how many were
+    left out so is logged. Its findings with a title the answer does not use,
+    its artifacts, its open questions and its disputes are added the same
+    way, after the ones in force. ``in_force`` itself is not changed.
+    """
+    from maljan.pipeline.claim_drops import claim_substance
+    from maljan.pipeline.retry_merge import folded_title
+
+    def _key(claim: Any) -> Any:
+        return next(iter(claim_substance(SimpleNamespace(claims=[claim]))))
+
+    held = {_key(claim) for claim in in_force.claims}
+    added: list[ClaimEvidence] = []
+    skipped = 0
+    for claim in list(getattr(retried, "claims", None) or []):
+        key = _key(claim)
+        if key in held:
+            skipped += 1
+            continue
+        held.add(key)
+        marked = claim.model_copy()
+        marked.added_by_retry_in_round = int(revision_round)
+        added.append(marked)
+    if skipped:
+        logger.info(
+            "%s: %d claim(s) of the round-%d validation retry state a claim in force again "
+            "in substance and are not added twice.",
+            in_force.agent_id,
+            skipped,
+            int(revision_round),
+        )
+    titles = {folded_title(f.title) for f in in_force.findings}
+    findings = [
+        f
+        for f in list(getattr(retried, "findings", None) or [])
+        if folded_title(f.title) not in titles
+    ]
+    artifacts = [
+        a for a in list(getattr(retried, "artifacts", None) or []) if a not in in_force.artifacts
+    ]
+    questions = [
+        q
+        for q in list(getattr(retried, "open_questions", None) or [])
+        if q not in in_force.open_questions
+    ]
+    disputes = [
+        d
+        for d in list(getattr(retried, "dissent_items", None) or [])
+        if d not in in_force.dissent_items
+    ]
+    combined = in_force.model_copy()
+    combined.claims = [*in_force.claims, *added]
+    combined.findings = [*in_force.findings, *findings]
+    combined.artifacts = [*in_force.artifacts, *artifacts]
+    combined.open_questions = [*in_force.open_questions, *questions]
+    combined.dissent_items = [*in_force.dissent_items, *disputes]
+    combined.revision_round = int(revision_round)
+    return combined
+
+
+# The record of a revision whose kept retry is in force: the retry's own words
+# first, then the answer the revision wrote. The record's report is cut at
+# ``events.REPORT_CHAR_LIMIT`` (and says so), so the shorter part that is in
+# force goes first and survives a long written answer.
+RETRY_WORDS_HEAD = "The validation retry kept in force, as it wrote it:"
+WRITTEN_ANSWER_HEAD = "The answer the revision wrote, which the retry replaced:"
+
+
+def written_record(written: str, retry_words: str = "") -> str:
+    """What a revision wrote, for the run record, with the kept retry's words when there are any.
+
+    The prompts read the answer in force (``AgentISR.report_in_force``); the
+    record keeps what the analyst wrote, so neither the revision nor the
+    retry the validation turn kept is lost. The retry's words come first.
+    """
+    if not retry_words:
+        return written
+    return f"{RETRY_WORDS_HEAD}\n{retry_words}\n\n{WRITTEN_ANSWER_HEAD}\n{written}"
+
+
+def retry_additions_text(combined: AgentISR, added: int, revision_round: int) -> str:
+    """The line saying which claims of ``combined``'s summary a retry added, for its report.
+
+    Said after the summary (:func:`retry_additions_report`), by the numbers
+    the summary gives them, so the next round and the mediator read them as
+    added and read each claim once.
+    """
+    total = len(list(combined.claims))
+    first = total - int(added) + 1
+    which = (
+        f"Claim {total} above was" if first == total else f"Claims {first} to {total} above were"
+    )
+    return (
+        f"{which} added by the round-{int(revision_round)} validation retry, written without "
+        "tools, beside the claims in force; none replaces a claim in force."
+    )
+
+
+def retry_additions_report(
+    prior: str, prior_isr: AgentISR | None, combined: AgentISR, added: int, revision_round: int
+) -> str:
+    """The report of an answer in force a retry added claims to, built from ``combined``.
+
+    Its claims summary (each claim once, the added ones numbered on), the line
+    saying which were added, then what the report in force held besides its
+    claims: after a summary the platform rendered, what followed it as it
+    was; after text the analyst wrote, its sections other than its claims
+    (``claim_headings.besides_claims``) and the findings in force.
+    """
+    from maljan.agents.base_agent import WRITTEN_BESIDES_CLAIMS, with_findings
+    from maljan.agents.claim_headings import besides_claims
+
+    summary = combined.to_text_summary()
+    combined.note_rendered_summary(summary)
+    said = retry_additions_text(combined, added, revision_round)
+    rendered = prior_isr.rendered_summary if prior_isr is not None else ""
+    if rendered and prior.startswith(rendered):
+        return f"{summary}\n{said}{prior[len(rendered) :]}"
+    besides = besides_claims(prior)
+    tail = f"\n{WRITTEN_BESIDES_CLAIMS}\n{besides}" if besides else ""
+    return f"{with_findings(summary, combined)}\n{said}{tail}"
+
+
+def retry_additions_sentence(name: str, revision_round: int, in_force: Any, added: int) -> str:
+    """The sentence for an empty revision whose validation retry added claims beside the answer."""
+    kept = len(list(getattr(in_force, "claims", None) or []))
+    return (
+        f"The {name} analyst's round-{int(revision_round)} revision wrote no claim; its "
+        f"validation retry, written without tools, added {added} claim(s) beside the {kept} "
+        "claim(s) in force and replaced none."
+    )
+
+
 def mean_claim_confidence(isrs: Any) -> float | None:
     """The mean confidence of the analysts that produced claims, or ``None``.
 
@@ -927,6 +1168,12 @@ def _absolute_host_sample_path(state: AnalysisState) -> str:
         return raw
 
 
+def _job_id_of(container: Any) -> str | None:
+    """The container's job id, or ``None`` for one that keys no job."""
+    key = getattr(container, "job_key", None)
+    return str(key()) if callable(key) else None
+
+
 def _yara_scan_budget(container: Any) -> int | None:
     """The operator's wall clock for one YARA scan of the sample, or ``None`` when unread."""
     try:
@@ -1001,6 +1248,7 @@ def _augment_static_chunks_with_path(
     state: AnalysisState,
     *,
     provider_id: str | None = None,
+    readers: Any = None,
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
@@ -1088,12 +1336,16 @@ def _augment_static_chunks_with_path(
     # deserves.
     if isinstance(host_path, str) and host_path:
         try:
-            from pathlib import Path as _P
+            from maljan.tools.readers import SampleReaders
 
-            from maljan.extractors.sample_identity import _detect_language_or_compiler
-
-            with _P(host_path).open("rb") as _fh:
-                _lang = _detect_language_or_compiler(_fh.read(4 * 1024 * 1024))
+            # Where the job's readings run (``tools.readers``): the reading of
+            # the toolchain stands in for the identity reading.
+            held = readers or SampleReaders(sample_path=host_path)
+            # The readers' own path of the sample: the one a place is handed
+            # its copy for.
+            _lang = held.read(
+                "toolchain", path=held.sample_path or host_path, prefix_bytes=4 * 1024 * 1024
+            )
             if _lang:
                 parsed["language_or_compiler"] = _lang
         except Exception as _e:  # noqa: BLE001 — a prompt hint is never worth a failure
@@ -1314,6 +1566,255 @@ def _step_arguments(step: Any, facts: Any, values: dict[str, str]) -> dict[str, 
     if roles.get("hash") and digest:
         args[roles["hash"]] = digest
     return args
+
+
+def sample_readers(container: Any, sample_path: str, artefacts: Any = None) -> Any:
+    """Where this job's readings of the sample run (``tools.readers.SampleReaders``).
+
+    A reading runs on the server declaring the tool it stands in for
+    (``pack_servers._declaring_server_key``), among the servers that declare
+    the readers' delivery primitive (``run_reader``, its declared kind
+    ``providers.servers.READER_DELIVERY_KIND``), when that server is switched on and reached at
+    an address: a container of its own, which opens its copy of the sample
+    under its declared ``sample_mount`` and holds none of this worker's
+    secrets. Every other reading runs in this process, as before: a server
+    started as this worker's child shares it anyway, and a server that
+    declares the tool but not the primitive (an operator's YARA server) has
+    no way to run it. Which server each reading runs on is resolved once per
+    job (:func:`_reader_servers`). The place's call opens the server for the
+    job, as a pack step's call does, and sends ``run_reader`` with the
+    reading's wall clock; the job's packet capture reaches it through the
+    job's artefact store (``artefacts``), as a server step's file does. Never
+    raises: a place that cannot be built is a reading in this process, logged.
+    """
+    from maljan.tools.readers import SampleReaders
+
+    places: dict[str, Any] = {}
+    try:
+        servers = container.config.mcp.servers
+        built: dict[str, Any] = {}
+        for tool, key in _reader_servers(container).items():
+            if key not in built:
+                built[key] = _reader_place(container, key, servers[key], artefacts)
+            places[tool] = built[key]
+    except Exception as exc:  # noqa: BLE001 — a place not built leaves the reading here
+        logger.warning("sample readers: the readings' servers were not read (%s).", exc)
+        places = {}
+    return SampleReaders(sample_path=sample_path, places=places)
+
+
+def _reader_servers(container: Any) -> dict[str, str]:
+    """``{tool a reading stands in for: the key of the server it runs on}``, once per job.
+
+    Only the tools whose server declares the readers' delivery primitive, is switched
+    on and is reached at an address are named; the answer is kept on the
+    container under the job's key, so the choice (and what it logs) is made
+    once however many callers ask.
+    """
+    from maljan.agents.sample_staging import REMOTE_TRANSPORTS
+    from maljan.providers.servers import READER_DELIVERY_KIND
+    from maljan.tools.readers import READERS
+
+    job = str(container.job_key())
+    held = getattr(container, "_reader_servers_held", None)
+    if isinstance(held, tuple) and held[0] == job:
+        return dict(held[1])
+    servers = container.config.mcp.servers
+    runners = {
+        key: server
+        for key, server in servers.items()
+        if any(
+            getattr(facts, "kind", None) == READER_DELIVERY_KIND
+            for facts in (getattr(server, "tool_facts", None) or {}).values()
+        )
+    }
+    chosen: dict[str, str] = {}
+    for tool in dict.fromkeys(spec.stands_for for spec in READERS.values()):
+        key = _declaring_server_key(runners, tool, purpose=f"the reading of {tool}")
+        config = runners.get(key) if key else None
+        if config is None or not getattr(config, "enabled", True):
+            continue
+        transport = str(getattr(config, "transport", "stdio") or "stdio").lower()
+        if transport in REMOTE_TRANSPORTS:
+            chosen[tool] = key
+    try:
+        container._reader_servers_held = (job, dict(chosen))
+    except Exception:  # noqa: BLE001 — a container that keeps nothing resolves again
+        pass
+    return chosen
+
+
+# How long the job's end waits for one server's answer to ``release_job`` (the
+# removal of one job's directory, which takes a moment), and the hard cap on
+# its call, a second beyond. Every server is asked at once, so the whole
+# release takes about one call's time (``core.container._RELEASE_BUDGET``).
+RELEASE_SECONDS = 4.0
+RELEASE_CALL_CAP_SECONDS = RELEASE_SECONDS + 1.0
+
+# Guards the note of the servers a job's readings were sent to: the pack's
+# thread and a step started beside it (the emulator) note from two threads.
+_READING_SERVERS_LOCK = threading.Lock()
+
+
+def _note_reading_server(container: Any, key: str) -> None:
+    """Note that server ``key`` was sent a reading for this job (:func:`release_reader_staging`)."""
+    job = str(container.job_key())
+    with _READING_SERVERS_LOCK:
+        held = getattr(container, "_reading_servers_held", None)
+        if not (isinstance(held, tuple) and held[0] == job):
+            held = (job, set())
+            try:
+                container._reading_servers_held = held
+            except Exception:  # noqa: BLE001 — a container that keeps nothing releases nothing
+                return
+        held[1].add(key)
+
+
+def _noted_reading_servers(container: Any, job: str) -> list[str]:
+    """The servers noted for ``job``, in name order; ``[]`` for none or another job's note."""
+    with _READING_SERVERS_LOCK:
+        held = getattr(container, "_reading_servers_held", None)
+        return sorted(held[1]) if isinstance(held, tuple) and held[0] == job else []
+
+
+def _release_on(container: Any, key: str, job: str) -> bool:
+    """Send server ``key`` ``release_job`` for ``job``; whether it released. Never raises."""
+    from maljan.agents.base_agent import run_coro_blocking
+    from maljan.core.config import ToolRef
+    from maljan.tools.readers import RELEASE_JOB
+
+    try:
+        registry = container.get_server_registry()
+        _tools, reasons = registry.tools_for_ref(
+            ToolRef(kind="mcp", server=key, name=RELEASE_JOB),
+            job,
+            truncation_ledger=container.get_truncation_ledger(),
+        )
+        handle = registry.get(key)
+        if not getattr(handle, "is_open", False):
+            raise RuntimeError("; ".join(reasons) or f"{key} could not be attached")
+        if RELEASE_JOB not in handle.all_tool_names():
+            logger.info(
+                "%s offers no %s; what this job's readings staged there is left to its "
+                "staging TTL.",
+                key,
+                RELEASE_JOB,
+            )
+            return False
+        said = run_coro_blocking(
+            handle.deliver(RELEASE_JOB, {"job": job}, RELEASE_SECONDS),
+            RELEASE_CALL_CAP_SECONDS,
+            label=f"release:{key}",
+        )
+    except Exception as exc:  # noqa: BLE001 — a release never fails the job
+        logger.warning(
+            "%s did not release this job's staging (%s: %s); it is left to its staging TTL.",
+            key,
+            type(exc).__name__,
+            exc,
+        )
+        return False
+    if isinstance(said, Mapping) and said.get("released") is True:
+        return True
+    why = said.get("error") if isinstance(said, Mapping) else None
+    logger.warning(
+        "%s did not release this job's staging (%s); it is left to its staging TTL.",
+        key,
+        str(why or "not all of it was removed")[:200],
+    )
+    return False
+
+
+def release_reader_staging(container: Any) -> list[str]:
+    """At the job's end, each server its readings ran on removes what they staged there.
+
+    A reading on a server of its own (capa's and FLOSS's scratch, the
+    unpacker's carves) writes under ``<staging>/<job>`` on that server, which
+    only its staging TTL would otherwise remove. Each server a reading was
+    sent to this job (:func:`_note_reading_server`) is sent ``release_job``
+    (``tools.readers.RELEASE_JOB``) with this job's id, all at once on
+    threads of their own, and removes that job's directory alone. Each call
+    waits :data:`RELEASE_SECONDS` and is capped at
+    :data:`RELEASE_CALL_CAP_SECONDS`; this waits for them no longer than
+    that cap. The threads start with a context of their own, so a job that
+    was cancelled still releases: the release is its teardown, not its work.
+    A server that does not offer the call (one built before it), cannot be
+    attached, refuses or does not answer in time is logged and its staging
+    left to its TTL: the job is never failed or held by it. Never raises.
+    Returns the servers that released, in name order.
+    """
+    from concurrent.futures import ThreadPoolExecutor, wait
+
+    try:
+        job = str(container.job_key())
+        servers = _noted_reading_servers(container, job)
+    except Exception as exc:  # noqa: BLE001 — teardown never propagates
+        logger.warning("release of the readings' staging: the job was not read (%s).", exc)
+        return []
+    if not servers:
+        return []
+    pool = ThreadPoolExecutor(max_workers=len(servers), thread_name_prefix="release")
+    try:
+        # ``submit`` copies no context: no thread runs under the job's cancellation.
+        asked = {key: pool.submit(_release_on, container, key, job) for key in servers}
+        wait(asked.values(), timeout=RELEASE_CALL_CAP_SECONDS)
+    finally:
+        pool.shutdown(wait=False)
+    released: list[str] = []
+    for key, future in asked.items():
+        if not future.done():
+            logger.warning(
+                "%s did not answer release_job in time; its staging is left to its TTL.", key
+            )
+        elif future.result():
+            released.append(key)
+    return released
+
+
+def _reader_place(container: Any, key: str, config: Any, artefacts: Any) -> Any:
+    """The place of server ``key`` for this job's readings (``tools.readers.Place``)."""
+    from maljan.agents.base_agent import run_coro_blocking
+    from maljan.core.config import ToolRef
+    from maljan.pipeline import artefacts as artefact_store
+    from maljan.tools.readers import RUN_READER, Place, ReaderRefused, SampleNotPlaced
+
+    job = container.job_key()
+
+    def call(payload: dict[str, Any], timeout: float | None) -> Any:
+        registry = container.get_server_registry()
+        tools, reasons = registry.tools_for_ref(
+            ToolRef(kind="mcp", server=key, name=RUN_READER),
+            job,
+            truncation_ledger=container.get_truncation_ledger(),
+        )
+        handle = registry.get(key)
+        if not getattr(handle, "is_open", False):
+            raise ReaderRefused("; ".join(reasons) or f"{key} could not be attached")
+        _note_reading_server(container, key)
+        return run_coro_blocking(
+            handle.deliver(RUN_READER, payload, timeout),
+            float(timeout) if timeout else None,
+            label=f"reader:{key}",
+        )
+
+    def hand(path: str) -> str:
+        if artefacts is None:
+            raise SampleNotPlaced(artefact_store.NO_STORE)
+        artefact = artefacts.take_in_capture(path)
+        values = {"capture_path": artefact.id}
+        why = artefact_store.hand_over(artefacts, container, key, config, values)
+        if why:
+            raise SampleNotPlaced(why)
+        return str(values["capture_path"])
+
+    mounted = getattr(container, "server_sample_paths", None) or {}
+    return Place(
+        server=key,
+        sample_path=str(mounted.get(key) or "") if isinstance(mounted, dict) else "",
+        job=job,
+        call=call,
+        hand=hand,
+    )
 
 
 def _server_step_call(container: ServiceContainer, artefacts: Any = None) -> Any:
@@ -2133,6 +2634,7 @@ def make_triage_node(
             pack_chars=upstream_chars(container),
             artefacts=artefacts,
             servers=cfg.mcp.servers,
+            readers=sample_readers(container, path, artefacts),
         )
 
         def _elapsed_ms() -> int:
@@ -2665,6 +3167,9 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
             reference = getattr(claim, "evidence_ref", "") or "—"
             if getattr(claim, "cites_only_failed_calls", False):
                 reference = f"{reference}, {FAILED_CALLS_MARKER}"
+            retried = getattr(claim, "added_by_retry_in_round", None)
+            if isinstance(retried, int) and not isinstance(retried, bool):
+                reference = f"{reference}, {retry_added_marker(retried)}"
             confidence = float(getattr(claim, "confidence", 0.0) or 0.0)
             text = " ".join(str(getattr(claim, "claim", "") or "").split())
             lines.append(f"- {text} [{technique}, confidence {confidence:.2f}, {reference}]")
@@ -2731,7 +3236,12 @@ def agent_input_room(container: Any, agent_name: str) -> Room:
 
 
 def added_to_head(
-    state: AnalysisState, block: str, *, sample_fed: bool, provider_id: str | None
+    state: AnalysisState,
+    block: str,
+    *,
+    sample_fed: bool,
+    provider_id: str | None,
+    readers: Any = None,
 ) -> Callable[[str], int]:
     """How many characters the node adds to a head chunk of a source's text, asked before chunking.
 
@@ -2757,7 +3267,9 @@ def added_to_head(
             )
         ]
         if sample_fed:
-            shown = _augment_static_chunks_with_path(shown, state, provider_id=provider_id)
+            shown = _augment_static_chunks_with_path(
+                shown, state, provider_id=provider_id, readers=readers
+            )
         shown = _with_upstream(shown, block)
         return max(len(str(shown[0].content)) - len(text), in_front)
 
@@ -2802,6 +3314,7 @@ def _analyst_input(
     """
     sample_fed = role in SAMPLE_FED_ROLES
     provider_id = provider_id if sample_fed else None
+    readers = sample_readers(container, _absolute_host_sample_path(state)) if sample_fed else None
     chunks = container.load_data_for_agent(
         agent_name,
         file_hash=file_hash,
@@ -2809,11 +3322,16 @@ def _analyst_input(
         sample_path=_absolute_host_sample_path(state) or None,
         room=room,
         head_room=head_room(
-            room, added_to_head(state, block, sample_fed=sample_fed, provider_id=provider_id)
+            room,
+            added_to_head(
+                state, block, sample_fed=sample_fed, provider_id=provider_id, readers=readers
+            ),
         ),
     )
     if sample_fed:
-        chunks = _augment_static_chunks_with_path(chunks, state, provider_id=provider_id)
+        chunks = _augment_static_chunks_with_path(
+            chunks, state, provider_id=provider_id, readers=readers
+        )
     return chunks
 
 
@@ -3168,6 +3686,12 @@ RUN_QUALITY_ANSWER_NOTE = (
 # What leads the facts about claims that are not limits of the run, when the
 # run has limits of its own listed first.
 RUN_QUALITY_CLAIM_NOTES = "Also noted about the claims, not about the run:"
+# What leads the tools the operator's configuration left out
+# (``pipeline.operator_choice``): no limit of this run, and no finding either.
+RUN_QUALITY_CHOICES = (
+    "Left out by the operator's configuration, so no evidence this run would have had "
+    "was lost; read each as an absence of that evidence, not as a finding:"
+)
 
 
 def run_quality_note(
@@ -3176,6 +3700,7 @@ def run_quality_note(
     degraded: bool,
     informational: Sequence[str] = (),
     notes: Sequence[str] = (),
+    choices: Sequence[str] = (),
 ) -> str:
     """The RUN QUALITY paragraph the judge reads, or ``""`` when the run recorded nothing.
 
@@ -3187,10 +3712,16 @@ def run_quality_note(
     ``notes`` are facts about claims the judge weighs that are not limits of
     the run (technique claims citing nothing): stated to the judge as they
     are, after the run's own reasons, and never as a cause of degradation.
+    ``choices`` are what the operator's configuration left out: said after
+    them, as absences, and never as a cause of degradation either.
     """
     noted_claims = "; ".join(str(note) for note in notes if note).rstrip(". ")
+    chosen = "; ".join(str(choice) for choice in choices if choice).rstrip(". ")
     if not reasons:
-        return f"RUN QUALITY — {noted_claims}." if noted_claims else ""
+        parts = [noted_claims] if noted_claims else []
+        if chosen:
+            parts.append(f"{RUN_QUALITY_CHOICES} {chosen}")
+        return f"RUN QUALITY — {'. '.join(parts)}." if parts else ""
     sentences = "; ".join(reason_sentence(r) for r in reasons).rstrip(". ")
     if degraded:
         parts = [
@@ -3207,6 +3738,8 @@ def run_quality_note(
             parts.append(RUN_QUALITY_ANSWER_NOTE)
     if noted_claims:
         parts.append(f"{RUN_QUALITY_CLAIM_NOTES} {noted_claims}.")
+    if chosen:
+        parts.append(f"{RUN_QUALITY_CHOICES} {chosen}.")
     return " ".join(parts)
 
 
@@ -3786,6 +4319,9 @@ def make_stage_agent_node(
 
             if isr.claims:
                 report = isr.to_text_summary()
+                # The report is the platform's rendering: a prompt renders it
+                # again with the marks set since (``report_rendered_again``).
+                isr.note_rendered_summary(report)
             elif isr.unparsed_answer:
                 # The analyst's answer in its own words, which is what it
                 # wrote: nothing in it could be read as a claim, and nothing
@@ -4341,6 +4877,17 @@ def _ledger_stated_lines(
         return []
 
 
+def _last_mediation_lines(state: AnalysisState) -> tuple[list[str], list[str]]:
+    """``(blocking lines, place facts)`` of the last mediation in the history, or empty."""
+    for earlier in reversed(state.get("discussion_history") or []):
+        if getattr(earlier, "agent_name", "") == MEDIATOR_AGENT_NAME:
+            return (
+                [str(line) for line in getattr(earlier, "contradictions", None) or []],
+                [str(fact) for fact in getattr(earlier, "place_facts", None) or []],
+            )
+    return [], []
+
+
 def _place_facts(state: AnalysisState, agent_names: Sequence[str], argument: Any) -> list[str]:
     """The functions the blocking lines name and whether each was listed. Never raises."""
     lines = list(getattr(argument, "contradictions", None) or [])
@@ -4508,6 +5055,11 @@ def make_negotiation_node(
             else False
         )
         convergence_said = convergence_sentence(converged or []) if syco else ""
+        # What the round before did on each blocking line of the last
+        # mediation: told to this mediation once, with no call made for it,
+        # and the mediator asked to mark each blocking line it lists carried
+        # or new.
+        said_of_round = round_facts_text(round_before)
 
         def _judge_evidence() -> list[dict[str, Any]]:
             """The judges' tool calls, drained from every cached role.
@@ -4557,6 +5109,21 @@ def make_negotiation_node(
             from maljan.agents.judge_agent import MEDIATION_CALL_SPANS
 
             judge_timeout, _judge_steps = loop_limits("judge")
+            facts_for_mediation = pack_text(state, container)
+            # The stored text of the entries the last mediation's blocking
+            # lines cite, as the analysts they name were shown them; what the
+            # mediation's pack already holds is left out.
+            last_lines, last_places = _last_mediation_lines(state)
+            mediation_entries = (
+                _contested_entries(
+                    SimpleNamespace(name=MEDIATOR_AGENT_NAME, run_state_source=state),
+                    last_lines,
+                    last_places,
+                    [facts_for_mediation],
+                )
+                if round_before is not None and last_lines
+                else {}
+            )
             # Every call the mediation can make one after another
             # (``MEDIATION_CALL_SPANS``), each within the judge's own limit.
             mediation_timeout = (
@@ -4584,9 +5151,11 @@ def make_negotiation_node(
                     # The same facts the analysts were given, so the mediator
                     # weighs their reports against the record rather than
                     # against each other alone.
-                    facts_block=pack_text(state, container)
+                    facts_block=facts_for_mediation
                     + (f"\n\n{convergence_said}" if convergence_said else ""),
                     run_state=render_run_state(state),
+                    **({"round_facts": said_of_round} if said_of_round else {}),
+                    **({"cited_entries": mediation_entries} if mediation_entries else {}),
                 ),
                 hard_timeout=mediation_timeout,
                 label="mediation",
@@ -4646,6 +5215,15 @@ def make_negotiation_node(
                         stage=stage_key_of(stage, "debate"),
                         kind="system",
                     )
+            # The mediator's carried-or-new mark on each blocking line, read
+            # against the lines of the last mediation the round's record
+            # numbered for it: the router ends the debate when every blocking
+            # line is carried and no analyst it names moved on it.
+            facts_told = (round_before or {}).get("lines") if said_of_round else None
+            if measured and argument.status == "complete" and isinstance(facts_told, list):
+                argument.carried = carried_marks(
+                    list(argument.contradictions or []), len(facts_told)
+                )
             # Who the mediation asks to revise: the analysts its blocking lines
             # name in their [analysts: ...] field, read and never guessed.
             if measured and argument.status == "complete":
@@ -4830,8 +5408,13 @@ def _round_convergence(
     after: Mapping[str, Any],
     revised: Sequence[str],
     round_ledger: Sequence[Mapping[str, Any]],
+    shown: Mapping[str, Sequence[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """The round's convergence flags (``sycophancy_detector.convergence_flags``). Never raises."""
+    """The round's convergence flags (``sycophancy_detector.convergence_flags``). Never raises.
+
+    ``shown`` is the entries each revision was shown: citing one is no
+    citation of the analyst's own.
+    """
     try:
         texts: dict[str, str] = {}
         for row in [*(state.get("evidence_ledger") or []), *round_ledger]:
@@ -4845,10 +5428,123 @@ def _round_convergence(
         for row in round_ledger:
             agent = str(row.get("agent") or "")
             calls[agent] = calls.get(agent, 0) + 1
-        return convergence_flags(before, after, revised, calls, texts)
+        return convergence_flags(before, after, revised, calls, texts, shown=shown or None)
     except Exception as exc:  # noqa: BLE001 — a reading not made is no flag
         logger.debug("revision: the round's convergence was not read (%s).", exc)
         return []
+
+
+def _contested_entries(
+    reader: Any, lines: Sequence[str], facts: Sequence[str], held: Sequence[str]
+) -> dict[str, str]:
+    """The stored texts of the entries ``lines`` cite and their place facts list, by id.
+
+    Read as the reader had each in view (``base_agent.cited_entry_texts``):
+    an entry ``held`` (its brief, its raw data) carries verbatim, or as the
+    summary line of the brief, is left out. Never raises: nothing is shown.
+    """
+    ids = line_entry_ids(lines, facts, every_listing=False)
+    if not ids:
+        return {}
+    try:
+        from maljan.agents.base_agent import cited_entry_texts
+
+        return cited_entry_texts(reader, ids, [h for h in held if h], summary_lines=False)
+    except Exception as exc:  # noqa: BLE001 — an entry not read is no entry shown
+        logger.debug("debate: the entries of the contested lines were not read (%s).", exc)
+        return {}
+
+
+def _mark_claims_on_shown_entries(
+    state: AnalysisState,
+    isrs: dict[str, Any],
+    revised: Sequence[str],
+    shown: Mapping[str, Sequence[str]],
+    round_ledger: Sequence[Mapping[str, Any]],
+) -> None:
+    """Mark each revised claim that cites only other agents' entries the debate showed it.
+
+    The entries shown are this round's and every earlier round's of the
+    debate (``revision_rounds[].shown``). A claim citing at least one entry,
+    all of them shown to its analyst and none filed by its analyst, is
+    replaced in ``isrs`` by a copy carrying ``rests_on_shown_entries``: the
+    corroboration reading counts it as no support of its own
+    (``validation.shown_claim_unbacked``). Never raises.
+    """
+    try:
+        from maljan.schemas.evidence import entry_ids_in
+
+        seen: dict[str, set[str]] = {}
+        for record in [*(state.get("revision_rounds") or []), {"shown": shown}]:
+            for name, ids in ((record or {}).get("shown") or {}).items():
+                seen.setdefault(str(name), set()).update(str(i).lower() for i in ids or ())
+        own: dict[str, set[str]] = {}
+        for row in [*(state.get("evidence_ledger") or []), *round_ledger]:
+            agent = row.get("agent") if isinstance(row, Mapping) else getattr(row, "agent", "")
+            entry = row.get("id") if isinstance(row, Mapping) else getattr(row, "id", "")
+            own.setdefault(str(agent or ""), set()).add(str(entry or "").lower())
+        for name in revised:
+            given = seen.get(name)
+            isr: Any = isrs.get(name)
+            if not given or not isinstance(getattr(isr, "claims", None), list):
+                continue
+            mine = own.get(name, set())
+            claims = []
+            marked = False
+            for claim in isr.claims:
+                said = f"{claim.claim or ''} {claim.evidence_ref or ''}"
+                cited = {i.lower() for i in entry_ids_in(said)}
+                if cited and cited <= given and not cited & mine:
+                    claim = claim.model_copy()
+                    claim.rests_on_shown_entries = sorted(cited)
+                    marked = True
+                claims.append(claim)
+            if marked:
+                isrs[name] = isr.model_copy(update={"claims": claims})
+    except Exception as exc:  # noqa: BLE001 — a mark not made is a claim read as before
+        logger.debug("revision: the claims on shown entries were not marked (%s).", exc)
+
+
+def _round_line_facts(
+    contested: Sequence[str],
+    places: Sequence[str],
+    asked: Sequence[str],
+    revised: Sequence[str],
+    shown: Mapping[str, Sequence[str]],
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    participants: Sequence[str],
+    round_ledger: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """What the round did on each blocking line it answered, for the next mediation. Never raises.
+
+    ``lines`` per line (``debate_facts.line_round_facts``), and ``filed``,
+    the entries the round filed by agent. Nothing for a round that answered
+    no blocking line.
+    """
+    if not contested:
+        return {}
+    try:
+
+        def _changed(name: str, _ids: Sequence[str], _spots: set[int]) -> bool:
+            # Anywhere in its answer, not only on the claims citing the line:
+            # a new claim that cites none of its entries may answer it.
+            return changed_anywhere(before.get(name), after.get(name))
+
+        filed: dict[str, list[str]] = {}
+        for row in round_ledger:
+            entry_id = str(row.get("id") or "")
+            if entry_id:
+                filed.setdefault(str(row.get("agent") or ""), []).append(entry_id)
+        return {
+            "lines": line_round_facts(
+                contested, places, asked, revised, shown, _changed, participants, filed
+            ),
+            "filed": filed,
+        }
+    except Exception as exc:  # noqa: BLE001 — a record not made is no fact told
+        logger.debug("revision: the round's line facts were not read (%s).", exc)
+        return {}
 
 
 def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any:
@@ -4996,11 +5692,28 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             mine = place_facts_for(name, places, agent_names)
             can_read = bool(tools_taking_an_address(getattr(agent, "tools", None) or ()))
             reads = can_read and names_an_unlisted_place(mine)
+            # The stored text of the entries those lines cite and of the
+            # listings their places resolve to: a peer's tool results are in
+            # no input of this analyst's own. What its brief and its raw data
+            # already hold is left out; the revision sizes the rest.
+            entries = _contested_entries(
+                agent,
+                points_naming(name, contested, agent_names) if named is not None else contested,
+                mine,
+                [str(getattr(agent, "facts_block", "") or ""), str(data or "")],
+            )
             # The reports are what models wrote: a run-state marker in one is
             # written out, so the debate never shows one as the platform's
             # block. One character for one: every length read of them holds.
             from maljan.utils.written_forms import markers_written_out
 
+            # Each passed only when it says something, so a round with neither
+            # makes the call it always made.
+            offered: dict[str, Any] = {}
+            if reads:
+                offered["read_places"] = True
+            if entries:
+                offered["cited_entries"] = entries
             return await asyncio.to_thread(
                 agent.safe_revise_isr,
                 data,
@@ -5016,7 +5729,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     can_read=can_read,
                 ),
                 iteration,
-                **({"read_places": True} if reads else {}),
+                **offered,
             )
 
         # Slot-topology parity with the initial fan-out (builder.py). On a
@@ -5082,6 +5795,11 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # the sycophancy check judges only the answers revised in the round.
         revised_names: list[str] = []
         not_revised: dict[str, str] = {}
+        # The claims a validation retry added beside the answer in force after
+        # a revision that wrote none, per analyst (``answer_with_retry_additions``).
+        retry_added: dict[str, int] = {}
+        # The entries of the contested lines each revision was shown.
+        entries_shown: dict[str, list[str]] = {}
 
         def _keep_the_answer_in_force(
             name: str, why: str, status: str = "", report: str = "", *, was_asked: bool = True
@@ -5147,6 +5865,12 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 )
             else:
                 revised_text, isr = result
+                with suppress(Exception):
+                    entries_shown[name] = [
+                        str(i)
+                        for i in getattr(container.get_agent(name), "revision_entries_shown", ())
+                        or ()
+                    ]
                 try:
                     revision_ledger.extend(
                         entry.model_dump(mode="json")
@@ -5174,19 +5898,81 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     # ceiling), or the call was refused before it was made.
                     _keep_the_answer_in_force(name, "no answer was written")
                     continue
-                if (
-                    not list(isr.claims or [])
-                    and str(getattr(isr, "status", "") or "") == NO_STRUCTURED_REPORT_STATUS
-                    and list(getattr(kept_isrs.get(name), "claims", None) or [])
+                in_force_isr = kept_isrs.get(name)
+                if revision_decided_nothing(isr) and (
+                    list(getattr(in_force_isr, "claims", None) or []) or list(isr.claims or [])
                 ):
                     # The revision ended without a structured report: it made
                     # no decision about the claims in force, so they stand.
-                    _keep_the_answer_in_force(
-                        name, "its answer carried no structured report", report=revised_text
+                    # A validation retry asked for after it may have written
+                    # claims, in a turn with no tools: they are added beside
+                    # the claims in force and replace none of them.
+                    combined = answer_with_retry_additions(
+                        in_force_isr
+                        if isinstance(in_force_isr, AgentISR)
+                        else _empty_isr(name, revision_round=iteration),
+                        isr,
+                        iteration,
+                    )
+                    added = len(combined.claims) - len(
+                        list(getattr(in_force_isr, "claims", None) or [])
+                    )
+                    if not added:
+                        _keep_the_answer_in_force(
+                            name, "its answer carried no structured report", report=revised_text
+                        )
+                        continue
+                    sentence = retry_additions_sentence(name, iteration, in_force_isr, added)
+                    logger.warning("%s", sentence)
+                    retry_added[name] = added
+                    in_force_report = kept_texts.get(name) or original_reports.get(name, "")
+                    revised[name] = retry_additions_report(
+                        in_force_report,
+                        in_force_isr if isinstance(in_force_isr, AgentISR) else None,
+                        combined,
+                        added,
+                        iteration,
+                    )
+                    revised_isrs[name] = combined
+                    if name in not_asked:
+                        not_revised[name] = not_loaded.get(name, NOT_ASKED_TO_REVISE)
+                    else:
+                        # Claims were added: the answer in force is not what
+                        # it was, in words or in substance.
+                        made += 1
+                        revised_names.append(name)
+                        identical = False
+                        reworded = False
+                    emit_agent_message(
+                        container.event_sink,
+                        speaker=name,
+                        role="reviser",
+                        text=(
+                            summarize_claims(
+                                combined.claims,
+                                speaker=spoken_name(container, name, _home_stage(container, name)),
+                                source=claims_source(container, name, _home_stage(container, name)),
+                            )
+                            + f" {sentence}"
+                        ),
+                        round_index=iteration,
+                        status=isr_status(combined),
+                        claims=claims_to_payload(combined.claims),
+                        dissent=list(combined.dissent_items or []),
+                        report=revised_text,
+                        stage=stage_key_of(stage, "debate"),
+                        display_name=label_of(container, name),
                     )
                     continue
                 in_force_text = kept_texts.get(name) or original_reports.get(name, "")
-                revised[name] = revised_text
+                # The answer in force as the prompts read it: the written one,
+                # or, when the validation turn changed it, the claims in force
+                # with what the revision wrote besides them
+                # (``base_agent.answer_in_force_text``). The written answer,
+                # and a kept retry's own words, go on the record below.
+                noted = isr if isinstance(isr, AgentISR) else None
+                report_now = (noted.report_in_force if noted else "") or revised_text
+                revised[name] = report_now
                 revised_isrs[name] = isr
                 if name in not_asked:
                     # Its answer from before the round, handed back unasked:
@@ -5195,10 +5981,10 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 else:
                     made += 1
                     revised_names.append(name)
-                    identical = identical and answer_unchanged(in_force_text, revised_text)
+                    identical = identical and answer_unchanged(in_force_text, report_now)
                     reworded = reworded and unchanged_in_substance(kept_isrs.get(name), isr)
                 dropped_here = dropped_values(
-                    kept_isrs.get(name), isr, revised_text, revision_round=iteration
+                    kept_isrs.get(name), isr, report_now, revision_round=iteration
                 )
                 if dropped_here:
                     logger.info(
@@ -5242,11 +6028,16 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     # entirely: ``revised_reports`` never reached the database,
                     # so what an agent said *after* the negotiation existed only
                     # inside the run.
-                    report=revised_text,
+                    report=written_record(revised_text, noted.retry_words if noted else ""),
                     stage=stage_key_of(stage, "debate"),
                     display_name=label_of(container, name),
                 )
 
+        # A claim restating only what the debate showed its analyst from a
+        # peer's calls is no support of its own for corroboration.
+        _mark_claims_on_shown_entries(
+            state, revised_isrs, revised_names, entries_shown, revision_ledger
+        )
         out: dict[str, Any] = {"revised_reports": revised, "isr_reports": revised_isrs}
         if revision_ledger:
             out["evidence_ledger"] = revision_ledger
@@ -5273,9 +6064,28 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 "revised": revised_names,
                 "not_revised": not_revised,
                 "converged": _round_convergence(
-                    state, kept_isrs, revised_isrs, revised_names, revision_ledger
+                    state, kept_isrs, revised_isrs, revised_names, revision_ledger, entries_shown
                 ),
                 **({"asked_all": asked_all} if asked_all else {}),
+                **({"retry_added": retry_added} if retry_added else {}),
+                # The entries each revision was shown, for the claims of later
+                # rounds to be read against (``_mark_claims_on_shown_entries``).
+                **(
+                    {"shown": {n: ids for n, ids in entries_shown.items() if ids}}
+                    if any(entries_shown.values())
+                    else {}
+                ),
+                **_round_line_facts(
+                    contested,
+                    places,
+                    asked,
+                    revised_names,
+                    entries_shown,
+                    kept_isrs,
+                    revised_isrs,
+                    agent_names,
+                    revision_ledger,
+                ),
             }
         ]
         if not made:
@@ -5347,6 +6157,7 @@ def _failed_verdict_summary(
     state: AnalysisState,
     own_stage: dict[str, Any] | None,
     reasons: list[str],
+    choices: Sequence[str] = (),
 ) -> dict[str, Any] | None:
     """The run summary of a run whose judge failed, or ``None`` when none can be built.
 
@@ -5363,6 +6174,7 @@ def _failed_verdict_summary(
             .set_sample(state.get("file_hash", ""), state.get("file_name"))
             .set_verdict("Suspicious", 0)
             .set_degraded_mode(True, list(reasons))
+            .set_operator_choices(list(choices))
         )
         parts: tuple[tuple[str, Callable[[], Any]], ...] = (
             ("stages", lambda: builder.set_stages(stage_rollup(container, state, own_stage))),
@@ -5539,6 +6351,7 @@ def run_coverage(
         unreadable=unreadable,
         shortened=shortened,
         partial_reason=partial_reason,
+        capture_failure=capture_fetch_statement(container),
     )
 
 
@@ -5606,10 +6419,16 @@ def make_judge_node(
             str(reason)
             for reason in (dict(state.get("triage_facts") or {}).get("degradation_reasons") or [])
         ]
+        # What the operator's configuration left out, taken off the reasons
+        # once the body has assembled them (``pipeline.operator_choice``): the
+        # unset settings are the ones the servers' manifests mark by code.
+        _operator_choices: list[str] = []
+        _not_configured: list[str] = []
         try:
             for _server_reason in container.server_degradation_reasons():
                 if str(_server_reason) not in _degradation_reasons:
                     _degradation_reasons.append(str(_server_reason))
+            _not_configured = [str(r) for r in container.server_not_configured_reasons()]
         except Exception as exc:  # noqa: BLE001 — a reason unread is not a verdict lost
             logger.debug("judge_node: server degradation reasons not read (%s).", exc)
         try:
@@ -5863,6 +6682,14 @@ def make_judge_node(
             )
             if _no_sandbox:
                 _degradation_reasons.append(_no_sandbox)
+            # An artefact the sandbox offered and the provider could not fetch
+            # (a packet capture answered with a 502, say): every IOC only it
+            # held is lost, and the reader is told which and why.
+            _degradation_reasons.extend(
+                reason
+                for reason in artefact_fetch_reasons(container)
+                if reason not in _degradation_reasons
+            )
             # A container we accept but cannot open. A .docm reaches here
             # legitimately — macro documents are among the commonest Windows
             # carriers, so rejecting them would be wrong — but the only analysis
@@ -5994,10 +6821,32 @@ def make_judge_node(
             # keeps the weight it always had.
             # A note on part of an answer whose other claims were read is
             # listed with the reasons and does not make the verdict tentative.
+            # A key never set, a server switched off, a tool a shared server
+            # withholds by policy: the operator's configuration, which cost the
+            # run no evidence it would have had. Listed apart, and never what
+            # makes the run degraded or draws the banner.
+            _degradation_reasons, _operator_choices = split_operator_choices(
+                _degradation_reasons, _not_configured
+            )
+            # What the run holds of its sample that says whether a missing
+            # tool cost it anything: its format, the tools that answered it
+            # short of a library, what each tool's missing part reads.
+            _sample_facts = SampleFacts(
+                file_type=str(state.get("file_type") or ""),
+                failures=tuple(state.get("evidence_ledger") or ()),
+            )
+            with suppress(Exception):
+                _sample_facts = SampleFacts(
+                    file_type=_sample_facts.file_type,
+                    failures=_sample_facts.failures,
+                    without_reads=container.server_without_reads(),
+                )
             _informational: list[str] = []
             with suppress(Exception):
                 _informational = informational_reasons_in_force(isr_reports)
-            _degraded_mode = run_is_degraded(_degradation_reasons, informational=_informational)
+            _degraded_mode = run_is_degraded(
+                _degradation_reasons, informational=_informational, facts=_sample_facts
+            )
             if _degraded_mode:
                 logger.warning("Degraded run detected (%s).", "; ".join(_degradation_reasons))
 
@@ -6011,6 +6860,7 @@ def make_judge_node(
                 degraded=_degraded_mode,
                 informational=_informational,
                 notes=[_ungrounded_note] if _ungrounded_note else (),
+                choices=_operator_choices,
             )
 
             verdict = await judge.give_verdict(
@@ -6048,7 +6898,10 @@ def make_judge_node(
                 # not attribute to the sample: an indicator on one is asked
                 # about once, with the fact beside it.
                 sandbox_facts=judge_sandbox_facts(
-                    _ledger, isr_reports, state.get("sandbox_report")
+                    _ledger,
+                    isr_reports,
+                    state.get("sandbox_report"),
+                    sample=judge_facts_identity(state),
                 ),
             )
             # A verdict the judge never expressed as a bundle is the thinnest
@@ -6144,6 +6997,13 @@ def make_judge_node(
                 # matrix notes its techniques no source of this run stands behind.
                 verdict.bundle.x_maljan_earlier_run = earlier_run_of(
                     container, str(state.get("file_hash") or "")
+                )
+                # Which similar cases of other samples the judge's prompt
+                # showed, the same kind of fact: the matrix notes their
+                # techniques no source of this run stands behind.
+                _similar = getattr(judge, "similar_cases_shown", None)
+                verdict.bundle.x_maljan_similar_cases = (
+                    _similar if isinstance(_similar, SimilarCases) else None
                 )
 
             bundle = verdict.bundle
@@ -6261,6 +7121,8 @@ def make_judge_node(
                     )
                     .set_corroboration(_corroboration)
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
+                    .set_operator_choices(_operator_choices)
+                    .set_loss_facts(facts_record(_sample_facts))
                     .set_failed_analysts(_failed_analysts)
                     .set_profile(
                         container.config.agents.profile,
@@ -6439,6 +7301,7 @@ def make_judge_node(
                     # node and downstream consumers (API/dashboard).
                     "degraded_mode": _degraded_mode,
                     "degradation_reasons": _degradation_reasons,
+                    "operator_choices": _operator_choices,
                     # Exact opcode-hash family overlap, surfaced into the report's
                     # FamilyAttribution.function_hash_matches by the report node.
                     "function_hash_matches": _func_hash_report,
@@ -6484,7 +7347,10 @@ def make_judge_node(
             # and the coverage of a run whose judge failed were absent without
             # notice.
             _judge_failed = f"judge failed ({type(e).__name__})"
-            _failed_reasons = [*_degradation_reasons]
+            # The reasons may not have been split yet: the judge can fail
+            # before the body assembles them.
+            _failed_reasons, _moved = split_operator_choices(_degradation_reasons, _not_configured)
+            _failed_choices = list(dict.fromkeys([*_operator_choices, *_moved]))
             if _judge_failed not in _failed_reasons:
                 _failed_reasons.append(_judge_failed)
             _failed_record = _verdict_record(
@@ -6504,8 +7370,13 @@ def make_judge_node(
                     },
                     "degraded_mode": True,
                     "degradation_reasons": _failed_reasons,
+                    "operator_choices": _failed_choices,
                     "run_summary": _failed_verdict_summary(
-                        container, state, _failed_record.get("stage_results"), _failed_reasons
+                        container,
+                        state,
+                        _failed_record.get("stage_results"),
+                        _failed_reasons,
+                        _failed_choices,
                     ),
                     "evidence_ledger": _judge_evidence(),
                     **_judge_budget(container),
@@ -6716,6 +7587,7 @@ def make_report_node(
 
         try:
             builder = MalwareReportBuilder(
+                job_id=_job_id_of(container),
                 file_hash=state.get("file_hash"),
                 file_name=state.get("file_name"),
                 sample_path=state.get("sample_path"),
@@ -6737,6 +7609,7 @@ def make_report_node(
                 # stage read the ledger, so a run that carries them must not
                 # ship a report saying no analysis was performed.
                 degradation_reasons=corrected_reasons(state.get("degradation_reasons"), _ledger),
+                operator_choices=list(state.get("operator_choices") or []),
                 # The routing minimum, which stands in for the identity block
                 # when no agent called an identification tool.
                 sample_platform=state.get("platform"),
@@ -6855,6 +7728,7 @@ def make_report_node(
                 _narrative_facts,
                 _narrative_state,
                 state.get("isr_reports"),
+                _entry_texts,
             )
             if narrative_agent is not None
             else None
@@ -7133,8 +8007,12 @@ def make_report_node(
             # of the table, the one ``/iocs`` serves as well.
             try:
                 from maljan.reporting.builder import build_consolidated_iocs
+                from maljan.reporting.misp import build_misp_attributes, misp_owner
 
                 report.consolidated_iocs = build_consolidated_iocs(report)
+                report.misp_attributes = build_misp_attributes(
+                    report, owner=misp_owner(report, _job_id_of(container))
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("report_node: the IOC table was not re-read (%s).", exc)
 

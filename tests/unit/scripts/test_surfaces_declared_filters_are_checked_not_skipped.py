@@ -1,0 +1,205 @@
+"""A surface that filters on purpose is held to its rule, never skipped.
+
+The default ``/iocs`` must be exactly the ``include=all`` rows that are
+published; the Markdown may cut a long value only where its rule cuts it,
+and a cut anywhere else (or inside a defang mark, or of a value that is code)
+is a truncation; the STIX
+export's withheld values are counted, not reported; a usage snapshot a stored
+run took mid-run is set aside, while the same gap read live is a defect.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from scripts.audit import surfaces
+
+from tests.unit.scripts._surfaces_run import CELL, IP, clean_run, clean_spec, defects
+
+
+def _with_default_feed(run: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    run["iocs_default"] = {"items": rows, "total": len(rows)}
+    return run
+
+
+def test_the_default_feed_is_the_published_rows_of_include_all() -> None:
+    run = clean_run()
+    published = [r for r in run["iocs_all"]["items"] if r["published"]]
+
+    result = surfaces.audit(_with_default_feed(run, published), clean_spec())
+
+    assert defects(result) == []
+    assert result["filtered"]["iocs_default: unpublished rows"] == 1
+    assert "iocs_default" not in result["not_checked"]
+
+
+def test_a_default_feed_with_a_withheld_row_breaks_its_rule() -> None:
+    run = clean_run()
+    rows = list(run["iocs_all"]["items"])
+
+    result = surfaces.audit(_with_default_feed(run, rows), clean_spec())
+
+    assert set(defects(result)) == {("filter", "ioc", "iocs_default")}
+
+
+def test_a_default_feed_missing_a_published_row_breaks_its_rule() -> None:
+    run = clean_run()
+    rows = [r for r in run["iocs_all"]["items"] if r["published"]][:1]
+
+    result = surfaces.audit(_with_default_feed(run, rows), clean_spec())
+
+    assert set(defects(result)) == {("filter", "ioc", "iocs_default")}
+
+
+def test_a_feed_row_without_a_flag_cannot_be_filtered() -> None:
+    run = clean_run()
+    del run["iocs_all"]["items"][2]["published"]
+
+    result = surfaces.audit(run, clean_spec())
+
+    assert set(defects(result)) == {("filter", "ioc", "iocs_default")}
+
+
+def test_a_cell_cut_at_its_declared_length_is_filtered_not_a_defect() -> None:
+    run = clean_run()
+    long = "x" * 120 + " " + "y" * 120
+    for mr in (run["report_row"]["malware_report"], run["report_full"]):
+        mr["sections"][0]["rows"] = [[long]]
+    cut = long[:159] + "…"
+    run["markdown"] += f"\n| {cut} |"
+    run["html"] += f"<td>{cut}</td>"
+
+    result = surfaces.audit(run, clean_spec())
+
+    assert defects(result) == []
+    assert result["filtered"]["markdown:strings: value cut at its declared length"] == 1
+
+
+def test_a_defanged_cell_may_be_cut_earlier_by_what_defanging_adds() -> None:
+    run = clean_run()
+    hosts = ", ".join(f"host{i}.example.org" for i in range(20))
+    for mr in (run["report_row"]["malware_report"], run["report_full"]):
+        mr["sections"][0]["rows"] = [[hosts]]
+    written = hosts.replace(".", "[.]")[:159] + "…"
+    run["markdown"] += f"\n| {written} |"
+    run["html"] += f"<td>{written}</td>"
+
+    result = surfaces.audit(run, clean_spec())
+
+    assert defects(result) == []
+
+
+def test_a_cell_cut_short_of_its_declared_length_is_truncated() -> None:
+    run = clean_run()
+    long = "z" * 300
+    for mr in (run["report_row"]["malware_report"], run["report_full"]):
+        mr["sections"][0]["rows"] = [[long]]
+    run["markdown"] += f"\n| {long[:40]}… |"
+    run["html"] += f"<td>{long[:40]}…</td>"
+
+    result = surfaces.audit(run, clean_spec())
+
+    assert set(defects(result)) == {
+        ("truncated", "section_item", "markdown:strings"),
+        ("truncated", "section_item", "html:strings"),
+    }
+
+
+CODE = "int FUN_00401000(int a)\n{\n" + "  a = a + 1;\n" * 30 + "  return a;\n}"
+
+
+def _code_run(row: str, *, kind: str | None = "decompile_batch") -> dict[str, Any]:
+    """The clean run with its one section holding a function's code, drawn as ``row``."""
+    run = clean_run()
+    for mr in (run["report_row"]["malware_report"], run["report_full"]):
+        mr["sections"][0]["columns"] = ["Field", "Value"]
+        mr["sections"][0]["rows"] = [["0x401000", CODE]]
+        mr["evidence_index"][0]["facts"] = {"kind": kind} if kind else None
+    run["markdown"] = run["markdown"].replace(
+        f"| Text |\n|---|\n| {CELL} |", f"| Field | Value |\n|---|---|\n{row}"
+    )
+    return run
+
+
+def test_a_code_value_cut_at_the_cell_length_is_a_truncation() -> None:
+    cut = " ".join(CODE.split())[:159] + "…"
+    run = _code_run(f"| 0x401000 | {cut} |")
+    run["html"] += f"<td>0x401000</td><td>{cut}</td>"
+
+    result = surfaces.audit(run, clean_spec())
+
+    assert set(defects(result)) == {
+        ("truncated", "section_item", "markdown:strings"),
+        ("truncated", "section_item", "html:strings"),
+    }
+    assert result["checked"]["section_code"] == 2
+
+
+def test_a_code_value_drawn_whole_as_a_listing_is_present() -> None:
+    for kind in ("decompile_batch", None):
+        run = _code_run(f"| 0x401000 | code: Listing 1 below |\n\n```\n{CODE}\n```", kind=kind)
+        run["html"] += f"<td>0x401000</td><pre><code>{CODE}</code></pre>"
+
+        result = surfaces.audit(run, clean_spec())
+
+        assert defects(result) == [], kind
+        assert result["checked"]["section_code"] == 2
+
+
+def test_a_cut_inside_a_defang_mark_is_a_truncation() -> None:
+    run = clean_run()
+    value = "c2=https://first.example/live/, https://second.example/live/"
+    for mr in (run["report_row"]["malware_report"], run["report_full"]):
+        mr["sections"][0]["rows"] = [[value]]
+    written = "c2=hxxps://first[.]example/live/, hxxps://second[.…"
+    run["markdown"] += f"\n| {written} |"
+    run["html"] += f"<td>{written}</td>"
+
+    result = surfaces.audit(run, clean_spec())
+
+    assert ("truncated", "section_item", "markdown:strings") in set(defects(result))
+
+
+def test_the_export_s_withheld_values_are_counted() -> None:
+    result = surfaces.audit(clean_run(), clean_spec())
+
+    assert result["filtered"]["stix: withheld IOC"] == 1
+    assert IP not in str(result["defects"])
+
+
+def test_a_stored_usage_snapshot_is_set_aside_and_a_live_gap_is_a_defect() -> None:
+    stored = clean_run()
+    stored["report_row"]["run_summary"]["tokens"]["llm_calls"] = 3
+    stored["run_summary"]["tokens"]["llm_calls"] = 3
+    stored["events"][2:2] = [{"type": "model_usage", "payload": {}}] * 2
+    stored["usage"] = {"calls": 2, "tokens": {"llm_calls": 2}}
+    stored["_stored"] = True
+
+    result = surfaces.audit(stored, clean_spec())
+
+    assert defects(result) == []
+    assert "snapshot" in result["not_checked"]["usage"]
+
+    live = dict(stored)
+    del live["_stored"]
+    assert set(defects(surfaces.audit(live, clean_spec()))) == {("differs", "count", "usage")}
+
+
+def test_a_file_the_export_names_in_its_directory_is_the_table_s_one_path() -> None:
+    bundle = {
+        "objects": [
+            {
+                "type": "indicator",
+                "pattern": (
+                    "[file:name = 'updater.exe' AND "
+                    "file:parent_directory_ref.path = 'C:\\\\Users\\\\Public']"
+                ),
+            },
+            {
+                "type": "indicator",
+                "pattern": "[file:name = 'a.so' AND file:parent_directory_ref.path = '/tmp']",
+            },
+        ]
+    }
+
+    assert set(surfaces._stix_values(bundle)) == {"c:\\users\\public\\updater.exe", "/tmp/a.so"}

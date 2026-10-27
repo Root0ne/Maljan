@@ -30,11 +30,14 @@ from typing import Any
 
 from markdown_it import MarkdownIt
 
+from maljan.reporting.defang import ProseDefanger
 from maljan.reporting.models import Figure, MalwareReport
 from maljan.reporting.renderers.markdown import (
     ABSENCE_PREFIXES,
     MarkdownRenderer,
+    _defanged_text,
     report_title,
+    run_network_values,
 )
 
 # Each figure kind is anchored to the section it illustrates so the graphic sits
@@ -226,6 +229,13 @@ class HtmlRenderer:
         """
         body_html = self._body_html(report)
         figures = list(report.figures or []) if embed_figures else []
+        if figures:
+            # A stored report's figures were drawn when it was built, perhaps
+            # before their text was defanged: each is read again here, with
+            # the run's own values, as the Markdown is. The read is
+            # idempotent, so a figure drawn defanged prints as it was drawn.
+            run_values = ProseDefanger(run_network_values(report))
+            figures = [_figure_read(fig, run_values) for fig in figures]
         preamble, sections, leftover = self._place_figures(body_html, figures)
         toc = self._toc(sections)
         appendix = self._figure_appendix(
@@ -410,6 +420,45 @@ def _slug(heading: str) -> str:
 def _numbered(figures: list[Figure]) -> int:
     """How many of ``figures`` take a figure number: a line saying one was not drawn takes none."""
     return sum(1 for fig in figures if fig.kind != "not_drawn")
+
+
+# A listing figure's code, and an SVG text element's words: the escaped text
+# between the tags a figure builder wrote around it.
+_LISTING_BODY = re.compile(r'(<pre class="listing">)(.*?)(</pre>)', re.DOTALL)
+_SVG_TEXT = re.compile(r"(<text\b[^>]*>)(.*?)(</text>)", re.DOTALL)
+
+
+def _figure_read(fig: Figure, run_values: ProseDefanger) -> Figure:
+    """``fig`` with every network value in its words defanged, the run's own values first.
+
+    The caption and the legend are read as text. A listing's code and every
+    SVG figure's text elements (a process tree's names, an entropy chart's
+    section names) are the escaped text a figure builder wrote: each is
+    unescaped, defanged and escaped again, and the markup around it is left
+    as drawn. A line saying a figure was not drawn names no value and
+    is left alone.
+    """
+    if fig.kind == "not_drawn":
+        return fig
+
+    def read(text: str) -> str:
+        return _defanged_text(text, run_values)
+
+    def inner(found: re.Match[str]) -> str:
+        return found.group(1) + escape(read(unescape(found.group(2)))) + found.group(3)
+
+    content = fig.content
+    if fig.kind == "code_listing":
+        content = _LISTING_BODY.sub(inner, content)
+    elif content.lstrip().startswith("<svg"):
+        content = _SVG_TEXT.sub(inner, content)
+    return fig.model_copy(
+        update={
+            "caption": read(fig.caption),
+            "legend": read(fig.legend) if fig.legend else fig.legend,
+            "content": content,
+        }
+    )
 
 
 def _figure_html(fig: Figure, number: int) -> str:

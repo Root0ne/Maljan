@@ -382,9 +382,14 @@ class TestWhatIsNotRead:
         sparse = tmp_path / "copy"
         with sparse.open("wb") as fh:
             fh.truncate(10 * 1024**4)
-        started = time.monotonic()
-        sha, why = file_sha256(sparse, len(BYTES))
-        assert time.monotonic() - started < 5
+        # Removed at once: pytest keeps its last temp dirs, and a 10 TiB file
+        # left there costs any host scanner that reads it hours of CPU.
+        try:
+            started = time.monotonic()
+            sha, why = file_sha256(sparse, len(BYTES))
+            assert time.monotonic() - started < 5
+        finally:
+            sparse.unlink()
         assert (sha, why) == ("", f"size {10 * 1024**4} is not the intake size {len(BYTES)}")
 
     def test_the_intake_size_reads_as_before(self, tmp_path: Path) -> None:

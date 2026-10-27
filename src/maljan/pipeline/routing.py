@@ -17,7 +17,11 @@ Decision priority (highest to lowest), in ``debate_route``:
      mediation's blocking lines are the same contested points as the last
      mediation's (``debate_facts.same_points``: none resolved, none new):
      another round would argue the same points. Judge
-     (``contested_points_unchanged``); no consensus is claimed.
+     (``contested_points_unchanged``); no consensus is claimed. The same end
+     when the mediator marked every blocking line carried from a line of the
+     last mediation (``[carried: L<n>]``) and the round's record shows no
+     analyst the line names changed a claim on that earlier line
+     (``debate_facts.carried_unmoved``); a line not marked is read as before.
      Ledger stated — every blocking line of this mediation states only counts
      the ledger states, and an earlier mediation told the analysts those
      counts (``debate_facts.ledger_stated``): another round would argue
@@ -289,14 +293,18 @@ def last_two_mediations(history: Any) -> tuple[Any, Any] | None:
     return None
 
 
-def points_unchanged(state: Any) -> bool:
+def points_unchanged(state: Any, record: dict[str, Any] | None = None) -> bool:
     """Whether the last mediation's blocking lines are the one before's contested points.
 
     Read from the two mediations' structured answers (``contradictions``,
     the lines each marked blocking or left unmarked), and only where both
-    were made (``status`` complete).
+    were made (``status`` complete): the same points by their keys
+    (``debate_facts.same_points``), or every blocking line marked carried by
+    the mediator from a line of the one before on which the revision round
+    in between (``record``) shows no analyst the line names changed a claim
+    (``debate_facts.carried_unmoved``).
     """
-    from maljan.pipeline.debate_facts import same_points
+    from maljan.pipeline.debate_facts import carried_unmoved, same_points
 
     pair = last_two_mediations(state.get("discussion_history") or [])
     if pair is None:
@@ -304,9 +312,14 @@ def points_unchanged(state: Any) -> bool:
     before, after = pair
     if any(getattr(a, "status", "complete") != "complete" for a in pair):
         return False
-    return same_points(
-        list(getattr(before, "contradictions", None) or []),
-        list(getattr(after, "contradictions", None) or []),
+    lines = list(getattr(after, "contradictions", None) or [])
+    if same_points(list(getattr(before, "contradictions", None) or []), lines):
+        return True
+    return carried_unmoved(
+        lines,
+        dict(getattr(after, "carried", None) or {}),
+        record,
+        [str(f) for f in getattr(after, "place_facts", None) or []],
     )
 
 
@@ -421,7 +434,11 @@ def route_within_limit(
     # mediation lists are the ones the last listed, none resolved and none new:
     # the round changed no point, and another would argue the same ones. The
     # answers in force go to the judge, and no agreement is claimed.
-    if revised is not None and int(revised.get("made") or 0) > 0 and points_unchanged(state):
+    if (
+        revised is not None
+        and int(revised.get("made") or 0) > 0
+        and points_unchanged(state, revised)
+    ):
         say(
             "The round before round %d revised analysts and left the contested points as they "
             "were; routing to judge with the answers in force.",

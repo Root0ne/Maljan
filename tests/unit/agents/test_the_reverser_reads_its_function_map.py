@@ -121,11 +121,11 @@ def _run(analyst: _Analyst) -> None:
 
 def test_every_call_runs_and_the_map_rides_the_latest_answer() -> None:
     calls: list[dict[str, Any]] = []
-    analyst, model = _analyst(["0x1400050ac", "1400050ac"], calls)
+    analyst, model = _analyst(["0x1400050ac", "0x1400050b0"], calls)
 
     _run(analyst)
 
-    assert len(calls) == 2, "another spelling of the address is run, as before"
+    assert len(calls) == 2, "another address in the function is run, as before"
     last = [str(m.content) for m in model.seen[2] if isinstance(m, ToolMessage)][-1]
     # Its answer is the function ev_0001 holds, so it is handed under that id
     # and filed as a repeat of it.
@@ -137,11 +137,13 @@ def test_every_call_runs_and_the_map_rides_the_latest_answer() -> None:
     assert "ledger_answers" not in analyst.drain_budget_records()[0]
 
 
-def test_an_identical_repeat_is_served_by_the_repeat_guard_as_before() -> None:
+@pytest.mark.parametrize("again", ["0x1400050ac", "1400050ac"])
+def test_an_identical_repeat_is_served_by_the_repeat_guard_as_before(again: str) -> None:
+    """The same address in another hex spelling is the same call (``RepeatGuard._key``)."""
     from maljan.agents.evidence_recorder import served_repeat_notice
 
     calls: list[dict[str, Any]] = []
-    analyst, model = _analyst(["0x1400050ac", "0x1400050ac"], calls)
+    analyst, model = _analyst(["0x1400050ac", again], calls)
 
     _run(analyst)
 

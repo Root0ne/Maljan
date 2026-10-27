@@ -1,15 +1,16 @@
 """The readers of model-written text run in time linear in the text, on hostile lines too.
 
 A model answer is untrusted and can be arbitrarily long. Each reader below is
-given a line of about 200 KB of words with no comma, semicolon or full stop and
-many technique-id tokens, and ten times less of the same; the long one may cost
-at most a constant factor more than ten times the short one. Nothing is cut to
-make it pass.
+given a line of words with no comma, semicolon or full stop and many
+technique-id tokens, sized so that it costs at least 10 ms of CPU time (from
+20 KB up), and four times as much of the same; the long one may cost less than
+``TIME_RATIO_LIMIT`` times the short one, each the best CPU time of five runs
+(``tests.linear_cost.cpu_seconds``), so a loaded machine does not move it.
+Nothing is cut to make it pass.
 """
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from types import SimpleNamespace
 
@@ -24,11 +25,19 @@ from maljan.agents.claim_headings import CLAIM_HEAD_RE, claim_blocks
 from maljan.agents.repeat_watch import ClaimRepeatReader
 from maljan.pipeline.claim_drops import claim_substance
 from maljan.pipeline.debate_facts import fact_atoms, ledger_count_facts, ledger_stated
-from maljan.pipeline.validation import EntryTexts, ledger_absence_contradictions
+from maljan.pipeline.validation import (
+    EntryTexts,
+    absence_holders_note,
+    ledger_absence_contradictions,
+)
 from maljan.schemas.evidence import build_entry
+from tests.linear_cost import TIME_RATIO_LIMIT, cpu_seconds
 
 UNIT = "T1234 Native words T1106 more is not read 0x1400 which that 12 hits Web Protocols "
-FACTOR = 30
+# The short line's least size and CPU time, and the largest size it grows to.
+SMALLEST = 20_000
+LEAST_SECONDS = 0.01
+LARGEST = 1_280_000
 
 
 def _hostile(size: int) -> str:
@@ -36,15 +45,17 @@ def _hostile(size: int) -> str:
 
 
 def _scales_linearly(read: Callable[[str], object]) -> None:
-    def cost(text: str) -> float:
-        start = time.perf_counter()
-        read(text)
-        return time.perf_counter() - start
+    def cost(size: int) -> float:
+        text = _hostile(size)
+        return cpu_seconds(lambda: read(text), repeats=5)
 
-    cost(_hostile(2_000))
-    small = cost(_hostile(20_000))
-    large = cost(_hostile(200_000))
-    assert large <= max(small, 1e-3) * FACTOR, (small, large)
+    size = SMALLEST
+    small = cost(size)
+    while small < LEAST_SECONDS and size < LARGEST:
+        size *= 2
+        small = cost(size)
+    large = cost(size * 4)
+    assert large < max(small, LEAST_SECONDS) * TIME_RATIO_LIMIT, (size, small, large)
 
 
 ENTRIES = EntryTexts.from_ledger(
@@ -101,6 +112,15 @@ LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 
             lambda t: read_technique_line("T1106" + " - " * (len(t) // 3) + "x"),
             id="technique line with spaced dashes",
         ),
+        pytest.param(lambda t: read_technique_line("T1106 (" + t + ")"), id="technique note"),
+        pytest.param(
+            lambda t: read_technique_line("T1106 (a); " * (len(t) // 10) + "T1106 ("),
+            id="technique line of notes left open",
+        ),
+        pytest.param(
+            lambda t: read_technique_line("none" + " " * len(t) + "(T1106 not supported"),
+            id="none line with a note left open",
+        ),
         pytest.param(
             lambda t: _EVIDENCE_ENDS_INLINE_RE.search(" " * len(t) + "x"),
             id="evidence end after a run of spaces",
@@ -134,6 +154,41 @@ LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 
             id="one clause of many statements",
         ),
         pytest.param(
+            lambda t: ledger_absence_contradictions(
+                {"body": "no a " * (len(t) // 5) + "is in the evidence."}, ENTRIES
+            ),
+            id="many subjects of no",
+        ),
+        pytest.param(
+            lambda t: ledger_absence_contradictions(
+                {"body": "The decompile of " + "x " * (len(t) // 2) + "0x1400 was not obtained."},
+                ENTRIES,
+            ),
+            id="a long decompile subject",
+        ),
+        pytest.param(
+            lambda t: ledger_absence_contradictions(
+                {
+                    "body": "The body of 0x1400"
+                    + ", which a" * (len(t) // 9)
+                    + " is not in my rows."
+                },
+                ENTRIES,
+            ),
+            id="a subject of many asides",
+        ),
+        pytest.param(
+            lambda t: ledger_absence_contradictions(
+                {"body": "the " + "plain " * (len(t) // 6) + "slots 0x1400 remain unresolved."},
+                ENTRIES,
+            ),
+            id="many words describing a kind noun",
+        ),
+        pytest.param(
+            lambda t: absence_holders_note("Slot 0x1400 is unresolved, and " + t, ENTRIES),
+            id="a claim's absence note",
+        ),
+        pytest.param(
             lambda t: ledger_count_facts([" " * len(t) + "x"], {}, LEDGER, ["a"]),
             id="claim numbers after a run of spaces",
         ),
@@ -143,5 +198,5 @@ LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 
         ),
     ],
 )
-def test_ten_times_the_hostile_line_costs_at_most_ten_times(read: Callable[[str], object]) -> None:
+def test_four_times_the_hostile_line_stays_under_the_ratio(read: Callable[[str], object]) -> None:
     _scales_linearly(read)

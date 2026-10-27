@@ -6,9 +6,11 @@ was asked about, and kept unread after the retry, so sixteen claims carried no
 technique. A name with no bracket runs to the next comma, semicolon or the
 line's end, and is taken off only when all of it is the id's catalogue name.
 A line that opens with "none" and holds no technique id and no catalogue
-technique name claims none, whatever the words after it say. A qualifier
-("candidate"), another name, or an id or a named candidate technique on a
-"none" line ("None; Process Injection is likely") is still asked about.
+technique name claims none, whatever the words after it say, and so does one
+whose ids stand in a closing note that sets them aside ("none (T1568 not
+supported)"). A qualifier ("candidate"), another name, or an id or a named
+candidate technique on a "none" line ("None; Process Injection is likely") is
+still asked about.
 """
 
 from __future__ import annotations
@@ -35,6 +37,8 @@ from maljan.agents.base_agent import read_technique_line
         ("none asserted", ()),
         ("none (capability only)", ()),
         ("None additional.", ()),
+        # The id on the "none" line is set aside by its note.
+        ("none (T1568 not supported)", ()),
     ],
 )
 def test_it_is_read(line: str, ids: tuple[str, ...]) -> None:
@@ -48,7 +52,7 @@ def test_it_is_read(line: str, ids: tuple[str, ...]) -> None:
         "T1071.001 Web Protocols (candidate)",
         "T1106 Native calls",
         "T1218.011 Signed Binary Proxy Execution: Rundll32",
-        "none (T1568 not supported)",
+        "none (T1568 likely)",
         "none asserted; T1041 would apply if transmission is shown",
         "nonexistent T1027",
         "T1027 or T1140",

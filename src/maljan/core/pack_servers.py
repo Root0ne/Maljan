@@ -9,7 +9,9 @@ cannot drift.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
+from functools import partial
 from typing import Any
 
 from maljan.core.logger import logger
@@ -42,7 +44,9 @@ def _declared_kind(called: str) -> str:
     return str(getattr(facts, "kind", "") or "")
 
 
-def _declaring_server_key(servers: Mapping[str, Any], called: str, *, purpose: str) -> str:
+def _declaring_server_key(
+    servers: Mapping[str, Any], called: str, *, purpose: str, level: int = logging.INFO
+) -> str:
     """The key of the server declaring a step's ``called`` tool or its kind, ``""`` for none.
 
     The in-process step stands in for that server's tool whether the server
@@ -51,8 +55,8 @@ def _declaring_server_key(servers: Mapping[str, Any], called: str, *, purpose: s
     name, then those declaring a tool of the same declared kind, each in
     ``mcp.servers`` order; switched-off servers follow in the same order, a
     last resort. When more than one qualifies, or the one read is switched
-    off, the choice is logged at info (the node resolves each purpose once
-    per run).
+    off, the choice is logged at ``level``, info by default (the node resolves
+    each purpose once per run; a status read asks for debug).
     """
     kind = _declared_kind(called)
     by_name: dict[bool, list[str]] = {True: [], False: []}
@@ -77,23 +81,33 @@ def _declaring_server_key(servers: Mapping[str, Any], called: str, *, purpose: s
         if len(qualified) > 1:
             also = f"; {', '.join(repr(k) for k in qualified[1:])} also declare {declared}"
         off = " (switched off; its env is still read)" if switched_off else ""
-        logger.info("triage pack: %s reads server %r%s%s.", purpose, chosen, off, also)
+        # ``info`` itself at the default: the worker's line is exactly what it was.
+        say = logger.info if level == logging.INFO else partial(logger.log, level)
+        say("triage pack: %s reads server %r%s%s.", purpose, chosen, off, also)
     return chosen
 
 
-def _decoder_server_key(servers: Mapping[str, Any], steps: Sequence[Any]) -> str:
+def _decoder_server_key(
+    servers: Mapping[str, Any], steps: Sequence[Any], *, level: int = logging.INFO
+) -> str:
     """The key of the server the pack's decoded-strings step declares, ``""`` for none.
 
     The step's own ``server`` when it is enabled, else the server declaring
     the tool the step calls (:func:`_declaring_server_key`): the
     server whose tool the in-process step stands in for. With the step left
-    out of ``steps`` (switched off), its shipped declaration is read.
+    out of ``steps`` (switched off), its shipped declaration is read. The
+    choice is logged at ``level`` (:func:`_declaring_server_key`).
     """
-    return _step_server_key(servers, steps, _DECODER_RENDERER, purpose="the decoder")
+    return _step_server_key(servers, steps, _DECODER_RENDERER, purpose="the decoder", level=level)
 
 
 def _step_server_key(
-    servers: Mapping[str, Any], steps: Sequence[Any], renderer: str, *, purpose: str
+    servers: Mapping[str, Any],
+    steps: Sequence[Any],
+    renderer: str,
+    *,
+    purpose: str,
+    level: int = logging.INFO,
 ) -> str:
     """The key of the server the pack's ``renderer`` step declares, ``""`` for none.
 
@@ -106,10 +120,10 @@ def _step_server_key(
         named = servers.get(step.server)
         if named is not None and getattr(named, "enabled", True):
             return str(step.server)
-    return _declaring_server_key(servers, step.called, purpose=purpose)
+    return _declaring_server_key(servers, step.called, purpose=purpose, level=level)
 
 
-def _carve_server_key(servers: Mapping[str, Any]) -> str:
+def _carve_server_key(servers: Mapping[str, Any], *, level: int = logging.INFO) -> str:
     """The key of the server whose file tools read what the pack's UPX carve writes.
 
     The carve is the platform's own step, so its shipped declaration names
@@ -117,8 +131,9 @@ def _carve_server_key(servers: Mapping[str, Any]) -> str:
     (:func:`_declaring_server_key`) is the one whose staging base the
     carve writes under. Independent of the decoded-strings step: an operator
     who moves that step to another server leaves the carve where it was.
+    The choice is logged at ``level`` (:func:`_declaring_server_key`).
     """
     step = _pack_step_of(_CARVE_RENDERER, ())
     if step is None:
         return ""
-    return _declaring_server_key(servers, step.called, purpose="the unpack carve")
+    return _declaring_server_key(servers, step.called, purpose="the unpack carve", level=level)

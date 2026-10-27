@@ -316,7 +316,13 @@ the same build of zlib: `manifest.json` first, `manifest.sig` second, every
 other entry sorted by path, plain USTAR regular files only, every timestamp 0,
 mode 0644, owner 0:0, and a gzip header with no name and no time. Another zlib
 build may compress the same tar differently; the uncompressed tar is the same
-everywhere. Every row set is read in a fixed order, and a report stored
+everywhere. The gzip header carries the file's own digest in an extra field
+(`MJ`): the SHA-256 of every byte after the header, to the end of the file,
+and beside it an HMAC-SHA256 of that digest under the package key when the
+manifest is signed (zeros when it is not). Deflate is not canonical: a match in
+a run of zeros may point at any earlier zero and padding bits are never read,
+so a changed byte can leave the archive and its CRC the same; the digest makes
+every byte count. Every row set is read in a fixed order, and a report stored
 without a generation time is dated with the job's stored completion time,
 never the build's clock (with neither, the Markdown is listed as absent).
 
@@ -372,15 +378,35 @@ builds: the per-client request rate limit (`rate_limit_requests` per
 `rate_limit_window_seconds`) applies, as to every route.
 
 `python -m scripts.package.verify <file> [--allow-unsigned]
-[--upload-max-bytes N]` reads the archive in one pass, to the gzip end (its
-CRC is checked) with nothing after the tar end marker but its zero padding.
+[--upload-max-bytes N]` opens the file once and reads it once, front to
+back. Its gzip header must be the builder's; every byte after it is hashed as
+the archive is read, and then the rest to the end of the file, and must match
+the SHA-256 the header carries; once the signature is known the HMAC beside
+it must verify under the manifest's key (an unsigned package carries zeros;
+under a key this environment cannot derive it is not checked). Any change to
+the file, a byte flipped, cut off or appended, reads `broken`, naming the
+entry a check of the archive caught it in, or else the package itself, and a
+failed digest or HMAC is reported before the seal is looked at;
+`seal_unverifiable` therefore never means damage. The manifest's format names
+the envelope: `maljan-job-package/2` carries the digest, and a package built
+before it (`maljan-job-package/1`, under the old plain header) still verifies
+and reads `file_digest: legacy`: in the same pass it is compared byte for byte
+with what the builder wrote then (the gzip header, every tar header and
+padding byte, the end marker and record padding, the gzip CRC and length,
+nothing after them), so only an equivalent encoding of its deflate stream,
+which yields the same archive, cannot be told apart. A current manifest under
+the old header, or an old one under the new, reads `broken`. The archive is
+read to the gzip end (its CRC is checked) with nothing after the tar end
+marker but its zero padding; an I/O error while reading reads `broken`.
 Every entry must be a plain USTAR regular file (no link, device, sparse file,
 or PAX or GNU extended header) under a safe relative name (no absolute path, no
 `..`, no duplicate). The manifest must come first and be no larger than
 `upload_max_bytes`, and every size it lists must be within that bound; every
 later entry must be listed, and its header's size must equal the listed size
 before a byte of it is read, so the whole read is bounded by the manifest. The
-signature, when present, comes second and is checked. The `run/` files are
+signature, when present, comes second and is checked; its file must be byte for
+byte the record the builder writes (every field, no other, the same spacing).
+The `run/` files are
 written into a temporary directory under names checked first, and the seal is
 checked there with the ledger verification of a run directory; nothing is
 extracted anywhere else. Corrupt or malformed input (bad gzip data, a bad CRC,
@@ -392,7 +418,7 @@ exits:
 | Status | Exit | When |
 |---|---|---|
 | `verified` | 0 | every file matches the signed manifest, the signature verifies and the seal verifies |
-| `broken` | 1 | `file` names what failed: an unsafe, unplain or unlisted entry, a missing file, a size or digest that differs, a manifest that fails its signature, a signature file removed from a manifest that says it is signed, data after the end marker, a seal that does not verify, or an unsigned package where this environment holds the package key and `--allow-unsigned` was not given |
+| `broken` | 1 | `file` names what failed: a changed, cut or extended file (its digest, or the HMAC beside it, differs), an unsafe, unplain or unlisted entry, a missing file, a size or digest that differs, a manifest that fails its signature, a signature file removed from a manifest that says it is signed, data after the end marker, a seal that does not verify, or an unsigned package where this environment holds the package key and `--allow-unsigned` was not given |
 | `unsigned` | 3 | every file matches and the seal verifies, but the package carries no signature, and either no package key is held or `--allow-unsigned` was given; the files outside `run/` are then not authenticated by a key |
 | `seal_unverifiable` | 4 | every file matches, but the seal cannot be verified (`other_key`, `not_sealed`, `unverifiable`, or a run file it reads was left out for its size) |
 | `other_key` | 5 | the manifest is signed under a key this environment cannot derive, named in the reason (a package signed before a settings key rotation) |

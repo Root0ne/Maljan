@@ -365,12 +365,14 @@ The debate ends when nothing is left to settle (`pipeline/debate_facts.py`,
 - For a listed line whose cited entries (cited by the line or by a claim it names) hold, in a field named for a count or a total, a number the line itself states, every such value is stated; the length of a list field (a match list: `matches = 0 items`) only where its key names the noun the line counts with that number ("0 hits" for `matches`, a hit being a match; "3 domains" for `domains`). A size or a time is not a count. No call is made for them: they ride on the revision directive of the analysts the line names and on the next mediation's prompt, and a debate that ends at this mediation spends nothing on them.
 - A blocking line the ledger states, told before, is recorded and shown, never taken away (`debate_facts.ledger_stated`). Its dispute must be about a count itself: two sides of the line (split at "while", "whereas", "but", "against", "versus", "although", "however" or a semicolon) each write one number, in digits or a number word, directly before one noun (at most one word between), and the numbers differ ("three matches" against "0 hits"). Two numbers on one side ("31 rules loaded, 3 matched") are two quantities, and a partitive or a ratio ("one of the rules", "0 hits of 31 rules", "3 out of 31", "3/31") is no count of its noun. "Hit" and "match" are one noun, a closed and deliberately minimal vocabulary; a line whose sides read counts both accept differently ("0 matches as benign" against "31 rules as malicious") is a dispute about meaning and is never stated. Every count it states (a number before a plural noun, "0 hits", "31 rules") is stated by a cited entry in a key naming that noun, the cited entries agree (every cited field of a counted noun holds one value) and are one record (an entry naming one of the line's nouns names all of them, so "0 connections" in one entry against "2 domains" in another is a dispute about meaning, not a count), and every fact stating one of its counts was stated by an earlier mediation of the debate. The line stays among the blocking lines, so the mediator, the judge and the report see it; it is said to the room, recorded in `AgentArgument.ledger_stated` and `run_summary.negotiation.ledger_stated`, and shown to the next mediation, which decides whether it still blocks. When every blocking line of a mediation is such a line, the debate ends as `ledger_stated`, with no consensus claimed. A line with a count no entry states, or with no count, is never stated, and a fact not yet told keeps the line out for the one round that tells it.
 - The mediator opens each line with `[analysts: <name>, <name>]`, the analysts who must revise over it, written as their reports are headed. A revision round asks only the analysts the blocking lines name; every other analyst keeps its answer in force, recorded in the round's `not_revised` as `not asked: not named by the mediator`. A named analyst's revision is shown the blocking lines that name it, with the mediator's summary and confidence, and of its peers only the ones those lines name, in the field or by key or label in any case or form; each is shown exactly as a round asking every analyst shows it, its answer in force whole, with no claim picked out by its number. A block that lists no blocking line holds no revision round: the debate goes to the judge as `consensus`; below the threshold, a stable confidence series still ends it as `convergence`, and otherwise it ends as `no_contested_point`. A blocking line without the field or naming no analyst of the debate, or a block that was not read, asks every analyst with every peer's answer, as before, and the round's record says why under `asked_all`.
-- Sycophancy is a rise in likeness beyond shared sources, told and never enforced (`pipeline/sycophancy_detector.py`, `convergence_flags`). After each revision round, for each analyst revised that made no tool call and whose revision cites nothing its answer before the round did not, the words of every ledger entry or sandbox item it and a peer both cite are left out of both, and its answer before the round and its revision are each compared with the peer's answer in force (bag-of-words cosine); a revision above the threshold and above its answer before the round is flagged and recorded on the round (`revision_rounds[].converged`). Two answers alike because they restate the same rows, or alike before the round, are not flagged. A flag is put to the next mediation as a sentence beside the facts block (`convergence_sentence`) and kept on the mediation (`AgentArgument.converged`); no analyst's prompt carries it, it never overrides the mediator's consensus or a block with no contested point, opens no round and never widens a round that asks only the analysts the mediator named. A stage with `sycophancy_check` off is told nothing. A round record stored before the flags existed is read by whole-answer likeness, as before, and decides no route either.
+- Sycophancy is a rise in likeness beyond shared sources, told and never enforced (`pipeline/sycophancy_detector.py`, `convergence_flags`). After each revision round, for each analyst revised that made no tool call and whose revision cites nothing its answer before the round did not (an entry the platform showed it in the round, a peer's tool result among them, is no citation of its own, and that entry's words are left out like a shared entry's: agreeing with what it states is no move, agreeing beyond it still is), the words of every ledger entry or sandbox item it and a peer both cite are left out of both, and its answer before the round and its revision are each compared with the peer's answer in force (bag-of-words cosine); a revision above the threshold and above its answer before the round is flagged and recorded on the round (`revision_rounds[].converged`). Two answers alike because they restate the same rows, or alike before the round, are not flagged. A flag is put to the next mediation as a sentence beside the facts block (`convergence_sentence`) and kept on the mediation (`AgentArgument.converged`); no analyst's prompt carries it, it never overrides the mediator's consensus or a block with no contested point, opens no round and never widens a round that asks only the analysts the mediator named. A stage with `sycophancy_check` off is told nothing. A round record stored before the flags existed is read by whole-answer likeness, as before, and decides no route either.
 - For a blocking line naming a function the run knows (an address the line writes, or one a claim it names writes, that is a row of the function index or a function a decompile or disassembly call listed; an offset and its virtual address are one function where an image base the run read joins them), the platform states whether the ledger holds a listing of it and which entries hold it (`debate_facts.place_facts`, `AgentArgument.place_facts`, said to the room as a notice). The analysts the line names in its field (every analyst, for a line with no field) are told it in their revision. An analyst with a tool whose declared arguments take an address (`undeclared_tools.address_arguments`, read from each tool's own schema) is also told it can read a function the ledger never listed in this round, and its revision is given its tools: a configurable analyst's revision is its tool loop already, and a built-in analyst's revision runs its tool loop in place of its one tools-free call (`BaseAnalyst.revision_answer`, `safe_revise_isr(read_places=True)`). The model decides whether to read; nothing is adopted or rejected for it, and no call is made for the facts.
+- A named analyst's revision is also shown, after the feedback, the stored text of the ledger entries the lines naming it cite and of one listing of each function their place facts name (`debate_facts.line_entry_ids`), each whole as it had it in view and shown through the one view of a tool answer, fenced, so a run-state block or a heading the sample wrote stays data (`base_agent.cited_entry_texts`, `tool_fence.fenced`; the validation retry and its drops question read entries the same way): a peer's tool result is in no input of its own, and before this the analysts were asked to check entries only the reverser had read. An entry its brief or its raw data already holds is left out. The entries take what the input room leaves beside the raw data, which they never shorten; one that does not fit is named by id (`debate_facts.fit_entries`, `safe_revise_isr(cited_entries=...)`), and the entries shown are grounds for the revision's checks as its raw data is. The next mediation is shown the same entries for the last mediation's blocking lines, in the room its reports and history leave. The mediation's entries also leave room for the turns after its first: one tool answer's share of the window (`context_window.ANSWER_SHARE`), the first answer at the output cap and the question for a missing block. Showing an entry raises no corroboration count: a technique's sources are ledger entries, each counted once however many analysts cite it, and a revised claim citing only entries of other agents the debate showed its analyst (in this round or an earlier one, `revision_rounds[].shown`) is marked (`ClaimEvidence.rests_on_shown_entries`) and counts as no sayer of its own unless it also cites an entry its analyst filed (`validation.shown_claim_unbacked`, read where `tool_backed_answers` reads a retry's claims).
+- After a revision round the next mediation is told, for each blocking line of the last mediation, numbered, who it named, who revised, the entries of the line each was shown, and who changed a claim anywhere in its answer (`claim_drops.changed_anywhere`, read by the `reworded` route's own key `claim_substance`, claim for claim with counts: a claim added or removed, or one whose values, cited entries, technique, negators, confidence step, technical terms or content words differ, whatever it cites; reordering, punctuation and stopwords are no change, any other rewording is, by design, so the stop rule errs towards another round; an answer whose claims cannot be read is a change; an analyst that filed entries in the round changed), then the entries the round filed by agent (`debate_facts.round_facts_text`, `revision_rounds[].lines` and `filed`). It is asked once to write `[carried: L<n>]` after the field of each blocking line that raises line n again, or `[new]`; the mark is no part of the point (`debate_facts.carried_marks`, `AgentArgument.carried`).
 - A revision round whose every revision is the answer in force again, whitespace aside, ends the debate as `converged`; the router reads only the record of the round right before the mediation it routes.
 - A revision round whose every revision states the claims in force again, wording aside, ends the debate as `reworded`, with no consensus claimed: another round would argue over words. Nothing factual may change: each claim's values (numbers, hex addresses, technique ids, quoted values), the entry ids its evidence line cites, its technique, its negators ("not", "no", "never", "without", a word ending "n't"), its confidence in steps of 0.05, its technical terms (acronyms, identifiers and names holding a digit, folded: RC4 against XOR is a change) and its content words (every word but articles, prepositions, "and", "so", pronouns and forms of be, have and do, read before the plural fold; "or", "nor" and "but" count; case and plural folded: "three" against "four", "explorer" against "svchost", "packed" against "unpacked" is a change) are the same, claim for claim; a reordering, punctuation or a stopword is wording (`claim_drops.unchanged_in_substance`, recorded as `reworded` in the round's record). A claim that cannot be read so, or any difference, leaves the round not reworded, and the debate goes on as before.
-- A revision's tool loop is seeded with the calls the analyst made in the run's earlier rounds to a tool that changes nothing and answers an identical call the same: one its server marks read-only (MCP `readOnlyHint`) or its declaration marks `read_only` (`base_agent.repeatable_earlier_entries`, `tool_pinning.answers_again`). A call of any other tool (a rename, a status poll, a submission) runs again, and so does a call whose earlier answer was a failure, carried a reason, an error or a message, or a status other than a word of completion such as "pending" (`evidence_recorder.holds_a_settled_answer`); an empty answer that nothing explains, alone or beside a status "ok", is settled and seeded. A tool is matched by its server and its name together, never by its name alone. A seed holds only while no call that is not read-only has run on the same server (its server key, else its source) since its entry was recorded, by any agent in any earlier round (`base_agent._stale_after`, newest first by `seq`, or by ledger order where a row has none) or in the current loop (`RepeatGuard.forget_round_seeds`): a rename or a patch makes a later decompile of that server a new call. An identical call (same tool, same arguments) is answered with the result its entry recorded, stamped with that entry's id and a sentence saying it was made in an earlier round, and no tool runs; the call is filed as a repeat of that entry. A failed call, and one whose result the run did not keep whole, is served once more, as for a chunked analysis.
-- A revision round that revised analysts and left the contested points as they were ends the debate as `contested_points_unchanged`, with no consensus claimed. A point is read from its blocking line alone (`debate_facts.point_key`): the analysts its field names, the ledger ids, hex values and decimal numbers it writes (claim numbers aside, since a revision renumbers claims; the mark and its reason aside), and its words where it writes none of those; two mediations whose blocking lines hold the same points, none resolved and none new, are unchanged however the mediator reworded them.
+- A revision's tool loop is seeded with the calls the analyst made in the run's earlier rounds to a tool that changes nothing and answers an identical call the same: one its server marks read-only (MCP `readOnlyHint`) or its declaration marks `read_only` (`base_agent.repeatable_earlier_entries`, `tool_pinning.answers_again`). A call of any other tool (a rename, a status poll, a submission) runs again, and so does a call whose earlier answer was a failure, carried a reason, an error or a message, or a status other than a word of completion such as "pending" (`evidence_recorder.holds_a_settled_answer`); an empty answer that nothing explains, alone or beside a status "ok", is settled and seeded. A tool is matched by its server and its name together, never by its name alone. A seed holds only while no call that is not read-only has run on the same server (its server key, else its source) since its entry was recorded, by any agent in any earlier round (`base_agent._stale_after`, newest first by `seq`, or by ledger order where a row has none) or in the current loop (`RepeatGuard.forget_round_seeds`): a rename or a patch makes a later decompile of that server a new call. An identical call (same tool, same arguments; an argument named for an address in the binary compared by its value where it is written with `0x`, and a bare spelling holding a decimal digit and a hex letter, for an argument whose name has no `name` word, answered from an entry a `0x` call made, never the other way) is answered with the result its entry recorded, stamped with that entry's id and a sentence saying it was made in an earlier round, and no tool runs; the call is filed as a repeat of that entry. A failed call, and one whose result the run did not keep whole, is served once more, as for a chunked analysis.
+- A revision round that revised analysts and left the contested points as they were ends the debate as `contested_points_unchanged`, with no consensus claimed. A point is read from its blocking line alone (`debate_facts.point_key`): the analysts its field names, the ledger ids, hex values and decimal numbers it writes (claim numbers aside, since a revision renumbers claims; the mark and its reason aside), and its words where it writes none of those; two mediations whose blocking lines hold the same points, none resolved and none new, are unchanged however the mediator reworded them. The debate ends the same way when the mediator marked every blocking line carried and, for each, the line shares an entry id or a place with the earlier line it names (a mark naming a line about other things is no mark), every analyst it names was named on the earlier line, every analyst the earlier line named revised in the round, and none of them changed a claim of its answer in the round (`debate_facts.carried_unmoved`; conservative by design); a line marked new or not marked, or an analyst that has not answered the earlier line yet, leaves the debate going as before.
 - A revision is made against the analyst's answer in force and its peers'; each value of the answer in force it states nowhere is recorded in `run_summary.negotiation.dropped_claims` (a decimal only as a stated value, never a claim, round, step, stage, phase or list number, nor the round's own number; nor a cross-reference to the answer's own numbering such as "#3" or "item 3"; a number after any other word, such as "line 75", is compared as a value), the report's run appendix prints one count line per analyst and round (`dropped_value_counts`), the worker log one count line per analyst and round at INFO with each claim's sentence at DEBUG, and nothing is asked.
 - The debate stage's duration adds the revision rounds' time to the mediations', and `termination_reason` comes from the router's own rules, `hard_limit` only when the debate would have gone on.
 
@@ -417,7 +419,16 @@ entropies, the packer signature hits and the import rows); the identification
 servers' steps, each off (no call, no entry) while its server is not switched
 on: `die_scan` (Detect It Easy) on every sample, then `dotnet_types` (ILSpy)
 and `go_symbols` (GoReSym) where `die_scan`'s declared `name` value says .NET
-or Go (see [Identification servers](/tools/identification/)); a `strings` head
+or Go (see [Identification servers](/tools/identification/)); the document
+servers' steps, each off the same way and each on the routed format: `ole_vba`
+(oletools) on an Office container, `office_dde` on an Office container or an
+RTF, `rtf_objects` on an RTF, `js_deobfuscate` (webcrack) on a JavaScript,
+HTA or WSF file (see [Rule and document servers](/tools/rules-and-documents/));
+the container and Android servers' steps, each off the same way:
+`container_extract` (unblob) on every sample, each file it wrote taken into
+the job's artefact store, and `android_classes` (JADX) on an APK or dex file
+(see [Container and Android servers](/tools/containers-and-android/));
+a `strings` head
 capped by `triage.strings_head` and `iocs_from_file` (its indicator scan reads printable
 ASCII and UTF-16LE runs; a UTF-16LE host written directly after a NUL-terminated ASCII
 string can be read with that string's last letter in front of it, because the bytes are
@@ -488,7 +499,7 @@ the file's import table puts in the slot a call or a jump thunk goes through,
 the function at a direct call's target, or the slot a runtime pointer is read
 from. A jump or return before the call, a byte the decoder cannot read, the
 function's end, a write to the argument register, another stack move for a
-pushed one, or a call through a register leave it absent. After that call, the walk follows to the next call in the same function that receives one of two things (`output_passed_to`, x64): the one frame slot whose address the call was given as another argument, else its return value in `rax`. It is said as a fact about the slot or the register ("the frame slot [rsp+0xa0], given to that call as argument 2, is then argument 2 of the call at …"; "that call's return value in rax is then …"), never as what the first call does with it. One hop more, the same walk runs from that later call: its own `output_passed_to` names the next call that receives the frame slot the later call was given as another argument, else its return value, with the callee and the argument position, and nothing is followed past that call; each hop is absent on its own when the code does not show it. The walk tracks registers and frame slots, ends tracking of a slot any store overlaps (sized by the store's width, SSE and VEX stores included; within 16 bytes where the width cannot be read), follows unconditional jumps and falls through conditional ones (said), and is absent at a return, an undecodable byte, a jump back, the function's end or a stack or frame pointer write. Both state addresses as offsets from the image base and the function
+pushed one, or a call through a register leave it absent. After that call, the walk follows to the next call in the same function that receives one of two things (`output_passed_to`, x64): the one frame slot whose address the call was given as another argument, else its return value in `rax`. It is said as a fact about the slot or the register ("the frame slot [rsp+0xa0], given to that call as argument 2, is then argument 2 of the call at …"; "that call's return value in rax is then …"), never as what the first call does with it. One hop more, the same walk runs from that later call: its own `output_passed_to` names the next call that receives the frame slot the later call was given as another argument, else its return value, with the callee and the argument position, and nothing is followed past that call; each hop is absent on its own when the code does not show it. Where the first hop's call reaches a function of the file (no import), that function is read from its first instruction (`inside`): the first call in it that receives the argument register the value arrived in, an argument spilled to its home slot and read back after a `push` or a `sub rsp` being the same slot; any other stack or frame pointer write leaves it absent, and nothing deeper is read. Which call is stated never depends on what the code writes on the way; whether the followed slot, or the argument inside, reaches that call as the decoder left it is a flag of its own on the hop and on `inside` (`contents_unchanged`). It is false after a store through a register holding it or a string store through `rdi` holding it, and, while a frame slot is followed, after a store into the frame at or above the slot's start, a store through any register holding a frame address, a string store, a frame store with an index register, or a call given a frame address before the call that receives the slot. A call through an import or a slot states its stack arguments that a `mov [rsp+d], imm32` in the straight run before it sets (`constants`, by argument position). The walk tracks registers and frame slots, ends tracking of a slot any store overlaps (sized by the store's width, SSE and VEX stores included; within 16 bytes where the width cannot be read), follows unconditional jumps and falls through conditional ones (said), and is absent at a return, an undecodable byte, a jump back, the function's end or a stack or frame pointer write. Both state addresses as offsets from the image base and the function
 around each from the file's own function table (`tools.pe_image`), and neither
 guesses one. The decoder runs after FLOSS so it can read FLOSS's kept result;
 both run after every other step so no earlier id moves. Where the resolution names
@@ -1888,7 +1899,25 @@ decides.
    (`claim_drops.dropped_values`), the technique ids the retry was asked about
    aside; the findings by title — is followed by one question naming each item
    (`isr.retry_dropped`, `validation.retry_drop_question`), with a
-   `validation_feedback` event when it is asked and when it is answered: the
+   `validation_feedback` event when it is asked and when it is answered. The
+   retry and this question are tools-free turns, so the tool results the first
+   answer read are in neither: the question names each item whole with its
+   EVIDENCE line, and shows each ledger entry the items cite once, the way the
+   analyst had it in view when it wrote the claim (`base_agent.cited_entry_texts`):
+   an entry from its own calls, or one it read again in its loop (a row of its
+   own repeating that entry, whole, in pages or cut; a chain of repeats followed
+   to its end), is shown whole and uncut, marked where the ledger holds part,
+   unless the conversation holds it verbatim; a pack entry it saw only as its
+   summary line is named, with a note that the line is in its brief and the
+   whole entry in the ledger; any other entry is shown whole.
+   Each turn is measured framed, run-state block included, against the job's
+   learned window, else the window the model's settings declare or its server
+   reported, else the vendored table's (`_window_room_chars`); items whose
+   entries do not fit together are asked in parts, each beside its own entries
+   (`_retry_drop_parts`, each part built when it closes); an entry that cannot fit
+   beside its item even alone is named by id wherever it is cited, and one named
+   to let an item fit is named in that item's part only, each named by
+   id as held and not shown. What the analyst answers stands as it gives it: the
    analyst answers `KEEP <label>: <reason>` or `WITHDRAW <label>: <reason>`
    per item, several labels at once (`KEEP C1, C2: …`, `KEEP C1 C2: …`,
    `WITHDRAW C3 because …`), several decisions on one line (`KEEP C1: …;
@@ -1912,7 +1941,39 @@ decides.
    analyst in `run_summary.validation.retry_drops`, listed in the run summary
    and in the report's section 13 (`validation.retry_drop_row`): every value
    masked as model text in the record is, in the case the claim wrote it,
-   and the sentence defanged after the mask.
+   and the sentence defanged after the mask. A kept retry that restates fewer
+   of the first answer's claims than it leaves out is more another answer
+   than a fix of this one, and does not replace the first answer
+   (`base_agent._restated_few`). Restated is read by the claim's values
+   (`claim_drops.dropped_claims`): a claim that holds a value, every one of
+   which the retry states, and that it was not asked to fold away; left out,
+   a claim the question names. A claim whose only values left out are
+   technique ids the retry was asked about, and a claim that holds no value,
+   are counted neither way. The one question about what it left out then says
+   the items stand in the answer as first written, beside the retry's claims
+   (`validation.retry_restated_few_question`), and also names each claim of
+   the first answer that holds no value and whose sentence (spacing aside) no
+   claim of the retry writes, so no claim leaves the answer unasked. It is
+   asked under `isr.retry_restated_few` as well as `isr.retry_dropped`: both
+   have the same `validation_feedback` events, retried then resolved or
+   survived, and both count in `validation_fed_back`;
+   `validation_retry_restated` on the loop's record keeps the counts. The
+   answer is read and applied as above; a withdrawn item stays out.
+   **The validation retry is shown what the answer cites.** It is a tools-free
+   turn over the brief, so in front of its closing it carries each ledger entry
+   the answer's claims and findings cite that the conversation does not hold,
+   the way `cited_entry_texts` gives it to the drops question
+   (`validation.validation_entries_text`). The turn is measured framed, with
+   the answer as it is sent back, against `_window_room_chars` beside an answer
+   of the cap the technique cards are measured with, every entry's id reserved
+   first; an entry that does not fit beside those shown is named by id, and
+   with no window known every entry is shown (`_with_cited_entries`). When no
+   entry fits, the turn is sent as it was, with no line of names. A turn that
+   fitted the window before still fits it, so whether the cards and the
+   cut-at-cap question are sent is decided as before. The whole answer asked
+   for after a retry that could not be merged fits the entries again, over the
+   turn it is sent as: the first turn, the retry's own answer and the question
+   after it, beside an answer of the output cap.
    **A retry changes only what it writes** (`pipeline.retry_merge`). A claim
    is named by its block number everywhere: its block's place among the
    answer's claim blocks, counted from 1 (`validation.claim_block_indexes`),
@@ -2414,7 +2475,9 @@ are informational while the analyst still has claims read
 other limitations and counted in the header's "Notes: … see §13" line, and
 they do not set `degraded_mode` (`triage_pack.run_is_degraded(reasons,
 informational=…)`). An answer none of whose claims was read, a failed stage
-and a failed required tool still degrade the run. The judge's RUN QUALITY
+and any failed or missing tool still degrade the run; only the operator's
+choices (`pipeline.operator_choice`: a key never set, a server switched off, a
+tool a shared server withholds by policy) are listed apart and never do. The judge's RUN QUALITY
 paragraph (`nodes.run_quality_note`) says a run that is not degraded is not,
 and adds only the sentences that fit its limitations: that a missing tool is an
 absence of evidence when a reason other than such a note is listed, and that a
@@ -3685,6 +3748,31 @@ can end an item id where its text went on (`net:44x` cut to `net:4`). Neither fo
 any reader, alone or beside the text around it. One pass, linear in the text;
 a case with no id is shown byte for byte as before.
 
+A similar case of another sample decides nothing either. The judge is shown up
+to three of them as weighted priors, read once per job
+(`long_term_memory.similar_cases`, kept on the container by the sample's
+sha256, so every verdict prompt of the job shows the same cases; a read that
+fails is not kept). A technique such a case carried can reach the verdict, or
+an analyst claim the judge keeps, with no source of this run behind it, so the
+judge's bundle records which cases' techniques its verdict prompt carried
+(`x_maljan_similar_cases`, each case's sample id and technique ids, set by the
+platform on every bundle). Both this record and `x_maljan_earlier_run` name
+other runs' samples, so they are in no STIX export and not in the report's
+bundle (the judge's draft stored as the report's when no export was made is
+written without them, `stix_models.JUDGE_ONLY_PROPERTIES`); they are kept on
+the judge's stored bundle as the run's facts. A case the fitted prompt cut
+before its header and techniques lines (matched with its number in the block,
+so two cases with the same techniques are told apart) is not recorded, since
+the judge was shown none of its techniques. The capability matrix publishes by the
+same rules as without the record, so the published set and every row's reason
+not to publish are the same with and without the similar cases, and a run
+repeated across samples that are each other's similar cases does not
+alternate. A recorded technique with no independent source in this run's
+corroboration row carries the note "a similar case from another sample also
+reported it; no source of this run stands behind it", beside the earlier
+run's note when both apply. A stored run from before the record carries none
+and replays as before.
+
 The run summary's `stix_object_count` is the exported bundle's object count
 once the report node has built the export, on the state's summary and on
 `report.run_summary` alike; the judge's own bundle size is kept as
@@ -3862,12 +3950,13 @@ conversation weighs before every model turn, and what it hands out is charged
 as it goes so a turn that calls several tools spends one turn's room between
 them. See [Configuration](/configuration/) for the numbers.
 
-**Old answers cleared when the window refuses.** A tool loop sends its whole
-conversation on every turn, so what the caps above bound is each answer, not
-what the loop reads again. Two things clear the oldest tool answers, each
-replaced by one line naming the evidence id the recorder stamped on it and how
-to read it again — and both only where the request would otherwise end the
-loop:
+**Old answers cleared when the window refuses, or past a price tier.** A tool
+loop sends its whole conversation on every turn, so what the caps above bound
+is each answer, not what the loop reads again. Three things clear the oldest
+tool answers, each replaced by one line naming the evidence id the recorder
+stamped on it and how to read it again — the first two only where the request
+would otherwise end the loop, the third only where it loses nothing and saves
+money:
 
 - **A refusal.** When the provider refuses a request as over its window (the
   same errors the `window_full` ending reads), one batch is cleared and the
@@ -3880,11 +3969,32 @@ loop:
   assignment's — never the job's smallest) is refused by every server, so it is
   cleared before it is sent. A prompt between the window less the output cap
   and the window is sent as before.
+- **A prompt past the agent's model's price tier.** Where the agent's own
+  model is priced by its prompt's length (its price row's `tiers`, read from
+  the operator's `llm.model_prices`, else the vendored table: Claude Haiku 5.5
+  bills every token of a prompt over 100,000 tokens at five times the rate) and
+  the request is past the first boundary, the oldest answers whose evidence id
+  one of the model's own turns has already written in its text are cleared —
+  never one it has not cited yet (an id named only in a call's arguments or in
+  its reasoning is no citation), so no fact it has not used leaves the
+  conversation. The clear is made only where what no tier clear can take (the
+  above, plus every answer not cited yet) is already under the boundary — a
+  clear that cannot bring the request under it would give up the cached prefix
+  and keep the dearer price — and where the request it sends, written to the
+  cache whole, costs less at the model's prices than the one it replaces with
+  its cached prefix, the turn's answer priced at this loop's mean and every
+  write priced for an hour where the model's cache entries live that long
+  (`tool_answer_clearing.tier_clear_pays`). A model priced by no prompt length
+  is never cleared for it. On the stored haiku5 run no loop met both
+  conditions at either cache lifetime — the reverser's first request alone was 131,680 tokens, and the
+  other loops that crossed the boundary had cited too little of what they read
+  — so that run is sent as it was.
 
 A clear takes the oldest answers until the request weighs what no clear can
 take (the framing, the pack, the definitions, the agent's own turns and
 reasoning, its newest answers) plus half of the room between that and the
-point — the refused request, or the window — so the loop has room to go on.
+point — the refused request, the window or the tier's boundary — so the loop
+has room to go on.
 A cleared answer stays cleared under the same line on every later turn. Never
 cleared: the newest turn's answers, an answer without the recorder's stamp, the
 system prompt, the task and its pack, the run-state block, the agent's own
@@ -3911,7 +4021,7 @@ the provider's recovery drops them. The nudge and the salvage after the loop
 send the cleared answers as the loop last sent them and bind the tools the loop
 last offered. Each clear is in the agent's log and is published as
 `tool_answers_cleared` (agent, turn, answers, characters before and after, and
-`refused` or `window`). The judge's tool loop clears the same way, with the
+`refused`, `window` or `tier`). The judge's tool loop clears the same way, with the
 same `read_evidence` tool offered from its first clear. The code is
 `maljan.agents.tool_answer_clearing`.
 
@@ -4106,7 +4216,7 @@ and the console draws the running analysis from them.
 |---|---|---|
 | `status_change` | the worker | `status` |
 | `pipeline_started` | the worker | `agents`, `sample_filename`, `sha256` |
-| `roster` | the worker, once, before anybody speaks | `agents[{key, label, role, stages, via}]`, `stages[{key, label, kind, agents}]` |
+| `roster` | the worker, once, before anybody speaks | `agents[{key, label, role, stages, via}]`, `stages[{key, label, kind, agents}]`, and `servers{key: label}` for each tool server whose label is not its key (left out when none has one) |
 | `agent_progress` | the worker and the analyst nodes | `agent`, `phase` |
 | `phase_change` | the worker | `phase` |
 | `stage_started` / `stage_skipped` / `stage_finished` | the stage nodes | `stage`, `kind`, and `agents` / `reason` / `ran`, `duration_ms` |
@@ -4118,8 +4228,8 @@ and the console draws the running analysis from them.
 | `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path`; `answer_kept` on an unread answer's question: one sentence saying where the answer is kept (`run_summary.validation.unparsed_answers`, one masked row per answer with its analyst and round), never the answer |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
-| `tool_answers_cleared` | an analyst's tool loop, on each clear of its oldest tool answers | `stage`, `agent`, `turn`, `answers`, `chars_before`, `chars_after`, `why` (`refused` or `window`) |
-| `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason` |
+| `tool_answers_cleared` | an analyst's tool loop, on each clear of its oldest tool answers | `stage`, `agent`, `turn`, `answers`, `chars_before`, `chars_after`, `why` (`refused`, `window` or `tier`) |
+| `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason`, and `label` where the server's block has a label other than its key |
 | `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
 | `completed` / `error` / `cancelled` | the worker | the outcome |
 
@@ -4219,9 +4329,30 @@ field name (`analysis_worker.IDENTITY_FIELDS`): the ids this system issues
 `agents`, `addressed_to`, `stage`, `stages`, `via`, `server`, `tool`, `key`,
 `profile`), the labels an operator typed (`label`, `display_name`) and the
 words the console switches on (`role`, `kind`, `status`, `phase`, `cap`,
-`code`, `verdict`). Nothing is exempt for the *shape* of its value beyond a
-digest and a canonical UUID, because a credential does not become safe by
-being lowercase.
+`code`, `verdict`). They are exempt from the shape rules only: a value the
+operator configured as a secret, a short one as a whole word, is masked in
+them as everywhere else.
+
+The model that answered (`model`, `models`, and each key of a `models`
+mapping; `analysis_worker.MODEL_FIELDS`) is not exempt, because the whole
+scrub reads `anthropic/claude-haiku-5-5` as a key by its length. It is
+scrubbed as a model label (`events.scrub_model_label`): configured values are
+masked and a URL loses its userinfo and its credential-named query values.
+Then each side of ` @ ` is kept as written only when it is an endpoint label
+(a scheme and a host, nothing else) or a provider and a model id split at the
+first `/`, each written as a model id is: parts between `-`, `.`, `_`, `:` and
+`/` that are words in one case (`claude`, `Llama`, `UD`), numbers of up to
+eight digits, or letter-and-digit runs of up to six characters in one case
+(`35b`, `Q4`), fewer than three of the last, and no vendor key prefix
+(`claude-sonnet-4-20250514`, `meta-llama/Llama-3.1-8B-Instruct`). Any other
+side is given the whole scrub, as every label was before. A process that has
+registered no configured values, or whose registration failed, holds the label
+to the whole scrub instead, as it holds a finding row; the API process
+registers none, so a model label it writes itself (a follow-up's usage rows)
+can still read `***`.
+
+Nothing is exempt for the *shape* of its value beyond a digest and a canonical
+UUID, because a credential does not become safe by being lowercase.
 
 A failed call travels as the remedy the tool offered, not as its error text,
 and a failed node travels as the class of its exception, never its message.
@@ -4232,6 +4363,9 @@ same ownership check as the report.
 /api/v1/jobs/{id}` carries the same roster, so a reader who is not an admin —
 and cannot read the agent definitions through the settings endpoint — still
 sees "Lead analyst" rather than `lead`, on a live run and on a finished one.
+Its `servers` names each tool server by the `label` its block gives it, so a
+server's own tab is drawn under that label; its key stays the id everywhere
+(the tab's route, the ledger, the events).
 
 ## The findings block
 
@@ -4839,8 +4973,10 @@ is assembled from what the run gathered rather than recomputed beside it:
   aside when it wrote it, under a token drawn for that render: each draft
   rule's body, which prints as it compiles, and in the run summary's appendix
   a model's endpoint where a generation or prompt-rate line names the model
-  (`<model> @ <endpoint>`) and the endpoint is one the settings configure
-  (`model_assignments.configured_endpoint_labels`). The same endpoint
+  (`<model> @ <endpoint>`) and the endpoint is one the run's own settings
+  configured, as its disclosure record keeps the labels
+  (`disclosure.endpoint_labels`), so a stored report prints the same on any
+  machine and one recorded without them keeps no endpoint. The same endpoint
   anywhere else, or a URL that begins with it (`http://127.0.0.1:8080/gate`
   beside a configured `http://127.0.0.1:8080`), prints defanged. No heading or fence in a
   sample's or a model's text makes a region the pass leaves. The host reader the publish checks, the run summary's sentences and
@@ -5075,6 +5211,34 @@ is assembled from what the run gathered rather than recomputed beside it:
   listed four hashes; under the rule both are unpublished rows ("seen only in
   the file's strings") and the export declines them. A test holds the export
   and the table to one decision.
+* **A decoded value the code passes to an API argument of its role is a row of
+  its own.** A decoded mutex name, file path or user agent has no standing by
+  its shape: a run decodes user agents the code never uses. The builder binds
+  a decoded text (`reporting.call_bindings`, stored as `bound_values`) only
+  where the run's answers state the whole chain: the static decoder's
+  reference passes the encoded bytes to a function of the file, the frame slot
+  that call was given (never its return value) is an argument of the next call,
+  directly or inside the function that call reaches (`inside`), that call is
+  an import the file's table names or a slot one function index entry alone
+  names, and the argument-role table (`data/api_argument_roles_v1.json`,
+  written from the Win32 prototypes) says that argument of that API takes a
+  mutex name, a file path or a user agent in the text's encoding. A file path
+  is listed only where the call makes or removes the file (a copy's or a
+  move's destination, a download's file, a delete), and CreateFile only where
+  its creation disposition is a constant that creates the file, read at the
+  call; a path a call only reads is as often the system's own. The row's
+  source is `call_argument`, its context the argument and the call, and its
+  `yes:` reason the chain, which §9, `/iocs`, MISP's comment and the STIX
+  indicator's description each carry; a user agent's pattern compares the
+  `User-Agent` request header of `http-request-ext`. A judge value the
+  report binds is asked as the binding. A bound value publishes nothing under
+  a Benign verdict or one the judge stated no confidence for. A bound user
+  agent that begins as the common browsers' do (the table's
+  `browser_user_agents`) keeps its row and chain but is refused by the rule,
+  with the reason, on every surface; the prefix rule is conservative and also
+  leaves a browser-shaped agent with a token of its own unpublished. A user agent
+  nothing binds is refused with that reason, and every other decoded text
+  stays a candidate.
 * **A value a tool recovered from hidden text is a source of its own.** Two
   tools recover text the sample hid: FLOSS, by emulation (its decoded, stack
   and tight strings), and the static decoder (`decode_string_blobs`), which

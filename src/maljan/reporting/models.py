@@ -19,6 +19,7 @@ Design notes:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Any, Literal, get_args
 
@@ -341,6 +342,10 @@ class ProcessNode(BaseModel):
     ppid: int = 0
     name: str = ""
     command_line: str = ""
+    # Whether the sandbox marks the process as the sample's: one of the two
+    # lineage facts the sample's process tree is read from. Left out of the
+    # dump when not marked, as on a report stored before the field existed.
+    marked: bool = Field(default=False, exclude_if=lambda value: not value)
     children: list[ProcessNode] = Field(default_factory=list)
     injected_into: list[int] = Field(default_factory=list)
 
@@ -355,6 +360,11 @@ class RegistryMod(BaseModel):
     value_name: str | None = None
     operation: Literal["create", "modify", "delete", "query"] = "modify"
     new_value: str | None = None
+    # The pids of the calls the sandbox recorded doing ``operation`` to the
+    # key, where its report kept them: what attributes the key to the sample's
+    # process tree. Empty when it named none, and then left out of the dump,
+    # as on a report stored before the field existed.
+    pids: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
 
 
 class SandboxSignature(BaseModel):
@@ -740,6 +750,11 @@ class TTPMapping(BaseModel):
     independent_sources: int = 0
     source_kinds: dict[str, int] = Field(default_factory=dict)
     support: str = ""
+    # The layers in ``contributing_layers`` that named it only in claims a
+    # tool-less retry added and nothing of their own backs
+    # (``validation.retry_claim_unbacked``): listed, never counted as a layer
+    # that names it. Left out of the stored row when empty.
+    retry_only_layers: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
 
 
 class AttckLink(BaseModel):
@@ -1206,6 +1221,48 @@ class EmulatedStrings(BaseModel):
     spelled: dict[str, str] = Field(default_factory=dict)
 
 
+class BoundValue(BaseModel):
+    """A decoded text the code passes whole to an API argument of a known role.
+
+    Built from the ledger at build time (``reporting.call_bindings``): the
+    decoder's entry (``entry``) states the text, the blob's file offset, the
+    place that loads it (``site``, in ``function``), the program's own routine
+    that receives it (``decoder_call``) and the frame slot that routine was
+    given, which a later call (``call_at``) receives as argument ``argument``:
+    directly, or inside the function (``inside``) that the call at ``reaches``
+    calls with it as argument ``reaches_argument``. The API
+    that call makes is the import the file's table names, or the slot a
+    function index entry names (``named_by``, with the ``slot``). The role,
+    its kind and the parameter's name are the argument-role table's for that
+    API. ``fall_through`` says the decoder followed the slot on the path where
+    every conditional jump falls through.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    value: str
+    kind: str
+    role: str
+    role_words: str = ""
+    api: str
+    argument: int
+    parameter: str = ""
+    entry: str
+    tool: str = ""
+    offset: str = ""
+    site: str = ""
+    function: str = ""
+    decoder_call: str = ""
+    call_at: str = ""
+    inside: str = ""
+    reaches: str = ""
+    reaches_argument: int = 0
+    slot: str = ""
+    imported_as: str = ""
+    named_by: str = ""
+    fall_through: bool = False
+
+
 class ClaimNotDiscussed(BaseModel):
     """An analyst claim in force whose code locations or API names the body does not name.
 
@@ -1226,6 +1283,9 @@ class ClaimNotDiscussed(BaseModel):
     carried: int = 0
     named: int = 0
     counted: str = "names"
+    # The round whose tool-less validation retry added the claim beside the
+    # answer in force (``ClaimEvidence.added_by_retry_in_round``), or ``None``.
+    added_by_retry_in_round: int | None = None
 
 
 class FlaggedStatement(BaseModel):
@@ -1525,6 +1585,22 @@ def _readable_reputation(value: Any) -> Any:
     return kept
 
 
+def key_ordered(value: Any) -> Any:
+    """``value`` with every mapping's keys in sorted order; lists keep theirs.
+
+    A stored report's key order is the storage's, not a fact of the run:
+    Postgres JSONB returns keys shorter first, a run export writes them
+    sorted. Every rendering of a stored report reads it through this, so
+    the served Markdown and HTML and the job package's ``report.md`` list
+    a mapping's entries in one order, whichever store they were read from.
+    """
+    if isinstance(value, Mapping):
+        return {key: key_ordered(value[key]) for key in sorted(value)}
+    if isinstance(value, list):
+        return [key_ordered(item) for item in value]
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Top-level report
 # ---------------------------------------------------------------------------
@@ -1574,6 +1650,12 @@ class MalwareReport(BaseModel):
     # reader sees why. ``degradation_reasons`` carries the human-readable list.
     degraded_mode: bool = False
     degradation_reasons: list[str] = Field(default_factory=list)
+    # What the operator's configuration left out — a key never set, a server
+    # switched off, a tool a shared server withholds by policy. It cost the
+    # run no evidence its configuration would give, so it is listed apart and
+    # never draws the banner (``pipeline.operator_choice``). Left out of the
+    # JSON when empty, so a report stored before the field existed reads as it did.
+    operator_choices: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
 
     # --- Identification ---
     identity: SampleIdentity
@@ -1662,6 +1744,11 @@ class MalwareReport(BaseModel):
     # entries at build time; ``None`` on a report stored before it existed,
     # which is then read from its kept section rows and said to be partial.
     emulated_strings: EmulatedStrings | None = None
+    # Each decoded text the code passes whole to an API argument of a known
+    # role, with the chain that binds it, built from the ledger at build time
+    # (``reporting.call_bindings``). Empty, and left out of the dump, on a
+    # report stored before it existed or a run that bound none.
+    bound_values: list[BoundValue] = Field(default_factory=list, exclude_if=lambda value: not value)
     # For every value an analyst's artifact lists, lower-cased: the tool
     # answers of the run that hold it whole, as ``(entry id, tool)``, and an
     # empty list when the ledger search found none. Built at build time from

@@ -563,6 +563,47 @@ def test_a_negative_over_an_observed_report_with_no_capture_is_partial() -> None
     assert {"gap": "narrowed", "entry": "ev_0002", "by": ["limit", "offset"]} in paged["gaps"]
 
 
+def test_a_capture_offered_and_not_fetched_is_not_a_capture_never_offered() -> None:
+    """T-336: the record says the capture could not be fetched, and why; a run
+    whose sandbox offered none keeps today's words."""
+    from types import SimpleNamespace
+
+    from maljan.pipeline.nodes import run_coverage
+    from maljan.providers.errors import PACKET_CAPTURE, ArtefactFetchFailed
+
+    lost = ArtefactFetchFailed(PACKET_CAPTURE, "HTTP 502")
+    claim = _claim("No mutex created [ev_0001].")
+    record = _record(
+        [_sandbox_call(1)], claim, sandbox_report={"processes": []}, capture_failure=lost.statement
+    )
+    gap = {"gap": "no_capture", "why": "the packet capture could not be fetched (HTTP 502)"}
+    assert gap in _only_negative(record)["gaps"]
+    (row,) = [r for r in record["not_established"] if r.get("input") == "capture"]
+    assert row["reason"] == "the packet capture could not be fetched (HTTP 502)"
+    text = "\n".join(line for block in coverage_lines(record) for line in block)
+    assert "No packet capture: the packet capture could not be fetched (HTTP 502)." in text
+    assert "names no packet capture" not in text
+
+    offered_none = _record([_sandbox_call(1)], claim, sandbox_report={"processes": []})
+    (row,) = [r for r in offered_none["not_established"] if r.get("input") == "capture"]
+    assert row["reason"] == "the sandbox report names no packet capture"
+    assert {"gap": "no_capture"} in _only_negative(offered_none)["gaps"]
+
+    # The report node reads the failure off the container.
+    container = SimpleNamespace(
+        server_degradation_reasons=lambda: [],
+        get_truncation_ledger=lambda: SimpleNamespace(input_shortened=[]),
+        artefact_fetch_failures=[
+            ArtefactFetchFailed(PACKET_CAPTURE, "9 bytes", empty=True).record()
+        ],
+    )
+    state = {"sample_path": SAMPLE, "evidence_ledger": [], "sandbox_report": {"processes": []}}
+    record = run_coverage(state, container, {})
+    assert record is not None
+    (row,) = [r for r in record["not_established"] if r.get("input") == "capture"]
+    assert row["reason"] == "the packet capture was fetched empty (9 bytes)"
+
+
 def test_a_non_path_argument_is_kept_as_its_role_and_a_digest_never_the_value() -> None:
     text = "x" * 5000
     entries = [

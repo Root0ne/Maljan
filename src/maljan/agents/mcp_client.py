@@ -21,11 +21,21 @@ from datetime import timedelta
 from typing import Any, cast
 
 from anyio.abc import ObjectReceiveStream
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from pydantic import ValidationError, create_model
+from pydantic import Field, ValidationError
 
+from maljan.agents.argument_schema import (
+    PLAIN_TYPES,
+    UnusableSchema,
+    holds_ref,
+    is_plain,
+    plain_type,
+)
+from maljan.agents.argument_schema import annotation as argument_annotation
+from maljan.agents.null_arguments import NullRules, argument_model, schema_rules
+from maljan.agents.server_names import ServerNamedTool, field_names, to_server_names
 from maljan.core.logger import logger
 from maljan.llm.context_window import note_call_began
 
@@ -406,6 +416,15 @@ def served_info(info: Any) -> dict[str, str]:
     return out
 
 
+# The most a delivery primitive's answer may hold, in characters (64 MiB): far
+# past any reading's answer, and short of what would exhaust the worker.
+DELIVERY_ANSWER_MAX_CHARS = 64 * 1024 * 1024
+
+# How long a streamable-HTTP or SSE session waits for the next bytes of an
+# answer, as the client library ships it.
+HTTP_READ_TIMEOUT_SECONDS = 300.0
+
+
 class MCPLangChainToolkit:
     """Toolkit that connects to an MCP server and exposes its tools to LangChain."""
 
@@ -424,6 +443,7 @@ class MCPLangChainToolkit:
         categories: Mapping[str, str] | None = None,
         keep_tool_definitions: bool = False,
         label: str = "",
+        http_read_timeout: float = HTTP_READ_TIMEOUT_SECONDS,
     ):
         self.server_params = server_params
         # The server's name in what this toolkit logs about it; a stdio
@@ -435,6 +455,10 @@ class MCPLangChainToolkit:
         self.transport = (transport or "stdio").lower()
         self.http_url = http_url
         self.http_headers = http_headers or {}
+        # How long an HTTP session waits for the next bytes of an answer: the
+        # library's own unless the server's block runs readings whose own
+        # clocks are longer (``ServerHandle``), each call still held to its own.
+        self.http_read_timeout = float(http_read_timeout)
         self.session: ClientSession | None = None
         self._exit_stack: Any = None
         self._tools: list[BaseTool] = []
@@ -493,13 +517,20 @@ class MCPLangChainToolkit:
             )
         self._exit_stack = AsyncExitStack()
 
+        # The session's wait for an answer's next bytes, named only where it
+        # is not the library's own, so every other session opens as before.
+        waits: dict[str, Any] = (
+            {"sse_read_timeout": self.http_read_timeout}
+            if self.http_read_timeout != HTTP_READ_TIMEOUT_SECONDS
+            else {}
+        )
         try:
             if self.transport in ("http", "streamable-http"):
                 from mcp.client.streamable_http import streamablehttp_client
 
                 logger.info("Connecting to MCP server over streamable-http: %s", self._host_label())
                 streams = await self._exit_stack.enter_async_context(
-                    streamablehttp_client(self.http_url, headers=self.http_headers)
+                    streamablehttp_client(self.http_url, headers=self.http_headers, **waits)
                 )
                 # streamablehttp_client yields (read, write, get_session_id).
                 read, write = streams[0], streams[1]
@@ -508,7 +539,7 @@ class MCPLangChainToolkit:
 
                 logger.info("Connecting to MCP server over SSE: %s", self._host_label())
                 read, write = await self._exit_stack.enter_async_context(
-                    sse_client(self.http_url, headers=self.http_headers)
+                    sse_client(self.http_url, headers=self.http_headers, **waits)
                 )
             else:
                 if self.server_params is None:
@@ -583,6 +614,47 @@ class MCPLangChainToolkit:
     def get_tools(self) -> list[BaseTool]:
         """Return the list of LangChain tools exposed by the MCP server."""
         return self._tools
+
+    async def deliver(
+        self, tool_name: str, args: dict[str, Any], timeout: float | None = None
+    ) -> Any:
+        """One call of a delivery primitive, answered whole, for the platform alone.
+
+        A delivery primitive's answer is the platform's input, never a model's
+        (``agents.tool_pinning.DELIVERY_TOOLS``), so it is not held to a
+        model's output limit: its text read as strict JSON (no ``NaN`` or
+        ``Infinity``), else the server's structured answer. The server may
+        have opened hostile bytes, so an answer past
+        :data:`DELIVERY_ANSWER_MAX_CHARS` is refused rather than read, and an
+        answer the server marked as an error is raised with its words.
+        ``timeout`` is how long the call waits for its answer.
+        """
+        import json
+
+        def refused(constant: str) -> Any:
+            raise ValueError(f"{tool_name}: the answer holds {constant}, which is no JSON value")
+
+        session = self.session
+        if session is None:
+            raise RuntimeError(f"{tool_name}: the server's session is not open")
+        timing: dict[str, Any] = (
+            {"read_timeout_seconds": timedelta(seconds=timeout)} if timeout else {}
+        )
+        result = await session.call_tool(tool_name, arguments=args, **timing)
+        text = "\n".join(str(getattr(c, "text", "") or "") for c in result.content or [])
+        if len(text) > DELIVERY_ANSWER_MAX_CHARS:
+            raise ValueError(
+                f"{tool_name}: the answer is {len(text)} characters, past the "
+                f"{DELIVERY_ANSWER_MAX_CHARS} a delivery answer may hold"
+            )
+        if result.isError:
+            raise RuntimeError(f"{tool_name}: {self._said_text(text.strip())}")
+        if text.strip():
+            return json.loads(text, parse_constant=refused)
+        content = getattr(result, "structuredContent", None)
+        if isinstance(content, dict) and content:
+            return content
+        raise ValueError(f"{tool_name}: the server answered nothing")
 
     async def cleanup(self) -> None:
         """Close the MCP server connection. Total: never raises, safe to repeat.
@@ -740,25 +812,57 @@ class MCPLangChainToolkit:
         properties: dict[str, tuple[Any, Any]] = {}
         required = mcp_tool.inputSchema.get("required", [])
         schema_props = mcp_tool.inputSchema.get("properties", {})
+        # A name no field can carry (``model_config``, ``_x``, ``class``,
+        # ``a-b``) is held under an internal field name with the server's own
+        # as its alias (``agents.server_names``); every other is its own.
+        held_as = field_names(schema_props)
+
+        def hold(prop_name: str, shaped: Any, default: Any) -> None:
+            field = held_as[prop_name]
+            if field == prop_name:
+                properties[field] = (shaped, default)
+            else:
+                properties[field] = (shaped, Field(default, alias=prop_name))
 
         for prop_name, prop_schema in schema_props.items():
             if not isinstance(prop_schema, dict):
                 prop_schema = {"type": "string"}
-            prop_type_str = prop_schema.get("type", "string")
+            default = prop_schema.get("default", None)
+            if holds_ref(default):
+                # A default that holds a ``$ref`` would be read as a reference
+                # by every client that converts the schema. Left out, the
+                # argument is not sent and the server applies its own default.
+                default = None
+            if not is_plain(prop_schema):
+                # A type list, a combinator, an enum, a nested object or array,
+                # a ``$ref`` or no type at all: offered the server's schema with
+                # its references written out (``agents.argument_schema``).
+                optional = prop_name not in required
+                try:
+                    shaped = argument_annotation(
+                        prop_schema, mcp_tool.inputSchema, optional=optional
+                    )
+                except Exception as exc:  # noqa: BLE001 — one property never costs the tool
+                    # Too large, too deep or not a valid schema: offered as the
+                    # plain type it was before any other form was read.
+                    logger.warning(
+                        "MCP server '%s' tool %r property %r is offered as its plain type: "
+                        "its schema is %s",
+                        self._server_name(),
+                        mcp_tool.name,
+                        prop_name,
+                        self._said(exc)
+                        if isinstance(exc, UnusableSchema)
+                        else f"unreadable ({type(exc).__name__})",
+                    )
+                    shaped = plain_type(prop_schema) | None if optional else plain_type(prop_schema)
+                hold(prop_name, shaped, default if optional else ...)
+                continue
 
-            # Map simple types
-            type_mapping = {
-                "string": str,
-                "integer": int,
-                "number": float,
-                "boolean": bool,
-                "array": list,
-                "object": dict,
-            }
-            py_type = type_mapping.get(prop_type_str, Any)
+            py_type = PLAIN_TYPES.get(prop_schema["type"], Any)
 
             if prop_name in required:
-                properties[prop_name] = (py_type, ...)
+                hold(prop_name, py_type, ...)
                 continue
 
             # An optional parameter carries the server's own declared default
@@ -769,9 +873,25 @@ class MCPLangChainToolkit:
             # The annotation stays nullable so that an agent which emits an
             # explicit ``null`` is tolerated here and dropped below, rather
             # than raising inside LangChain's own argument parsing.
-            properties[prop_name] = (py_type | None, prop_schema.get("default", None))
+            hold(prop_name, py_type | None, default)
 
-        args_schema = create_model(f"{mcp_tool.name}Schema", **properties)  # type: ignore[call-overload]
+        # A ``null`` the server's schema does not allow is dropped while the
+        # model validates (``agents.null_arguments``), so the field takes its
+        # declared default exactly as if the call had left it out. A ``null``
+        # it admits is let through, and ``arun_tool`` does not send it.
+        try:
+            rules = schema_rules(mcp_tool.inputSchema, withholds_admitted_nulls=True)
+        except RecursionError:
+            # Nested past what can be walked: every optional field is still
+            # nullable here and a top-level ``None`` is still not sent.
+            logger.warning(
+                "MCP server '%s' tool '%s': its schema is nested too deep to read its null "
+                "rules; a null inside a nested object is sent as given",
+                self._server_name(),
+                mcp_tool.name,
+            )
+            rules = NullRules()
+        args_schema = argument_model(f"{mcp_tool.name}Schema", properties, rules)
 
         tool_name = mcp_tool.name
         # This tool's own way of asking for less, read off the schema it
@@ -780,7 +900,7 @@ class MCPLangChainToolkit:
         # cut to.
         from maljan.agents.output_shortening import narrowing_arguments
 
-        narrowing = narrowing_arguments(properties)
+        narrowing = narrowing_arguments(schema_props)
 
         async def arun_tool(**kwargs: Any) -> str:
             if not self.session:
@@ -793,7 +913,9 @@ class MCPLangChainToolkit:
             # not. Only the first is a value the caller meant; forwarding the
             # second turns "unset" into "explicitly null" and denies the server
             # the chance to apply its own default.
-            args = {k: v for k, v in kwargs.items() if v is not None or k in required}
+            # Each under the server's own name, whatever field held it.
+            named = to_server_names(args_schema, kwargs)
+            args = {k: v for k, v in named.items() if v is not None or k in required}
             guard = self._guard
             if guard is None:
                 return await self._call(tool_name, args, narrowing)
@@ -842,7 +964,7 @@ class MCPLangChainToolkit:
         given = hints_of_annotations(hints)
         if given:
             metadata[SERVER_HINTS_METADATA_KEY] = given
-        return StructuredTool.from_function(
+        return ServerNamedTool.from_function(
             func=None,  # Not supporting sync execution since MCP client is async
             coroutine=arun_tool,
             name=mcp_tool.name,

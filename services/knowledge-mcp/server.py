@@ -28,8 +28,9 @@ if __name__ == "__main__":
     route_logging_to_stderr()
 
 from maljan.tools import knowledge as knowledge_tools
+from maljan.tools import sidecar_needs
 from maljan.tools.arguments import read_unquoted, says_unquoted, with_read_as
-from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
+from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
 from maljan.tools.errors import code_for_exception, normalise_error, tool_error
 
 mcp = FastMCP("KnowledgeMCP")
@@ -56,16 +57,8 @@ def _apply_index_retry() -> None:
 _apply_index_retry()
 
 # The two retrievals over a vector store need its client; every other lookup
-# reads the vendored catalogues.
-TOOL_NEEDS: list[ToolNeeds] = [
-    ToolNeeds("resolve_technique"),
-    ToolNeeds("attck_lookup"),
-    ToolNeeds("attck_validate"),
-    ToolNeeds("api_capability"),
-    ToolNeeds("lolbin_lookup"),
-    ToolNeeds("family_lookup", (module("qdrant_client"),)),
-    ToolNeeds("similar_cases", (module("qdrant_client"),)),
-]
+# reads the vendored catalogues (``maljan.tools.sidecar_needs``).
+TOOL_NEEDS: list[ToolNeeds] = sidecar_needs.KNOWLEDGE
 CAPABILITIES = manifest("knowledge", TOOL_NEEDS)
 
 

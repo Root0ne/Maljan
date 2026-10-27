@@ -2,9 +2,9 @@
 
 import type { EvidenceSection } from "@/types/malware-report";
 import { humaniseKey } from "@/lib/humanise";
-import EvidenceChips from "./EvidenceChips";
+import EvidenceChips, { CitedText } from "./EvidenceChips";
 import { saysSomething } from "./reportSections";
-import { withoutConstantColumns } from "./tableColumns";
+import { headedTable, withoutConstantColumns } from "./tableColumns";
 
 /**
  * One report section, drawn from its own declared shape.
@@ -83,99 +83,133 @@ function hasOtherContent(section: EvidenceSection): boolean {
 function rowsOf(section: EvidenceSection): string[][] {
   const rows = section.rows ?? [];
   if (section.kind !== "kv") return rows;
-  return rows.filter((row) => row.slice(1).some(saysSomething));
+  return rows.filter(
+    (row) =>
+      !Array.isArray(row) ||
+      row.slice(1).some((cell) => saysSomething(typeof cell === "string" ? cell : String(cell ?? ""))),
+  );
 }
 
+/**
+ * Everything a section carries, whatever its declared kind.
+ *
+ * The kind says how the section is mainly drawn, not what else it holds. A
+ * table whose tool cut it short says so in its `text` ("18 more rows not
+ * shown here; the evidence endpoint carries every one under ev_0005"), a list
+ * of the functions examined leads with a sentence counting them, and a `kv`
+ * section a tool answered twice into can hold items or text beside its rows.
+ * Drawing only the part the kind names dropped the rest without a trace, so
+ * the rows, the items and the text are each drawn when present, in that
+ * order.
+ */
 function SectionBody({ section, rows }: { section: EvidenceSection; rows: string[][] }) {
-  /* A `kv` section that kept no row falls through to whatever else it carries,
-   * which is how a tool that answered once with a dict and once with prose
-   * still shows the prose. */
-  if (section.kind === "table" || (section.kind === "kv" && rows.length > 0)) {
-    /* Column headers come from the tool, so they arrive as whatever key it
-       used: `optional_dependency` and `technique_ids` sat beside the
-       hand-written "Rule category" of the table below. Read back rather than
-       renamed — the console does not know what a tool's columns mean, only
-       how a key is spelled. */
-    const declared = (
-      section.columns.length > 0
-        ? section.columns
-        : section.kind === "kv"
-        ? ["Field", "Value"]
-        : rows[0]?.map((_, i) => `Column ${i + 1}`) ?? []
-    ).map(humaniseKey);
-    if (rows.length === 0) {
-      return <p className="p-4 text-xs text-text-muted">The tool returned no rows.</p>;
-    }
-    /* Only a real table: a key/value block's two columns are its field names
-       and its values, and lifting "Value: yes" out of a two-row block would
-       leave a list of fields with no answers beside them. */
-    const narrowed =
-      section.kind === "table"
-        ? withoutConstantColumns(declared, rows)
-        : { columns: declared, rows, constants: [], empty: [] };
-    return (
-      <>
-        {(narrowed.constants.length > 0 || narrowed.empty.length > 0) && (
-          <p className="px-4 pt-3 text-[11px] text-text-muted">
-            {narrowed.constants.map((c) => `${c.column}: ${c.value}`).join(" · ")}
-            {narrowed.constants.length > 0 && narrowed.empty.length > 0 ? " · " : ""}
-            {narrowed.empty.length > 0
-              ? `${narrowed.empty.join(", ")}: nothing on any row`
-              : ""}
-            {" — the same on every row below."}
-          </p>
-        )}
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                {narrowed.columns.map((column) => (
-                  <th
-                    key={column}
-                    scope="col"
-                    className="px-4 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted"
+  const items = (section.items ?? []).filter(
+    (item) => typeof item === "string" && item.trim().length > 0,
+  );
+  const text = typeof section.text === "string" ? section.text : "";
+  const hasText = text.trim().length > 0;
+  /* A `kv` section that kept no row draws whatever else it carries, which is
+   * how a tool that answered once with a dict and once with prose still shows
+   * the prose. A table with no row says so only when it carries nothing else
+   * either. */
+  const drawsTable = rows.length > 0;
+  const saysNoRows =
+    section.kind === "table" && rows.length === 0 && items.length === 0 && !hasText;
+  return (
+    <>
+      {drawsTable && <SectionTable section={section} rows={rows} />}
+      {saysNoRows && <p className="p-4 text-xs text-text-muted">The tool returned no rows.</p>}
+      {items.length > 0 && (
+        <ul className={`p-4 space-y-1 ${drawsTable ? "border-t border-border-light" : ""}`}>
+          {items.map((item, i) => (
+            <li key={i} className="text-xs font-mono text-text-secondary break-all">
+              {item}
+            </li>
+          ))}
+        </ul>
+      )}
+      {hasText && (
+        <p
+          className={`p-4 text-xs text-text-secondary leading-relaxed whitespace-pre-wrap break-words ${
+            drawsTable || items.length > 0 ? "border-t border-border-light" : ""
+          }`}
+        >
+          <CitedText text={text} />
+        </p>
+      )}
+    </>
+  );
+}
+
+function SectionTable({ section, rows }: { section: EvidenceSection; rows: string[][] }) {
+  /* Column headers come from the tool, so they arrive as whatever key it
+     used: `optional_dependency` and `technique_ids` sat beside the
+     hand-written "Rule category" of the table below. Read back rather than
+     renamed — the console does not know what a tool's columns mean, only
+     how a key is spelled. Every cell gets a heading: a row wider than the
+     declared columns adds its own (`headedTable`). */
+  const headed = headedTable(
+    section.columns?.length ? section.columns : section.kind === "kv" ? ["Field", "Value"] : [],
+    rows,
+  );
+  const declared = headed.columns.map(humaniseKey);
+  /* Only a real table: a key/value block's two columns are its field names
+     and its values, and lifting "Value: yes" out of a two-row block would
+     leave a list of fields with no answers beside them. */
+  const narrowed =
+    section.kind === "table"
+      ? withoutConstantColumns(declared, headed.rows)
+      : { columns: declared, rows: headed.rows, constants: [], empty: [] };
+  return (
+    <>
+      {(narrowed.constants.length > 0 || narrowed.empty.length > 0) && (
+        <p className="px-4 pt-3 text-[11px] text-text-muted">
+          {narrowed.constants.map((c) => `${c.column}: ${c.value}`).join(" · ")}
+          {narrowed.constants.length > 0 && narrowed.empty.length > 0 ? " · " : ""}
+          {narrowed.empty.length > 0
+            ? `${narrowed.empty.join(", ")}: nothing on any row`
+            : ""}
+          {" — the same on every row below."}
+        </p>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border">
+              {narrowed.columns.map((column, i) => (
+                <th
+                  key={i}
+                  scope="col"
+                  className="px-4 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-text-muted"
+                >
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border-light">
+            {narrowed.rows.map((row, i) => (
+              <tr key={i} className="hover:bg-bg-hover">
+                {row.map((cell, j) => (
+                  <td
+                    key={j}
+                    /* A cell of several lines — a decompiled function, a
+                       listing — keeps its lines: run together, a
+                       decompiler's `undefined8 FUN_…(undefined8 param_1)`
+                       read like the console printing a missing value. */
+                    className={`px-4 py-2 text-xs font-mono text-text-secondary break-all align-top ${
+                      cell.includes("\n") ? "whitespace-pre-wrap" : ""
+                    }`}
                   >
-                    {column}
-                  </th>
+                    {cell || "-"}
+                  </td>
                 ))}
               </tr>
-            </thead>
-            <tbody className="divide-y divide-border-light">
-              {narrowed.rows.map((row, i) => (
-                <tr key={i} className="hover:bg-bg-hover">
-                  {row.map((cell, j) => (
-                    <td
-                      key={j}
-                      className="px-4 py-2 text-xs font-mono text-text-secondary break-all align-top"
-                    >
-                      {cell || "-"}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </>
-    );
-  }
-
-  if (section.kind === "list") {
-    return (
-      <ul className="p-4 space-y-1">
-        {section.items.map((item, i) => (
-          <li key={i} className="text-xs font-mono text-text-secondary break-all">
-            {item}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-
-  return (
-    <p className="p-4 text-xs text-text-secondary leading-relaxed whitespace-pre-wrap break-words">
-      {section.text}
-    </p>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

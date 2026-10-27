@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import importlib.util
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -44,8 +45,10 @@ class Requirement:
     kind: str  # "module" | "binary" | "env"
     name: str
     # For a binary found somewhere other than ``PATH`` alone: the lookup that
-    # answers ``None`` when it is present, else the reason it is not.
-    locate: Callable[[], str | None] | None = field(default=None, compare=False)
+    # answers ``None`` when it is present, else the reason it is not. Called
+    # with no argument inside the server, and with the server's environment
+    # when the check is made from outside it (``installed``).
+    locate: Callable[..., str | None] | None = field(default=None, compare=False)
 
     def probe(self) -> str | None:
         """``None`` when present, else the reason it is not.
@@ -75,12 +78,44 @@ class Requirement:
             return None if os.environ.get(self.name) else f"{self.name} is not configured"
         return f"unknown requirement kind {self.kind!r}"
 
+    def installed(self, environ: Mapping[str, str] | None = None) -> str | None:
+        """``None`` when the module or binary is on this host, else the reason ``probe`` gives.
+
+        The check made before a job, from outside the server: nothing is
+        imported and nothing is run. A module is looked up on the import path
+        (a library uninstalled under a running process is noticed, where a
+        module that process imported once would still answer), and a binary is
+        looked for as ``probe`` looks for it, in ``environ`` (the environment
+        the server is started with) rather than this process's. A setting is
+        no install: an ``env`` requirement answers ``None`` here, since the
+        value is handed to the server by its own settings, which this
+        process's environment does not show.
+
+        The import path looked on is this process's: a server started with a
+        ``PYTHONPATH`` of its own can import what this answers is missing, so
+        a caller leaves a module of such a server unchecked.
+        """
+        if self.kind == "module":
+            try:
+                found = importlib.util.find_spec(self.name)
+            except (ImportError, ValueError):
+                found = None
+            if found is None:
+                return f"{self.name} is not installed (No module named '{self.name}')"
+            return None
+        if self.kind == "binary":
+            if self.locate is not None:
+                return self.locate(environ)
+            path = None if environ is None else environ.get("PATH")
+            return None if shutil.which(self.name, path=path) else f"{self.name} is not on PATH"
+        return None
+
 
 def module(name: str) -> Requirement:
     return Requirement("module", name)
 
 
-def binary(name: str, locate: Callable[[], str | None] | None = None) -> Requirement:
+def binary(name: str, locate: Callable[..., str | None] | None = None) -> Requirement:
     """A tool that shells out to an executable.
 
     Found on ``PATH`` by default. ``locate`` is for an executable looked for in
@@ -105,6 +140,12 @@ class ToolNeeds:
     # What the tool still does without the requirement, when it does
     # something: ``apk_info`` answers the zip-level facts without androguard.
     without: str = ""
+    # The routed formats only the missing requirement reads, for a tool that
+    # still answers without it: a sample of another known format loses
+    # nothing (``archive_list`` without py7zr on a zip), and one of these
+    # formats loses what it would have read. Empty when that cannot be said,
+    # and the partial answer is then a loss for every sample.
+    without_reads: tuple[str, ...] = ()
     # The remedy when the requirement is missing, where the code's general one
     # names the wrong thing: an executable is not installed by ``uv sync``.
     remediation: str = ""
@@ -138,9 +179,15 @@ def _cell(tool: ToolNeeds) -> dict[str, Any]:
     if missing:
         kinds = {req.kind for req, _reason in missing}
         code = NOT_CONFIGURED if kinds == {"env"} else MISSING_DEPENDENCY
+        # Kept on the cell: a setting left unset is the operator's choice and a
+        # library missing is a loss, and the code, not the reason's words, is
+        # what tells them apart (``pipeline.operator_choice``).
+        cell["code"] = code
         cell["remediation"] = tool.remediation or REMEDIATIONS[code]
         if tool.without:
             cell["without"] = tool.without
+            if tool.without_reads:
+                cell["without_reads"] = list(tool.without_reads)
     return cell
 
 
@@ -170,6 +217,11 @@ class Unavailable:
     reason: str
     remediation: str | None = None
     without: str = ""
+    # The manifest's code for why (``not_configured``, ``missing_dependency``),
+    # ``None`` for a manifest written before cells carried one.
+    code: str | None = None
+    # What the tool needs, by name, as its cell lists it (``optional_dependency``).
+    requires: tuple[str, ...] = ()
 
     @property
     def degradation_reason(self) -> str:
@@ -233,6 +285,12 @@ class ServerCapabilities:
                     reason=str(cell.get("reason") or "unavailable"),
                     remediation=(str(cell["remediation"]) if cell.get("remediation") else None),
                     without=str(cell.get("without") or ""),
+                    code=str(cell["code"]) if cell.get("code") else None,
+                    requires=tuple(
+                        name.strip()
+                        for name in str(cell.get("optional_dependency") or "").split(",")
+                        if name.strip()
+                    ),
                 )
             )
         return out

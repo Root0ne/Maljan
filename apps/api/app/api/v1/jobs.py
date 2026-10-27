@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -29,6 +30,7 @@ from app.schemas.job import (
     JobListResponse,
     JobResponse,
     JobRoster,
+    UnavailableTool,
 )
 from app.services import audit
 from app.services.analysis_service import AnalysisService
@@ -154,6 +156,36 @@ async def _unready_providers_for(db: AsyncSession, config: dict[str, Any]) -> li
     )
 
 
+async def _unavailable_tools_for(db: AsyncSession, config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every tool this job would call that this host cannot run, with why and the remedy.
+
+    A warning, never a refusal (``services.tool_availability``): the job is
+    accepted and its answer names them, so an operator reads "capa is not
+    installed" before the run rather than in its degraded block afterwards.
+    A check that cannot be made names nothing and costs the submit nothing.
+    """
+    import logging
+
+    from app.services.settings_service import effective_core_settings
+    from app.services.tool_availability import as_rows, unavailable_tools
+
+    try:
+        settings = await effective_core_settings(db)
+        profile = config.get("profile")
+        static_provider = config.get("static_provider")
+        return as_rows(
+            unavailable_tools(
+                settings,
+                profile=str(profile) if profile else None,
+                global_provider=str(static_provider) if static_provider else None,
+                level=logging.WARNING,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — a warning is never worth the submit
+        logger.debug(f"tool availability not checked ({type(exc).__name__})")
+        return []
+
+
 # The config keys an audit row may carry. A job config is operator-supplied and
 # open-ended, so it is never copied wholesale: only these are named, and a
 # credential someone put in it has no way through.
@@ -239,6 +271,7 @@ async def create_job(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"profile {str(profile)!r} lists disabled analyst {disabled!r}",
             )
+    unavailable = await _unavailable_tools_for(db, body.config or {})
     try:
         job = await svc.create_job(
             sample_id=body.sample_id,
@@ -257,7 +290,6 @@ async def create_job(
             details=_job_details(body.sample_id, body.config),
             request=request,
         )
-        return job
     except ValueError as exc:
         # Sample not found OR IDOR rejection — surface a 404 either way so
         # we do not leak existence information.
@@ -274,6 +306,17 @@ async def create_job(
                 detail="Analysis queue is unavailable. Please retry shortly.",
             ) from exc
         raise
+    if not unavailable:
+        return job
+    # Outside the block above: a job that was accepted is never answered as a
+    # missing sample, nor with a 500, because its warning did not validate.
+    try:
+        answer = JobResponse.model_validate(job)
+        answer.unavailable_tools = [UnavailableTool(**row) for row in unavailable]
+    except ValidationError as exc:
+        logger.debug(f"job answered without its tool warning ({exc.error_count()} errors)")
+        return job
+    return answer
 
 
 @router.get("", response_model=JobListResponse)
@@ -405,6 +448,20 @@ def _delegation_depth(overrides: dict[str, Any]) -> int:
         return default
 
 
+def _server_labels(overrides: dict[str, Any]) -> dict[str, str]:
+    """Each tool server's display name in force: the built-ins', then the stored map's."""
+    from maljan.core.settings_overrides import build_settings
+    from maljan.pipeline.events import server_labels
+
+    labels = {key: cfg.label for key, cfg in build_settings({}).mcp.servers.items()}
+    stored = overrides.get("core.mcp.servers")
+    if isinstance(stored, dict):
+        for key, entry in stored.items():
+            if isinstance(entry, dict) and "label" in entry:
+                labels[str(key)] = str(entry.get("label") or "")
+    return server_labels(labels)
+
+
 async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
     """Who can speak in this job's run, by key, label, role and stage.
 
@@ -440,7 +497,10 @@ async def _roster_for_job(db: AsyncSession, job: Any) -> dict[str, Any]:
             # ones who would speak.
             document = ProfileDefinition.model_validate(document).model_dump(mode="json")
         roster = roster_payload(
-            document, effective_definitions(overrides), depth=_delegation_depth(overrides)
+            document,
+            effective_definitions(overrides),
+            depth=_delegation_depth(overrides),
+            servers=_server_labels(overrides),
         )
         if cache_key:
             _remember_roster(cache_key, roster)

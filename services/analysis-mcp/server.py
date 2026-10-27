@@ -12,6 +12,12 @@ capability at all.
 ``put_sample`` implements the remote-delivery convention (see
 ``maljan.agents.sample_staging``): a caller on another host uploads the bytes
 and gets back the path to pass to every other tool here.
+
+Started by the worker it serves over stdio; with ``--http``, over streamable
+HTTP behind its own token, from a container of its own (``MCP_BIND_ADDRESS``,
+``MCP_PORT``, ``MCP_AUTH_TOKEN``, the shared sidecar plumbing's), where
+``run_reader`` runs the triage pack's own readings of the sample
+(``maljan.tools.readers``), which the worker then does not run itself.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ import copy
 import hashlib
 import os
 import stat
+import sys
 import tempfile
 import time
 import uuid
@@ -45,6 +52,8 @@ from maljan.tools import (
     children,
     crypto_constants,
     emulated_strings,
+    readers,
+    sidecar_needs,
     staging,
     string_blobs,
     transforms,
@@ -57,7 +66,7 @@ from maljan.tools import rules as rule_tools
 from maljan.tools import strings as string_tools
 from maljan.tools.arguments import SURROUNDING_QUOTES, read_unquoted, says_unquoted, with_read_as
 from maljan.tools.binary import carved_name_prefix
-from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, binary, manifest, module
+from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
 from maljan.tools.errors import (
     BAD_ARGUMENT,
     NO_SUCH_FILE,
@@ -74,71 +83,15 @@ from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
 # one line goes to standard error: standard output is this server's protocol.
 pin_character_classification(say=say_on_stderr)
 
-mcp = FastMCP("AnalysisMCP")
+mcp = FastMCP("AnalysisMCP", stateless_http=True)
 
 # What each tool needs beyond the interpreter, probed once when the server
-# starts. A tool that is not listed always answers.
-# The wall clock each rule engine is given. Named once so the tool's own
-# default and the manifest that declares it cannot drift: a model told
-# ``timeout_s: null`` for a scan that gives up after a minute has been told
-# something untrue by the structure whose premise is that it was computed.
-YARA_TIMEOUT_S = 60
-# capa and FLOSS have no wall clock of the server's own: what bounds a call is
-# the ``timeout_s`` its caller passes — the triage pack passes the operator's
-# ``static.capa.timeout_seconds`` and what is left of ``triage.budget_seconds``
-# — and a call that passes none is bounded by the job's timeout. Their time
-# grows with the sample's code, not with anything the server can know in
-# advance, and a fixed ceiling stopped a large sample's emulation half-way
-# whatever the operator had allowed. The manifest declares ``timeout_s: null``.
-CAPA_TIMEOUT_S: int | None = None
-FLOSS_TIMEOUT_S: int | None = emulated_strings.FLOSS_TIMEOUT_S
-
-TOOL_NEEDS: list[ToolNeeds] = [
-    ToolNeeds("identify_file"),
-    ToolNeeds("hashes"),
-    ToolNeeds("signing_info"),
-    ToolNeeds("strings"),
-    ToolNeeds("iocs_from_text"),
-    ToolNeeds("iocs_from_file"),
-    ToolNeeds("pe_info", (module("pefile"),)),
-    ToolNeeds("elf_info", (module("elftools"),)),
-    ToolNeeds("macho_info", (module("macholib"),)),
-    ToolNeeds("apk_info", (module("androguard"),), without="the zip-level facts"),
-    ToolNeeds("carve_payloads"),
-    ToolNeeds(upx.TOOL, facts=upx.CAPABILITY_FACTS),
-    ToolNeeds("archive_list", (module("py7zr"),), without="zip and tar members; 7z needs py7zr"),
-    ToolNeeds("document_info", (module("olefile"),), without="the PDF and OOXML halves"),
-    ToolNeeds(
-        "yara_scan",
-        (module("yara"),),
-        timeout_s=YARA_TIMEOUT_S,
-        without="the regex fallback over the corpus",
-    ),
-    ToolNeeds("sigma_match", (module("sigma"),)),
-    ToolNeeds("sigma_match_sandbox", (module("sigma"),)),
-    ToolNeeds("capa", (module("capa"),), timeout_s=CAPA_TIMEOUT_S, long_running=True),
-    ToolNeeds(
-        "floss",
-        (binary("floss", emulated_strings.floss_unavailable),),
-        timeout_s=FLOSS_TIMEOUT_S,
-        long_running=True,
-        remediation=emulated_strings.FLOSS_REMEDIATION,
-    ),
-    ToolNeeds("resolve_api_hashes"),
-    ToolNeeds("decode_string_blobs"),
-    ToolNeeds(crypto_constants.TOOL),
-    ToolNeeds("function_index"),
-    ToolNeeds(
-        transforms.TOOL,
-        (module("cryptography"),),
-        without="every operation but aes",
-        facts=transforms.CAPABILITY_FACTS,
-    ),
-    ToolNeeds("put_sample"),
-    ToolNeeds("put_sample_begin"),
-    ToolNeeds("put_sample_chunk"),
-    ToolNeeds("put_sample_finish"),
-]
+# starts (``maljan.tools.sidecar_needs``, where a check made before a job reads
+# the same declaration), and the wall clock each long tool is given.
+TOOL_NEEDS: list[ToolNeeds] = sidecar_needs.ANALYSIS
+YARA_TIMEOUT_S = sidecar_needs.YARA_TIMEOUT_S
+CAPA_TIMEOUT_S: int | None = sidecar_needs.CAPA_TIMEOUT_S
+FLOSS_TIMEOUT_S: int | None = sidecar_needs.FLOSS_TIMEOUT_S
 CAPABILITIES = manifest("analysis", TOOL_NEEDS)
 
 # Chunked uploads in flight, keyed by upload id. Bounded by the number of
@@ -1707,12 +1660,67 @@ def put_sample_finish(upload_id: str) -> dict[str, Any]:
     )
 
 
+# The tools whose readings ``run_reader`` runs here: this server's own.
+_OFFERED = frozenset(need.name for need in TOOL_NEEDS)
+
+
+def _reader_path(value: str, job: str) -> str:
+    """A reading's file argument held to the sample roots and this job's staging directory."""
+    environ: dict[str, str] = dict(os.environ)
+    if job:
+        environ[staging.STAGING_JOB_ENV] = staging.job_directory_name(job)
+    inside = resolve_under_roots(value, extra_roots=(staging.staging_root(environ),))
+    return str(staging.confined_to_this_job(inside, environ))
+
+
+@mcp.tool()
+def run_reader(
+    reader: str, arguments: dict[str, Any] | None = None, job: str = ""
+) -> dict[str, Any]:
+    """Run one of the platform's own readings of the job's sample here, for the worker.
+
+    A delivery primitive, never offered to a model: the worker's triage pack
+    calls it when this server runs in a container of its own, so the reading
+    opens the sample here and the worker reads only the answer
+    (``maljan.tools.readers``). Only a reading standing in for a tool this
+    server offers is run, its file arguments held to the sample roots and
+    ``job``'s staging directory.
+    """
+    return readers.serve_reader(reader, arguments, job, offered=_OFFERED, confine=_reader_path)
+
+
+@mcp.tool()
+def release_job(job: str) -> dict[str, Any]:
+    """Remove what the platform's readings staged here for one job, at that job's end.
+
+    A delivery primitive, never offered to a model: the worker calls it when
+    a job whose readings ran here ends, so ``job``'s staging directory (capa's
+    and FLOSS's scratch, the unpacker's carves) goes then rather than at the
+    staging TTL. Only that job's directory, never a path the id could name
+    (``maljan.tools.readers.serve_release``).
+    """
+    return readers.serve_release(job)
+
+
+def _http_serve() -> None:
+    """Serve over streamable HTTP behind the token, with the shared sidecar plumbing."""
+    try:  # An image that copies the shared module beside this file.
+        import cli_sidecar as sidecar
+    except ModuleNotFoundError:  # The repository keeps it in a directory of its own.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cli-sidecar"))
+        import cli_sidecar as sidecar
+    sidecar.serve(mcp, [])
+
+
 if __name__ == "__main__":
     # A child a tool started runs in a session of its own, so it does not die
     # with this server: every one still running is killed when the server
     # ends, on end of input or on a termination signal.
     children.kill_all_on_exit()
     try:
-        mcp.run(transport="stdio")
+        if "--http" in sys.argv[1:]:
+            _http_serve()
+        else:
+            mcp.run(transport="stdio")
     finally:
         children.kill_all()
