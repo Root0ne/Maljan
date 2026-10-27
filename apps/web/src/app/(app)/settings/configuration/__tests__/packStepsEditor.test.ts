@@ -348,12 +348,17 @@ describe("the placeholder check", () => {
       expect(unknownPlaceholders(template, vocabulary)).toHaveLength(expected);
       return performance.now() - started;
     };
+    // Each size is timed three times and the best kept, so a scheduler pause on a
+    // loaded runner cannot fail a check that is about growth, not about one run.
+    const best = (template: unknown, expected: number) =>
+      Math.min(took(template, expected), took(template, expected), took(template, expected));
     took(deep(500), 1);
-    const deepSmall = took(deep(2_000), 1);
-    const deepLarge = took(deep(20_000), 1);
+    took(wide(200), 800);
+    const deepSmall = best(deep(2_000), 1);
+    const deepLarge = best(deep(20_000), 1);
     expect(deepLarge).toBeLessThan(Math.max(deepSmall * 40, 50));
-    const wideSmall = took(wide(2_000), 8_000);
-    const wideLarge = took(wide(20_000), 80_000);
+    const wideSmall = best(wide(2_000), 8_000);
+    const wideLarge = best(wide(20_000), 80_000);
     expect(wideLarge).toBeLessThan(Math.max(wideSmall * 40, 50));
   });
 });
