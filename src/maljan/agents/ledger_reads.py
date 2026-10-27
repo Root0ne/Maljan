@@ -296,9 +296,11 @@ class LedgerReads:
                 asked[key] = asked.get(key, 0) + 1
                 if asked[key] > RepeatGuard.SERVED:
                     refused += 1
+                    wanted = str(args.get("evidence_id") or "") if isinstance(args, Mapping) else ""
                     said = (
-                        f"[{READ_EVIDENCE_TOOL}: not read again; this read's answer is above in "
-                        "this conversation]"
+                        f"[{READ_EVIDENCE_TOOL}: {wanted or 'this read'} not read again; this "
+                        "read's answer is above in this conversation. Pass another offset, and "
+                        "a limit, to read another page of it]"
                     )
                     self._count(call or what, refused=True)
                 else:

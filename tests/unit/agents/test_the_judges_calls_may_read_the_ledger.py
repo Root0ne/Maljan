@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
+from maljan.agents.evidence_recorder import RepeatGuard
 from maljan.agents.judge_agent import (
     TECHNIQUE_QUESTION_SYSTEM,
     TECHNIQUE_QUESTION_SYSTEM_WITHOUT_TOOLS,
@@ -48,6 +49,13 @@ def _read(entry_id: str, call_id: str = "c1") -> AIMessage:
     return AIMessage(
         content="",
         tool_calls=[{"name": READ_EVIDENCE_TOOL, "args": {"evidence_id": entry_id}, "id": call_id}],
+    )
+
+
+def _read_page(entry_id: str, call_id: str, *, offset: int) -> AIMessage:
+    args = {"evidence_id": entry_id, "offset": offset, "limit": 10}
+    return AIMessage(
+        content="", tool_calls=[{"name": READ_EVIDENCE_TOOL, "args": args, "id": call_id}]
     )
 
 
@@ -190,22 +198,40 @@ class TestTheVerdict:
         assert verdict.bundle.x_maljan_assessment is not None
 
     def test_repeated_reads_end_the_loop_with_the_reply_kept_without_its_calls(self) -> None:
-        reads = [_read("ev_0012", f"c{n}") for n in range(5)]
+        last = 2 + RepeatGuard.ENDS_AT
+        reads = [_read("ev_0012", f"c{n}") for n in range(last)]
         llm = _ReadingLlm(*reads, _bundle_json())
 
         verdict, _judge = _verdict(llm)
 
-        # Two identical reads served, the third and fourth refused and sent, the
-        # fifth refused and its reply kept with no call: an empty answer, asked
-        # again as one.
+        # Two identical reads served, the next refused and sent until the
+        # stated count, the last refused and its reply kept with no call: an
+        # empty answer, asked again as one.
         refused = [
             m
-            for m in llm.calls[4][1]
+            for m in llm.calls[last - 1][1]
             if isinstance(m, ToolMessage) and "not read again" in str(m.content)
         ]
-        assert len(refused) == 2
-        assert len(llm.calls) == 6
+        assert len(refused) == RepeatGuard.ENDS_AT - 1
+        assert len(llm.calls) == last + 1
         assert verdict.bundle.x_maljan_assessment is not None
+        # Each refusal names the id it already holds, and how to page it.
+        assert "ev_0012 not read again" in str(refused[0].content)
+        assert "Pass another offset, and a limit" in str(refused[0].content)
+
+    def test_reads_of_other_pages_are_never_refused(self) -> None:
+        pages = [
+            _read_page("ev_0012", f"p{n}", offset=n * 10) for n in range(RepeatGuard.ENDS_AT + 2)
+        ]
+        llm = _ReadingLlm(*pages, _bundle_json())
+
+        _verdict(llm)
+
+        assert len(llm.calls) == RepeatGuard.ENDS_AT + 3
+        assert not any(
+            isinstance(m, ToolMessage) and "not read again" in str(m.content)
+            for m in llm.calls[-1][1]
+        )
 
 
 class TestTheTechniqueQuestion:

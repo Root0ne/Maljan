@@ -915,24 +915,32 @@ class RepeatGuard:
 
     # Identical calls answered before the third is refused.
     SERVED = 2
-    # The served repeat whose notice says the loop is about to end, and the
-    # number of served repeats that ends it. Two live runs made the case: a
-    # static analyst spent 16 of its 19 steps on ``pe_info`` with identical
-    # arguments, and another spent 11 on one ``strings`` regex. Being told
-    # where the answer is does not stop a model that has decided to ask again,
-    # so after three of them the loop is ended and what was gathered is
-    # synthesised — which is what the step budget running out already does,
-    # only sooner and with the steps still unspent.
-    WARNS_AT = 2
-    ENDS_AT = 3
+    # A stall limit, not a policy cap: the number of refused calls — each one
+    # identical to a call already answered, same tool and same arguments as
+    # ``_key`` writes them — after which the loop is taken as stalled and
+    # ended, what was gathered synthesised as a spent step budget would have
+    # it. A served repeat never counts, and neither does a call that differs
+    # in any argument or page. ``WARNS_AT`` is the refusal whose notice says
+    # the next one ends the loop.
+    #
+    # Eight is a stall limit, not a measured optimum. No stored run has a
+    # single refusal by this guard, so none comes near it; the most calls one
+    # loop of a stored run had answered without a run was four, and a useful
+    # distinct call still followed the fourth. It still ends both live loops
+    # the guard was written from (16 of 19 steps on one ``pe_info``; 11
+    # identical ``strings`` calls, 9 of them refused with ``SERVED`` at 2).
+    ENDS_AT = 8
+    WARNS_AT = ENDS_AT - 1
 
     def __init__(self) -> None:
         self._first: dict[str, str] = {}
         self._count: dict[str, int] = {}
-        # Across the whole loop, not per call: a model that asks for three
-        # different answers twice each is in the same place as one that asks
-        # for one answer three times.
+        # Every repeat of the loop, served or refused: what a cap's reason
+        # reports.
         self.served_repeats = 0
+        # The refused ones alone, across the whole loop: what ends it
+        # (``ENDS_AT``).
+        self.refused_repeats = 0
         # The calls earlier chunks of the same analysis made (``seed``), kept
         # apart so a replayed conversation forgets its own calls and not these.
         self._seeded: dict[str, str] = {}
@@ -1228,24 +1236,25 @@ class RepeatGuard:
             return None
         return self._first.get(key)
 
-    def note_repeat(self) -> None:
-        """Count one repeated call, whether it was served or refused.
+    def note_repeat(self, *, refused: bool = False) -> None:
+        """Count one repeated call; ``refused`` when it was not run.
 
-        Both are the same fact about the loop: the model asked for an answer it
-        already has. The first version counted only the served one, so a
-        sixteen-call ``pe_info`` run — the failure this guard was written from
-        — counted exactly one repeat and was never ended, because every call
-        after the second was refused without passing the counter.
+        Every repeat is counted for the reason a cap gives. Only a refused one
+        counts toward the end: a served repeat is a retry the guard allows,
+        and the end is for a loop that keeps asking for what it was told it
+        already has.
         """
         self.served_repeats += 1
+        if refused:
+            self.refused_repeats += 1
 
     def ending_the_loop(self) -> bool:
-        """Whether this loop has repeated itself often enough to be ended."""
-        return self.served_repeats >= self.ENDS_AT
+        """Whether this loop has been refused identical calls often enough to be ended."""
+        return self.refused_repeats >= self.ENDS_AT
 
     def warning_of_the_end(self) -> bool:
         """Whether the notice being written is the one before the last."""
-        return self.served_repeats >= self.WARNS_AT
+        return self.refused_repeats >= self.WARNS_AT
 
     def note(self, tool: str, kwargs: dict[str, Any], entry_id: str) -> None:
         """Record that the call ran, and which entry first answered it."""
@@ -1632,8 +1641,8 @@ def completeness_notice(
 # What both notices say on the call before the loop ends. One sentence, in one
 # place, because the model reads it from whichever branch it lands in.
 _ENDING_SENTENCE = (
-    " One more repeated call ends this analysis and what you have gathered "
-    "is written up as it stands."
+    " One more call that is not run because it repeats one already answered ends this "
+    "analysis and what you have gathered is written up as it stands."
 )
 
 
@@ -1679,6 +1688,10 @@ def repeat_notice(
     where saying it can still change what the model does. A loop that repeats
     one call reaches the end through this branch rather than through the served
     one.
+
+    Every refusal says what the model already has: the ledger id that holds
+    the answer, and how to read it again and page through it where the
+    conversation no longer shows it.
     """
     where = (
         f"You already called {tool} with these arguments and it failed, in [{entry_id}]"
@@ -1687,7 +1700,19 @@ def repeat_notice(
     )
     return (
         f"{where}. Do not call it again with these arguments; "
-        f"{_do_something_else(tool, narrowing)}{_ENDING_SENTENCE if last_warning else ''}"
+        f"{_do_something_else(tool, narrowing)}{_read_it_again(entry_id)}"
+        f"{_ENDING_SENTENCE if last_warning else ''}"
+    )
+
+
+def _read_it_again(entry_id: str) -> str:
+    """The sentence of a refusal that says where the answer is kept and how to page it."""
+    from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+
+    return (
+        f" The ledger keeps it under {entry_id}: where this conversation shows it as "
+        f"[cleared {entry_id}], call {READ_EVIDENCE_TOOL} with evidence_id {entry_id}, and "
+        "pass offset and limit to page through a long answer."
     )
 
 
@@ -1996,7 +2021,7 @@ def _record_tool(
         key = RepeatGuard._key(name, kwargs)
         asked_about[key] = asked_about.get(key, 0) + 1
         if asked_about[key] > 1 and repeats is not None:
-            repeats.note_repeat()
+            repeats.note_repeat(refused=True)
         logger.warning(
             "%s: %s was not run; its argument names its own parameter (%s).",
             recorder.agent,
@@ -2052,7 +2077,7 @@ def _record_tool(
                 charge=_charged,
             )
         if not repeats.first_touch_of_seed(name, kwargs):
-            repeats.note_repeat()
+            repeats.note_repeat(refused=True)
         failed = recorder.entry_failed(first) or repeats.seeded_failure(first)
         notice = repeat_notice(
             name,

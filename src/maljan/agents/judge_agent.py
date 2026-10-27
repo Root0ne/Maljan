@@ -2300,7 +2300,9 @@ class JudgeAgent(BudgetMeter):
         # What an ask reads on its caller (``agents.delegation``): the judge
         # asks the agents its definition names. Nobody asks the judge, so its
         # chain is empty; ``loop_budget`` is the running loop's, so an ask is
-        # held to the time the loop has left; its asks run one at a time. The
+        # held to the time the loop has left; its asks run one at a time unless
+        # the asked agents' models serve concurrent requests
+        # (``delegation.asks_run_at_once``). The
         # node that runs a mediation hands the judge the pack, the run state
         # and the sample's paths an ask hands on (``pipeline.nodes``). What a
         # callee's checks told it is handed over onto the validation fields
@@ -2309,6 +2311,9 @@ class JudgeAgent(BudgetMeter):
         self.loop_budget: LoopBudget | None = None
         self.current_round: int = 0
         self.asks_lock = threading.Lock()
+        # Taken to add to or drain the entries, which an ask that ran beside
+        # the judge's other asks hands over from its own thread.
+        self.evidence_lock = threading.Lock()
         self._meter_lock = threading.Lock()
         self.validation_findings: list[Violation] = []
         self.validation_retries: int = 0
@@ -3157,7 +3162,7 @@ class JudgeAgent(BudgetMeter):
             self._close_input_loop(budget, list(latest.get("messages") or [])[len(messages) :])
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
-            self._evidence_entries.extend(recorder.entries)
+            self._keep_the_loop_s_entries(recorder.entries)
             self._offered_after_clear = []
             self.loop_budget = None
             details = {
@@ -3321,10 +3326,16 @@ class JudgeAgent(BudgetMeter):
             )
         return text
 
+    def _keep_the_loop_s_entries(self, entries: list[LedgerEntry]) -> None:
+        """Add a loop's entries, under the lock an ask's hand-over takes too."""
+        with getattr(self, "evidence_lock", None) or contextlib.nullcontext():
+            self._evidence_entries.extend(entries)
+
     def drain_evidence_entries(self) -> list[LedgerEntry]:
         """Every entry the judge's tool loops gathered, handing over ownership."""
-        entries = self._evidence_entries
-        self._evidence_entries = []
+        with getattr(self, "evidence_lock", None) or contextlib.nullcontext():
+            entries = self._evidence_entries
+            self._evidence_entries = []
         return entries
 
     def _holds_a_lookup_tool(self) -> bool:

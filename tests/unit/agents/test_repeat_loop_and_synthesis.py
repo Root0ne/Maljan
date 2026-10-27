@@ -3,8 +3,10 @@
 Two live runs. A static analyst spent 16 of its 19 steps calling ``pe_info``
 with identical arguments and being told each time that the answer sits in
 ev_0002; another spent 11 on one ``strings`` regex. Being told where the answer
-is does not stop a model that has decided to ask again, so the third served
-repeat ends the loop and hands what was gathered to forced synthesis.
+is does not stop a model that has decided to ask again, so ``RepeatGuard.ENDS_AT``
+refused identical calls end the loop and hand what was gathered to forced
+synthesis. A served repeat, and a call that differs in any argument or page,
+never counts toward that end.
 
 The salvage then has to keep what it is asked to synthesise. A fixed
 16,000-character budget cut 21 of 41 messages on one of those runs and dropped
@@ -100,32 +102,99 @@ class TestTheGuardEndsTheLoop:
         assert len(calls) == 2, "the tool itself ran twice; the rest were refused"
         assert "[ev_0001]" in answers[0]
 
-    def test_the_loop_ends_on_the_third_repeated_call(self) -> None:
+    def test_the_loop_ends_at_the_stated_count_of_refusals_and_not_before(self) -> None:
         guard = RepeatGuard()
         tool = self._wrapped(guard, [])[0]
         args = {"path": "/tmp/s.bin"}
 
         tool.invoke(args)
-        assert guard.served_repeats == 0
         tool.invoke(args)
-        assert (guard.served_repeats, guard.ending_the_loop()) == (1, False)
-        tool.invoke(args)
-        assert (guard.served_repeats, guard.ending_the_loop()) == (2, False)
+        assert (guard.refused_repeats, guard.ending_the_loop()) == (0, False), "one is served"
+        for refused in range(1, RepeatGuard.ENDS_AT):
+            tool.invoke(args)
+            assert (guard.refused_repeats, guard.ending_the_loop()) == (refused, False)
         tool.invoke(args)
 
-        assert (guard.served_repeats, guard.ending_the_loop()) == (3, True)
+        assert (guard.refused_repeats, guard.ending_the_loop()) == (RepeatGuard.ENDS_AT, True)
 
-    def test_three_tools_asked_twice_each_end_it_too(self) -> None:
-        """The count is the loop's, not one call's."""
+    def test_the_stated_count_is_more_than_the_three_repeats_it_was(self) -> None:
+        assert RepeatGuard.ENDS_AT == 8
+        assert RepeatGuard.WARNS_AT == RepeatGuard.ENDS_AT - 1
+
+    def test_served_repeats_of_many_tools_never_end_it(self) -> None:
+        """Each tool asked twice is served twice: nothing was refused, so nothing stalled."""
         guard = RepeatGuard()
-        tools = self._wrapped(guard, [], "pe_info", "strings", "hashes")
+        names = [f"tool_{index}" for index in range(RepeatGuard.ENDS_AT + 2)]
+        tools = self._wrapped(guard, [], *names)
 
-        for tool in tools:
-            tool.invoke({"path": "/tmp/s.bin"})
-        for tool in tools:
-            tool.invoke({"path": "/tmp/s.bin"})
+        for _ in range(2):
+            for tool in tools:
+                tool.invoke({"path": "/tmp/s.bin"})
 
-        assert guard.ending_the_loop() is True
+        assert guard.served_repeats == len(names)
+        assert (guard.refused_repeats, guard.ending_the_loop()) == (0, False)
+
+    def test_distinct_pages_and_arguments_never_count(self) -> None:
+        from langchain_core.tools import StructuredTool
+        from pydantic import BaseModel
+
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from maljan.schemas.evidence import EvidenceCounter
+
+        class _Args(BaseModel):
+            path: str = ""
+            offset: int = 0
+            limit: int = 0
+
+        def _run(**kwargs: Any) -> str:
+            return f"page at {kwargs.get('offset')}"
+
+        paged = StructuredTool.from_function(
+            func=_run, name="strings", description="strings", args_schema=_Args, infer_schema=False
+        )
+        guard = RepeatGuard()
+        tool = record_tools([paged], EvidenceRecorder("static", counter=EvidenceCounter()), guard)[
+            0
+        ]
+
+        for page in range(RepeatGuard.ENDS_AT * 3):
+            tool.invoke({"path": "/tmp/s.bin", "offset": page * 100, "limit": 100})
+        for page in range(RepeatGuard.ENDS_AT * 3):
+            tool.invoke({"path": f"/tmp/s{page}.bin", "offset": 0, "limit": 100})
+        for limit in range(1, RepeatGuard.ENDS_AT * 3):
+            tool.invoke({"path": "/tmp/s.bin", "offset": 0, "limit": limit})
+
+        assert (guard.served_repeats, guard.refused_repeats) == (0, 0)
+        assert guard.ending_the_loop() is False
+
+    def test_only_calls_identical_after_normalisation_count(self) -> None:
+        """The key sorts the arguments; any value that differs is another call."""
+        guard = RepeatGuard()
+        first = {"path": "/tmp/s.bin", "offset": 0, "limit": 100}
+
+        guard.note("strings", first, "ev_0001")
+        guard.note("strings", dict(reversed(list(first.items()))), "ev_0002")
+
+        assert guard.answered_by("strings", {"limit": 100, "offset": 0, "path": "/tmp/s.bin"}) == (
+            "ev_0001"
+        )
+        assert guard.answered_by("strings", {**first, "offset": 100}) is None
+        assert guard.answered_by("strings", {**first, "limit": 50}) is None
+        assert guard.answered_by("pe_info", first) is None
+
+    def test_a_refusal_names_the_ledger_id_and_how_to_page(self) -> None:
+        guard = RepeatGuard()
+        tool = self._wrapped(guard, [])[0]
+        args = {"path": "/tmp/s.bin"}
+
+        tool.invoke(args)
+        tool.invoke(args)
+        refused = tool.invoke(args)
+
+        assert "the result is in [ev_0001]" in refused
+        assert "The ledger keeps it under ev_0001" in refused
+        assert "call read_evidence with evidence_id ev_0001" in refused
+        assert "pass offset and limit to page" in refused
 
     def test_a_loop_that_asks_different_things_is_left_alone(self) -> None:
         guard = RepeatGuard()
@@ -144,12 +213,16 @@ class TestTheGuardEndsTheLoop:
 
         first = tool.invoke(args)
         served = tool.invoke(args)
-        refused = tool.invoke(args)
+        refusals = [tool.invoke(args) for _ in range(RepeatGuard.WARNS_AT)]
 
         assert "ends this analysis" not in first
         assert "A third will not be run" in served
         assert "ends this analysis" not in served, "one repeat is not the last one"
-        assert "ends this analysis" in refused
+        assert not any("ends this analysis" in said for said in refusals[:-1])
+        assert "ends this analysis" in refusals[-1]
+        assert guard.ending_the_loop() is False
+        tool.invoke(args)
+        assert guard.ending_the_loop() is True
 
     def test_a_repeated_call_that_raises_counts_the_same(self) -> None:
         """An unreachable server or a path the sidecar will never read throws
@@ -175,13 +248,14 @@ class TestTheGuardEndsTheLoop:
         ]
         args = {"path": "/tmp/s.bin"}
 
-        answers = [tool.invoke(args) for _ in range(4)]
+        answers = [tool.invoke(args) for _ in range(RepeatGuard.ENDS_AT + 2)]
 
         assert "tool call failed" in answers[0]
         assert "A third will not be run" in answers[1]
         assert "failed the same way before, in [ev_0001]" in answers[1]
         assert "the answer above" not in answers[1], "what is above is a failure"
-        assert (guard.served_repeats, guard.ending_the_loop()) == (3, True)
+        assert "it failed, in [ev_0001]" in answers[2]
+        assert (guard.refused_repeats, guard.ending_the_loop()) == (RepeatGuard.ENDS_AT, True)
 
     def test_the_analyst_loop_ends_and_synthesises_on_it(self) -> None:
         """The wiring: the stream is broken and the salvage is the same one a
@@ -358,7 +432,7 @@ class TestTheLoopStopsMidStream:
 
             async def astream(self, inputs: Any, config: Any, stream_mode: str = "values") -> Any:
                 messages = list(inputs["messages"])
-                for step in range(8):
+                for step in range(RepeatGuard.ENDS_AT + 6):
                     self.steps += 1
                     answer = agent_tools[0].invoke({"path": "/tmp/s.bin"})
                     messages = [
@@ -423,7 +497,7 @@ class TestTheLoopStopsMidStream:
                 answer = agent.execute_tool_loop([("system", "s"), ("human", "h")])
 
         assert executor is not None
-        assert executor.steps == 4, "the fourth repeated call ends the loop"
+        assert executor.steps == RepeatGuard.ENDS_AT + 2, "the last refused call ends the loop"
         assert len(ran) == 2, "the tool itself ran twice; the rest were refused"
         assert "PE32" in answer, "the salvage answered from what was gathered"
         llm.invoke.assert_called_once()
