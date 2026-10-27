@@ -84,7 +84,9 @@ async def unready_static_providers(
     named = [agent for stage in team.stages for agent in stage.agents]
     by_provider: dict[str, list[str]] = {}
     chosen: set[str] = set()
-    for key in reachable_agents(settings, named):
+    # Not the agents only the mediator may ask: an ask of one whose provider is
+    # not ready is a failed call on the ledger, never a reason to refuse the job.
+    for key in reachable_agents(settings, named, mediated=False):
         definition = settings.agents.definitions.get(key)
         if not reads_static_provider(definition):
             continue

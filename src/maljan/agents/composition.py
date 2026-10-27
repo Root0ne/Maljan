@@ -152,7 +152,9 @@ def called_assignments(settings: Settings, stages: Sequence[Any] | None = None) 
         if getattr(stage, "kind", "") == "analysis"
         for agent in stage.agents
     ]
-    agents = reachable_agents(settings, analysts)
+    # The agents only the mediator may ask are not in it: an ask of one whose
+    # model fails is a failed call on the ledger, never a refused job.
+    agents = reachable_agents(settings, analysts, mediated=False)
     if "debate" in kinds:
         agents.append(MEDIATOR_AGENT_KEY)
     if settings.preprocessing.use_function_summarizer:
@@ -317,7 +319,16 @@ def pin_provider_sample(agent: Any, mirrored: Mapping[str, str] | None) -> None:
             reasons.append(reason)
 
 
-def reachable_agents(settings: Settings, named: Sequence[str]) -> list[str]:
+def mediates(team: Any) -> bool:
+    """Whether ``team`` holds a debate stage, the one place the judge runs a tool loop."""
+    return any(
+        getattr(stage, "kind", "") == "debate" for stage in getattr(team, "stages", ()) or ()
+    )
+
+
+def reachable_agents(
+    settings: Settings, named: Sequence[str], *, mediated: bool | None = None
+) -> list[str]:
     """The agents ``named``, every agent they can ask, and so on, in order.
 
     A team's stages name the agents it runs, and a lead names the specialists
@@ -326,13 +337,29 @@ def reachable_agents(settings: Settings, named: Sequence[str]) -> list[str]:
     provider to have mirrored the sample for — has to follow those
     references. The reference graph is acyclic (the settings model refuses a
     self-reference and the run refuses a cycle), so the closure terminates.
+
+    The judge asks only while it mediates, so its references are followed
+    only for a team with a debate stage: ``mediated``, or the active
+    profile's when it is not given (:func:`mediates`); and never where the
+    profile withholds every server from the judge, which builds it no ask
+    (:func:`_agent_tools`). The agents reached only this way are for the run
+    to have ready (the sample mirrored, the roster); none of them is a reason
+    to refuse a job, since a failed ask is a failed call on the ledger.
     """
+    from maljan.core.config import ALL_SERVERS, JUDGE_AGENT_KEY
+
+    if mediated is None:
+        mediated = mediates(active_profile(settings))
+    if mediated and ALL_SERVERS in _withheld_servers(settings, JUDGE_AGENT_KEY):
+        mediated = False
     definitions = settings.agents.definitions
     reached = list(dict.fromkeys(str(key) for key in named))
     seen = set(reached)
     pending = list(reached)
     while pending:
         definition = definitions.get(pending.pop())
+        if getattr(definition, "role", "") == "judge" and not mediated:
+            continue
         for ref in getattr(definition, "tools", None) or []:
             callee = str(getattr(ref, "agent", "") or "")
             if getattr(ref, "kind", "") != "agent" or not callee or callee in seen:
@@ -654,7 +681,9 @@ def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
     return stamp_source(sandbox_tools(container), SANDBOX_FAMILY, declared="sandbox")
 
 
-def _agent_tools(container: Any, definition: AgentDefinition, key: str) -> list[Any]:
+def _agent_tools(
+    container: Any, definition: AgentDefinition, key: str, caller: Any = None
+) -> list[Any]:
     """The ``ask_<agent>`` tools, one per agent reference on the definition.
 
     In-process like the sandbox tools, and only bound where the definition
@@ -674,7 +703,32 @@ def _agent_tools(container: Any, definition: AgentDefinition, key: str) -> list[
         return []
     from maljan.agents.delegation import ask_tool
 
-    return [ask_tool(container, key, str(ref.agent)) for ref in refs]
+    return [ask_tool(container, key, str(ref.agent), caller) for ref in refs]
+
+
+def in_process_tools_for(
+    container: Any, key: str, caller: Any = None
+) -> tuple[list[Any], dict[str, str]]:
+    """Agent ``key``'s sandbox-report and ``ask_<agent>`` tools, and the names they claimed.
+
+    The half of a definition that resolution builds in-process, for an agent
+    that attaches its own servers rather than reading a ``ResolvedAgent``: the
+    judge. The names come back so the servers attached after them take the
+    prefix on a clash, as they do in resolution. ``caller`` is the asking
+    instance an ask runs for (``delegation.ask_tool``).
+    """
+    definition = getattr(getattr(container.config, "agents", None), "definitions", {}).get(key)
+    seen: dict[str, str] = {}
+    tools: list[Any] = []
+    if definition is None:
+        return tools, seen
+    _claim_in_process_tools(
+        _sandbox_tools(container, definition), "in-process:sandbox", tools, seen
+    )
+    _claim_in_process_tools(
+        _agent_tools(container, definition, key, caller), "in-process:team", tools, seen
+    )
+    return tools, seen
 
 
 def _claim_in_process_tools(
@@ -850,6 +904,7 @@ def servers_withheld_from(
     caller_key: str,
     callee_key: str,
     also: frozenset[str] = frozenset(),
+    caller_withholds: Iterable[str] | None = None,
 ) -> list[str]:
     """The servers ``callee_key`` brings that ``caller_key``'s own stage may not reach.
 
@@ -871,7 +926,15 @@ def servers_withheld_from(
     # by the delegation. Without it the policy stops at the first callee: a
     # specialist that no stage names withholds nothing of its own, so the ask
     # it makes in turn would reach exactly what the stage was told not to.
-    withheld = _withheld_servers(settings, caller_key) | set(also)
+    # ``caller_withholds`` is the caller's own policy where it is not the
+    # stage its key is in: the judge asks while it mediates, under the debate
+    # stage and the profile, never under its verdict stage.
+    own = (
+        _withheld_servers(settings, caller_key)
+        if caller_withholds is None
+        else set(caller_withholds)
+    )
+    withheld = own | set(also)
     if not withheld:
         return []
     brought = servers_bound_to(settings, callee_key)

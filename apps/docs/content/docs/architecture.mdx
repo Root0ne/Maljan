@@ -299,6 +299,19 @@ judge
 report  ->  END
 ```
 
+Every mediation runs the judge's tool loop, the first round as much as any
+other: there is no single call without tools for a round in which no analyst
+wrote explicit dissent. The loop offers the judge's tools, `read_evidence` from
+its first turn, and an `ask_<agent>` tool for each agent the judge's definition
+names (the reverser and the static analyst in the seed, with the job's sandbox
+report tools beside them), and the model decides whether to read, look up or
+ask anything; a round that needs nothing answers on its first turn and pays only
+for the tool definitions it carried. The prompt's sentence about tools is the
+one every agent gets (`tools_statement`), after the reputation sentence when no
+analyst consulted one (`judge_agent.mediator_system_prompt`). A loop whose
+answer is empty and was not cut at the output cap is run once more as it was
+sent; a cut answer, or a loop a limit ended, is not.
+
 The mediator reads each analyst's report under its heading, then, under
 `=== STRUCTURED CLAIMS (ISR) ===`, the ISR summary of every analyst whose
 report is not that summary word for word (`judge_agent.mediation_reports_text`).
@@ -3053,6 +3066,17 @@ optional `context`, described from the static analyst's label and role. Any
 analyst may carry such a reference — a lead that gives out work, a static clone
 that checks a point with the network analyst — and an agent with none cannot
 ask anyone, which is what keeps the `default` team's analysts what they were.
+The judge carries two in its seed, `reverser` and `static`: a mediation whose
+dispute turns on a function nobody read can ask the agent that reads code. Its
+`ask_<agent>` tools are built for the instance that holds them (the mediator
+and the verdict are two instances under the one `judge` key), the debate node
+hands the mediator the pack, the run state and the sample's paths an ask hands
+on (`nodes.brief_the_mediator`), and what the callee's checks said is written
+under `judge` as a lead's asks are under the lead. The answer reaches the
+mediator as the tool's result and the callee's calls reach the ledger; the
+mediator still decides. A caller that writes no report, like the judge, keeps
+none of the callee's findings, artifacts or open questions beside them, and the
+log says how many reached it only in the answer and the ledger.
 
 Calling it runs the named agent under the same job: the same container, the
 same sample paths (its own provider's mirror first, as a stage agent gets), the
@@ -3120,7 +3144,15 @@ the asking, so a stage with `builtin_tools=False` cannot reach `knowledge` or
 `network` through a colleague that no stage narrows, whichever way that
 colleague was bound to them. The settings model refuses the static cases
 at save time: a reference to an agent that does not exist, to the definition
-itself, to the judge or the reporter, or on the judge or the reporter.
+itself, to the judge or the reporter, or on the reporter. A judge row an
+earlier release stored with its former seed list (`knowledge` and reputation
+alone) reads as the seed (`config.former_seed_tool_lists`). The judge's asks
+follow the stage it asks from and the profile, never its verdict stage's tool
+policy, and a profile that withholds every server from the judge builds it no
+ask. The agents only the mediator may ask, in a team with a debate stage, get
+the sample mirrored and a roster line, but neither the job-start probe gate nor
+the provider readiness check refuses a job over them: a failed ask is a failed
+call on the ledger.
 
 One agent does one thing at a time, on both sides. A caller's asks take its own
 lock, so two `ask_*` calls in one assistant turn — which langgraph gathers and
@@ -3422,8 +3454,8 @@ resolved. Each reads its own provider — the team's forced one, else its
 definition's `static_provider`, else the global one — and the container keeps
 one provider object per id. Everything that depends on the provider follows
 the agent rather than `core.static.provider`: the worker mirrors the sample
-once per provider any such agent of the team (or any agent they can ask)
-opens, so a reverser on Ghidra under another global provider has a path the
+once per provider any such agent of the team (or any agent they or the
+mediator can ask) opens, so a reverser on Ghidra under another global provider has a path the
 Ghidra container can read; the open of the sample and the sink-reachability
 pre-pass (`providers.base.prepare_sample`) run for every such agent through
 its own provider object: the provider opens the sample where its session needs
@@ -3835,7 +3867,7 @@ the output, flags the entry `truncated` and is counted.
 Ids (`ev_0007`) are monotonic across the whole job. The triage pack's calls
 are the first entries of every run that has one, under `agent="pipeline"`, and
 the judge's own calls — threat intel on a disputed indicator, a knowledge
-lookup — go through the same recorder under `agent="judge"`, so a verdict that
+lookup, an ask of the reverser — go through the same recorder under `agent="judge"`, so a verdict that
 leans on one can cite it. An agent's ask of another agent is an entry under
 `server="team"`, `tool="ask_<key>"`, and the calls the asked agent made are
 entries under its own key (see *Delegation*).
@@ -4022,7 +4054,7 @@ send the cleared answers as the loop last sent them and bind the tools the loop
 last offered. Each clear is in the agent's log and is published as
 `tool_answers_cleared` (agent, turn, answers, characters before and after, and
 `refused`, `window` or `tier`). The judge's tool loop clears the same way, with the
-same `read_evidence` tool offered from its first clear. The code is
+same `read_evidence` tool, which it offers from its first turn. The code is
 `maljan.agents.tool_answer_clearing`.
 
 **An answer wider than the prompt allows.** Before any of that, a tool result

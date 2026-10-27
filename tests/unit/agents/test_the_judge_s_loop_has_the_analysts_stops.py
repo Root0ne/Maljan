@@ -38,7 +38,9 @@ class _Judge(BaseChatModel):
         self, messages: Any, stop: Any = None, run_manager: Any = None, **_: Any
     ) -> ChatResult:
         self.turns += 1
-        if isinstance(messages[-1], HumanMessage) and "Do NOT call" in str(messages[-1].content):
+        if isinstance(messages[-1], HumanMessage) and "this turn carries no tools" in str(
+            messages[-1].content
+        ):
             return ChatResult(
                 generations=[ChatGeneration(message=AIMessage(content="agreement 0.5"))]
             )

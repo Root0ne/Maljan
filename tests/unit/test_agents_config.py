@@ -177,7 +177,15 @@ DEFAULT_AGENTS = {
             "role": "judge",
             "label": "Judge",
             "prompt": None,
-            "tools": [_mcp("knowledge"), _REPUTATION],
+            # The mediator may read the sandbox report and ask the reverser
+            # and the static analyst when a dispute turns on code (T-415d).
+            "tools": [
+                _mcp("knowledge"),
+                _REPUTATION,
+                {"kind": "sandbox", "server": None, "name": None},
+                {"kind": "agent", "server": None, "name": None, "agent": "reverser"},
+                {"kind": "agent", "server": None, "name": None, "agent": "static"},
+            ],
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
@@ -750,17 +758,21 @@ def test_an_agent_may_not_reference_itself():
         _led(boss={"role": "lead", "prompt": "lead", "tools": [_agent("boss")]})
 
 
-def test_the_judge_and_the_reporter_can_neither_ask_nor_be_asked():
+def test_the_judge_may_ask_and_neither_it_nor_the_reporter_can_be_asked():
     from maljan.core.config import AgentDefinition, agent_reference_problems
 
     with pytest.raises(ValidationError, match="'judge' has role 'judge' and cannot be asked"):
         _led(boss={"role": "lead", "prompt": "lead", "tools": [_agent("judge")]})
+    with pytest.raises(ValidationError, match="'reporter' has role 'report' and cannot be asked"):
+        _led(boss={"role": "lead", "prompt": "lead", "tools": [_agent("reporter")]})
     # The built-in identity check refuses an edited judge before this rule is
     # reached through ``Settings``; the rule itself is what the API shares.
     definitions = Settings(_env_file=None).agents.definitions
     judge = AgentDefinition(role="judge", tools=[ToolRef(kind="agent", agent="static")])
-    assert agent_reference_problems("judge", judge, definitions) == [
-        "a judge definition cannot ask other agents"
+    assert agent_reference_problems("judge", judge, definitions) == []
+    reporter = AgentDefinition(role="report", tools=[ToolRef(kind="agent", agent="static")])
+    assert agent_reference_problems("reporter", reporter, definitions) == [
+        "a report definition cannot ask other agents"
     ]
 
 

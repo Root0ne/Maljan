@@ -130,12 +130,16 @@ def tool_name(agent_key: str) -> str:
     return f"ask_{agent_key}"
 
 
-def ask_tool(container: Any, caller_key: str, callee_key: str) -> BaseTool:
+def ask_tool(container: Any, caller_key: str, callee_key: str, caller: Any = None) -> BaseTool:
     """The ``ask_<callee>`` tool for ``caller_key``, described from the callee.
 
     A synchronous function on purpose: the ReAct executor runs a sync tool on
     a worker thread, which is the one place a nested tool loop may block on
     the shared agent loop without deadlocking it.
+
+    ``caller`` is the asking instance when the container's agent map does not
+    hold it: the judge, whose mediator and verdict are two instances under one
+    key (``ServiceContainer.get_judge_agent``). ``None`` asks the map.
     """
     from langchain_core.tools import StructuredTool
 
@@ -153,7 +157,12 @@ def ask_tool(container: Any, caller_key: str, callee_key: str) -> BaseTool:
 
     def _ask(task: str, context: str = "") -> str:
         return ask(
-            container, caller_key=caller_key, callee_key=callee_key, task=task, context=context
+            container,
+            caller_key=caller_key,
+            callee_key=callee_key,
+            task=task,
+            context=context,
+            caller=caller,
         )
 
     return StructuredTool.from_function(
@@ -268,10 +277,29 @@ def _servers_the_caller_may_not_reach(container: Any, caller: Any, callee_key: s
             str(caller.name),
             callee_key,
             also=frozenset(getattr(caller, "withheld_by_the_chain", ()) or ()),
+            caller_withholds=_own_policy(caller),
         )
     except Exception as exc:  # noqa: BLE001 — a guard never costs a run
         logger.debug("delegation: the caller's tool policy could not be read (%s).", exc)
         return []
+
+
+def _own_policy(caller: Any) -> set[str] | None:
+    """The servers the caller's own asks may not reach, where the caller says so; else ``None``.
+
+    A caller whose key sits in a stage other than the one it asks from says so
+    itself (``servers_its_asks_may_not_reach``): the judge asks while it
+    mediates, and its verdict stage's policy is not the debate's. ``None``
+    reads the policy of the stage the caller's key is in.
+    """
+    own = getattr(caller, "servers_its_asks_may_not_reach", None)
+    if not callable(own):
+        return None
+    try:
+        return set(own())
+    except Exception as exc:  # noqa: BLE001 — the stage's policy still holds
+        logger.debug("delegation: the caller's own policy could not be read (%s).", exc)
+        return None
 
 
 def _the_chain_s_tool_policy(caller: Any) -> frozenset[str]:
@@ -284,6 +312,9 @@ def _the_chain_s_tool_policy(caller: Any) -> frozenset[str]:
     from maljan.agents.composition import _withheld_servers
 
     inherited = frozenset(getattr(caller, "withheld_by_the_chain", ()) or ())
+    own = _own_policy(caller)
+    if own is not None:
+        return inherited | frozenset(own)
     try:
         return inherited | frozenset(_withheld_servers(caller._container.config, str(caller.name)))
     except Exception as exc:  # noqa: BLE001 — the inherited set still holds
@@ -295,6 +326,8 @@ def _where_the_caller_runs(container: Any, caller: Any) -> str:
     """The stage the caller is in, named the way the refusal reads best."""
     from maljan.agents.composition import stage_for_agent
 
+    if callable(getattr(caller, "servers_its_asks_may_not_reach", None)):
+        return "the stage it is asking from"
     try:
         stage = stage_for_agent(container.config, str(caller.name))
     except Exception:  # noqa: BLE001 — the sentence still reads without it
@@ -302,14 +335,24 @@ def _where_the_caller_runs(container: Any, caller: Any) -> str:
     return f"stage {str(stage.key)!r}" if stage is not None else "this profile"
 
 
-def ask(container: Any, *, caller_key: str, callee_key: str, task: str, context: str = "") -> str:
+def ask(
+    container: Any,
+    *,
+    caller_key: str,
+    callee_key: str,
+    task: str,
+    context: str = "",
+    caller: Any = None,
+) -> str:
     """Run ``callee_key`` on ``task`` for ``caller_key`` and return its ISR text.
 
     Raises ``DelegationRefused`` for a guarded ask and whatever the callee's
     loop raises for one that failed; the recorder turns either into a failed
-    ledger entry whose message the caller reads.
+    ledger entry whose message the caller reads. ``caller`` is the asking
+    instance where the agent map does not hold it (:func:`ask_tool`).
     """
-    caller = container.get_agent(caller_key)
+    if caller is None:
+        caller = container.get_agent(caller_key)
     why = refusal(container, caller, callee_key)
     if why is not None:
         logger.info("delegation refused (%s -> %s): %s", caller_key, callee_key, why)
@@ -690,6 +733,25 @@ def _hand_over_the_structured_channel(
             len(getattr(isr, "open_questions", None) or []),
         )
         return
+    remember = getattr(caller, "remember_answered_ask", None)
+    if not isinstance(getattr(caller, "_artifacts_buffer", None), list):
+        # A caller that writes no report of its own — the judge — has no
+        # buffer for a report's artifacts, findings or open questions. The
+        # answer reaches it whole as the tool's result and the callee's calls
+        # are on the ledger (:func:`_hand_over_the_record`); what the
+        # structured channel carried beside them is said, not kept.
+        logger.info(
+            "delegation %s -> %s: the caller keeps no report buffers; %d finding(s), %d "
+            "artifact(s) and %d open question(s) reach it only in the answer and the ledger.",
+            caller.name,
+            callee.name,
+            len(isr.findings or []),
+            len(isr.artifacts or []),
+            len(getattr(isr, "open_questions", None) or []),
+        )
+        if callable(remember):
+            remember(isr)
+        return
     for artifact in list(isr.artifacts or []):
         if not str(getattr(artifact, "source", "") or "").strip():
             artifact.source = str(callee.name)
@@ -707,7 +769,6 @@ def _hand_over_the_structured_channel(
     # caller's conversation, so a caller whose loop died — the wall-clock cap
     # on a lead's chunk, with six asks already answered — took every answer
     # down with it. Kept here, the stage can promote them.
-    remember = getattr(caller, "remember_answered_ask", None)
     if callable(remember):
         remember(isr)
 

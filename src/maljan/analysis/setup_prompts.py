@@ -3,7 +3,7 @@
 The run fingerprint (``analysis.efficiency``) hashes the job's setup, never
 its traffic: the same code, settings and servers give the same fingerprint
 whether or not a run asked a validation retry, reached a revision round,
-cleared tool answers or took the mediator's fast path, and on any sample.
+cleared tool answers or made a tool call from the mediation, and on any sample.
 
 So each system prompt is rendered here by the very builder that sends it, with
 one fixed placeholder job (:data:`PLACEHOLDER_SHA256`, :data:`PLACEHOLDER_PATH`,
@@ -184,17 +184,11 @@ def mediator_prompts(tool_sets: Iterable[list[Any]]) -> list[str]:
 
     rendered: set[str] = set()
     for tools in [[], *tool_sets]:
-        for identity, lookup, needs in (
-            (True, True, True),
-            (False, True, True),
-            (False, False, True),
-            (False, False, False),
-        ):
+        for identity, lookup in ((True, True), (False, True), (False, False)):
             rendered.add(
                 mediator_system_prompt(
                     identity_unanswered=identity,
                     lookup_attached=lookup,
-                    needs_tools=needs,
                     sha256=PLACEHOLDER_SHA256,
                     tools=tools,
                 )
@@ -203,7 +197,6 @@ def mediator_prompts(tool_sets: Iterable[list[Any]]) -> list[str]:
             mediator_system_prompt(
                 identity_unanswered=True,
                 lookup_attached=True,
-                needs_tools=True,
                 sha256="",
                 tools=tools,
             )

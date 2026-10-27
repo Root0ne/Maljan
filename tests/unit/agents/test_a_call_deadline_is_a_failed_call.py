@@ -133,7 +133,7 @@ class _Mediator(BaseChatModel):
     ) -> ChatResult:
         self.calls += 1
         last = messages[-1]
-        if isinstance(last, HumanMessage) and "Do NOT call" in str(last.content):
+        if isinstance(last, HumanMessage) and "this turn carries no tools" in str(last.content):
             return ChatResult(
                 generations=[ChatGeneration(message=AIMessage(content="agreement 0.7"))]
             )
