@@ -388,17 +388,31 @@ ANALYST_FEEDBACK_CLOSING_BY_NUMBER_WITHOUT_TECHNIQUES = (
 )
 
 
-def analyst_feedback_closing(*, whole: bool, techniques: bool = True) -> str:
+# Said in front of an analyst's closing when the turn carries its own tools
+# (``BaseAnalyst._answer_after_loop``): a claim a question asks it to fix may
+# be fixed from an entry the ledger holds, or from one a call files now.
+ANALYST_TOOLS_ATTACHED = (
+    "Your tools are attached to this turn. Where a question asks you to cite an entry or "
+    "check a value, cite one the ledger holds or read it: call a tool to read or check what "
+    "the claim states, and cite the entry the call files."
+)
+
+
+def analyst_feedback_closing(*, whole: bool, techniques: bool = True, tools: bool = False) -> str:
     """The closing of an analyst's retry: a whole answer or the claims it changes.
 
     ``techniques=False`` names the claim block without its TECHNIQUE line, for
-    an analyst whose definition turns the line off.
+    an analyst whose definition turns the line off. ``tools`` is a turn that
+    carries the analyst's own tools, which the closing then says first
+    (:data:`ANALYST_TOOLS_ATTACHED`).
     """
     if techniques:
-        return ANALYST_FEEDBACK_CLOSING if whole else ANALYST_FEEDBACK_CLOSING_BY_NUMBER
-    if whole:
-        return ANALYST_FEEDBACK_CLOSING_WITHOUT_TECHNIQUES
-    return ANALYST_FEEDBACK_CLOSING_BY_NUMBER_WITHOUT_TECHNIQUES
+        closing = ANALYST_FEEDBACK_CLOSING if whole else ANALYST_FEEDBACK_CLOSING_BY_NUMBER
+    elif whole:
+        closing = ANALYST_FEEDBACK_CLOSING_WITHOUT_TECHNIQUES
+    else:
+        closing = ANALYST_FEEDBACK_CLOSING_BY_NUMBER_WITHOUT_TECHNIQUES
+    return f"{ANALYST_TOOLS_ATTACHED}\n{closing}" if tools else closing
 
 
 UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
@@ -12251,7 +12265,7 @@ RETRY_DROP_NOT_ANSWERED = "not answered; kept as the first answer wrote it"
 # leaves out (by the claim's values: restated when the retry states every value
 # it holds; a claim that holds none, or whose only values left out are
 # technique ids the retry was asked about, is counted neither way) is more
-# another answer than a fix of this one, written in a tools-free turn. It does
+# another answer than a fix of this one, written in a turn of its own. It does
 # not replace the first answer: what it left out stands beside the retry's own
 # claims, which stand for the claims they restate. The one question about
 # those items says so, and also names each claim with no value whose sentence
@@ -12465,12 +12479,18 @@ RETRY_DROP_PART = (
     "This question is asked in {total} parts, each beside the entries its items cite; this "
     "is part {number}."
 )
+# Said before the answer's form when the question carries the analyst's own
+# tools (``BaseAnalyst._answer_after_loop``).
+RETRY_DROP_TOOLS_ATTACHED = (
+    "Your tools are attached to this turn: you may read or check an item's values with them "
+    "before you decide, and cite the entry a call files in your reason."
+)
 
 
 def _cited_entry_lines(
     head: str, unfit_head: str, entries: Mapping[str, str] | None, unfit: Sequence[str]
 ) -> list[str]:
-    """The entries a tools-free turn shows under ``head``, then the ones named as unfit."""
+    """The entries a turn without them shows under ``head``, then the ones named as unfit."""
     lines: list[str] = []
     if entries:
         lines.append(head)
@@ -12482,11 +12502,11 @@ def _cited_entry_lines(
 
 # The head of the entries a validation retry shows beside its questions, and
 # what it says of a cited entry that does not fit beside the conversation and
-# the entries shown. The retry is a tools-free turn: the tool results the
-# answer was written from are not in it.
+# the entries shown. The tool results the answer was written from are not in
+# the retry's conversation, whether or not its turn carries tools.
 VALIDATION_ENTRIES_HEAD = (
-    "The ledger entries your answer cites, as recorded. This turn carries no tools and the "
-    "tool results you read are not in it; read the entries here:"
+    "The ledger entries your answer cites, as recorded. The tool results you read are not "
+    "in this conversation; read the entries here:"
 )
 VALIDATION_ENTRIES_UNFIT = (
     "The ledger holds these entries your answer cites; they do not fit beside this "
@@ -12502,7 +12522,10 @@ def validation_entries_text(entries: Mapping[str, str], unfit: Sequence[str] = (
 
 
 def _retry_drop_closing(
-    entries: Mapping[str, str] | None, unfit: Sequence[str], part: tuple[int, int] | None
+    entries: Mapping[str, str] | None,
+    unfit: Sequence[str],
+    part: tuple[int, int] | None,
+    tools: bool = False,
 ) -> str:
     parts: list[str] = []
     if part is not None:
@@ -12510,6 +12533,8 @@ def _retry_drop_closing(
     parts.extend(
         _cited_entry_lines(RETRY_DROP_ENTRIES_HEAD, RETRY_DROP_ENTRIES_UNFIT, entries, unfit)
     )
+    if tools:
+        parts.append(RETRY_DROP_TOOLS_ATTACHED)
     parts.append(
         "For each item, write one line: KEEP <label>: <reason> to keep it in your answer as "
         "your first answer wrote it, or WITHDRAW <label>: <reason> to leave it out. Write "
@@ -12524,6 +12549,7 @@ def retry_drop_question(
     *,
     unfit: Sequence[str] = (),
     part: tuple[int, int] | None = None,
+    tools: bool = False,
 ) -> str:
     """The question a kept retry's dropped items are put to the analyst with.
 
@@ -12531,14 +12557,16 @@ def retry_drop_question(
     the conversation does not hold to its text as recorded, shown once under
     the items. ``unfit`` names the cited entries that do not fit beside the
     conversation and the entries shown; ``part`` is ``(number, total)`` when the items
-    are asked in several parts, each beside its own entries.
+    are asked in several parts, each beside its own entries. ``tools`` is a
+    question that carries the analyst's own tools, which it then says
+    (:data:`RETRY_DROP_TOOLS_ATTACHED`).
     """
     return (
         "Your retry stands as your answer, and it no longer states these items of your first "
         "answer:\n"
         + "\n".join(_retry_drop_item_lines(drops, numbered=False, values=True))
         + "\n"
-        + _retry_drop_closing(entries, unfit, part)
+        + _retry_drop_closing(entries, unfit, part, tools)
     )
 
 
@@ -12551,6 +12579,7 @@ def retry_restated_few_question(
     restated: int = 0,
     left_out: int = 0,
     plain: int = 0,
+    tools: bool = False,
 ) -> str:
     """The question about what a retry that restated few claims left out, item by item.
 
@@ -12571,7 +12600,7 @@ def retry_restated_few_question(
         "stand in your answer as you wrote them, beside your retry's claims:\n"
         + "\n".join(_retry_drop_item_lines(drops, numbered=False, values=True))
         + "\n"
-        + _retry_drop_closing(entries, unfit, part)
+        + _retry_drop_closing(entries, unfit, part, tools)
     )
 
 
@@ -12581,6 +12610,7 @@ def retry_unplaced_question(
     *,
     unfit: Sequence[str] = (),
     part: tuple[int, int] | None = None,
+    tools: bool = False,
 ) -> str:
     """The question about what a merged retry left as it was, item by item.
 
@@ -12596,7 +12626,7 @@ def retry_unplaced_question(
         "while it wrote findings under new titles. Each stands as your first answer wrote it:\n"
         + "\n".join(_retry_drop_item_lines(drops, numbered=True, values=False))
         + "\n"
-        + _retry_drop_closing(entries, unfit, part)
+        + _retry_drop_closing(entries, unfit, part, tools)
     )
 
 
@@ -12606,11 +12636,13 @@ def retry_unplaced_question(
 WHOLE_ANSWER_AFTER_RETRY_LEAD = "Your retry could not be merged into your answer by claim number"
 
 
-def whole_answer_after_retry_question(why: str, *, techniques: bool = True) -> str:
+def whole_answer_after_retry_question(
+    why: str, *, techniques: bool = True, tools: bool = False
+) -> str:
     """The one question for the whole answer, after a retry the claim numbers did not place."""
     return (
         f"{WHOLE_ANSWER_AFTER_RETRY_LEAD}: {why}. Your answer is now read whole. "
-        f"{analyst_feedback_closing(whole=True, techniques=techniques)}"
+        f"{analyst_feedback_closing(whole=True, techniques=techniques, tools=tools)}"
     )
 
 

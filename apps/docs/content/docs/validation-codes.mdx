@@ -161,7 +161,7 @@ No comment names its meaning, and `maljan.pipeline.validation:validate_isr` pass
 No comment names its meaning; the message at `maljan.pipeline.validation:validate_isr` reads: "TECHNIQUE \<tid> is not in the MITRE ATT&CK catalogue\<retired_note>.\<hint> Use one of them, or omit the technique id."
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`
-- **Passes on** `maljan.agents.base_agent:BaseAnalyst._validate_isr`, `maljan.pipeline.nodes:make_judge_node.node_fn`
+- **Passes on** `maljan.agents.base_agent:BaseAnalyst._validation_turn`, `maljan.pipeline.nodes:make_judge_node.node_fn`
 - **Constant** `maljan.pipeline.validation:VALIDITY_CODE`
 - **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/benchmark/scores/latrodectus-iteration6-default/)
 
@@ -301,7 +301,7 @@ A retry kept as the analyst's answer that no longer states claims or findings it
 
 ### `isr.retry_restated_few`
 
-A whole retry that restates fewer of the first answer's claims than it leaves out (by the claim's values: restated when the retry states every value it holds; a claim that holds none, or whose only values left out are technique ids the retry was asked about, is counted neither way) is more another answer than a fix of this one, written in a tools-free turn. It does not replace the first answer: what it left out stands beside the retry's own claims, which stand for the claims they restate. The one question about those items says so, and also names each claim with no value whose sentence the retry does not write; it is asked under this code beside the drops code, with the same events. Each item the analyst withdraws stays out, every other stays as first written.
+A whole retry that restates fewer of the first answer's claims than it leaves out (by the claim's values: restated when the retry states every value it holds; a claim that holds none, or whose only values left out are technique ids the retry was asked about, is counted neither way) is more another answer than a fix of this one, written in a turn of its own. It does not replace the first answer: what it left out stands beside the retry's own claims, which stand for the claims they restate. The one question about those items says so, and also names each claim with no value whose sentence the retry does not write; it is asked under this code beside the drops code, with the same events. Each item the analyst withdraws stays out, every other stays as first written.
 
 - **Raised at** `maljan.agents.base_agent:BaseAnalyst._ask_retry_drops._emit`, `maljan.pipeline.events:emit_validation_feedback`
 - **Constant** `maljan.pipeline.validation:RETRY_RESTATED_FEW_CODE`

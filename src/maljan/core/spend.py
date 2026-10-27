@@ -154,7 +154,8 @@ LOOP_TURN_CALL = "tool loop turn"
 # start (:meth:`SpendMeter.begin_stage`).
 STAGE_CALL_KINDS: dict[str, tuple[str, ...]] = {
     "analysis": ("loop turn",),
-    "debate": ("revision", "mediation turn"),
+    # A revision that carries the analyst's tools is a loop of its turns.
+    "debate": ("revision", "loop turn", "mediation turn"),
 }
 
 # What the token ledger names a verdict or report call, and the planned kind
@@ -230,6 +231,11 @@ def validation_retry() -> Iterator[None]:
         yield
     finally:
         _RETRYING.reset(token)
+
+
+def in_validation_retry() -> bool:
+    """Whether the calls made here are a validation loop's retry (:func:`validation_retry`)."""
+    return _RETRYING.get()
 
 
 class Admission:

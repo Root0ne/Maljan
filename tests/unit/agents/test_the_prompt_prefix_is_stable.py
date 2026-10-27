@@ -362,15 +362,11 @@ class TestTheRetries:
 
         told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
         answers = iter([told, told, []])
-        agent = _analyst(_Scripted(seen=[]))
+        # The retry carries the analyst's tools and runs its loop: the
+        # requests are the model's, as it is sent them.
+        model = _Scripted(seen=[], calls=0)
+        agent = _analyst(model)
         agent._system_prompt = lambda _default, tools=None: SYSTEM  # type: ignore[method-assign]
-        sent: list[list[Any]] = []
-
-        def _capture(turns: list[Any], timeout: int, **_: Any) -> AIMessage:
-            sent.append(list(turns))
-            return AIMessage(content=REPORT)
-
-        agent._invoke_llm_with_timeout = _capture  # type: ignore[method-assign]
         isr = AgentISR(
             agent_id="static",
             domain="static",
@@ -380,6 +376,7 @@ class TestTheRetries:
         )
         with patch("maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
             agent._validate_isr(isr, "the raw data")
+        sent = model.seen
         assert sent
         retry = sent[0]
         _assert_the_shape_every_template_takes(retry)
@@ -420,15 +417,9 @@ class TestAQuestionAfterAUserTurn:
 
         cap = 64
         cut = "CLAIM: one\nEVIDENCE: [ev_0001] x\nCONFIDENCE: 0.5\nTECHNIQUE: NONE\n---\nCLAIM: tw"
-        agent = _analyst(_Scripted(seen=[]))
+        model = _Scripted(seen=[], calls=0)
+        agent = _analyst(model)
         agent.pack_ledger_ids = ["ev_0001"]
-        sent: list[list[Any]] = []
-
-        def _capture(turns: list[Any], timeout: float, **_: Any) -> str:
-            sent.append(list(turns))
-            return REPORT
-
-        agent._invoke_llm_with_timeout = _capture  # type: ignore[method-assign]
         isr = agent._text_to_isr(cut, 0)
         with (
             patch.object(base_agent, "analyst_output_cap", return_value=cap),
@@ -446,6 +437,7 @@ class TestAQuestionAfterAUserTurn:
                 )
             )
             agent._validate_isr(isr, "evidence")
+        sent = model.seen
         assert sent, "the cut answer was asked about"
         retry = sent[0]
         _assert_the_shape_every_template_takes(retry)

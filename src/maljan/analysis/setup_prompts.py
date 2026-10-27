@@ -75,7 +75,9 @@ PROMPT_SITES: dict[str, str | None] = {
     "maljan.agents.base_agent:revision_messages": REVISION,
     "maljan.agents.base_agent:BaseAnalyst._run_tool_loop": ANALYSTS,
     "maljan.agents.base_agent:BaseAnalyst._synthesise_from_answered_asks": ANALYSTS,
-    "maljan.agents.base_agent:BaseAnalyst._validate_isr": ANALYSTS,
+    "maljan.agents.base_agent:BaseAnalyst._validation_turn": ANALYSTS,
+    # A question asked without the tools: the analyst's tools-free prompt.
+    "maljan.agents.base_agent:BaseAnalyst._tools_free_turns": ANALYSTS,
     "maljan.agents.base_agent:BaseAnalyst.answer_task": ANALYSTS,
     "maljan.agents.base_agent:BaseAnalyst._invoke_view": "views",
     "maljan.agents.configurable_analyst:ConfigurableAnalyst.analyze": ANALYSTS,

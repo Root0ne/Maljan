@@ -379,7 +379,7 @@ The debate ends when nothing is left to settle (`pipeline/debate_facts.py`,
 - A blocking line the ledger states, told before, is recorded and shown, never taken away (`debate_facts.ledger_stated`). Its dispute must be about a count itself: two sides of the line (split at "while", "whereas", "but", "against", "versus", "although", "however" or a semicolon) each write one number, in digits or a number word, directly before one noun (at most one word between), and the numbers differ ("three matches" against "0 hits"). Two numbers on one side ("31 rules loaded, 3 matched") are two quantities, and a partitive or a ratio ("one of the rules", "0 hits of 31 rules", "3 out of 31", "3/31") is no count of its noun. "Hit" and "match" are one noun, a closed and deliberately minimal vocabulary; a line whose sides read counts both accept differently ("0 matches as benign" against "31 rules as malicious") is a dispute about meaning and is never stated. Every count it states (a number before a plural noun, "0 hits", "31 rules") is stated by a cited entry in a key naming that noun, the cited entries agree (every cited field of a counted noun holds one value) and are one record (an entry naming one of the line's nouns names all of them, so "0 connections" in one entry against "2 domains" in another is a dispute about meaning, not a count), and every fact stating one of its counts was stated by an earlier mediation of the debate. The line stays among the blocking lines, so the mediator, the judge and the report see it; it is said to the room, recorded in `AgentArgument.ledger_stated` and `run_summary.negotiation.ledger_stated`, and shown to the next mediation, which decides whether it still blocks. When every blocking line of a mediation is such a line, the debate ends as `ledger_stated`, with no consensus claimed. A line with a count no entry states, or with no count, is never stated, and a fact not yet told keeps the line out for the one round that tells it.
 - The mediator opens each line with `[analysts: <name>, <name>]`, the analysts who must revise over it, written as their reports are headed. A revision round asks only the analysts the blocking lines name; every other analyst keeps its answer in force, recorded in the round's `not_revised` as `not asked: not named by the mediator`. A named analyst's revision is shown the blocking lines that name it, with the mediator's summary and confidence, and of its peers only the ones those lines name, in the field or by key or label in any case or form; each is shown exactly as a round asking every analyst shows it, its answer in force whole, with no claim picked out by its number. A block that lists no blocking line holds no revision round: the debate goes to the judge as `consensus`; below the threshold, a stable confidence series still ends it as `convergence`, and otherwise it ends as `no_contested_point`. A blocking line without the field or naming no analyst of the debate, or a block that was not read, asks every analyst with every peer's answer, as before, and the round's record says why under `asked_all`.
 - Sycophancy is a rise in likeness beyond shared sources, told and never enforced (`pipeline/sycophancy_detector.py`, `convergence_flags`). After each revision round, for each analyst revised that made no tool call and whose revision cites nothing its answer before the round did not (an entry the platform showed it in the round, a peer's tool result among them, is no citation of its own, and that entry's words are left out like a shared entry's: agreeing with what it states is no move, agreeing beyond it still is), the words of every ledger entry or sandbox item it and a peer both cite are left out of both, and its answer before the round and its revision are each compared with the peer's answer in force (bag-of-words cosine); a revision above the threshold and above its answer before the round is flagged and recorded on the round (`revision_rounds[].converged`). Two answers alike because they restate the same rows, or alike before the round, are not flagged. A flag is put to the next mediation as a sentence beside the facts block (`convergence_sentence`) and kept on the mediation (`AgentArgument.converged`); no analyst's prompt carries it, it never overrides the mediator's consensus or a block with no contested point, opens no round and never widens a round that asks only the analysts the mediator named. A stage with `sycophancy_check` off is told nothing. A round record stored before the flags existed is read by whole-answer likeness, as before, and decides no route either.
-- For a blocking line naming a function the run knows (an address the line writes, or one a claim it names writes, that is a row of the function index or a function a decompile or disassembly call listed; an offset and its virtual address are one function where an image base the run read joins them), the platform states whether the ledger holds a listing of it and which entries hold it (`debate_facts.place_facts`, `AgentArgument.place_facts`, said to the room as a notice). The analysts the line names in its field (every analyst, for a line with no field) are told it in their revision. An analyst with a tool whose declared arguments take an address (`undeclared_tools.address_arguments`, read from each tool's own schema) is also told it can read a function the ledger never listed in this round, and its revision is given its tools: a configurable analyst's revision is its tool loop already, and a built-in analyst's revision runs its tool loop in place of its one tools-free call (`BaseAnalyst.revision_answer`, `safe_revise_isr(read_places=True)`). The model decides whether to read; nothing is adopted or rejected for it, and no call is made for the facts.
+- For a blocking line naming a function the run knows (an address the line writes, or one a claim it names writes, that is a row of the function index or a function a decompile or disassembly call listed; an offset and its virtual address are one function where an image base the run read joins them), the platform states whether the ledger holds a listing of it and which entries hold it (`debate_facts.place_facts`, `AgentArgument.place_facts`, said to the room as a notice). The analysts the line names in its field (every analyst, for a line with no field) are told it in their revision. An analyst with a tool whose declared arguments take an address (`undeclared_tools.address_arguments`, read from each tool's own schema) is also told it can read a function the ledger never listed in this round. Every revision carries the analyst's own tools wherever its model binds them: a configurable analyst's revision is its tool loop already, and a built-in analyst's revision runs its tool loop in place of the one tools-free call it was (`BaseAnalyst.revision_answer`, `safe_revise_isr`), which it is still where the analyst has no tools or its model cannot bind them, with a degradation reason saying so. A tool-carrying revision is a full loop: its own time and steps, the no-tool-call question (asked at most once per analyst per job), and a validation turn held to what the revision's loop left. The model decides whether to read; nothing is adopted or rejected for it, and no call is made for the facts.
 - A named analyst's revision is also shown, after the feedback, the stored text of the ledger entries the lines naming it cite and of one listing of each function their place facts name (`debate_facts.line_entry_ids`), each whole as it had it in view and shown through the one view of a tool answer, fenced, so a run-state block or a heading the sample wrote stays data (`base_agent.cited_entry_texts`, `tool_fence.fenced`; the validation retry and its drops question read entries the same way): a peer's tool result is in no input of its own, and before this the analysts were asked to check entries only the reverser had read. An entry its brief or its raw data already holds is left out. The entries take what the input room leaves beside the raw data, which they never shorten; one that does not fit is named by id (`debate_facts.fit_entries`, `safe_revise_isr(cited_entries=...)`), and the entries shown are grounds for the revision's checks as its raw data is. The next mediation is shown the same entries for the last mediation's blocking lines, in the room its reports and history leave. The mediation's entries also leave room for the turns after its first: one tool answer's share of the window (`context_window.ANSWER_SHARE`), the first answer at the output cap and the question for a missing block. Showing an entry raises no corroboration count: a technique's sources are ledger entries, each counted once however many analysts cite it, and a revised claim citing only entries of other agents the debate showed its analyst (in this round or an earlier one, `revision_rounds[].shown`) is marked (`ClaimEvidence.rests_on_shown_entries`) and counts as no sayer of its own unless it also cites an entry its analyst filed (`validation.shown_claim_unbacked`, read where `tool_backed_answers` reads a retry's claims).
 - After a revision round the next mediation is told, for each blocking line of the last mediation, numbered, who it named, who revised, the entries of the line each was shown, and who changed a claim anywhere in its answer (`claim_drops.changed_anywhere`, read by the `reworded` route's own key `claim_substance`, claim for claim with counts: a claim added or removed, or one whose values, cited entries, technique, negators, confidence step, technical terms or content words differ, whatever it cites; reordering, punctuation and stopwords are no change, any other rewording is, by design, so the stop rule errs towards another round; an answer whose claims cannot be read is a change; an analyst that filed entries in the round changed), then the entries the round filed by agent (`debate_facts.round_facts_text`, `revision_rounds[].lines` and `filed`). It is asked once to write `[carried: L<n>]` after the field of each blocking line that raises line n again, or `[new]`; the mark is no part of the point (`debate_facts.carried_marks`, `AgentArgument.carried`).
 - A revision round whose every revision is the answer in force again, whitespace aside, ends the debate as `converged`; the router reads only the record of the round right before the mediation it routes.
@@ -1913,8 +1913,8 @@ decides.
    aside; the findings by title — is followed by one question naming each item
    (`isr.retry_dropped`, `validation.retry_drop_question`), with a
    `validation_feedback` event when it is asked and when it is answered. The
-   retry and this question are tools-free turns, so the tool results the first
-   answer read are in neither: the question names each item whole with its
+   tool results the first answer read are in neither the retry nor this
+   question: the question names each item whole with its
    EVIDENCE line, and shows each ledger entry the items cite once, the way the
    analyst had it in view when it wrote the claim (`base_agent.cited_entry_texts`):
    an entry from its own calls, or one it read again in its loop (a row of its
@@ -1972,8 +1972,8 @@ decides.
    survived, and both count in `validation_fed_back`;
    `validation_retry_restated` on the loop's record keeps the counts. The
    answer is read and applied as above; a withdrawn item stays out.
-   **The validation retry is shown what the answer cites.** It is a tools-free
-   turn over the brief, so in front of its closing it carries each ledger entry
+   **The validation retry is shown what the answer cites.** It is a turn over
+   the brief, so in front of its closing it carries each ledger entry
    the answer's claims and findings cite that the conversation does not hold,
    the way `cited_entry_texts` gives it to the drops question
    (`validation.validation_entries_text`). The turn is measured framed, with
@@ -1987,6 +1987,37 @@ decides.
    for after a retry that could not be merged fits the entries again, over the
    turn it is sent as: the first turn, the retry's own answer and the question
    after it, beside an answer of the output cap.
+   **The questions after the loop carry its tools.** The validation retry, the
+   drops question and the whole-answer question each run the analyst's own
+   tool loop over their conversation (`BaseAnalyst._answer_after_loop`,
+   `execute_tool_loop(asked=...)`): the tools its loop binds, in their order,
+   with the loop's guards, stall deadline, breaker and repeat guard. They are
+   part of the loop before them and share what it left: the time to its
+   deadline (a question that cannot hold an answer at the loop's pace is not
+   asked) and its steps, each question spending from them; with fewer than
+   three steps left a question is asked in the tools-free call and the loop's
+   record says why (`asked_without_tools`). Their steps are not added to the
+   agent's own (`steps_spent`), so a delegated callee stays inside its ask's
+   steps. Each answer is checked against the ledger as it stands when it is
+   checked, so an entry a question's call filed may be cited. The model
+   decides whether to call one. A question whose loop ends at a cap, or with
+   no text, is asked once more in its tools-free call, worded for no tools,
+   in the time left, so it never answers less than the tools-free call did; a
+   call is filed on the ledger as any loop's is, and an identical read-only
+   call the analyst's loops made this round is answered from that entry
+   (`evidence_recorder.EARLIER_TURN`). The answer is read as before; a loop a
+   cap ends without an answer is an unanswered question, and the first answer
+   stands. Each turn is recorded under the question's own call, the loop's
+   record under the loop it follows (`asked_after`), and the window measures
+   count the definitions the turn carries. The retry and the whole-answer
+   question say the tools are attached and that a claim may be fixed by citing
+   an entry or by reading it (`validation.ANALYST_TOOLS_ATTACHED`); the drops
+   question says an item may be read or checked before it is decided. A model
+   that cannot bind the tools is asked in the one tools-free call, and the log
+   says so, and the reason is on the agent's and the run's degradation
+   reasons; so does a question whose loop cannot bind them. A question a cap
+   ends does not announce that the stage ended at a cap: the first answer
+   stands, and the record under `asked_after` says why.
    **A retry changes only what it writes** (`pipeline.retry_merge`). A claim
    is named by its block number everywhere: its block's place among the
    answer's claim blocks, counted from 1 (`validation.claim_block_indexes`),
@@ -2523,7 +2554,9 @@ Every validation turn after a loop gets what that loop left of its time, not
 a fresh budget, and is not asked when that cannot hold one answer at the pace
 the loop measured (its final-answer reserve); what it would have asked is then
 recorded as unresolved and `run_summary.budget.<agent>.validation_not_asked`
-says why.
+says why. The questions themselves share that time and the loop's steps;
+`run_summary.budget.<agent>.questions` sums the ones that ran the agent's tool
+loop (steps, seconds, caps) and lists each asked without its tools, with why.
 
 An analyst answer that ended at its output cap (`llm.expert_max_tokens`, or the
 cap derived from the window when it is 0; for a call the spend ceiling held to

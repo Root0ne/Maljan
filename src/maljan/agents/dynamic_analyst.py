@@ -292,8 +292,9 @@ class DynamicAnalyst(BaseAnalyst):
             [
                 (
                     "system",
-                    # A revision is one tools-free call unless it may read a
-                    # function the ledger never listed: the prompt says which.
+                    # A revision carries this agent's tools where its model
+                    # binds them, and is one tools-free call otherwise: the
+                    # prompt says which.
                     self._system_prompt(_dynamic_prompt, tools=self.revision_tools()) + "\n\n"
                     "You are in a negotiation round. You MUST:\n"
                     "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
