@@ -394,8 +394,8 @@ class NetworkAnalyst(BaseAnalyst):
         self.logger.info("Executing network ISR revision (round %d)...", revision_round)
 
         messages = revision_messages(
-            # A revision is one tools-free call unless it may read a function
-            # the ledger never listed: the prompt says which.
+            # A revision carries this agent's tools where its model binds
+            # them, and is one tools-free call otherwise: the prompt says which.
             self._system_prompt(_network_prompt, tools=self.revision_tools()),
             original_data,
             own_report,

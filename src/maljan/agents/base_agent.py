@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import functools
 import inspect
 import itertools
 import json
@@ -637,7 +638,12 @@ class LoopBudget:
     """
 
     def __init__(
-        self, max_steps: int | None, timeout: float | None, started: float | None = None
+        self,
+        max_steps: int | None,
+        timeout: float | None,
+        started: float | None = None,
+        *,
+        before: int = 0,
     ) -> None:
         # ``None`` in either is no limit in that dimension.
         self.max_steps = None if max_steps is None else int(max_steps)
@@ -645,10 +651,18 @@ class LoopBudget:
         self.started = time.monotonic() if started is None else float(started)
         self.own_steps = 0
         self.delegated_steps = 0
+        # The steps the conversation the loop starts from already holds: a
+        # question asked after a loop starts from the answers before it, which
+        # no turn of this loop spent.
+        self.before = max(0, int(before))
+
+    def spent_in(self, messages: list) -> int:
+        """The steps this loop's own turns of ``messages`` spent."""
+        return max(0, steps_used(messages) - self.before)
 
     def note_turns(self, messages: list) -> None:
         """Record what the loop's own conversation has spent so far."""
-        self.own_steps = steps_used(messages)
+        self.own_steps = self.spent_in(messages)
 
     def note_delegated(self, steps: int) -> None:
         """Record what an agent this loop asked spent, for the meter only.
@@ -667,7 +681,9 @@ class LoopBudget:
 
     def turns_left(self, messages: list) -> int | None:
         """The budget line's number: model turns this loop has left, ``None`` with no limit."""
-        return model_turns_left(self.max_steps, messages)
+        if self.max_steps is None:
+            return None
+        return max(0, (self.max_steps - self.spent_in(messages) + 1) // 2)
 
     def seconds_left(self) -> float | None:
         """Seconds this loop has left, or ``None`` with no time limit."""
@@ -969,6 +985,33 @@ def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -
     return bound | RunnableLambda(repair)
 
 
+class ToolsNotBound(Exception):  # noqa: N818 — a signal, not a failure
+    """Raised by a question's loop whose graph could not bind the agent's tools.
+
+    The question is then asked in the one tools-free call it was
+    (``BaseAnalyst._answer_after_loop``), and the run says the turn lost them.
+    """
+
+
+class QuestionUnanswered(AnalystError):
+    """Raised by a question's loop that ended without an answer: at a cap, or with no text.
+
+    ``ended`` says how. The question is then asked once more in the one
+    tools-free call it was before (``BaseAnalyst._answer_after_loop``), in
+    the time left, so a loop that answered nothing never costs the answer
+    that call would have given.
+    """
+
+    def __init__(self, said: str, ended: str) -> None:
+        super().__init__(said)
+        self.ended = ended
+
+
+# What a question's loop is held to when the loop it follows left no count:
+# the agent's own step limit.
+_OWN_STEPS: Any = object()
+
+
 class OfferReadAgainFirst(Exception):  # noqa: N818 — a signal, not a failure
     """Raised by the refresher before the request that would carry a loop's first clear.
 
@@ -1130,7 +1173,7 @@ def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
     would read 82 of 40. The row carries ``delegated_steps`` beside this, for a
     reader who wants the other number.
     """
-    return int(steps_used(messages) if messages else ledger.own_steps)
+    return int(ledger.spent_in(messages) if messages else ledger.own_steps)
 
 
 def alignment_threshold_of(cfg_validation: Any, default: float = 0.05) -> float:
@@ -3183,12 +3226,22 @@ def _submit_to_agent_loop(
     # And the spend admission of the call the caller just made, which a model
     # list's fallback attempts are admitted under (``core.spend.Admission``).
     admission = current_admission()
+    # And whether the caller is a validation loop's retry: a retry that runs
+    # the agent's tool loop admits its turns there, and they are counted as
+    # the retry they are (``core.spend.validation_retry``).
+    from maljan.core.spend import in_validation_retry, validation_retry
+
+    retrying = in_validation_retry()
 
     async def _tracked() -> Any:
         task = asyncio.current_task()
         if task is not None:
             running.append(task)
-        with watching(rule), carrying(admission):
+        with (
+            watching(rule),
+            carrying(admission),
+            validation_retry() if retrying else contextlib.nullcontext(),
+        ):
             return await coro
 
     return asyncio.run_coroutine_threadsafe(_tracked(), loop), running
@@ -3615,7 +3668,7 @@ PACK_SUMMARY_NOTE = (
 def cited_entry_texts(
     agent: Any, cited: Sequence[str], messages: Sequence[Any], *, summary_lines: bool = True
 ) -> dict[str, str]:
-    """The cited entries a tools-free turn does not hold, each as the agent had it in view, by id.
+    """The cited entries a turn after the loop does not hold, each as the agent had it in view, by id.
 
     The ledger is the agent's own entries and the run's as the agent was
     briefed with it (``run_state_source``); a repeat is shown as the entry
@@ -3721,7 +3774,61 @@ def own_earlier_entries(agent: Any) -> list[LedgerEntry]:
     return found
 
 
-def repeatable_earlier_entries(agent: Any) -> list[LedgerEntry]:
+def own_entries_of_this_round(agent: Any) -> list[LedgerEntry]:
+    """The entries ``agent``'s own loops filed in this round and not yet handed over, oldest first.
+
+    Its buffer (``_evidence_entries``) less what a callee handed over there,
+    which is the callee's. Never raises.
+    """
+    name = str(getattr(agent, "name", "") or "")
+    try:
+        return [
+            entry
+            for entry in getattr(agent, "_evidence_entries", None) or ()
+            if name and str(getattr(entry, "agent", "") or "") == name
+        ]
+    except Exception:  # noqa: BLE001 — no seed is the guard as it was
+        return []
+
+
+def _repeatable_tools(agent: Any) -> set[tuple[str, str]]:
+    """``(server, tool)`` of each tool the agent holds whose identical call answers the same."""
+    from maljan.agents.tool_pinning import answers_again, declared_source_of, server_of
+
+    return {
+        (
+            server_of(tool) or declared_source_of(tool) or "",
+            str(getattr(tool, "name", "") or ""),
+        )
+        for tool in getattr(agent, "tools", None) or ()
+        if answers_again(tool)
+    }
+
+
+def _repeatable_of(
+    agent: Any, candidates: Sequence[LedgerEntry], later: Sequence[Any] = ()
+) -> list[LedgerEntry]:
+    """Of ``candidates``, those of a repeatable tool whose answer is settled and not stale."""
+    from maljan.agents.evidence_recorder import entry_server, holds_a_settled_answer
+
+    try:
+        repeatable = _repeatable_tools(agent)
+    except Exception:  # noqa: BLE001 — no tool read is no tool seeded
+        return []
+    if not repeatable:
+        return []
+    kept = [
+        entry
+        for entry in candidates
+        if (entry_server(entry), entry.tool) in repeatable and holds_a_settled_answer(entry)
+    ]
+    if not kept:
+        return []
+    stale = _stale_after(agent, repeatable, later)
+    return [entry for entry in kept if entry.id not in stale]
+
+
+def repeatable_earlier_entries(agent: Any, later: Sequence[Any] = ()) -> list[LedgerEntry]:
     """The agent's own earlier-round entries whose answer still holds, for tools that answer the same.
 
     Of :func:`own_earlier_entries`, those of a tool the agent holds, on the
@@ -3732,33 +3839,24 @@ def repeatable_earlier_entries(agent: Any) -> list[LedgerEntry]:
     recorded, by any agent of the run (:func:`_stale_after`): a rename or a
     patch makes a later decompile of that server's program a new question. A
     call of any other tool (a rename, a status poll, a submission) runs again
-    in a revision. Never raises.
+    in a revision. ``later`` are calls made since the agent was briefed (this
+    round's own, :func:`own_entries_of_this_round`), read after the ledger.
+    Never raises.
     """
-    from maljan.agents.evidence_recorder import entry_server, holds_a_settled_answer
-    from maljan.agents.tool_pinning import answers_again, declared_source_of, server_of
+    return _repeatable_of(agent, own_earlier_entries(agent), later)
 
-    try:
-        repeatable = {
-            (
-                server_of(tool) or declared_source_of(tool) or "",
-                str(getattr(tool, "name", "") or ""),
-            )
-            for tool in getattr(agent, "tools", None) or ()
-            if answers_again(tool)
-        }
-    except Exception:  # noqa: BLE001 — no tool read is no tool seeded
-        return []
-    if not repeatable:
-        return []
-    candidates = [
-        entry
-        for entry in own_earlier_entries(agent)
-        if (entry_server(entry), entry.tool) in repeatable and holds_a_settled_answer(entry)
-    ]
-    if not candidates:
-        return []
-    stale = _stale_after(agent, repeatable)
-    return [entry for entry in candidates if entry.id not in stale]
+
+def repeatable_entries_of_this_round(agent: Any) -> list[LedgerEntry]:
+    """The agent's own entries of this round whose answer still holds, for tools that answer the same.
+
+    Of :func:`own_entries_of_this_round`, by the rule
+    :func:`repeatable_earlier_entries` applies to the earlier rounds', with
+    this round's calls read after the briefed ledger: a question asked after
+    a loop is answered from what the loop read, and a call that may change a
+    server's state made since makes it a new question. Never raises.
+    """
+    own = own_entries_of_this_round(agent)
+    return _repeatable_of(agent, own, own)
 
 
 def settled_chunk_entries(agent: Any, entries: Sequence[Any] | None) -> list[Any]:
@@ -3827,27 +3925,32 @@ def _entry_reads_only(row: Any, server: str, repeatable: set[tuple[str, str]]) -
     return bool(facts is not None and getattr(facts, "read_only", False) is True)
 
 
-def _stale_after(agent: Any, repeatable: set[tuple[str, str]]) -> set[str]:
+def _stale_after(
+    agent: Any, repeatable: set[tuple[str, str]], later: Sequence[Any] = ()
+) -> set[str]:
     """The ids of the ledger's entries after which a call that is not read-only ran on their server.
 
-    Read once, newest first, from the state the agent was briefed with: a
-    server is marked changed at the first such call met, and every entry
-    older than it on that server is stale. Newest is the highest ``seq``, or,
-    when any row has none, the later place in the ledger. A call answered
-    from the record (``repeated_of``) ran nothing. Linear in the ledger.
+    Read once, newest first, from the state the agent was briefed with, then
+    ``later`` (calls made since, oldest first) after it: a server is marked
+    changed at the first such call met, and every entry older than it on that
+    server is stale. Newest is the highest ``seq``, or, when any row has none,
+    the later place in the ledger. A call answered from the record
+    (``repeated_of``) ran nothing. Linear in the ledger.
     """
     from maljan.agents.evidence_recorder import entry_server
 
     source = getattr(agent, "run_state_source", None)
-    if not isinstance(source, Mapping):
+    if not isinstance(source, Mapping) and not later:
         return set()
 
     def _field(row: Any, name: str) -> Any:
         return row.get(name) if isinstance(row, Mapping) else getattr(row, name, None)
 
-    rows = list(source.get("evidence_ledger") or ())
+    rows = list(source.get("evidence_ledger") or ()) if isinstance(source, Mapping) else []
     if all(isinstance(_field(row, "seq"), int) and _field(row, "seq") > 0 for row in rows):
         rows.sort(key=lambda row: int(_field(row, "seq")))
+    briefed = {_row_id(row) for row in rows}
+    rows.extend(row for row in later if _row_id(row) not in briefed)
     changed: set[str] = set()
     stale: set[str] = set()
     for row in reversed(rows):
@@ -4789,17 +4892,20 @@ class BudgetMeter:
         )
         return analyst_output_cap(str(getattr(self, "name", "") or ""))
 
-    def _record_turns_taken(self, latest: Mapping[str, Any], sent: int) -> None:
+    def _record_turns_taken(
+        self, latest: Mapping[str, Any], sent: int, *, call: str = TOOL_LOOP_TURN_CALL
+    ) -> None:
         """The model turns of a loop that did not come back, onto the run's ledger.
 
         ``latest`` is the conversation as the stream last left it and ``sent``
         how many of its messages the loop started with. A loop the hard cap
         stopped, or one that failed, was still answered for every turn it
         took; a finished loop records its turns from its result instead.
+        ``call`` is what each turn is recorded as.
         """
         for message in list(latest.get("messages") or [])[sent:]:
             if is_model_turn(message):
-                self._record_usage(message, announce=False, call=TOOL_LOOP_TURN_CALL)
+                self._record_usage(message, announce=False, call=call)
 
     def _announce_fallback(self, message: Any) -> None:
         """Publish ``model_fallback`` when ``message`` is the turn its model list moved on.
@@ -4917,7 +5023,9 @@ class BudgetMeter:
         if cap and detail:
             record["detail"] = detail
         self._note_budget(record)
-        if cap:
+        # A question asked after a loop that a cap ended is not the stage
+        # ending at a cap: the first answer stands, and its record says why.
+        if cap and not getattr(self, "_asking", ""):
             emit_stage_ended_at_cap(
                 self._event_sink(), stage=stage, agent=str(self.name), cap=cap, detail=detail
             )
@@ -5474,8 +5582,9 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         ``tools`` is the list the request this prompt goes with carries:
         ``self.tools`` by default, which is what the tool loop binds, and
-        ``()`` for a tools-free call — a revision, a validation turn, a
-        synthesis. The prompt's statement about tools is built from it, so a
+        ``()`` for a tools-free call — a synthesis, and a revision or a
+        validation turn whose model cannot bind the agent's tools
+        (:meth:`_turns_carry_tools`). The prompt's statement about tools is built from it, so a
         request is never told about tools it does not carry, nor told it has
         none when it does.
 
@@ -6073,6 +6182,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         on_clear: Callable[[Clearing], None] | None = None,
         offered: Callable[[], bool] | None = None,
         ticked: list[int] | None = None,
+        kind: str = TOOL_LOOP,
     ) -> Any:
         """The per-turn hook that regenerates the run-state block's budget line.
 
@@ -6103,6 +6213,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         says whether the loop offers ``read_evidence`` yet
         (:meth:`_cleared_request`). ``ticked`` is the meter's last tick, kept by
         the loop so a graph built again goes on from it rather than ticking twice.
+        ``kind`` is what the input meter files each request under: a question
+        asked after a loop keeps its own call's name.
         """
         ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
         from maljan.pipeline.events import BUDGET_TICK_EVERY
@@ -6164,7 +6276,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     )
             # The meter, every few steps: a tick per turn would be a stream
             # of near-identical events on a forty-step loop.
-            used = steps_used(messages)
+            used = ledger.spent_in(messages)
             if budget is not None and used and used // BUDGET_TICK_EVERY > ticked[0]:
                 ticked[0] = used // BUDGET_TICK_EVERY
                 self._budget_tick(
@@ -6181,29 +6293,46 @@ class BaseAnalyst(BudgetMeter, ABC):
                 sent = [*sent[:-1], last.model_copy(update={"response_metadata": noted})]
             # What the request is made of, measured as it is sent
             # (``core.input_meter``); nothing in it changes.
-            self._note_request(
-                sent, kind=TOOL_LOOP, loop=ledger, definitions=self._definitions_sent()
-            )
+            self._note_request(sent, kind=kind, loop=ledger, definitions=self._definitions_sent())
             return sent
 
         return refresh
 
-    def execute_tool_loop(self, prompt_messages: list) -> str:
+    def execute_tool_loop(
+        self,
+        prompt_messages: list,
+        *,
+        asked: str = "",
+        seconds: float | None = None,
+        steps: Any = _OWN_STEPS,
+    ) -> str:
         """Run the tool loop (``_run_tool_loop``) and let go of its run-state copies.
 
         The loop's turns, its nudge and its salvage continue one conversation
         and send the earlier run-state blocks again; a call this analyst makes
         afterwards (a debate revision, a validation retry) starts a fresh one
         and sends none, so it is not measured with them, however the loop ended.
+
+        ``asked`` names a question asked after a loop (a validation retry, the
+        drops question, the whole-answer question; :meth:`_answer_after_loop`):
+        the loop then runs over that conversation, held to ``seconds`` and to
+        ``steps``, the steps the loop it follows left (``None`` for no limit).
         """
         try:
-            return self._run_tool_loop(prompt_messages)
+            return self._run_tool_loop(prompt_messages, asked=asked, seconds=seconds, steps=steps)
         finally:
             self._replayed_blocks = {}
             self._replay_upto = None
             self._offered_after_clear: list[Any] = []
 
-    def _run_tool_loop(self, prompt_messages: list) -> str:
+    def _run_tool_loop(
+        self,
+        prompt_messages: list,
+        *,
+        asked: str = "",
+        seconds: float | None = None,
+        steps: Any = _OWN_STEPS,
+    ) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
 
         The loop runs against ``pinned_tools()``; ``self.tools`` keeps the
@@ -6235,14 +6364,30 @@ class BaseAnalyst(BudgetMeter, ABC):
         daemon-thread + hard-cap-timeout machinery as the tools path, so the
         analyst is killed at the configured ``react_agent_timeout`` budget
         regardless of which path it takes.
+
+        A question asked after a loop (``asked``) runs this same loop over its
+        own conversation, the answers before it included, held to ``seconds``
+        and ``steps``: the same tools, guards and stops. Its steps are part of
+        the loop it follows and are not added to ``steps_spent``; the
+        steps this loop's own turns spent are on ``_question_budget``. A graph
+        that cannot bind the tools raises ``ToolsNotBound``. It is not asked the no-tool-call
+        question, its answer is returned as the model wrote it (the caller
+        reads it as it read the tools-free call's), and a loop a cap ended
+        without an answer raises ``AnalystError``, as a call that failed did.
         """
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+        from langchain_core.messages import BaseMessage as _Message
 
         # Build BaseMessages directly so literal `{...}` substrings in the
         # report content (e.g. JSON like {"programs": [...]}) are not parsed
-        # as ChatPromptTemplate f-string variables.
+        # as ChatPromptTemplate f-string variables. A question's conversation
+        # comes as messages already, its earlier answers among them.
         prebuilt: list[BaseMessage] = []
-        for role, content in prompt_messages:
+        for item in prompt_messages:
+            if isinstance(item, _Message):
+                prebuilt.append(item)
+                continue
+            role, content = item
             if role == "system":
                 prebuilt.append(SystemMessage(content=content))
             elif role == "human":
@@ -6255,7 +6400,19 @@ class BaseAnalyst(BudgetMeter, ABC):
         # without it the loop hit the step cap and LangGraph returned the
         # "need more steps" stop message instead of real claims. Both are
         # capped by a caller's ceiling when this loop answers an ask.
-        timeout, max_steps = self._loop_limits()
+        loop_timeout, max_steps = self._loop_limits()
+        # A question is held to what the loop it follows left, its time as its
+        # tools-free call was and its steps (``_answer_after_loop``).
+        timeout: float | None = seconds if asked else loop_timeout
+        if asked and steps is not _OWN_STEPS:
+            max_steps = steps
+        if not asked:
+            # Known again once this loop has counted its turns.
+            self._last_loop_steps_known = False
+        # What each model turn is recorded as: a question's turns under its
+        # own call (``analysis.efficiency`` reads their share), a loop's as
+        # loop turns.
+        turn_call = asked or TOOL_LOOP_TURN_CALL
 
         # A model list that moved on in an earlier loop starts this one at its
         # first model again — the switch is sticky for a loop, not for the job
@@ -6277,6 +6434,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # A loop that would start after the job's spend ceiling was reached is
         # not started: once it is reached only the verdict and the report run.
         if self._spend_reached():
+            if asked:
+                # Refused as the tools-free call was: no answer, no record.
+                raise SpendCeilingStop(self._spend_reason() or "the job's spend ceiling is reached")
             plain = LoopBudget(max_steps, timeout)
             self._record_budget(plain, [], SPEND_CAP, detail=self._spend_reason())
             self.logger.warning(
@@ -6353,9 +6513,23 @@ class BaseAnalyst(BudgetMeter, ABC):
         # answered the same way (``own_earlier_entries``), for the tools that
         # change nothing and answer an identical call the same
         # (``repeatable_earlier_entries``): any other tool runs again.
-        repeats = seeded_repeat_guard(
-            settled_chunk_entries(self, getattr(self, "_prior_chunk_calls", None)),
-            earlier_rounds=repeatable_earlier_entries(self),
+        # A question's starts with the calls this agent made in this round's
+        # loops too, answered the same way and for the same tools
+        # (``repeatable_entries_of_this_round``): the question follows them in
+        # the same analysis, and its model is told where each was made.
+        repeats = (
+            seeded_repeat_guard(
+                (),
+                earlier_rounds=repeatable_earlier_entries(
+                    self, later=own_entries_of_this_round(self)
+                ),
+                earlier_turns=repeatable_entries_of_this_round(self),
+            )
+            if asked
+            else seeded_repeat_guard(
+                settled_chunk_entries(self, getattr(self, "_prior_chunk_calls", None)),
+                earlier_rounds=repeatable_earlier_entries(self),
+            )
         )
         # The function map reads this loop's calls as they are made.
         self._live_map_entries = recorder.entries
@@ -6374,11 +6548,14 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         # The loop's budget, readable by an ask made from inside it and
         # charged by the delegation when the callee returns.
-        budget = LoopBudget(max_steps, timeout)
+        budget = LoopBudget(max_steps, timeout, before=steps_used(messages))
         # When this loop's time runs out: the validation turn that follows it
         # is held to what is left, not given a fresh budget. ``None`` with no
         # time limit.
         self._last_loop_deadline = budget.deadline()
+        if asked:
+            # The steps this question spends, read by the caller however it ends.
+            self._question_budget = budget
         self.loop_budget = budget
 
         # The run-state block is regenerated on every model turn with the
@@ -6486,6 +6663,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     on_clear=self._note_clearing,
                     offered=lambda: bool(self._offered_after_clear),
                     ticked=ticked,
+                    kind=asked or TOOL_LOOP,
                 ),
             )
 
@@ -6517,7 +6695,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._offered_after_clear = [read_tool]
             return True
 
-        graph["executor"] = _executor(loop_model, held_binding)
+        try:
+            graph["executor"] = _executor(loop_model, held_binding)
+        except Exception as exc:
+            if not asked:
+                raise
+            # The question is asked without the tools, as it was before.
+            self.loop_budget = None
+            self._live_map_entries = None
+            raise ToolsNotBound(f"{type(exc).__name__}: {exc}") from exc
 
         # Whether the server, rather than the budget, said the window was full.
         window_full = False
@@ -6601,6 +6787,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # asked again, if at all, of the replay's own answer.
                 tool_ask.clear()
                 if not await _one_pass(list(messages), spoken, pace):
+                    return dict(latest)
+                # A question asked after a loop is answered by what the model
+                # wrote: whether to call a tool was its own to decide there.
+                if asked:
                     return dict(latest)
                 # The model answered. An analyst with tools whose first answer
                 # called none is told so, with the tools it has, and asked once
@@ -6720,7 +6910,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 nonlocal call_deadline_hit, spend_refusal
                 # What the steps have left after the turns ``start`` already
                 # spent; the first pass has spent none.
-                steps = None if max_steps is None else max(1, max_steps - steps_used(start))
+                steps = None if max_steps is None else max(1, max_steps - budget.spent_in(start))
                 stream: Any = graph["executor"].astream(
                     {"messages": start},
                     {"recursion_limit": recursion_limit(steps)},
@@ -6986,7 +7176,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 detail = f"model call deadline: {exc}"
                 self.logger.error("%s ReAct agent failed: %s.", self.name, detail)
                 self._record_budget(budget, [], "time", detail=detail)
-                self._record_turns_taken(latest, len(messages))
+                self._record_turns_taken(latest, len(messages), call=turn_call)
                 raise AnalystError(f"{self.name} ReAct agent failed: {detail}") from exc
             except TimeoutError:
                 # Two different walls. The soft budget with nothing gathered
@@ -7010,13 +7200,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                     )
                     detail = f"the loop exceeded its {limit_text(hard_timeout, 's')} hard cap"
                 self._record_budget(budget, [], "time", detail=detail)
-                self._record_turns_taken(latest, len(messages))
+                self._record_turns_taken(latest, len(messages), call=turn_call)
                 raise
             except AnalystError:
-                self._record_turns_taken(latest, len(messages))
+                self._record_turns_taken(latest, len(messages), call=turn_call)
                 raise
             except Exception as exc:
-                self._record_turns_taken(latest, len(messages))
+                self._record_turns_taken(latest, len(messages), call=turn_call)
                 # The retries the lost call made, where no recorder took them.
                 record_lost_retries(
                     getattr(self, "token_ledger", None),
@@ -7068,12 +7258,25 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         msgs = thread_result.get("messages", []) or []
         # What this loop cost: its own turns. What it asked for is the
-        # callee's own budget and is counted under the callee.
-        self.steps_spent += steps_used(msgs)
+        # callee's own budget and is counted under the callee. A question's
+        # conversation starts with the answers before it, which are not this
+        # loop's turns and are not counted, recorded or charged here.
+        if asked:
+            # The question's own steps, its answer included, for the caller.
+            budget.note_turns(msgs)
+        else:
+            self.steps_spent += budget.spent_in(msgs)
+            # What the questions after it share (``_answer_after_loop``).
+            self._last_loop_steps_left = (
+                None if max_steps is None else max(0, max_steps - budget.spent_in(msgs))
+            )
+            self._last_loop_steps_known = True
         # Tool calls are AIMessage instances whose ``tool_calls`` attribute
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
-        tool_call_count = sum(len(getattr(m, "tool_calls", None) or []) for m in msgs)
+        tool_call_count = sum(len(getattr(m, "tool_calls", None) or []) for m in msgs) - sum(
+            len(getattr(m, "tool_calls", None) or []) for m in messages
+        )
         # The analyst's own loops' calls count toward its own: one that called
         # a tool in any of them is not asked why it called none. A loop that
         # answered another agent's ask is that agent's work, and is not counted.
@@ -7082,9 +7285,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Turns the question's pass took and the first answer replaced: spent,
         # and counted where every turn of the loop is.
         dropped = [m for m in tool_ask.get("dropped") or [] if is_model_turn(m)]
-        self.steps_spent += steps_used(dropped)
+        if not asked:
+            self.steps_spent += steps_used(dropped)
         for _m in dropped:
-            self._record_usage(_m, announce=False, call=TOOL_LOOP_TURN_CALL)
+            self._record_usage(_m, announce=False, call=turn_call)
         # The ReAct tool-loop's LLM calls happen INSIDE
         # langgraph's ``create_react_agent`` executor, so they never passed
         # through ``_invoke_llm_with_timeout`` where token usage is tallied.
@@ -7101,13 +7305,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         # turn of that state in order, so anything that drops or merges model
         # turns out of the state must key the holds again, or the kept turn
         # reads no hold (the built cap).
-        turns = [m for m in msgs if is_model_turn(m)]
-        last_held = turn_holds.get(len(turns))
+        # Keyed by the turn's place among the state's model turns, the
+        # earlier answers a question starts from included.
+        every_turn = [m for m in msgs if is_model_turn(m)]
+        last_held = turn_holds.get(len(every_turn))
+        turns = every_turn[sum(1 for m in messages if is_model_turn(m)) :]
         for index, _m in enumerate(turns):
             self._record_usage(
                 _m,
                 announce=False,
-                call=TOOL_LOOP_TURN_CALL,
+                call=turn_call,
                 held=last_held if index == len(turns) - 1 else None,
             )
         # The loop's row on the input meter, closed with exactly the turns the
@@ -7181,7 +7388,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the first into the second.
         ended_early = repeats.ending_the_loop() or no_room or window_full or time_capped
         ended_early = ended_early or spend_capped or call_deadline_hit
-        self._record_react_loop(hit_step_cap=hit_step_cap)
+        # Truncation frequency is the stage loops': a question that ended at
+        # its share of the steps is asked tools-free and recorded on its own.
+        if not asked:
+            self._record_react_loop(hit_step_cap=hit_step_cap)
         if repeats.ending_the_loop():
             cap, why = "repeats", f"{repeats.served_repeats} repeated tool call(s)"
         elif no_room:
@@ -7221,10 +7431,28 @@ class BaseAnalyst(BudgetMeter, ABC):
             why = f"{why}; {note}" if why else note
             self.logger.warning("%s: %s.", self.name, note)
         self._record_budget(budget, msgs, cap, detail=why)
-        self._budget_tick(budget, msgs, final=True, ledger_entries=len(recorder.entries))
+        # A question's loop is part of the loop it follows: the meter's final
+        # tick is that loop's, and the question's record rides on it.
+        if not asked:
+            self._budget_tick(budget, msgs, final=True, ledger_entries=len(recorder.entries))
         # Counted above, where it cost a step; not sent back to a model, which
         # would read the graph's sentence as its own last turn.
         msgs = [message for message in msgs if not is_the_graph_s_step_stop(message)]
+        # A question asked after a loop: its answer is the model's last turn,
+        # read by its caller as the tools-free call's was, findings block and
+        # all. A loop a cap ended wrote no answer to the question; the salvage
+        # and the nudge ask for a report, which is not every question's
+        # answer, so the question is asked in its tools-free call instead
+        # (``_answer_after_loop``).
+        if asked:
+            if cap is not None or hit_step_cap or not content.strip():
+                ended = cap or ("steps" if hit_step_cap else "no text")
+                ended = f"{ended} ({why})" if why else ended
+                self.logger.warning(
+                    "%s: the %s's loop ended without an answer (%s).", self.name, asked, ended
+                )
+                raise QuestionUnanswered(f"{self.name} {asked} failed: no answer ({ended})", ended)
+            return content
         answered = False
         # Stopped at the agent's own ceiling: no model call is made after it,
         # neither the salvage nor the nudge. The answer is the latest of its
@@ -8115,6 +8343,263 @@ class BaseAnalyst(BudgetMeter, ABC):
         timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
         return self._invoke_llm_with_timeout(messages, timeout, model=model, what=what)
 
+    def _turns_carry_tools(self, what: str) -> bool:
+        """Whether a turn asked outside the loop (``what``) carries this agent's own tools.
+
+        It does whenever the agent has tools and its model binds them, the
+        list the loop binds (``pinned_tools``), in its order. An agent with no
+        tools asks without, as it always did. A model that cannot bind them
+        asks without them too, and the run says the turn lost them
+        (:meth:`_say_the_tools_were_not_bound`).
+        """
+        if not getattr(self, "tools", None):
+            return False
+        try:
+            binder = getattr(getattr(self, "llm", None), "bind_tools", None)
+            if not callable(binder):
+                raise TypeError("the model has no way to bind tools")
+            binder(list(self.pinned_tools()))
+        except Exception as exc:  # noqa: BLE001 — the turn is asked as it was, and says so
+            BaseAnalyst._say_the_tools_were_not_bound(self, what, exc)
+            return False
+        return True
+
+    def _say_the_tools_were_not_bound(self, what: str, exc: BaseException) -> None:
+        """Log, and put on the agent's and the server registry's degradation reasons, once each.
+
+        A turn that loses the agent's tools is not a silent override: the run
+        summary carries the reason as it carries an unmirrored sample's.
+        """
+        self.logger.warning(
+            "%s: its model could not bind its tools (%s: %s); its %s is asked without them.",
+            self.name,
+            type(exc).__name__,
+            exc,
+            what,
+        )
+        reason = (
+            f"agent '{self.name}': its model could not bind its tools; the turns after its "
+            "loop and its revisions are asked without them"
+        )
+        own = list(getattr(self, "degradation_reasons", None) or [])
+        if reason not in own:
+            self.degradation_reasons = [*own, reason]
+        try:
+            registry = self._server_registry()
+        except Exception:  # noqa: BLE001 — the reason is still on the agent
+            return
+        reasons = getattr(registry, "degradation_reasons", None)
+        if isinstance(reasons, list) and reason not in reasons:
+            reasons.append(reason)
+
+    def _answer_after_loop(
+        self, messages: list[Any], timeout: float | None, *, what: str, tools: bool
+    ) -> str:
+        """A question asked after this agent's loop, with its tools when ``tools``; its answer's text.
+
+        A validation retry, the drops question and the whole-answer question
+        are turns the model answers from evidence it may need to read or
+        check, so each runs this agent's tool loop over its conversation
+        (``execute_tool_loop(asked=...)``): the same tools in the same order,
+        guards and repeat guard, stall deadline and breaker, its calls filed
+        on the ledger as any loop's are. ``tools`` is
+        :meth:`_turns_carry_tools`, read once by the caller for the wording
+        and the window too; without them it is the one tools-free call it was.
+
+        The questions are part of the loop they follow and share what it left:
+        the time to its deadline, at most ``timeout`` (a question that cannot
+        hold an answer at the loop's pace is not asked, and the first answer
+        stands), and its steps, each question spending from them. With fewer
+        than three steps left (a turn that calls a tool, the call and the
+        answer after it) the question is the tools-free call, and the loop's
+        record says why. A graph that cannot bind the tools is the tools-free
+        call too (:class:`ToolsNotBound`), said as a degradation.
+
+        That loop's deadline, pace and room flag stand after the question. The
+        budget record the question writes is put on the record of the loop it
+        follows, under ``asked_after``, where the validation turn's own notes
+        go (:meth:`_fold_question_records`).
+        """
+        if not tools:
+            # An agent with tools whose model could not bind them asks without
+            # them, and its loop's record says so; one with none asks as it
+            # always did.
+            if getattr(self, "tools", None):
+                BaseAnalyst._note_question_without_tools(  # type: ignore[arg-type]
+                    self, what, "its model could not bind its tools"
+                )
+            return self._invoke_llm_with_timeout(messages, timeout, what=what)
+        deadline = getattr(self, "_last_loop_deadline", None)
+        timeout = BaseAnalyst._question_seconds(self, what, timeout, deadline)  # type: ignore[arg-type]
+        known = bool(getattr(self, "_last_loop_steps_known", False))
+        steps: Any = getattr(self, "_last_loop_steps_left", None) if known else _OWN_STEPS
+        if isinstance(steps, int) and steps < 3:
+            why = (
+                f"{steps} step(s) of its loop were left, and a turn that may call a tool needs "
+                "three; asked without its tools"
+            )
+            return BaseAnalyst._ask_without_tools(  # type: ignore[arg-type]
+                self, messages, timeout, what=what, why=why
+            )
+        with self._the_meter_s_lock():
+            records_before = len(getattr(self, "_budget_records", None) or [])
+        pace = getattr(self, "_last_pace", None)
+        out_of_room = bool(getattr(self, "ended_out_of_room", False))
+        self._question_budget = None
+        self._asking = what
+        unanswered = ""
+        try:
+            return self.execute_tool_loop(list(messages), asked=what, seconds=timeout, steps=steps)
+        except ToolsNotBound as exc:
+            BaseAnalyst._say_the_tools_were_not_bound(self, what, exc)
+            unanswered = "the question's loop could not bind its tools"
+        except QuestionUnanswered as exc:
+            unanswered = f"its loop ended at {exc.ended} without an answer"
+        except AnalystError as exc:
+            # A failed turn of the question's loop (a provider refusing the
+            # request that carries the tools, a stalled call): the tools-free
+            # call is still asked, as dev asked it. The hard cap is a
+            # TimeoutError and is not caught.
+            unanswered = f"its loop failed: {exc}"
+        finally:
+            self._asking = ""
+            spent = getattr(self._question_budget, "own_steps", 0) or 0
+            if isinstance(steps, int):
+                self._last_loop_steps_left = max(0, steps - int(spent))
+            self._question_budget = None
+            self._last_loop_deadline = deadline
+            self.ended_out_of_room = out_of_room
+            if isinstance(pace, TurnPace):
+                self._last_pace = pace
+            else:
+                self.__dict__.pop("_last_pace", None)
+            BaseAnalyst._fold_question_records(self, records_before)  # type: ignore[arg-type]
+        # Never worse than the tools-free call: asked once in it, in the time
+        # the loop it follows still leaves.
+        return BaseAnalyst._ask_without_tools(  # type: ignore[arg-type]
+            self,
+            messages,
+            BaseAnalyst._question_seconds(self, what, timeout, deadline),  # type: ignore[arg-type]
+            what=what,
+            why=unanswered,
+        )
+
+    def _question_seconds(self, what: str, timeout: float | None, deadline: Any) -> float | None:
+        """The seconds a question gets: at most ``timeout``, at most what is left to ``deadline``.
+
+        Raises ``AnalystError`` when that cannot hold an answer at the pace of
+        the loop it follows: the question is not asked, and the first answer
+        stands.
+        """
+        if isinstance(deadline, int | float):
+            share = float(deadline) - time.monotonic()
+            timeout = share if timeout is None else min(float(timeout), share)
+        needs = BaseAnalyst.seconds_an_answer_needs(self)  # type: ignore[arg-type]
+        if timeout is not None and timeout < needs:
+            raise AnalystError(
+                f"{self.name} {what} not asked: {max(0.0, timeout):.0f}s of its loop's time "
+                f"were left, and an answer needs {needs:.0f}s"
+            )
+        return timeout
+
+    def _ask_without_tools(
+        self, messages: list[Any], timeout: float | None, *, what: str, why: str
+    ) -> str:
+        """The question in its one tools-free call, worded as one, its reason on the loop's record.
+
+        The system turn is the prompt for no tools, and the sentence saying the
+        tools are attached is taken off the question: a request is never told
+        of tools it does not carry.
+        """
+        self.logger.warning("%s: its %s is asked without its tools: %s.", self.name, what, why)
+        BaseAnalyst._note_question_without_tools(self, what, why)  # type: ignore[arg-type]
+        return self._invoke_llm_with_timeout(
+            BaseAnalyst._tools_free_turns(self, messages),  # type: ignore[arg-type]
+            timeout,
+            what=what,
+        )
+
+    def _tools_free_turns(self, messages: list[Any]) -> list[Any]:
+        """``messages`` worded for a request with no tools: its system turn and its question."""
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        from maljan.pipeline.validation import ANALYST_TOOLS_ATTACHED, RETRY_DROP_TOOLS_ATTACHED
+
+        out = list(messages)
+        if out and isinstance(out[0], SystemMessage):
+            prompt = self._system_prompt("", tools=())
+            out = [SystemMessage(content=prompt), *out[1:]] if prompt else out[1:]
+        for index in range(len(out) - 1, -1, -1):
+            turn = out[index]
+            if not isinstance(turn, HumanMessage):
+                continue
+            text = turn.content
+            if isinstance(text, str):
+                for said in (ANALYST_TOOLS_ATTACHED, RETRY_DROP_TOOLS_ATTACHED):
+                    text = text.replace(f"{said}\n", "").replace(f"\n{said}", "")
+                out[index] = turn.model_copy(update={"content": text})
+            break
+        return out
+
+    def _fold_question_records(self, records_before: int) -> None:
+        """Put the question's own budget records on the record of the loop it followed.
+
+        Only this agent's rows (no ``agent``, or its own name) are put there;
+        a row a callee it asked handed over (``delegation``) stays a record
+        of its own, in order. With no record before the question (none was
+        kept yet, or the records were drained) there is nothing to put them
+        on, and the question's record stays a record of its own.
+        """
+        with self._the_meter_s_lock():
+            records = list(getattr(self, "_budget_records", None) or [])
+            if not records_before or len(records) <= records_before:
+                return
+            name = str(self.name)
+            added = records[records_before:]
+            own = [row for row in added if str(row.get("agent") or name) == name]
+            # The loop it followed: this agent's last row before it, never a
+            # row a callee handed over.
+            target = next(
+                (
+                    i
+                    for i in range(records_before - 1, -1, -1)
+                    if str(records[i].get("agent") or name) == name
+                ),
+                None,
+            )
+            if not own or target is None:
+                return
+            others = [row for row in added if str(row.get("agent") or name) != name]
+            earlier = records[target]
+            asked_after = [*(earlier.get("asked_after") or []), *own]
+            self._budget_records = [
+                *records[:target],
+                {**earlier, "asked_after": asked_after},
+                *records[target + 1 : records_before],
+                *others,
+            ]
+
+    def _note_question_without_tools(self, what: str, why: str) -> None:
+        """Say on the last loop's record that a question was asked without the tools, and why."""
+        records = list(getattr(self, "_budget_records", None) or [])
+        own = BaseAnalyst._own_last_row(self, records)  # type: ignore[arg-type]
+        rows = list((records[own].get("asked_without_tools") or []) if own is not None else [])
+        BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
+            self, "asked_without_tools", [*rows, {"call": what, "why": why}]
+        )
+
+    def _own_last_row(self, records: Sequence[Mapping[str, Any]]) -> int | None:
+        """The index of this agent's last loop row: no ``agent``, or its own name; ``None`` if none.
+
+        A row a callee it asked handed over (``delegation``) carries the
+        callee's name and is the callee's loop, not this agent's.
+        """
+        name = str(getattr(self, "name", "") or "")
+        for index in range(len(records) - 1, -1, -1):
+            if str(records[index].get("agent") or name) == name:
+                return index
+        return None
+
     def _claims_watched(self) -> Any:
         """A block whose model calls are read under the repeated-claims rule as they stream.
 
@@ -8250,24 +8735,26 @@ class BaseAnalyst(BudgetMeter, ABC):
         return str(content)
 
     def revision_tools(self) -> tuple[Any, ...] | None:
-        """The tools a revision's system prompt states: ``None`` (its own) when it may read.
+        """The tools a revision's system prompt states: ``None`` (its own) when it carries them.
 
-        ``()`` for the one tools-free call a revision is by default; ``None``,
-        which ``_system_prompt`` reads as the tools the loop binds, when this
-        round's directive names a function the ledger holds no listing of and
-        this agent has tools (``safe_revise_isr(read_places=True)``).
+        ``None``, which ``_system_prompt`` reads as the tools the loop binds,
+        when the round carries this agent's tools (:meth:`_revision_may_read`);
+        ``()`` for the one tools-free call it is otherwise.
         """
         return None if self._revision_may_read() else ()
 
     def _revision_may_read(self) -> bool:
-        return bool(getattr(self, "_revision_reads", False)) and bool(getattr(self, "tools", None))
+        """Whether this round's revision carries the agent's tools, as ``safe_revise_isr`` found."""
+        return bool(getattr(self, "_revision_tooled", False))
 
     def revision_answer(self, messages: list[BaseMessage], what: str = "revision") -> str:
-        """A revision's answer: one tools-free call, or this agent's tool loop when it may read.
+        """A revision's answer: this agent's tool loop, or one tools-free call without tools.
 
-        The tool loop runs when the round's directive names a function the
-        ledger holds no listing of and this agent has tools; its calls enter
-        the ledger as any loop's do, and the model decides whether to make any.
+        The round carries the agent's own tools whenever it has them and its
+        model binds them (``safe_revise_isr``, :meth:`_turns_carry_tools`):
+        its calls enter the ledger as any loop's do, and the model decides
+        whether to make any. An agent with no tools, or one whose model cannot
+        bind them, answers in one tools-free call, as every revision did.
         """
         if self._revision_may_read():
             pairs = [
@@ -8275,9 +8762,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 for m in messages
                 if getattr(m, "type", "") in ("system", "human")
             ]
-            self.logger.info(
-                "%s: the revision may read a function the ledger never listed.", self.name
-            )
+            if getattr(self, "_revision_reads", False):
+                self.logger.info(
+                    "%s: the revision may read a function the ledger never listed.", self.name
+                )
             return str(self.execute_tool_loop(pairs) or "")
         return self.ask_the_model(self.frame_messages(messages), what=what)
 
@@ -8464,7 +8952,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                 records = list(getattr(self, "_budget_records", None) or [])
                 if not records:
                     return
-                records[-1] = {**records[-1], key: value}
+                # This agent's own last loop, not a row a callee handed over;
+                # the last row where none is its own.
+                own = BaseAnalyst._own_last_row(self, records)  # type: ignore[arg-type]
+                index = len(records) - 1 if own is None else own
+                records[index] = {**records[index], key: value}
                 self._budget_records = records
         except Exception as exc:  # noqa: BLE001 — a record never costs an answer
             self.logger.debug("%s: %s was not recorded (%s).", self.name, key, exc)
@@ -9081,70 +9573,122 @@ class BaseAnalyst(BudgetMeter, ABC):
         chunked analysis gets when its own answer was cut, before the merge,
         whose other questions the merged answer is asked. ``chunk`` names the
         chunk ("chunk 1 of 2") in the question and in what is recorded.
+
+        The turn's questions carry this agent's own tools where its model
+        binds them (:meth:`_answer_after_loop`); while it runs,
+        ``_questions_carry_tools`` says so to the window measures, which then
+        count the tool definitions the requests carry.
         """
+        try:
+            return BaseAnalyst._validation_turn(  # type: ignore[arg-type]
+                self, isr, evidence, chunk=chunk, only_cut=only_cut
+            )
+        finally:
+            self._questions_carry_tools = False
+
+    def _validation_turn(
+        self,
+        isr: AgentISR,
+        evidence: str,
+        *,
+        chunk: str = "",
+        only_cut: bool = False,
+    ) -> AgentISR:
+        """:meth:`_validate_isr`'s body."""
         try:
             from maljan.tools import knowledge
         except Exception as exc:  # noqa: BLE001 — no catalogue, no check
             self.logger.debug("Validation skipped, the knowledge tools are unavailable: %s", exc)
             return isr
 
-        # What this analyst may cite: its own ledger as it stands when the
-        # answer is checked, the entries its own earlier rounds of this job
-        # produced (handed to the job's ledger at their drain, and a revision
-        # still rests on them), and the triage pack's entries, which every
-        # agent was shown. Another analyst's entries are not among them. It
-        # decides whether a technique claim that cites nothing is a violation:
-        # an analyst with none has nothing to cite.
-        ledger_ids = analyst_ledger_ids(
-            getattr(self, "_evidence_entries", None) or [],
-            _drained_ids_of(self) or [],
-            getattr(self, "pack_ledger_ids", None) or [],
-        )
         # The run's sandbox section index, read off the pack's entry: a claim
         # cites an item of the report as it cites an entry, each id one lookup.
         items = item_index_of(getattr(self, "pack_entries", None) or ())
-        # The functions this analyst's own calls decompiled: any no claim of
-        # the answer names by address or name is listed to it, once.
-        decompiled = decompiled_functions(getattr(self, "_evidence_entries", None) or [])
-        # The image bases the run read, the analyst's own calls' and the
-        # pack's: an offset and a virtual address are matched by them.
-        image_bases = run_image_bases(
-            getattr(self, "_evidence_entries", None) or [],
-            getattr(self, "pack_image_bases", None) or (),
-        )
-        # The functions this analyst's own calls listed, and their facts: a
-        # claim naming a call or a string its function's facts do not hold
-        # is stated to it, once (``pipeline.function_claims``).
-        own_entries = list(getattr(self, "_evidence_entries", None) or [])
-        listed = listed_functions(own_entries)
-        facts: Any = None
-        facts_failed = ""
-        if listed:
-            try:
-                kept = getattr(self, "_function_map_entries", None)
-                copies = list(kept()) if callable(kept) else []
-                facts = function_facts(
-                    [*copies, *own_entries],
-                    getattr(self, "pack_function_artefacts", None),
-                    pack_entries=list(getattr(self, "pack_entries", None) or ()),
-                    facts_block=str(getattr(self, "facts_block", "") or ""),
-                    bases=image_bases,
-                )
-            except Exception as exc:  # noqa: BLE001 — no facts, no function question
-                facts_failed = facts_unread(exc)
-                self.logger.warning("%s: function claims %s.", self.name, facts_failed)
-                facts = None
-        function_checks: dict[int, FunctionClaimCheck] = {}
 
-        def _function_check(candidate: AgentISR) -> FunctionClaimCheck:
-            key = id(candidate)
+        # What an answer is checked against from this analyst's own ledger,
+        # read as the ledger stands when that answer is checked: a question
+        # asked after the loop carries its tools, and an answer citing an
+        # entry a call of that question filed cites an entry it may cite.
+        # Read again only when the ledger grew (keyed by its length).
+        @dataclasses.dataclass
+        class _Ledger:
+            ledger_ids: Any
+            decompiled: Any
+            image_bases: Any
+            listed: Any
+            facts: Any
+            facts_failed: str
+
+        read: dict[int, _Ledger] = {}
+
+        def _ledger(at: int | None = None) -> _Ledger:
+            # ``at``: the ledger as it was read at that length, where it was.
+            if at is not None and at in read:
+                return read[at]
+            own_entries = list(getattr(self, "_evidence_entries", None) or [])
+            held = read.get(len(own_entries))
+            if held is not None:
+                return held
+            # What this analyst may cite: its own ledger as it stands, the
+            # entries its own earlier rounds of this job produced (handed to
+            # the job's ledger at their drain, and a revision still rests on
+            # them), and the triage pack's entries, which every agent was
+            # shown. Another analyst's entries are not among them. It decides
+            # whether a technique claim that cites nothing is a violation: an
+            # analyst with none has nothing to cite.
+            ledger_ids = analyst_ledger_ids(
+                own_entries,
+                _drained_ids_of(self) or [],
+                getattr(self, "pack_ledger_ids", None) or [],
+            )
+            # The functions this analyst's own calls decompiled: any no claim
+            # of the answer names by address or name is listed to it, once.
+            decompiled = decompiled_functions(own_entries)
+            # The image bases the run read, the analyst's own calls' and the
+            # pack's: an offset and a virtual address are matched by them.
+            image_bases = run_image_bases(
+                own_entries, getattr(self, "pack_image_bases", None) or ()
+            )
+            # The functions this analyst's own calls listed, and their facts:
+            # a claim naming a call or a string its function's facts do not
+            # hold is stated to it, once (``pipeline.function_claims``).
+            listed = listed_functions(own_entries)
+            facts: Any = None
+            facts_failed = ""
+            if listed:
+                try:
+                    kept = getattr(self, "_function_map_entries", None)
+                    copies = list(kept()) if callable(kept) else []
+                    facts = function_facts(
+                        [*copies, *own_entries],
+                        getattr(self, "pack_function_artefacts", None),
+                        pack_entries=list(getattr(self, "pack_entries", None) or ()),
+                        facts_block=str(getattr(self, "facts_block", "") or ""),
+                        bases=image_bases,
+                    )
+                except Exception as exc:  # noqa: BLE001 — no facts, no function question
+                    facts_failed = facts_unread(exc)
+                    self.logger.warning("%s: function claims %s.", self.name, facts_failed)
+                    facts = None
+            held = _Ledger(ledger_ids, decompiled, image_bases, listed, facts, facts_failed)
+            read[len(own_entries)] = held
+            return held
+
+        function_checks: dict[tuple[int, int], FunctionClaimCheck] = {}
+
+        def _function_check(candidate: AgentISR, at: int | None = None) -> FunctionClaimCheck:
+            ledger = _ledger(at)
+            key = (
+                id(candidate),
+                at if at in read else len(getattr(self, "_evidence_entries", None) or []),
+            )
             if key not in function_checks:
-                if facts_failed:
-                    function_checks[key] = FunctionClaimCheck(not_checked=[facts_failed])
+                if ledger.facts_failed:
+                    function_checks[key] = FunctionClaimCheck(not_checked=[ledger.facts_failed])
                     return function_checks[key]
                 try:
                     function_checks[key] = check_function_claims(
-                        candidate, listed, facts, image_bases
+                        candidate, ledger.listed, ledger.facts, ledger.image_bases
                     )
                 except Exception as exc:  # noqa: BLE001 — a check that fails asks nothing
                     failed = facts_unread(exc)
@@ -9236,20 +9780,23 @@ class BaseAnalyst(BudgetMeter, ABC):
                 techniques=techniques,
             )
 
-        # What every answer of this turn is checked against, composed once
-        # with the replay of a stored run (``validation.analyst_answer_checks``).
-        inputs = AnswerCheckInputs(
-            attck=knowledge,
-            ledger_ids=ledger_ids,
-            sample=sample,
-            items=items,
-            decompiled=decompiled,
-            image_bases=image_bases,
-            techniques=techniques,
-            alignment=gate,
-            alignment_threshold=threshold,
-            alignment_margin=margin,
-        )
+        # What every answer of this turn is checked against, composed with the
+        # replay of a stored run (``validation.analyst_answer_checks``), from
+        # the ledger as it stands when the answer is checked.
+        def _inputs() -> AnswerCheckInputs:
+            ledger = _ledger()
+            return AnswerCheckInputs(
+                attck=knowledge,
+                ledger_ids=ledger.ledger_ids,
+                sample=sample,
+                items=items,
+                decompiled=ledger.decompiled,
+                image_bases=ledger.image_bases,
+                techniques=techniques,
+                alignment=gate,
+                alignment_threshold=threshold,
+                alignment_margin=margin,
+            )
 
         def _validator(candidate: AgentISR) -> list[Violation]:
             if only_cut:
@@ -9260,7 +9807,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._keep_unparsed_answers(unread, candidate.revision_round)
             return analyst_answer_checks(
                 candidate,
-                inputs,
+                _inputs(),
                 whole_answer=_whole_answer_questions(candidate),
                 unread=unread,
                 functions=_function_check(candidate).violations,
@@ -9292,7 +9839,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # What the function claim check read of this answer, on the loop's
         # record: how many claims it checked and asked about, and each it
         # could state no fact for, with why.
-        if not only_cut and listed:
+        if not only_cut and _ledger().listed:
             checked = _function_check(isr)
             if checked.checked or checked.not_checked:
                 BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
@@ -9325,10 +9872,13 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-        # The validation turn is one tools-free call over the evidence text: it
-        # asks for a fix to an answer, not for more looking, so the prompt it is
-        # sent with says it carries no tools.
-        prompt = self._system_prompt("", tools=())
+        # The validation turn asks for a fix to an answer over the evidence
+        # text, and the model may read or check what a question names: its
+        # questions carry this agent's own tools, as its loop did, where its
+        # model binds them (``_answer_after_loop``), and the prompt says which.
+        tooled = BaseAnalyst._turns_carry_tools(self, VALIDATION_RETRY_CALL)  # type: ignore[arg-type]
+        self._questions_carry_tools = tooled
+        prompt = self._system_prompt("", tools=None if tooled else ())
         messages: list[BaseMessage] = []
         if prompt:
             messages.append(SystemMessage(content=prompt))
@@ -9372,7 +9922,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             if only_cut or loop_cuts or _repeated(isr) is not None
             else numbering_unsettled(isr)
         )
-        closing = analyst_feedback_closing(whole=bool(merge_why), techniques=techniques)
+        closing = analyst_feedback_closing(
+            whole=bool(merge_why), techniques=techniques, tools=tooled
+        )
         if isr.gate_removed and isr.answer_text:
             closing = f"{gate_removed_note(isr.gate_removed)}\n{closing}"
         sent = with_question(messages, feedback_text(initial, closing=closing))
@@ -9393,11 +9945,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         ):
             cards = False
             sent = with_question(messages, feedback_text(initial, closing=closing, cards=False))
-        # The retry is a tools-free turn, and the tool results the answer was
-        # written from are not in the conversation it is sent in: the ledger
-        # entries the answer cites are shown in front of the closing, as the
-        # analyst had them in view, as many as fit beside an answer of the cap
-        # the cards were measured with. What fitted before still fits.
+        # The tool results the answer was written from are not in the
+        # conversation the retry is sent in: the ledger entries the answer
+        # cites are shown in front of the closing, as the analyst had them in
+        # view, as many as fit beside an answer of the cap the cards were
+        # measured with. What fitted before still fits. The model may read
+        # any of them again, or check a value, with its tools.
         bare_closing = closing
         with_entries = BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
             self,
@@ -9469,10 +10022,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return first.pop()
             # The block moves to the retry's own question, the last message,
             # and the turn that carried it before is sent as it was written.
-            answer = self._invoke_llm_with_timeout(
+            answer = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
+                self,
                 frame_messages(turns, run_state=current_run_state(self)),
                 left,
                 what=VALIDATION_RETRY_CALL,
+                tools=tooled,
             )
             if round_asked:
                 rounds_answered.append(round_asked.pop())
@@ -9542,6 +10097,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # What the retry was asked about, as sent: the claims a merged retry
         # was asked to fix are named by the flags' paths.
         shown: list[Violation] = []
+        # The ledger's length when the first questions were put: what they
+        # were about is read against the ledger as it was then, not as the
+        # retry's own calls grew it.
+        fed_at: list[int] = []
 
         def _asked_blocks(first_answer: AgentISR) -> list[int]:
             """The claim blocks of ``first_answer`` the questions sent were about.
@@ -9558,7 +10117,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             if LIBRARY_ONLY_CLAIMS_CODE in codes:
                 about.update(library_only_claims(first_answer))
             if FUNCTION_CLAIM_UNHELD_CODE in codes:
-                about.update(_function_check(first_answer).flagged)
+                about.update(_function_check(first_answer, fed_at[0] if fed_at else None).flagged)
             if TECHNIQUE_LINE_UNREAD_CODE in codes:
                 about.update(
                     i
@@ -9597,7 +10156,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
 
             retried_answer = raw_answers.get(id(retried), "")
-            question = whole_answer_after_retry_question(why, techniques=techniques)
+            question = whole_answer_after_retry_question(why, techniques=techniques, tools=tooled)
 
             def _turns(text: str) -> list[Any]:
                 asked = _with_feedback(
@@ -9629,10 +10188,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             self.validation_retries += 1
             try:
-                answer = self._invoke_llm_with_timeout(
+                answer = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
+                    self,
                     frame_messages(turns, run_state=current_run_state(self)),
                     left,
                     what=WHOLE_ANSWER_RETRY_CALL,
+                    tools=tooled,
                 )
             except Exception as exc:  # noqa: BLE001 — unanswered, the first answer stays
                 self.logger.warning(
@@ -9988,6 +10549,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             tally = ValidationTally()
 
             def _fed_back(violations: Sequence[Violation]) -> None:
+                if not fed_at:
+                    fed_at.append(len(getattr(self, "_evidence_entries", None) or []))
                 shown.extend(violations)
                 tally.count(violations)
                 round_asked[:] = [list(violations)]
@@ -10125,7 +10688,22 @@ class BaseAnalyst(BudgetMeter, ABC):
         except Exception:  # noqa: BLE001 — a budget that cannot say leaves the question asked
             return True
         sent = sum(len(str(getattr(m, "content", m) or "")) for m in messages)
+        sent += BaseAnalyst._question_definition_chars(self)  # type: ignore[arg-type]
         return sent <= room
+
+    def _question_definition_chars(self) -> int:
+        """What the tool definitions a validation turn's questions carry weigh, or 0.
+
+        The loop's own (``_tool_definition_chars``), sent with each question
+        while ``_questions_carry_tools`` says they carry them
+        (:meth:`_answer_after_loop`); 0 for a tools-free turn.
+        """
+        if not getattr(self, "_questions_carry_tools", False):
+            return 0
+        try:
+            return max(0, int(getattr(self, "_tool_definition_chars", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
 
     def drain_nudge_retry_mode(self) -> str | None:
         """How the last nudge had to be sent, handed over once."""
@@ -10263,7 +10841,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         retry states nowhere are technique ids it was asked about answered its
         question, and is counted neither way, nor is a claim that holds no
         value. A retry that restates fewer claims than it leaves out is more
-        another answer than a fix of this one, written in a tools-free turn,
+        another answer than a fix of this one, written in a turn of its own,
         and does not replace the first answer: what it left out stands beside
         its claims unless the analyst withdraws it; ``None`` otherwise. The
         caller says it once, in the run log and on the loop's record. Linear in
@@ -10429,7 +11007,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             return None
         if tokens <= 0:
             return None
-        return (tokens - int(cap)) * per_token
+        # The tool definitions a question carries are part of its prompt.
+        definitions = BaseAnalyst._question_definition_chars(self)  # type: ignore[arg-type]
+        return (tokens - int(cap)) * per_token - definitions
 
     def _with_cited_entries(
         self,
@@ -10603,8 +11183,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         The question follows the retry as the analyst wrote it, and shows the
         ledger entries the items cite that the conversation does not hold,
-        whole: the retry and this question are tools-free turns, and the tool
-        results the first answer read are in neither. Items whose entries do
+        whole: the tool results the first answer read are in neither the retry
+        nor this question. It carries this agent's own tools when the
+        validation turn's questions do (``_questions_carry_tools``), so the
+        model may read or check an item before it decides. Items whose entries do
         not fit beside the conversation together are asked in parts, each
         beside its own entries (:meth:`_retry_drop_parts`). Each item is
         recorded (``retry_drop_row``) as kept, withdrawn or not answered, with
@@ -10616,6 +11198,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         from langchain_core.messages import AIMessage, HumanMessage
 
+        tools = bool(getattr(self, "_questions_carry_tools", False))
+        if tools:
+            question = functools.partial(question, tools=True)
         labelled = drops.labelled()
         cited = [entry_id for _l, _k, item, _m in labelled for entry_id in retry_drop_cited(item)]
         entries = cited_entry_texts(self, cited, messages)
@@ -10677,10 +11262,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                     AIMessage(content=str(answer or "")),
                     HumanMessage(content=asked),
                 ]
-                reply = self._invoke_llm_with_timeout(
+                reply = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
+                    self,
                     frame_messages(turns, run_state=current_run_state(self)),
                     left,
                     what=RETRY_DROPS_QUESTION_CALL,
+                    tools=tools,
                 )
                 read = read_retry_drop_answers(
                     answer_text(getattr(reply, "content", reply)), [row[0] for row in part_rows]
@@ -10836,10 +11423,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         the turn reads: the round-0 loop's deadline and whether its answer was
         nudged are not this answer's, so they are cleared before it is made.
 
+        Every revision carries this agent's own tools where its model binds
+        them (``revision_answer``), and the model decides whether to call one.
         ``read_places`` is a round whose directive names a function the ledger
-        holds no listing of (``debate_facts.place_facts``): the revision is
-        given this agent's tools (``revision_answer``), and the model decides
-        whether to read it.
+        holds no listing of (``debate_facts.place_facts``), which the log says.
 
         ``cited_entries`` are the stored texts of the ledger entries the
         contested lines naming this agent cite (``debate_facts.line_entry_ids``),
@@ -10901,14 +11488,18 @@ class BaseAnalyst(BudgetMeter, ABC):
             # The entries shown are text the revision read, as its raw data is.
             grounds = f"{truncated}\n\n{block}" if block else truncated
             self._last_loop_deadline = None
+            self._last_loop_steps_known = False
             self._answer_unstructured = False
             self._revision_reads = bool(read_places)
+            # Its own tools, as its loop had them, where its model binds them.
+            self._revision_tooled = BaseAnalyst._turns_carry_tools(self, "revision")  # type: ignore[arg-type]
             try:
                 text, isr = self.revise_isr(
                     truncated, own_report, peer_reports, mediator_feedback, revision_round
                 )
             finally:
                 self._revision_reads = False
+                self._revision_tooled = False
             isr = self._drain_findings(isr)
             if not isr.answer_text:
                 isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))
@@ -11317,6 +11908,13 @@ class BaseAnalyst(BudgetMeter, ABC):
     # When the last loop's time ran out, on the monotonic clock; ``None``
     # before any loop.
     _last_loop_deadline: float | None = None
+    # The steps the last loop left (``None``: no limit), once it counted them,
+    # which the questions asked after it share (``_answer_after_loop``).
+    _last_loop_steps_left: int | None = None
+    _last_loop_steps_known: bool = False
+    # The running question's loop budget, and the question's call name.
+    _question_budget: Any = None
+    _asking: str = ""
     steps_spent: int = 0
     current_round: int = 0
     # The lock included: ``delegation.ask`` takes it on the callee, and a

@@ -644,7 +644,7 @@ class TestTheEarlierBlocksAreCounted:
         agent._replayed_blocks = {3: 400}
         agent._replay_upto = None
 
-        def _fails(_prompt: list[Any]) -> str:
+        def _fails(_prompt: list[Any], **_k: Any) -> str:
             raise TimeoutError("the loop's clock ran out")
 
         monkeypatch.setattr(agent, "_run_tool_loop", _fails)

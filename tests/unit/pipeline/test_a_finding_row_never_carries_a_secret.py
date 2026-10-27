@@ -1248,7 +1248,7 @@ WRITES_THE_LIST: dict[tuple[str, str], str] = {
     ("agents/base_agent.py", "drain_validation_findings"): "the drain empties it",
     # The one place anything is added to it: the output of ``validate_isr``,
     # which is walked source.
-    ("agents/base_agent.py", "_validate_isr"): "what the walked validator returned",
+    ("agents/base_agent.py", "_validation_turn"): "what the walked validator returned",
     # The same validator's output for a turn that gave no answer, each row with
     # the platform's sentence saying why appended (``_not_asked``).
     ("agents/base_agent.py", "_settle_an_unanswered_turn"): "the walked validator's rows",

@@ -949,10 +949,11 @@ class RepeatGuard:
         # when its listing is the held one, or a prefix of it.
         self._functions: dict[tuple[str, Any], list[tuple[str, str]]] = {}
         # Where each seeded entry was made: an earlier chunk of this input
-        # (``EARLIER_CHUNK``) or an earlier round of this analysis
-        # (``EARLIER_ROUND``), which is what its answer says.
+        # (``EARLIER_CHUNK``), an earlier round of this analysis
+        # (``EARLIER_ROUND``) or an earlier loop of this round
+        # (``EARLIER_TURN``), which is what its answer says.
         self._origins: dict[str, str] = {}
-        # The server each earlier round's seeded call was made on, by its key:
+        # The server each earlier round's or loop's seeded call was made on, by its key:
         # a call on that server that may change state makes the seed stale
         # (:meth:`forget_round_seeds`).
         self._seed_servers: dict[str, str] = {}
@@ -997,13 +998,14 @@ class RepeatGuard:
         not keep (``rerun``), is seeded as asked once, so one retry is served,
         as the guard serves any retry after a failure. No first touch counts
         toward the loop's repeats (:meth:`first_touch_of_seed`). ``origin`` is
-        where the call was made (``EARLIER_CHUNK`` when not given, or
-        ``EARLIER_ROUND``), which the answer to an identical call says.
+        where the call was made (``EARLIER_CHUNK`` when not given,
+        ``EARLIER_ROUND`` or ``EARLIER_TURN``), which the answer to an
+        identical call says.
         """
         key = self._key(tool, kwargs)
         self._seeded.setdefault(key, str(entry_id))
         self._origins.setdefault(str(entry_id), origin or EARLIER_CHUNK)
-        if origin == EARLIER_ROUND:
+        if origin in (EARLIER_ROUND, EARLIER_TURN):
             self._seed_servers.setdefault(key, str(server or ""))
         if failed:
             self._seeded_failures.add(str(entry_id))
@@ -1125,7 +1127,7 @@ class RepeatGuard:
         return self._still_held(server, ("member", str(declared_name), address, roles), mark)
 
     def forget_round_seeds(self, server: str) -> int:
-        """Drop every earlier round's seed made on ``server``: a call there may have changed it.
+        """Drop every earlier round's or loop's seed made on ``server``: a call there may have changed it.
 
         Called after a call that is not read-only runs on ``server``. Its
         seeds' recorded answers may no longer be what the server would answer,
@@ -1150,7 +1152,7 @@ class RepeatGuard:
         return dropped
 
     def origin_of(self, entry_id: str) -> str:
-        """Where a seeded entry was made: ``EARLIER_CHUNK`` or ``EARLIER_ROUND``."""
+        """Where a seeded entry was made: ``EARLIER_CHUNK``, ``EARLIER_ROUND`` or ``EARLIER_TURN``."""
         return self._origins.get(str(entry_id), EARLIER_CHUNK)
 
     def seeded_failure(self, entry_id: str) -> bool:
@@ -1334,17 +1336,25 @@ def entry_server(entry: Any) -> str:
 # Where a call a loop's guard was seeded with was made.
 EARLIER_CHUNK = "chunk"
 EARLIER_ROUND = "round"
+# An earlier loop of this round: the question asked after a loop
+# (``BaseAnalyst._answer_after_loop``) follows it in the same analysis.
+EARLIER_TURN = "turn"
 
 
 def seeded_repeat_guard(
-    entries: Sequence[Any] | None, *, earlier_rounds: Sequence[Any] | None = None
+    entries: Sequence[Any] | None,
+    *,
+    earlier_rounds: Sequence[Any] | None = None,
+    earlier_turns: Sequence[Any] | None = None,
 ) -> RepeatGuard:
     """A loop's repeat guard, seeded with the calls earlier chunks made (``RepeatGuard.seed``).
 
     ``earlier_rounds`` are the calls this agent made in earlier rounds of the
     run (a revision's first answer and the revisions before it), seeded first
     and answered the same way: a revision that repeats an identical call reads
-    the result its entry recorded, and no tool runs.
+    the result its entry recorded, and no tool runs. ``earlier_turns`` are the
+    calls this agent's loops made earlier in this round, seeded the same way
+    for a question asked after them.
 
     An answered call is seeded with the result its entry recorded, which is
     what a later identical call is answered with. A call whose entry does not
@@ -1356,6 +1366,7 @@ def seeded_repeat_guard(
     guard = RepeatGuard()
     seeds = [
         *((entry, EARLIER_ROUND) for entry in earlier_rounds or ()),
+        *((entry, EARLIER_TURN) for entry in earlier_turns or ()),
         *((entry, EARLIER_CHUNK) for entry in entries or ()),
     ]
     for entry, origin in seeds:
@@ -1505,6 +1516,11 @@ def earlier_chunk_sentence(tool: str, entry_id: str, *, origin: str = EARLIER_CH
             f"This call to {tool} with these arguments was made in an earlier round of this "
             f"analysis and is not run again: the text above is the result recorded in "
             f"[{entry_id}]."
+        )
+    if origin == EARLIER_TURN:
+        return (
+            f"This call to {tool} with these arguments was made earlier in this analysis and "
+            f"is not run again: the text above is the result recorded in [{entry_id}]."
         )
     return (
         f"This call to {tool} with these arguments was made in an earlier chunk of this "

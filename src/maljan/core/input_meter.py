@@ -228,15 +228,17 @@ class InputMeter:
         """One request about to be sent; the row it was counted on (for :meth:`answered`).
 
         ``loop`` is the tool loop the request is a turn of — its turns are
-        summed on one row until :meth:`close` — or ``None`` for a single call,
-        summed with the agent's other calls of the same ``kind`` and stage.
+        summed on one row of ``kind`` until :meth:`close` (a question asked
+        after a loop runs a loop of its own, filed under its call's name) — or
+        ``None`` for a single call, summed with the agent's other calls of the
+        same ``kind`` and stage.
         """
         try:
             with self._lock:
                 if loop is not None:
                     held = self._loops.get((agent, id(loop)))
                     if held is None or held[0] is not loop:
-                        row = _new_row(agent, stage, TOOL_LOOP)
+                        row = _new_row(agent, stage, kind)
                         self._rows.append(row)
                         self._loops[(agent, id(loop))] = (loop, row)
                     else:

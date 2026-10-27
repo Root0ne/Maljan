@@ -659,6 +659,43 @@ class TruncationMetrics:
         )
 
 
+def _questions_of(loops: list[dict[str, Any]]) -> dict[str, Any]:
+    """The questions asked after an agent's loops, summed; ``{}`` when none was asked.
+
+    Each loop row carries the questions asked after it as rows of their own
+    (``asked_after``: a validation retry, a drops question, a whole-answer
+    question that ran the agent's tool loop) and the ones asked without its
+    tools (``asked_without_tools``: the call and why). The steps and seconds
+    of the first are summed, their caps kept as the distinct list in order;
+    the second are kept whole, so a fallback is never silent.
+    """
+    asked = [
+        row for loop in loops for row in (loop.get("asked_after") or []) if isinstance(row, dict)
+    ]
+    without = [
+        dict(row)
+        for loop in loops
+        for row in (loop.get("asked_without_tools") or [])
+        if isinstance(row, dict)
+    ]
+    if not asked and not without:
+        return {}
+    caps: list[str] = []
+    for row in asked:
+        cap = row.get("cap")
+        if cap and str(cap) not in caps:
+            caps.append(str(cap))
+    out: dict[str, Any] = {
+        "asked": len(asked),
+        "steps_used": sum(int(row.get("steps_used") or 0) for row in asked),
+        "elapsed_s": round(sum(float(row.get("elapsed_s") or 0.0) for row in asked), 1),
+        "caps": caps,
+    }
+    if without:
+        out["asked_without_tools"] = without
+    return out
+
+
 def _largest_limit(rows: Any, key: str) -> float | int | None:
     """The largest of an agent's per-loop limits under ``key``, ``None`` when a loop had none.
 
@@ -1980,6 +2017,9 @@ class RunSummaryBuilder:
                     )
                     else {}
                 ),
+                # The questions asked after its loops (``asked_after``: each a
+                # loop of its own tools) and those asked without its tools, why.
+                **({"questions": questions} if (questions := _questions_of(loops)) else {}),
             }
         self._budget = out or None
         return self
