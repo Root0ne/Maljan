@@ -15,7 +15,9 @@ answered the same way:
   per technique the analysts claimed and an indicator only for a value the run
   holds verbatim; the **technique question** keeps every technique it is asked;
 * the **narrative** and each **composer section** answer the JSON object their
-  request shows, citing ids the request carries.
+  request shows, citing ids the request carries;
+* the **agreement** question finds no sentence that says otherwise and lists
+  none.
 
 A scenario turns the same script into a failure the live runs met: an answer
 cut at its cap with only thinking, an empty answer, a schema break, a long tool
@@ -111,6 +113,7 @@ _UNUSUAL_STOPS = {
     "technique_question": "refusal",
     "narrative": "pause_turn",
     "composer": "pause_turn",
+    "agreement": "pause_turn",
 }
 _STRUCTURED_ROLES = {"mediator_extract", "judge", "technique_question", "narrative", "composer"}
 
@@ -125,6 +128,7 @@ class Markers:
     judge: str
     narrative: str
     composer: str
+    agreement: str
     revision: str
     feedback: str
     no_tool_nudge: str
@@ -157,7 +161,7 @@ def markers() -> Markers:
     from maljan.agents.prompt_fragments import no_tool_call_question
     from maljan.agents.static_analyst import _extract_load_hint
     from maljan.pipeline.validation import FEEDBACK_PREAMBLE, RetryDrops, retry_drop_question
-    from maljan.reporting import composer, narrative_agent
+    from maljan.reporting import composer, narrative_agent, section_agreement
 
     keep = re.search(r"KEEP <label>: <reason>", retry_drop_question(RetryDrops()))
     if keep is None:
@@ -177,6 +181,7 @@ def markers() -> Markers:
         judge=_head(JUDGE_VERDICT_SYSTEM),
         narrative=_head(narrative_agent._SYSTEM_PROMPT),
         composer=_head(composer._SYSTEM),
+        agreement=_head(section_agreement.SYSTEM_PROMPT),
         revision=_head(_REVISION_ISR_FRAMING),
         feedback=FEEDBACK_PREAMBLE,
         no_tool_nudge=no_tool_call_question(["tool"]).split(".")[0],
@@ -276,7 +281,14 @@ def role_of(request: wire.Request) -> str:
     """The role a request is answered as, read from the request alone."""
     system = request.system
     found = markers()
-    for role in ("technique_question", "mediator_extract", "mediator", "judge", "narrative"):
+    for role in (
+        "technique_question",
+        "mediator_extract",
+        "mediator",
+        "judge",
+        "narrative",
+        "agreement",
+    ):
         if getattr(found, role) in system:
             return role
     if found.composer in system:
@@ -310,7 +322,7 @@ STAGE_ROLES: dict[str, frozenset[str]] = {
     "analysis": frozenset({"analyst"}),
     "debate": frozenset({"mediator", "mediator_extract", "revision"}),
     "verdict": frozenset({"judge", "technique_question"}),
-    "report": frozenset({"narrative", "composer"}),
+    "report": frozenset({"narrative", "composer", "agreement"}),
 }
 # How long a call of the aimed-at stage is held: longer than any deadline a
 # rehearsal sets, so the run is still in that stage when its deadline fires.
@@ -468,6 +480,12 @@ class Brain:
                 "deliberately_empty": self.deliberately_empty(section, request),
             }
             return reply
+        if role == "agreement":
+            # No sentence says otherwise: the report stands as written.
+            return wire.Reply(
+                thinking="Reading each passage against section 5 and the facts.",
+                text=json.dumps({"sentences": []}),
+            )
         return wire.Reply(text=self._previous_or(request, "No further answer."))
 
     def _mediator(self, request: wire.Request) -> wire.Reply:

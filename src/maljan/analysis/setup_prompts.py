@@ -56,6 +56,7 @@ PROMPT_CONSTANTS: dict[str, tuple[tuple[str, str], ...]] = {
     "technique questions": (("maljan.agents.judge_agent", "TECHNIQUE_QUESTION_SYSTEM"),),
     "composer": (("maljan.reporting.composer", "_SYSTEM"),),
     "questions": (("maljan.reporting.question_round", "SYSTEM_PROMPT"),),
+    "section agreement": (("maljan.reporting.section_agreement", "SYSTEM_PROMPT"),),
     "summarizer": (
         ("maljan.analysis.function_summarizer", "_SUMMARIZE_SYSTEM"),
         ("maljan.analysis.function_summarizer", "_MERGE_SYSTEM"),
@@ -93,6 +94,7 @@ PROMPT_SITES: dict[str, str | None] = {
     "maljan.reporting.composer:ReportComposer._author._turns": "composer",
     "maljan.reporting.narrative_agent:NarrativeAgent._build_prompt": "narrative",
     "maljan.reporting.question_round:build_messages": "questions",
+    "maljan.reporting.section_agreement:build_messages": "section agreement",
     "maljan.analysis.function_summarizer:FunctionSummarizer.summarize_chunk": "summarizer",
     "maljan.analysis.function_summarizer:FunctionSummarizer._merge_summaries": "summarizer",
     # A settings section's label ("system"), not a model prompt.

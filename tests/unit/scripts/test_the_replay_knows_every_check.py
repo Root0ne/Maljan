@@ -28,6 +28,7 @@ from scripts.replay.stored import read_run
 from maljan.agents import base_agent, evidence_recorder, judge_agent
 from maljan.agents.base_agent import BaseAnalyst
 from maljan.pipeline import validation
+from maljan.reporting import section_agreement
 from maljan.reporting.composer import ReportComposer
 from maljan.reporting.narrative_agent import NarrativeAgent
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -52,6 +53,11 @@ SITES: dict[str, tuple[Sequence[Callable[..., Any]], Sequence[str], Mapping[str,
         rules.COMPOSER_NOT_REPLAYED,
     ),
     "tool": ((evidence_recorder._record_tool,), rules.TOOL_CHECKS, {}),
+    "agreement": (
+        (section_agreement._ask, section_agreement._rewrite_violations),
+        (),
+        rules.AGREEMENT_NOT_REPLAYED,
+    ),
 }
 
 # The compositions the producers and the replay share, by the module each

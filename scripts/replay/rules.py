@@ -114,6 +114,28 @@ COMPOSER_NOT_REPLAYED: dict[str, str] = {
         "is not in the stored record"
     ),
 }
+# The agreement question asked once the body is written
+# (``reporting.section_agreement``): the stored report holds the passages as
+# its rewrites left them, and each sentence it rewrote or listed only as a
+# finding row (``agreement.rewritten``, ``agreement.listed``); the record keeps
+# not the answer whose rows its checks read, so none of them can be re-run.
+_AGREEMENT_ANSWER_NOT_STORED = (
+    "the agreement question's answer is not in the stored record: the stored report holds the "
+    "passages as its rewrites left them, and each rewritten or listed sentence only as a finding "
+    "row"
+)
+AGREEMENT_NOT_REPLAYED: dict[str, str] = {
+    name: _AGREEMENT_ANSWER_NOT_STORED
+    for name in (
+        "schema_violations",
+        "agreement_violations",
+        "rewrites_violations",
+        "citation_violations",
+        "wrong_entry_citations",
+        "misstated_entry_contents",
+        "ledger_absence_contradictions",
+    )
+}
 TOOL_CHECKS: tuple[str, ...] = ("self_named_arguments",)
 
 # Where each composer section's answer stands in a stored report, and how the
@@ -2437,6 +2459,7 @@ def _settings_notes(run: _Run) -> None:
         ("analysts", ANALYST_NOT_REPLAYED),
         ("judge", JUDGE_NOT_REPLAYED),
         ("composer", COMPOSER_NOT_REPLAYED),
+        ("agreement", AGREEMENT_NOT_REPLAYED),
     ):
         for check, why in missing.items():
             run.name(part, f"{check} is not replayed: {why}")

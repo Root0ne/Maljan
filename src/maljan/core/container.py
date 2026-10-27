@@ -2173,12 +2173,13 @@ class ServiceContainer:
         """Tell the spend meter the verdict and report calls this job will make.
 
         The verdict is one call on the judge's model; the report is one call
-        for each section the composer writes (when it is on) and one for the
-        narrative round, on the reporter's model. Each is planned with the
-        prompt the window accounting allows it: its model's window less its
-        output budget, from what is already known of the window (nothing is
-        asked of a server here), and ``0`` where no window is known. The meter
-        keeps what they will cost aside from the tool phases. Never raises.
+        for each section the composer writes and one for its agreement question
+        (when it is on), and one for the narrative round, on the reporter's
+        model. Each is planned with the prompt the window accounting allows
+        it: its model's window less its output budget, from what is already
+        known of the window (nothing is asked of a server here), and ``0``
+        where no window is known. The meter keeps what they will cost aside
+        from the tool phases. Never raises.
         """
         if meter is None or getattr(meter, "ceiling_usd", None) is None:
             return
@@ -2189,7 +2190,8 @@ class ServiceContainer:
             if bool(getattr(self.config.reporting, "composer_enabled", False)):
                 from maljan.reporting.composer import COMPOSED_SECTIONS
 
-                report_calls += len(COMPOSED_SECTIONS)
+                # And the agreement question asked once the sections are written.
+                report_calls += len(COMPOSED_SECTIONS) + 1
             judge_chain = assignment_chain_for(self.config, "judge", role="judge")
             reporter_chain = assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge")
             meter.plan_tail(

@@ -114,7 +114,7 @@ ROLE_GROUPS: dict[str, set[str]] = {
     "analyst": {"analyst", "revision"},
     "judge": {"judge", "technique_question"},
     "mediator": {"mediator", "mediator_extract"},
-    "reporter": {"narrative", "composer"},
+    "reporter": {"narrative", "composer", "agreement"},
 }
 
 # The report fields the report models write: the body a claim is discussed in.

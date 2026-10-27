@@ -91,6 +91,15 @@ _SECTION_KINDS: dict[str, tuple[str, ...]] = {
 }
 
 
+def reads_code(section: str) -> bool:
+    """Whether a composed section is shown a function's code: one of its kinds is code.
+
+    The introduction and the execution flow read the analysts' claims and no
+    tool output; the others read the kinds ``_SECTION_KINDS`` gives them.
+    """
+    return any(kind in _CODE for kind in _SECTION_KINDS.get(section, ()))
+
+
 def shown_to_section(section: str, output: dict[str, Any]) -> bool:
     """Whether one captured tool output belongs in a technical section's bundle.
 
