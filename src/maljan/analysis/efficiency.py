@@ -42,6 +42,13 @@ often, its tool, and whether it is a pack row (an entry the triage pack wrote,
 A read is not evidence of its own and is not counted under ``uncited`` or
 ``calls``.
 
+``ledger_reads`` is the reads the calls outside a tool loop made (the
+verdict, the technique question, the mediation's block question and the
+report's calls; ``agents.ledger_reads``): those are filed nowhere, the ledger
+being fixed by then, so they are counted here by call, with the reads that
+named no entry and the repeats refused. Present wherever such a call offered
+the read, ``reads: 0`` included.
+
 ``output`` is each agent's output in the token ledger, and of it the share its
 validation retries (a retry, and the whole answer asked for after a retry that
 could not be merged) and its drops questions took: provider-reported output
@@ -683,6 +690,11 @@ def efficiency_record(
         rows_read = rows_read_record(held)
         if rows_read is not None:
             record["rows_read"] = rows_read
+        from maljan.agents.ledger_reads import ledger_reads_record
+
+        ledger_reads = ledger_reads_record(container)
+        if ledger_reads is not None:
+            record["ledger_reads"] = ledger_reads
         output = output_record(container, tokens)
         if output is not None:
             record["output"] = output
@@ -832,6 +844,9 @@ def _lines(record: Mapping[str, Any]) -> list[str]:
     rows_read = record.get("rows_read")
     if isinstance(rows_read, Mapping):
         lines.append(_rows_read_line(rows_read))
+    ledger_reads = record.get("ledger_reads")
+    if isinstance(ledger_reads, Mapping):
+        lines.append(_ledger_reads_line(ledger_reads))
     output = record.get("output")
     if isinstance(output, Mapping):
         lines.extend(_output_lines(output))
@@ -939,6 +954,26 @@ def _output_lines(output: Mapping[str, Any]) -> list[str]:
     if not lines and output:
         lines.append("Output: no validation retry and no drops question was asked.")
     return lines
+
+
+def _ledger_reads_line(ledger_reads: Mapping[str, Any]) -> str:
+    reads = _int(ledger_reads.get("reads"))
+    head = "Entries read by id outside a tool loop (read_evidence, not filed)"
+    if not reads:
+        line = f"{head}: none"
+    else:
+        parts = [
+            f"{_c(str(call))} {_count(_int(n), 'read')}"
+            for call, n in (ledger_reads.get("by_call") or {}).items()
+        ]
+        line = f"{head}: {_count(reads, 'read')}" + (" — " + ", ".join(parts) if parts else "")
+    unfound = _int(ledger_reads.get("unfound"))
+    if unfound:
+        line += f"; {_count(unfound, 'read')} named no entry the ledger holds"
+    refused = _int(ledger_reads.get("refused"))
+    if refused:
+        line += f"; {_count(refused, 'repeated read')} refused"
+    return line + "."
 
 
 def _rows_read_line(rows_read: Mapping[str, Any]) -> str:

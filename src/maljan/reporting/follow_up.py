@@ -4,7 +4,9 @@ An analyst may ask a new question after a job has finished. It is answered by
 the report's question round (``reporting.question_round``), from the job's
 stored run alone: its evidence ledger as stored (``evidence.json``), its
 report and the run state rebuilt from both. Nothing is analysed again and no
-tool is called; the answer can only use what the run recorded, and a question
+analysis tool is called: the model may read a stored entry by its id
+(``read_evidence`` over the stored ledger, ``agents.ledger_reads``), as the
+round may during the run. The answer can only use what the run recorded, and a question
 the stored evidence cannot settle is "not determinable from this run" with the
 reason. It gets the round's checks: every id it cites must be one the run
 issued, "established" needs an entry of a call that answered, "limited
@@ -528,9 +530,14 @@ async def answer_follow_up(
     reason. ``facts_block`` is the triage pack as the reporter is shown it.
     Never raises.
     """
+    from maljan.agents.ledger_reads import LedgerReads
     from maljan.pipeline.run_state import render_run_state
     from maljan.pipeline.validation import EntryTexts
 
+    # The stored ledger, which the reporter's call may read by id, as the
+    # question round reads the run's during the run.
+    if run.ledger and reporter is not None and getattr(reporter, "ledger_reads", 0) is None:
+        reporter.ledger_reads = LedgerReads(run.ledger)
     try:
         texts = EntryTexts.from_ledger(run.ledger, None)
     except Exception as exc:  # noqa: BLE001 — the prose checks then read no entry text

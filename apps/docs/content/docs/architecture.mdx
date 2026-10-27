@@ -4090,6 +4090,55 @@ last offered. Each clear is in the agent's log and is published as
 same `read_evidence` tool, which it offers from its first turn. The code is
 `maljan.agents.tool_answer_clearing`.
 
+**The calls outside a tool loop read the ledger too.** The judge's verdict and
+its technique question, the mediation's block question, the report composer's
+sections, the narrative, the
+report's question round (and a follow-up question asked of a finished run,
+over its stored ledger) and its section agreement round each offer
+`read_evidence` from their first turn, with the same definition, beside the
+answer's schema where the call is structured; the technique question's system
+text says the tool is there. On OpenAI and Gemini a structured call that offers
+the read is sent as function calling (the schema's tool and the read, bound
+together), where the call without it uses the provider's own structured-output
+method; the schema tool's answer is parsed as that provider's function-calling
+structured output parses it. A read is answered from the run's ledger by id,
+fenced under the id of the entry that holds the answer (a repeat's id reads its
+holder), sized by the job's guardrail; an answer the byte budget blanked is read
+from the job's store of whole answers, and `offset`/`limit` page through it. A
+reply that reads is answered and the conversation sent again, each turn admitted,
+held and recorded as the call's own, until a reply makes no read: that reply is
+the call's answer, parsed, retried and published exactly as before; a reply that
+calls the schema's tool beside a read (its arguments parsed or not) is the answer
+too, kept without its reads, so the schema's call is the one parsed, salvaged and
+answered by a retry; a reply whose only read did not parse is its text alone. A
+read of an entry the platform cut states the cut under it, as an analyst's
+read-again does. An id
+the ledger does not hold is said to be none the run's ledger holds. Nothing caps
+the reads; an identical read is served twice (the second, of an entry that
+recorded a failure, with the notice the analysts' read-again gives then),
+refused after that, and three refusals end the call with the reply kept without
+its calls. A dropped socket sends the call again from its first turn, under that
+turn's admission, and the reads made before it stay counted. The one limit is
+physical: a call's wall clock (the verdict's and the technique question's wait
+sized from the model's pace for one answer, where one is set) covers all its
+turns, reads included, and a call that reads past it ends as a call that ran
+past it always did. A read is filed nowhere: the entry it reads is already on
+the ledger, and the report is built over a fixed one. The reads are counted
+instead, in `run_summary.efficiency.ledger_reads` (reads by call, the ones that
+named no entry, the repeats refused; `reads: 0` where a model bound the read and
+made none), and the efficiency block says so in a line of its own. A model that cannot bind the tool is asked in the call it
+always was, with no tool, and the run's degradation reasons say so once per
+agent. The reporter's calls share one definition, so the composer's shared
+header and the prefix its sections read from the cache are unchanged; priced
+offline on haiku7's 25 such requests with no read made, the definitions add
+about 0.003 USD to the run. The code is `maljan.agents.ledger_reads`.
+
+The mediator's own loop reads the run's ledger the same way: the debate node
+hands each round the ledger, and the loop's `read_evidence` reads an entry any
+agent filed by its id (a repeat's id its holder, paged as above), not only the
+loop's own. Such a read is filed on the judge's ledger as a repeat of the entry
+it reads, as a read of the loop's own entry is, so no second citable id exists.
+
 **An answer wider than the prompt allows.** Before any of that, a tool result
 over that limit meets the output guardrail, which
 now has three outcomes rather than two. A JSON object is **shortened as a

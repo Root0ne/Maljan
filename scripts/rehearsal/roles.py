@@ -295,7 +295,7 @@ def role_of(request: wire.Request) -> str:
         return "composer"
     if found.revision in system:
         return "revision"
-    if request.tools or "CLAIM:" in request.all_text:
+    if _answer_tools(request) or "CLAIM:" in request.all_text:
         return "analyst"
     return "other"
 
@@ -387,7 +387,7 @@ class Brain:
         if request.api not in SCENARIO_WIRES.get(self.scenario, {request.api}):
             return ""
         if self.scenario == "prose_instead_of_tool" and not (
-            role in _STRUCTURED_ROLES and len(request.tools) == 1
+            role in _STRUCTURED_ROLES and len(_answer_tools(request)) == 1
         ):
             return ""
         if self.scenario == "stream_error" and not request.stream:
@@ -883,24 +883,36 @@ def _thinks_first(role: str, request: wire.Request) -> bool:
     return role == "composer" and request.api == "anthropic"
 
 
+def _answer_tools(request: wire.Request) -> list[dict[str, Any]]:
+    """The tools a request offers for its answer: all but the read of a ledger entry by id.
+
+    A call outside a tool loop offers that read beside whatever it offered
+    before (``agents.ledger_reads``); it is never the answer's schema.
+    """
+    from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+
+    return [tool for tool in request.tools if tool.get("name") != READ_EVIDENCE_TOOL]
+
+
 def _as_schema_call(request: wire.Request, text: str, thinking: str = "") -> wire.Reply:
     """``text`` as the reply, or as a call of the one schema tool the request offers.
 
     A provider that asks for structured output offers the answer's schema as
-    its only tool and reads the call's input as the answer; any other request
-    reads the text.
+    its only answer tool and reads the call's input as the answer; any other
+    request reads the text.
     """
-    if len(request.tools) == 1:
+    offered = _answer_tools(request)
+    if len(offered) == 1:
         try:
             args = json.loads(text)
         except ValueError:
             args = None
         if isinstance(args, dict):
-            name = str(request.tools[0].get("name") or "")
+            name = str(offered[0].get("name") or "")
             return wire.Reply(thinking=thinking, tool_calls=[wire.ToolCall(name=name, args=args)])
         if isinstance(args, list):
-            name = str(request.tools[0].get("name") or "")
-            schema = request.tools[0].get("schema") or {}
+            name = str(offered[0].get("name") or "")
+            schema = offered[0].get("schema") or {}
             key = next(iter(schema.get("properties") or {"items": None}))
             return wire.Reply(
                 thinking=thinking, tool_calls=[wire.ToolCall(name=name, args={key: args})]

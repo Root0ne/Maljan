@@ -375,7 +375,7 @@ class TestAnAnswerThatIsNotABundle:
 
         feedback = str(llm.calls[1][-1].content)
         assert "verdict.not_json" in feedback
-        assert "Return the JSON bundle only, no tool calls, no prose." in feedback
+        assert "Your answer is the JSON bundle alone, with no prose around it." in feedback
 
     @pytest.mark.asyncio
     async def test_garbage_twice_falls_back_and_says_so(self) -> None:

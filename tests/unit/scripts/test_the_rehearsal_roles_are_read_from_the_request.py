@@ -40,6 +40,7 @@ from maljan.agents.judge_agent import (
 )
 from maljan.agents.prompt_fragments import no_tool_call_question
 from maljan.agents.static_analyst import _extract_load_hint
+from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
 from maljan.pipeline.validation import FEEDBACK_PREAMBLE, RetryDrops, retry_drop_question
 from maljan.reporting import composer, narrative_agent
 
@@ -376,3 +377,17 @@ class TestTheJudgeAndTheReport:
             ("NarrativeOutput", {"executive_summary": "s"})
         ]
         assert _as_schema_call(_request("x", "y"), '{"a": 1}').text == '{"a": 1}'
+
+    def test_the_read_offered_beside_a_schema_is_never_taken_for_it(self) -> None:
+        tool = {"name": "NarrativeOutput", "description": "", "schema": {"properties": {}}}
+        read = {"name": READ_EVIDENCE_TOOL, "description": "", "schema": {"properties": {}}}
+        reply = _as_schema_call(
+            _request("x", "y", tools=[tool, read]), '{"executive_summary": "s"}'
+        )
+        assert [c.name for c in reply.tool_calls] == ["NarrativeOutput"]
+        alone = _as_schema_call(_request("x", "y", tools=[read]), '{"a": 1}')
+        assert alone.text == '{"a": 1}' and not alone.tool_calls
+
+    def test_a_call_offering_only_the_read_is_no_analyst(self) -> None:
+        read = {"name": READ_EVIDENCE_TOOL, "description": "", "schema": {"properties": {}}}
+        assert role_of(_request("A prompt nobody wrote.", "hello", tools=[read])) == "other"
