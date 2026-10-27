@@ -483,5 +483,5 @@ class TestAQuestionAfterAUserTurn:
         _assert_the_shape_every_template_takes(request)
         assert [m.type for m in request] == ["system", "human"]
         assert str(request[-1].content).startswith(
-            "Expert Reports: x\n\nDo NOT call any more tools."
+            "Expert Reports: x\n\nYour tool loop has ended, so this turn carries no tools."
         )

@@ -632,7 +632,9 @@ a paid model call after the sample was accepted.
 So `POST /api/v1/jobs` asks first, in the same place as the model gate and
 with the same 422 (`apps/api/app/services/provider_readiness.py`). Every agent
 the chosen team can run — its stages' agents and every agent they can ask —
-that opens a static provider is resolved to the provider it would open, as the
+that opens a static provider (the agents only the mediator may ask are not
+among them: an ask of one whose provider is not ready is a failed call on the
+ledger, not a refused job) is resolved to the provider it would open, as the
 run resolves it: the team's forced provider, the definition's own
 `static_provider`, the job's `static_provider`, or `core.static.provider`.
 Each distinct provider that does not degrade is asked whether it is ready:
@@ -2100,13 +2102,14 @@ declines.
 run: the `static` and `network` analysts, the judge, and the seeded `triage`,
 `android_static` and `reverser` agents. Their prompts say what to do with an
 answer — look the hash up once, cite it like any other tool result, and treat
-a reputation label as one source rather than as the verdict. The judge opens
-its own tool loop when it holds a reputation server (`virustotal` or
-`threatintel`) and no entry in the run's evidence ledger came from one, so the
-identity question is asked once even on a run nobody disagreed about. What
-decides it is the ledger rather than the analysts' prose: a sentence saying no
-family could be determined is what an analyst writes when it consulted
-nothing. A disabled server contributes no tools and no
+a reputation label as one source rather than as the verdict. The mediator
+runs its tool loop every round; when it holds a reputation server (`virustotal`
+or `threatintel`) and no entry in the run's evidence ledger came from one, its
+prompt also says no analyst has consulted one and asks it to look the sample up
+once, so the identity question is put even on a run nobody disagreed about.
+What decides that sentence is the ledger rather than the analysts' prose: a
+sentence saying no family could be determined is what an analyst writes when
+it consulted nothing. A disabled server contributes no tools and no
 degradation reason, so every one of those references costs nothing until the
 server is registered.
 

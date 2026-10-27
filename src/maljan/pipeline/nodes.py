@@ -1273,11 +1273,7 @@ def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
     # The same three choices, kept on the agent for the agents it may ask: a
     # callee's tools open the mirror its own provider was given, which the
     # caller's pinned path cannot say. See ``agents.delegation``.
-    agent.sample_path_choices = {
-        "by_provider": dict(state.get("static_sample_paths") or {}),
-        "static": state.get("static_sample_path") or None,
-        "host": _absolute_host_sample_path(state) or None,
-    }
+    agent.sample_path_choices = _sample_path_choices(state)
     # The worker's own copy, for the static role's family classifier, which
     # reads the bytes on this host. Kept off the chunk the model reads.
     agent._host_sample_path = state.get("sample_path") or None
@@ -1291,6 +1287,32 @@ def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
     from maljan.agents.composition import pin_provider_sample
 
     pin_provider_sample(agent, state.get("static_sample_paths") or {})
+
+
+def _sample_path_choices(state: AnalysisState) -> dict[str, Any]:
+    """The sample's paths an ask chooses its callee's from: per provider, the mirror, the host's."""
+    return {
+        "by_provider": dict(state.get("static_sample_paths") or {}),
+        "static": state.get("static_sample_path") or None,
+        "host": _absolute_host_sample_path(state) or None,
+    }
+
+
+def brief_the_mediator(judge: Any, state: AnalysisState, container: Any, round_index: int) -> None:
+    """Hand the mediator what an ask it makes hands on: the pack, the run state, the paths.
+
+    The judge asks the agents its definition names (``agents.delegation``),
+    and a callee is briefed from its caller as a stage briefs an analyst: the
+    same standing blocks, the ids it may cite and the sample's paths, chosen
+    for the callee's own provider from the choices kept here. Assigned
+    unconditionally, as an analyst's are: the judge is cached for the job and
+    a block from an earlier round is worse than the current one.
+    """
+    brief_agent(judge, state, container)
+    choices = _sample_path_choices(state)
+    judge.sample_path_choices = choices
+    judge._analysis_file_path = choices["static"] or choices["host"]
+    judge.current_round = int(round_index)
 
 
 def _augment_static_chunks_with_path(
@@ -5127,6 +5149,21 @@ def make_negotiation_node(
                 logger.debug("evidence ledger read skipped for the judges: %s", exc)
                 return []
 
+        def _asked_validation() -> dict[str, Any]:
+            """What the checks told the agents the mediator asked, under the judge's name.
+
+            As a lead's asks are drained under the lead's: the rows name each
+            asked agent in their route. Drained however the mediation ended.
+            """
+            try:
+                mediator = container.get_judge_agent(role="expert")
+            except Exception as exc:  # noqa: BLE001 — a record is never worth a lost round
+                logger.debug("validation read skipped for the mediator: %s", exc)
+                return {}
+            return _validation_update(
+                mediator, str(getattr(mediator, "name", "") or JUDGE_AGENT_KEY)
+            )
+
         # Two descriptions of one failure, and the difference is who reads
         # them. The log gets the message — that is the operator's line, on the
         # operator's host. The event gets the type and nothing else: it is
@@ -5140,6 +5177,7 @@ def make_negotiation_node(
             # Mediation is this debate stage's work, so the tool calls it makes
             # are recorded against it rather than against "analysis".
             judge.pipeline_stage = stage.key if stage is not None else "analysis"
+            brief_the_mediator(judge, state, container, iteration)
             # Mediation runs on the shared agent loop, not this one. The openai
             # SDK's httpx pool is process-wide and bound to whichever loop first
             # awaited it — always the agent loop, because the analysts ran
@@ -5355,6 +5393,7 @@ def make_negotiation_node(
                 # this is where those calls have to leave the agent.
                 "evidence_ledger": _judge_evidence(),
                 **_judge_budget(container),
+                **_asked_validation(),
                 **_debate_record(stage, started),
             }
         except Exception as e:  # noqa: BLE001 — per-run fault-isolation boundary
@@ -5418,6 +5457,7 @@ def make_negotiation_node(
                 # A mediation that timed out still made the calls it made.
                 "evidence_ledger": _judge_evidence(),
                 **_judge_budget(container),
+                **_asked_validation(),
                 **_debate_record(stage, started, reason=f"mediation {label}"),
             }
 
@@ -8296,7 +8336,7 @@ def make_report_node(
             from maljan.analysis.efficiency import efficiency_record
 
             # The judge's and the mediator's servers as their settings declare
-            # them, where the run never bound them (a fast path): never attached
+            # them, where the run never bound them (the verdict's): never attached
             # for the fingerprint.
             _judge_setup = getattr(type(container), "note_judge_declared_setup", None)
             if callable(_judge_setup):

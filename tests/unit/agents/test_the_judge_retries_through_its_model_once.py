@@ -62,25 +62,25 @@ def _model(script: list[Any]) -> Any:
     return with_transient_retries(_Scripted)(script=list(script), asked=[])
 
 
-class TestTheMediatorsReAsk:
+class TestTheMediatorsCallWithNoTools:
+    """The call a mediation makes when nothing attached, and makes again for an empty answer."""
+
     def test_a_5xx_there_is_attempted_the_policy_s_number_of_times(self) -> None:
         model = _model([])
         judge = JudgeAgent(llm=model)
 
-        answer, bound, why = asyncio.run(judge._ask_mediation_again([HumanMessage("x")], None))
+        with pytest.raises(openai.APIStatusError):
+            asyncio.run(judge.execute_tool_loop([("human", "x")]))
 
-        assert answer is None and bound is None
-        assert "failed" in why
         assert len(model.asked) == DEFAULT_ATTEMPTS
 
     def test_a_5xx_then_an_answer_is_the_answer(self) -> None:
         model = _model([_status(503), "CONTRADICTIONS: NONE"])
         judge = JudgeAgent(llm=model)
 
-        answer, _bound, why = asyncio.run(judge._ask_mediation_again([HumanMessage("x")], None))
+        answer = asyncio.run(judge.execute_tool_loop([("human", "x")]))
 
-        assert answer.content == "CONTRADICTIONS: NONE"
-        assert why == ""
+        assert answer == "CONTRADICTIONS: NONE"
         assert len(model.asked) == 2
 
 
@@ -101,7 +101,7 @@ class TestNoJudgeCallIsWrappedAgain:
 class TestARetryNamesTheCallItRetried:
     """The judge and the mediator are both filed under ``judge``: the row says which call."""
 
-    def test_the_re_ask_s_retries_name_it(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_the_no_tools_call_s_retries_name_it(self, caplog: pytest.LogCaptureFixture) -> None:
         from maljan.core.token_ledger import TokenLedger
         from maljan.llm.transient import attach_retry_recorder
 
@@ -112,11 +112,11 @@ class TestARetryNamesTheCallItRetried:
         judge = JudgeAgent(llm=model)
 
         with caplog.at_level("WARNING"):
-            asyncio.run(judge._ask_mediation_again([HumanMessage("x")], None))
+            asyncio.run(judge.execute_tool_loop([("human", "x")]))
 
         (row,) = ledger.snapshot()["retries"]
-        assert row["reason"].startswith("Mediator asked once more")
-        assert any("Mediator asked once more" in record.getMessage() for record in caplog.records)
+        assert row["reason"].startswith("Judge no-tools path")
+        assert any("Judge no-tools path" in record.getMessage() for record in caplog.records)
 
     def test_the_verdict_s_retries_name_it(self) -> None:
         from maljan.core.token_ledger import TokenLedger

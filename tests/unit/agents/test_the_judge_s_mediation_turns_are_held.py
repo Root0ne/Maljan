@@ -47,7 +47,8 @@ class _Judge(BaseChatModel):
         self.caps.append(kwargs.get("max_tokens"))
         asked = any(isinstance(m, AIMessage) and m.tool_calls for m in messages)
         if asked or (
-            isinstance(messages[-1], HumanMessage) and "Do NOT call" in str(messages[-1].content)
+            isinstance(messages[-1], HumanMessage)
+            and "this turn carries no tools" in str(messages[-1].content)
         ):
             turn = AIMessage(content="agreement 0.5", usage_metadata=USAGE)
         else:

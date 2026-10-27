@@ -351,7 +351,7 @@ def test_editing_a_sentence_a_builder_writes_moves_its_part(
     before = _record(_container())
     edits = [
         (narrative_agent, "rule_pointer", lambda report=None: "a reworded pointer", "narrative"),
-        (judge_agent, "MEDIATOR_TI_TOOLS", "Reworded.\n", "mediator"),
+        (judge_agent, "MEDIATOR_LOOKUP_ONCE", "Reworded.\n", "mediator"),
         (base_agent, "_REVISION_ISR_FRAMING", "Reworded.", "revision:static"),
         (prompt_fragments, "_ARCHIVE_FRAGMENT", "Reworded.", "format fragments"),
     ]

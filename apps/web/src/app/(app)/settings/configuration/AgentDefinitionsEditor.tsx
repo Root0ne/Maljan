@@ -87,6 +87,9 @@ const ROLE_CHOICES: AgentDefinitionEntry["role"][] = [
  *  reporter are not analysts and the settings model refuses a reference to
  *  either. */
 const ASKABLE_ROLES = new Set(["static", "dynamic", "network", "generic", "lead"]);
+/** The roles that may ask: every askable one, and the judge, whose mediation
+ *  may ask the agents that read the code. The reporter asks no one. */
+const ASKING_ROLES = new Set(["static", "dynamic", "network", "generic", "lead", "judge"]);
 
 /**
  * One entry of `llm.agents`, mirroring `maljan.core.config.AgentLLMConfig`.
@@ -419,9 +422,9 @@ export function AgentDetail({
   /** The agents this one may be given as tools: every other analyst-role
    *  definition, whether or not it is enabled — a disabled one is refused at
    *  run time by name rather than silently missing from the list. Empty for a
-   *  judge or a reporter, whose references the API always refuses, so the
-   *  group is not offered where ticking a row is a guaranteed save error. */
-  const askable = ASKABLE_ROLES.has(definitions[agentKey]?.role)
+   *  reporter, whose references the API always refuses, so the group is not
+   *  offered where ticking a row is a guaranteed save error. */
+  const askable = ASKING_ROLES.has(definitions[agentKey]?.role)
     ? Object.entries(definitions)
         .filter(([key, d]) => key !== agentKey && ASKABLE_ROLES.has(d.role))
         .map(([key]) => key)

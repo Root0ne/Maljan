@@ -184,10 +184,16 @@ class TestTheMediatorTrigger:
 
         assert self._run_mediate(judge, {"static": _isr()}, False) == ["tools"]
 
-    def test_the_fast_path_is_kept_once_one_was_called(self) -> None:
+    def test_the_loop_runs_once_one_was_called_too(self) -> None:
+        # No fast path is left: whether to call anything is the mediator's.
         judge = self._mediator([ToolRef(kind="mcp", server=SERVER_KEY)], "")
 
-        assert self._run_mediate(judge, {"static": _isr()}, True) == ["fast"]
+        assert self._run_mediate(judge, {"static": _isr()}, True) == ["tools"]
+
+    def test_a_round_with_no_dissent_and_nothing_to_look_up_runs_the_loop(self) -> None:
+        judge = self._mediator([], "")
+
+        assert self._run_mediate(judge, {"static": _isr()}, True) == ["tools"]
 
     def test_prose_about_a_family_does_not_close_it(self) -> None:
         judge = self._mediator([ToolRef(kind="mcp", server=SERVER_KEY)], "")

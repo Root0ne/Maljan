@@ -556,17 +556,19 @@ def profile_static_providers(container: Any) -> list[str]:
     ``provider`` tool reference opens Ghidra too, and without a mirror for
     Ghidra its ``load_program`` is handed a path the container cannot see.
     The agents a lead can ask count as well, since they run under the same
-    job and open their own providers.
+    job and open their own providers, and so do the agents the judge's
+    definition lets the mediator ask.
     """
     from maljan.agents.composition import (
         reachable_agents,
         reads_static_provider,
         static_provider_id_for,
     )
+    from maljan.core.config import JUDGE_AGENT_KEY
 
     settings = container.config
     ids = [str(settings.static.provider)]
-    for key in reachable_agents(settings, container.analyst_keys()):
+    for key in reachable_agents(settings, [*container.analyst_keys(), JUDGE_AGENT_KEY]):
         if not reads_static_provider(settings.agents.definitions.get(key)):
             continue
         provider_id = static_provider_id_for(settings, key)

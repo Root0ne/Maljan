@@ -95,7 +95,9 @@ class _Server(BaseChatModel):
 
 
 def _told_to_stop(sent: list[BaseMessage]) -> bool:
-    return isinstance(sent[-1], HumanMessage) and "Do NOT call any more tools" in str(
+    from maljan.agents.judge_agent import MEDIATION_SALVAGE_QUESTION
+
+    return isinstance(sent[-1], HumanMessage) and MEDIATION_SALVAGE_QUESTION in str(
         sent[-1].content
     )
 

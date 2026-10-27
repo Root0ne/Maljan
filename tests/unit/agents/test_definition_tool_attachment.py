@@ -277,7 +277,10 @@ class TestTheJudge:
 
         await judge._initialize_mcp_client()
 
-        assert sorted(t.name for t in judge.tools) == ["attck_lookup", "check_ip_reputation"]
+        # Its servers', beside the in-process sandbox and ask tools its seed
+        # names (T-415d).
+        served = [t.name for t in judge.tools if not t.name.startswith(("sandbox_", "ask_"))]
+        assert sorted(served) == ["attck_lookup", "check_ip_reputation"]
 
     @pytest.mark.asyncio
     async def test_the_measurement_profile_leaves_the_judge_tool_free(self) -> None:

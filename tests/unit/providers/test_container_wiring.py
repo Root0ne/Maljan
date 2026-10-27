@@ -68,6 +68,20 @@ async def test_aclose_closes_the_registry_only_when_one_was_built():
 # The threat-intel lookups, each withheld by its host without its service's key.
 LOOKUPS = ("check_domain_reputation", "check_hash", "check_ip_reputation")
 INTEL_KEYS = ("VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY")
+# The sandbox report's views, in the order the in-process tools are built.
+SANDBOX_VIEWS = (
+    "report_section",
+    "processes",
+    "network",
+    "signatures",
+    "dropped_files",
+    "registry_ops",
+    "api_calls",
+    "mutexes",
+    "services_and_tasks",
+    "channels",
+    "items",
+)
 
 
 @pytest.mark.asyncio
@@ -143,7 +157,16 @@ async def test_the_judge_agent_the_container_hands_out_can_reach_the_registry(mo
                 if (key, name) in withheld:
                     continue
                 expected.append(f"{key}__{name}" if name in expected else name)
-        assert sorted(t.name for t in judge.tools) == sorted(expected)
+        # Ahead of the servers' tools, the in-process half of the judge's seed
+        # (T-415d): the job's sandbox report tools and one ask per agent it
+        # names. Nothing else: no server's tool arrives a second time this way.
+        in_process = [
+            *(f"sandbox_{name}" for name in SANDBOX_VIEWS),
+            "ask_reverser",
+            "ask_static",
+        ]
+        assert [t.name for t in judge.tools][: len(in_process)] == in_process
+        assert sorted(t.name for t in judge.tools[len(in_process) :]) == sorted(expected)
         if keys:
             assert withheld == set(), reasons
         else:

@@ -1255,6 +1255,11 @@ WRITES_THE_LIST: dict[tuple[str, str], str] = {
     # A callee's own drained rows, each rebuilt as a Violation naming the
     # callee. Walked source too, and vouched for by name in ``OWNED_IN``.
     ("agents/delegation.py", "_hand_over_the_record"): "a callee's rows, rebuilt",
+    # The judge holds the same list for the agents its mediation asks
+    # (T-415d): created empty and emptied by its drain, filled only by
+    # ``_hand_over_the_record`` above.
+    ("agents/judge_agent.py", "__init__"): "the list is created here",
+    ("agents/judge_agent.py", "drain_validation_findings"): "the drain empties it",
 }
 
 

@@ -2524,12 +2524,17 @@ def roster_payload(
                 entry["stages"].append(key)
 
     # The specialists, breadth first from the agents the stages named, so a
-    # callee reached from two callers is listed once with both of them.
+    # callee reached from two callers is listed once with both of them. The
+    # judge asks only while it mediates, so its asks count only in a team
+    # with a debate stage.
+    mediated = any(str(item["kind"]) == "debate" for item in stages_out)
     named_by_a_stage = set(agents_out)
     frontier = list(agents_out)
     for _hop in range(max(0, int(depth))):
         next_frontier: list[str] = []
         for caller in frontier:
+            if str(field(definition_map.get(caller), "role", "") or "") == "judge" and not mediated:
+                continue
             for callee in _asks_of(definition_map.get(caller)):
                 definition = definition_map.get(callee)
                 if definition is None or field(definition, "enabled", True) is False:

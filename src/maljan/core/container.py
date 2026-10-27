@@ -731,8 +731,8 @@ class ServiceContainer:
         # The job's setup as each agent was resolved: the resolution itself,
         # and the name and version every tool server attached by then gave for
         # itself. What the run fingerprint is made of (``analysis.efficiency``),
-        # so nothing a run does later — a retry, a revision, a clear, the
-        # mediator's fast path — moves it.
+        # so nothing a run does later — a retry, a revision, a clear, a
+        # mediation's tool call — moves it.
         self._resolved_agents: dict[str, Any] = {}
         self._setup_servers: dict[str, dict[str, str]] = {}
         # The tools each agent was set up with, by its key: an analyst's as it
@@ -1411,8 +1411,8 @@ class ServiceContainer:
         """The judge's and the mediator's servers from their settings, where the run bound none.
 
         No server is attached for the fingerprint, and no agent is built: an
-        agent that never bound its role's servers in this run (a mediation
-        that took its fast path) is recorded by what the settings declare for
+        agent that never bound its role's servers in this run (the verdict's,
+        which runs no tool loop) is recorded by what the settings declare for
         each server the ``judge`` role and definition bind — digests of its
         launch identity with this host's paths replaced and of its tool filter
         (``efficiency.declared_server``), never the values — marked not

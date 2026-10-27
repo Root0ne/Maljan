@@ -142,7 +142,10 @@ class TestABuiltInRole:
         judge = JudgeAgent(llm=MagicMock(), config=container.config)
         judge._container = container
         await judge._initialize_mcp_client()
-        answers = {t.name: str(await t.ainvoke({})) for t in judge.tools}
+        # The servers' tools; the judge's in-process sandbox and ask tools
+        # (T-415d) take arguments of their own and claim no server's name.
+        wanted = ("attck_lookup", "kit__attck_lookup")
+        answers = {t.name: str(await t.ainvoke({})) for t in judge.tools if t.name in wanted}
         assert answers["attck_lookup"] == "knowledge"
         assert answers["kit__attck_lookup"] == "kit"
 

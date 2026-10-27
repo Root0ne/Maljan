@@ -82,14 +82,13 @@ def test_a_refused_mediation_request_is_cleared_and_sent_again() -> None:
     assert cleared and all(e["why"] == tac.CLEARED_FOR_REFUSAL for e in cleared)
 
 
-def test_read_evidence_is_offered_from_the_first_clear_and_never_before() -> None:
+def test_read_evidence_is_offered_from_the_first_turn() -> None:
+    # Whether to read an answer again is the model's from the loop's first
+    # request (T-415d), not only once a clear made it necessary.
     model, _container, _answer = _run(refuse_over=50_000)
 
     offered = [tools for _sent, tools in model.seen]
-    first = next(i for i, tools in enumerate(offered) if tac.READ_EVIDENCE_TOOL in tools)
-    assert first > 0
-    assert all(tools == ["lookup"] for tools in offered[:first])
-    assert all(tac.READ_EVIDENCE_TOOL in tools for tools in offered[first:])
+    assert offered and all(tools == ["lookup", tac.READ_EVIDENCE_TOOL] for tools in offered)
 
 
 def test_a_loop_that_fits_sends_what_it_always_sent() -> None:
@@ -97,7 +96,7 @@ def test_a_loop_that_fits_sends_what_it_always_sent() -> None:
 
     assert not model.refused
     assert not _cleared(container)
-    assert all(tools == ["lookup"] for _sent, tools in model.seen)
+    assert all(tools == ["lookup", tac.READ_EVIDENCE_TOOL] for _sent, tools in model.seen)
     # Every request carries the answers whole, none a reference.
     last, _tools = model.seen[-1]
     answers = [m for m in last if m.type == "tool"]

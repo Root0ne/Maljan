@@ -57,7 +57,7 @@ never bound the judge's servers, digests of those servers' declared settings
 the fingerprint; the name and version each tool server attached by then gave
 for itself; and the settings
 the run ran with, masked as the stored snapshot masks them. A retry, a
-revision round, a cleared tool answer or the mediator's fast path does not
+revision round, a cleared tool answer or a mediation's tool call does not
 move it, nor does the sample, whose values are never in a rendered prompt;
 editing any built-in prompt, or any sentence a builder writes, does. Each of
 the four is hashed on its own (``components``), and each per prompt, agent,

@@ -224,12 +224,12 @@ class TestTheMediatorRecordsNoAnswer:
         assert consensus is True
         extract.assert_called_once()
 
-    def test_a_tool_loop_that_wrote_nothing_is_no_answer(self) -> None:
+    def test_a_tool_loop_that_wrote_nothing_is_run_once_more_then_no_answer(self) -> None:
         judge = JudgeAgent(llm=MagicMock())
+        loop = AsyncMock(return_value="")
         with (
-            patch.object(judge, "_has_explicit_dissent", return_value=True),
             patch.object(judge, "_initialize_mcp_client", AsyncMock()),
-            patch.object(judge, "execute_tool_loop", AsyncMock(return_value="")),
+            patch.object(judge, "execute_tool_loop", loop),
         ):
             argument, consensus = asyncio.run(
                 judge.mediate(
@@ -239,9 +239,11 @@ class TestTheMediatorRecordsNoAnswer:
 
         assert consensus is None
         assert argument.status == MEDIATOR_NO_ANSWER
-        # The loop has its own nudge and salvage; it is not run a second time.
+        # Every mediation is a loop now, and an empty answer the cap did not
+        # cut is asked once more, as the single call used to be.
+        assert loop.await_count == 2
         assert argument.note == mediator_no_answer_note(
-            "the answer was empty; the tool loop was not run again"
+            "the answer was empty; asked once more, the answer was empty again"
         )
 
     def test_a_tool_loop_that_ended_without_an_answer_says_how_it_ended(self) -> None:
@@ -252,7 +254,6 @@ class TestTheMediatorRecordsNoAnswer:
             return ""
 
         with (
-            patch.object(judge, "_has_explicit_dissent", return_value=True),
             patch.object(judge, "_initialize_mcp_client", AsyncMock()),
             patch.object(judge, "execute_tool_loop", side_effect=_stopped),
         ):
@@ -423,7 +424,7 @@ class TestTheRoundIsNotMediated:
         ):
             asyncio.run(make_negotiation_node(container)(CLAIMING_STATE))
 
-        # The fast call, its second ask, the block question and the extraction.
+        # The tool loop, its second run, the block question and the extraction.
         assert MEDIATION_CALL_SPANS == 4
         assert caps == [100 * MEDIATION_CALL_SPANS + 30]
 

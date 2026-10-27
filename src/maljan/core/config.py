@@ -23,7 +23,7 @@ import contextvars
 import logging
 import re
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date as _date
 from typing import Annotated, Any, Literal, NoReturn
@@ -2342,24 +2342,44 @@ FORMER_SEED_TOOLS: dict[str, dict[str, Any]] = {
 }
 
 
-def _is_a_former_seed_tool_list(key: str, tools: Any) -> bool:
-    """Whether ``tools`` is built-in ``key``'s seed list as an earlier release wrote it."""
-    seed = _builtin_definitions().get(key)
-    if seed is None or not isinstance(tools, list) or len(tools) != len(seed.tools):
-        return False
-    former = [
+# A built-in's whole seed list as an earlier release wrote it, where a release
+# added to the list rather than renaming one reference: the judge's before it
+# could ask the reverser and the static analyst and read the sandbox report.
+# Each is also read with ``FORMER_SEED_TOOLS`` in place of a capability.
+def former_seed_tool_lists() -> dict[str, tuple[tuple[ToolRef, ...], ...]]:
+    """Per built-in key, the whole seed lists earlier releases wrote for it."""
+    return {
+        JUDGE_AGENT_KEY: ((ToolRef(kind="mcp", server="knowledge"), _reputation_ref()),),
+    }
+
+
+def _with_former_capabilities(refs: Sequence[ToolRef]) -> list[dict[str, Any]]:
+    """``refs`` dumped with each capability reference written as an earlier release wrote it."""
+    return [
         FORMER_SEED_TOOLS.get(f"capability:{ref.capability}", ref.model_dump())
         if ref.kind == "capability"
         else ref.model_dump()
-        for ref in seed.tools
+        for ref in refs
     ]
-    if former == [ref.model_dump() for ref in seed.tools]:
+
+
+def _is_a_former_seed_tool_list(key: str, tools: Any) -> bool:
+    """Whether ``tools`` is built-in ``key``'s seed list as an earlier release wrote it."""
+    seed = _builtin_definitions().get(key)
+    if seed is None or not isinstance(tools, list):
+        return False
+    current = [ref.model_dump() for ref in seed.tools]
+    formers: list[list[dict[str, Any]]] = [_with_former_capabilities(seed.tools)]
+    for listed in former_seed_tool_lists().get(key, ()):
+        formers += [[ref.model_dump() for ref in listed], _with_former_capabilities(listed)]
+    formers = [former for former in formers if former != current]
+    if not any(len(former) == len(tools) for former in formers):
         return False
     try:
         stored = [ToolRef.model_validate(ref).model_dump() for ref in tools]
     except ValueError:
         return False
-    return stored == former
+    return stored in formers
 
 
 def as_stored_builtin(key: str, entry: dict[str, Any]) -> dict[str, Any]:
@@ -2367,7 +2387,8 @@ def as_stored_builtin(key: str, entry: dict[str, Any]) -> dict[str, Any]:
 
     Three things read as not set, so the seed's own value applies: an empty
     tool list (``_without_the_empty_builtin_tool_list``), the seed's tool list
-    as an earlier release wrote it (``FORMER_SEED_TOOLS``) and a prompt the
+    as an earlier release wrote it (``FORMER_SEED_TOOLS``,
+    ``former_seed_tool_lists``) and a prompt the
     seed itself shipped with in an earlier release
     (``FORMER_SEED_PROMPT_DIGESTS``).
     Every place that compares a stored built-in with its seed reads it
@@ -3283,12 +3304,19 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
                 _reputation_ref(),
             ],
         ),
+        # The judge asks the reverser and the static analyst, and reads the
+        # sandbox report, when a disagreement it mediates turns on code or on
+        # what the sample did: the answer comes back as evidence, and the
+        # judge still decides.
         JUDGE_AGENT_KEY: AgentDefinition(
             role="judge",
             label="Judge",
             tools=[
                 ToolRef(kind="mcp", server="knowledge"),
                 _reputation_ref(),
+                ToolRef(kind="sandbox"),
+                ToolRef(kind="agent", agent="reverser"),
+                ToolRef(kind="agent", agent="static"),
             ],
         ),
         REPORTER_AGENT_KEY: AgentDefinition(
@@ -3594,14 +3622,16 @@ def agent_reference_problems(
     Shared by the settings model and the API's definition editor so the two
     refuse the same things in the same words. A reference to an agent that is
     not there, to the definition itself, to the judge or the reporter, and a
-    reference on the judge or the reporter are all refused here; whether the
-    named agent is enabled is a runtime question, answered by the ask itself,
+    reference on the reporter are all refused here; the judge may ask, so a
+    mediation can settle a dispute about code with the agent that reads it.
+    Whether the named agent is enabled is a runtime question, answered by the
+    ask itself,
     because a built-in profile may keep a disabled member while another
     profile runs.
     """
     problems: list[str] = []
     refs = [ref for ref in definition.tools if ref.kind == "agent"]
-    if refs and definition.role in ("judge", "report"):
+    if refs and definition.role == "report":
         problems.append(f"a {definition.role} definition cannot ask other agents")
     seen: set[str] = set()
     for ref in refs:

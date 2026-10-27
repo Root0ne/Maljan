@@ -358,8 +358,10 @@ class TestJudgeToolCallsAreCitable:
         async def _astream(payload, config=None, stream_mode="values"):
             # The executor is the seam the loop calls the tool through; the
             # recorder wraps whichever tools it is handed.
+            # ``read_evidence`` is offered beside it from the first turn.
             for wrapped in captured[0]:
-                wrapped.invoke({"indicator": "c2.evil.tld"})
+                if wrapped.name == "reputation":
+                    wrapped.invoke({"indicator": "c2.evil.tld"})
             yield {"messages": [AIMessage(content="Verdict: Malware.")]}
 
         captured: list = []

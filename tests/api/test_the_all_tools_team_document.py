@@ -282,7 +282,9 @@ class TestTheDocument:
             for key in reachable_agents(settings, named)
             if reads_static_provider(settings.agents.definitions.get(key))
         }
-        assert opens == {"static", "all_tools_static_r2", "all_tools_reverser_ghidra"}
+        # The team holds a debate, so the seeded reverser the mediator may ask
+        # opens its provider too (T-415d).
+        assert opens == {"static", "all_tools_static_r2", "all_tools_reverser_ghidra", "reverser"}
 
 
 class TestEveryAgentResolves:
@@ -340,7 +342,9 @@ class TestEveryAgentResolves:
             ("triage", {"analysis", "knowledge", "virustotal"}),
             ("network", {"network", "knowledge", "virustotal"}),
             ("dynamic", {"sandbox", "knowledge"}),
-            ("judge", {"knowledge", "virustotal", "threatintel"}),
+            # The judge's sandbox report tools and its asks of the reverser
+            # and the static analyst (T-415d).
+            ("judge", {"knowledge", "virustotal", "threatintel", "sandbox", "ask"}),
         ],
     )
     def test_the_rest_of_the_team_keeps_its_seeded_tools(
