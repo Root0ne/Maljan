@@ -16,7 +16,11 @@ setting would resolve differently against a loopback address than against
 the paid endpoint, it is pinned to what it resolves to for the paid endpoint:
 ``llm.openai.compat`` to ``standard``, ``llm.parallel_analysts`` to ``true``.
 Nothing may reach a third party: the sandbox becomes the mock, enrichment is
-off and tool servers that answer from outside this machine are disabled.
+off and a tool server stays on only where its declarations say it makes no
+outward call: one that answers from outside this machine, one that declares
+reaching a third party, and one whose effects are not known are disabled.
+The stack's own servers reached from this machine are listed first, as a job
+lists them, so what they declare of themselves is read.
 Models, efforts, caps, timeouts, agents and keys stay as the operator set
 them, and the checklist expects exactly them in force. The connection test
 runs before anything is saved, and a failed one stops the rehearsal. Every
@@ -487,12 +491,16 @@ def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
     off. Each enabled tool server is judged by what its tool declarations in
     force say (:func:`server_effects`), never by its key and never by its
     environment: a server's offline behaviour is not inferred from what keys
-    it is handed. A server that answers from outside this machine (an HTTP
-    server not on loopback) is disabled, and so is every server that declares
-    reaching a third party, whatever its ``env``, ``env_allow``, ``args`` or
-    transport hold (the shipped threat-intel sidecar among them). A server
-    that declares no effects at all is kept at full strength, its environment
-    untouched, and :func:`describe_changes` names it as kept undeclared. A
+    it is handed. A server stays on only where it is positively known to
+    make no outward call: every tool it offers declares its effects, and none
+    reaches a third party (or each that would declares it answers offline
+    without credentials, which are then withheld). Every other server is
+    disabled: one that answers from outside this machine (an HTTP server not
+    on loopback), one that declares reaching a third party whatever its
+    ``env``, ``env_allow``, ``args`` or transport hold, and one whose effects
+    are not known, wholly or for some tools (a server never listed, whose
+    declaration is not kept, among them): in a gate that must reach no third
+    party the careful reading wins. :func:`describe_changes` names each. A
     disabled server's tool definitions are missing from the rehearsed
     requests. The server map comes back masked and goes back masked; a masked
     token in a PATCH means "unchanged", so no token is lost.
@@ -513,7 +521,7 @@ def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
             server.get("url")
         )
         effects = server_effects(str(key), server)
-        if remote or effects == REACHES:
+        if remote or effects in (REACHES, UNDECLARED, PARTLY_DECLARED):
             server["enabled"] = False
             moved = True
         elif effects == OFFLINE_WITHOUT_CREDENTIALS and withhold_credentials(server):
@@ -568,9 +576,8 @@ def withhold_credentials(server: dict[str, Any]) -> bool:
 REACHES = "reaches"
 LOCAL = "local"
 UNDECLARED = "undeclared"
-# Some tools declare an effect, others declare none: named as kept like an
-# undeclared server, since the tools without a declaration are used at full
-# strength.
+# Some tools declare an effect, others declare none: what the others do is
+# not known, so the server is disabled as an undeclared one is.
 PARTLY_DECLARED = "partly declared"
 # Every tool that would reach a third party declares that it answers offline
 # without credentials (``effects.offline_without_credentials``).
@@ -580,9 +587,11 @@ OFFLINE_WITHOUT_CREDENTIALS = "offline without credentials"
 def server_effects(key: str, server: dict[str, Any]) -> str:
     """Whether the server's tools declare reaching a third party, staying local, or nothing.
 
-    Read from the tool declarations in force on the block: a built-in's
-    shipped ones with the stored changes over them, an operator's server's as
-    stored. :data:`REACHES` when a tool's ``effects.network`` is ``true``, it
+    Read from the tool declarations in force on the block: what it ships
+    with the stored changes over them, and what its server declared of itself
+    when it was last listed, read as far as the block trusts it
+    (``core.declared_reading.tools_in_force``); a server never listed declares
+    only what its block holds. :data:`REACHES` when a tool's ``effects.network`` is ``true``, it
     sends the sample's hash or bytes to a third party (``effects.third_party``,
     ``discloses_sample``), or a declaration is refused (it vouches for
     nothing). A network reached only in a named way (the operator's own
@@ -619,6 +628,9 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
     )
     if refused:
         return REACHES
+    # And what the server declared of its own tools, under the block's.
+    for name, facts in _served_in_force(key, server).items():
+        in_force.setdefault(name, facts)
     declared = 0
     tools = 0
     offline = False
@@ -659,6 +671,57 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
     return LOCAL if declared == tools else PARTLY_DECLARED
 
 
+def _served_in_force(key: str, server: dict[str, Any]) -> dict[str, Any]:
+    """What ``server``'s own server declared of its tools, laid under the block, as JSON.
+
+    The block as the stack holds it, built as the settings build it; the
+    served declaration read as the block trusts it. ``{}`` where nothing can
+    be read.
+    """
+    from maljan.core.declared_reading import tools_in_force
+    from maljan.core.settings_overrides import build_settings
+
+    try:
+        block = build_settings({"mcp.servers": {key: server}}).mcp.servers[key]
+        held = tools_in_force(f"mcp:{key}", block)
+    except Exception:  # noqa: BLE001 — an unreadable block declares nothing
+        return {}
+    return {
+        str(name): facts.model_dump(mode="json", exclude_defaults=True)
+        for name, facts in held.items()
+        if hasattr(facts, "model_dump")
+    }
+
+
+def learn_declarations(values: dict[str, dict[str, Any]]) -> list[str]:
+    """List each trusted server of the stack this machine reaches, as a job's start does.
+
+    So a gate reads what the platform's own servers declare of themselves
+    (``providers.served_listing``: a handshake, no tool called) before it
+    decides which servers stay on. A server answering from outside this
+    machine is not reached. The keys that declared themselves.
+    """
+    from maljan.core.settings_overrides import build_settings
+    from maljan.llm.openai_provider import is_local_endpoint
+    from maljan.providers.served_listing import list_unlisted
+
+    servers = _value(values, "core.mcp.servers", {}) or {}
+    local = {
+        key: server
+        for key, server in servers.items()
+        if isinstance(server, dict)
+        and (
+            str(server.get("transport") or "stdio") == "stdio"
+            or is_local_endpoint(server.get("url"))
+        )
+    }
+    try:
+        settings = build_settings({"mcp.servers": local})
+    except Exception:  # noqa: BLE001 — settings that do not build list nothing
+        return []
+    return asyncio.run(list_unlisted(settings))
+
+
 def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any]) -> dict[str, Any]:
     """Every setting the rehearsal changed, before and during it, and every server it took away."""
     servers_before = _value(values, "core.mcp.servers", {}) or {}
@@ -671,8 +734,6 @@ def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any])
         and (servers_before.get(key) or {}).get("enabled", True)
     )
     named = {
-        UNDECLARED: "kept: effects not declared",
-        PARTLY_DECLARED: "kept: effects not declared for some tools",
         OFFLINE_WITHOUT_CREDENTIALS: (
             "kept: declares it answers offline without credentials; credentials withheld"
         ),
@@ -684,6 +745,17 @@ def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any])
         and server.get("enabled", True)
         and (effects := server_effects(str(key), server)) in named
     }
+    # Disabled because what it does is not known, not because it declares reaching out.
+    not_known = {
+        UNDECLARED: "disabled: effects not declared",
+        PARTLY_DECLARED: "disabled: effects not declared for some tools",
+    }
+    unknown = {
+        key: not_known[effects]
+        for key in disabled
+        if isinstance(servers_before.get(key), dict)
+        and (effects := server_effects(str(key), servers_before[key])) in not_known
+    }
     return {
         "settings": {
             key: {"before": _value(values, key), "rehearsed": value}
@@ -692,6 +764,7 @@ def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any])
         },
         "servers_disabled": disabled,
         "servers_kept": kept,
+        "servers_unknown": unknown,
     }
 
 
@@ -1106,6 +1179,9 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
         if args.configure:
             refuse_while_jobs_run(client, args.redis_url)
             if args.configure == "gate":
+                learned = learn_declarations(values)
+                if learned:
+                    print(f"servers that declared their tools: {', '.join(learned)}", flush=True)
                 changes = gate_changes(values, stub_root)
                 expected = {**gate_expected(values, changes), **expected}
                 models = gate_models(

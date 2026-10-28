@@ -5203,8 +5203,11 @@ class Settings(BaseSettings):
             pack = in_process_declarations().get(PACK)
             held = pack.tool_facts.get(step.called) if pack is not None else None
         else:
+            from maljan.core.declared_reading import tools_in_force
+
             server = self.mcp.servers.get(step.server)
-            facts = server.tool_facts if server is not None else {}
+            # Its block's, with what its server declares of itself under them.
+            facts = tools_in_force(f"mcp:{step.server}", server) if server is not None else {}
             held = facts.get(step.called) or facts.get(renamed_tool(step.server, step.called))
         return held.kind if held is not None else ""
 

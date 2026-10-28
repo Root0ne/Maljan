@@ -9,9 +9,9 @@ The parity gate: for every tool of these servers, the facts the client reads
 from the server's own listing equal, field by field, the facts captured from
 the platform's shipped tables before any of them is taken out
 (``tests/fixtures/own_server_tool_facts.json``). The capture is frozen: it is
-never regenerated from a later table, so it keeps holding the servers to what
-the platform read before. While the tables still ship, the capture is also
-held to them.
+never regenerated, so it keeps holding the servers to what the platform read
+before. The tables are gone: what the platform reads of these servers is what
+each serves, and nothing else ships it.
 
 Each server is imported in-process and listed as a client's handshake lists
 it; no image is built and no program runs.
@@ -20,7 +20,6 @@ it; no image is built and no program runs.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import importlib.util
 import json
 import sys
@@ -41,9 +40,8 @@ from maljan.core.served_declarations import (
     served,
     served_facts_of,
     served_tool_facts,
-    with_served,
 )
-from maljan.core.tool_declarations import SourceRef, ToolDeclarations, ToolFacts
+from maljan.core.tool_declarations import SourceRef, ToolDeclarations, ToolFacts, launch_identity
 from maljan.tools.declared_facts import NO_EFFECT, tool_declaration
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -127,13 +125,10 @@ def test_the_parity_gate_covers_every_tool_of_every_own_server() -> None:
 
 
 @pytest.mark.parametrize("key", SERVERS)
-def test_the_capture_is_what_the_platform_ships_while_it_ships_it(key: str) -> None:
-    shipped = server_declaration(key).get("tool_facts") or {}
-    if not shipped:
-        pytest.skip(f"{key} ships no tool table: the capture alone holds what it read")
-    assert {
-        tool: _fields(ToolFacts.model_validate(raw)) for tool, raw in shipped.items()
-    } == _captured()[key]
+def test_no_own_server_ships_a_table_of_its_tools(key: str) -> None:
+    # What the platform reads of it is what it serves, and nothing else.
+    assert "tool_facts" not in server_declaration(key)
+    assert Settings(_env_file=None).mcp.servers[key].tool_facts == {}
 
 
 @pytest.mark.parametrize("key", SERVERS)
@@ -242,6 +237,7 @@ def test_the_operator_s_declaration_wins_field_by_field_over_the_server_s(
                 _definition("only_served", {"kind": "identity"}),
             ]
         ),
+        launch_identity(_settings({}).mcp.servers["mine"]),
     )
     settings = _settings(
         {
@@ -272,17 +268,10 @@ def test_a_field_an_operator_gave_at_its_default_is_in_force_over_the_server_s()
     assert list(layered({"t": above}, {"t": below})[0]["t"].routed_formats) == []
 
 
-def test_a_shipped_tool_an_operator_removed_stays_removed_whatever_its_server_says(
-    clean_served: None,
-) -> None:
-    held = ToolDeclarations.from_settings(Settings()).source("mcp:die")
-    assert held is not None and "die_scan" in held.tools
-    register_served("mcp:die", served_tool_facts(_listing("die")))
-    removed = dataclasses.replace(
-        held, tools={k: v for k, v in held.tools.items() if k != "die_scan"}
-    )
-    assert "die_scan" not in with_served(removed).tools
-    assert "die_scan" in with_served(held).tools
+def test_a_shipped_tool_an_operator_removed_stays_removed_whatever_its_server_says() -> None:
+    read = served_tool_facts(_listing("die"))
+    assert "die_scan" in layered({}, read)[0]
+    assert "die_scan" not in layered({}, read, removed={"die_scan"})[0]
 
 
 def test_a_listing_is_kept_until_the_next_one_and_rebuilds_the_held_declarations(
@@ -291,26 +280,32 @@ def test_a_listing_is_kept_until_the_next_one_and_rebuilds_the_held_declarations
     from maljan.core.tool_declarations import declaration_version
 
     before = declaration_version()
-    register_served("mcp:mine", {"t": ToolFacts(kind="strings")})
+    register_served("mcp:mine", {"t": ToolFacts(kind="strings")}, "L")
     assert declaration_version() == before + 1
-    register_served("mcp:mine", {"t": ToolFacts(kind="strings")})
+    register_served("mcp:mine", {"t": ToolFacts(kind="strings")}, "L")
     assert declaration_version() == before + 1
     assert set(served("mcp:mine")) == {"t"}
-    register_served("mcp:mine", {})
+    register_served("mcp:mine", {}, "L")
     assert served("mcp:mine") == {}
     assert declaration_version() == before + 2
 
 
-def test_a_built_in_server_s_own_declaration_changes_nothing_the_platform_reads(
+def test_what_a_built_in_server_declares_is_what_the_platform_reads(
     clean_served: None,
 ) -> None:
+    # Before any listing, its block declares nothing: it is read as undeclared.
     before = ToolDeclarations.from_settings(Settings())
     for key in SERVERS:
-        register_served(str(SourceRef("mcp", key)), served_tool_facts(_listing(key)))
+        held = before.source(f"mcp:{key}")
+        assert held is not None and dict(held.tools) == {}
+    for key in SERVERS:
+        register_served(
+            str(SourceRef("mcp", key)),
+            served_tool_facts(_listing(key)),
+            launch_identity(Settings().mcp.servers[key]),
+        )
     after = ToolDeclarations.from_settings(Settings())
     for key in SERVERS:
-        mine, theirs = before.source(f"mcp:{key}"), after.source(f"mcp:{key}")
-        assert mine is not None and theirs is not None
-        assert {t: _fields(f) for t, f in mine.tools.items()} == {
-            t: _fields(f) for t, f in theirs.tools.items()
-        }
+        theirs = after.source(f"mcp:{key}")
+        assert theirs is not None
+        assert {t: _fields(f) for t, f in theirs.tools.items()} == _captured()[key]

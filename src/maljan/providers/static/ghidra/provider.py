@@ -660,7 +660,7 @@ class GhidraStaticProvider(StaticProvider):
         """
         from maljan.core.undeclared_tools import aggregates_of, with_aggregate_notes
 
-        aggregates = aggregates_of(getattr(self._cfg, "tool_facts", None))
+        aggregates = aggregates_of(tools_in_force(self.declaration_source, self._cfg))
         if not aggregates:
             return tools
         offered = {str(t.name): str(t.name) for t in tools}

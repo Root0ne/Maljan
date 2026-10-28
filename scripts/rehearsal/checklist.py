@@ -1589,8 +1589,11 @@ def as_markdown(record: RunRecord, checks: list[Check]) -> str:
         lines += ["", "## Changed on the stack for the rehearsal", ""]
         for key, row in (record.gate.get("settings") or {}).items():
             lines.append(f"- {key}: {row.get('before')!r} -> {row.get('rehearsed')!r}")
+        unknown = record.gate.get("servers_unknown") or {}
         for key in record.gate.get("servers_disabled") or []:
-            lines.append(f"- tool server {key}: disabled (its tool definitions were not sent)")
+            # Why, where it was disabled for effects not known.
+            why = unknown.get(key) or "disabled"
+            lines.append(f"- tool server {key}: {why} (its tool definitions were not sent)")
         for key in record.gate.get("servers_with_keys_withheld") or []:
             lines.append(f"- tool server {key}: reputation keys withheld (offline answers)")
         for key, why in (record.gate.get("servers_kept") or {}).items():

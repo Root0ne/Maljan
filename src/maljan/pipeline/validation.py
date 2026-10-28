@@ -3293,16 +3293,22 @@ def _matcher_name(name: str, facts: Any) -> str:
     return str(facts.display_name or name).strip().lower()
 
 
-# The rule matchers the platform ships, by the names a sentence calls them.
-SHIPPED_MATCHER_NAMES: tuple[str, ...] = tuple(
-    sorted(
-        {
-            _matcher_name(name, facts)
-            for name, facts in shipped_by_name().items()
-            if facts.kind in consumer_kinds(_RULE_MATCH_SECTIONS)
-        }
+def shipped_matcher_names() -> tuple[str, ...]:
+    """The rule matchers the platform's own sources declare, by the names a sentence calls them.
+
+    Read when asked, never once at import: the platform's own servers declare
+    their tools themselves, and what each declared is read once it is kept
+    (``core.declared_reading.shipped_by_name``).
+    """
+    return tuple(
+        sorted(
+            {
+                _matcher_name(name, facts)
+                for name, facts in shipped_by_name().items()
+                if facts.kind in consumer_kinds(_RULE_MATCH_SECTIONS)
+            }
+        )
     )
-)
 
 
 @cache
@@ -3325,7 +3331,7 @@ def matcher_names(ledger: Iterable[Any] | None = None) -> tuple[str, ...]:
     names the matchers the frozen snapshot names, so a stored run reads the
     same whatever a shipped matcher is called now.
     """
-    names = set(SHIPPED_MATCHER_NAMES)
+    names = set(shipped_matcher_names())
     for entry in ledger or ():
         if read_by_name(entry):
             names |= _stored_matcher_names()
@@ -3381,7 +3387,7 @@ class CapabilityGrounding:
     # The rule matchers a sentence may name (:func:`matcher_names`): a
     # sentence whose assertion is that one of them matched states nothing
     # about the sample.
-    matchers: tuple[str, ...] = SHIPPED_MATCHER_NAMES
+    matchers: tuple[str, ...] = field(default_factory=shipped_matcher_names)
     # Why the run could not be read, empty for a run that was. A grounding
     # that could not be read checks nothing (``ungrounded_capabilities``), and
     # a caller that holds a degradation list says so there: a half-read
@@ -4764,7 +4770,6 @@ def _rule_match_assertion_re(names: tuple[str, ...]) -> re.Pattern[str]:
     )
 
 
-_RULE_MATCH_ASSERTION_RE = _rule_match_assertion_re(SHIPPED_MATCHER_NAMES)
 _CONCLUDES_ABOUT_THE_SAMPLE_RE = re.compile(
     r"\b(?:so|therefore|thus|hence|because|since|based|indicat\w*|suggest\w*|show\w*|"
     r"mean\w*|confirm\w*|prov\w*|reveal\w*|demonstrat\w*|consistent)\b"
@@ -4774,10 +4779,13 @@ _CONCLUDES_ABOUT_THE_SAMPLE_RE = re.compile(
 )
 
 
-def _says_only_that_a_rule_matched(
-    sentence: str, matchers: tuple[str, ...] = SHIPPED_MATCHER_NAMES
-) -> bool:
-    """Whether the sentence's assertion is a rule match and nothing about the sample."""
+def _says_only_that_a_rule_matched(sentence: str, matchers: tuple[str, ...] | None = None) -> bool:
+    """Whether the sentence's assertion is a rule match and nothing about the sample.
+
+    ``matchers`` are the rule matchers it may name; the platform's own by default.
+    """
+    if matchers is None:
+        matchers = shipped_matcher_names()
     return bool(_rule_match_assertion_re(matchers).search(sentence)) and not (
         _CONCLUDES_ABOUT_THE_SAMPLE_RE.search(sentence)
     )

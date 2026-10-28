@@ -114,25 +114,26 @@ class TestTheDigests:
 
     def test_the_built_ins_that_declare_neither_keep_dev_s_digests(self) -> None:
         # Each of the two servers' trust in its own declaration (T-418) moves
-        # its digest; without it each block is as recorded below.
+        # its digest; without it each block is as recorded below. Both moved
+        # again when their tool tables went: each server declares its tools
+        # itself (T-418 PR1b), these fields with them.
         settings = Settings(_env_file=None)
         for key in ("knowledge", "network"):
             object.__setattr__(settings.mcp.servers[key], "trusts_served_declaration", False)
         digests = ToolDeclarations.from_settings(settings).digests()
-        assert digests["mcp:knowledge"] == "2fbd76f41eddabe6"
-        # Moved twice since dev, by tools added, not by these fields: the
-        # readers' delivery primitives (``run_reader``, T-006; ``release_job``,
-        # T-325).
-        assert digests["mcp:network"] == "7438a760e7ef8ec6"
+        assert digests["mcp:knowledge"] == "b261c17f07e13ef9"
+        assert digests["mcp:network"] == "7211e6023885a063"
         assert digests["provider:ghidra"] == "f2901a540b190c6d"
         assert digests["sandbox"] == "c2bf77971e47dfa4"
 
 
 class TestTheBuiltInsDeclare:
     def test_the_answers_whose_limits_are_material(self) -> None:
-        servers = Settings(_env_file=None).mcp.servers
+        from maljan.core.declared_reading import builtin_tools
+
+        # As each server declares its tools (its own, kept from its listing).
         held = {
-            key: answer_scopes_of(servers[key].tool_facts)
+            key: answer_scopes_of(builtin_tools(key))
             for key in ("analysis", "threatintel", "virustotal", "knowledge", "network")
         }
         assert set(held["analysis"]) == {"strings", "capa"}

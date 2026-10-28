@@ -66,12 +66,14 @@ from __future__ import annotations
 import contextvars
 import hashlib
 import json
+import os
 import posixpath
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import lru_cache, partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import (
@@ -2492,7 +2494,10 @@ def launch_identity(cfg: Any) -> str:
 
     Its transport, command, arguments, working directory and address: a
     server's own declaration is kept under it, so a block pointed at another
-    server stops reading what the last one declared.
+    server stops reading what the last one declared. The command is read as
+    the file it runs (:func:`_launched_file`), so two names of one program in
+    one directory (``bin/python`` and its link ``bin/python3``) start the same
+    server.
     """
     held = {
         name: getattr(cfg, name, None)
@@ -2501,20 +2506,58 @@ def launch_identity(cfg: Any) -> str:
     }
     if not held:
         return ""
+    command = held.get("command")
+    if isinstance(command, str):
+        held["command"] = _launched_file(command)
     text = json.dumps(held, sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-@lru_cache(maxsize=1)
+def _launched_file(command: str) -> str:
+    """``command`` as the file it runs: its directory, and the file its links end at.
+
+    A command that names no file here (a bare name found on the path, a path
+    on another host) is read as written. The directory is kept: a link to the
+    same program elsewhere (another virtual environment) runs it with other
+    surroundings, and is another launch. The whole target is kept, so two
+    links in one directory to different programs stay two launches.
+    """
+    try:
+        path = Path(command)
+        if not path.is_absolute() or not path.is_file():
+            return command
+        return f"{path.parent}|{os.path.realpath(path)}"
+    except (OSError, ValueError):
+        return command
+
+
+# The shipped launches, held with the interpreter file they were read for: a
+# built-in sidecar is started by this process's own interpreter, so they are
+# read again if what that interpreter's path resolves to changes (a virtual
+# environment rebuilt under a running process).
+_SHIPPED_LAUNCHES: list[Any] = [None, {}]
+
+
 def _shipped_launches() -> dict[str, str]:
     """The launch identity of each built-in server block that ships trusting its server."""
+    import sys
+
     from maljan.core.config import _builtin_servers
 
-    return {
-        f"mcp:{key}": launch_identity(cfg)
-        for key, cfg in _builtin_servers().items()
-        if getattr(cfg, "trusts_served_declaration", False) is True
-    }
+    interpreter = _launched_file(sys.executable)
+    if _SHIPPED_LAUNCHES[0] != interpreter:
+        _SHIPPED_LAUNCHES[1] = {
+            f"mcp:{key}": launch_identity(cfg)
+            for key, cfg in _builtin_servers().items()
+            if getattr(cfg, "trusts_served_declaration", False) is True
+        }
+        _SHIPPED_LAUNCHES[0] = interpreter
+    return dict(_SHIPPED_LAUNCHES[1])
+
+
+def shipped_launch(source: Any) -> str:
+    """The launch identity the built-in ``source`` ships with on this host; ``""`` for none."""
+    return _shipped_launches().get(str(source), "")
 
 
 def trusts_served(source: Any, cfg: Any) -> bool:

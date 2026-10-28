@@ -77,13 +77,13 @@ def _shipped_dump() -> dict[str, Any]:
     return build_settings({}).model_dump(mode="json")
 
 
-def _dev_row(*, analysis_facts: dict[str, Any]) -> dict[str, Any]:
+def _dev_row(*, virustotal_facts: dict[str, Any]) -> dict[str, Any]:
     """``core.mcp.servers`` as dev's save wrote it: declarations equal to shipped stripped,
     a changed ``tool_facts`` written whole as full dumps."""
     from app.services.server_map import validate_server_map
 
     row = validate_server_map({})
-    row["analysis"] = {**row["analysis"], "tool_facts": analysis_facts}
+    row["virustotal"] = {**row["virustotal"], "tool_facts": virustotal_facts}
     return row
 
 
@@ -156,17 +156,17 @@ def _in_force(rows: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_a_dev_row_with_one_accepted_proposal_keeps_only_that_tool() -> None:
-    shipped = _dev_shipped("mcp.servers.analysis")
+    shipped = _dev_shipped("mcp.servers.virustotal")
     proposed = _full({"display_name": "Pack scanner", "timeout_seconds": 600})
     whole = {**shipped, "pack_scan": proposed}
     conn = _connect()
-    _insert(conn, SERVERS, _dev_row(analysis_facts=whole))
+    _insert(conn, SERVERS, _dev_row(virustotal_facts=whole))
     _run(_module(), conn)
     after_rows = _rows(conn)
-    assert after_rows[SERVERS]["analysis"]["tool_facts"] == _marked({"pack_scan": proposed})
+    assert after_rows[SERVERS]["virustotal"]["tool_facts"] == _marked({"pack_scan": proposed})
     # Every tool the operator left alone takes the declaration shipped now.
-    assert _in_force(after_rows)["mcp"]["servers"]["analysis"]["tool_facts"] == {
-        **_today("mcp.servers.analysis"),
+    assert _in_force(after_rows)["mcp"]["servers"]["virustotal"]["tool_facts"] == {
+        **_today("mcp.servers.virustotal"),
         "pack_scan": _read(proposed),
     }
 
@@ -193,22 +193,22 @@ def test_a_tool_an_older_release_stored_as_shipped_takes_todays_declaration() ->
 
 
 def test_an_operator_change_keeps_its_fields_and_a_removal_stays() -> None:
-    shipped = _dev_shipped("mcp.servers.analysis")
+    shipped = _dev_shipped("mcp.servers.virustotal")
     first, second, *_ = list(shipped)
     whole = dict(shipped)
     whole.pop(first)
     whole[second] = {**whole[second], "timeout_seconds": 1234.0}
     conn = _connect()
-    _insert(conn, SERVERS, _dev_row(analysis_facts=whole))
+    _insert(conn, SERVERS, _dev_row(virustotal_facts=whole))
     _run(_module(), conn)
-    stored = _rows(conn)[SERVERS]["analysis"]["tool_facts"]
+    stored = _rows(conn)[SERVERS]["virustotal"]["tool_facts"]
     assert stored == _marked({first: None, second: {"timeout_seconds": 1234.0}})
     # What dev read from the whole map is in force now, each tool the operator
     # left alone as it ships now.
-    today = _today("mcp.servers.analysis")
+    today = _today("mcp.servers.virustotal")
     expected = {tool: entry for tool, entry in today.items() if tool != first}
     expected[second] = {**today[second], "timeout_seconds": 1234.0}
-    assert _in_force(_rows(conn))["mcp"]["servers"]["analysis"]["tool_facts"] == expected
+    assert _in_force(_rows(conn))["mcp"]["servers"]["virustotal"]["tool_facts"] == expected
 
 
 def test_a_provider_leaf_typed_whole_is_rewritten_the_same_way() -> None:
@@ -254,12 +254,15 @@ def test_a_secret_row_and_marked_maps_are_left_alone(caplog) -> None:
         "enabled": True,
         "tool_facts": _marked({"scan": {"kind": "strings"}}),
     }
-    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    shipped = _shipped_dump()["mcp"]["servers"]["virustotal"]["tool_facts"]
     first, second, *_ = list(shipped)
-    row["analysis"] = {**row["analysis"], "tool_facts": _marked({first: None})}
+    row["virustotal"] = {**row["virustotal"], "tool_facts": _marked({first: None})}
     # A marked map with no removal in it (one tool's change alone) is the
     # operator's change of that tool, never a whole map missing the others.
-    row["network"] = {**row["network"], "tool_facts": _marked({}) | _one_change("network")}
+    row["network"] = {
+        **row["network"],
+        "tool_facts": _marked({}) | {"extract_dns": {"display_name": "Mine"}},
+    }
     conn = _connect()
     _insert(conn, SERVERS, row)
     _insert(conn, "core.mcp.servers.mine.auth_token", "ciphertext", secret=True)
@@ -304,11 +307,11 @@ def test_a_custom_server_s_whole_map_is_marked_and_an_unknown_leaf_stays_whole(c
 
 
 def test_one_fixed_info_line_is_logged_and_a_downgrade_reads_the_same(caplog) -> None:
-    shipped = _dev_shipped("mcp.servers.analysis")
+    shipped = _dev_shipped("mcp.servers.virustotal")
     whole = {**shipped, "pack_scan": _full({"display_name": "Pack scanner"})}
     whole.pop(next(iter(shipped)))
     conn = _connect()
-    _insert(conn, SERVERS, _dev_row(analysis_facts=whole))
+    _insert(conn, SERVERS, _dev_row(virustotal_facts=whole))
     mod = _module()
     with caplog.at_level(logging.INFO):
         _run(mod, conn)
@@ -316,7 +319,7 @@ def test_one_fixed_info_line_is_logged_and_a_downgrade_reads_the_same(caplog) ->
     assert [r.getMessage() for r in lines] == [mod.REWRITTEN]
     assert lines[0].levelno == logging.INFO
     _run(mod, conn, "downgrade")
-    restored = _rows(conn)[SERVERS]["analysis"]["tool_facts"]
+    restored = _rows(conn)[SERVERS]["virustotal"]["tool_facts"]
     assert set(restored) == set(whole)
     from maljan.core.tool_declarations import ToolFacts
 
@@ -339,11 +342,11 @@ def test_a_save_before_the_migration_keeps_every_tool_after_it() -> None:
     from app.services import settings_service as svc
     from app.services.server_map import validate_server_map
 
-    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    shipped = _shipped_dump()["mcp"]["servers"]["virustotal"]["tool_facts"]
     tool = sorted(shipped)[0]
-    dev = _dev_row(analysis_facts=dict(shipped))
+    dev = _dev_row(virustotal_facts=dict(shipped))
     changes = _marked({tool: {"display_name": "Mine"}})
-    sent = {**dev, "analysis": {**dev["analysis"], "tool_facts": changes}}
+    sent = {**dev, "virustotal": {**dev["virustotal"], "tool_facts": changes}}
     saved = validate_server_map(sent, stored=dev)
     ghidra = _shipped_dump()["static"]["ghidra"]["tool_facts"]
     leaf_tool = sorted(ghidra)[0]
@@ -357,25 +360,25 @@ def test_a_save_before_the_migration_keeps_every_tool_after_it() -> None:
     _run(_module(), conn)
     assert _rows(conn) == before
     held = _in_force(_rows(conn))
-    analysis = held["mcp"]["servers"]["analysis"]["tool_facts"]
-    assert set(analysis) == set(shipped)
-    assert analysis[tool]["display_name"] == "Mine"
-    assert analysis[tool]["kind"] == shipped[tool]["kind"]
+    held_facts = held["mcp"]["servers"]["virustotal"]["tool_facts"]
+    assert set(held_facts) == set(shipped)
+    assert held_facts[tool]["display_name"] == "Mine"
+    assert held_facts[tool]["kind"] == shipped[tool]["kind"]
     assert set(held["static"]["ghidra"]["tool_facts"]) == set(ghidra)
 
 
 def test_an_unmigrated_whole_map_is_read_as_dev_read_it() -> None:
-    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    shipped = _shipped_dump()["mcp"]["servers"]["virustotal"]["tool_facts"]
     first, second, *_ = list(shipped)
     whole = dict(shipped)
     whole.pop(first)
     whole[second] = _full({"display_name": "Only this"})
-    held = _in_force({SERVERS: _dev_row(analysis_facts=whole)})
-    analysis = held["mcp"]["servers"]["analysis"]["tool_facts"]
+    held = _in_force({SERVERS: _dev_row(virustotal_facts=whole)})
+    held_facts = held["mcp"]["servers"]["virustotal"]["tool_facts"]
     # The removed tool stays removed, and a field the whole entry leaves at its
     # default is not filled from what ships, but for a field no such release
     # knew (``effects``), which follows the shipped declaration.
-    assert analysis == {
+    assert held_facts == {
         tool: _read(_with_shipped_effects(entry, shipped.get(tool)))
         for tool, entry in whole.items()
     }
@@ -386,10 +389,10 @@ def test_an_unmigrated_whole_map_is_read_as_dev_read_it() -> None:
 
 
 def test_running_the_revision_again_changes_nothing(caplog) -> None:
-    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    shipped = _shipped_dump()["mcp"]["servers"]["virustotal"]["tool_facts"]
     whole = {**shipped, "pack_scan": _full({"display_name": "Pack scanner"})}
     conn = _connect()
-    _insert(conn, SERVERS, _dev_row(analysis_facts=whole))
+    _insert(conn, SERVERS, _dev_row(virustotal_facts=whole))
     _insert(conn, GHIDRA, {"my_script": {"kind": "strings"}})
     mod = _module()
     _run(mod, conn)
@@ -404,11 +407,11 @@ def test_running_the_revision_again_changes_nothing(caplog) -> None:
 def test_a_downgrade_reads_as_dev_and_leaves_an_unmarked_map_alone() -> None:
     from app.services.server_map import validate_server_map
 
-    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    shipped = _shipped_dump()["mcp"]["servers"]["virustotal"]["tool_facts"]
     first, second, *_ = list(shipped)
     row = validate_server_map({})
-    row["analysis"] = {
-        **row["analysis"],
+    row["virustotal"] = {
+        **row["virustotal"],
         "tool_facts": _marked({first: None, second: {"timeout_seconds": 77.0}}),
     }
     row["mine"] = {
@@ -426,13 +429,13 @@ def test_a_downgrade_reads_as_dev_and_leaves_an_unmarked_map_alone() -> None:
     after = _rows(conn)
     assert after[GHIDRA] == whole_leaf
     assert after[SERVERS]["mine"]["tool_facts"] == {"scan": {"kind": "strings"}}
-    restored = after[SERVERS]["analysis"]["tool_facts"]
+    restored = after[SERVERS]["virustotal"]["tool_facts"]
     assert "" not in restored and first not in restored
     assert restored[second]["timeout_seconds"] == 77.0
     # The downgraded rows are whole maps under the declarations the release
     # before the revision shipped: that release reads them as what was in
     # force, each untouched tool as it shipped then.
-    dev = _dev_shipped("mcp.servers.analysis")
+    dev = _dev_shipped("mcp.servers.virustotal")
     expected = {
         tool: _read(_with_shipped_effects(entry, shipped.get(tool)))
         for tool, entry in dev.items()
@@ -440,7 +443,7 @@ def test_a_downgrade_reads_as_dev_and_leaves_an_unmarked_map_alone() -> None:
     }
     expected[second] = {**expected[second], "timeout_seconds": 77.0}
     in_force_after = _in_force(after)
-    assert in_force_after["mcp"]["servers"]["analysis"]["tool_facts"] == expected
+    assert in_force_after["mcp"]["servers"]["virustotal"]["tool_facts"] == expected
     for held in (in_force_after, in_force_before):
-        held["mcp"]["servers"]["analysis"].pop("tool_facts")
+        held["mcp"]["servers"]["virustotal"].pop("tool_facts")
     assert in_force_after == in_force_before

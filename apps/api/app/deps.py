@@ -268,3 +268,16 @@ async def require_admin_session(
     refused before it is looked up, as ``get_session_user`` refuses it.
     """
     return user
+
+
+async def reads_served_declarations() -> None:
+    """A router dependency: what each tool server last declared of its tools, read first.
+
+    For the routers whose answers read a declaration before any server
+    attaches (``app.services.served_declarations_store.refresh``), in a
+    session of the application's own, never the request's.
+    """
+    from app.database import async_session_factory
+    from app.services.served_declarations_store import refresh
+
+    await refresh(async_session_factory)

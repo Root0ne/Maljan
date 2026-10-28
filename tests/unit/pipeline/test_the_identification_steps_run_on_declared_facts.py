@@ -23,6 +23,7 @@ from maljan.agents.composition import servers_a_job_calls
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.core import config as config_module
 from maljan.core.config import Settings
+from maljan.core.declared_reading import builtin_tools
 from maljan.core.pack_steps import (
     DOTNET_RUNTIMES,
     GO_COMPILERS,
@@ -44,9 +45,19 @@ IDENTIFIERS = ("die", "ilspy", "goresym")
 STEPS = {"die": "die_scan", "ilspy": "dotnet_types", "goresym": "go_symbols"}
 
 
+def _launch(key: str) -> dict[str, Any]:
+    """How the server ``key`` ships started or reached, as an operator's stored entry holds it.
+
+    A stored entry is held whole: one pointed where the server ships keeps the
+    trust in what the server declares of its tools (T-418).
+    """
+    shipped = Settings(_env_file=None).mcp.servers[key]
+    return shipped.model_dump(mode="json", include={"transport", "url", "command", "args", "cwd"})
+
+
 def _settings(*on: str, **blocks: Any) -> Settings:
     """The shipped settings with the identification servers in ``on`` switched on."""
-    servers = {key: {"enabled": True, **blocks.get(key, {})} for key in on}
+    servers = {key: {**_launch(key), "enabled": True, **blocks.get(key, {})} for key in on}
     return build_settings({"mcp.servers": servers}) if servers else Settings(_env_file=None)
 
 
@@ -235,7 +246,7 @@ class TestTheyRunOnDeclaredFacts:
         assert result.failed == []
 
     def test_the_conditions_name_a_declared_value_not_a_tool(self) -> None:
-        die = Settings(_env_file=None).mcp.servers["die"].tool_facts["die_scan"]
+        die = builtin_tools("die")["die_scan"]
         for step_id in ("dotnet_types", "go_symbols"):
             step = shipped_step(step_id)
             assert step is not None

@@ -659,7 +659,9 @@ services:
   # COMPOSE_PROFILES, its token set here, and its built-in block in the
   # console pointed at it: transport streamable-http, url
   # http://analysis-mcp:8098/mcp (http://network-mcp:8099/mcp), the token as
-  # auth_token and sample_mount /data/samples. The worker then copies the
+  # auth_token, sample_mount /data/samples and trusts_served_declaration on: the
+  # server declares its own tools, and a block pointed away from the server it
+  # ships with reads that only once trusted. The worker then copies the
   # sample under the mount for it, and the triage pack's own readings of the
   # sample (maljan.tools.readers) and every agent's call to that server run
   # there. The worker still reads the sample for a few things of its own: its

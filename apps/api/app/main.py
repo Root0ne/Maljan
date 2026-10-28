@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings, settings
@@ -526,18 +526,23 @@ def create_app() -> FastAPI:
     from app.api.v1.settings import router as settings_router
     from app.api.v1.system import router as system_router
     from app.api.ws import router as ws_router
+    from app.deps import reads_served_declarations
 
     api_prefix = "/api/v1"
+    # The routers whose answers read what a tool server declares of its tools
+    # before any attach read the kept declarations first
+    # (``app.services.served_declarations_store``).
+    reads_declarations = [Depends(reads_served_declarations)]
     app.include_router(auth_router, prefix=api_prefix)
     app.include_router(audit_router, prefix=api_prefix)
-    app.include_router(jobs_router, prefix=api_prefix)
+    app.include_router(jobs_router, prefix=api_prefix, dependencies=reads_declarations)
     app.include_router(samples_router, prefix=api_prefix)
     app.include_router(sandbox_reports_router, prefix=api_prefix)
     app.include_router(sandbox_report_formats_router, prefix=api_prefix)
     app.include_router(reports_router, prefix=api_prefix)
     app.include_router(dashboard_router, prefix=api_prefix)
-    app.include_router(system_router, prefix=api_prefix)
-    app.include_router(settings_router, prefix=api_prefix)
+    app.include_router(system_router, prefix=api_prefix, dependencies=reads_declarations)
+    app.include_router(settings_router, prefix=api_prefix, dependencies=reads_declarations)
 
     # WebSocket routes (no API prefix)
     app.include_router(ws_router)

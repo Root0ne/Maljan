@@ -223,10 +223,11 @@ def test_the_network_turn_does_not_deny_it_a_packet_tool(attached: list[Any]) ->
 def test_a_declared_built_in_carries_nothing_more() -> None:
     from langchain_core.tools import StructuredTool
 
-    from maljan.core.builtin_declarations import server_declaration
+    from maljan.core.declared_reading import builtin_tools
     from maljan.providers.servers import _own_words
 
-    declared = server_declaration("knowledge")["tool_facts"]
+    # What the server declares of itself, as the platform reads it.
+    declared = builtin_tools("knowledge")
     tools = [
         StructuredTool.from_function(
             func=lambda: "", name=name, description="a built-in tool", args_schema=None

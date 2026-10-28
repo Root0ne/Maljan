@@ -58,7 +58,8 @@ def test_a_tool_held_as_shipped_changes_nothing(where: str, tools: dict[str, Any
 
 
 def test_an_operator_s_value_of_a_later_field_wins() -> None:
-    tools = shipped_tool_facts("mcp.servers.analysis")
+    # A block that still ships a table of its tools.
+    tools = shipped_tool_facts("static.ghidra")
     tool = next(name for name, facts in tools.items() if facts.get("read_only"))
     whole = _as_a_whole_map(tools)
     whole[tool] = {**whole[tool], "read_only": False}

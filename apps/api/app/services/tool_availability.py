@@ -141,13 +141,16 @@ def _in_process_readings(
     steps, _off = steps_on_servers(
         effective_steps(getattr(settings.triage, "steps", None) or ()), servers
     )
+    from maljan.core.declared_reading import tools_in_force
+
     run = {step.called for step in steps if step.enabled and step.builtin}
+    # Each block's declarations with what its server declares of itself under them.
     runners = {
         key: server
         for key, server in servers.items()
         if any(
             getattr(facts, "kind", None) == READER_DELIVERY_KIND
-            for facts in (getattr(server, "tool_facts", None) or {}).values()
+            for facts in tools_in_force(f"mcp:{key}", server).values()
         )
     }
     lent: dict[str, Mapping[str, str]] = {}

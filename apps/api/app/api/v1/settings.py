@@ -1099,6 +1099,10 @@ async def test_mcp_server(
     # it. Nothing below needs the transaction that read them, and a probe is
     # the longest await this API makes.
     await end_read_transaction(db)
+    from maljan.core.served_declarations import snapshot_served
+
+    # What this process held for the server before the test lists it.
+    before = snapshot_served(f"mcp:{server}")
     response = await _probe_response(
         run_mcp_probe(server, body.values, stored, confirmed_calls=body.confirmed_calls)
     )
@@ -1111,6 +1115,13 @@ async def test_mcp_server(
         server=server,
         confirmed_calls=sorted(body.confirmed_calls),
     )
+    # What the server declared of its tools as it listed them is kept, as a
+    # run's attach keeps it, where the entry tested is the saved block's
+    # server; a staged or unsaved entry's listing is put back
+    # (``app.services.served_declarations_store``).
+    from app.services import served_declarations_store
+
+    await served_declarations_store.keep_probe_listing(db, server, stored, body.values, before)
     return response
 
 

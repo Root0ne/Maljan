@@ -541,12 +541,14 @@ def test_a_cancelled_job_still_releases() -> None:
 
 def test_a_server_that_declares_only_the_release_is_never_chosen_to_run_readings() -> None:
     from maljan.core.config import Settings
+    from maljan.core.declared_reading import builtin_tools
     from maljan.pipeline import nodes
     from maljan.providers.servers import READER_DELIVERY_KIND, RELEASE_DELIVERY_KIND
 
     servers = dict(Settings(_env_file=None).mcp.servers)
     analysis = servers["analysis"]
-    facts = dict(analysis.tool_facts or {})
+    # What the server declares of itself, as the platform reads it.
+    facts = dict(builtin_tools("analysis"))
     assert facts[RELEASE_JOB].kind == RELEASE_DELIVERY_KIND != READER_DELIVERY_KIND
     assert facts[readers.RUN_READER].kind == READER_DELIVERY_KIND
     remote = {"transport": "streamable-http", "url": "http://analysis-mcp:8098/mcp"}
@@ -559,7 +561,7 @@ def test_a_server_that_declares_only_the_release_is_never_chosen_to_run_readings
     )
     assert nodes.sample_readers(container, "/w/x.exe").places == {}
     # With the readers' primitive declared too, it runs them.
-    servers["analysis"] = analysis.model_copy(update=remote)
+    servers["analysis"] = analysis.model_copy(update={**remote, "tool_facts": facts})
     container._reader_servers_held = None
     assert nodes.sample_readers(container, "/w/x.exe").place_of("pe_info") is not None
 

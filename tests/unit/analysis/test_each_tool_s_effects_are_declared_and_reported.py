@@ -200,10 +200,23 @@ def test_a_tool_that_runs_any_script_it_is_given_is_left_undeclared(
     ]
 
 
+def _declared_as_shipped(key: str) -> dict[str, Any]:
+    """A built-in server's tools as the platform reads them: its block's, its own under them."""
+    from maljan.core.declared_reading import builtin_tools
+
+    return {
+        tool: facts.model_dump(mode="json", exclude_defaults=True)
+        for tool, facts in builtin_tools(key).items()
+    }
+
+
 def _shipped_blocks() -> list[tuple[str, dict[str, Any]]]:
     from maljan.core import builtin_declarations as built
 
-    blocks = [(f"mcp:{key}", built.server_declaration(key)) for key in built.builtin_server_names()]
+    blocks = [
+        (f"mcp:{key}", {"tool_facts": _declared_as_shipped(key)})
+        for key in built.builtin_server_names()
+    ]
     blocks += [
         (f"provider:{key}", built.provider_declaration(key)) for key in built.provider_names()
     ]
@@ -363,14 +376,13 @@ def test_reference_refreshes_and_the_case_store_are_named(shipped: ToolDeclarati
 
 
 def test_a_map_saved_whole_keeps_the_shipped_effects_and_the_operator_s_own_values() -> None:
-    from maljan.core.builtin_declarations import server_declaration
     from maljan.core.tool_declarations import (
         merge_tool_facts,
         stored_changes,
         stored_in_force,
     )
 
-    shipped = server_declaration("analysis")["tool_facts"]
+    shipped = _declared_as_shipped("analysis")
     # Saved whole by an earlier release: no mark, no ``effects`` anywhere, and
     # an operator's own budget on FLOSS and own effects on ``strings``.
     whole = {
@@ -777,10 +789,9 @@ def test_an_undeclared_tool_hinted_open_stays_an_undeclared_row() -> None:
 
 
 def test_a_tick_of_discloses_sample_on_put_sample_saves_and_says_bytes() -> None:
-    from maljan.core.builtin_declarations import server_declaration
     from maljan.core.tool_declarations import merge_tool_facts, strict_declarations
 
-    shipped = server_declaration("analysis")["tool_facts"]
+    shipped = _declared_as_shipped("analysis")
     assert shipped["put_sample"]["effects"]["third_party"] == "no"
     in_force = merge_tool_facts(shipped, {"put_sample": {"discloses_sample": True}})
     with strict_declarations():
@@ -791,10 +802,9 @@ def test_a_tick_of_discloses_sample_on_put_sample_saves_and_says_bytes() -> None
 
 
 def test_an_operator_s_effects_merge_with_the_shipped_ones_sub_field_by_sub_field() -> None:
-    from maljan.core.builtin_declarations import server_declaration
     from maljan.core.tool_declarations import merge_tool_facts, tool_facts_changes
 
-    shipped = server_declaration("knowledge")["tool_facts"]
+    shipped = _declared_as_shipped("knowledge")
     change = {"attck_lookup": {"effects": {"network": True}}}
     in_force = merge_tool_facts(shipped, change)
     assert in_force["attck_lookup"]["effects"] == {

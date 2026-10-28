@@ -24,7 +24,7 @@ from maljan.core import builtin_declarations, tool_declarations
 from maljan.core import settings_overrides as so
 from maljan.core.tool_declarations import stored_changes, with_mark, without_mark
 
-SERVER = "analysis"
+SERVER = "virustotal"
 BLOCK = f"mcp.servers.{SERVER}"
 
 
@@ -35,7 +35,7 @@ def _fresh_warnings() -> None:
 
 @pytest.fixture
 def release() -> Iterator[dict[str, Any]]:
-    """What the analysis server ships, changed in place as a later release would."""
+    """What the VirusTotal block ships, changed in place as a later release would."""
     blocks = builtin_declarations._SERVER_BLOCKS[SERVER]["tool_facts"]
     saved = {name: dict(entry) for name, entry in blocks.items()}
     so._shipped_dump.cache_clear()

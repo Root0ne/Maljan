@@ -2487,11 +2487,10 @@ def behaviour_inputs(
 
 
 def _pack_facts(step: PackStep) -> ToolFacts | None:
-    """What the pack's shipped declaration says of the tool a shipped step calls, or ``None``."""
-    from maljan.core.builtin_declarations import in_process_declarations
+    """What the pack's declaration in force says of the tool a shipped step calls, or ``None``."""
+    from maljan.core.declared_reading import in_process_tools
 
-    held = in_process_declarations().get(PACK)
-    return held.tool_facts.get(step.called) if held is not None else None
+    return in_process_tools(PACK).get(step.called)
 
 
 def _server_facts(step: PackStep) -> ToolFacts | None:
@@ -2513,13 +2512,12 @@ def _server_facts(step: PackStep) -> ToolFacts | None:
 def _shipped_kind_name(kinds: Iterable[str]) -> str:
     """The display name of the pack's shipped tool of one of ``kinds``, for a line read alone.
 
-    From the pack's shipped declaration: the pack is the platform's own code.
+    From the pack's declaration in force: the pack is the platform's own code.
     """
-    from maljan.core.builtin_declarations import in_process_declarations
+    from maljan.core.declared_reading import in_process_tools
 
     wanted = frozenset(kinds)
-    held = in_process_declarations().get(PACK)
-    for name, facts in held.tool_facts.items() if held is not None else ():
+    for name, facts in in_process_tools(PACK).items():
         if facts.kind in wanted:
             return facts.display_name or name
     return ""
@@ -3413,10 +3411,9 @@ def _current_names(kind: str) -> tuple[str, str]:
     current = _CURRENT.get()
     if current is not None:
         return str(current.tool), display_name(current)
-    from maljan.core.builtin_declarations import in_process_declarations
+    from maljan.core.declared_reading import in_process_tools
 
-    held = in_process_declarations().get(PACK)
-    for name, facts in held.tool_facts.items() if held is not None else ():
+    for name, facts in in_process_tools(PACK).items():
         if facts.kind == kind:
             return name, facts.display_name or name
     return kind, kind

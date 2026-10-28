@@ -49,6 +49,15 @@ FLASH_UNDOCUMENTED = "acme-hosted-flash"
 PRO_UNDOCUMENTED = "acme-hosted-pro"
 
 
+def _shipped_entry(key: str) -> dict[str, Any]:
+    """A built-in server's entry as the stack serves it: its launch as shipped, switched on."""
+    from maljan.core.config import Settings
+
+    entry = Settings(_env_file=None).mcp.servers[key].model_dump(mode="json")
+    entry.pop("auth_token", None)
+    return {**entry, "enabled": True}
+
+
 def _values(**overrides: Any) -> dict[str, dict[str, Any]]:
     base = {
         "core.llm.provider": {"value": "openai", "source": "ui"},
@@ -198,10 +207,9 @@ class TestTheGateChangesOnlyTheEndpoints:
                 "api.enrichment_enabled": {"value": True, "source": "default"},
                 "core.mcp.servers": {
                     "value": {
-                        "analysis": {"enabled": True, "transport": "stdio"},
+                        "analysis": _shipped_entry("analysis"),
                         "threatintel": {
-                            "enabled": True,
-                            "transport": "stdio",
+                            **_shipped_entry("threatintel"),
                             "env_allow": ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"],
                         },
                         "virustotal": {
@@ -224,19 +232,50 @@ class TestTheGateChangesOnlyTheEndpoints:
         assert changes["core.sandbox.provider"] == "mock"
         assert changes["api.enrichment_enabled"] is False
         servers = changes["core.mcp.servers"]
-        assert servers["analysis"]["enabled"] and servers["local"]["enabled"]
+        # Every tool it offers declares it stays on this machine: kept.
+        assert servers["analysis"]["enabled"]
         # Its declarations say it reaches a third party: disabled, its keys untouched.
         assert not servers["threatintel"]["enabled"]
         assert servers["threatintel"]["env_allow"] == ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"]
         assert not servers["virustotal"]["enabled"]
         assert servers["virustotal"]["token"] == "**********"
+        # What a loopback server does is not known: the careful reading disables it.
+        assert not servers["local"]["enabled"]
         assert "core.mcp.servers" in gate_changes(values, STUB)
         described = describe_changes(values, changes)
-        assert described["servers_disabled"] == ["threatintel", "virustotal"]
-        assert described["servers_kept"] == {"local": "kept: effects not declared"}
+        assert described["servers_disabled"] == ["local", "threatintel", "virustotal"]
+        assert described["servers_kept"] == {}
+        assert described["servers_unknown"] == {"local": "disabled: effects not declared"}
         assert described["settings"]["core.sandbox.provider"] == {
             "before": "triage",
             "rehearsed": "mock",
+        }
+
+    def test_no_third_party_is_reached_whether_or_not_a_server_was_listed(self) -> None:
+        """Nothing kept yet (a fresh install): no server stays on unless known to stay local."""
+        from maljan.core import served_declarations
+
+        served_declarations.forget_served()
+        values = _values(
+            **{
+                "core.mcp.servers": {
+                    "value": {
+                        "analysis": _shipped_entry("analysis"),
+                        "threatintel": _shipped_entry("threatintel"),
+                    },
+                    "source": "ui",
+                }
+            }
+        )
+        changes = third_party_off(values)
+        servers = changes["core.mcp.servers"]
+        assert not servers["threatintel"]["enabled"]
+        assert not servers["analysis"]["enabled"]
+        changes = {"core.mcp.servers": servers}
+        described = describe_changes(values, changes)
+        assert described["servers_unknown"] == {
+            "analysis": "disabled: effects not declared",
+            "threatintel": "disabled: effects not declared",
         }
 
     def test_a_server_declaring_a_third_party_is_disabled_whatever_its_environment(
@@ -315,7 +354,7 @@ class TestTheGateChangesOnlyTheEndpoints:
         assert "offline_mine" not in described["servers_disabled"]
         assert described["servers_kept"] == {}
 
-    def test_an_undeclared_server_is_kept_at_full_strength_and_named(self) -> None:
+    def test_an_undeclared_server_is_disabled_and_named(self) -> None:
         values = _values(
             **{
                 "core.mcp.servers": {
@@ -326,19 +365,23 @@ class TestTheGateChangesOnlyTheEndpoints:
                             "env_allow": ["MY_TOKEN"],
                             "env": {"MY_SETTING": "x"},
                         },
-                        "analysis": {"enabled": True, "transport": "stdio"},
+                        "analysis": _shipped_entry("analysis"),
                     },
                     "source": "ui",
                 },
             }
         )
         changes = third_party_off(values)
-        assert "core.mcp.servers" not in changes
+        servers = changes["core.mcp.servers"]
+        assert not servers["mine"]["enabled"] and servers["analysis"]["enabled"]
+        # Disabled, not stripped: its environment is as it was.
+        assert servers["mine"]["env_allow"] == ["MY_TOKEN"]
         described = describe_changes(values, changes)
-        assert described["servers_kept"] == {"mine": "kept: effects not declared"}
-        assert described["servers_disabled"] == []
+        assert described["servers_kept"] == {}
+        assert described["servers_disabled"] == ["mine"]
+        assert described["servers_unknown"] == {"mine": "disabled: effects not declared"}
 
-    def test_a_server_with_some_tools_undeclared_is_kept_and_named(self) -> None:
+    def test_a_server_with_some_tools_undeclared_is_disabled_and_named(self) -> None:
         declared = {"effects": {"executes": "no", "network": False, "third_party": "no"}}
         values = _values(
             **{
@@ -355,9 +398,11 @@ class TestTheGateChangesOnlyTheEndpoints:
             }
         )
         changes = third_party_off(values)
-        assert "core.mcp.servers" not in changes
+        assert not changes["core.mcp.servers"]["mixed"]["enabled"]
         described = describe_changes(values, changes)
-        assert described["servers_kept"] == {"mixed": "kept: effects not declared for some tools"}
+        assert described["servers_unknown"] == {
+            "mixed": "disabled: effects not declared for some tools"
+        }
 
     def test_an_allowed_tool_with_no_entry_at_all_makes_the_server_partly_declared(self) -> None:
         declared = {"effects": {"executes": "no", "network": False, "third_party": "no"}}
@@ -376,8 +421,12 @@ class TestTheGateChangesOnlyTheEndpoints:
             },
         }
         values = _values(**{"core.mcp.servers": {"value": servers, "source": "ui"}})
-        described = describe_changes(values, third_party_off(values))
-        assert described["servers_kept"] == {"listed": "kept: effects not declared for some tools"}
+        changes = third_party_off(values)
+        assert changes["core.mcp.servers"]["whole"]["enabled"]
+        described = describe_changes(values, changes)
+        assert described["servers_unknown"] == {
+            "listed": "disabled: effects not declared for some tools"
+        }
 
     def test_a_server_declaring_it_answers_offline_without_credentials_is_kept_and_named(
         self,
@@ -1192,3 +1241,45 @@ class TestAPinnedDetail:
         from scripts.rehearsal.run import detail_matches
 
         assert not detail_matches(self.PINNED, shown)
+
+
+def test_the_gate_lists_only_the_servers_this_machine_reaches_before_it_decides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Declarations are read as a job reads them; a server answering from afar is not reached."""
+    from scripts.rehearsal.run import learn_declarations
+
+    from maljan.core import served_declarations
+    from maljan.providers import served_listing
+
+    served_declarations.forget_served()
+    asked: list[Any] = []
+
+    async def _list(settings: Any, **kwargs: Any) -> list[str]:
+        asked.append(sorted(settings.mcp.servers))
+        return ["analysis"]
+
+    monkeypatch.setattr(served_listing, "list_unlisted", _list)
+    values = _values(
+        **{
+            "core.mcp.servers": {
+                "value": {
+                    "analysis": _shipped_entry("analysis"),
+                    "afar": {
+                        "enabled": True,
+                        "transport": "streamable-http",
+                        "url": "https://intel.example.org/mcp",
+                    },
+                    "loopback": {
+                        "enabled": True,
+                        "transport": "sse",
+                        "url": "http://127.0.0.1:9100/sse",
+                    },
+                },
+                "source": "ui",
+            }
+        }
+    )
+    assert learn_declarations(values) == ["analysis"]
+    (servers,) = asked
+    assert "afar" not in servers and {"analysis", "loopback"} <= set(servers)

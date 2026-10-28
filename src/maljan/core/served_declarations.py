@@ -47,12 +47,28 @@ connection test proposes to the operator (``core.declaration_proposals``).
 No block reads a kind of what a sandbox observed (``sandbox_...``) from a
 server's claim unless the block's ``roles`` hold ``sandbox``.
 
-A served declaration is read only where the live declarations are: by the
-writer of an entry's facts and by the tools a request is about to offer. An
+A served declaration is read wherever the live declarations are: by the
+writer of an entry's facts, by the tools a request is about to offer, and by
+the readers that decide before any server attaches (the pack's servers and
+steps, the reputation order, the routed formats, the capability binding). An
 entry stores the facts in force when it was written, so a stored run never
 reads a server's declaration again. A run's recorded declaration digests are
 of the blocks alone; what each server declared is recorded by its own digest
 when it attaches (:func:`served_digest`).
+
+**Kept past the process.** What each source last declared outlives the
+process that listed it, so a reader that runs before any attach (a worker's
+next job, a restarted worker, the API) reads the same: the application keeps
+each source's last declaration, under the launch identity it was listed
+through, in a store of its own (``app.services.served_declarations_store``),
+loads it into a process (:func:`install_persisted`) and writes back what this
+process listed or forgot since (:func:`unsaved`, :func:`mark_saved`). A
+listing this process made and has not saved is never replaced by a load. A
+block whose launch identity changed forgets what its source declared
+(:func:`forget_moved`), here and in the store, so a block pointed at another
+server never reads the last one's. Until a source has been listed once
+nothing is kept for it, and its tools are read as any undeclared server's
+are.
 """
 
 from __future__ import annotations
@@ -87,14 +103,22 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FACTS_META_KEY",
+    "forget_moved",
     "forget_served",
+    "held_served",
+    "install_persisted",
     "laid_under",
     "layered",
+    "mark_saved",
     "register_served",
+    "restore_served",
     "served",
     "served_digest",
     "served_facts_of",
     "served_tool_facts",
+    "snapshot_served",
+    "stored_form",
+    "unsaved",
     "with_served",
 ]
 
@@ -105,6 +129,9 @@ _LOCK = threading.Lock()
 # Each source's last served declaration, by its source text, with the launch
 # identity of the block it was listed through.
 _SERVED: dict[str, tuple[str, dict[str, ToolFacts]]] = {}
+# The sources whose declaration this process listed or forgot since it last
+# loaded or saved the kept ones (:func:`unsaved`).
+_UNSAVED: set[str] = set()
 
 
 def _meta_of(definition: Any) -> Any:
@@ -189,12 +216,13 @@ def served_digest(tool_facts: Mapping[str, ToolFacts]) -> str:
     return declaration_digest({"tool_facts": body})
 
 
-def register_served(source: str, tool_facts: Mapping[str, ToolFacts], launch: str = "") -> None:
+def register_served(source: str, tool_facts: Mapping[str, ToolFacts], launch: str) -> None:
     """Keep ``tool_facts`` as what ``source`` declares now; held declarations are rebuilt.
 
     Kept under the launch identity of the block that started or reached the
     server (``tool_declarations.launch_identity``): a block pointed elsewhere
-    later reads none of it. A listing that declares nothing forgets what the
+    later reads none of it, and a block of no launch (``""``) reads only what
+    was kept under none. A listing that declares nothing forgets what the
     source declared before.
     """
     held = dict(tool_facts)
@@ -206,6 +234,8 @@ def register_served(source: str, tool_facts: Mapping[str, ToolFacts], launch: st
         else:
             _SERVED[source] = after
         changed = before != after
+        if changed:
+            _UNSAVED.add(source)
     if changed:
         bump_declaration_version()
 
@@ -213,30 +243,199 @@ def register_served(source: str, tool_facts: Mapping[str, ToolFacts], launch: st
 def served(source: str, launch: str | None = None) -> Mapping[str, ToolFacts]:
     """What ``source`` declared when it was last listed; empty for a source not listed.
 
-    With ``launch``, only what it declared under that launch identity: a
-    declaration kept under another one is not read (and stays kept until the
-    source's next listing replaces it).
+    With ``launch``, only what it declared under that very launch identity:
+    a declaration kept under another one is not read (and stays kept until
+    the source's next listing replaces it). No launch identity stands for
+    another, the empty one included.
     """
     with _LOCK:
         held = _SERVED.get(str(source))
     if held is None:
         return {}
     kept_under, facts = held
-    if launch is not None and kept_under and launch and kept_under != launch:
+    if launch is not None and kept_under != launch:
         return {}
     return dict(facts)
 
 
+def held_served(source: str) -> tuple[str, dict[str, ToolFacts]] | None:
+    """What this process holds for ``source``: its launch identity and its declaration."""
+    with _LOCK:
+        held = _SERVED.get(str(source))
+    return None if held is None else (held[0], dict(held[1]))
+
+
+def snapshot_served(source: str) -> tuple[tuple[str, dict[str, ToolFacts]] | None, bool]:
+    """What this process holds for ``source`` and whether it is still to be saved.
+
+    As :func:`restore_served` puts it back.
+    """
+    with _LOCK:
+        held = _SERVED.get(str(source))
+        unsaved_now = str(source) in _UNSAVED
+    return (None if held is None else (held[0], dict(held[1])), unsaved_now)
+
+
+def restore_served(
+    source: str, snapshot: tuple[tuple[str, Mapping[str, ToolFacts]] | None, bool]
+) -> None:
+    """Put back what :func:`snapshot_served` gave for ``source``, as if nothing was listed since.
+
+    For a listing that is no declaration of the block in force (a connection
+    test of an entry not saved as it is): it is not kept, and not saved; what
+    was held is held again, and still to be saved where it was.
+    """
+    held, was_unsaved = snapshot
+    with _LOCK:
+        before = _SERVED.get(str(source))
+        if held is None:
+            _SERVED.pop(str(source), None)
+        else:
+            _SERVED[str(source)] = (held[0], dict(held[1]))
+        if was_unsaved:
+            _UNSAVED.add(str(source))
+        else:
+            _UNSAVED.discard(str(source))
+        changed = before != _SERVED.get(str(source))
+    if changed:
+        bump_declaration_version()
+
+
 def forget_served(source: str | None = None) -> None:
-    """Forget what ``source`` declared, or what every source did."""
+    """Forget what ``source`` declared, or what every source did, here and where it is kept."""
     with _LOCK:
         if source is None:
             changed = bool(_SERVED)
+            _UNSAVED.update(_SERVED)
             _SERVED.clear()
         else:
             changed = _SERVED.pop(str(source), None) is not None
+            if changed:
+                _UNSAVED.add(str(source))
     if changed:
         bump_declaration_version()
+
+
+def stored_form(tool_facts: Mapping[str, ToolFacts]) -> dict[str, dict[str, Any]]:
+    """``tool_facts`` as the store keeps them: per tool, each field it sets, as JSON."""
+    return {name: _set_fields(facts) for name, facts in sorted(tool_facts.items())}
+
+
+def _read_stored(raw: Any, where: str) -> dict[str, ToolFacts]:
+    """A kept declaration read back as a listing is read: leniently, tool by tool."""
+    if not isinstance(raw, Mapping):
+        return {}
+    definitions = [
+        {"name": str(name), "_meta": {FACTS_META_KEY: facts}} for name, facts in raw.items()
+    ]
+    return served_tool_facts(definitions, where=where)
+
+
+def install_persisted(rows: Iterable[Any]) -> None:
+    """Hold the kept declarations ``rows`` as what their sources declare now.
+
+    Each row is ``(source, launch, tool_facts, shipped)``: the source's text,
+    the launch identity it was listed through, its declaration in
+    :func:`stored_form`, and whether that launch was the one the source ships
+    with on the host that listed it (``tool_declarations.shipped_launch``).
+    A row listed through the shipped launch is held under the shipped launch
+    of this host, which may spell the same server otherwise (an API on the
+    host, a worker in a container). A row of no launch identity is left out:
+    it would stand for none. What the store keeps replaces what this process holds
+    for every source but one this process listed or forgot and has not saved
+    (:func:`unsaved`), which is newer; a source the store no longer keeps is
+    forgotten here too. A row whose declaration cannot be read is read as
+    leniently as a listing (:func:`served_tool_facts`), and one that is not a
+    row is left out, with a warning.
+    """
+    from maljan.core.tool_declarations import shipped_launch
+
+    kept: dict[str, tuple[str, dict[str, ToolFacts]]] = {}
+    for row in rows:
+        try:
+            source, launch, raw, *rest = row
+        except (TypeError, ValueError):
+            logger.warning("A kept server declaration that is not a row is left out.")
+            continue
+        source = str(source)
+        launch = str(launch or "")
+        if rest and rest[0] is True and shipped_launch(source):
+            launch = shipped_launch(source)
+        if not launch:
+            continue
+        try:
+            facts = _read_stored(raw, f"{source}.")
+        except Exception as exc:  # noqa: BLE001 — one unreadable row costs that source alone
+            logger.warning(
+                "A kept server declaration was not read (%s); its source reads as undeclared.",
+                type(exc).__name__,
+            )
+            continue
+        if facts:
+            kept[source] = (launch, facts)
+    with _LOCK:
+        after = {source: held for source, held in kept.items() if source not in _UNSAVED}
+        after.update({source: _SERVED[source] for source in _UNSAVED if source in _SERVED})
+        changed = after != _SERVED
+        if changed:
+            _SERVED.clear()
+            _SERVED.update(after)
+    if changed:
+        bump_declaration_version()
+
+
+def unsaved() -> list[tuple[str, str, dict[str, dict[str, Any]] | None, bool]]:
+    """What this process listed or forgot since the kept declarations were loaded or saved.
+
+    Per source, ``(source, launch, tool_facts, shipped)``: its declaration in
+    :func:`stored_form` and whether ``launch`` is the one it ships with here
+    (:func:`install_persisted`), or ``(source, "", None, False)`` for one
+    whose declaration is forgotten (or held under no launch identity), to be
+    taken out of the store. Marked saved by :func:`mark_saved`.
+    """
+    from maljan.core.tool_declarations import shipped_launch
+
+    with _LOCK:
+        held_now = {source: _SERVED.get(source) for source in sorted(_UNSAVED)}
+    out: list[tuple[str, str, dict[str, dict[str, Any]] | None, bool]] = []
+    for source, held in held_now.items():
+        if held is None or not held[0]:
+            out.append((source, "", None, False))
+        else:
+            ships = held[0] == shipped_launch(source)
+            out.append((source, held[0], stored_form(held[1]), ships))
+    return out
+
+
+def mark_saved(rows: Iterable[tuple[Any, ...]]) -> None:
+    """Mark the rows :func:`unsaved` gave as kept; a source listed again since stays unsaved."""
+    with _LOCK:
+        for source, launch, raw, *_shipped in rows:
+            held = _SERVED.get(source)
+            now = None if held is None or not held[0] else (held[0], stored_form(held[1]))
+            if now == (None if raw is None else (launch, raw)):
+                _UNSAVED.discard(source)
+
+
+def forget_moved(launches: Mapping[str, str]) -> list[str]:
+    """Forget each source whose block now starts or reaches its server otherwise.
+
+    ``launches`` is each source's block launch identity under the settings in
+    force (``tool_declarations.launch_identity``). A source held under another
+    one is forgotten, here and in the store (:func:`unsaved`), so a block
+    pointed at another server never reads what the last one declared, before
+    or after a restart. A source the settings hold no block for is left as it
+    is. The sources forgotten, in order.
+    """
+    with _LOCK:
+        moved = sorted(
+            source
+            for source, (launch, _facts) in _SERVED.items()
+            if source in launches and launch and launches[source] != launch
+        )
+    for source in moved:
+        forget_served(source)
+    return moved
 
 
 def _set_fields(facts: ToolFacts) -> dict[str, Any]:

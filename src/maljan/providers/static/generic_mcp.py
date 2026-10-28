@@ -353,10 +353,11 @@ class GenericMCPStaticProvider(StaticProvider):
         A provider's tools are offered under their own names, so each note
         names the aggregated tools the provider offers as they are named.
         """
+        from maljan.core.declared_reading import tools_in_force
         from maljan.core.undeclared_tools import aggregates_of, with_aggregate_notes
 
         aggregates = aggregates_of(
-            getattr(getattr(self._handle, "config", None), "tool_facts", None)
+            tools_in_force(self.declaration_source, getattr(self._handle, "config", None))
         )
         if not aggregates:
             return tools
@@ -436,7 +437,7 @@ class GenericMCPStaticProvider(StaticProvider):
         open of a tool that needs the program, or a failed call, raises.
         """
         tool = declared_tool(self._cfg, which)
-        facts = block_declaration(self._cfg, tool)
+        facts = block_declaration(self._cfg, tool, self.declaration_source)
         roles = facts.arguments if facts is not None else {}
         program = None
         if path and (PROGRAM_ROLE in roles or not roles):
@@ -469,7 +470,7 @@ class GenericMCPStaticProvider(StaticProvider):
         tool = declared_tool(self._cfg, "call_graph")
         return call_graph_of(
             answer_value(raw),
-            block_declaration(self._cfg, tool),
+            block_declaration(self._cfg, tool, self.declaration_source),
             getattr(self._cfg, "auto_name_prefixes", None) or (),
         )
 
@@ -509,7 +510,9 @@ class GenericMCPStaticProvider(StaticProvider):
         if parts is not None:
             return FunctionHashes(unavailable=f"{tool} refused: {parts[1][:300]}")
         return FunctionHashes(
-            function_hashes_of(answer_value(raw), block_declaration(self._cfg, tool))
+            function_hashes_of(
+                answer_value(raw), block_declaration(self._cfg, tool, self.declaration_source)
+            )
         )
 
     def anti_analysis_scan(
@@ -526,7 +529,7 @@ class GenericMCPStaticProvider(StaticProvider):
         tool = declared_tool(self._cfg, "anti_analysis")
         if not tool:
             return None
-        facts = block_declaration(self._cfg, tool)
+        facts = block_declaration(self._cfg, tool, self.declaration_source)
         formats = frozenset(
             facts.routed_formats if facts and facts.routed_formats else routed_formats()
         )

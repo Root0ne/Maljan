@@ -37,7 +37,7 @@ def _pack_step_of(renderer: str, steps: Sequence[Any]) -> Any:
 
 
 def _declared_kind(called: str) -> str:
-    """The kind the platform ships for a step's ``called`` tool, ``""`` for none."""
+    """The kind the platform's own sources declare for a step's ``called`` tool, ``""`` for none."""
     from maljan.core.declared_reading import shipped_by_name
 
     facts = shipped_by_name().get(called)
@@ -58,12 +58,15 @@ def _declaring_server_key(
     off, the choice is logged at ``level``, info by default (the node resolves
     each purpose once per run; a status read asks for debug).
     """
+    from maljan.core.declared_reading import tools_in_force
+
     kind = _declared_kind(called)
     by_name: dict[bool, list[str]] = {True: [], False: []}
     by_kind: dict[bool, list[str]] = {True: [], False: []}
     for key, server in servers.items():
         enabled = bool(getattr(server, "enabled", True))
-        facts = getattr(server, "tool_facts", None) or {}
+        # Its block's declarations, with what its server declares of itself under them.
+        facts = tools_in_force(f"mcp:{key}", server)
         if called in facts:
             by_name[enabled].append(str(key))
         elif kind and any(getattr(f, "kind", None) == kind for f in facts.values()):

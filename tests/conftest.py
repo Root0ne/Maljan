@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from functools import cache
 from unittest.mock import MagicMock
 
 import pytest
@@ -60,6 +61,77 @@ def reset_observability_state() -> None:
     observability.throttle.last_error = None
     throttle._pool = None
     throttle._last_failure_at = None
+
+
+@cache
+def _own_servers_kept() -> tuple[tuple[str, str, dict], ...]:
+    """What each of the platform's own servers declares of its tools, as the store keeps it.
+
+    The frozen capture the parity gate holds every server's own listing to
+    (``tests/unit/servers/test_each_own_server_declares_its_tools.py``), under
+    the launch identity of the block it ships with.
+    """
+    import json
+    from pathlib import Path
+
+    from maljan.core.config import _builtin_servers
+    from maljan.core.tool_declarations import launch_identity
+
+    captured = json.loads(
+        (Path(__file__).parent / "fixtures" / "own_server_tool_facts.json").read_text()
+    )
+    blocks = _builtin_servers()
+    return tuple(
+        (f"mcp:{key}", launch_identity(blocks[key]), tools) for key, tools in captured.items()
+    )
+
+
+@pytest.fixture(autouse=True)
+def the_own_servers_have_declared_their_tools() -> Iterator[None]:
+    """Each test starts where a deployment is once its own servers were first listed.
+
+    The platform's own sidecars ship no table of their tools: what the
+    platform reads of them is what each declared when it was last listed,
+    kept past the process (``core.served_declarations``). Every test starts
+    with that kept declaration, and with nothing this process listed or
+    forgot since; a test of a fresh install, before any listing, forgets it
+    (``forget_served``).
+    """
+    from maljan.core import served_declarations
+
+    served_declarations._UNSAVED.clear()
+    served_declarations.install_persisted(_own_servers_kept())
+    yield
+    # And between tests, where a module's or a session's fixture is built.
+    served_declarations._UNSAVED.clear()
+    served_declarations.install_persisted(_own_servers_kept())
+
+
+@pytest.fixture(autouse=True, scope="session")
+def the_own_servers_declared_their_tools_before_the_first_test() -> None:
+    """As above, before any fixture of a wider scope than a test is built."""
+    from maljan.core import served_declarations
+
+    served_declarations.install_persisted(_own_servers_kept())
+
+
+@pytest.fixture(autouse=True)
+def no_server_is_listed_or_reread_unless_a_test_asks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test lists a server before its run, nor rereads the kept declarations per request.
+
+    A job's start lists each trusted server nothing is kept for
+    (``providers.served_listing``), and the API rereads what is kept every few
+    seconds (``served_declarations_store.refresh``): left on, a test's worker
+    would start the real sidecars and a test's request would read an empty
+    test database over the kept declarations, depending on the clock. A test
+    of either asks for it itself.
+    """
+    from app.services import served_declarations_store
+    from maljan.providers import served_listing
+
+    monkeypatch.setattr(served_listing, "unlisted", lambda settings: [])
+    # Read last at the end of time: never due again.
+    monkeypatch.setattr(served_declarations_store, "_READ_AT", [float("inf")])
 
 
 @pytest.fixture(autouse=True)
