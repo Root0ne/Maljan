@@ -1776,11 +1776,13 @@ that would size it from the window. With no room measured the prompts are
 built as before; two chunk boundaries differ on purpose: whole sources beside a
 split one are joined, and a packed bin counts the overlap it carries.
 
-**What the report leaves out, it says.** The markdown report keeps its layout
-bounds — a long table value is cut to fit the page, a long list shows its
-first rows — and every one now says what it left out and where the whole is:
-a cut value ends in `…` and the methodology appendix says the JSON report and
-the evidence ledger carry it whole; a list shown in part ends with "N more …
+**What the report leaves out, it says.** No table cell of the report's body
+is cut: a long value is printed whole in its row and the page wraps it (the
+HTML report breaks a cell wherever it must, and the PDF lays its tables out
+fixed, so a kilobyte-long cell costs no more to print than a short one). The markdown report keeps its
+other layout bounds — Appendix A cuts a long one-line value, a long list shows
+its first rows — and every one says what it left out and where the whole is:
+a cut value ends in `…` and the section says where it is whole; a list shown in part ends with "N more …
 not shown here; the JSON report carries every one." The evidence sections do
 the same ("N more rows not shown here; the evidence endpoint carries every one
 under ev_…", a long text "Cut here at … characters"), a figure's legend counts

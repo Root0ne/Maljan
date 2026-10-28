@@ -508,6 +508,9 @@ class TestAgainstTheSequentialBase:
     say the table publishes nothing itself (T-386): that line is the only change.
     The commands request was re-pinned when its instruction came to ask for each
     command's branch value as its id (T-378): that sentence is the only change.
+    The Markdown and HTML digests were re-pinned when the methodology came to
+    say no table value of the body is cut (T-399): that sentence is the only
+    change, with the HTML print stylesheet's fixed table layout.
     """
 
     def test_the_requests_and_the_report_are_those_of_the_base(self) -> None:

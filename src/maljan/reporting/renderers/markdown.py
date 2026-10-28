@@ -114,7 +114,7 @@ from maljan.reporting.prose_decisions import (
     with_decided_statements,
 )
 from maljan.schemas.evidence import is_guard_answer
-from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
+from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, UNVERIFIED_TECHNIQUE_MARKER
 from maljan.utils.marked_cut import CUT_MARK
 
 # ---------------------------------------------------------------------------
@@ -259,8 +259,9 @@ def _is_sandbox_status(row: Any) -> bool:
 _EVASION_WORDS = ("anti", "evas", "debug", "sandbox", "virtual", "vm")
 _RESOLUTION_WORDS = ("hash", "peb", "resolv", "dynamic api")
 
-# Long values are cut outside the IOC table, which never cuts one.
-_CELL_LIMIT = 240
+# No cell of the body is cut: a value is printed whole in its row, and the
+# page wraps it (the HTML stylesheet breaks a cell anywhere it must). Only
+# Appendix A cuts a one-line value, and says under it where it is whole.
 
 _EV_RE = re.compile(r"\bev_\d+\b")
 
@@ -824,9 +825,7 @@ class MarkdownRenderer:
             measured.append(_row("Name", "Severity", "Description"))
             measured.append(_divider(3))
             for sig in evasive[:10]:
-                measured.append(
-                    _row(sig.name, _severity_cell(sig), _truncate(sig.description, _CELL_LIMIT))
-                )
+                measured.append(_row(sig.name, _severity_cell(sig), _whole(sig.description)))
             measured.extend(_left_out(len(evasive), 10, "evasion signatures"))
         blocks.append(
             _subsection(
@@ -907,10 +906,8 @@ class MarkdownRenderer:
                 measured.append(
                     _row(
                         mech.kind,
-                        _code_span(_truncate(ctx.plain(mech.target), _CELL_LIMIT)),
-                        _code_span(_truncate(ctx.plain(mech.payload), _CELL_LIMIT))
-                        if mech.payload
-                        else "-",
+                        _code_span(_whole(ctx.plain(mech.target))),
+                        _code_span(_whole(ctx.plain(mech.payload))) if mech.payload else "-",
                         mech.technique_id or "-",
                         ctx.source_of(mech.evidence_ref),
                         mech.evidence_ref or "-",
@@ -938,8 +935,8 @@ class MarkdownRenderer:
                 measured.append(
                     _row(
                         listed_row["kind"] or "-",
-                        _code_span(_truncate(ctx.plain(listed_row["target"]), _CELL_LIMIT)),
-                        _code_span(_truncate(ctx.plain(listed_row["payload"]), _CELL_LIMIT))
+                        _code_span(_whole(ctx.plain(listed_row["target"]))),
+                        _code_span(_whole(ctx.plain(listed_row["payload"])))
                         if listed_row["payload"]
                         else "-",
                         f"the {listed_row['listed_by']} analyst"
@@ -972,9 +969,7 @@ class MarkdownRenderer:
             measured.append(_row("PID", "Command line"))
             measured.append(_divider(2))
             for node in commands[:20]:
-                measured.append(
-                    _row(node.pid, _code_span(_truncate(ctx.plain(node.command_line), _CELL_LIMIT)))
-                )
+                measured.append(_row(node.pid, _code_span(_whole(ctx.plain(node.command_line)))))
             measured.extend(_left_out(len(commands), 20, "commands"))
         blocks.append(
             _subsection(
@@ -1067,10 +1062,10 @@ class MarkdownRenderer:
                 measured.append(
                     _row(
                         _inline_safe(u.method or "-", pipes=False, plain=ctx.plain),
-                        _code_span(defang(_truncate(u.url, _CELL_LIMIT), "url")),
+                        _code_span(defang(_whole(u.url), "url")),
                         _inline_safe(u.status or "-", pipes=False, plain=ctx.plain),
                         _inline_safe(
-                            _truncate(u.user_agent or "-", _CELL_LIMIT),
+                            _whole(u.user_agent or "-"),
                             pipes=False,
                             plain=ctx.plain,
                         ),
@@ -1121,7 +1116,7 @@ class MarkdownRenderer:
                 named = str(op.get("path") or op.get("name") or "not recorded")
                 measured.append(
                     _row(
-                        _code_span(_truncate(ctx.plain(named), _CELL_LIMIT)),
+                        _code_span(_whole(ctx.plain(named))),
                         f"{op['size']} bytes" if op.get("size") else "not recorded",
                         _code_span(str(op.get("sha256")).lower()) if op.get("sha256") else "-",
                         op.get("type") or "-",
@@ -1214,7 +1209,7 @@ class MarkdownRenderer:
             for op in files[:40]:
                 lines.append(
                     _row(
-                        _code_span(_truncate(ctx.plain(str(op.get("path", ""))), _CELL_LIMIT)),
+                        _code_span(_whole(ctx.plain(str(op.get("path", ""))))),
                         op.get("operation", "-"),
                         op.get("api", "-"),
                     )
@@ -1457,9 +1452,7 @@ class MarkdownRenderer:
             lines.append(_divider(4))
             for ioc in static.interesting_strings[:60]:
                 published = ctx.plain(answers.get((ioc.kind, ioc.value.strip().lower())) or "-")
-                # Defanged whole, then cut: a value cut first could leave a
-                # host the defanger no longer reads as one.
-                value = _truncate(_defanged_text(ctx.plain(ioc.value)), _CELL_LIMIT)
+                value = _whole(_defanged_text(ctx.plain(ioc.value)))
                 lines.append(
                     _row(
                         _code_span(value),
@@ -2819,13 +2812,11 @@ class _Context:
         return self._labels
 
     def cell(self, text: Any) -> str:
-        """A model-written table cell: defanged like prose, cut like every cell."""
+        """A model-written table cell: defanged like prose, and whole, as every body cell is."""
         raw = str(text or "")
-        cut = _truncate(self._defang(raw), _CELL_LIMIT)
-        # A cell is cut to its width, so its marks follow the cut text rather
-        # than a sentence the cut may have shortened.
+        whole = self._defang(raw)
         marks = list(dict.fromkeys(mark for sentence, mark in self.flagged if sentence in raw))
-        return f"{cut} {' '.join(marks)}" if marks else cut
+        return f"{whole} {' '.join(marks)}" if marks else whole
 
     def sandbox_sentence(self) -> str:
         """What the run knows about a sandbox, as one sentence, in the run's own voice.
@@ -4078,7 +4069,7 @@ def _directed_text_lines(rows: list[Any], ctx: _Context) -> list[str]:
     lines.append(_divider(6))
     for row in rows:
         # Held escaped already (``analysis.directed_text.TEXT_FORM``).
-        text = _truncate(_defanged_text(ctx.plain(row.text)), _CELL_LIMIT)
+        text = _whole(_defanged_text(ctx.plain(row.text)))
         inside = (
             [f"{row.inside_template} inside a chat template structure"]
             if row.inside_template
@@ -4305,9 +4296,21 @@ def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[st
         evidence = f" Evidence: {row.evidence_ref}" if row.evidence_ref.strip() else ""
         retried = getattr(row, "added_by_retry_in_round", None)
         added = f"{retry_added_marker(retried)}; " if isinstance(retried, int) else ""
+        # A claim mapped to several techniques is one claim: its ids together.
+        # Each id carries the note the ATT&CK table prints beside it.
+        ids = list(getattr(row, "technique_ids", None) or [])
+        unverified = set(getattr(row, "unverified_technique_ids", None) or [])
+        kept = set(getattr(row, "absence_kept_technique_ids", None) or [])
+        written = []
+        for tid in ids:
+            notes = [UNVERIFIED_TECHNIQUE_MARKER] if tid in unverified else []
+            notes += [ABSENCE_TECHNIQUE_MARKER] if tid in kept else []
+            shown = _inline_safe(tid, plain=ctx.plain)
+            written.append(f"{shown} ({'; '.join(notes)})" if notes else shown)
+        mapped = f"technique{'s' if len(ids) > 1 else ''} {', '.join(written)}; " if ids else ""
         lines.append(
             _item(
-                f"**{claim_label(row.agent, row.claim_number)}** ({added}{stated}"
+                f"**{claim_label(row.agent, row.claim_number)}** ({added}{mapped}{stated}"
                 f"{carried_sentence(row)}): {ctx.plain(row.claim)}{ctx.plain(evidence)}"
             )
         )
@@ -4995,7 +4998,7 @@ def _endpoint(value: str) -> str:
         kind, host = "ip", text
     else:
         kind, host = "domain", text.split("/", 1)[0].split(":", 1)[0]
-    written = _code_span(defang(_truncate(text, _CELL_LIMIT), kind))
+    written = _code_span(defang(_whole(text), kind))
     if _is_address(host):
         # The publish rule's own question, asked of an address a model wrote:
         # a private or reserved one is nothing a consumer could act on.
@@ -5750,8 +5753,8 @@ def _evidence_body(
     return [_escape_block(write(section.text)), ""] + rows
 
 
-# How much of one table cell, and of one list item, the page prints. Only a
-# one-line value is ever cut so: code a section holds is drawn whole as a
+# How much of one table cell, and of one list item, Appendix A prints; the
+# body cuts none. Only a one-line value is ever cut so: code a section holds is drawn whole as a
 # listing (``_evidence_rows``), and a section with a cut value says where it
 # is whole (``_cut_note``).
 CELL_WIDTH = 160
@@ -5781,6 +5784,7 @@ def _evidence_rows(
     it, and the listing draws the code whole in a fence, headed by the
     function it is. A one-line value is still cut to the page, and a
     section with a value cut says under it where the value is whole.
+    Without ``listings`` (a section printed in the body) nothing is cut.
     """
     out: list[str] = []
     code: list[tuple[str, str]] = []
@@ -5803,11 +5807,11 @@ def _evidence_rows(
                     continue
                 if at in spans and str(cell) and str(cell) not in plain:
                     whole = write(str(cell))
-                    shown = _truncate(whole, CELL_WIDTH)
+                    shown = _truncate(whole, CELL_WIDTH) if listings else whole
                     cells.append(_code_span(_one_line(shown)))
                 else:
                     whole = _emphasis_escaped(write(_escaped(cell)))
-                    shown = _truncate_escaped(whole, CELL_WIDTH)
+                    shown = _truncate_escaped(whole, CELL_WIDTH) if listings else whole
                     cells.append(shown)
                 cut = cut or shown != whole
             cells += [""] * (len(columns) - len(cells))
@@ -5820,7 +5824,7 @@ def _evidence_rows(
                 out.append(_item(f"code: Listing {len(code)} below"))
                 continue
             whole = _emphasis_escaped(write(_escaped(item)))
-            shown = _truncate_escaped(whole, ITEM_WIDTH)
+            shown = _truncate_escaped(whole, ITEM_WIDTH) if listings else whole
             cut = cut or shown != whole
             out.append(_item(shown))
     if listings and cut:
@@ -6022,7 +6026,7 @@ def _unmapped_behaviour_lines(report: MalwareReport) -> list[str]:
     if not names:
         return []
     lines = ["", _plain_heading("Behaviours with no mapped technique"), ""]
-    lines.extend(_item(_truncate(name, 200)) for name in names)
+    lines.extend(_item(_whole(name)) for name in names)
     lines.append("")
     lines.append(
         "_Named in the verdict without a MITRE ATT&CK technique id after the id was "
@@ -6098,11 +6102,12 @@ def _one_line(value: Any) -> str:
 # report's structured form) and the evidence ledger hold every value whole.
 LEFT_OUT_LINE = "_{rest:,} more {what} not shown here; the JSON report carries every one._"
 # Said once, in the methodology appendix, of a table cell that ends in the cut
-# mark.
+# mark: only Appendix A has one.
 CUT_CELL_SENTENCE = (
-    "A table value that ends in … is cut to fit the page; the JSON report and the "
-    "evidence ledger (Appendix A's ids) carry it whole. Code is never cut to fit the page: "
-    "Appendix A draws each function's code whole, as a listing."
+    "No table value in the body of the report is cut. A table value in Appendix A that "
+    "ends in … is cut to fit the page; the JSON report and the evidence ledger (Appendix "
+    "A's ids) carry it whole. Code is never cut to fit the page: Appendix A draws each "
+    "function's code whole, as a listing."
 )
 
 
@@ -6131,6 +6136,11 @@ def _outside_marks(text: str, cut: int) -> int:
             if text.startswith(mark, start):
                 return start
     return cut
+
+
+def _whole(value: Any) -> str:
+    """A body cell's value as text, whole; nothing for none."""
+    return "" if value is None else str(value)
 
 
 def _truncate(value: Any, length: int) -> str:
@@ -6182,8 +6192,8 @@ def _registry_row(reg: RegistryMod, plain: Callable[[str], str] = lambda text: t
     """One registry modification, its key and value name defanged."""
     return _row(
         reg.hive,
-        _code_span(_truncate(plain(reg.key), _CELL_LIMIT)),
-        _code_span(_truncate(plain(reg.value_name or "-"), 80)),
+        _code_span(_whole(plain(reg.key))),
+        _code_span(_whole(plain(reg.value_name or "-"))),
         reg.operation,
     )
 
@@ -6195,4 +6205,4 @@ def _severity_cell(sig: SandboxSignature) -> Any:
 
 def _signature_row(sig: SandboxSignature) -> str:
     ttps = ", ".join(sig.technique_ids) if sig.technique_ids else "-"
-    return _row(sig.name, _severity_cell(sig), ttps, _truncate(sig.description or "-", _CELL_LIMIT))
+    return _row(sig.name, _severity_cell(sig), ttps, _whole(sig.description or "-"))

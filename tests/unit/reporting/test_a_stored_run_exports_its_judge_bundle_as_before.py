@@ -28,11 +28,11 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # is an anomalous-activity indicator of its own, and an indicator's reason is
 # read from the rebuilt table.
 STORED_EXPORTS = {
-    "run7": "eff64a6fcc7d2c98",
-    "run5": "618c6bdf28561f05",
+    "run7": "8954bac7f3ea132c",
+    "run5": "efe981ba18209c11",
     "run4": "9a3a7b4040b09b57",
-    "local8": "23b5d33c962e03b7",
-    "haiku4": "860e9bb2afe060ca",
+    "local8": "952f4e3743111201",
+    "haiku4": "d8d0d7500af6a3ff",
 }
 # ``(markdown, html with the nonce "fixed", normalised STIX)`` for haiku4. The
 # Markdown and HTML were re-pinned when a sample's, a tool's or a finding's text
@@ -48,7 +48,15 @@ STORED_EXPORTS = {
 # change.
 # The Markdown and HTML re-pinned when the host identifier table came to mark
 # each row the IOC table publishes (T-386); the STIX did not change.
-HAIKU4_RENDERS = ("75b9157b1a863aca", "b47768bbf80581cb", "98ec03129873afd3")
+# Re-pinned when no table cell of the body came to be cut (T-399) and every
+# indicator to indicate the malware object (T-402): the only Markdown and HTML
+# changes are body cells that ended in … printed whole, the methodology's
+# sentence about cut values and the HTML print stylesheet's fixed table layout;
+# each STIX export, here and in ``STORED_EXPORTS``, gains one platform
+# ``indicates`` edge per indicator related to no malware object (the similarity
+# digests and benign-typed ones aside), each named by the report object, and
+# nothing else (run4's export over the judge's bundle gains none).
+HAIKU4_RENDERS = ("0f6dfb3b3023d7e9", "8e00936f17be76df", "830330837272aa44")
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")

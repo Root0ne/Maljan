@@ -1516,7 +1516,16 @@ Two producers use it:
   (`MalwareReport.claims_not_discussed`), counted
   (`run_summary.claims_not_discussed`) and printed under §13.1 "Claims whose
   code locations or API names the body does not name", with the names it
-  lacks. Nothing is decided about a listed claim.
+  lacks. Nothing is decided about a listed claim. A claim is the block the
+  analyst wrote: a block whose TECHNIQUE line listed several ids is read as one
+  claim per id, and the coverage check, the report models' list of claims in
+  force, §13.1 and the run summary's per-analyst claim count read it as one
+  claim again, numbered once, with its techniques together in its row
+  (`ClaimNotDiscussed.technique_ids`), each id with the note the ATT&CK table
+  prints beside it: "technique id not in the ATT&CK catalog" for an id the
+  catalogue lacks, and the kept-absence note for an absence claim kept when
+  asked. The ATT&CK table, the matrix and
+  `ttp_mappings` keep one row per technique.
 
   A function name the run resolved at runtime from a stored value is not an
   import. `api_capability` takes such names as `resolved_names` and marks them
@@ -1762,14 +1771,27 @@ onto that object unchanged — confidence, basis and credits as the judge wrote
 them — so the technique the judge numbered is used by the export's malware
 object and published at the judge's number, as the report publishes it.
 
-An indicator indicates the malware object only by an edge somebody made: the
-judge's own `indicates` edges, and the sample's hash indicator, whose edge is a
-fact the platform owns. Every other indicator — the network and string rows the
-renderer mints, a judge indicator the judge related to nothing — is published
-related to nothing and listed in the report object's `object_refs`. In STIX
-`indicates` says the pattern detects the malware, and a Malware verdict does
-not say that of every value the run saw; the same reason types those rows
-`anomalous-activity`.
+Every indicator the export publishes indicates the malware object that stands
+for the sample: each was published for this sample by the one publish rule, and
+an indicator related to nothing was a finding missing from the export's graph.
+The judge's own edges are kept as written, and the sample's hash indicator has
+its edge from the start. Every other indicator — the network and string rows
+the renderer mints, the IOC table's host rows, a judge indicator the judge
+related to nothing — gets one edge to the sample's malware object once the
+integrity pass has folded duplicates
+(`stix_renderer._every_indicator_indicates`). That edge says it is the
+platform's in its `description` (`stix_renderer.PLATFORM_INDICATES_EDGE`), so
+a consumer tells it from one the judge wrote, and the report object's
+`object_refs` names it. What the value claims about the activity is still its
+`indicator_types`: the string-derived rows stay `anomalous-activity`. Three
+get no edge: an indicator the judge related to a malware object by an edge of
+any type, in either direction (a `related-to` such as "shared hosting; not
+specific" is the judge's word that the value does not indicate the malware,
+and is not upgraded); one typed `benign`, which says it indicates no malware;
+and the sample's similarity digests ("Files like the sample": imphash, ssdeep,
+TLSH, `stix_renderer.sample_similarity_pattern`), which match files that are
+not the sample. A Benign export has no malware object and no such edge; the
+judge's own bundle is never edited.
 
 The export names its producer in STIX's own vocabulary: one `identity` for this
 platform, `identity_class: system`, under an id derived once

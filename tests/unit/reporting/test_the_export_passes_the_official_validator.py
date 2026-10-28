@@ -34,6 +34,7 @@ from maljan.reporting.models import (
     ProcessNode,
 )
 from maljan.reporting.renderers.stix_renderer import (
+    PLATFORM_INDICATES_EDGE,
     UNPUBLISHABLE_OBJECT_CODE,
     ExtendedSTIXRenderer,
 )
@@ -434,11 +435,12 @@ class TestEveryMalwareExportHangsTogether:
             patterns = {o.id for o in bundle.objects if o.type == "attack-pattern"}
             assert patterns <= used, name
 
-    def test_every_indicator_is_related_by_its_maker_or_listed_unrelated(self) -> None:
-        """An indicator indicates the malware object only by an edge the judge
-        wrote or by the sample's own hash edge; any other is related to nothing
-        and listed in the report object's ``object_refs``. In STIX ``indicates``
-        says the pattern detects the malware, which a verdict does not say."""
+    def test_every_indicator_indicates_the_malware_by_its_maker_or_the_platform(self) -> None:
+        """Every indicator the export publishes indicates a malware object: by
+        an edge the judge wrote, by the sample's own hash edge, or by an edge
+        the platform adds and says it added; one typed ``benign`` and the
+        similarity digests are related to nothing. Every edge is listed in the
+        report object's ``object_refs``."""
         for name, bundle in _malware_exports():
             by_id = {o.id: o for o in bundle.objects}
             sample_hash = {
@@ -453,13 +455,22 @@ class TestEveryMalwareExportHangsTogether:
                 if o.type != "relationship" or o.relationship_type != "indicates":
                     continue
                 assert getattr(by_id.get(o.target_ref), "type", "") == "malware", name
-                assert o.id in _JUDGE_INDICATES or o.source_ref in sample_hash, (
-                    f"{name}: an indicates edge nobody made from {o.source_ref}"
-                )
+                assert (
+                    o.id in _JUDGE_INDICATES
+                    or o.source_ref in sample_hash
+                    or o.description == PLATFORM_INDICATES_EDGE
+                ), f"{name}: an indicates edge nobody made from {o.source_ref}"
+                assert o.id in listed, (name, o.id)
                 indicating.add(o.source_ref)
             for o in bundle.objects:
                 if o.type == "indicator":
-                    assert o.id in indicating or o.id in listed, (name, o.id)
+                    # Typed benign, or the similarity digests (which match
+                    # files that are not the sample): related to nothing.
+                    similar = str(o.name or "").startswith("Files like the sample")
+                    if "benign" in (o.indicator_types or []) or similar:
+                        assert o.id not in indicating and o.id in listed, (name, o.id)
+                    else:
+                        assert o.id in indicating, (name, o.id)
 
     def test_a_benign_typed_judge_indicator_is_not_said_to_indicate_the_malware(self) -> None:
         bundle = _benign_typed_indicator()

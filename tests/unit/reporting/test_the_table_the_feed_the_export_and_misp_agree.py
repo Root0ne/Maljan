@@ -56,6 +56,7 @@ from maljan.reporting.models import (
 )
 from maljan.reporting.renderers import MarkdownRenderer
 from maljan.reporting.renderers.stix_renderer import (
+    PLATFORM_INDICATES_EDGE,
     ExtendedSTIXRenderer,
     pattern_values,
     publishes,
@@ -539,10 +540,14 @@ class TestTheExport:
             if o["type"] == "indicator" and o is not sample and (SHA256 in o["pattern"])
         ]
         assert INDICATES["source_ref"] not in json.dumps(bundle)
+        # The edges the platform adds for the other indicators aside: the
+        # judge's edge is the sample's one edge.
         edges = [
             o
             for o in bundle["objects"]
-            if o["type"] == "relationship" and o["relationship_type"] == "indicates"
+            if o["type"] == "relationship"
+            and o["relationship_type"] == "indicates"
+            and o.get("description") != PLATFORM_INDICATES_EDGE
         ]
         assert [(e["source_ref"], e["target_ref"]) for e in edges] == [
             (sample["id"], MALWARE["id"])

@@ -2558,6 +2558,8 @@ class RunSummaryBuilder:
         had data, read it, and its model ended without a report. That is
         neither of the other two and the row now says so.
         """
+        from maljan.pipeline.validation import count_claim_blocks
+
         starved = no_data or set()
         stats: list[ISRAgentStats] = []
         for isr in isr_reports.values():
@@ -2567,7 +2569,8 @@ class RunSummaryBuilder:
                     agent_id=isr.agent_id,
                     domain=isr.domain,
                     revision_round=isr.revision_round,
-                    claim_count=len(isr.claims),
+                    # A claim mapped to several techniques is counted once.
+                    claim_count=count_claim_blocks(isr.claims),
                     mean_confidence=isr.mean_confidence,
                     technique_ids=list(dict.fromkeys(technique_ids)),  # deduplicate, preserve order
                     has_dissent=bool(isr.dissent_items),
