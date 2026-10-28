@@ -480,10 +480,12 @@ def _bare_secrets(address: str) -> list[str]:
     refuses a password holding a bracket: everything after the first ``:``,
     and also what follows the last one, where a word before a mailbox's
     colon stands in front of a user name (``to:user:pw@host:8080``). A token
-    alone in its user name slot where it has a token's shape, and each query
-    value whose key names a credential, as in a URL with a scheme.
+    alone in its user name slot where it has a token's shape or holds an
+    opener no user name holds (``p"ss@h:8080``), then also what follows its
+    last opener where that has a token's shape, and each query value whose
+    key names a credential, as in a URL with a scheme.
     """
-    from maljan.core.settings_masking import bare_userinfo
+    from maljan.core.settings_masking import TOKEN_OPENERS, bare_userinfo
 
     parts = bare_userinfo(address)
     if parts is None:
@@ -494,8 +496,13 @@ def _bare_secrets(address: str) -> list[str]:
         found.extend(
             dict.fromkeys(p for p in (head.partition(":")[2], head.rpartition(":")[2]) if p)
         )
-    elif _reads_as_a_credential(head):
-        found.append(head)
+    else:
+        last_opener = max(head.rfind(opener) for opener in TOKEN_OPENERS)
+        if last_opener >= 0 or _reads_as_a_credential(head):
+            found.append(head)
+        after = head[last_opener + 1 :]
+        if 0 <= last_opener and after and _reads_as_a_credential(after):
+            found.append(after)
     found.extend(_url_secrets("//host" + tail[len(tail.split("?", 1)[0]) :]))
     return found
 

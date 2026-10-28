@@ -13,6 +13,10 @@ fingerprint's masked settings and server digests.
 from __future__ import annotations
 
 import json
+import random
+import re
+import string
+import time
 
 import pytest
 from pydantic import ValidationError
@@ -379,3 +383,250 @@ def test_an_address_in_free_text_registers_only_its_password():
     assert not any("cannot" in value or "Error" in value for value in held)
     snap = ov.public_snapshot(settings, ())
     assert snap["mcp.servers.notes.prompt_fragment"] == "Error: cannot connect to ***@10.0.0.5"
+
+
+@pytest.mark.parametrize("opener", list("\"'([{<"))
+@pytest.mark.parametrize("tail", ["llm.internal:8080", "llm.internal:8080/v1", "llm.internal/v1"])
+def test_a_token_alone_holding_an_opener_leaves_nothing_of_itself(opener, tail):
+    from maljan.core.settings_masking import masked_text
+    from maljan.pipeline import events
+
+    token = f"{_marker(506)}{opener}{_marker(507)}"
+    value = f"{token}@{tail}"
+
+    masked = masked_text(f"Error: cannot connect to {value}")
+
+    assert masked == f"Error: cannot connect to ***@{tail}"
+    held = _registered(value)
+    assert token in held
+    # A later event that repeats the token, in its address or alone, is masked too.
+    events.remember_secret_values(held)
+    later = events.scrub(f"retrying {value}; {token} refused")
+    assert _marker(506) not in later and _marker(507) not in later
+
+
+@pytest.mark.parametrize("opener", list("\"'([{<"))
+@pytest.mark.parametrize("tail", ["h:8080", "h/v1"])
+def test_a_token_alone_ending_in_an_opener_is_masked(opener, tail):
+    from maljan.core.settings_masking import masked_text
+
+    token = f"{_marker(508)}{opener}"
+
+    assert masked_text(f"cannot connect to {token}@{tail}") == f"cannot connect to ***@{tail}"
+    assert token in _registered(f"{token}@{tail}")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'require("@scope/pkg")',
+        "import('@scope/pkg/sub')",
+        'print("ops@example.com")',
+        "(see ops@example.com)",
+        "[@decorator]",
+        "f(@name)",
+        "user@host",
+        '"user@host"',
+        "<ops@example.com>",
+        'x("@h:8080")',
+        '{"from":"\\"Evil\\"<x@evil.com>"}',
+        '{"to":"\\"bob\\"@corp.com"}',
+        '{"email":"a\\"b@corp.com"}',
+        '{"k":"v","to":"\\"b\\"@c.com"}',
+    ],
+)
+def test_ordinary_text_with_an_opener_and_an_at_is_kept(text):
+    from maljan.core.settings_masking import masked_text
+
+    assert masked_text(text) == text
+    assert configured_secret_values_of(text) == set()
+
+
+@pytest.mark.parametrize(
+    ("text", "masked", "before"),
+    [
+        ('func("user@host:22")', 'func("***@host:22")', 'func("'),
+        ('C2="admin@1.2.3.4:4444/gate.php"', 'C2="***@1.2.3.4:4444/gate.php"', 'C2="'),
+        ('log: connect("bob@srv:3306")', 'log: connect("***@srv:3306")', 'connect("'),
+        ('url="tok@h:8080"', 'url="***@h:8080"', 'url="'),
+    ],
+)
+def test_a_quoted_token_alone_keeps_what_stands_before_its_quote(text, masked, before):
+    from maljan.core.settings_masking import masked_text
+
+    assert masked_text(text) == masked
+    assert not any(before in value for value in configured_secret_values_of(text))
+
+
+# A JSON-escaped backslash before a letter stays a path's (``C:\\\\Users``).
+@pytest.mark.parametrize("password", ['p\\"{pw}', 'p\\\\\\"{pw}', 'user:p\\"{pw}'])
+def test_a_password_escaped_in_json_text_is_masked(password):
+    from maljan.core.settings_masking import masked_text
+
+    secret = _marker(510)
+    text = '{"password":"' + password.format(pw=secret) + '@h:8080"}'
+
+    assert masked_text(text) == '{"***@h:8080"}'
+    assert secret not in masked_text(f"Error: {text}")
+
+
+@pytest.mark.parametrize("path", ["C:\\Users\\bob@corp", "C:\\\\Users\\\\bob@h:8080"])
+def test_a_windows_path_is_kept(path):
+    from maljan.core.settings_masking import masked_text
+
+    assert masked_text(path) == path
+
+
+def configured_secret_values_of(text: str) -> set[str]:
+    from maljan.core.settings_catalog import configured_secret_values
+
+    return configured_secret_values(_with_fragment(text))
+
+
+# --- The reference: where an address began, and what was registered, before a
+# token alone could hold an opener (verbatim) ----------------------------------
+
+
+def _bare_userinfo_before(token: str) -> tuple[str, str] | None:
+    from maljan.core.settings_masking import bare_userinfo
+
+    return None if "\\" in token.rpartition("@")[0] else bare_userinfo(token)
+
+
+def _address_in_before(word: str) -> int | None:
+    from maljan.core.settings_masking import TOKEN_OPENERS
+
+    last_at = word.rfind("@")
+    if last_at < 0:
+        return None
+    lead = len(word) - len(word.lstrip(TOKEN_OPENERS))
+    start = max(word.rfind(opener, 0, last_at) for opener in TOKEN_OPENERS) + 1
+    if start > lead and ":" in word[lead:start]:
+        start = lead
+    return start if _bare_userinfo_before(word[start:]) is not None else None
+
+
+def _bare_secrets_before(address: str) -> list[str]:
+    from maljan.core.settings_catalog import _reads_as_a_credential, _url_secrets
+
+    parts = _bare_userinfo_before(address)
+    if parts is None:
+        return []
+    head, tail = parts
+    found: list[str] = []
+    if ":" in head:
+        found.extend(
+            dict.fromkeys(p for p in (head.partition(":")[2], head.rpartition(":")[2]) if p)
+        )
+    elif _reads_as_a_credential(head):
+        found.append(head)
+    found.extend(_url_secrets("//host" + tail[len(tail.split("?", 1)[0]) :]))
+    return found
+
+
+_FUZZ_HEAD = string.ascii_letters + string.digits + "\"'([{<:/=,.%-_@\\"
+_FUZZ_TAILS = [
+    "h",
+    "h:8080",
+    "h/v1",
+    "h:8080/v1",
+    "[::1]:80",
+    "example.com",
+    "1.2.3",
+    "h:5432)",
+    'h:8080"',
+    'h:8080")',
+    'h/v1"]',
+    'corp.com"}',
+]
+
+
+def _fuzzed_words(count: int) -> list[str]:
+    draw = random.Random(371)
+    words = []
+    for _ in range(count):
+        head = "".join(draw.choice(_FUZZ_HEAD) for _ in range(draw.randint(0, 12)))
+        lead = "".join(draw.choice("\"'([{<") for _ in range(draw.randint(0, 2)))
+        words.append(f"{lead}{head}@{draw.choice(_FUZZ_TAILS)}")
+    return words
+
+
+def test_masking_is_never_weaker_than_before_on_fuzzed_words():
+    from maljan.core.settings_catalog import _bare_secrets
+    from maljan.core.settings_masking import (
+        _CLOSERS,
+        TOKEN_OPENERS,
+        _address_in,
+        _left_unclosed,
+        _opener_is_its_own,
+        bare_userinfo,
+    )
+
+    def names_a_port_or_a_path(address: str) -> bool:
+        tail = address.rpartition("@")[2]
+        return bool(re.search(r"\A(?:\[[^\]]*\]|[^:/?#]*)(?::\d|[/?#])", tail))
+
+    weaker = []
+    for word in _fuzzed_words(20_000):
+        before, now = _address_in_before(word), _address_in(word)
+        if before is not None:
+            # Masked at least from where it was, and registering what it did.
+            if now is None or now > before:
+                weaker.append(word)
+            elif not set(_bare_secrets_before(word[before:])) <= set(_bare_secrets(word[now:])):
+                weaker.append(word)
+            elif now < before:
+                # Read from further back only where the opener it was read
+                # from is left unclosed after the "@".
+                opener, last_at = word[before - 1], word.rfind("@")
+                lead = len(word) - len(word.lstrip(TOKEN_OPENERS))
+                assert _left_unclosed(word, opener, lead, last_at), word
+                assert word.count(_CLOSERS[opener], last_at + 1) <= word.count(
+                    opener, 0, lead
+                ) or word.startswith("[", last_at + 1), word
+                if "\\" in word[now:last_at]:
+                    assert names_a_port_or_a_path(word[now:]), word
+        elif now is not None:
+            if "\\" in word[now:].rpartition("@")[0]:
+                # A JSON escape is read only before a port or a path.
+                assert names_a_port_or_a_path(word[now:]), word
+                assert bare_userinfo(word[now:]) is not None, word
+            else:
+                # Otherwise a new reading only where the token's own opener
+                # stands right before the "@" of a token alone.
+                head, _, tail = word.rpartition("@")
+                assert head[-1] in TOKEN_OPENERS and ":" not in head, word
+                assert _opener_is_its_own(head[-1], tail), word
+    assert weaker == []
+
+
+def test_a_token_alone_holding_openers_leaves_no_character_on_fuzzed_words():
+    from maljan.core.settings_masking import masked_text
+
+    draw = random.Random(3710)
+    for _ in range(2_000):
+        token = "".join(
+            draw.choice(string.ascii_letters + string.digits + "\"'([{<") for _ in range(12)
+        )
+        token = f"{_marker(509)}{token}"
+        tail = draw.choice(["h:8080", "h/v1", "h:8080/v1", "[::1]:80"])
+        assert masked_text(f"x {token}@{tail} y") == f"x ***@{tail} y", token
+
+
+def test_masking_a_ten_times_longer_text_costs_about_ten_times_as_much():
+    from maljan.core.settings_masking import bare_addresses, masked_text
+
+    def cost(text: str) -> float:
+        best = float("inf")
+        for _ in range(3):
+            began = time.perf_counter()
+            masked_text(text)
+            bare_addresses(text)
+            best = min(best, time.perf_counter() - began)
+        return best
+
+    word = '("' * 200 + "p'ss" * 200 + "@h:8080"
+    one, ten = " ".join([word] * 20), " ".join([word] * 200)
+    long_word = '"(' * 2_000 + "a@" * 2_000 + "h:8080"
+    assert cost(ten) < 30 * cost(one)
+    assert cost(long_word * 10) < 30 * cost(long_word)

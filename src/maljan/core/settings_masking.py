@@ -110,7 +110,10 @@ _BARE_AUTHORITY_TAIL = re.compile(
 )
 # What may open a token before an address's first character: a quote, a
 # bracket, or a JSON object's brace (``{"u":"user:pw@host"}``).
-_TOKEN_OPENERS = "\"'(<[{"
+TOKEN_OPENERS = "\"'(<[{"
+# A backslash that is not JSON's escape of a quote or of a backslash: a
+# Windows path's separator.
+_PATH_BACKSLASH = re.compile(r'\\(?![\\"])')
 # The words before a colon that open a mailbox rather than a user name: the
 # schemes whose address is one (``mailto:ops@example.com``) and the mail
 # headers that name one (``From:alice@example.com``), any case.
@@ -131,13 +134,20 @@ def bare_userinfo(token: str) -> tuple[str, str] | None:
     ``@scope/pkg@latest``), a Git remote (``git@host:org/repo``), a mailbox
     after its scheme or header (``mailto:ops@example.com``,
     ``From:alice@example.com``) and a Windows path (``C:\\Users\\bob@corp``)
-    are none.
+    are none. A backslash that escapes a quote or a backslash, as JSON text
+    writes a password (``{"password":"p\\"ss@h:8080"}``), is no path where
+    the address names a port or a path; before a mail address's host
+    (``{"to":"\\"bob\\"@corp.com"}``) any backslash refuses it.
     """
     head, at, tail = token.rpartition("@")
-    if not at or not head or not tail or "\\" in head:
+    if not at or not head or not tail:
         return None
     found = _BARE_AUTHORITY_TAIL.fullmatch(tail)
     if found is None:
+        return None
+    if "\\" in head and (
+        _PATH_BACKSLASH.search(head) or not (found.group("port") or found.group("path"))
+    ):
         return None
     slash = head.find("/")
     colon = head.find(":")
@@ -161,24 +171,69 @@ def bare_userinfo(token: str) -> tuple[str, str] | None:
     return None
 
 
+# The character that closes each opener.
+_CLOSERS = dict(zip(TOKEN_OPENERS, "\"')>]}", strict=True))
+
+
+def _left_unclosed(word: str, opener: str, lead: int, last_at: int) -> bool:
+    """Whether what follows ``word``'s last ``@`` leaves an inner ``opener`` unclosed.
+
+    The closers after the ``@`` go first to the word's ``lead`` leading
+    openers; one left over closes the inner opener, which then quotes the
+    address. A bracketed IPv6 host closes its own bracket.
+    """
+    after = last_at + 1
+    if word.startswith("[", after):
+        after = word.find("]", after) + 1 or len(word)
+    return word.count(_CLOSERS[opener], after) <= word.count(opener, 0, lead)
+
+
+def _opener_is_its_own(opener: str, tail: str) -> bool:
+    """Whether an opener right before an address's last ``@`` is the token's own.
+
+    It is where the address after it names a port, or where nothing after the
+    ``@`` closes it: ``require("@scope/pkg")`` quotes a package name.
+    """
+    found = _BARE_AUTHORITY_TAIL.fullmatch(tail)
+    return found is not None and (found.group("port") is not None or _CLOSERS[opener] not in tail)
+
+
 def _address_in(word: str) -> int | None:
     """Where the address written with no scheme in ``word`` begins, or ``None`` for none.
 
-    It begins after the last opener (:data:`_TOKEN_OPENERS`) before the word's
+    It begins after the last opener (:data:`TOKEN_OPENERS`) before the word's
     last ``@``, so a quoted value reads as the address it holds, where what
     stands between the word's leading openers and that opener holds no ``:``.
     Where it does, the opener may be a password's own character
     (``user:p"ss@host``), so the address begins after the leading openers and
     nothing of the password is left; a compact JSON member's key is then
-    masked with it (``{"***@host"}``).
+    masked with it (``{"***@host"}``). A token alone (no ``:`` before the
+    ``@``) may hold an opener the same way (``p"ss@h:8080``), so where the
+    word from its leading openers reads as such an address and nothing after
+    the ``@`` closes that opener beyond what closes the leading openers, it
+    begins there too; where nothing stands between the opener and the ``@``,
+    only where the opener is the token's own as well
+    (:func:`_opener_is_its_own`). A closed opener is read as quoting the
+    address (``func("user@host:22")``, ``url="tok@h:8080"``), so a token whose
+    own opener is followed by its closer after the ``@`` (``p"ss@h:8080",``)
+    keeps what stands before that opener.
     """
     last_at = word.rfind("@")
     if last_at < 0:
         return None
-    lead = len(word) - len(word.lstrip(_TOKEN_OPENERS))
-    start = max(word.rfind(opener, 0, last_at) for opener in _TOKEN_OPENERS) + 1
+    lead = len(word) - len(word.lstrip(TOKEN_OPENERS))
+    start = max(word.rfind(opener, 0, last_at) for opener in TOKEN_OPENERS) + 1
     if start > lead and ":" in word[lead:start]:
         start = lead
+    elif start > lead and ":" not in word[lead:last_at]:
+        whole = bare_userinfo(word[lead:])
+        opener = word[start - 1]
+        if (
+            whole is not None
+            and _left_unclosed(word, opener, lead, last_at)
+            and (start < last_at or _opener_is_its_own(opener, whole[1]))
+        ):
+            start = lead
     return start if bare_userinfo(word[start:]) is not None else None
 
 
