@@ -4485,7 +4485,8 @@ def make_stage_agent_node(
                     ran=True,
                     agents=(agent_name,),
                     agent_reasons={agent_name: second_loop_note} if second_loop_note else None,
-                    claim_count=len(isr.claims),
+                    # A claim mapped to several techniques is one claim.
+                    claim_count=count_claim_blocks(isr.claims),
                     technique_ids=technique_ids,
                     duration_ms=_elapsed_ms(),
                 ),
