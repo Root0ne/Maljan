@@ -21,15 +21,19 @@ It is one team profile, derived from a base profile and never run here:
   not a tool server) is named as not withheld, never dropped silently.
 
 The arm is checked by building the settings with it, and is written as the
-profile to add under ``agents.profiles`` and the job config that selects it.
-Running it is a paid run, which needs the owner's go-ahead per run.
+profile to add under ``agents.profiles`` and the job config that selects it,
+which starts the run without an earlier run's memory as every benchmark run
+does (``scripts.benchmark.jobs``). Running it is a paid run, which needs the
+owner's go-ahead per run.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Any
 
+from scripts.benchmark.jobs import job_config
 from scripts.benchmark.provenance import LOOKUP_KINDS
 
 from maljan.core.config import ALL_SERVERS
@@ -101,7 +105,7 @@ def intel_off(overrides: Mapping[str, Any], base: str | None = None) -> dict[str
         "base_profile": name,
         "definition": definition,
         "settings_key": f"{PROFILES_KEY}.{arm_key}",
-        "job_config": {"profile": arm_key},
+        "job_config": job_config({"profile": arm_key}),
         "withheld": {key: sorted(lookups[key]) for key in added},
         "already_withheld": {key: sorted(lookups[key]) for key in already},
         "withheld_with_them": {key: with_them[key] for key in added if key in with_them},
@@ -125,7 +129,7 @@ def render(arm: dict[str, Any]) -> str:
         "lookups a profile cannot withhold: " + (", ".join(arm["not_withheld"]) or "none"),
         f"exclude_servers: {', '.join(arm['definition']['exclude_servers']) or 'none'}",
         f"add it under {arm['settings_key']}; select it with the job config "
-        f'{{"profile": "{arm["profile"]}"}}',
+        f"{json.dumps(arm['job_config'], sort_keys=True)}",
         arm["paid"],
     ]
     if not arm["withheld"] and not arm["already_withheld"]:

@@ -196,6 +196,7 @@ _AUDITED_CONFIG_KEYS = (
     "sandbox_provider",
     "sandbox_report_id",
     "mock_mode",
+    "ignore_earlier_runs",
 )
 
 

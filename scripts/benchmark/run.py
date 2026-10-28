@@ -7,6 +7,7 @@
                                     [--baseline-m M] [--candidate-m M]
                                     [--sheet CSV --map JSON] [--json OUT]
     python scripts/benchmark/run.py intel-off [--settings JSON] [--profile NAME] [--json OUT]
+    python scripts/benchmark/run.py job-config [--profile NAME] [--with-earlier-runs]
 
 A ``SCORED`` is a key score (``score.md``), a calibration score or gate result
 (``.json``), or ``blind:ARM``, one arm of the blind score sheet that ``--sheet``
@@ -16,11 +17,16 @@ when nothing the baseline found dropped, 1 when something did, and 2 when the
 scored runs cannot be read or compared. Both also say, for each credited item
 of a key score with its stored run beside it, whether the run found it by its
 own analysis or by a lookup (``scripts.benchmark.provenance``), and count each
-arm's items both ways. ``intel-off`` writes the arm that withholds every lookup
+arm's items both ways, and name first, under ``EARLIER RUNS NOT RULED OUT``,
+every key score whose stored run summary does not say the run started without
+an earlier run's memory and which does not state that it used one
+(``scripts.benchmark.earlier_runs``). ``intel-off`` writes the arm that withholds every lookup
 server from a profile (``scripts.benchmark.intel_off``), from the stored
 settings in ``--settings`` (dotted keys) or the defaults; it exits 2 when the
-arm cannot be derived. Nothing here starts a run or asks a model: it reads
-scores already written.
+arm cannot be derived. ``job-config`` prints the config a benchmark run is
+submitted with: every run starts without an earlier run's memory of its sample
+(``scripts.benchmark.jobs``) unless ``--with-earlier-runs`` says otherwise.
+Nothing here starts a run or asks a model: it reads scores already written.
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ if str(_ROOT) not in sys.path:
 
 from scripts.benchmark import gate as gating  # noqa: E402
 from scripts.benchmark import intel_off as arms  # noqa: E402
+from scripts.benchmark import jobs  # noqa: E402
 from scripts.benchmark.scores import (  # noqa: E402
     ScoredRun,
     ScoreFileError,
@@ -97,12 +104,23 @@ def _parser() -> argparse.ArgumentParser:
     i.add_argument("--settings", type=Path, default=None, help="stored settings, dotted keys")
     i.add_argument("--profile", default=None, help="the base profile (default: the active one)")
     i.add_argument("--json", type=Path, default=None, help="also write the arm here")
+    j = sub.add_parser("job-config", help="the config a benchmark run is submitted with")
+    j.add_argument("--profile", default=None, help="the team profile the run selects")
+    j.add_argument(
+        "--with-earlier-runs",
+        action="store_true",
+        help="keep an earlier run's memory of the sample (the score must then state it)",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "job-config":
+            options = {"profile": args.profile} if args.profile else {}
+            print(json.dumps(jobs.job_config(options, earlier_runs=args.with_earlier_runs)))
+            return 0
         if args.command == "intel-off":
             overrides: Any = {}
             if args.settings is not None:

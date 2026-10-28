@@ -6286,6 +6286,7 @@ def _failed_verdict_summary(
             .set_verdict("Suspicious", 0)
             .set_degraded_mode(True, list(reasons))
             .set_operator_choices(list(choices))
+            .set_earlier_runs_ignored(getattr(container, "ignore_earlier_runs", False) is True)
         )
         parts: tuple[tuple[str, Callable[[], Any]], ...] = (
             ("stages", lambda: builder.set_stages(stage_rollup(container, state, own_stage))),
@@ -7244,6 +7245,9 @@ def make_judge_node(
                     .set_corroboration(_corroboration)
                     .set_degraded_mode(_degraded_mode, _degradation_reasons)
                     .set_operator_choices(_operator_choices)
+                    .set_earlier_runs_ignored(
+                        getattr(container, "ignore_earlier_runs", False) is True
+                    )
                     .set_loss_facts(facts_record(_sample_facts))
                     .set_failed_analysts(_failed_analysts)
                     .set_profile(

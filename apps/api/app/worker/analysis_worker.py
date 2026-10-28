@@ -3052,6 +3052,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             remember_secrets=False,
             # Long-term memory is the job owner's alone.
             memory_owner=str(job.created_by),
+            # A job may start without an earlier run's memory of its sample;
+            # its config says so (``ignore_earlier_runs``), and nothing else.
+            ignore_earlier_runs=job_config.get("ignore_earlier_runs") is True,
             event_sink=_make_event_sink(
                 redis_conn,
                 job_id,

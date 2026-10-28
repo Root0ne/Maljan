@@ -65,6 +65,12 @@ NOT_APPLICABLE_SENTENCE = f"Consensus: {NOT_APPLICABLE_PHRASE}."
 # left out, apart from what limited the run (``pipeline.operator_choice``).
 OPERATOR_CHOICES_HEADING = "Not configured or withheld by choice"
 
+# What the summary says of a job that started without an earlier run's memory
+# of its sample (``ServiceContainer.ignore_earlier_runs``).
+EARLIER_RUNS_IGNORED_SENTENCE = (
+    "not read; this job started without what an earlier run on this sample stored"
+)
+
 
 @dataclass
 class NegotiationMetrics:
@@ -1318,6 +1324,11 @@ class RunSummary:
     # The run-time limit the sandbox set for the task, and which sandbox set
     # it (``run_limit`` in the report); ``None`` where its report says nothing.
     sandbox_run_limit: dict[str, Any] | None = None
+    # Whether the job started without an earlier run's memory of its sample
+    # (``ServiceContainer.ignore_earlier_runs``): no earlier-run block in any
+    # prompt. Written to the dict only when it did, so a summary of a job
+    # that read its earlier runs reads as it always has.
+    earlier_runs_ignored: bool = False
     # Each model's measured generation rate and each per-call timeout it
     # produced (``llm.generation_rate.GenerationRates.snapshot``). ``None`` on
     # a run that measured no answer and sized no call.
@@ -1370,6 +1381,11 @@ class RunSummary:
                     f"the run-time limit {self.sandbox_run_limit['set_by']} set for the task  "
                 ]
                 if self.sandbox_run_limit
+                else []
+            ),
+            *(
+                [f"**Earlier runs**: {EARLIER_RUNS_IGNORED_SENTENCE}  "]
+                if self.earlier_runs_ignored
                 else []
             ),
             *stage_duration_lines(self.stages),
@@ -1811,6 +1827,8 @@ class RunSummary:
         }
         if self.sandbox_run_limit:
             result["sandbox_run_limit"] = dict(self.sandbox_run_limit)
+        if self.earlier_runs_ignored:
+            result["earlier_runs_ignored"] = True
 
         if self.validation:
             result["validation"] = {
@@ -1953,6 +1971,7 @@ class RunSummaryBuilder:
         self._triage: dict[str, Any] | None = None
         self._sandbox: dict[str, str] | None = None
         self._sandbox_run_limit: dict[str, Any] | None = None
+        self._earlier_runs_ignored: bool = False
         self._nudge: dict[str, Any] | None = None
         self._budget: dict[str, Any] | None = None
         self._tool_latency: dict[str, Any] | None = None
@@ -2171,6 +2190,11 @@ class RunSummaryBuilder:
         """What the operator's configuration left out, apart from the degradations."""
         held = [*self._operator_choices, *(str(r) for r in reasons or [])]
         self._operator_choices = list(dict.fromkeys(held))
+        return self
+
+    def set_earlier_runs_ignored(self, ignored: bool) -> RunSummaryBuilder:
+        """Whether the job started without an earlier run's memory of its sample."""
+        self._earlier_runs_ignored = ignored is True
         return self
 
     def set_token_usage(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
@@ -2630,6 +2654,7 @@ class RunSummaryBuilder:
             tool_latency=self._tool_latency,
             sandbox=self._sandbox,
             sandbox_run_limit=self._sandbox_run_limit,
+            earlier_runs_ignored=self._earlier_runs_ignored,
             generation=self._generation,
             spend=self._spend,
         )

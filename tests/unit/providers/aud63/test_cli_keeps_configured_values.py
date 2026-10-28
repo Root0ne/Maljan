@@ -17,7 +17,7 @@ def _run(monkeypatch, args: list[str]) -> Settings:
     seen: dict[str, Any] = {}
 
     class _App:
-        def __init__(self, config: Settings, mock: bool) -> None:
+        def __init__(self, config: Settings, mock: bool, **_options: Any) -> None:
             seen["config"] = config
             raise RuntimeError("stop")
 

@@ -178,9 +178,13 @@ def _built_summary(
     _part("validation", _validation)
     _part(
         "degradation",
-        lambda: builder.set_degraded_mode(
-            bool(state.get("degraded_mode")), list(state.get("degradation_reasons") or [])
-        ).set_operator_choices(list(state.get("operator_choices") or [])),
+        lambda: (
+            builder.set_degraded_mode(
+                bool(state.get("degraded_mode")), list(state.get("degradation_reasons") or [])
+            )
+            .set_operator_choices(list(state.get("operator_choices") or []))
+            .set_earlier_runs_ignored(getattr(container, "ignore_earlier_runs", False) is True)
+        ),
     )
     _part("profile", _profile)
     _part(

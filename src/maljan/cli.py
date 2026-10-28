@@ -73,6 +73,12 @@ def analyze(
         "-r",
         help="Path to write the Markdown analysis report (e.g. report.md).",
     ),
+    ignore_earlier_runs: bool = typer.Option(
+        False,
+        "--ignore-earlier-runs",
+        help="Start without an earlier run's memory of this sample: no earlier-run block "
+        "in any prompt. Nothing stored is read; the run still stores its own case on completion.",
+    ),
 ) -> None:
     """Run the full malware analysis pipeline on a sample."""
 
@@ -99,7 +105,7 @@ def analyze(
     # block only reads ``result``.
     maljan_app: MaljanApp | None = None
     try:
-        maljan_app = MaljanApp(config=config, mock=mock)
+        maljan_app = MaljanApp(config=config, mock=mock, ignore_earlier_runs=ignore_earlier_runs)
         result = maljan_app.run(file_hash=file_hash, file_name=file_name, sample_path=sample_path)
         # The run completed: the case its judge built may now teach the next.
         maljan_app.remember_the_run()
@@ -305,6 +311,7 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
             degraded_mode=bool(run_summary_dict.get("degraded_mode", False)),
             degradation_reasons=[str(r) for r in run_summary_dict.get("degradation_reasons") or []],
             operator_choices=[str(r) for r in run_summary_dict.get("operator_choices") or []],
+            earlier_runs_ignored=run_summary_dict.get("earlier_runs_ignored") is True,
         )
 
         Path(report_path).write_text(summary.to_markdown(), encoding="utf-8")

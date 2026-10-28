@@ -78,6 +78,7 @@ class MaljanApp:
         analyst_mode: Any = None,
         remember_secrets: bool = True,
         memory_owner: str | None = None,
+        ignore_earlier_runs: bool = False,
     ) -> None:
         self.config = config or Settings()
         # The secrets these settings hold are masked by value wherever the
@@ -99,6 +100,9 @@ class MaljanApp:
             # Whose long-term memory the job reads and writes; ``None`` is the
             # unscoped memory (``long_term_memory.recall``).
             memory_owner=memory_owner,
+            # Whether the job starts without an earlier run's memory of its
+            # sample (``long_term_memory.earlier_case_of``).
+            ignore_earlier_runs=ignore_earlier_runs,
         )
         self.graph = build_graph(self.container)
         # What the report node built, with the state it built it from, as soon

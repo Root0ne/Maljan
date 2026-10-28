@@ -12,7 +12,9 @@ Three sources are read, never written:
   line and the "N facts more than the human analyst" line, when it has them. A
   file that disagrees with itself is refused, naming both numbers. Each item's
   row, as written, is followed back to the ledger entries that credited it,
-  where the stored run lies beside the file (``scripts.benchmark.provenance``);
+  where the stored run lies beside the file (``scripts.benchmark.provenance``),
+  and its run summary says whether the run started without an earlier run's
+  memory of its sample (``scripts.benchmark.earlier_runs``);
 - **a blind score sheet** with its sealed map (``scripts/blind``): one scored
   run per arm, named by the map;
 - **a calibration score** (``scripts/calibration/run.py score --json`` or
@@ -41,6 +43,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from scripts.benchmark import earlier_runs
 from scripts.benchmark.provenance import ItemProvenance, attribute_all
 
 KEY, FACT, CLAIM = "key", "fact", "claim"
@@ -109,6 +112,11 @@ class ScoredRun:
     # (``scripts.benchmark.provenance``); empty, with the reason, where none was read.
     provenance: dict[str, ItemProvenance] = field(default_factory=dict)
     provenance_note: str = ""
+    # Whether the run started without an earlier run's memory of its sample
+    # (``scripts.benchmark.earlier_runs``): its status and why; empty for a
+    # score with no stored run to read.
+    earlier_runs: str = ""
+    earlier_runs_note: str = ""
 
 
 def rank(scale: str, word: str | None) -> int | None:
@@ -212,6 +220,7 @@ def read_key_score(path: Path) -> ScoredRun:
         labels[key] = _plain(row[0])
         written[key] = " | ".join(row)
     provenance, provenance_note = attribute_all(path, written)
+    independence, independence_note = earlier_runs.check(path, lines)
     run = ScoredRun(
         name=_name(path),
         source=str(path),
@@ -220,6 +229,8 @@ def read_key_score(path: Path) -> ScoredRun:
         column=_plain(header[column]),
         provenance=provenance,
         provenance_note=provenance_note,
+        earlier_runs=independence,
+        earlier_runs_note=independence_note,
     )
     _check_totals(path, lines, run)
     _read_beyond(path, lines, run)

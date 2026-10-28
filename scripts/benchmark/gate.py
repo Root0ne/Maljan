@@ -24,6 +24,12 @@ each arm's credited items are counted by tag, with the two columns "found by
 analysis" and "found only by lookup". This is reported, never gated: a tag
 changes no verdict and no outcome.
 
+A run whose earlier runs on its sample are not ruled out
+(``scripts.benchmark.earlier_runs``: its run summary does not say it started
+without them, and its score does not state that it used them) is named first
+in every output, under ``EARLIER RUNS NOT RULED OUT``, and in the JSON under
+``earlier_runs_not_ruled_out``. It is flagged, not gated.
+
 Time is linear in what is read: one pass over each arm's verdicts per item, a
 count per word of a fixed scale, and an expected-linear selection for the
 beyond-human counts.
@@ -37,6 +43,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from scripts.benchmark import earlier_runs
 from scripts.benchmark import provenance as prov
 from scripts.benchmark.scores import CREDITED, SCALES, ScoredRun, rank
 
@@ -242,6 +249,7 @@ def score_arm(a: Arm) -> dict[str, Any]:
         "provenance": {**_provenance_totals(a, tags), "by_item": tags},
         "beyond": _beyond(a),
         "unchecked_totals": _unchecked(a),
+        "earlier_runs_not_ruled_out": earlier_runs.flagged(a.runs),
     }
 
 
@@ -338,6 +346,10 @@ def gate(baseline: Arm, candidate: Arm) -> dict[str, Any]:
         "new_items": new_items,
         "beyond": {"baseline": base_beyond, "candidate": cand_beyond, "outcome": beyond_outcome},
         "unchecked_totals": {**_unchecked(baseline), **_unchecked(candidate)},
+        "earlier_runs_not_ruled_out": {
+            **earlier_runs.flagged(baseline.runs),
+            **earlier_runs.flagged(candidate.runs),
+        },
         "provenance": {
             "baseline": _provenance_totals(baseline, base_tags),
             "candidate": _provenance_totals(candidate, cand_tags),
@@ -420,6 +432,7 @@ def render_arm(result: dict[str, Any]) -> str:
     labels = result["labels"]
     return "\n".join(
         [
+            *earlier_runs.flag_lines(result["earlier_runs_not_ruled_out"]),
             _totals_line(name, result["totals"]),
             _beyond_line(name, result["beyond"]),
             *_unchecked_lines(result["unchecked_totals"]),
@@ -435,6 +448,7 @@ def render(result: dict[str, Any]) -> str:
     base, cand = result["baseline"], result["candidate"]
     lines = [
         f"known-answer gate: {head}",
+        *earlier_runs.flag_lines(result["earlier_runs_not_ruled_out"]),
         f"baseline:  {_runs(base['n'])}, m {base['m']}: {', '.join(base['runs'])}",
         f"candidate: {_runs(cand['n'])}, m {cand['m']}: {', '.join(cand['runs'])}",
         _totals_line("baseline", result["totals"]["baseline"]),

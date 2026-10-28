@@ -511,6 +511,7 @@ class ServiceContainer:
         job_id: str = "",
         resolved_mode: Any = None,
         memory_owner: str | None = None,
+        ignore_earlier_runs: bool = False,
     ) -> None:
         self.config = config
         self.mock = mock
@@ -521,6 +522,12 @@ class ServiceContainer:
         from maljan.memory.long_term_memory import owner_key
 
         self.memory_owner: str | None = owner_key(memory_owner)
+        # Whether this job starts without what an earlier run on its sample
+        # stored (``long_term_memory.earlier_case_of``): no earlier-run block
+        # in any prompt and no earlier case on the bundle. Nothing stored is
+        # read for it; once it completes, its own case is stored as any job's
+        # is (``remember_the_run``), replacing its owner's case of the sample.
+        self.ignore_earlier_runs: bool = ignore_earlier_runs is True
         # The job's analyst mode as the caller resolved it off its event loop
         # (``pipeline.analyst_mode.resolve_for``), or ``None`` to resolve it
         # here on first use.

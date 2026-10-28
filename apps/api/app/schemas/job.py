@@ -4,7 +4,14 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    StrictBool,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 # ── Job Schemas ──────────────────────────────────────────────────
 
@@ -45,6 +52,13 @@ class _KnownJobConfig(BaseModel):
     # (``maljan.core.plugins.id_refusal``).
     llm_provider: str | None = None
     mock_mode: bool | None = None
+    # Start without an earlier run's memory of this sample: no earlier-run
+    # block in any prompt (``long_term_memory.earlier_case_of``). Nothing
+    # stored is read for it; once it completes, its own case is stored as any
+    # job's is, replacing its owner's earlier case of the sample. Strict: the
+    # route stores the config as sent and the worker reads only ``true``, so
+    # a "true" or a 1 would leave the switch off without a word.
+    ignore_earlier_runs: StrictBool | None = None
     static_provider: str | None = None
     sandbox_provider: str | None = None
     # An uploaded report to attach; build_job_settings forces sandbox.provider="upload".
