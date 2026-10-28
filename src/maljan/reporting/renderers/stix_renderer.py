@@ -3907,7 +3907,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
     provenance: dict[str, list[RecoveredValue]] = {}
     spelled: dict[str, str] = {}
     plain_texts: list[tuple[str, str]] = []
-    floss_whole = strings_whole = decoder_whole = False
+    emulated_whole = strings_whole = decoder_whole = False
     # The names each kind of entry is stated under in the partial reasons, in
     # the order the entries were met.
     emulators: list[str] = []
@@ -3923,7 +3923,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
         rows, text_path = _rows_and_text(structured, facts)
         if facts.kind == _EMULATED:
             _note(emulators, named)
-            floss_whole = floss_whole or _whole_listing(structured, rows)
+            emulated_whole = emulated_whole or _whole_listing(structured, rows)
             scheme_path = facts.values.get("scheme", "")
             for row in rows:
                 if not isinstance(row, dict):
@@ -3967,7 +3967,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
             )
     kept, plain = _hold_out_plain(values, plain_texts)
     why: list[str] = []
-    if emulators and not floss_whole:
+    if emulators and not emulated_whole:
         why.append(EMULATOR_PARTIAL.format(tools=" or ".join(emulators)))
     if decoders and not decoder_whole:
         why.append(DECODER_PARTIAL.format(tools=" or ".join(decoders)))
@@ -4010,14 +4010,48 @@ def recovered_network_values(record: EmulatedStrings) -> list[str]:
 _FROM_KEPT_ROWS = "read from the kept rows of a report stored before the record existed"
 
 
+def _row_field(path: str) -> str:
+    """The field a declared path names in a flat row (``/string`` → ``string``), or ``""``."""
+    name = str(path or "").strip("/")
+    return "" if not name or "/" in name or "*" in name else name
+
+
+def _emulated_columns(
+    section: Any, columns: list[str], index: Mapping[str, Any]
+) -> tuple[int, int] | None:
+    """Where a stored table of an emulator's strings holds a row's scheme and text, or ``None``.
+
+    A table drawn from the answers of a tool of the emulated-strings kind,
+    read by the entry that opened it (``tool_kinds.section_entry``), whose
+    columns are the fields that tool's declaration reads a row's scheme and
+    text under (``values``): the generic block's table of the rows, never its
+    field and value block. A section that records no tool it came from is
+    read by the first entry it cites.
+    """
+    entry: Any = tool_kinds.section_entry(section, index)
+    if not tool_kinds.section_tool(section):
+        cited = [str(i) for i in (_field(section, "evidence_ids") or [])]
+        entry = index.get(cited[0]) if cited and cited[0] in index else None
+    if entry is None:
+        return None
+    facts = tool_kinds.facts_of(entry)
+    if facts is None or facts.kind != _EMULATED:
+        return None
+    scheme = _row_field(facts.values.get("scheme", ""))
+    text = _row_field(facts.values.get("text", ""))
+    if scheme and text and scheme in columns and text in columns:
+        return columns.index(scheme), columns.index(text)
+    return None
+
+
 def emulation_record(report: Any) -> EmulatedStrings:
     """The report's record of what only a recovering tool (FLOSS or the static decoder) read.
 
     The one built from the ledger at build time (``emulated_strings``), or, for
     a report stored before it existed, one read from the report's kept section
-    rows — FLOSS's ``tool_floss_strings`` and the sweep's ``strings`` and
-    string rows — and marked partial, because a section keeps a bounded number
-    of rows.
+    rows — an emulator's strings table (:func:`_emulated_columns`) and the
+    sweep's ``strings`` and string rows — and marked partial, because a
+    section keeps a bounded number of rows.
     """
     stored = _field(report, "emulated_strings")
     if stored:
@@ -4030,6 +4064,7 @@ def emulation_record(report: Any) -> EmulatedStrings:
         str(_field(row, "id") or ""): str(_field(row, "agent") or "")
         for row in (_field(report, "evidence_index") or [])
     }
+    rows_by_id = tool_kinds.index_by_id(_field(report, "evidence_index") or [])
     values: dict[str, str] = {}
     plain_texts: list[tuple[str, str]] = []
     for section in _field(report, "sections") or []:
@@ -4037,9 +4072,10 @@ def emulation_record(report: Any) -> EmulatedStrings:
         columns = [str(c) for c in (_field(section, "columns") or [])]
         ids = [str(i) for i in (_field(section, "evidence_ids") or [])]
         rows = _field(section, "rows") or []
-        if key == "tool_floss_strings" and "kind" in columns and "string" in columns and ids:
+        emulated = _emulated_columns(section, columns, rows_by_id)
+        if emulated is not None and ids:
             entry = next((i for i in ids if index.get(i) == "pipeline"), ids[0])
-            at_kind, at_string = columns.index("kind"), columns.index("string")
+            at_kind, at_string = emulated
             for row in rows:
                 if len(row) > max(at_kind, at_string) and (
                     str(row[at_kind]).strip().lower() in _EMULATED_KINDS

@@ -697,9 +697,10 @@ BUILDER_OF_KIND: dict[str, str] = {
     "strings": "_strings",
     "text_iocs": "_iocs",
     "file_iocs": "_iocs",
-    "signature_rules": "_yara",
-    "event_rules": "_sigma",
-    "capability_rules": "_capa",
+    # One reader of a rule match list, for every kind of rule table.
+    "signature_rules": "_rule_table",
+    "event_rules": "_rule_table",
+    "capability_rules": "_rule_table",
     "sandbox_processes": "_sandbox_processes",
     "sandbox_network": "_sandbox_network",
     "sandbox_signatures": "_sandbox_signatures",

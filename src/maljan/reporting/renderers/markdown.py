@@ -91,9 +91,11 @@ from maljan.reporting.ledger_report import (
     BEHAVIOUR_CODE_SAMPLE_COLUMNS,
     BEHAVIOUR_CODE_SECTION,
     CAPABILITIES_TITLE,
+    RULE_TABLES,
     analyst_persistence,
     listed_by,
-    titled_tool,
+    rule_table_tools,
+    section_key_of_kind,
 )
 from maljan.reporting.models import (
     CapabilityCell,
@@ -760,7 +762,7 @@ class MarkdownRenderer:
         static = report.static
         dynamic = report.dynamic
         blocks: list[str] = []
-        capa = _capa_rules(report)
+        capability = _capability_rules(report)
 
         if report.capabilities_narrative:
             # A report stored before the composer wrote these subsections
@@ -806,7 +808,7 @@ class MarkdownRenderer:
                 measured.append(_row(*cells, pm.get("method") or "-", evidence or "-"))
         elif static is not None and static.packer_hint:
             measured.append(f"_{MEASURED}:_ packer hint {_one_line(static.packer_hint)}.")
-        measured.extend(_capa_table(capa, _is_evasion_rule, _capability_tool(report)))
+        measured.extend(_capability_table(capability, _is_evasion_rule, _capability_tool(report)))
         # A cipher the model extracted that encrypts no files — a loader's
         # string or traffic cipher — belongs beside the obfuscation prose, not
         # under a ransomware heading.
@@ -858,7 +860,9 @@ class MarkdownRenderer:
                 f"{_one_line(h.get('name'))} ({_one_line(h.get('source'))})" for h in resolving
             )
             measured.append(f"_{MEASURED}:_ rule hits {names}.")
-        measured.extend(_capa_table(capa, _is_resolution_rule, _capability_tool(report)))
+        measured.extend(
+            _capability_table(capability, _is_resolution_rule, _capability_tool(report))
+        )
         blocks.append(
             _subsection(
                 "5.2",
@@ -1527,7 +1531,7 @@ class MarkdownRenderer:
             ),
         ):
             rules_by_tid.setdefault(str(hit.get("technique_id") or ""), []).append(hit)
-        capa_ids = _capa_evidence_ids(report)
+        capability_ids = _capability_evidence_ids(report)
         seen: set[str] = set()
         for cell in sorted(cells, key=_tactic_key):
             seen.add(cell.technique_id)
@@ -1538,7 +1542,7 @@ class MarkdownRenderer:
                     corroboration,
                     ctx,
                     rules_by_tid.get(cell.technique_id, []),
-                    capa_ids,
+                    capability_ids,
                 )
             )
         # A published technique the matrix does not hold — a stored report
@@ -1566,7 +1570,7 @@ class MarkdownRenderer:
                     + (f"; {ctx.rule_only[tid]}" if tid in ctx.rule_only else ""),
                     ", ".join(
                         dict.fromkeys(
-                            _ids_in(mapping.evidence_quotes) + _rule_ids(folded, capa_ids)
+                            _ids_in(mapping.evidence_quotes) + _rule_ids(folded, capability_ids)
                         )
                     )
                     or "-",
@@ -1576,7 +1580,7 @@ class MarkdownRenderer:
         for tid, folded in rules_by_tid.items():
             if tid in seen:
                 continue
-            lines.append(_rule_only_row(tid, folded, mappings, capa_ids))
+            lines.append(_rule_only_row(tid, folded, mappings, capability_ids))
         lines.extend(_resolved_only_lines(sorted(cells, key=_tactic_key), rules_by_tid, ctx))
         if hits:
             lines.extend(
@@ -2442,10 +2446,10 @@ class MarkdownRenderer:
 # What the sections share
 # ---------------------------------------------------------------------------
 
-# The evidence sections that are rule hits.
-# The capability-rule table's key (``ledger_report``), whichever tool of the kind filled it.
-_CAPABILITY_SECTION = "capa_capabilities"
-_RULE_SECTIONS = ("yara_matches", _CAPABILITY_SECTION, "sigma_matches")
+# The evidence sections that are rule hits: the table of each rule kind
+# (``ledger_report.RULE_TABLES``), keyed by its kind whichever tool filled it.
+_CAPABILITY_SECTION = section_key_of_kind("capability_rules")
+_RULE_SECTIONS = tuple(section_key_of_kind(kind) for kind in RULE_TABLES)
 
 # How the report builder begins the reason for an absent summary. Spelled here
 # rather than imported so the renderer keeps no import of the builder.
@@ -5149,7 +5153,7 @@ def _attack_row(
     corroboration: dict[str, Any],
     ctx: _Context,
     rules: list[dict[str, Any]],
-    capa_ids: list[str],
+    capability_ids: list[str],
 ) -> str:
     row = corroboration.get(cell.technique_id)
     asserted = list(row.get("asserted_by") or []) if isinstance(row, dict) else []
@@ -5216,7 +5220,7 @@ def _attack_row(
     tactic = f"{cell.tactic_name} ({cell.tactic})" if cell.tactic else cell.tactic_name
     # The statement whole: a table cell wraps, it is never cut.
     procedure = ctx.cell(str(cell.evidence[0])) if cell.evidence else "-"
-    evidence = list(dict.fromkeys(_ids_in(cell.evidence) + _rule_ids(rules, capa_ids)))
+    evidence = list(dict.fromkeys(_ids_in(cell.evidence) + _rule_ids(rules, capability_ids)))
     return _row(
         tactic,
         cell.technique_id,
@@ -5467,19 +5471,19 @@ def _with_rules(procedure: str, rules: list[dict[str, Any]]) -> str:
     return said if procedure in ("", "-") else f"{procedure}; {said}"
 
 
-def _rule_ids(rules: list[dict[str, Any]], capa_ids: list[str]) -> list[str]:
-    """The evidence ids behind rule hits: each hit's own, or the capa section's."""
+def _rule_ids(rules: list[dict[str, Any]], capability_ids: list[str]) -> list[str]:
+    """The evidence ids behind rule hits: each hit's own, or the capability-rule table's."""
     out: list[str] = []
     for hit in rules:
         if hit.get("evidence_id"):
             out.append(str(hit["evidence_id"]))
         elif _capability_rule_hit(hit):
-            out.extend(capa_ids)
+            out.extend(capability_ids)
     return list(dict.fromkeys(out))
 
 
 def _rule_only_row(
-    tid: str, rules: list[dict[str, Any]], mappings: dict[str, Any], capa_ids: list[str]
+    tid: str, rules: list[dict[str, Any]], mappings: dict[str, Any], capability_ids: list[str]
 ) -> str:
     """A technique only rules named, one row, with the catalogue's tactic and name.
 
@@ -5504,7 +5508,7 @@ def _rule_only_row(
         sources,
         "rule match",
         status,
-        ", ".join(_rule_ids(rules, capa_ids)) or "-",
+        ", ".join(_rule_ids(rules, capability_ids)) or "-",
     )
 
 
@@ -5521,8 +5525,9 @@ def _catalogue_names(tid: str) -> tuple[str, str]:
     return tactic, (name if name and name != tid else "not recorded")
 
 
-# The capa rules each capability subsection prints beside its prose, chosen by
-# the rule's namespace and, where capa gave none, by its MBC behaviour.
+# The capability rules each capability subsection prints beside its prose,
+# chosen by the rule's namespace and, where the rule gave none, by its MBC
+# behaviour.
 _EVASION_NAMESPACES = (
     "anti-analysis",
     "data-manipulation/encryption",
@@ -5541,8 +5546,8 @@ _RESOLUTION_NAMESPACES = (
 _RESOLUTION_RULES = ("peb", "resolve function", "parse pe export", "runtime link")
 
 
-def _capa_rules(report: MalwareReport) -> list[tuple[dict[str, str], list[str]]]:
-    """Every capa rule the run recorded, as ``({namespace, rule, attck, mbc}, evidence ids)``."""
+def _capability_rules(report: MalwareReport) -> list[tuple[dict[str, str], list[str]]]:
+    """Every capability rule the run recorded: ``({namespace, rule, attck, mbc}, evidence ids)``."""
     out: list[tuple[dict[str, str], list[str]]] = []
     seen: set[tuple[str, str]] = set()
     for section in report.sections:
@@ -5585,17 +5590,17 @@ _BRACKETED_ID_RE = re.compile(r"\[([A-Z]{1,2}\d{3,4}(?:\.\d{3})?)\]")
 
 
 def _capability_tool(report: MalwareReport) -> str:
-    """The tool the capability-rule table's title names (``ledger_report.titled_tool``).
+    """The tools the capability-rule table's rows came from (``ledger_report.rule_table_tools``).
 
-    The declared display name of the tool whose rows the table holds, whichever
-    tool of the kind ran; ``""`` for a report with no such table, or one whose
-    title names none.
+    The declared display name of each tool whose rows the table holds,
+    whichever tools of the kind ran, joined by "and"; ``""`` for a report with
+    no such table, or one whose title names none.
     """
     for section in report.sections:
         if section.key == _CAPABILITY_SECTION:
-            named = titled_tool(section.title, CAPABILITIES_TITLE)
+            named = rule_table_tools(section, CAPABILITIES_TITLE)
             if named:
-                return named
+                return " and ".join(named)
     return ""
 
 
@@ -5605,7 +5610,7 @@ def _capability_owner(report: MalwareReport) -> str:
     return f"{tool}'s" if tool else "a capability rule tool's"
 
 
-def _capa_table(
+def _capability_table(
     rules: list[tuple[dict[str, str], list[str]]],
     wanted: Callable[[dict[str, str]], bool],
     tool: str = "",
@@ -5634,7 +5639,8 @@ def _capa_table(
     return lines
 
 
-def _capa_evidence_ids(report: MalwareReport) -> list[str]:
+def _capability_evidence_ids(report: MalwareReport) -> list[str]:
+    """The ids the capability-rule table cites, whichever tool of the kind filled it."""
     return list(
         dict.fromkeys(
             i

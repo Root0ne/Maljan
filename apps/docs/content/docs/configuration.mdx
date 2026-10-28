@@ -4064,13 +4064,26 @@ declared kind, from whichever server declares it, and never by the tool's
 name:
 
 * the section a tool's answer is drawn as: `identity`, `signing`,
-  `format_info`, `strings`, `file_iocs`/`text_iocs`, the three rule kinds
-  (`signature_rules`, `event_rules`, `capability_rules`, each read at its
-  declared `rows`, `values.rule`, `values.namespace` and `techniques`, and
-  titled by its `display_name`), the `sandbox_<section>` kinds, `pcap` and the
-  reputation kinds each get a purpose-built section; any other kind, and a
-  tool of yours whose answer the purpose-built section cannot read, gets the
-  generic block;
+  `format_info`, `strings`, `file_iocs`/`text_iocs`, the three rule kinds,
+  the `sandbox_<section>` kinds, `pcap` and the reputation kinds each get a
+  purpose-built section; any other kind, and a tool of yours whose answer the
+  purpose-built section cannot read, gets the generic block, one per tool,
+  since its answer is in that tool's own shape;
+* the three rule kinds share one reader: every `signature_rules`,
+  `event_rules` or `capability_rules` tool is drawn in its kind's one table,
+  under its kind's key whichever tool filled it (`yara_matches`,
+  `sigma_matches` and `capa_capabilities`, the keys stored reports and the
+  console already read), titled by its `display_name`. The rows are read at
+  its declared `rows`; each column at the value it declares under the
+  column's name (`values.rule`, `values.title`, `values.namespace`,
+  `values.tags`, `values.where`, `values.level`, `values.matched_fields`,
+  `values.mbc`), else at the field the kind's answers share (`rule`, `tags`,
+  `level`, `attck`, `mbc` …), and the technique column at its declared
+  `techniques` or the row's ATT&CK tags. A table that holds the rows of
+  more than one tool gains a `Tool` column naming each row's tool, and its
+  title names every tool. A server you add whose tool declares one of these
+  kinds and answers in the shape the built-in does gets the built-in's
+  table, rows and run-comparison rows as they are;
 * "Functions examined" lists every call of a `decompile`,
   `function_disassembly`, `function_list` or `method_list` tool, and the code
   figures draw every `decompile` answer;
