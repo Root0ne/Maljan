@@ -2791,7 +2791,8 @@ def mark_claims_citing_only_failed_calls(
     one entry the ledger does not hold, any answered entry, a sandbox item
     (``net:3``, in its evidence or bracketed in its words) or any other
     reference that is not an entry id is not flagged. Returns the label of
-    each claim flagged (``<agent> claim <n>``), for the log line. Linear in
+    each claim block flagged (``<agent> claim <n>``, numbered by block, each
+    once), for the log line. Linear in
     the claims and the ledger.
     """
     failed: set[str] = set()
@@ -2806,7 +2807,10 @@ def mark_claims_citing_only_failed_calls(
         return flagged
     for name, isr in (isr_reports or {}).items():
         agent = str(getattr(isr, "agent_id", "") or name)
-        for number, claim in enumerate(getattr(isr, "claims", None) or [], start=1):
+        claims = list(getattr(isr, "claims", None) or [])
+        # Named by claim block, each block once: a claim mapped to several
+        # techniques is one claim (``claim_block_indexes``).
+        for block, claim in zip(claim_block_indexes(claims), claims, strict=True):
             text = str(getattr(claim, "claim", "") or "")
             ref = str(getattr(claim, "evidence_ref", "") or "")
             if not _only_entry_references(ref) or cited_item_ids(text):
@@ -2814,7 +2818,9 @@ def mark_claims_citing_only_failed_calls(
             cited = entry_ids_in(f"{text} {ref}")
             if cited and cited <= failed and hasattr(claim, "cites_only_failed_calls"):
                 claim.cites_only_failed_calls = True
-                flagged.append(f"{agent} claim {number}")
+                label = f"{agent} claim {block + 1}"
+                if label not in flagged:
+                    flagged.append(label)
     if flagged:
         logger.info(
             "validation: %d claim(s) cite only tool calls that failed, flagged: %s",
@@ -2870,7 +2876,9 @@ def claim_block_indexes(claims: Sequence[Any]) -> list[int]:
     block on each (``ClaimEvidence.block``). Two adjacent claims the reader
     recorded are one block when it recorded one block for both. Only for a
     claim built without the reader is the block read from its words: a run of
-    claims written alike, each with a different id, is one block.
+    claims written alike, each with a different id, is one block. A claim a
+    validation retry added (``added_by_retry_in_round``) is never in one block
+    with a claim it did not add, so it keeps its own number and its mark.
     """
     out: list[int] = []
     block = -1
@@ -2883,6 +2891,9 @@ def claim_block_indexes(claims: Sequence[Any]) -> list[int]:
             str(getattr(claim, "evidence_ref", "") or ""),
             getattr(claim, "confidence", None),
             getattr(claim, "technique_line", None),
+            # A claim a validation retry added beside the answer in force is
+            # never one block with a claim it did not add.
+            getattr(claim, "added_by_retry_in_round", None),
         )
         tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
         recorded = getattr(claim, "block", None)

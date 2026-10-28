@@ -2571,6 +2571,7 @@ class RunSummaryBuilder:
                     revision_round=isr.revision_round,
                     # A claim mapped to several techniques is counted once.
                     claim_count=count_claim_blocks(isr.claims),
+                    # Each block once, by its own confidence (``AgentISR.mean_confidence``).
                     mean_confidence=isr.mean_confidence,
                     technique_ids=list(dict.fromkeys(technique_ids)),  # deduplicate, preserve order
                     has_dissent=bool(isr.dissent_items),

@@ -353,10 +353,10 @@ class TestTheAdditionsReport:
             prior, _empty_revision_retried("reverser", RETRY_NEW), 2
         )
 
-        report = retry_additions_report(summary + tail, prior, combined, 1, 2)
+        report = retry_additions_report(summary + tail, prior, combined, 2)
 
         assert report == (
-            f"{combined.to_text_summary()}\n{retry_additions_text(combined, 1, 2)}{tail}"
+            f"{combined.to_text_summary()}\n{retry_additions_text(combined, 2)}{tail}"
         )
         assert report.count(RETRY_NEW.claim) == 1 and report.count(DISPATCH.claim) == 1
 
@@ -370,11 +370,11 @@ class TestTheAdditionsReport:
             prior, _empty_revision_retried("reverser", RETRY_NEW), 2
         )
 
-        report = retry_additions_report(written, prior, combined, 1, 2)
+        report = retry_additions_report(written, prior, combined, 2)
 
         assert report.startswith(combined.to_text_summary())
         assert "  Findings:\n    - Install path: read in round 0" in report
-        assert retry_additions_text(combined, 1, 2) in report
+        assert retry_additions_text(combined, 2) in report
         assert report.endswith(
             f"{WRITTEN_BESIDES_CLAIMS}\nDISPUTES:\n- Dynamic claim 2 reads the sleep as "
             "fixed; ev_0063 shows a range."
@@ -382,7 +382,13 @@ class TestTheAdditionsReport:
         assert report.count(DISPATCH.claim) == 1
 
     def test_the_line_names_the_added_claims_by_their_numbers(self) -> None:
-        combined = AgentISR(agent_id="x", domain="x", claims=[DISPATCH, TIMING, INSTALL])
+        def added(claim: ClaimEvidence) -> ClaimEvidence:
+            marked = claim.model_copy()
+            marked.added_by_retry_in_round = 3
+            return marked
 
-        assert retry_additions_text(combined, 1, 3).startswith("Claim 3 above was")
-        assert retry_additions_text(combined, 2, 3).startswith("Claims 2 to 3 above were")
+        one = AgentISR(agent_id="x", domain="x", claims=[DISPATCH, TIMING, added(INSTALL)])
+        two = AgentISR(agent_id="x", domain="x", claims=[DISPATCH, added(TIMING), added(INSTALL)])
+
+        assert retry_additions_text(one, 3).startswith("Claim 3 above was")
+        assert retry_additions_text(two, 3).startswith("Claims 2 to 3 above were")

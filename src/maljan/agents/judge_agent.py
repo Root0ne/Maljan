@@ -144,6 +144,7 @@ from maljan.pipeline.validation import (
     announce_unresolved,
     assessment_conflict_violations,
     assessment_violations,
+    count_claim_blocks,
     drop_ungrounded_indicators,
     kept_after_the_sandbox_fact,
     not_asked,
@@ -879,7 +880,8 @@ def verdict_report_parts(
     if isr_reports:
         isr_block = "\n".join(
             f"[{name}] domain={isr.domain} | "
-            f"claims={len(isr.claims)} | "
+            # A claim mapped to several techniques is one claim.
+            f"claims={count_claim_blocks(isr.claims)} | "
             f"mean_conf={isr.mean_confidence:.2f}"
             for name, isr in isr_reports.items()
             if isr.claims

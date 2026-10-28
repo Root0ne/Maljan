@@ -1496,9 +1496,12 @@ PROMPTS: dict[str, str] = {
         AgentISR(
             agent_id="a",
             domain="a",
-            claims=[ClaimEvidence(claim="c", evidence_ref="e", confidence=0.5)],
+            claims=[
+                ClaimEvidence(
+                    claim="c", evidence_ref="e", confidence=0.5, added_by_retry_in_round=2
+                )
+            ],
         ),
-        1,
         2,
     ),
     "sandbox-called api catalogue label": shipped_label("api_capability", CALLED_API_CATALOGUE),
