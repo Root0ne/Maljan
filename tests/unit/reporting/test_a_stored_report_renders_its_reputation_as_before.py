@@ -42,11 +42,18 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # The Markdown and HTML re-pinned when the host identifier table came to mark
 # each row the IOC table publishes and its footer to say the table publishes
 # nothing itself (T-386); the STIX did not change.
+# Re-pinned when no table cell of the body came to be cut (T-399) and every
+# indicator to indicate the malware object (T-402): the only Markdown and HTML
+# changes are body cells that ended in … printed whole, the methodology's
+# sentence about cut values and the HTML print stylesheet's fixed table layout;
+# the STIX gains one platform ``indicates`` edge per indicator related to no
+# malware object (the similarity digests aside), each named by the report
+# object, and nothing else.
 STORED_RENDERS = {
-    "run7": ("cdd9515862d5af1d", "dea1f998fc174103", "865cd19e7ce6284b"),
-    "run5": ("83588faa188377b2", "b771abbf5ef82b73", "0f3807de7d1fb836"),
-    "run4": ("db8c93d83f3b8f4e", "8f930558dc551ae8", "204536a060726373"),
-    "local8": ("0de08c4dc87e22cd", "4cb8cd5f0fb12432", "7f04dee0deee7a55"),
+    "run7": ("b6b67d78ed8bfe45", "985ed08f2496b1e3", "c6313f103ee42d52"),
+    "run5": ("3f3f15bbd3933f1f", "b376d7a47c654122", "276aad22c908ff48"),
+    "run4": ("9da95bae69272ee5", "7c6021dbe84ce2ff", "b0060de27f126465"),
+    "local8": ("9a23cffd548254ce", "ad6790825e501610", "bd6ac195bc590655"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

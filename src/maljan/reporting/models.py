@@ -1286,6 +1286,13 @@ class ClaimNotDiscussed(BaseModel):
     # The round whose tool-less validation retry added the claim beside the
     # answer in force (``ClaimEvidence.added_by_retry_in_round``), or ``None``.
     added_by_retry_in_round: int | None = None
+    # Every technique id the claim names, in its order: a claim mapped to
+    # several techniques is one row with all of them.
+    technique_ids: list[str] = Field(default_factory=list)
+    # Of those, the ids the catalogue does not have, and the ids an absence
+    # claim kept when asked: each printed with the ATT&CK table's note.
+    unverified_technique_ids: list[str] = Field(default_factory=list)
+    absence_kept_technique_ids: list[str] = Field(default_factory=list)
 
 
 class FlaggedStatement(BaseModel):

@@ -244,12 +244,15 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # Re-pinned when the report model's host identifier table came to mark each
 # row the IOC table publishes and its footer to say the table publishes
 # nothing itself (T-386): only that table's marked rows and footer changed.
+# Re-pinned when no table cell of the body came to be cut (T-399): the only
+# changes are body cells that ended in … printed whole, the methodology's
+# sentence about cut values, and the HTML print stylesheet's fixed table layout.
 STORED_RENDERS = {
-    "run7": ("cdd9515862d5af1d", "dea1f998fc174103"),
-    "run5": ("83588faa188377b2", "b771abbf5ef82b73"),
-    "run4": ("db8c93d83f3b8f4e", "8f930558dc551ae8"),
-    "local8": ("0de08c4dc87e22cd", "4cb8cd5f0fb12432"),
-    "haiku4": ("75b9157b1a863aca", "b47768bbf80581cb"),
+    "run7": ("b6b67d78ed8bfe45", "985ed08f2496b1e3"),
+    "run5": ("3f3f15bbd3933f1f", "b376d7a47c654122"),
+    "run4": ("9da95bae69272ee5", "7c6021dbe84ce2ff"),
+    "local8": ("9a23cffd548254ce", "ad6790825e501610"),
+    "haiku4": ("0f6dfb3b3023d7e9", "8e00936f17be76df"),
 }
 
 

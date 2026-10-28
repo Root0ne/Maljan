@@ -84,7 +84,7 @@ def claim_label(agent: str, number: int) -> str:
 
 @dataclass(frozen=True)
 class ClaimInForce:
-    """One claim of an answer in force, with its label."""
+    """One claim of an answer in force, with its label and every technique it names."""
 
     agent: str
     number: int
@@ -93,6 +93,13 @@ class ClaimInForce:
     confidence: float | None
     # The round whose tool-less validation retry added it, or ``None``.
     added_by_retry_in_round: int | None = None
+    # The technique ids the claim's block listed, in its order, each once.
+    technique_ids: tuple[str, ...] = ()
+    # Of those, the ids the catalogue does not have (``technique_id_valid``
+    # false) and the ids an absence claim kept when asked
+    # (``kept_after_absence_question``): the ATT&CK table's notes, per id.
+    unverified_technique_ids: tuple[str, ...] = ()
+    absence_kept_technique_ids: tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
@@ -105,20 +112,45 @@ def _retry_round(claim: Any) -> int | None:
 
 
 def claims_in_force(isr_reports: Mapping[str, Any] | None) -> list[ClaimInForce]:
-    """Every claim of every answer in force, numbered in its answer, in the answers' order."""
+    """Every claim of every answer in force, numbered in its answer, in the answers' order.
+
+    A claim is a block the analyst wrote: a block whose TECHNIQUE line listed
+    several ids is read as one claim per id (``validation.claim_block_indexes``),
+    and here it is one claim again, numbered once, with all of its ids.
+    """
+    from maljan.pipeline.validation import claim_block_indexes
+
     out: list[ClaimInForce] = []
     for name, isr in (isr_reports or {}).items():
         agent = str(getattr(isr, "agent_id", "") or name)
-        for number, claim in enumerate(getattr(isr, "claims", None) or [], start=1):
+        claims = list(getattr(isr, "claims", None) or [])
+        firsts: dict[int, Any] = {}
+        ids: dict[int, list[str]] = {}
+        unverified: dict[int, list[str]] = {}
+        kept: dict[int, list[str]] = {}
+        for block, claim in zip(claim_block_indexes(claims), claims, strict=True):
+            firsts.setdefault(block, claim)
+            tid = str(getattr(claim, "technique_id", "") or "").strip()
+            if not tid or tid in ids.setdefault(block, []):
+                continue
+            ids[block].append(tid)
+            if getattr(claim, "technique_id_valid", True) is False:
+                unverified.setdefault(block, []).append(tid)
+            if getattr(claim, "kept_after_absence_question", False) is True:
+                kept.setdefault(block, []).append(tid)
+        for block, claim in firsts.items():
             confidence = getattr(claim, "confidence", None)
             out.append(
                 ClaimInForce(
                     agent=agent,
-                    number=number,
+                    number=block + 1,
                     claim=str(getattr(claim, "claim", "") or ""),
                     evidence_ref=str(getattr(claim, "evidence_ref", "") or ""),
                     confidence=float(confidence) if isinstance(confidence, int | float) else None,
                     added_by_retry_in_round=_retry_round(claim),
+                    technique_ids=tuple(ids.get(block, ())),
+                    unverified_technique_ids=tuple(unverified.get(block, ())),
+                    absence_kept_technique_ids=tuple(kept.get(block, ())),
                 )
             )
     return out
@@ -245,6 +277,9 @@ def _row(
         named=named,
         counted=counted,
         added_by_retry_in_round=claim.added_by_retry_in_round,
+        technique_ids=list(claim.technique_ids),
+        unverified_technique_ids=list(claim.unverified_technique_ids),
+        absence_kept_technique_ids=list(claim.absence_kept_technique_ids),
     )
 
 

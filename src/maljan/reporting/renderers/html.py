@@ -165,6 +165,11 @@ figcaption b { color: var(--ink); }
 
 @media print {
   body { max-width: none; padding: 0; font-size: 9.5pt; }
+  /* Every body cell is printed whole, and a sample's command line can run to
+     kilobytes; an automatic layout measures every word of every cell to size
+     its columns, which takes minutes on such a cell. A fixed layout sizes the
+     columns once, from the first row, and keeps every word. */
+  table { table-layout: fixed; width: 100%; }
   nav.toc a::after {
     content: target-counter(attr(href url), page);
     color: var(--muted); font-variant-numeric: tabular-nums;

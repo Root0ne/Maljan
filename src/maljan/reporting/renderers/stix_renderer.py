@@ -1428,6 +1428,19 @@ class ExtendedSTIXRenderer:
         # an object the standard refuses, and it is declined with the reason
         # rather than exported so.
         objects = self._without_empty_references(objects)
+        # Every indicator the export publishes was found for this sample, so
+        # each indicates the sample's malware object. Only the sample's own
+        # digests used to: an indicator minted from the network block, a
+        # string row or the IOC table, and one the judge left unrelated, went
+        # out naming nothing it indicates. Three are left as they are: one the
+        # judge related to a malware object by any edge (a ``related-to`` is
+        # not upgraded), one typed ``benign``, and the similarity digests,
+        # which match files that are not the sample. Added once the integrity
+        # pass has folded duplicates, so no edge is written for one it removed.
+        if malware_id is not None:
+            objects = _every_indicator_indicates(
+                objects, malware_id, sample_similarity_pattern(report.identity.hashes)
+            )
         return Bundle(objects=_produced_by(objects, identity.id, self.declined))
 
     def _without_empty_references(self, objects: list[Any]) -> list[Any]:
@@ -1564,6 +1577,70 @@ def _names_the_family(objects: list[Any], family: str) -> bool:
         and str(getattr(obj, "name", "") or "").strip().casefold() == wanted
         for obj in objects
     )
+
+
+# What an ``indicates`` edge the platform adds says about itself.
+PLATFORM_INDICATES_EDGE = (
+    "Added by the platform: the indicator was published for this sample, and no edge "
+    "the judge wrote relates it to a malware object."
+)
+
+
+def _every_indicator_indicates(
+    objects: list[Any], malware_id: str, similarity: str | None = None
+) -> list[Any]:
+    """``objects`` with an ``indicates`` edge from each indicator unrelated to a malware.
+
+    The edge runs to ``malware_id``, the object that stands for the sample the
+    indicators were found for. An indicator the bundle already relates to a
+    malware object, by an edge of any type in either direction, keeps what that
+    edge says and gets no second one: a judge's ``related-to`` is the judge's
+    word that the value does not indicate the malware, and is not upgraded.
+    One typed ``benign`` says it indicates no malware and gets none, and the
+    sample's similarity digests (``similarity``, the pattern
+    :func:`sample_similarity_pattern` writes) match files that are not the
+    sample and get none. Each new edge
+    says it is the platform's (:data:`PLATFORM_INDICATES_EDGE`), so a reader
+    tells it from an edge the judge wrote, and is named by the report object,
+    which names every object it reports on.
+    """
+    present = {str(getattr(obj, "id", "")) for obj in objects}
+    if malware_id not in present:
+        return objects
+    malware = {
+        str(getattr(obj, "id", "")) for obj in objects if getattr(obj, "type", "") == "malware"
+    }
+    linked: set[str] = set()
+    for obj in objects:
+        if getattr(obj, "type", "") != "relationship":
+            continue
+        source, target = str(getattr(obj, "source_ref", "")), str(getattr(obj, "target_ref", ""))
+        if source in malware:
+            linked.add(target)
+        if target in malware:
+            linked.add(source)
+    edges = [
+        Relationship(
+            relationship_type="indicates",
+            source_ref=str(obj.id),
+            target_ref=malware_id,
+            description=PLATFORM_INDICATES_EDGE,
+        )
+        for obj in objects
+        if getattr(obj, "type", "") == "indicator"
+        and str(getattr(obj, "id", "")) not in linked
+        and "benign" not in (getattr(obj, "indicator_types", None) or [])
+        and (similarity is None or str(getattr(obj, "pattern", "")) != similarity)
+    ]
+    if not edges:
+        return objects
+    out: list[Any] = []
+    for obj in objects:
+        refs = getattr(obj, "object_refs", None)
+        if getattr(obj, "type", "") == "report" and isinstance(refs, list):
+            obj = obj.model_copy(update={"object_refs": [*refs, *(e.id for e in edges)]})
+        out.append(obj)
+    return out + edges
 
 
 def _produced_by(
