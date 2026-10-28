@@ -325,7 +325,13 @@ EVIDENCE_ROOT_READERS = {
 
 
 def test_the_readers_are_the_evidence_roots_shapes(declared: ToolDeclarations) -> None:
+    from maljan.core.reputation import SHAPE_READER
+
     for source, name, facts in _built_in_tools(declared):
+        if facts.reader == SHAPE_READER:  # type: ignore[attr-defined]
+            # A reputation lookup read from its listing: read by the answer's
+            # shape in ``core.reputation``, never an evidence root shape.
+            continue
         assert facts.reader == EVIDENCE_ROOT_READERS.get(name, ""), (source, name)  # type: ignore[attr-defined]
 
 
@@ -592,14 +598,21 @@ def test_the_technique_depth_bound_is_the_summarys(declared: ToolDeclarations) -
         assert by_path == bool(_technique_ids(node)), depth
 
 
-def test_the_declared_reputation_paths_read_the_virustotal_answer(
+def test_the_reputation_service_s_lookup_reads_its_answer_by_its_shape(
     declared: ToolDeclarations,
 ) -> None:
+    """The built-in service's lookup is read from its listing, and declares no paths."""
     from maljan.core.reputation import read_answer
 
     answer = json.loads((LEDGER / "get_file_report.json").read_text(encoding="utf-8"))
     facts = declared.declaration_for(("mcp:virustotal", "get_file_report"))
-    assert facts is not None and facts.reputation is not None
+    from maljan.core.reputation import SHAPE_READER
+
+    assert facts is not None and facts.kind == "reputation" and facts.reader == SHAPE_READER
+    # What its catalog entry says of the service as a whole, and no path.
+    assert facts.reputation is not None
+    assert (facts.reputation.service, facts.reputation.rank) == ("VirusTotal", 10)
+    assert not (facts.reputation.stats or facts.reputation.labels or facts.reputation.link)
     stats = answer["data"]["last_analysis_stats"]
     read = read_answer(facts, output=json.dumps(answer), server="virustotal")
     assert read.malicious == stats["malicious"]

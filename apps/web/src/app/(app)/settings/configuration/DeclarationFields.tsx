@@ -15,6 +15,7 @@ import {
   DECLARATION_PANEL_COPY,
   readCallTimeout,
   readCredentialBootstrap,
+  readReputationService,
   readEnvNames,
   readErrorPatterns,
   readLauncherDepth,
@@ -561,6 +562,19 @@ export default function DeclarationFields({
             mono
             read={readCredentialBootstrap}
             onValue={(credential_bootstrap) => put({ credential_bootstrap })}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <ReadField
+            id={box("reputation_service")}
+            label="Reputation service (JSON object: name, rank; the rank the triage pack asks its lookups at, lower first)"
+            ariaLabel={`${serverKey} reputation_service`}
+            value={server.reputation_service ?? null}
+            show={showJson}
+            rows={3}
+            mono
+            read={readReputationService}
+            onValue={(reputation_service) => put({ reputation_service })}
           />
         </div>
       </div>

@@ -30,6 +30,11 @@ def pytest_configure(config: pytest.Config) -> None:
     changes the locale itself does so in a subprocess.
     """
     pin_character_classification()
+    config.addinivalue_line(
+        "markers",
+        "no_kept_reputation_service: the test starts where a fresh deployment is, nothing "
+        "read yet of the built-in reputation service's listing",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -82,13 +87,35 @@ def _own_servers_kept() -> tuple[tuple[str, str, dict], ...]:
         (Path(__file__).parent / "fixtures" / "own_server_tool_facts.json").read_text()
     )
     blocks = _builtin_servers()
-    return tuple(
+    own = tuple(
         (f"mcp:{key}", launch_identity(blocks[key]), tools) for key, tools in captured.items()
     )
+    return (*own, _reputation_service_kept(blocks))
+
+
+def _reputation_service_kept(blocks: dict) -> tuple[str, str, dict]:
+    """What the platform read of the built-in reputation service's listing, as the store keeps it.
+
+    The server is not the platform's own and declares none of its tools: what
+    each is, is read from its listing (``core.derived_declarations``), here the
+    vendored one (``tests/fixtures/virustotal_listing.json``).
+    """
+    import json
+    from pathlib import Path
+
+    from maljan.core.derived_declarations import derived_tool_facts
+    from maljan.core.served_declarations import stored_form
+    from maljan.core.tool_declarations import launch_identity
+
+    listing = json.loads(
+        (Path(__file__).parent / "fixtures" / "virustotal_listing.json").read_text()
+    )
+    read = derived_tool_facts(listing["tools"])
+    return ("mcp:virustotal", launch_identity(blocks["virustotal"]), stored_form({}, read))
 
 
 @pytest.fixture(autouse=True)
-def the_own_servers_have_declared_their_tools() -> Iterator[None]:
+def the_own_servers_have_declared_their_tools(request: pytest.FixtureRequest) -> Iterator[None]:
     """Each test starts where a deployment is once its own servers were first listed.
 
     The platform's own sidecars ship no table of their tools: what the
@@ -96,12 +123,17 @@ def the_own_servers_have_declared_their_tools() -> Iterator[None]:
     kept past the process (``core.served_declarations``). Every test starts
     with that kept declaration, and with nothing this process listed or
     forgot since; a test of a fresh install, before any listing, forgets it
-    (``forget_served``).
+    (``forget_served``). A test marked ``no_kept_reputation_service`` starts
+    with nothing read of the built-in reputation service's listing, as a fresh
+    deployment does before its first job lists it.
     """
     from maljan.core import served_declarations
 
+    kept = _own_servers_kept()
+    if request.node.get_closest_marker("no_kept_reputation_service") is not None:
+        kept = tuple(row for row in kept if row[0] != "mcp:virustotal")
     served_declarations._UNSAVED.clear()
-    served_declarations.install_persisted(_own_servers_kept())
+    served_declarations.install_persisted(kept)
     yield
     # And between tests, where a module's or a session's fixture is built.
     served_declarations._UNSAVED.clear()

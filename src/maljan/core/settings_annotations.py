@@ -1691,6 +1691,15 @@ DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
         "shown to the operator, by path) and note. Empty when the token is typed in.",
     ),
     (
+        "reputation_service",
+        "reputation service",
+        "What a reputation service's server says of its lookups as a whole, as JSON: name "
+        "(the service its answers are attributed to and the name published text gives a "
+        "lookup) and rank (the order the triage pack asks lookups in, lowest first; 100 "
+        "when none says). Laid under each reputation lookup read from the server's "
+        "listing; a lookup a declaration names keeps what it declares. Empty says neither.",
+    ),
+    (
         "launcher_depth",
         "launcher levels",
         "How many levels at the top of the process tree the worker starts for this server "

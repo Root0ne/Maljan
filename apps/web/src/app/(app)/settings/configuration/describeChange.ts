@@ -246,6 +246,7 @@ const SERVER_FIELDS = [
   "credential_bootstrap",
   "launcher_depth",
   "prepass_tools",
+  "reputation_service",
 ] as const;
 
 function hasToken(v: unknown): boolean {

@@ -28,6 +28,7 @@ resolution rule cannot drift apart.
 
 from __future__ import annotations
 
+import copy
 import shutil
 
 SERVER_KEY = "virustotal"
@@ -67,6 +68,41 @@ LOOKUP_TOOLS: tuple[str, ...] = (
 SUBMIT_TOOLS: tuple[str, ...] = ("submit_file", "submit_local_file")
 
 
+# What the catalog says of the server as a whole, beside how it is reached: it
+# is a reputation service (``MCPServerConfig.roles``) and what it says of its
+# lookups as a whole (``reputation_service``), the address of its
+# report on a sample (``reference_urls``), and how its credential is obtained
+# (``credential_bootstrap``, the generic mechanism of
+# ``app.services.credential_bootstrap``): one POST naming the agent family and
+# the ``vt-mcp`` release, one ``vtai_`` token back, and the agent id and public
+# handle the operator recognises the deployment by in VirusTotal's own
+# listing. The note is what the console said beside the button before the
+# step was a declaration. Its tools are declared by nothing here: what each is
+# is read from what the server lists (``core.derived_declarations``).
+ROLES: tuple[str, ...] = ("reputation",)
+# The service its lookups' answers are attributed to, and the rank the triage
+# pack asks them at: before the threat-intel sidecar (20), which relays the
+# same service through a key of its own.
+REPUTATION_SERVICE: dict[str, object] = {"name": "VirusTotal", "rank": 10}
+REFERENCE_URLS: tuple[str, ...] = ("https://www.virustotal.com/gui/file/{sha256}",)
+CREDENTIAL_BOOTSTRAP: dict[str, object] = {
+    "url": REGISTER_URL,
+    "body": {"agent_family": "{family}", "agent_version": VT_MCP_VERSION},
+    "token_json_path": "/agent_token",
+    "token_prefix": "vtai_",
+    "family": AGENT_FAMILY,
+    "facts": {"public_handle": "/public_handle", "agent_id": "/agent_id"},
+    "note": (
+        "The agent token is free and is issued to this deployment without an account. "
+        "VirusTotal enforces its own published quotas on it; a lookup over quota comes "
+        "back as a 429 with a retry delay, and the analyst carries on without that answer. "
+        "Only the read-only lookups are ticked. The submit tools upload the sample itself "
+        "to VirusTotal, where it is shared with their customers, so they stay off until "
+        "you tick them in the Tools step."
+    ),
+}
+
+
 def stdio_command(command_exists: object = None) -> tuple[str, list[str]]:
     """The command and args that launch ``vt-mcp`` over stdio on this host.
 
@@ -80,3 +116,13 @@ def stdio_command(command_exists: object = None) -> tuple[str, list[str]]:
     if which(STDIO_COMMAND):
         return STDIO_COMMAND, []
     return STDIO_FALLBACK_COMMAND, list(STDIO_FALLBACK_ARGS)
+
+
+def catalog_entry() -> dict[str, object]:
+    """The catalog's fields of the server's block beside its launch, as a fresh copy."""
+    return {
+        "roles": list(ROLES),
+        "reference_urls": list(REFERENCE_URLS),
+        "credential_bootstrap": copy.deepcopy(CREDENTIAL_BOOTSTRAP),
+        "reputation_service": dict(REPUTATION_SERVICE),
+    }

@@ -545,7 +545,17 @@ def test_without_acceptance_the_tool_stays_undeclared(installed: Any) -> None:
     before = _scan_entry(settings)
     _probe(confirmed=["scan_rules", "query_hash", "section_list"])
     after = _scan_entry(settings)
-    assert before.facts == after.facts == {"v": 1, "hints": {"readOnlyHint": True}}
+    # No proposal is applied: the tool keeps no kind and no reading of its
+    # answer. What is read of every listed tool is whether it sends the file:
+    # it takes a path and its server does not mark it closed, so it does
+    # (``core.derived_declarations``), whatever is proposed or accepted.
+    assert before.facts == after.facts
+    assert after.facts == {
+        "v": 1,
+        "kind": "",
+        "discloses_sample": True,
+        "hints": {"readOnlyHint": True},
+    }
     assert asserted_techniques(after) == set()
     assert settings.mcp.servers[SERVER].tool_facts == {}
 

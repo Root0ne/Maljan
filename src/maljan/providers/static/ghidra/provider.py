@@ -608,13 +608,19 @@ class GhidraStaticProvider(StaticProvider):
         self.tools = list(self._all_tools)
         logger.info("Initialized Ghidra MCP tools: %d.", len(self.tools))
 
-    def _categories_with_served(self, held: Mapping[str, Any]) -> dict[str, str]:
+    def _categories_with_served(
+        self,
+        held: Mapping[str, Any],
+        read: Mapping[str, Any] | None = None,
+        closed: Mapping[str, Any] | None = None,
+    ) -> dict[str, str]:
         """The description tags in force with ``held``, what the server declared, laid under.
 
-        Asked by the toolkit before it builds the tools; nothing is kept until
-        the attach succeeded.
+        With ``read`` and ``closed``, what the platform read of the same
+        listing. Asked by the toolkit before it builds the tools; nothing is
+        kept until the attach succeeded.
         """
-        return categories_of(tools_in_force(self.declaration_source, self._cfg, held))
+        return categories_of(tools_in_force(self.declaration_source, self._cfg, held, read, closed))
 
     def server_guard(self) -> Any:
         """This job's breaker and call cap for Ghidra, or ``None`` where no settings can be read.

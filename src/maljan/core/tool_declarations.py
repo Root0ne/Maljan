@@ -663,6 +663,35 @@ def lenient_declaration(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[st
     return kept, left_out
 
 
+def kind_free_changes(value: Any) -> dict[str, dict[str, Any]]:
+    """Per tool, the kind-dependent fields a stored declaration sets with no kind of its own.
+
+    A change an operator stored over a declaration whose kind comes from
+    elsewhere (``reputation: {rank: 30}`` over a lookup read from its server's
+    listing, ``core.derived_declarations``): the lenient reading leaves such
+    fields out of the tool's declaration (:func:`lenient_declaration`), and
+    they are kept here instead, to be laid over the kind once one is in force
+    (``derived_declarations.lay_under``). Never in an operator's edit, which
+    is checked strictly.
+    """
+    if STRICT_DECLARATIONS.get() or not isinstance(value, Mapping):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for tool, raw in value.items():
+        if not isinstance(raw, Mapping) or raw.get("kind") not in (None, ""):
+            continue
+        if reads_no_kind(raw):
+            continue
+        held = {
+            name: _copy(raw[name])
+            for name in KIND_DEPENDENT_FIELDS
+            if name in raw and is_set(name, raw[name])
+        }
+        if held:
+            out[str(tool)] = held
+    return out
+
+
 def reads_no_kind(raw: Mapping[str, Any]) -> bool:
     """Whether ``unclassified`` in ``raw`` names no kind: only when no kind-dependent field is set.
 
@@ -1345,8 +1374,14 @@ class ToolFacts(BaseModel):
                 )
             needing = [name for name in KIND_DEPENDENT_FIELDS if name in held]
             if needing:
+                pointer = (
+                    "; to rank or name a reputation server's lookups, set the server's "
+                    "reputation_service.rank or reputation_service.name instead"
+                    if "reputation" in needing
+                    else ""
+                )
                 raise ValueError(
-                    f"{', '.join(needing)} are read only through a kind; declare the kind"
+                    f"{', '.join(needing)} are read only through a kind; declare the kind" + pointer
                 )
         return self
 
@@ -1373,6 +1408,30 @@ def _with_family(value: Any, family: str) -> Any:
     if isinstance(value, list):
         return [_with_family(v, family) for v in value]
     return value
+
+
+class ReputationService(BaseModel):
+    """What a reputation service's server says of its lookups as a whole.
+
+    Server-level, never per tool: ``name`` is the service its lookups' answers
+    are attributed to and the name published text gives them; ``rank`` the
+    rank the triage pack asks them at (``ReputationFacts.rank``). Laid under
+    each reputation lookup read from the server's listing
+    (``core.derived_declarations``); a lookup a block or its server declares
+    keeps what it declares.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = ""
+    rank: int | None = Field(default=None, ge=0)
+
+    @field_validator("name")
+    @classmethod
+    def _one_line(cls, value: str) -> str:
+        if any(not ch.isprintable() for ch in value):
+            raise ValueError("reputation_service.name is one line of printable text")
+        return value.strip()
 
 
 class CredentialBootstrap(BaseModel):
@@ -1462,6 +1521,7 @@ DECLARATION_FIELDS: tuple[str, ...] = (
     "credential_bootstrap",
     "launcher_depth",
     "prepass_tools",
+    "reputation_service",
 )
 # The declaration fields a settings snapshot records only where an operator
 # set them (the shipped values are named by a digest instead).
@@ -2596,6 +2656,13 @@ class Declared:
     auto_name_prefixes: tuple[str, ...] = ()
     reference_urls: tuple[str, ...] = ()
     tools: Mapping[str, ToolFacts] = field(default_factory=dict)
+    # Per tool, the kind-dependent fields the block sets with no kind of its
+    # own (``kind_free_changes``), laid over the kind its listing's reading
+    # puts in force.
+    kind_free: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    # What a reputation service's server says of its lookups as a whole
+    # (``ReputationService``), laid under the lookups read from its listing.
+    reputation_service: ReputationService | None = None
     # Whether the server's own declaration of its tools is read as the block's
     # (``trusts_served_declaration``), and the block's launch identity, which
     # a server's declaration is kept under (``core.served_declarations``).
@@ -2631,6 +2698,8 @@ class Declared:
             auto_name_prefixes=tuple(getattr(copied, "auto_name_prefixes", ()) or ()),
             reference_urls=tuple(getattr(copied, "reference_urls", ()) or ()),
             tools=dict(getattr(copied, "tool_facts", {}) or {}),
+            reputation_service=getattr(copied, "reputation_service", None),
+            kind_free=dict(getattr(copied, "kind_free_changes", None) or {}),
             trusts_served=trusts_served(source, cfg),
             launch=launch_identity(copied),
         )

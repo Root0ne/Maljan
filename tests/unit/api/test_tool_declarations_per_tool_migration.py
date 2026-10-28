@@ -16,6 +16,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+# The mechanism is read against a block that ships a table of its tools.
+pytestmark = pytest.mark.usefixtures("a_built_in_server_ships_a_tool_table")
+
+
 VERSIONS = Path(__file__).resolve().parents[3] / "apps/api/alembic/versions"
 MIGRATION = VERSIONS / "20261012000000_tool_declarations_stored_per_tool.py"
 RECORD = VERSIONS / "20261012000000_shipped_tool_declarations.json"

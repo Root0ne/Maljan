@@ -258,6 +258,10 @@ export interface McpServerEntry {
   /** How the server's credential is obtained by one request, or null when its
    *  token is typed in (`core.tool_declarations.CredentialBootstrap`). */
   credential_bootstrap?: CredentialBootstrapEntry | null;
+  /** What a reputation service's server says of its lookups as a whole
+   *  (`core.tool_declarations.ReputationService`): the service's name and the
+   *  rank the triage pack asks them at. */
+  reputation_service?: { name?: string; rank?: number | null } | null;
   /** How many levels at the top of the process tree the worker starts for
    *  the server are a launcher that does not read the sample, or null when
    *  none is declared (`MCPServerConfig.launcher_depth`). */

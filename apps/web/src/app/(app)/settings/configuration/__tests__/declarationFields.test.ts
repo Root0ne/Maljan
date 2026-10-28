@@ -7,6 +7,7 @@ import {
   readMount,
   readPrefixes,
   readReferenceUrls,
+  readReputationService,
   readRoles,
   readToolFacts,
   readWorkDir,
@@ -209,6 +210,23 @@ describe("the server editor's declaration readers", () => {
     expect(readReferenceUrls(url).value).toEqual([url]);
     expect(readReferenceUrls("http://example.org/{sha256}").error).toMatch(/https/);
     expect(readReferenceUrls("https://example.org/").error).toMatch(/sha256/);
+  });
+
+  it("points a kindless change at the server's reputation_service", () => {
+    expect(read('{"get_file_report": {"reputation": {"rank": 30}}}').error).toMatch(
+      /read only through a kind; declare the kind .*set the server's reputation_service/
+    );
+  });
+
+  it("reads a server's reputation_service: a name and a whole rank", () => {
+    expect(readReputationService("").value).toBeNull();
+    expect(readReputationService('{"name": "Svc", "rank": 10}').value).toEqual({
+      name: "Svc",
+      rank: 10,
+    });
+    expect(readReputationService('{"rank": -1}').error).toMatch(/whole number/);
+    expect(readReputationService('{"name": 3}').error).toMatch(/name/);
+    expect(readReputationService("[1]").error).toMatch(/object/);
   });
 
   it("splits words without keeping empty entries", () => {

@@ -1,0 +1,101 @@
+{
+  "get_analysis": {
+    "effects": {
+      "executes": "no",
+      "network": true,
+      "third_party": "hash"
+    },
+    "kind": "submission_status"
+  },
+  "get_domain_report": {
+    "effects": {
+      "executes": "no",
+      "network": true,
+      "third_party": "no"
+    },
+    "kind": "indicator_report"
+  },
+  "get_file_report": {
+    "arguments": {
+      "hash": "hash"
+    },
+    "display_name": "VirusTotal",
+    "does_not_show": "this run's own analysis of the sample; an unknown hash or no detections is no evidence that the file is clean",
+    "effects": {
+      "executes": "no",
+      "network": true,
+      "third_party": "hash"
+    },
+    "kind": "reputation",
+    "reputation": {
+      "detections": "/**7/detections",
+      "engines": "/**7/coverage/engines",
+      "first_seen": [
+        "/**7/first_submission_date",
+        "/**7/first_seen_itw_date"
+      ],
+      "labels": [
+        "/**7/popular_threat_classification/suggested_threat_label",
+        "/**7/popular_threat_classification/popular_threat_name/*/value",
+        "/**7/popular_threat_classification/popular_threat_category/*/value"
+      ],
+      "last_seen": [
+        "/**7/last_analysis_date",
+        "/**7/analysis_date",
+        "/**7/last_submission_date"
+      ],
+      "link": [
+        "/**7/report_url",
+        "/**7/gui_url",
+        "/**7/permalink",
+        "/**7/html_url"
+      ],
+      "malicious": "/**7/last_analysis_stats/malicious",
+      "rank": 10,
+      "service": "VirusTotal",
+      "stats": "/**7/last_analysis_stats",
+      "suspicious": "/**7/last_analysis_stats/suspicious"
+    },
+    "shows": "what VirusTotal holds for the hash: its engines' detections and file details"
+  },
+  "get_ip_report": {
+    "effects": {
+      "executes": "no",
+      "network": true,
+      "third_party": "no"
+    },
+    "kind": "indicator_report"
+  },
+  "get_submission": {
+    "effects": {
+      "executes": "no",
+      "network": true,
+      "third_party": "hash"
+    },
+    "kind": "submission_status"
+  },
+  "get_url_report": {
+    "effects": {
+      "executes": "no",
+      "network": true,
+      "third_party": "no"
+    },
+    "kind": "indicator_report"
+  },
+  "submit_file": {
+    "discloses_sample": true,
+    "effects": {
+      "executes": "sandbox",
+      "network": true
+    },
+    "kind": "submission"
+  },
+  "submit_local_file": {
+    "discloses_sample": true,
+    "effects": {
+      "executes": "sandbox",
+      "network": true
+    },
+    "kind": "submission"
+  }
+}

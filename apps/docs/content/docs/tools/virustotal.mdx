@@ -64,6 +64,21 @@ sends](/security/#what-the-virustotal-server-sends).
 
 </Callout>
 
+The platform ships no declaration of these tools. Its catalog entry says
+only what holds for the server as a whole: that it is a reputation service
+(`roles: [reputation]`), the service's name and the rank its lookups are asked
+at (`reputation_service: {name: VirusTotal, rank: 10}`), where its report on a
+sample is, and how its credential is obtained; what each tool is,
+is read from what the server lists, and the lookup's answer by its shape, as
+for any reputation server (see [A reputation service read from what it
+lists](/configuration/#what-a-server-declares-about-its-tools)). The submit tools take the file's
+bytes or a path and are write tools, so each is read as sending the sample:
+the run's disclosure names the upload, and a tool the server adds later is
+read the same way.
+
+The stdio form's `submit_local_file` is read so too, by its path, whatever
+its hints say. Neither is ticked unless you tick it.
+
 ## Who uses it
 
 `virustotal` is referenced by every agent that reads the file or weighs the
@@ -71,7 +86,10 @@ run: the `static` and `network` analysts, the judge, and the seeded `triage`,
 `android_static` and `reverser` agents. Their prompts say to look the hash up
 once, cite it like any other tool result, and treat a reputation label as one
 source rather than as the verdict. The triage pack makes one reputation lookup
-on the sample's sha256 through it when it is enabled. A disabled server
+on the sample's sha256 through it when it is enabled, before the threat-intel
+sidecar's (rank 20). A job lists
+the server before its run when nothing is kept of it, so that order and the
+agents' reference to it hold from the first run. A disabled server
 contributes no tools and no degradation reason.
 
 Over quota, the server answers a call with a 429 carrying `Retry-After`; the

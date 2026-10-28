@@ -29,6 +29,10 @@ from maljan.core.tool_declarations import (
     without_mark,
 )
 
+# The mechanism is read against a block that ships a table of its tools.
+pytestmark = pytest.mark.usefixtures("a_built_in_server_ships_a_tool_table")
+
+
 LEAF = "core.static.ghidra.tool_facts"
 
 

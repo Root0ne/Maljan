@@ -362,8 +362,10 @@ def test_the_api_reads_a_moved_built_in_through_its_stored_block(
     # Listed at the container by a job, and kept; nothing under the shipped launch.
     sd.forget_served("mcp:analysis")
     sd.register_served("mcp:analysis", tools, launch_identity(stored.mcp.servers["analysis"]))
-    # Every own server is kept, as a deployment's store holds them.
+    # Every own server is kept, as a deployment's store holds them, and what
+    # was read of the reputation service's listing.
     sd._UNSAVED.update(sd._SERVED)
+    sd._UNSAVED.update(sd._DERIVED)
     asyncio.run(store.save(db))
     sd._UNSAVED.clear()
     monkeypatch.setattr(declared_reading, "_READ_THROUGH", [None])

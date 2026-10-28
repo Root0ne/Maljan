@@ -19,9 +19,11 @@ entry that stored none (written before records were, or a test's), the same
 reading of its answer through the facts it stored, or, for an entry with no
 source and no facts, the facts the platform ships for its tool's name
 (``core.declared_reading.facts_of``). Nothing here reads a tool by its name or
-an answer by one service's shape: the built-in VirusTotal and threat-intel
-lookups are read by the paths their declarations ship
-(``core.builtin_declarations``).
+an answer by one service's shape: a lookup is read by the paths its
+declaration gives (the threat-intel sidecar declares its own), and a lookup
+read from its server's listing (``core.derived_declarations``), which names
+the shape reader, by the shape every reputation answer has
+(:func:`read_shape`): its engine counts, labels, detections, dates and link.
 
 **The lookups** (:func:`pack_lookups`, :func:`lookup_servers`,
 :func:`is_lookup_tool`) are read from the live declarations, where nothing
@@ -33,8 +35,9 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -53,6 +56,15 @@ HASH_ARGUMENT = "hash"
 # that carries an indicator: the sample's hash and those.
 NETWORK_INDICATOR_ARGUMENTS: tuple[str, ...] = ("domain", "ip", "url")
 INDICATOR_ARGUMENTS: tuple[str, ...] = (HASH_ARGUMENT, *NETWORK_INDICATOR_ARGUMENTS)
+# Per network indicator role, the words of an argument's name and the schema
+# formats that say it takes one: the one copy a proposal
+# (``declaration_proposals``) and a listing's reading
+# (``derived_declarations``) read an argument's role by.
+INDICATOR_ROLE_WORDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "ip": (frozenset({"ip", "ipv4", "ipv6"}), frozenset({"ipv4", "ipv6"})),
+    "domain": (frozenset({"domain", "hostname", "fqdn"}), frozenset({"hostname", "idn-hostname"})),
+    "url": (frozenset({"url", "uri"}), frozenset({"uri", "iri"})),
+}
 # The kinds a lookup about an indicator declares, beside a reputation lookup
 # about the sample: a service's report on an indicator, and its reputation.
 INDICATOR_LOOKUP_KINDS: tuple[str, ...] = ("indicator_report", "indicator_reputation")
@@ -258,10 +270,17 @@ def read_answer(
 
     Counts come from the declared paths; a count no path gave is looked for
     in the answer's text by the declared patterns. Linear in the size of the
-    answer (``tool_declarations.select``, RE2 patterns).
+    answer (``tool_declarations.select``, RE2 patterns). A lookup that names
+    the shape reader (:data:`SHAPE_READER`: one read from its server's
+    listing, ``core.derived_declarations``) is read by the answer's shape
+    (:func:`read_shape`) when its declaration names no path, and only such a
+    lookup: a stored entry's facts that name no reader read as they always
+    did, and a declared path is always read.
     """
     from maljan.core.tool_declarations import ReputationFacts, first
 
+    if facts.reader == SHAPE_READER and not declares_paths(facts.reputation):
+        return _read_by_shape(facts, output=output, structured=structured, server=server)
     declared: ReputationFacts = facts.reputation or ReputationFacts()
     document = _document(output, structured)
     stats_found = first(document, declared.stats) if declared.stats else None
@@ -300,6 +319,309 @@ def read_answer(
         last_seen=_first_moment(document, declared.last_seen),
         link=_first_link(document, declared.link),
         summary=summary,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reading an answer by its shape
+# ---------------------------------------------------------------------------
+
+# How deep the shape reading looks into an answer, and how many of its nodes
+# it visits at most: a reputation answer holds its counts near the top.
+SHAPE_DEPTH = 8
+SHAPE_NODES = 20_000
+# How many whole numbers an object of engine counts holds at least: an engine
+# tally counts several verdicts, where a vote counts two.
+TALLY_COUNTS = 3
+# The verdicts an engine tally counts engines under: of two objects that hold
+# a malicious count, the one counting more of them is the tally.
+_VERDICT_KEYS = (
+    "malicious",
+    "suspicious",
+    "harmless",
+    "undetected",
+    "clean",
+    "unrated",
+    "timeout",
+    "failure",
+    "type-unsupported",
+)
+# The words of a key whose object is a vote, never an engine tally.
+_VOTE_WORDS = frozenset({"vote", "votes"})
+# The reader a lookup read from its server's listing names: its answer is read
+# by its shape (:func:`read_shape`), not by paths.
+SHAPE_READER = "reputation_shape"
+# The count an object of engine counts is found by, and the counts read in it.
+_MALICIOUS_KEYS = ("malicious", "positives")
+_SUSPICIOUS_KEYS = ("suspicious",)
+# The keys beside the counts that name the service the counts are attributed to.
+_SERVICE_KEYS = ("source", "service", "provider", "vendor")
+# The words of a key that say it holds a threat label, in the order the
+# classes of label are read: a label or family itself, then threat names, then
+# threat categories.
+_LABEL_WORDS = frozenset({"label", "labels", "family", "families"})
+_THREAT_NAME_WORDS = frozenset({"name", "names"})
+_THREAT_CATEGORY_WORDS = frozenset({"category", "categories", "class", "classes"})
+# The member of a label object that holds its text.
+_LABEL_MEMBERS = ("value", "name", "label")
+# The words of a key that say it holds when the sample was seen.
+_WHEN_WORDS = frozenset({"seen", "submission", "submitted", "analysis", "scan", "scanned"})
+_DATE_WORDS = frozenset({"date", "time", "timestamp"})
+# The words of a key that say it holds a link to the service's report.
+_LINK_WORDS = frozenset({"link", "permalink"})
+_REPORT_LINK_WORDS = frozenset({"report", "gui", "html", "web", "page"})
+
+
+def _key_words(key: str) -> frozenset[str]:
+    """A key's words: split at ``_``, ``-`` and spaces, camelCase split, lowercased."""
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key)
+    return frozenset(part for part in re.split(r"[_\-\s]+", spaced.lower()) if part)
+
+
+@dataclass
+class _Node:
+    key: str
+    value: Any
+    depth: int
+    parent: Any
+
+
+def _shape_nodes(document: Any) -> list[_Node]:
+    """Every keyed member of ``document`` within :data:`SHAPE_DEPTH`, shallowest first.
+
+    Breadth first, each object's members in their order; a list's items are
+    walked, never keyed. At most :data:`SHAPE_NODES` are visited, so the time
+    is linear in the answer and bounded.
+    """
+    out: list[_Node] = []
+    queue: list[tuple[Any, int]] = [(document, 0)]
+    at = 0
+    while at < len(queue) and len(out) < SHAPE_NODES:
+        value, depth = queue[at]
+        at += 1
+        if depth >= SHAPE_DEPTH:
+            continue
+        if isinstance(value, Mapping):
+            for key, member in value.items():
+                if len(out) >= SHAPE_NODES:
+                    break
+                out.append(_Node(str(key), member, depth + 1, value))
+                if isinstance(member, Mapping | list) and len(queue) < SHAPE_NODES:
+                    queue.append((member, depth + 1))
+        elif isinstance(value, list):
+            for item in value:
+                if len(queue) >= SHAPE_NODES:
+                    break
+                if isinstance(item, Mapping | list):
+                    queue.append((item, depth))
+    return out
+
+
+def _wholes(held: Mapping[str, Any]) -> int:
+    """How many of an object's first :data:`SHAPE_NODES` members are whole numbers."""
+    count = 0
+    for at, value in enumerate(held.values()):
+        if at >= SHAPE_NODES:
+            break
+        if _whole(value) is not None:
+            count += 1
+    return count
+
+
+def _label_class(words: frozenset[str]) -> int | None:
+    if words & _LABEL_WORDS:
+        return 0
+    if "threat" in words and words & _THREAT_NAME_WORDS:
+        return 1
+    if "threat" in words and words & _THREAT_CATEGORY_WORDS:
+        return 2
+    return None
+
+
+def _label_texts(value: Any) -> list[str]:
+    """A label field's texts: a text, a list of texts, or the text member of each object."""
+    items = value if isinstance(value, list) else [value]
+    out: list[str] = []
+    for item in items:
+        if isinstance(item, Mapping):
+            item = next((item[k] for k in _LABEL_MEMBERS if isinstance(item.get(k), str)), None)
+        if isinstance(item, str) and item.strip():
+            out.append(item.strip())
+    return out
+
+
+def _sortable(moment: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(moment.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _extreme(moments: list[str], *, latest: bool) -> str | None:
+    """The earliest (or latest) of ``moments`` that can be read as a time, else the first."""
+    if not moments:
+        return None
+    timed = [(when, moment) for moment in moments if (when := _sortable(moment)) is not None]
+    if not timed:
+        return moments[0]
+    pick = max if latest else min
+    return pick(timed, key=lambda pair: pair[0])[1]
+
+
+@dataclass
+class ShapeReading:
+    """What a reputation answer says, found by its shape (:func:`read_shape`)."""
+
+    service: str = ""
+    stats: dict[str, int] = field(default_factory=dict)
+    malicious: int | None = None
+    suspicious: int | None = None
+    engines: int | None = None
+    labels: list[str] = field(default_factory=list)
+    detections: list[str] = field(default_factory=list)
+    first_seen: str | None = None
+    last_seen: str | None = None
+    link: str | None = None
+
+
+def read_shape(document: Any) -> ShapeReading:
+    """A reputation answer read by its shape, for a lookup that declares no paths.
+
+    By what any reputation answer holds, never by one service's field names:
+
+    * the **counts**: the object whose ``malicious`` (or ``positives``) is a
+      whole number and that holds at least :data:`TALLY_COUNTS` whole numbers,
+      under a key that does not say vote (an engine tally, never a vote); of
+      several, the one counting the most verdicts (malicious, suspicious,
+      harmless, undetected …), then the most whole numbers; its whole numbers
+      are ``stats``, its ``suspicious`` the
+      suspicious count, and the ``source``, ``service``, ``provider`` or
+      ``vendor`` text in it or beside it the service the counts are
+      attributed to;
+    * the **engine count**: the first whole number under a key whose words
+      hold ``engines``;
+    * the **detections**: the first list of texts under a key whose words hold
+      ``detections``;
+    * the **labels**: texts under a key that says label or family, then threat
+      names, then threat categories, each class in the answer's order, a list
+      of objects read by each one's ``value``, ``name`` or ``label``;
+    * the **dates**: under a key that says ``first`` and when it was seen,
+      submitted, analysed or scanned, the earliest; under one that says
+      ``last`` (or names an analysis or scan date alone), the latest;
+    * the **link**: the first ``http(s)`` text under a key that says link or
+      permalink, or a URL of the report, its page or its interface.
+
+    Shallowest first, within :data:`SHAPE_DEPTH`; linear in the answer.
+    """
+    out = ShapeReading()
+    nodes = _shape_nodes(document)
+    tally: tuple[int, int, int, int] | None = None
+    tally_node: _Node | None = None
+    labels: dict[int, list[str]] = {0: [], 1: [], 2: []}
+    first: list[str] = []
+    last: list[str] = []
+    for order, node in enumerate(nodes):
+        words = _key_words(node.key)
+        if isinstance(node.value, Mapping) and not words & _VOTE_WORDS:
+            count = next((node.value.get(k) for k in _MALICIOUS_KEYS if k in node.value), None)
+            wholes = _wholes(node.value) if _whole(count) is not None else 0
+            if wholes >= TALLY_COUNTS:
+                verdicts = sum(1 for k in _VERDICT_KEYS if _whole(node.value.get(k)) is not None)
+                rank = (verdicts, wholes, -node.depth, -order)
+                if tally is None or rank > tally:
+                    tally, tally_node = rank, node
+        if out.engines is None and "engines" in words and _whole(node.value) is not None:
+            out.engines = _whole(node.value)
+        if not out.detections and "detections" in words and isinstance(node.value, list):
+            out.detections = [
+                " ".join(i.split()) for i in node.value if isinstance(i, str) and i.strip()
+            ]
+        label_class = _label_class(words)
+        if label_class is not None:
+            labels[label_class].extend(_label_texts(node.value))
+        if words & _WHEN_WORDS or words & _DATE_WORDS:
+            moment = _moment(node.value)
+            if moment and "first" in words and words & _WHEN_WORDS:
+                first.append(moment)
+            elif moment and (
+                ("last" in words and words & _WHEN_WORDS)
+                or ("first" not in words and words & {"analysis", "scan"} and words & _DATE_WORDS)
+            ):
+                last.append(moment)
+        if out.link is None and isinstance(node.value, str):
+            text = node.value.strip()
+            names_a_link = bool(words & _LINK_WORDS) or (
+                bool(words & {"url", "uri"}) and bool(words & _REPORT_LINK_WORDS)
+            )
+            if names_a_link and text.lower().startswith(("http://", "https://")):
+                out.link = text
+    if tally_node is not None:
+        held = tally_node.value
+        out.stats = {str(k): v for k, v in held.items() if _whole(v) is not None}
+        out.malicious = next((_whole(held.get(k)) for k in _MALICIOUS_KEYS if k in held), None)
+        out.suspicious = next(
+            (_whole(held.get(k)) for k in _SUSPICIOUS_KEYS if _whole(held.get(k)) is not None),
+            None,
+        )
+        for around in (held, tally_node.parent):
+            named = next(
+                (around[k].strip() for k in _SERVICE_KEYS if isinstance(around.get(k), str)),
+                "",
+            )
+            if named:
+                out.service = named
+                break
+    out.labels = _once([label for cls in (0, 1, 2) for label in labels[cls]])
+    out.first_seen = _extreme(first, latest=False)
+    out.last_seen = _extreme(last, latest=True)
+    return out
+
+
+def declares_paths(declared: ReputationFacts | None) -> bool:
+    """Whether a lookup's declaration says where its answer holds anything (a path or pattern)."""
+    if declared is None:
+        return False
+    return bool(
+        declared.stats
+        or declared.malicious
+        or declared.suspicious
+        or declared.total
+        or declared.labels
+        or declared.detections
+        or declared.engines
+        or declared.first_seen
+        or declared.last_seen
+        or declared.link
+        or declared.summary
+        or declared.text_patterns
+    )
+
+
+def _read_by_shape(
+    facts: ToolFacts, *, output: str, structured: Any = None, server: str | None = None
+) -> ReputationRecord:
+    """One reputation answer read by its shape: a lookup that names :data:`SHAPE_READER`."""
+    declared = facts.reputation
+    document = _document(output, structured)
+    shape = read_shape(document) if document is not None else ShapeReading()
+    total = sum(shape.stats.values()) if shape.stats else None
+    return ReputationRecord(
+        service=(declared.service if declared is not None else "")
+        or facts.display_name
+        or shape.service
+        or str(server or ""),
+        malicious=shape.malicious,
+        suspicious=shape.suspicious,
+        total=total,
+        engines=shape.engines,
+        stats=shape.stats,
+        labels=shape.labels,
+        detections=shape.detections,
+        first_seen=shape.first_seen,
+        last_seen=shape.last_seen,
+        link=shape.link,
+        summary="" if document is not None else str(output or "").strip(),
     )
 
 
@@ -481,23 +803,30 @@ def _shipped_rank(server: str, tool: str) -> int | None:
     return declared.rank
 
 
-def _rank(server: str, tool: str, facts: ToolFacts) -> int:
-    """A lookup's rank: as declared; one that declares none takes the shipped rank, else 100.
+def _rank(server: str, tool: str, facts: ToolFacts, cfg: Any = None) -> int:
+    """A lookup's rank: as declared; else the shipped rank; else its server's; else 100.
 
     A server row stored with an edited ``tool_facts`` block written before
-    ranks were declared keeps its place in the order the platform ships.
+    ranks were declared keeps its place in the order the platform ships. A
+    lookup whose declaration names no rank takes the rank its server block
+    says of the service as a whole (``reputation_service.rank``).
     """
     declared = facts.reputation
     if declared is not None and "rank" in declared.model_fields_set:
         return declared.rank
     shipped = _shipped_rank(server, tool)
-    return shipped if shipped is not None else DEFAULT_RANK
+    if shipped is not None:
+        return shipped
+    service_rank = getattr(getattr(cfg, "reputation_service", None), "rank", None)
+    return service_rank if isinstance(service_rank, int) else DEFAULT_RANK
 
 
 def pack_lookups(servers: Mapping[str, Any], declared: ToolDeclarations) -> list[Lookup]:
     """Every server's declared reputation lookup that takes a hash, in the order the pack asks.
 
-    ``servers`` is ``mcp.servers`` in its configured order. The lowest
+    ``servers`` is ``mcp.servers`` in its configured order; a server's
+    ``tools`` list, where it names one, holds the only tools of it the pack may
+    ask (an unticked tool is never the pack's call). The lowest
     ``rank`` first; lookups of one rank in their servers' order, and a
     server's own lookups in their declaration's order.
     """
@@ -506,7 +835,12 @@ def pack_lookups(servers: Mapping[str, Any], declared: ToolDeclarations) -> list
         held = declared.source(f"mcp:{key}")
         if held is None:
             continue
+        # The block's tick list, where it names one: only a ticked tool is
+        # ever the pack's own call.
+        ticked = getattr(cfg, "tools", None)
         for name, facts in held.tools.items():
+            if ticked is not None and str(name) not in set(ticked):
+                continue
             argument = facts.arguments.get(HASH_ARGUMENT, "")
             if is_lookup(facts) and argument:
                 found.append(
@@ -514,7 +848,7 @@ def pack_lookups(servers: Mapping[str, Any], declared: ToolDeclarations) -> list
                         server=str(key),
                         tool=str(name),
                         hash_argument=argument,
-                        rank=_rank(str(key), str(name), facts),
+                        rank=_rank(str(key), str(name), facts, cfg),
                         enabled=bool(getattr(cfg, "enabled", False)),
                     )
                 )

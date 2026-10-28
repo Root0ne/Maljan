@@ -24,6 +24,10 @@ from maljan.core import builtin_declarations, tool_declarations
 from maljan.core import settings_overrides as so
 from maljan.core.tool_declarations import stored_changes, with_mark, without_mark
 
+# The mechanism is read against a block that ships a table of its tools.
+pytestmark = pytest.mark.usefixtures("a_built_in_server_ships_a_tool_table")
+
+
 SERVER = "virustotal"
 BLOCK = f"mcp.servers.{SERVER}"
 

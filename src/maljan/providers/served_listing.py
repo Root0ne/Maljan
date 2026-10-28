@@ -8,8 +8,10 @@ routed formats) would read it as an undeclared server, and a fresh install's
 first run would be weaker than every later one.
 
 :func:`list_unlisted` closes that gap the generic way: every enabled server
-whose block trusts what its server declares (``trusts_served_declaration``)
-and for which nothing is kept under its block's launch identity is attached
+whose block trusts what its server declares (``trusts_served_declaration``),
+or whose ``roles`` say the platform reads its undeclared tools as a reputation
+service's (``core.derived_declarations``), and for which nothing is kept under
+its block's launch identity is attached
 long enough to list its tools (the handshake a connection test makes,
 ``server_probe.handshake``: no tool is called), and what it declares is kept
 as any attach keeps it. A server that cannot be reached within the budget is
@@ -17,9 +19,10 @@ left unlisted and is read as undeclared, never refused; the run's own attach
 lists it again. Such a server, and one whose listing declared nothing, is not
 reached again here for a while (:data:`RETRY_SECONDS`), per launch identity,
 so a server that is down costs no job its budget twice nor every job forever.
-At most :data:`AT_ONCE` servers are listed at a time. A server whose block
-does not trust it is not reached here: its declaration is only ever its
-cautious claims, which its own attach reads.
+At most :data:`AT_ONCE` servers are listed at a time. Any other server is
+not reached here: its declaration is only ever its cautious claims, and what
+is read of its tools only whether they send the sample, which its own attach
+reads.
 """
 
 from __future__ import annotations
@@ -62,22 +65,37 @@ def _rest(source: str, launch: str) -> None:
         _NOT_BEFORE[(source, launch)] = time.monotonic() + RETRY_SECONDS
 
 
+def _read_before_run(source: str, block: Any) -> bool:
+    """Whether a block's listing is read by a reader that decides before any server attaches.
+
+    Its block trusts what its server declares, or its ``roles`` hold
+    ``reputation``: what is read of a reputation service's undeclared tools
+    decides the pack's lookup and the capability binding.
+    """
+    from maljan.core.reputation import REPUTATION_ROLE
+    from maljan.core.tool_declarations import trusts_served
+
+    roles = getattr(block, "roles", None) or ()
+    return trusts_served(source, block) or REPUTATION_ROLE in roles
+
+
 def unlisted(settings: Any) -> list[tuple[str, Any]]:
-    """Each enabled server, ``(key, block)``, that trusts its own declaration and has none kept.
+    """Each enabled server, ``(key, block)``, read before the run (:func:`_read_before_run`),
+    of which nothing is kept.
 
     Not one that could not be listed, or declared nothing, a while ago
     (:data:`RETRY_SECONDS`).
     """
-    from maljan.core.served_declarations import served
-    from maljan.core.tool_declarations import launch_identity, trusts_served
+    from maljan.core.served_declarations import kept
+    from maljan.core.tool_declarations import launch_identity
 
     out: list[tuple[str, Any]] = []
     for key, block in settings.mcp.servers.items():
         source = f"mcp:{key}"
-        if not getattr(block, "enabled", False) or not trusts_served(source, block):
+        if not getattr(block, "enabled", False) or not _read_before_run(source, block):
             continue
         launch = launch_identity(block)
-        if served(source, launch) or _resting(source, launch):
+        if kept(source, launch) or _resting(source, launch):
             continue
         out.append((str(key), block))
     return out
@@ -93,7 +111,7 @@ async def list_unlisted(settings: Any, *, budget: float = LISTING_BUDGET_SECONDS
     each listing is given what is left of it, and one that would start past it
     is not started (nor rested: it was not tried).
     """
-    from maljan.core.served_declarations import served
+    from maljan.core.served_declarations import kept
     from maljan.core.tool_declarations import launch_identity
     from maljan.providers import server_probe
 
@@ -124,7 +142,7 @@ async def list_unlisted(settings: Any, *, budget: float = LISTING_BUDGET_SECONDS
     listed: list[str] = []
     for key, block in wanted:
         source, launch = f"mcp:{key}", launch_identity(block)
-        if served(source, launch):
+        if kept(source, launch):
             listed.append(key)
         elif key in tried:
             _rest(source, launch)

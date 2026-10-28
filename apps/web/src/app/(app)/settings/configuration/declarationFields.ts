@@ -273,7 +273,13 @@ export function readToolFacts(
         );
       }
       if (needing.length) {
-        return bad(`${tool}: ${needing.join(", ")} are read only through a kind; declare the kind`);
+        // A server's lookups read from its listing are ranked and named by the
+        // server, never by a kindless change of one of them.
+        return bad(
+          `${tool}: ${needing.join(", ")} are read only through a kind; declare the kind ` +
+            "(to rank or name a reputation server's lookups, set the server's " +
+            "reputation_service instead)",
+        );
       }
     }
   }
@@ -296,6 +302,25 @@ export function readCredentialBootstrap(text: string): Read<CredentialBootstrapE
     return bad("token_json_path is the path of the token in the answer, starting with '/'");
   }
   return ok(parsed.value as unknown as CredentialBootstrapEntry);
+}
+
+/** A server's `reputation_service` as typed: an object of `name` and `rank`,
+ *  or empty for none (`core.tool_declarations.ReputationService`). */
+export function readReputationService(
+  text: string,
+): Read<{ name?: string; rank?: number | null } | null> {
+  const parsed = parseJson(text);
+  if (parsed.error !== null) return bad(parsed.error);
+  if (parsed.value === undefined) return ok(null);
+  if (!isObject(parsed.value)) return bad("expected an object with name and rank");
+  const { name, rank } = parsed.value;
+  if (name !== undefined && typeof name !== "string") {
+    return bad("name is the service its lookups' answers are attributed to");
+  }
+  if (rank !== undefined && rank !== null && !(Number.isInteger(rank) && (rank as number) >= 0)) {
+    return bad("rank is a whole number of 0 or more: lower ranks are asked first");
+  }
+  return ok(parsed.value as { name?: string; rank?: number | null });
 }
 
 /** A JSON value as the box shows it: pretty, or empty for nothing declared. */
