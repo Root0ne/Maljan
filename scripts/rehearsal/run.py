@@ -608,7 +608,11 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
     :data:`REACHES`; a server whose reaching tools all declare it is
     :data:`OFFLINE_WITHOUT_CREDENTIALS`, kept running with its credentials
     withheld (:func:`withhold_credentials`) and named. A tool that sends the
-    sample's bytes keeps its server :data:`REACHES` whatever it declares.
+    sample's bytes keeps its server :data:`REACHES` whatever it declares, and
+    so does a server whose block's ``roles`` hold ``reputation``: a
+    reputation service answers from outside the deployment by what it is,
+    which its block says before any of its tools is read
+    (``core.derived_declarations``).
     """
     from maljan.analysis.tool_effects import sends_sample_bytes
     from maljan.core.builtin_declarations import server_declaration
@@ -627,6 +631,11 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
         else (dict(shipped), [])
     )
     if refused:
+        return REACHES
+    if _reputation_service(key, server):
+        # A reputation service is a service outside the deployment by what
+        # it is (its block's role, the catalog's or the operator's word):
+        # whatever its tools are read as, and before they are read at all.
         return REACHES
     # And what the server declared of its own tools, under the block's.
     for name, facts in _served_in_force(key, server).items():
@@ -669,6 +678,18 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
     if not declared:
         return UNDECLARED
     return LOCAL if declared == tools else PARTLY_DECLARED
+
+
+def _reputation_service(key: str, server: dict[str, Any]) -> bool:
+    """Whether the block, as the settings build it, says its server is a reputation service."""
+    from maljan.core.reputation import REPUTATION_ROLE
+    from maljan.core.settings_overrides import build_settings
+
+    try:
+        block = build_settings({"mcp.servers": {key: server}}).mcp.servers[key]
+    except Exception:  # noqa: BLE001 — an unreadable block says nothing of its role
+        return False
+    return REPUTATION_ROLE in (getattr(block, "roles", None) or ())
 
 
 def _served_in_force(key: str, server: dict[str, Any]) -> dict[str, Any]:

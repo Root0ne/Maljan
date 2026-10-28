@@ -273,10 +273,11 @@ class TestTheGateChangesOnlyTheEndpoints:
         assert not servers["analysis"]["enabled"]
         changes = {"core.mcp.servers": servers}
         described = describe_changes(values, changes)
-        assert described["servers_unknown"] == {
-            "analysis": "disabled: effects not declared",
-            "threatintel": "disabled: effects not declared",
-        }
+        # The threat-intel sidecar's block says it is a reputation service, a
+        # service outside the deployment by what it is: disabled as reaching
+        # one before any of its tools is read, never as merely unknown.
+        assert described["servers_unknown"] == {"analysis": "disabled: effects not declared"}
+        assert described["servers_disabled"] == ["analysis", "threatintel"]
 
     def test_a_server_declaring_a_third_party_is_disabled_whatever_its_environment(
         self,

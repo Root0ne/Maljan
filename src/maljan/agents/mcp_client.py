@@ -444,7 +444,7 @@ class MCPLangChainToolkit:
         keep_tool_definitions: bool = False,
         label: str = "",
         http_read_timeout: float = HTTP_READ_TIMEOUT_SECONDS,
-        categories_with_served: Callable[[Mapping[str, Any]], Mapping[str, str]] | None = None,
+        categories_with_served: Callable[..., Mapping[str, str]] | None = None,
     ):
         self.server_params = server_params
         # The server's name in what this toolkit logs about it; a stdio
@@ -507,6 +507,14 @@ class MCPLangChainToolkit:
         # ``_meta`` (``core.served_declarations``), by the name it lists it
         # under; the handle keeps it as the server's declaration.
         self.served_tool_facts: dict[str, Any] = {}
+        # What the platform reads of the tools the listing does not declare
+        # (``core.derived_declarations``); the handle keeps it beside it.
+        # ``None`` when the listing could not be read: what was read before
+        # is then kept as it is.
+        self.derived_tool_facts: dict[str, Any] | None = {}
+        # What a trusted block reads of the tools whose disclosure only their
+        # server's own hints could lift (``derived_declarations.closed_by_hints``).
+        self.derived_closed: dict[str, Any] = {}
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools.
@@ -585,6 +593,7 @@ class MCPLangChainToolkit:
             # What the server declares of its tools, read before they are
             # built so their tags are the ones in force from the first attach.
             self.served_tool_facts = self._served_tool_facts(response.tools)
+            self.derived_tool_facts, self.derived_closed = self._derived_readings(response.tools)
             self._settle_categories()
             for tool in response.tools:
                 lc_tool = self._create_langchain_tool(tool)
@@ -630,7 +639,11 @@ class MCPLangChainToolkit:
         if ask is None:
             return
         try:
-            self._categories = dict(ask(self.served_tool_facts))
+            # With what the platform read of the same listing: the first
+            # attach's tags read it as every later one does.
+            self._categories = dict(
+                ask(self.served_tool_facts, self.derived_tool_facts, self.derived_closed)
+            )
         except Exception as exc:  # noqa: BLE001 — a tag never costs an attach
             logger.warning(
                 "The tool tags of %s were not read with its declaration (%s).",
@@ -656,6 +669,28 @@ class MCPLangChainToolkit:
                 type(exc).__name__,
             )
             return {}
+
+    def _derived_readings(
+        self, definitions: Sequence[Any]
+    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        """What is read of each listed tool, and what a trusted block keeps where hints lift it.
+
+        ``None`` for the reading when the listing cannot be read: what was
+        read before is then kept. Read for every server alike, each
+        definition once (``core.derived_declarations``); a reading that fails
+        never costs the attach.
+        """
+        from maljan.core.derived_declarations import derived_readings
+
+        try:
+            return derived_readings(definitions, where=f"{self._server_name()}.")
+        except Exception as exc:  # noqa: BLE001 — a reading never costs an attach
+            logger.warning(
+                "The tools %s listed were not read (%s); what was read before is kept.",
+                self._server_name(),
+                type(exc).__name__,
+            )
+            return None, {}
 
     def get_tools(self) -> list[BaseTool]:
         """Return the list of LangChain tools exposed by the MCP server."""

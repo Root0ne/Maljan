@@ -635,7 +635,7 @@ def test_the_toolkit_tags_its_tools_as_in_force_from_the_first_attach() -> None:
 
     asked: list[Any] = []
 
-    def categories(held: Any) -> dict[str, str]:
+    def categories(held: Any, *_reading: Any) -> dict[str, str]:
         asked.append(dict(held))
         return {"t": "decoding"}
 
@@ -843,7 +843,7 @@ def test_the_first_attach_tags_its_tools_with_what_the_server_declares(
 ) -> None:
     _stub_session(monkeypatch, _tagged_listing())
 
-    def categories(held: Any) -> dict[str, str]:
+    def categories(held: Any, *_reading: Any) -> dict[str, str]:
         return {name: facts.category for name, facts in held.items()}
 
     kit = _kit(categories={}, categories_with_served=categories)
@@ -862,7 +862,7 @@ def test_the_first_attach_tags_its_tools_with_what_the_server_declares(
 def test_a_tag_that_cannot_be_read_keeps_the_given_ones(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_session(monkeypatch, _tagged_listing())
 
-    def broken(held: Any) -> dict[str, str]:
+    def broken(held: Any, *_reading: Any) -> dict[str, str]:
         raise RuntimeError("unreadable")
 
     kit = _kit(categories={"t": "network"}, categories_with_served=broken)

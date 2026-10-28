@@ -20,6 +20,7 @@ Heterogeneous Model Ensemble:
 """
 
 import contextvars
+import copy
 import logging
 import re
 import sys
@@ -32,9 +33,11 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     SecretStr,
     SerializerFunctionWrapHandler,
     ValidationInfo,
+    field_serializer,
     field_validator,
     model_serializer,
     model_validator,
@@ -78,6 +81,7 @@ from maljan.core.tool_declarations import (
     VOCABULARY_PATTERN,
     CredentialBootstrap,
     ErrorPattern,
+    ReputationService,
     ToolFacts,
     check_auto_name_prefixes,
     check_env_names,
@@ -1683,6 +1687,10 @@ class MCPServerConfig(BaseModel):
     # Which of the server's tools the platform calls itself before a model turn
     # (``PrepassToolsConfig``). ``None`` (every built-in) declares none.
     prepass_tools: PrepassToolsConfig | None = None
+    # What a reputation service's server says of its lookups as a whole: the
+    # service's name and the rank the triage pack asks them at
+    # (``ReputationService``). ``None`` says neither.
+    reputation_service: ReputationService | None = None
 
     @field_validator("roles")
     @classmethod
@@ -1755,6 +1763,53 @@ class MCPServerConfig(BaseModel):
     @classmethod
     def _references_are_templates(cls, value: list[str]) -> list[str]:
         return check_reference_urls(value)
+
+    # Per tool, the kind-dependent fields a stored change sets with no kind of
+    # its own (``tool_declarations.kind_free_changes``): left out of the tool's
+    # declaration by the lenient reading, and kept here to be laid over the
+    # kind the server's listing puts in force (``core.derived_declarations``).
+    _kind_free_changes: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
+
+    @property
+    def kind_free_changes(self) -> dict[str, dict[str, Any]]:
+        """The kind-dependent fields stored with no kind, per tool; a copy."""
+        return {tool: dict(held) for tool, held in self._kind_free_changes.items()}
+
+    @field_serializer("tool_facts", mode="wrap")
+    def _dump_kind_free_changes(self, value: Any, handler: SerializerFunctionWrapHandler) -> Any:
+        """Each tool's declaration as dumped, with the kind-free change it was stored with.
+
+        So a dump and its validation (the settings crossing a process as JSON,
+        a save that sends the block back) keep it, as the stored entry held
+        it: the validation keeps it aside again (:meth:`_keep_kind_free_changes`).
+        """
+        dumped = handler(value)
+        held = self._kind_free_changes
+        if not held or not isinstance(dumped, dict):
+            return dumped
+        out = dict(dumped)
+        for tool, fields in held.items():
+            facts = value.get(tool) if isinstance(value, Mapping) else None
+            if tool not in out or not isinstance(facts, BaseModel):
+                continue
+            # The tool's entry as it was stored: what it sets, and the change.
+            # Dumped whole, every field at its default would read as set on
+            # the way back, a kind of none over the reading's.
+            own = facts.model_dump(mode="json", exclude_defaults=True)
+            out[tool] = {**own, **copy.deepcopy(fields)}
+        return out
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _keep_kind_free_changes(cls, data: Any, handler: Any) -> "MCPServerConfig":
+        """Keep what a stored change sets with no kind, which the lenient reading leaves out."""
+        from maljan.core.tool_declarations import kind_free_changes
+
+        held = kind_free_changes(data.get("tool_facts")) if isinstance(data, Mapping) else {}
+        model = handler(data)
+        if held and isinstance(model, MCPServerConfig):
+            model._kind_free_changes = held
+        return model  # type: ignore[no-any-return]
 
     @field_validator("tool_facts", mode="before")
     @classmethod
@@ -1961,6 +2016,9 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
         # ``agents=[]`` for the reason the tool sidecars carry it: the
         # definitions in ``_builtin_definitions()`` reference this server by
         # name, and a role binding on top would make those lists decorative.
+        # Its role, reference URL and credential step are the catalog's
+        # (``core.virustotal``); what each of its tools is, is read from what
+        # it lists (``core.derived_declarations``).
         virustotal.SERVER_KEY: _declared(
             virustotal.SERVER_KEY,
             enabled=False,
@@ -1969,6 +2027,7 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             tools=list(virustotal.LOOKUP_TOOLS),
             agents=[],
             label=virustotal.SERVER_LABEL,
+            **virustotal.catalog_entry(),
         ),
         # The sidecars of one analysis program each, in an image of its own:
         # the identification servers (``services/die-mcp``,

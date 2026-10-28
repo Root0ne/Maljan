@@ -822,7 +822,8 @@ class TestEveryReaderReadsADnsRowSNameAlike:
         for a DNS row), the shape test's DNS-specific question spellings (the
         evidence a list is DNS, never a reading of a row's name) and the word
         lists that hold two of the words with another meaning: an argument's
-        role words, a description's vocabulary,
+        role words (one shared copy, ``reputation.INDICATOR_ROLE_WORDS``, and
+        the role a proposal returns), a description's vocabulary,
         a card's source fields, indicator kinds and code identifiers. Each is
         named by the name it is assigned to, or the function holding it.
         """
@@ -835,6 +836,7 @@ class TestEveryReaderReadsADnsRowSNameAlike:
             ("core/report_shapes.py", "_GENERIC_QUESTION_KEYS"),
             ("core/declaration_proposals.py", "_DESCRIPTION_WORDS"),
             ("core/declaration_proposals.py", "_argument_role"),
+            ("core/reputation.py", "INDICATOR_ROLE_WORDS"),
             ("memory/technique_cards.py", "SOURCE_FIELDS"),
             ("reporting/dedupe.py", "_CASE_BLIND"),
             ("tools/strings.py", "_CODE_IDENTIFIER_LABELS"),

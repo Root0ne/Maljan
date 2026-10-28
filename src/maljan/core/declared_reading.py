@@ -167,7 +167,11 @@ def declarations(settings: Settings | None = None) -> ToolDeclarations:
 
 
 def tools_in_force(
-    source: str, block: Any, listing: Mapping[str, Any] | None = None
+    source: str,
+    block: Any,
+    listing: Mapping[str, Any] | None = None,
+    read: Mapping[str, Any] | None = None,
+    closed: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any]:
     """The tool declarations in force for ``block`` under ``source``: its own, its server's under.
 
@@ -178,7 +182,9 @@ def tools_in_force(
     reads a block's tools before a call: the call guard's budgets and
     long-running flags, the description tags. The block's own map where
     nothing can be read. With ``listing``, what the server declares in a
-    listing nothing has kept yet is laid under in place of what was kept.
+    listing nothing has kept yet is laid under in place of what was kept, and
+    with ``read`` and ``closed`` what the platform read of that same listing
+    (``core.derived_declarations``), so a first attach already reads it.
     """
     own = dict(getattr(block, "tool_facts", None) or {})
     try:
@@ -186,8 +192,8 @@ def tools_in_force(
         from maljan.core.tool_declarations import Declared, SourceRef
 
         declared = Declared.of(SourceRef.parse(str(source)), block, enabled=True)
-        if listing is not None:
-            return dict(laid_under(declared, listing).tools)
+        if listing is not None or read is not None:
+            return dict(laid_under(declared, listing or {}, read, closed).tools)
         return dict(with_served(declared).tools)
     except Exception as exc:  # noqa: BLE001 — an unreadable declaration falls back to the block
         from maljan.core.logger import logger

@@ -28,7 +28,6 @@ from collections.abc import Mapping
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
-from maljan.core import virustotal
 from maljan.core.builtin_reverser_tools import GHIDRA_TOOLS, R2_TOOLS
 from maljan.core.legacy_reputation import STORED_REPUTATION_KINDS
 from maljan.core.reputation import REPUTATION_KIND
@@ -254,6 +253,10 @@ READERS: dict[str, str] = {
     "dns_query_lines": "a text answer holding one DNS query per line",
     "packet_lines": "a text answer holding one captured packet per line, with its endpoints",
     "report_items": "sandbox report items, each with an id and the fields that place it",
+    "reputation_shape": (
+        "a reputation answer read by its shape: its engine tally, labels, detections, dates "
+        "and report link"
+    ),
 }
 
 _CAPABILITY_RULES: dict[str, Any] = {
@@ -399,56 +402,6 @@ _PACK_READINGS: dict[str, dict[str, Any]] = {
         ),
     },
     "unpack_upx": _file("unpack", "unpacked_image"),
-}
-
-# VirusTotal's own server: the lookups and submit tools of ``core.virustotal``;
-# the file report's shape read within eight levels of the answer: its engine
-# counts, its popular threat labels, its per-engine detection labels, its
-# dates and its report link, as the API and the agent server write them.
-# Rank 10: the triage pack asks it before the threat-intel sidecar.
-_VT_REPUTATION: dict[str, Any] = {
-    "service": "VirusTotal",
-    "stats": "/**7/last_analysis_stats",
-    "malicious": "/**7/last_analysis_stats/malicious",
-    "suspicious": "/**7/last_analysis_stats/suspicious",
-    "labels": [
-        "/**7/popular_threat_classification/suggested_threat_label",
-        "/**7/popular_threat_classification/popular_threat_name/*/value",
-        "/**7/popular_threat_classification/popular_threat_category/*/value",
-    ],
-    "detections": "/**7/detections",
-    "engines": "/**7/coverage/engines",
-    "first_seen": [
-        "/**7/first_submission_date",
-        "/**7/first_seen_itw_date",
-    ],
-    "last_seen": [
-        "/**7/last_analysis_date",
-        "/**7/analysis_date",
-        "/**7/last_submission_date",
-    ],
-    "link": ["/**7/report_url", "/**7/gui_url", "/**7/permalink", "/**7/html_url"],
-    "rank": 10,
-}
-_VIRUSTOTAL_TOOLS: dict[str, dict[str, Any]] = {
-    "get_analysis": {"kind": "submission_status"},
-    "get_domain_report": {"kind": "indicator_report"},
-    "get_file_report": {
-        "kind": "reputation",
-        "arguments": {"hash": "hash"},
-        "reputation": _VT_REPUTATION,
-        "display_name": "VirusTotal",
-        "shows": "what VirusTotal holds for the hash: its engines' detections and file details",
-        "does_not_show": (
-            "this run's own analysis of the sample; an unknown hash or no detections is no "
-            "evidence that the file is clean"
-        ),
-    },
-    "get_ip_report": {"kind": "indicator_report"},
-    "get_submission": {"kind": "submission_status"},
-    "get_url_report": {"kind": "indicator_report"},
-    "submit_file": {"kind": "submission", "discloses_sample": True},
-    "submit_local_file": {"kind": "submission", "discloses_sample": True},
 }
 
 # The platform's sandbox report tools (``providers.sandbox_tools``). Shapes as
@@ -721,28 +674,6 @@ BUILDER_OF_KIND: dict[str, str] = {
 # The blocks
 # ---------------------------------------------------------------------------
 
-# VirusTotal's agent-token registration (``core.virustotal``): one POST naming
-# the agent family and the ``vt-mcp`` release, one ``vtai_`` token back, and
-# the agent id and public handle the operator recognises the deployment by in
-# VirusTotal's own listing. The note is what the console said beside the
-# button before the step was a declaration.
-_VIRUSTOTAL_BOOTSTRAP: dict[str, Any] = {
-    "url": virustotal.REGISTER_URL,
-    "body": {"agent_family": "{family}", "agent_version": virustotal.VT_MCP_VERSION},
-    "token_json_path": "/agent_token",
-    "token_prefix": "vtai_",
-    "family": virustotal.AGENT_FAMILY,
-    "facts": {"public_handle": "/public_handle", "agent_id": "/agent_id"},
-    "note": (
-        "The agent token is free and is issued to this deployment without an account. "
-        "VirusTotal enforces its own published quotas on it; a lookup over quota comes "
-        "back as a 429 with a retry delay, and the analyst carries on without that answer. "
-        "Only the read-only lookups are ticked. The submit tools upload the sample itself "
-        "to VirusTotal, where it is shared with their customers, so they stay off until "
-        "you tick them in the Tools step."
-    ),
-}
-
 # What each built-in tool's call does beyond answering (``ToolFacts.effects``):
 # whether it runs the sample's code, reaches a network service beyond its own
 # server, and what of the sample it sends to a third party. A tool that sends
@@ -784,14 +715,6 @@ _RUNS_ANYTHING: dict[str, Any] = {
     "why_undeclared": "it runs whatever script or command it is given, so what it does is "
     "whatever that does"
 }
-# Asks an outside service about an indicator (a domain, an address, a URL).
-_ASKS_ABOUT_AN_INDICATOR: dict[str, Any] = {"executes": "no", "network": True, "third_party": "no"}
-# Asks an outside service about the sample by its hash, or by the id of its
-# submission there.
-_ASKS_ABOUT_THE_SAMPLE: dict[str, Any] = {**_ASKS_ABOUT_AN_INDICATOR, "third_party": "hash"}
-# Hands the sample to a third party's sandboxes (VirusTotal's), which may run
-# it; the bytes going out are the tool's ``discloses_sample``.
-_SUBMITS_THE_SAMPLE: dict[str, Any] = {"executes": "sandbox", "network": True}
 
 
 def _with_effects(
@@ -828,14 +751,16 @@ def _one_program_block(role: str) -> dict[str, Any]:
 # platform's own sidecars (``services/``): each declares its own tools when it
 # lists them (``core.served_declarations``), and no block here holds a table of
 # them; what the platform reads of them is what each server serves, kept from
-# its last listing. ``roles``: ``reputation`` on the two
-# servers that declare a reputation lookup. ``reads_staged_sample`` on the
+# its last listing. ``roles``: ``reputation`` on the threat-intel sidecar,
+# which declares a reputation lookup. ``reads_staged_sample`` on the
 # three servers whose path-taking tools read the sample the platform staged
 # (``agents.tool_pinning.reads_staged_sample``). ``required_env_allow`` as
 # ``config.REQUIRED_ENV_ALLOW``. ``platform_owned`` on the servers of
-# ``agents.evidence_recorder._RESOLVING_SERVERS``. VirusTotal's reference URL
-# as ``reporting.builder._build_references`` and
-# ``reporting.detection_signatures`` write it.
+# ``agents.evidence_recorder._RESOLVING_SERVERS``. A built-in server that is
+# not the platform's own (VirusTotal's) ships no block here: what its catalog
+# entry says of it as a whole (its role, its reference URL, how its credential
+# is obtained) is in its launch entry (``config._builtin_servers``), and its
+# tools are read from what it lists (``core.derived_declarations``).
 _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
     "analysis": {
         "trusts_served_declaration": True,
@@ -867,24 +792,6 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
     "threatintel": {
         "trusts_served_declaration": True,
         "roles": ["reputation"],
-    },
-    "virustotal": {
-        "roles": ["reputation"],
-        "reference_urls": ["https://www.virustotal.com/gui/file/{sha256}"],
-        "tool_facts": _with_effects(
-            _VIRUSTOTAL_TOOLS,
-            {
-                "get_analysis": _ASKS_ABOUT_THE_SAMPLE,
-                "get_domain_report": _ASKS_ABOUT_AN_INDICATOR,
-                "get_file_report": _ASKS_ABOUT_THE_SAMPLE,
-                "get_ip_report": _ASKS_ABOUT_AN_INDICATOR,
-                "get_submission": _ASKS_ABOUT_THE_SAMPLE,
-                "get_url_report": _ASKS_ABOUT_AN_INDICATOR,
-                "submit_file": _SUBMITS_THE_SAMPLE,
-                "submit_local_file": _SUBMITS_THE_SAMPLE,
-            },
-        ),
-        "credential_bootstrap": _VIRUSTOTAL_BOOTSTRAP,
     },
     # The identification servers, the rule and document servers and the
     # container and Android servers: each reads the sample the worker mirrors
@@ -1000,8 +907,19 @@ _IN_PROCESS_BLOCKS: dict[str, dict[str, Any]] = {
 
 
 def builtin_server_names() -> tuple[str, ...]:
-    """The keys of ``mcp.servers`` that ship a declaration."""
-    return tuple(_SERVER_BLOCKS)
+    """The keys of ``mcp.servers`` the platform ships: each built-in server's launch entry.
+
+    A built-in server whose block here holds nothing (one that is not the
+    platform's own) is one of them all the same.
+    """
+    return _builtin_names()
+
+
+@cache
+def _builtin_names() -> tuple[str, ...]:
+    from maljan.core.config import _builtin_servers
+
+    return tuple(dict.fromkeys((*_builtin_servers(), *_SERVER_BLOCKS)))
 
 
 def server_declaration(key: str) -> dict[str, Any]:

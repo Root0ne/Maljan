@@ -13,6 +13,9 @@ import pytest
 from app.services.server_map import ServerMapError, validate_server_map
 from maljan.core.config import Settings
 
+# The mechanism is read against a block that ships a table of its tools.
+pytestmark = pytest.mark.usefixtures("a_built_in_server_ships_a_tool_table")
+
 
 def _entry(**over: object) -> dict:
     base: dict = {"enabled": True, "transport": "stdio", "command": "python", "agents": []}

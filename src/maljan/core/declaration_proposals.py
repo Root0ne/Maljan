@@ -65,7 +65,11 @@ from maljan.core.report_shapes import (
     note_question_value,
     row_shape,
 )
-from maljan.core.reputation import HASH_ARGUMENT, NETWORK_INDICATOR_ARGUMENTS
+from maljan.core.reputation import (
+    HASH_ARGUMENT,
+    INDICATOR_ROLE_WORDS,
+    NETWORK_INDICATOR_ARGUMENTS,
+)
 from maljan.core.tool_declarations import (
     KIND_DEPENDENT_FIELDS,
     SANDBOX_ROLE,
@@ -458,16 +462,19 @@ def _argument_role(name: str, shape: _Shape) -> tuple[str, str, str] | None:
         and ({"hash", "sha256", "sha1", "md5", "digest"} & words)
     ):
         return "hash", MEDIUM, "length and description"
-    if fmt in ("ipv4", "ipv6"):
+    ip_words, ip_formats = INDICATOR_ROLE_WORDS["ip"]
+    domain_words, domain_formats = INDICATOR_ROLE_WORDS["domain"]
+    url_words, url_formats = INDICATOR_ROLE_WORDS["url"]
+    if fmt in ip_formats:
         return "ip", HIGH, "format"
-    if {"ip", "ipv4", "ipv6"} & set(tokens):
+    if ip_words & set(tokens):
         return "ip", HIGH, "name"
-    if fmt in ("hostname", "idn-hostname"):
+    if fmt in domain_formats:
         return "domain", HIGH, "format"
-    if {"domain", "hostname", "fqdn"} & set(tokens):
+    if domain_words & set(tokens):
         return "domain", HIGH, "name"
-    if {"url", "uri"} & set(tokens) or fmt in ("uri", "iri"):
-        return "url", HIGH, "format" if fmt in ("uri", "iri") else "name"
+    if url_words & set(tokens) or fmt in url_formats:
+        return "url", HIGH, "format" if fmt in url_formats else "name"
     if lowered in ADDRESS_ARGUMENTS or {"addr", "address"} & set(tokens):
         return "address", HIGH, "name"
     if {"ea", "va"} & set(tokens):

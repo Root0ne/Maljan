@@ -3794,7 +3794,9 @@ the server on and answers with the masked state and the facts. The token is in
 no log line, audit row or answer; a refusal carries the service's own sentence,
 with a token it still holds masked. Until a token is stored, the server's Test
 button answers "no credential" without dialling. VirusTotal's agent-token
-registration is the built-in `virustotal` server's declaration. Only a tool
+registration is the built-in `virustotal` server's, written in its catalog
+entry beside its address (`core.virustotal`), as its `reputation` role, its
+`reputation_service` and its reference URL are. Only a tool
 server of `mcp.servers` takes one: a provider's own block (`static.ghidra`,
 `static.r2`, `sandbox.cape2.mcp`) refuses it on save.
 
@@ -3814,7 +3816,7 @@ it:
 | `timeout_seconds` | the budget the tool itself keeps, where it has one |
 | `memory_peak_mb` | the tool's measured memory peak, where known |
 | `discloses_sample` | the tool sends the sample, or its bytes, out of the deployment |
-| `effects` | what a call does beyond answering, each part optional and said to be undeclared when left out: `executes` (`no`, `native`, `emulation` or `sandbox`: whether the call runs the sample's code, and how), `network` (`true` or `false`: whether the tool itself reaches a network service beyond its own server; or one of three named ways it reaches one only: `on_refresh`, only to fetch or refresh reference data it keeps, such as the ATT&CK bundle once stale or embedding weights on first use, never with anything of the sample; `case_store`, the configured case-memory store, which the disclosure's case-memory row places; `operator_sandbox`, the sandbox service its server fronts, at the address the operator configured; whether that is the operator's own, and so not a third party, is never taken from the declaration: the report derives it from where the disclosure places the call, and says it cannot be told where the disclosure cannot place it), `third_party` (`no`, `hash` or `bytes`: what of the sample it sends to a third party; `bytes` and `discloses_sample` say the same, and either one makes the call an upload in the disclosure block) `why_undeclared` (why a part is left out, printed with it) and `when` (the condition under which a declared effect happens, printed with it). A tick of `discloses_sample` lifts the tool's effects to `third_party: bytes` and a network that carries them, whatever the shipped effects say, so ticking it on a shipped tool (`put_sample` on a remote analysis server) saves as before; a save whose own effects send the sample or its hash with `network` `false`, `on_refresh` or `case_store` is refused. An operator's `effects` is merged with the shipped one sub-field by sub-field (`tool_declarations.SUBFIELD_MERGED`) and stored as the sub-fields that differ, so a later release's correction of another sub-field still reaches the tool; `effects: null` clears it. Printed per tool called in the report's **Tool effects** block; an operator declares a third-party server's tools here as a built-in's are. Every built-in tool declares all three (`builtin_declarations._with_effects`, held by a test that sweeps every shipped block): the CAPE sidecar's status, search, task status, report, IOC and configuration tools reach `operator_sandbox` and its `submit_file` hands the sample to it to run (`executes: sandbox`); radare2's `analyze` is `executes: emulation` `when` the analysis level is 2 or above, where r2mcp runs `aaa`, whose type matching (`aaft`) emulates each function with ESIL; VirusTotal's `submit_file` and `submit_local_file` hand the sample to a third party's sandbox (`executes: sandbox`, `network: true`, `discloses_sample`), since VirusTotal may run what it is sent; the ATT&CK knowledge tools, `family_lookup` and `similar_cases` are `on_refresh` (the bundle once stale, the embedding weights on first use), and the triage pack's `function_matches` is `case_store`. Only the tools that run whatever script or command they are given (Ghidra's `run_ghidra_script` and `run_script_inline`, radare2's `run_command`) declare none, with that as their `why_undeclared`. A tool map an earlier release stored whole keeps the shipped `effects` of each shipped tool it leaves them out of, merged per field as a stored change is (`tool_declarations.FIELDS_AFTER_WHOLE_MAPS`): a value the operator set wins |
+| `effects` | what a call does beyond answering, each part optional and said to be undeclared when left out: `executes` (`no`, `native`, `emulation` or `sandbox`: whether the call runs the sample's code, and how), `network` (`true` or `false`: whether the tool itself reaches a network service beyond its own server; or one of three named ways it reaches one only: `on_refresh`, only to fetch or refresh reference data it keeps, such as the ATT&CK bundle once stale or embedding weights on first use, never with anything of the sample; `case_store`, the configured case-memory store, which the disclosure's case-memory row places; `operator_sandbox`, the sandbox service its server fronts, at the address the operator configured; whether that is the operator's own, and so not a third party, is never taken from the declaration: the report derives it from where the disclosure places the call, and says it cannot be told where the disclosure cannot place it), `third_party` (`no`, `hash` or `bytes`: what of the sample it sends to a third party; `bytes` and `discloses_sample` say the same, and either one makes the call an upload in the disclosure block) `why_undeclared` (why a part is left out, printed with it) and `when` (the condition under which a declared effect happens, printed with it). A tick of `discloses_sample` lifts the tool's effects to `third_party: bytes` and a network that carries them, whatever the shipped effects say, so ticking it on a shipped tool (`put_sample` on a remote analysis server) saves as before; a save whose own effects send the sample or its hash with `network` `false`, `on_refresh` or `case_store` is refused. An operator's `effects` is merged with the shipped one sub-field by sub-field (`tool_declarations.SUBFIELD_MERGED`) and stored as the sub-fields that differ, so a later release's correction of another sub-field still reaches the tool; `effects: null` clears it. Printed per tool called in the report's **Tool effects** block; an operator declares a third-party server's tools here as a built-in's are. Every built-in tool declares all three (`builtin_declarations._with_effects`, held by a test that sweeps every shipped block): the CAPE sidecar's status, search, task status, report, IOC and configuration tools reach `operator_sandbox` and its `submit_file` hands the sample to it to run (`executes: sandbox`); radare2's `analyze` is `executes: emulation` `when` the analysis level is 2 or above, where r2mcp runs `aaa`, whose type matching (`aaft`) emulates each function with ESIL; VirusTotal's `submit_file` and `submit_local_file` are read from its listing as handing the sample to a third party's sandbox (`executes: sandbox`, `network: true`, `discloses_sample`; see "A reputation service read from what it lists"), since the service may run what it is sent; the ATT&CK knowledge tools, `family_lookup` and `similar_cases` are `on_refresh` (the bundle once stale, the embedding weights on first use), and the triage pack's `function_matches` is `case_store`. Only the tools that run whatever script or command they are given (Ghidra's `run_ghidra_script` and `run_script_inline`, radare2's `run_command`) declare none, with that as their `why_undeclared`. A tool map an earlier release stored whole keeps the shipped `effects` of each shipped tool it leaves them out of, merged per field as a stored change is (`tool_declarations.FIELDS_AFTER_WHOLE_MAPS`): a value the operator set wins |
 | `read_only` | the tool changes nothing and answers an identical call the same (read-only or idempotent): a revision that repeats an identical call of an earlier round is answered from that round's entry, as a tool its server marks `readOnlyHint` is, while no call that is not read-only has run on the same server since that entry was recorded; any other tool runs again. The shipped Ghidra, radare2, analysis, knowledge and network declarations mark their reading tools (`builtin_reverser_tools.GHIDRA_READ_ONLY`, `R2_READ_ONLY`, `builtin_declarations.ANALYSIS_READ_ONLY`, `KNOWLEDGE_READ_ONLY`, `NETWORK_READ_ONLY`) |
 | `holds_strings` | the answer holds the sample's strings as data though its kind is not a strings kind (Ghidra's `batch_string_anchor_report` and `find_undocumented_by_string`); a function claim's quoted value is looked for in it |
 | `reads_delay_imports` | the tool's import rows cover the imports the format binds late: the PE delay-load table, or the one import table ELF keeps them in (the shipped `pe_info` and `elf_info`). A format answer read whole is the binary's complete import list only when its tool declares this or the answer carries a `delay_imports` list; otherwise the report's binary facts call the list partial |
@@ -3832,7 +3834,7 @@ it:
 | `display_name` | the name published text gives the tool: a rule table's title, the tool a recovered value names, the decoder a decoded value names; empty uses the tool's name |
 | `category` | the tag its description is shown with (`analyze`, `list`, `modify` …); an undeclared tool is tagged by its name's first word |
 | `aggregate_of` | the tools of the same server this tool is the aggregate (combined) form of: one call answers what many calls of those would (a decompilation of many functions at once, a whole-program graph that combines per-function ones). Its description, as the model is shown it, ends with "Aggregate form of `<tool>`: one call answers what many calls of it would.", written once the names a request offers are settled: each aggregated tool is named as the request offers it (`<server>__<tool>` where another server took the name), and a tool the request does not offer (withheld, or not picked by a reference) is left out of the note. The model can then choose the one call over the many; nothing else reads it, a server's own words quoted for it never carry the note, and a tool that declares none is shown and called as before. Each name is a tool the server declares in `tool_facts` (an aggregated tool declared with only its `category` is enough) or that its `tools` allow-list names; it is not the tool itself, nor a tool that declares itself the aggregate form of this one. A save that adds or changes such a declaration is refused naming the field (`<tool>.aggregate_of`, "declare each in tool_facts (e.g. its category)"), checked against the allow-list in force (sent, else stored, else shipped), and a stored one that names a tool the server no longer has is read without that name, with a warning. The shipped Ghidra block declares its batch and whole-program tools (`batch_decompile` of `decompile_function`, `batch_analyze_completeness`, `get_bulk_function_hashes`, `get_full_call_graph`, `bulk_fuzzy_match`, `batch_create_labels`, `batch_delete_labels`, `batch_set_comments`, `rename_variables`; `builtin_reverser_tools.GHIDRA_TOOLS`); `get_bulk_xrefs` declares none: its definition ("Batch cross-reference retrieval" over `addresses`) does not say whether it answers the references to each address or those from it, so which one tool it batches is not known |
-| `shows`, `does_not_show` | what this tool's answer shows and what it does not show, each one line in the operator's own words (a reputation lookup shows what others report of a hash, not this run's own analysis of the sample; a strings dump shows runs as they sit in the file, not strings that are encoded, encrypted or built at run time). Shown in the server card's **Tool declarations** box and here; the model is shown them only while `core.mcp.answer_scope_notes` is on (off by default, so every prompt is as it was): the tool's description then ends with `This answer shows: <shows>. It does not show: <does_not_show>.`, after its aggregate note, and a tool that declares neither is shown as before. A line break or another control character is refused on save (`<tool>.shows`); a stored one is read as a space, with a warning; no length is imposed. The shipped declarations: the analysis server's `strings` (shows printable ASCII and UTF-16LE runs as they sit in the file, with their offsets; does not show strings that are encoded, encrypted, compressed or built at run time, nor runs shorter than `min_len`, or past this page (read `next_offset`)) and `capa` (shows the capabilities whose capa rules match features of the file, its code and its structure; does not show whether the matched code runs, or a capability no rule describes); the threat-intel server's `check_hash`, `check_ip_reputation` and `check_domain_reputation` (what VirusTotal, and AbuseIPDB for an address, report; not this run's own analysis, nor whether the sample contacts an address or a domain); VirusTotal's `get_file_report` (what VirusTotal holds for the hash; not this run's own analysis, and an unknown hash or no detections is no evidence that the file is clean). Every other built-in tool declares neither |
+| `shows`, `does_not_show` | what this tool's answer shows and what it does not show, each one line in the operator's own words (a reputation lookup shows what others report of a hash, not this run's own analysis of the sample; a strings dump shows runs as they sit in the file, not strings that are encoded, encrypted or built at run time). Shown in the server card's **Tool declarations** box and here; the model is shown them only while `core.mcp.answer_scope_notes` is on (off by default, so every prompt is as it was): the tool's description then ends with `This answer shows: <shows>. It does not show: <does_not_show>.`, after its aggregate note, and a tool that declares neither is shown as before. A line break or another control character is refused on save (`<tool>.shows`); a stored one is read as a space, with a warning; no length is imposed. The shipped declarations: the analysis server's `strings` (shows printable ASCII and UTF-16LE runs as they sit in the file, with their offsets; does not show strings that are encoded, encrypted, compressed or built at run time, nor runs shorter than `min_len`, or past this page (read `next_offset`)) and `capa` (shows the capabilities whose capa rules match features of the file, its code and its structure; does not show whether the matched code runs, or a capability no rule describes); the threat-intel server's `check_hash`, `check_ip_reputation` and `check_domain_reputation` (what VirusTotal, and AbuseIPDB for an address, report; not this run's own analysis, nor whether the sample contacts an address or a domain); a reputation service's lookup read from its listing (what the service holds for the hash; not this run's own analysis, and an unknown hash or no detections is no evidence that the file is clean). Every other built-in tool declares neither |
 
 **Paths** are JSON-pointer-like: `/strings/*/offset` is the `offset` of every
 item of `strings`; `*` is every item of a list or every value of an object at
@@ -3899,10 +3901,13 @@ prose, the first pattern that finds a match giving the counts; each names a
 reputation source, whatever the tool is called and however it answers:
 
 - the triage pack asks one such tool about the sample's sha256, when it also
-  declares the argument it takes a hash in (`arguments: {hash: <name>}`): the
-  first enabled one, lowest `reputation.rank` first (default 100; the built-in
-  VirusTotal lookup ships rank 10, the threat-intel sidecar's rank 20), lookups
-  of one rank in the order their servers are configured;
+  declares the argument it takes a hash in (`arguments: {hash: <name>}`) and,
+  where its server's block names a `tools` list, is ticked in it (an unticked
+  tool is never the pack's call; an agent's own use of tools is unchanged): the
+  first enabled one, lowest `reputation.rank` first (default 100; the
+  built-in VirusTotal server's lookups take rank 10 from its block's
+  `reputation_service`, the threat-intel sidecar declares rank 20), lookups of
+  one rank in the order their servers are configured;
 - its answer is read once, when its entry is written, through the declared
   paths into one record (the service, `malicious`, `suspicious`, `total`,
   `engines`, the counts object, `labels`, `detections`, `first_seen`,
@@ -3929,6 +3934,120 @@ A tool named like a built-in lookup that declares another kind, or nothing,
 gets none of this. A report stored before the records is read the way it
 always was.
 
+**A reputation service read from what it lists.** The platform ships no
+declaration of a reputation service's tools, VirusTotal's included. For a
+server whose block's `roles` hold `reputation` (the catalog sets it on the
+built-in `virustotal` entry; set it on a reputation server of yours), each
+tool that neither the block nor the server's own `_meta` declares is read from
+its MCP definition when the server is listed (`core.derived_declarations`),
+by the same rules for every server:
+
+- a tool that sends the file (below) is a submission (`submission`,
+  `discloses_sample`, `executes: sandbox`); so is a write tool, one not marked
+  `readOnlyHint: true` or marked `destructiveHint: true` (MCP's defaults make
+  an unannotated tool a write tool), so the triage pack never calls one;
+- only a tool marked read-only and not destructive is read as asking: one that
+  takes the id of an analysis, a submission, a task or a request is that
+  submission's status (`submission_status`, `third_party: hash`); one that
+  requires an argument read as the sample's hash is a reputation lookup
+  (`kind: reputation`, that argument as `arguments.hash`, `reader:
+  reputation_shape`, `effects` `executes: no`, `network: true`,
+  `third_party: hash`); one that requires a domain, an address or a URL is a
+  report on it (`indicator_report`, `third_party: no`);
+- `network: true` unless the server marks the tool `openWorldHint: false`;
+- what the block's `reputation_service` says of the service as a whole is
+  laid under each of its lookups: its `name` as the lookup's `display_name`
+  and `reputation.service`, its `rank` as `reputation.rank`, each only where
+  the lookup's declaration (the block's, an operator's row) says none; a
+  lookup that names no rank is asked at the service's rank before the
+  default. The built-in `virustotal` entry's is `{name: VirusTotal, rank:
+  10}`.
+
+A lookup that names the `reputation_shape` reader and declares no path is
+read by its answer's shape. Only such a lookup is: a lookup whose declaration
+declares a path or a pattern of its `reputation`, or a `reader` of its own,
+never takes the reading's reader, so its declared paths are read (one that
+names only a service or a rank keeps the shape reader), and a stored entry
+whose facts name no reader reads as it always did.
+
+A stored change of such a tool that names no kind of its own (an operator's
+`get_file_report: {reputation: {rank: 30}}` on the built-in VirusTotal server,
+saved over the table a release once shipped) is not dropped with its
+kind-dependent fields: they are kept with the block and laid over the
+reading once it puts a kind in force, a `reputation` change field by field
+(`tool_declarations.kind_free_changes`). Until the server is first listed, or
+after its block is pointed at another server and before that one is listed,
+the change waits; it applies from the listing on. It is kept with the block
+through every dump of the settings (the settings crossing a process as JSON, a
+save that sends the block back), written as it was stored. A new edit of such a
+change is refused, as a kind-dependent field with no kind always is; to rank or
+name a reputation server's lookups, set the server's `reputation_service`
+(`rank`, `name`) in the server's Declaration panel instead. The counts are the object
+whose `malicious` (or `positives`) is a whole number, that holds at least three
+whole numbers and sits under a key that does not say vote (an engine tally,
+never a vote); of several, the one counting the most verdicts (`malicious`,
+`suspicious`, `harmless`, `undetected` and the like), then the most whole
+numbers; the service, where the lookup names none, is the `source`, `service`,
+`provider` or `vendor` text in or beside it; the engine count the first whole number under a key that says `engines`;
+the detections the first list of texts under a key that says `detections`;
+the labels the texts under a key that says label or family, then threat names,
+then threat categories (a list of objects read by each one's `value`, `name`
+or `label`); first seen the earliest date under a key that says `first` and
+seen, submitted, analysed or scanned, last seen the latest under one that says
+`last` (or names an analysis or scan date alone); the link the first `http(s)`
+text under a key that says link or permalink, or a report's, page's or
+interface's URL. It looks eight levels deep and at 20,000 members at most.
+
+**Whether a tool sends the sample** is read for every server, whatever its
+roles, and for every tool, one its server declares under `_meta` included: a
+tool that takes the file's content as bytes (an argument named for content,
+bytes, base64, b64, a blob or a payload, or for data or a body beside a file's
+word such as `file_data` or `sample_body`, or one whose schema says `format`
+or `contentEncoding` `byte`, `binary` or `base64`) is `discloses_sample`; only
+a server whose block trusts its declaration (`trusts_served_declaration`) can
+lift that by marking the tool both `readOnlyHint: true` and
+`openWorldHint: false`, an untrusted server's own hints never (such a tool of
+a trusted reputation service is then read as the read-only tool it is); a tool
+that
+takes a path or a file (an argument named for a path or a file name, or only
+for files or samples, such as `file`, `files`, `local_file` or `paths`, or one
+whose schema or array items say `format: path`) is unless it is marked
+`openWorldHint: false`. A tool whose name or description says it submits or
+uploads (its name read by its words, so `submitFile` and `upload-sample`
+count) and that takes either sends it whatever its hints say; one that is not
+marked `readOnlyHint: true` and says it submits or uploads now (its name's
+word `submit` or `upload`, or its description's `submit`, `submits`, `upload`
+or `uploads`; a past `submitted` or `uploaded` names what others did and does
+not count) sends it whatever it takes, since it may hand the sample over by
+an id or a hash. A definition that cannot be read
+is read as sending the sample; a listing that cannot be read keeps what was
+read of the server before. A path's word or format wins
+over a hash's (`hash_file_path` is a path). Each argument
+is read in every schema form it may take: a local `$ref` (`#/$defs/…`,
+`#/definitions/…`) followed from the root schema, each reference once (a cycle
+ends there), the members of `anyOf`, `oneOf` and `allOf`, array items, and
+the arguments of nested objects one level down. `readOnlyHint` says a tool
+changes nothing, not that it sends nothing, so it never excuses sending.
+When the definition leaves it open, the reading is that it sends: a tool of
+an undeclared server that takes a path and is not marked
+`openWorldHint: false` is shown in the run's disclosure as an upload of the
+sample, whatever it does with the file. To show a local tool that only reads
+the file as reading it, mark it closed: its server lists it with
+`annotations: {openWorldHint: false}`, or you declare what it sends in the
+server's `tool_facts` (`<tool>: {effects: {network: false, third_party:
+no}}`), which is in force over the reading. The reading is dropped only where
+the block itself (an operator's declaration, or what the
+platform ships) says what the tool sends (`discloses_sample` or
+`effects.third_party`), which is how an operator allows a tool to send
+nothing, or where a server the block trusts declares the tool; never on an
+untrusted server's word. Whatever else a block or a server declares of a tool
+is in force over the reading field by field.
+
+What is read is kept with the server's own declaration, under the same launch
+identity and past the process, and a job that runs for real lists each enabled
+server whose `roles` hold `reputation` and of which nothing is kept, as it
+lists a server whose block trusts its declaration.
+
 **Readers** are named by the answer shape they read, never by a tool, so a
 tool of yours that answers in that shape may name one:
 
@@ -3943,6 +4062,7 @@ tool of yours that answers in that shape may name one:
 | `dns_query_lines` | a text answer holding one DNS query per line |
 | `packet_lines` | a text answer holding one captured packet per line, with its endpoints |
 | `report_items` | sandbox report items, each with an id and the fields that place it |
+| `reputation_shape` | a reputation answer read by its shape: its engine tally, labels, detections, dates and report link (named by a lookup read from a reputation service's listing) |
 
 **Vocabulary.** `kind`, `roles`, `source`, `reader`, `category`, a technique
 `format`, a place or value name and an error `code` are open: any lowercase

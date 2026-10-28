@@ -1,0 +1,98 @@
+{
+  "server": "virustotal",
+  "source": "vendored listing of the tools the built-in block names, over streamable-http",
+  "note": "The tools/list answer of VirusTotal's own MCP server for the tools its built-in block names (core.virustotal.LOOKUP_TOOLS and SUBMIT_TOOLS), each with its inputSchema and annotations as that server lists them; descriptions shortened to one line. The lookups' annotations are the ones recorded with the lookups of the stored benchmark runs (haiku5 to haiku7); the submit tools are written as write tools that reach outside, as their descriptions say. submit_local_file is the stdio form's own tool. The platform reads what each tool is from this listing (core.derived_declarations); nothing here is shipped.",
+  "tools": [
+    {
+      "name": "get_analysis",
+      "description": "Read one analysis registered to the current VTAI account.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "analysis_id": {"title": "Analysis Id", "type": "string"},
+          "request_id": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null, "title": "Request Id"}
+        },
+        "required": ["analysis_id"]
+      },
+      "annotations": {"readOnlyHint": true, "openWorldHint": true, "idempotentHint": true, "destructiveHint": false}
+    },
+    {
+      "name": "get_domain_report",
+      "description": "Look up existing intelligence for a DNS domain name, without resolving or visiting it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {"domain": {"title": "Domain", "type": "string"}},
+        "required": ["domain"]
+      },
+      "annotations": {"readOnlyHint": true, "openWorldHint": true, "idempotentHint": true, "destructiveHint": false}
+    },
+    {
+      "name": "get_file_report",
+      "description": "Look up an existing file report by hexadecimal MD5, SHA-1 or SHA-256 hash.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {"hash": {"title": "Hash", "type": "string"}},
+        "required": ["hash"]
+      },
+      "annotations": {"readOnlyHint": true, "openWorldHint": true, "idempotentHint": true, "destructiveHint": false}
+    },
+    {
+      "name": "get_ip_report",
+      "description": "Look up existing intelligence for an IPv4 or IPv6 address.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {"ip": {"title": "Ip", "type": "string"}},
+        "required": ["ip"]
+      },
+      "annotations": {"readOnlyHint": true, "openWorldHint": true, "idempotentHint": true, "destructiveHint": false}
+    },
+    {
+      "name": "get_submission",
+      "description": "Recover the current account's receipt with exactly one sha256 or request_id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "request_id": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null, "title": "Request Id"},
+          "sha256": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null, "title": "Sha256"}
+        }
+      },
+      "annotations": {"readOnlyHint": true, "openWorldHint": true, "idempotentHint": true, "destructiveHint": false}
+    },
+    {
+      "name": "get_url_report",
+      "description": "Look up existing intelligence for one HTTP(S) URL.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {"url": {"title": "Url", "type": "string"}},
+        "required": ["url"]
+      },
+      "annotations": {"readOnlyHint": true, "openWorldHint": true, "idempotentHint": true, "destructiveHint": false}
+    },
+    {
+      "name": "submit_file",
+      "description": "Submit canonical base64 bytes matching SHA256, at most 24000000 decoded bytes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content_base64": {"maxLength": 32000000, "title": "Content Base64", "type": "string"},
+          "sha256": {"title": "Sha256", "type": "string"}
+        },
+        "required": ["sha256", "content_base64"]
+      },
+      "annotations": {"readOnlyHint": false, "openWorldHint": true, "idempotentHint": false, "destructiveHint": false}
+    },
+    {
+      "name": "submit_local_file",
+      "description": "Submit one local regular file of at most 32000000 bytes in standard mode.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "expected_sha256": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": null, "title": "Expected Sha256"},
+          "path": {"maxLength": 4096, "minLength": 1, "title": "Path", "type": "string"}
+        },
+        "required": ["path"]
+      },
+      "annotations": {"readOnlyHint": false, "openWorldHint": true, "idempotentHint": false, "destructiveHint": false}
+    }
+  ]
+}

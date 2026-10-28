@@ -37,7 +37,9 @@ calls to reach the stub:
   tool definitions still ride every request. Every tool server that answers
   from outside this machine (VirusTotal, any HTTP server not on loopback) is
   disabled, and its tool definitions are then missing from the rehearsed
-  requests: a paid run's requests are larger by that much. Server tokens come
+  requests: a paid run's requests are larger by that much. A server whose
+  block's `roles` hold `reputation` is disabled as one that reaches a third
+  party, by what it is, before any of its tools is read. Server tokens come
   back masked and go back masked, which the settings API reads as unchanged;
 - where no spend ceiling is set, one no rehearsal reaches is set, so the run
   summary carries the spend the checklist prices the usage against.
