@@ -1,3 +1,4 @@
+import gc
 from collections.abc import Iterator
 from functools import cache
 from unittest.mock import MagicMock
@@ -287,6 +288,15 @@ def sample_network_data() -> list[dict]:
             "resp_bytes": 512,
         },
     ]
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    # Everything imported and built while collecting lives for the whole
+    # session. Freezing it keeps a full collection from walking it again
+    # inside a test: on a loaded runner such a walk took ~2 s and fell
+    # inside the timed span of a linear-time check (T-427).
+    gc.collect()
+    gc.freeze()
 
 
 def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
