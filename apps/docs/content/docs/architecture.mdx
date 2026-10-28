@@ -1519,13 +1519,20 @@ Two producers use it:
   lacks. Nothing is decided about a listed claim. A claim is the block the
   analyst wrote: a block whose TECHNIQUE line listed several ids is read as one
   claim per id, and the coverage check, the report models' list of claims in
-  force, §13.1 and the run summary's per-analyst claim count read it as one
-  claim again, numbered once, with its techniques together in its row
-  (`ClaimNotDiscussed.technique_ids`), each id with the note the ATT&CK table
-  prints beside it: "technique id not in the ATT&CK catalog" for an id the
-  catalogue lacks, and the kept-absence note for an absence claim kept when
-  asked. The ATT&CK table, the matrix and
-  `ttp_mappings` keep one row per technique.
+  force, §13.1, the console's list of the same claims and the run summary's
+  per-analyst claim count read it as one claim again, numbered once, with its
+  techniques together in its row (`ClaimNotDiscussed.technique_ids`), each id
+  with the note the ATT&CK table prints beside it: "technique id not in the
+  ATT&CK catalog" for an id the catalogue lacks, and the kept-absence note for
+  an absence claim kept when asked. An analyst's mean confidence weighs each
+  block once, by the confidence all its copies share; the ISR summary the
+  mediator and the judge read (`AgentISR.to_text_summary`) numbers claims by
+  block, one line per block with its ids together, and the debate facts resolve
+  a mediation line's "claim N" to block N (`debate_facts._claims_of`). The
+  line after an empty revision's summary names the blocks its validation retry
+  added (`nodes.retry_additions_text`), and a claim a retry added is never one
+  block with a claim it did not add (`added_by_retry_in_round` is compared). The
+  ATT&CK table, the matrix and `ttp_mappings` keep one row per technique.
 
   A function name the run resolved at runtime from a stored value is not an
   import. `api_capability` takes such names as `resolved_names` and marks them

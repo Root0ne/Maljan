@@ -175,6 +175,7 @@ from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
     corroboration,
+    count_claim_blocks,
     not_run_sentence,
     partial_grounding_reason,
     technique_check_note,
@@ -1064,18 +1065,28 @@ def written_record(written: str, retry_words: str = "") -> str:
     return f"{RETRY_WORDS_HEAD}\n{retry_words}\n\n{WRITTEN_ANSWER_HEAD}\n{written}"
 
 
-def retry_additions_text(combined: AgentISR, added: int, revision_round: int) -> str:
+def retry_additions_text(combined: AgentISR, revision_round: int) -> str:
     """The line saying which claims of ``combined``'s summary a retry added, for its report.
 
     Said after the summary (:func:`retry_additions_report`), by the numbers
-    the summary gives them, so the next round and the mediator read them as
-    added and read each claim once.
+    the summary gives them: claim blocks (``AgentISR.claim_blocks``), each
+    named once when a claim of it was added by the round's retry
+    (``added_by_retry_in_round``), so the next round and the mediator read
+    them as added and read each claim once.
     """
-    total = len(list(combined.claims))
-    first = total - int(added) + 1
-    which = (
-        f"Claim {total} above was" if first == total else f"Claims {first} to {total} above were"
-    )
+    numbers = [
+        number
+        for number, block in enumerate(combined.claim_blocks(), 1)
+        if any(c.added_by_retry_in_round == int(revision_round) for c in block)
+    ]
+    if not numbers:
+        return ""
+    if len(numbers) == 1:
+        which = f"Claim {numbers[0]} above was"
+    elif numbers == list(range(numbers[0], numbers[-1] + 1)):
+        which = f"Claims {numbers[0]} to {numbers[-1]} above were"
+    else:
+        which = f"Claims {', '.join(str(n) for n in numbers)} above were"
     return (
         f"{which} added by the round-{int(revision_round)} validation retry, written without "
         "tools, beside the claims in force; none replaces a claim in force."
@@ -1083,7 +1094,7 @@ def retry_additions_text(combined: AgentISR, added: int, revision_round: int) ->
 
 
 def retry_additions_report(
-    prior: str, prior_isr: AgentISR | None, combined: AgentISR, added: int, revision_round: int
+    prior: str, prior_isr: AgentISR | None, combined: AgentISR, revision_round: int
 ) -> str:
     """The report of an answer in force a retry added claims to, built from ``combined``.
 
@@ -1098,7 +1109,7 @@ def retry_additions_report(
 
     summary = combined.to_text_summary()
     combined.note_rendered_summary(summary)
-    said = retry_additions_text(combined, added, revision_round)
+    said = retry_additions_text(combined, revision_round)
     rendered = prior_isr.rendered_summary if prior_isr is not None else ""
     if rendered and prior.startswith(rendered):
         return f"{summary}\n{said}{prior[len(rendered) :]}"
@@ -1109,7 +1120,7 @@ def retry_additions_report(
 
 def retry_additions_sentence(name: str, revision_round: int, in_force: Any, added: int) -> str:
     """The sentence for an empty revision whose validation retry added claims beside the answer."""
-    kept = len(list(getattr(in_force, "claims", None) or []))
+    kept = count_claim_blocks(list(getattr(in_force, "claims", None) or []))
     return (
         f"The {name} analyst's round-{int(revision_round)} revision wrote no claim; its "
         f"validation retry, written without tools, added {added} claim(s) beside the {kept} "
@@ -6028,7 +6039,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                         isr,
                         iteration,
                     )
-                    added = len(combined.claims) - len(
+                    # Counted by claim block: a claim mapped to several
+                    # techniques is one claim, added or kept.
+                    added = count_claim_blocks(combined.claims) - count_claim_blocks(
                         list(getattr(in_force_isr, "claims", None) or [])
                     )
                     if not added:
@@ -6044,7 +6057,6 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                         in_force_report,
                         in_force_isr if isinstance(in_force_isr, AgentISR) else None,
                         combined,
-                        added,
                         iteration,
                     )
                     revised_isrs[name] = combined

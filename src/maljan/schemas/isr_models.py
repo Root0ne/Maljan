@@ -12,6 +12,7 @@ Literature basis:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
@@ -396,18 +397,30 @@ def open_question_line(question: OpenQuestion) -> str:
     return " | ".join(parts)
 
 
-def claim_summary_line(number: int, claim: ClaimEvidence) -> str:
+def _technique_written(claim: ClaimEvidence) -> str:
+    """The claim's technique id with its marker, as a summary shows it, or ``""``."""
+    if not claim.technique_id:
+        return ""
+    if not claim.technique_id_valid:
+        return f"{claim.technique_id} — {UNVERIFIED_TECHNIQUE_MARKER}"
+    if claim.kept_after_absence_question:
+        return f"{claim.technique_id} — {ABSENCE_TECHNIQUE_MARKER}"
+    return claim.technique_id
+
+
+def claim_summary_line(
+    number: int, claim: ClaimEvidence, block: Sequence[ClaimEvidence] = ()
+) -> str:
     """One claim as an ISR summary shows it to a model (``AgentISR.to_text_summary``).
 
     The marker travels with the id rather than replacing it. The analyst was
     told and kept its answer; the judge is entitled to see both the answer and
-    that it does not resolve.
+    that it does not resolve. ``block`` is every claim read from the claim's
+    block (``validation.claim_block_indexes``): a block whose TECHNIQUE line
+    listed several ids is one claim, shown once with all of its ids.
     """
-    tech = f" ({claim.technique_id})" if claim.technique_id else ""
-    if claim.technique_id and not claim.technique_id_valid:
-        tech = f" ({claim.technique_id} — {UNVERIFIED_TECHNIQUE_MARKER})"
-    elif claim.technique_id and claim.kept_after_absence_question:
-        tech = f" ({claim.technique_id} — {ABSENCE_TECHNIQUE_MARKER})"
+    written = list(dict.fromkeys(w for c in (block or (claim,)) if (w := _technique_written(c))))
+    tech = f" ({', '.join(written)})" if written else ""
     noted = f" {claim.heading_note}" if claim.heading_note else ""
     failed = f" ({FAILED_CALLS_MARKER})" if claim.cites_only_failed_calls else ""
     retried = (
@@ -646,10 +659,29 @@ class AgentISR(BaseModel):
 
     @property
     def mean_confidence(self) -> float:
-        """Average confidence across all claims. Returns 0.0 if no claims."""
-        if not self.claims:
+        """Average confidence across the claim blocks. Returns 0.0 if no claims.
+
+        A block whose TECHNIQUE line listed several ids is one claim, counted
+        once with its own confidence (``validation.claim_block_indexes``). Its
+        copies cannot differ: a claim whose confidence differs from the one
+        before it starts a block of its own.
+        """
+        blocks = self.claim_blocks()
+        if not blocks:
             return 0.0
-        return sum(c.confidence for c in self.claims) / len(self.claims)
+        return sum(block[0].confidence for block in blocks) / len(blocks)
+
+    def claim_blocks(self) -> list[list[ClaimEvidence]]:
+        """The claims grouped by the block they were written in, in order."""
+        from maljan.pipeline.validation import claim_block_indexes
+
+        blocks: list[list[ClaimEvidence]] = []
+        indexes = claim_block_indexes(self.claims)
+        for index, claim in zip(indexes, self.claims, strict=True):
+            if index == len(blocks):
+                blocks.append([])
+            blocks[index].append(claim)
+        return blocks
 
     def to_text_summary(self) -> str:
         """Render this ISR as a concise human-readable text block.
@@ -662,8 +694,10 @@ class AgentISR(BaseModel):
             f"Domain: {self.domain} | Mean confidence: {self.mean_confidence:.2f}",
         ]
 
-        for i, claim in enumerate(self.claims, 1):
-            lines.append(f"  {claim_summary_line(i, claim)}")
+        # Numbered by claim block, the number every other surface names a
+        # claim by: a claim mapped to several techniques is one line.
+        for i, block in enumerate(self.claim_blocks(), 1):
+            lines.append(f"  {claim_summary_line(i, block[0], block)}")
 
         # An unknown the analyst names, for a peer, the mediator, the judge
         # or the lead that asked to route: never an absence, and absent from

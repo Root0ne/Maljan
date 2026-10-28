@@ -154,9 +154,22 @@ def _claim_place(number: str, count: int) -> int | None:
 
 
 def _claims_of(isr_reports: Mapping[str, Any], name: str) -> list[Any]:
+    """The analyst's claims by claim block, one per block, so "claim N" is block N.
+
+    A block whose TECHNIQUE line listed several ids is read as one claim per
+    id, each with the block's sentence and evidence
+    (``validation.claim_block_indexes``); the summaries the mediator reads and
+    the report number it once, and so does this.
+    """
+    from maljan.pipeline.validation import claim_block_indexes
+
     for key, isr in isr_reports.items():
         if str(key).lower() == name.lower():
-            return list(getattr(isr, "claims", None) or [])
+            claims = list(getattr(isr, "claims", None) or [])
+            firsts: dict[int, Any] = {}
+            for block, claim in zip(claim_block_indexes(claims), claims, strict=True):
+                firsts.setdefault(block, claim)
+            return list(firsts.values())
     return []
 
 

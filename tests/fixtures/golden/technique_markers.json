@@ -1,0 +1,5 @@
+{
+  "_note": "THIS FILE IS THE SOURCE OF THE TWO TECHNIQUE NOTES. Both surfaces are pinned against it and neither may be reworded alone: change the wording here first, then make src/maljan/schemas/isr_models.py (UNVERIFIED_TECHNIQUE_MARKER, ABSENCE_TECHNIQUE_MARKER) and apps/web/src/components/analysis/reportProse.ts agree with it. The report prints each note beside a technique id in its ATT&CK table and in section 13.1; the console prints the same note beside the same id in its list of the claims the report does not discuss.",
+  "unverified": "technique id not in the ATT&CK catalog",
+  "absence_kept": "the claim naming it reads as absence; the analyst kept the technique when asked"
+}
