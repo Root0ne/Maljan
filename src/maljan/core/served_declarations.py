@@ -127,6 +127,7 @@ __all__ = [
     "served",
     "served_digest",
     "served_facts_of",
+    "served_generation",
     "served_tool_facts",
     "snapshot_served",
     "stored_form",
@@ -156,6 +157,28 @@ DERIVED_KEY = ""
 DERIVED_FORM = "derived"
 CLOSED_FORM = "closed_by_hints"
 PROGRAM_FORM = "program"
+# How many times what is kept of any source changed (:func:`served_generation`).
+_GENERATION: list[int] = [0]
+
+
+def _bump_generation() -> None:
+    """Count one change of what is kept, and have held declarations rebuilt."""
+    with _LOCK:
+        _GENERATION[0] += 1
+    bump_declaration_version()
+
+
+def served_generation() -> int:
+    """How many times what any source declared, or what was read of it, changed in this process.
+
+    A reader that holds what it built from the kept rows (``declared_reading.
+    shipped_by_name``) keys it on this, so a registration, a load or a forget
+    is read again.
+    """
+    with _LOCK:
+        return _GENERATION[0]
+
+
 # The sources whose declaration this process listed or forgot since it last
 # loaded or saved the kept ones (:func:`unsaved`).
 _UNSAVED: set[str] = set()
@@ -287,7 +310,7 @@ def register_served(
         if changed:
             _UNSAVED.add(source)
     if changed:
-        bump_declaration_version()
+        _bump_generation()
 
 
 def served(source: str, launch: str | None = None) -> Mapping[str, ToolFacts]:
@@ -386,7 +409,7 @@ def restore_served(source: str, snapshot: tuple[Any, ...]) -> None:
         else:
             _UNSAVED.discard(str(source))
     if changed:
-        bump_declaration_version()
+        _bump_generation()
 
 
 def forget_served(source: str | None = None) -> None:
@@ -404,7 +427,7 @@ def forget_served(source: str | None = None) -> None:
             if changed:
                 _UNSAVED.add(str(source))
     if changed:
-        bump_declaration_version()
+        _bump_generation()
 
 
 def stored_form(
@@ -546,7 +569,7 @@ def install_persisted(rows: Iterable[Any]) -> None:
                 table.clear()
                 table.update(after)
     if changed:
-        bump_declaration_version()
+        _bump_generation()
 
 
 def unsaved() -> list[tuple[str, str, dict[str, dict[str, Any]] | None, bool]]:
@@ -778,6 +801,17 @@ def layered(
     claims: dict[str, dict[str, Any]] = {}
     for tool, facts in served_facts.items():
         if tool in gone:
+            # A removal never takes away the server's own word that the tool
+            # sends the sample.
+            if facts.discloses_sample or (
+                facts.effects is not None and facts.effects.third_party == THIRD_PARTY_BYTES
+            ):
+                out[tool] = ToolFacts.model_validate(
+                    {
+                        "discloses_sample": True,
+                        "effects": {"network": True, "third_party": THIRD_PARTY_BYTES},
+                    }
+                )
             continue
         own = held.get(tool)
         if trusted:
@@ -852,7 +886,7 @@ def laid_under(
 
     if not held and not read and not program:
         return declared
-    removed = shipped_tools_of(str(declared.source)) - set(declared.tools)
+    removed = (shipped_tools_of(str(declared.source)) - set(declared.tools)) | declared.removed
     tools, said, claims = layered(
         declared.tools,
         held,
@@ -877,7 +911,7 @@ def laid_under(
             default_effects=declared.default_effects,
             sample_open=declared.sample_open,
         )
-    listed = {*held, *(read or {}), *(program or {})}
+    listed = {*held, *(read or {}), *(program or {})} - removed
     tools = with_server_effects(
         tools,
         declared.default_effects,

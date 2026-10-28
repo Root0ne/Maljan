@@ -22,8 +22,12 @@ from app.models import RuntimeSetting
 from app.services import settings_service as svc
 from maljan.core import tool_declarations
 
-LEAF = "core.static.ghidra.tool_facts"
-STORED = {"decompile_function": {"kind": "decompile", "note": "kept from an older version"}}
+# A provider leaf that ships a table of its tools (Ghidra's and radare2's are
+# read from their listings, T-418 PR4), and a stored entry of one of them
+# that says what it ships, beside a key this version does not know.
+LEAF = "core.sandbox.cape2.mcp.tool_facts"
+_SHIPPED_EFFECTS = {"executes": "sandbox", "network": "operator_sandbox"}
+STORED = {"submit_file": {"effects": _SHIPPED_EFFECTS, "note": "kept from an older version"}}
 
 
 class _Result:
@@ -65,13 +69,13 @@ def test_the_stored_row_builds_and_jobs_run(caplog: pytest.LogCaptureFixture) ->
     from maljan.core.settings_overrides import build_settings
 
     with caplog.at_level(logging.WARNING, logger="maljan"):
-        built = build_settings({"static.ghidra.tool_facts": STORED})
-        job = build_job_settings({"static.ghidra.tool_facts": STORED}, None)
+        built = build_settings({"sandbox.cape2.mcp.tool_facts": STORED})
+        job = build_job_settings({"sandbox.cape2.mcp.tool_facts": STORED}, None)
     for settings in (built, job):
-        facts = settings.static.ghidra.tool_facts["decompile_function"]
-        assert facts.kind == "decompile"
+        facts = settings.sandbox.cape2.mcp.tool_facts["submit_file"]
+        assert facts.effects is not None and facts.effects.network == "operator_sandbox"
     warnings = [r.getMessage() for r in caplog.records if "left out" in r.getMessage()]
-    assert warnings and "note" in warnings[0] and "decompile_function" in warnings[0]
+    assert warnings and "note" in warnings[0] and "submit_file" in warnings[0]
 
 
 @pytest.mark.asyncio
@@ -104,7 +108,7 @@ async def test_a_new_hand_edit_with_an_unknown_key_is_still_refused() -> None:
     db = _db([_stored_row()])
     # The console edits the leaf as the API serves it: the stored whole map
     # as the changes that put the same in force.
-    served = svc.served_tool_facts(STORED, shipped_tool_facts("static.ghidra"))
+    served = svc.served_tool_facts(STORED, shipped_tool_facts("sandbox.cape2.mcp"))
     edit = {**served, "new_tool": {"kind": "strings", "nott": "a typo"}}
     with pytest.raises(svc.SettingsValidationError) as refused:
         await svc.SettingsService(db).save({LEAF: edit}, user_id=uuid.uuid4(), ip=None)
@@ -199,7 +203,7 @@ def test_an_import_leaves_the_unknown_key_out_and_says_so() -> None:
     assert saved["core.mcp.servers"]["invented"]["tool_facts"] == tool_declarations.with_mark(
         {"t": {"kind": "strings"}}
     )
-    assert "note" in warnings[f"{LEAF}.decompile_function"]
+    assert "note" in warnings[f"{LEAF}.submit_file"]
     assert "note" in warnings["core.mcp.servers.invented.tool_facts.t"]
     assert "declares nothing" in warnings["core.mcp.servers.invented.tool_facts.e"]
 
@@ -210,7 +214,7 @@ def test_an_import_written_whole_keeps_reading_whole(document_format: str) -> No
     from maljan.core.settings_overrides import shipped_tool_facts
 
     saved, warnings = _imported(document_format)
-    shipped = shipped_tool_facts("static.ghidra")
+    shipped = shipped_tool_facts("sandbox.cape2.mcp")
     # The map was the provider's whole map: every shipped tool it lacks was
     # removed, and the one it holds reads as written, its other fields at
     # their default rather than the shipped value.
@@ -220,14 +224,14 @@ def test_an_import_written_whole_keeps_reading_whole(document_format: str) -> No
         for tool, change in tool_declarations.without_mark(saved[LEAF]).items()
         if change is None
     }
-    assert removed == set(shipped) - {"decompile_function"}
-    held = saved[LEAF]["decompile_function"]
+    assert removed == set(shipped) - {"submit_file"}
+    held = saved[LEAF]["submit_file"]
     assert held and "kind" not in held
     assert all(value in ({}, [], "", None, False) for value in held.values())
     assert saved["core.mcp.servers"]["invented"]["tool_facts"] == tool_declarations.with_mark(
         {"t": {"kind": "strings"}}
     )
-    assert "note" in warnings[f"{LEAF}.decompile_function"]
+    assert "note" in warnings[f"{LEAF}.submit_file"]
 
 
 @pytest.mark.asyncio

@@ -571,7 +571,13 @@ def test_the_provider_blocks_carry_their_declarations_where_they_set_none() -> N
     static = StaticConfig.model_validate({"ghidra": {"url": "http://g:8089"}, "r2": {}})
     assert static.ghidra.sample_open.open_tool == "load_program"
     assert static.ghidra.sample_mount == "/data/samples"
-    assert static.ghidra.tool_facts["decompile_function"].kind == "decompile"
+    # No table of their tools: what each block says of its tools as a whole.
+    assert static.ghidra.tool_facts == {}
+    assert static.ghidra.default_effects is not None
+    assert static.ghidra.default_effects.network is False
+    assert static.r2.sample_open.analyse_tool == "analyze"
+    assert static.r2.analyse_effects is not None
+    assert static.r2.analyse_effects.executes == "emulation"
     assert static.r2.error_patterns[0].applies_to == ("protocol_error",)
     cleared = StaticConfig.model_validate({"ghidra": {"prompt_fragment": "", "sample_open": {}}})
     assert cleared.ghidra.prompt_fragment == ""

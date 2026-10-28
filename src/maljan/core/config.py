@@ -1800,6 +1800,16 @@ class MCPServerConfig(BaseModel):
     # kind the server's listing puts in force (``core.derived_declarations``).
     _kind_free_changes: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
 
+    # The tools a stored change removed that the block does not ship (a stored
+    # ``null``, ``tool_declarations.stored_in_force``): nothing its server lists
+    # is read of them (``core.served_declarations.laid_under``).
+    _removed_tools: frozenset[str] = PrivateAttr(default_factory=frozenset)
+
+    @property
+    def removed_tools(self) -> frozenset[str]:
+        """The tools a stored change removed that the block does not ship."""
+        return frozenset(self._removed_tools)
+
     @property
     def kind_free_changes(self) -> dict[str, dict[str, Any]]:
         """The kind-dependent fields stored with no kind, per tool; a copy."""
@@ -1815,9 +1825,12 @@ class MCPServerConfig(BaseModel):
         """
         dumped = handler(value)
         held = self._kind_free_changes
-        if not held or not isinstance(dumped, dict):
+        gone = self._removed_tools
+        if not (held or gone) or not isinstance(dumped, dict):
             return dumped
         out = dict(dumped)
+        # A removal is dumped as stored, so it survives a dump and its validation.
+        out.update({tool: None for tool in sorted(gone) if tool not in out})
         for tool, fields in held.items():
             facts = value.get(tool) if isinstance(value, Mapping) else None
             if tool not in out or not isinstance(facts, BaseModel):
@@ -1836,9 +1849,17 @@ class MCPServerConfig(BaseModel):
         from maljan.core.tool_declarations import kind_free_changes
 
         held = kind_free_changes(data.get("tool_facts")) if isinstance(data, Mapping) else {}
+        gone: frozenset[str] = frozenset()
+        facts = data.get("tool_facts") if isinstance(data, Mapping) else None
+        if isinstance(facts, Mapping) and any(v is None for v in facts.values()):
+            gone = frozenset(str(t) for t, v in facts.items() if v is None)
+            data = {**data, "tool_facts": {t: v for t, v in facts.items() if v is not None}}
         model = handler(data)
-        if held and isinstance(model, MCPServerConfig):
-            model._kind_free_changes = held
+        if isinstance(model, MCPServerConfig):
+            if held:
+                model._kind_free_changes = held
+            if gone:
+                model._removed_tools = gone
         return model  # type: ignore[no-any-return]
 
     @field_validator("tool_facts", mode="before")

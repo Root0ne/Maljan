@@ -476,10 +476,17 @@ def test_the_analysis_servers_long_running_tools_and_budgets_are_its_manifests()
 
 
 def test_the_report_sections_are_the_section_hints_by_name(declared: ToolDeclarations) -> None:
+    from maljan.reporting.evidence_bundles import _SECTION_KINDS
     from maljan.reporting.legacy_tool_names import SECTION_TOOL_HINTS as _SECTION_TOOL_HINTS
 
     for source, name, facts in _built_in_tools(declared):
         hinted = [s for s, hs in _SECTION_TOOL_HINTS.items() if any(h in name for h in hs)]
+        if source in ("provider:ghidra", "provider:r2"):
+            # Read from their listings, they name no sections: their kinds reach them.
+            kind = facts.kind  # type: ignore[attr-defined]
+            reached = {s for s, kinds in _SECTION_KINDS.items() if kind in kinds}
+            assert set(hinted) <= reached, (source, name)
+            continue
         assert list(facts.report_sections) == hinted, (source, name)  # type: ignore[attr-defined]
 
 

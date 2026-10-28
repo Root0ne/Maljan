@@ -650,15 +650,20 @@ def shipped_by_name() -> Mapping[str, ToolFacts]:
     and one reading in both (held by
     ``tests/unit/core/test_entries_are_read_by_their_declared_kind.py``); the
     first source in that order gives its facts. Read again whenever what a
-    server declares changes.
+    server declares, or what is read of its listing, changes: it depends on
+    the rows kept of each server's listing (``core.served_declarations``).
     """
     from maljan.core import builtin_declarations as shipped
     from maljan.core.tool_declarations import declaration_version
 
     keys = shipped.builtin_server_names()
     servers: list[Mapping[str, ToolFacts]] = [builtin_tools(key) for key in keys]
-    # Held as long as no server's reading was read anew.
-    signature = (declaration_version(), _READS[0])
+    # Held as long as no server's reading was read anew and nothing kept of a
+    # server's listing changed: a provider's tools in force are its listing's
+    # reading (``served_declarations.served_generation``).
+    from maljan.core.served_declarations import served_generation
+
+    signature = (declaration_version(), _READS[0], served_generation())
     with _LOCK:
         if _BY_NAME[0] == signature and _BY_NAME[1] is not None:
             return _BY_NAME[1]  # type: ignore[no-any-return]
@@ -672,12 +677,36 @@ def shipped_by_name() -> Mapping[str, ToolFacts]:
 
     for tools in servers:
         _take(tools)
-    for provider in shipped.provider_names():
-        _take(shipped.provider_declaration(provider).get("tool_facts") or {})
+    # A provider-owned block as it ships, with what its server listed laid
+    # under (Ghidra's and radare2's tools are read from their listings).
+    for source, block in _shipped_provider_blocks().items():
+        name = "_".join(shipped.provider_block_paths()[source].split(".")[1:])
+        own = {
+            tool: raw if isinstance(raw, ToolFacts) else ToolFacts.model_validate(raw)
+            for tool, raw in (shipped.provider_declaration(name).get("tool_facts") or {}).items()
+        }
+        _take(tools_in_force(source, block.model_copy(update={"tool_facts": own})))
     for cfg in shipped.in_process_declarations().values():
         _take(cfg.tool_facts)
     with _LOCK:
         _BY_NAME[0], _BY_NAME[1] = signature, out
+    return out
+
+
+@cache
+def _shipped_provider_blocks() -> Mapping[str, Any]:
+    """Each shipped provider-owned block, as the settings built from no override hold it."""
+    from maljan.core import builtin_declarations as shipped
+    from maljan.core.settings_overrides import build_settings
+
+    settings: Any = build_settings({})
+    out: dict[str, Any] = {}
+    for source, path in shipped.provider_block_paths().items():
+        node: Any = settings
+        for part in path.split("."):
+            node = getattr(node, part, None)
+        if node is not None:
+            out[source] = node
     return out
 
 

@@ -3844,7 +3844,7 @@ it:
 | `words` | words a statement may use to name this tool's entry |
 | `display_name` | the name published text gives the tool: a rule table's title, the tool a recovered value names, the decoder a decoded value names; empty uses the tool's name |
 | `category` | the tag its description is shown with (`analyze`, `list`, `modify` …); an undeclared tool is tagged by its name's first word |
-| `aggregate_of` | the tools of the same server this tool is the aggregate (combined) form of: one call answers what many calls of those would (a decompilation of many functions at once, a whole-program graph that combines per-function ones). Its description, as the model is shown it, ends with "Aggregate form of `<tool>`: one call answers what many calls of it would.", written once the names a request offers are settled: each aggregated tool is named as the request offers it (`<server>__<tool>` where another server took the name), and a tool the request does not offer (withheld, or not picked by a reference) is left out of the note. The model can then choose the one call over the many; nothing else reads it, a server's own words quoted for it never carry the note, and a tool that declares none is shown and called as before. Each name is a tool the server declares in `tool_facts` (an aggregated tool declared with only its `category` is enough) or that its `tools` allow-list names; it is not the tool itself, nor a tool that declares itself the aggregate form of this one. A save that adds or changes such a declaration is refused naming the field (`<tool>.aggregate_of`, "declare each in tool_facts (e.g. its category)"), checked against the allow-list in force (sent, else stored, else shipped), and a stored one that names a tool the server no longer has is read without that name, with a warning. The shipped Ghidra block still declares its batch and whole-program tools (`batch_decompile` of `decompile_function`, `batch_analyze_completeness`, `get_bulk_function_hashes`, `get_full_call_graph`, `bulk_fuzzy_match`, `batch_create_labels`, `batch_delete_labels`, `batch_set_comments`, `rename_variables`; `core.builtin_reverser_kinds`, a leftover); `get_bulk_xrefs` declares none. Another reverser's batch tool is read as the aggregate form of the listed tool its name, without `batch` or `bulk`, names in the singular |
+| `aggregate_of` | the tools of the same server this tool is the aggregate (combined) form of: one call answers what many calls of those would (a decompilation of many functions at once, a whole-program graph that combines per-function ones). Its description, as the model is shown it, ends with "Aggregate form of `<tool>`: one call answers what many calls of it would.", written once the names a request offers are settled: each aggregated tool is named as the request offers it (`<server>__<tool>` where another server took the name), and a tool the request does not offer (withheld, or not picked by a reference) is left out of the note. The model can then choose the one call over the many; nothing else reads it, a server's own words quoted for it never carry the note, and a tool that declares none is shown and called as before. Each name is a tool the server declares in `tool_facts` (an aggregated tool declared with only its `category` is enough) or that its `tools` allow-list names; it is not the tool itself, nor a tool that declares itself the aggregate form of this one. A save that adds or changes such a declaration is refused naming the field (`<tool>.aggregate_of`, "declare each in tool_facts (e.g. its category)"), checked against the allow-list in force (sent, else stored, else shipped), and a stored one that names a tool the server no longer has is read without that name, with a warning. A reverser's aggregate tools are read from what it lists (`core.program_reading`): a `batch`, `bulk` or `full` tool, or one whose object is the plural of another tool's and whose arguments name it, aggregates each listed tool of its verb whose object is its own in the singular, or whose object an argument of its names (`batch_decompile` over `functions` of `decompile_function`), or else the one tool whose object holds its own. Ghidra's read so: `batch_decompile`, `batch_analyze_completeness`, `get_bulk_function_hashes`, `get_full_call_graph`, `batch_create_labels`, `batch_delete_labels`, `batch_set_comments`, `rename_variables`; `get_bulk_xrefs` fits several tools no argument tells apart and aggregates none, nor does `bulk_fuzzy_match`, whose verb is no other tool's |
 | `shows`, `does_not_show` | what this tool's answer shows and what it does not show, each one line in the operator's own words (a reputation lookup shows what others report of a hash, not this run's own analysis of the sample; a strings dump shows runs as they sit in the file, not strings that are encoded, encrypted or built at run time). Shown in the server card's **Tool declarations** box and here; the model is shown them only while `core.mcp.answer_scope_notes` is on (off by default, so every prompt is as it was): the tool's description then ends with `This answer shows: <shows>. It does not show: <does_not_show>.`, after its aggregate note, and a tool that declares neither is shown as before. A line break or another control character is refused on save (`<tool>.shows`); a stored one is read as a space, with a warning; no length is imposed. The shipped declarations: the analysis server's `strings` (shows printable ASCII and UTF-16LE runs as they sit in the file, with their offsets; does not show strings that are encoded, encrypted, compressed or built at run time, nor runs shorter than `min_len`, or past this page (read `next_offset`)) and `capa` (shows the capabilities whose capa rules match features of the file, its code and its structure; does not show whether the matched code runs, or a capability no rule describes); the threat-intel server's `check_hash`, `check_ip_reputation` and `check_domain_reputation` (what VirusTotal, and AbuseIPDB for an address, report; not this run's own analysis, nor whether the sample contacts an address or a domain); a reputation service's lookup read from its listing (what the service holds for the hash; not this run's own analysis, and an unknown hash or no detections is no evidence that the file is clean). Every other built-in tool declares neither |
 
 **Paths** are JSON-pointer-like: `/strings/*/offset` is the `offset` of every
@@ -4014,7 +4014,9 @@ roles, and for every tool, one its server declares under `_meta` included: a
 tool that takes the file's content as bytes (an argument named for content,
 bytes, base64, b64, a blob or a payload, or for data or a body beside a file's
 word such as `file_data` or `sample_body`, or one whose schema says `format`
-or `contentEncoding` `byte`, `binary` or `base64`) is `discloses_sample`; only
+or `contentEncoding` `byte`, `binary` or `base64`; a name only when its
+schema does not type it a number or a flag, which cannot carry the file:
+`max_scan_bytes: integer` does not) is `discloses_sample`; only
 a server whose block trusts its declaration (`trusts_served_declaration`) can
 lift that by marking the tool both `readOnlyHint: true` and
 `openWorldHint: false`, an untrusted server's own hints never (such a tool of
@@ -4060,39 +4062,55 @@ server whose `roles` hold `reputation` and of which nothing is kept, as it
 lists a server whose block trusts its declaration.
 
 **A decompiler's or disassembler's tools read from what it lists.** The
-platform ships no table of Ghidra's or radare2's tools' categories, arguments,
-read-only readings or effects; only what is read by a tool's kind (its kind,
-the report sections it is shown to, the rows of an answer read by kind, the
-tools a batch tool aggregates) is still shipped for those two
-(`core.builtin_reverser_kinds`, a leftover a reading by verb and object
-replaces), and is in force over the reading below. For a server whose
+platform ships no table of Ghidra's or radare2's tools. For a server whose
 block's `roles` hold `decompiler` or `disassembler` (the Ghidra and radare2
 blocks ship both; set one on a reverser of yours), each tool its server does
 not declare under `_meta` is read from its MCP definition when the server is
 listed (`core.program_reading`), by the same rules for every server and never
 by its name:
 
-- **its kind**, by its verb: the first word of its name (the word after
-  `batch` or `bulk` for a batch tool), whose category is the tag an undeclared
-  tool's description is shown with. A verb that changes the program (`set`,
-  `rename`, `create`, `delete`, `apply`, `clear`, `save` …) is `program_edit`,
-  so `set_decompiler_comment` is never a decompiler; `open` and `load` are
-  `open_sample` (read by the open-program readers, so the file its `path`
-  argument names is a program the agent named); `switch` and `select`
-  `select_sample`; `close` `sample_close`; `emulate` `emulation`; `run` `run`;
-  `import` `file_import`; a check `check`; an analysis (`analyze`, `detect`,
-  `find`, `compare` …) `analysis`; a listing or read (`list`, `get`,
-  `search`, `read`) `listing`; a name whose last word is `status` `status`,
-  whose answer moves; any other verb `utility`. Where the verb itself
-  decompiles or disassembles, the code listing its name says
-  (`decompile`, `decompile_batch`, `function_disassembly`, `disassembly`); a
-  read whose name says cross-references (before any `by`) `xrefs`; a listing
-  or read whose name says strings `listing_strings`; a tool of another kind
-  whose name says strings `holds_strings`. The tools the block's
-  `sample_open` names are read as opening, selecting, analysing
-  (`analyse_sample`) and closing a program. No vocabulary of one server's
-  tools is kept: a server whose tools are renamed with the same verbs reads
-  the same;
+- **its kind**, by its verb and its object: the first word of its name (the
+  word after `batch` or `bulk` for a batch tool; camelCase is read as words)
+  and the words after it, before any `by`. A verb that changes the program
+  (`set`, `rename`, `create`, `delete`, `apply`, `clear`, `save` …) is
+  `program_edit`, so `set_decompiler_comment` is never a decompiler (`force`
+  or `refresh` of a decompilation is `decompile_refresh`); `open` and `load`
+  are `open_sample` (read by the open-program readers, so the file its `path`
+  argument names is a program the agent named), of a project alone
+  `project_navigation`, of a program from the project's store
+  `project_load`; `switch` and `select` `select_sample`; `close`
+  `sample_close`; `emulate` `emulation`; `run` `run`; `import` of a file
+  `file_import`; a name whose last word is `status` `status`, whose answer
+  moves. Where the verb itself decompiles or disassembles, the code listing
+  its name says (`decompile`, `decompile_batch`, `function_disassembly`,
+  `disassembly`); a name that says cross-references (before any `by`)
+  `xrefs`. Any other reading verb's object names the kind a platform
+  consumer reads (`core.program_reading.OBJECT_KINDS`), each word read
+  anywhere in the object by its stem or singular: a listing or read (`list`,
+  `get`, `read`, `show`, `fetch` …, never a `search`) of imports
+  `import_listing`, of exports `export_listing`, of segments or sections
+  `segments`, of exactly `functions` `function_list`, of `methods`
+  `method_list` and of `strings` `listing_strings`; a `search` of `strings`
+  `string_search`; any verb on a program's, a binary's or a file's `info`
+  `program_info`, on callers `callers` and callees `callees`, `call chains`
+  `call_chains`, `crypto constants` `crypto_constants`, `dataflow`, iocs
+  `iocs_with_context`, behaviors `behaviour_scan`, `anti analysis`
+  `anti_analysis_scan`, `documentation completeness`
+  `documentation_completeness` (as is an analysis or check of
+  `completeness`); an analysis of one `function` whose arguments name it
+  (by its address or its name) `function_analysis`. A batch's answer is many
+  answers, so its object names none. An `open` of a program or file from a
+  project is `project_load`, of a project alone `project_navigation`; a verb
+  on a decompilation that does not itself decompile (`force_decompile`), or
+  `re` and the code verb, is `decompile_refresh`. Else a check is `check`, an analysis (`analyze`, `detect`, `find`,
+  `compare` …) `analysis`, a listing or read (`list`, `get`, `search`,
+  `read`) `listing`, any other verb `utility`; a tool whose name says strings
+  and whose kind is no strings kind holds them (`holds_strings`). The tools
+  the block's `sample_open` names are read as opening, selecting, analysing
+  (`analyse_sample`) and closing a program. The object words are the
+  consumers' own, the same for every server, never one server's tools: a
+  server whose tools say the same with another verb of the same category or
+  another spelling reads the same;
 - **its arguments**, each by an exact role word: `program` for the argument
   named `program`; `address` for the first read as a code or memory address of
   the binary (a struct's, a range end's, a base's, a diff's `address_a` and a
@@ -4109,19 +4127,41 @@ by its name:
   shares (the programs open on it, its scripts, its project), which another
   job may change, so it never answers from an earlier call;
 - **what it does beyond answering**, only where its definition says it: an
-  `emulate` verb emulates; a tool that requires an argument naming code, a
-  script or a command runs whatever it is given and declares no effect
-  (`why_undeclared`); a tool that says it submits or uploads now and takes a
-  file sends its bytes (`third_party: bytes`). Everything else is what the
+  `emulate` verb emulates; a tool with an argument whose name holds a word for
+  code to run (`code`, `script`, `command`, `cmd`, `python`, `js`, `lua`),
+  whatever else it holds (`user_script`, `hook_code`, `asm_code`), unless its
+  other words only name a property of the code (`style`, `type`, `kind`,
+  `mode`, `format`, `language`, `id`, `count`, `limit`, `offset`, `page`,
+  `size`: `code_style`, `command_count`); an expression evaluated as a
+  condition or a filter (`condition_expression`); or, for a verb that runs or
+  evaluates (`run`, `exec`, `eval` …), a `source`, `query` or `expression`
+  with the words that carry them (`name`, `text`, `body`, `inline`,
+  `string`), runs whatever it is given and declares no effect
+  (`why_undeclared`), its block's own analysis step included (a search's
+  `query` and a `source_address` name something else); a `run` verb (or `exec`, `eval`, `invoke` …)
+  with no such argument runs what its definition does not say, unless the
+  block's `sample_open` names it as its analysis step. A tool that takes the
+  file's content, by the one rule the disclosure reads it by (below), sends
+  its bytes (`third_party:
+  bytes`), and so does one that says it submits, uploads or sends now: unless
+  it is marked read-only, and whatever its server's hints say when it takes
+  a path, the file's content, an id or a hash. Everything else is what the
   block's `default_effects` say, and the analysis tool's what its
   `analyse_effects` say over them;
-- **its aggregate**, for a batch tool whose name without `batch` or `bulk`,
-  in the singular, is another listed tool's name.
+- **its aggregate**, for a batch tool (see `aggregate_of`).
 
 The reading of whether a tool sends the file it opens is dropped for such a
 block's tools where its `default_effects` say what its tools send, as for a
-tool the block declares; never for a tool read as sending its bytes, and
-never on another server's word. Ghidra's HTTP transport serves no MCP listing:
+tool the block declares, only for a tool it reads as opening or reading the
+file where it runs: never for a tool read as sending its bytes, never for one
+of the `utility` or `run` kind or that runs what it is given, and never on
+another server's word. A stored
+removal of such a tool (`<tool>: null` in the block's changes) stays a
+removal, kept through a dump and its validation: nothing its server lists is
+read of it, but that it sends the sample, where its listing or its server
+says so (the removal takes what the block says away, never a disclosure). A stored change of a field read only through a kind
+(`extract_iocs_with_context: {places: …}`) is laid over the kind the reading
+puts in force, inside the rows that kind's own reader reads. Ghidra's HTTP transport serves no MCP listing:
 its `/mcp/schema` is read as one (each entry's name, description and
 parameters, the required ones marked), so Ghidra over HTTP and over stdio read
 the same 165 tools alike. The schema's HTTP `method` is not read: the server
@@ -4316,7 +4356,7 @@ server of your own a key of its own.
 
 **What ships.** The built-in servers (`analysis`, `knowledge`, `network`,
 `threatintel`, `virustotal`), the Ghidra and radare2 blocks (their tools are
-read from what each lists, but for what is read by their kind), the CAPE MCP block and the
+read from what each lists, never shipped), the CAPE MCP block and the
 platform's in-process tools ship declarations that say what the code holds
 today: `threatintel` and `virustotal` carry the `reputation`
 role, the three file-reading sidecars `reads_staged_sample`, `analysis` and the

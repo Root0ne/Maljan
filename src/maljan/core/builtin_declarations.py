@@ -16,13 +16,11 @@ module under whatever an operator stored (``tool_declarations.fill_declaration``
 
 The static providers' and the CAPE sidecar's workflow prompts and radare2's
 error patterns live here as the text of their declarations; the adapters read
-the workflow from their block, so there is one copy of each. A Ghidra or
-radare2 tool's category, arguments, read-only reading and effects are read
-from what its server lists (``core.program_reading``), under what their
-blocks say of their tools as a whole (``default_effects``) and of radare2's
-analysis (``analyse_effects``); only what is read by a tool's kind is still
-data (``core.builtin_reverser_kinds``, a leftover the verb-and-object reading
-removes).
+the workflow from their block, so there is one copy of each. No table of the
+Ghidra or radare2 tools is shipped: each tool is read from what its server
+lists, by its verb and its object (``core.program_reading``), and their
+blocks say only what their tools do as a whole (``default_effects``) and
+what radare2's analysis runs (``analyse_effects``).
 """
 
 from __future__ import annotations
@@ -33,7 +31,6 @@ from collections.abc import Mapping
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
-from maljan.core.builtin_reverser_kinds import GHIDRA_KINDS, R2_KINDS
 from maljan.core.legacy_reputation import STORED_REPUTATION_KINDS
 from maljan.core.reputation import REPUTATION_KIND
 from maljan.tools.errors import BAD_ARGUMENT, TOOL_FAILED
@@ -736,11 +733,6 @@ def _with_effects(
     return out
 
 
-def _copy_tables(tools: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
-    """A fresh copy of a leftover kind table (``builtin_reverser_kinds``)."""
-    return {name: dict(facts) for name, facts in tools.items()}
-
-
 def _one_program_block(role: str) -> dict[str, Any]:
     """A one-program sidecar's declaration: its role and its mount; its tools are its own."""
     return {
@@ -838,7 +830,6 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "auto_name_prefixes": ["FUN_", "LAB_", "SUB_"],
         "data_label_prefixes": ["DAT_"],
         "default_effects": dict(_NO_EFFECT),
-        "tool_facts": _copy_tables(GHIDRA_KINDS),
     },
     "r2": {
         "work_dir": "r2-work",
@@ -847,7 +838,6 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "error_patterns": list(R2_ERROR_PATTERNS),
         "auto_name_prefixes": ["fcn.", "loc.", "sub.", "func."],
         "default_effects": dict(_NO_EFFECT),
-        "tool_facts": _copy_tables(R2_KINDS),
         "analyse_effects": dict(_R2_ANALYSIS_EMULATES),
     },
     # The workflow's ``submit_file`` sends the sample to the sandbox: declared

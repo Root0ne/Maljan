@@ -166,14 +166,30 @@ def _serve_changed(change: Callable[..., Any]) -> None:
     # And what the platform read of a server's undeclared tools, changed alike.
     for source, (launch, facts, *_closed) in dict(served_declarations._DERIVED).items():
         held = dict(served_declarations.served(source, launch))
+        # What each tool is read as on a program-analysis server, alike.
+        program = dict(served_declarations.program_read(source, launch))
         if change is _emptied:
             served_declarations.forget_served(source)
         elif change is _reshaped:
             reshaped = {n: _reshape(n, f) for n, f in facts.items()}
-            served_declarations.register_served(source, held, launch, reshaped)
+            served_declarations.register_served(
+                source,
+                held,
+                launch,
+                reshaped,
+                None,
+                {n: _reshape(n, f) for n, f in program.items()},
+            )
         else:
             rekinded = {n: ToolFacts(kind="reference") for n in facts}
-            served_declarations.register_served(source, held, launch, rekinded)
+            served_declarations.register_served(
+                source,
+                held,
+                launch,
+                rekinded,
+                None,
+                {n: ToolFacts(kind="reference") for n in program},
+            )
 
 
 def _in_process(change: Callable[..., Any]) -> Callable[[], dict[Any, Any]]:

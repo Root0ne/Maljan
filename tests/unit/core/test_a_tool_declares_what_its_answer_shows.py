@@ -126,7 +126,7 @@ class TestTheDigests:
         digests = ToolDeclarations.from_settings(settings).digests()
         assert digests["mcp:knowledge"] == "b261c17f07e13ef9"
         assert digests["mcp:network"] == "7211e6023885a063"
-        assert digests["provider:ghidra"] == "1bab40cba81d028e"
+        assert digests["provider:ghidra"] == "01e22fee1043d4c4"
         assert digests["sandbox"] == "c2bf77971e47dfa4"
 
 

@@ -2008,9 +2008,14 @@ def stored_in_force(
     if unreadable_map(stored):
         _warn_unreadable_map(where)
         return _copy(dict(shipped)), [CHANGES_MARK]
+    removals: list[str] = []
     if holds_changes(stored):
         named = without_mark(stored)
         in_force = merge_tool_facts(shipped, named)
+        # A removal of a tool the block does not ship stays a removal: the
+        # tool is read from what its server lists, and the operator took it
+        # out of that reading (``MCPServerConfig.removed_tools``).
+        removals = [str(t) for t, change in named.items() if change is None and t not in shipped]
     else:
         named = dict(stored)
         in_force = {
@@ -2026,6 +2031,9 @@ def stored_in_force(
             in_force.pop(tool, None)
     if refused:
         _warn_refused_changes(where, refused)
+    for tool in removals:
+        if not _refused_name(tool, server):
+            in_force[tool] = None
     return in_force, [str(tool) for tool in refused]
 
 
@@ -2676,6 +2684,9 @@ class Declared:
     data_label_prefixes: tuple[str, ...] = ()
     reference_urls: tuple[str, ...] = ()
     tools: Mapping[str, ToolFacts] = field(default_factory=dict)
+    # The tools the block removed that it does not ship (``removed_tools``):
+    # nothing its server lists is read of them.
+    removed: frozenset[str] = frozenset()
     # Per tool, the kind-dependent fields the block sets with no kind of its
     # own (``kind_free_changes``), laid over the kind its listing's reading
     # puts in force.
@@ -2724,6 +2735,7 @@ class Declared:
             data_label_prefixes=tuple(getattr(copied, "data_label_prefixes", ()) or ()),
             reference_urls=tuple(getattr(copied, "reference_urls", ()) or ()),
             tools=dict(getattr(copied, "tool_facts", {}) or {}),
+            removed=frozenset(getattr(copied, "removed_tools", None) or ()),
             reputation_service=getattr(copied, "reputation_service", None),
             default_effects=getattr(copied, "default_effects", None),
             analyse_effects=getattr(copied, "analyse_effects", None),

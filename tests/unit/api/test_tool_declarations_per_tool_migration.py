@@ -27,6 +27,9 @@ MIGRATION = VERSIONS / "20261012000000_tool_declarations_stored_per_tool.py"
 RECORD = VERSIONS / "20261012000000_shipped_tool_declarations.json"
 SERVERS = "core.mcp.servers"
 GHIDRA = "core.static.ghidra.tool_facts"
+# A provider leaf that still ships a table of its tools (Ghidra's and radare2's are
+# read from their listings, T-418 PR4).
+CAPE_MCP = "core.sandbox.cape2.mcp.tool_facts"
 
 
 def _module():
@@ -354,14 +357,14 @@ def test_a_save_before_the_migration_keeps_every_tool_after_it() -> None:
     changes = _marked({tool: {"display_name": "Mine"}})
     sent = {**dev, "virustotal": {**dev["virustotal"], "tool_facts": changes}}
     saved = validate_server_map(sent, stored=dev)
-    ghidra = _shipped_dump()["static"]["ghidra"]["tool_facts"]
-    leaf_tool = sorted(ghidra)[0]
-    leaf = svc.stored_declaration_leaves({GHIDRA: _marked({leaf_tool: {"timeout_seconds": 5}})})[
-        GHIDRA
+    cape = _shipped_dump()["sandbox"]["cape2"]["mcp"]["tool_facts"]
+    leaf_tool = sorted(cape)[0]
+    leaf = svc.stored_declaration_leaves({CAPE_MCP: _marked({leaf_tool: {"timeout_seconds": 5}})})[
+        CAPE_MCP
     ]
     conn = _connect()
     _insert(conn, SERVERS, saved)
-    _insert(conn, GHIDRA, leaf)
+    _insert(conn, CAPE_MCP, leaf)
     before = _rows(conn)
     _run(_module(), conn)
     assert _rows(conn) == before
@@ -370,7 +373,7 @@ def test_a_save_before_the_migration_keeps_every_tool_after_it() -> None:
     assert set(held_facts) == set(shipped)
     assert held_facts[tool]["display_name"] == "Mine"
     assert held_facts[tool]["kind"] == shipped[tool]["kind"]
-    assert set(held["static"]["ghidra"]["tool_facts"]) == set(ghidra)
+    assert set(held["sandbox"]["cape2"]["mcp"]["tool_facts"]) == set(cape)
 
 
 def test_an_unmigrated_whole_map_is_read_as_dev_read_it() -> None:
@@ -388,9 +391,11 @@ def test_an_unmigrated_whole_map_is_read_as_dev_read_it() -> None:
         tool: _read(_with_shipped_effects(entry, shipped.get(tool)))
         for tool, entry in whole.items()
     }
-    ghidra = _shipped_dump()["static"]["ghidra"]["tool_facts"]
-    tool = next(iter(ghidra))
-    leaf = _in_force({GHIDRA: {tool: {"kind": "strings"}}})["static"]["ghidra"]["tool_facts"]
+    cape = _shipped_dump()["sandbox"]["cape2"]["mcp"]["tool_facts"]
+    tool = next(iter(cape))
+    leaf = _in_force({CAPE_MCP: {tool: {"kind": "strings"}}})["sandbox"]["cape2"]["mcp"][
+        "tool_facts"
+    ]
     assert set(leaf) == {tool}
 
 
