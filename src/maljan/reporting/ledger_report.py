@@ -5,14 +5,15 @@ section says which ledger entries it was built from. That is the whole design:
 a reader who doubts a row can name the call behind it, and a section that can
 name no call is a bug the contract test fails on.
 
-The module is a dispatch table, not a pipeline. A tool the table knows gets a
+The module is a dispatch table, not a pipeline, keyed by the kind a tool
+declares, never by its name. A tool of a kind the table knows gets a
 purpose-built section — a PE section table looks like a PE section table, a
-capa result looks like a capability list. A tool the table does not know still
-lands in the report through the generic fallbacks: a JSON object becomes a
-key/value block, a JSON array of objects becomes a table with the union of
-their keys as columns, and anything else becomes a capped text block. That is
-what makes the report open to a tool server nobody has written yet — adding a
-tool adds a section without touching this file.
+capability rule tool's answer looks like a capability list. A tool the table
+does not know still lands in the report through the generic fallbacks: a JSON
+object becomes a key/value block, a JSON array of objects becomes a table with
+the union of their keys as columns, and anything else becomes a capped text
+block. That is what makes the report open to a tool server nobody has written
+yet — adding a tool adds a section without touching this file.
 
 Agents contribute two more shapes. ``artifacts`` are the tables an analyst
 established itself, grouped by their ``kind``; ``findings`` are its conclusions,
@@ -30,6 +31,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
@@ -121,6 +123,9 @@ class _Sections:
         # citation and the question "was this entry drawn" are one lookup.
         self._cited: dict[str, set[str]] = {}
         self._credited: set[str] = set()
+        # The display name of the tool behind each row a rule table holds, in
+        # row order (:func:`_rule_table`).
+        self.row_tools: dict[str, list[str]] = {}
 
     def _full(self, section: EvidenceSection, size: int) -> bool:
         if size < MAX_ROWS:
@@ -191,6 +196,14 @@ class _Sections:
         section.columns.append(name)
         for row in section.rows:
             row.append(fill)
+        self._seen[section.key] = {tuple(row) for row in section.rows}
+
+    def fill_column(self, section: EvidenceSection, name: str, values: list[str]) -> None:
+        """Give a table one more column holding ``values``, one per row it holds already."""
+        self.add_column(section, name)
+        at = section.columns.index(name)
+        for row, value in zip(section.rows, values, strict=False):
+            row[at] = value
         self._seen[section.key] = {tuple(row) for row in section.rows}
 
     def add_row(self, section: EvidenceSection, row: list[str]) -> None:
@@ -611,12 +624,98 @@ def _strings(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
 # The rule tables' titles: ``{tool}`` is the rule tool's declared display name.
 RULE_MATCHES_TITLE = "{tool} rule matches"
 CAPABILITIES_TITLE = "{tool} capabilities"
-# The rule-match tables' section keys, by the declared kind whose rows each
-# holds (stored keys, kept for stored-run byte identity).
-RULE_TABLE_OF_KIND: dict[str, str] = {
-    "event_rules": "sigma_matches",
-    "signature_rules": "yara_matches",
+
+# How a rule table's cell reads a technique list rather than one field: the
+# ids a row's ATT&CK tags spell (``attack.t1059``), and the ids the tool's
+# declaration places in the row (``techniques``).
+TAGGED_TECHNIQUES = "#tagged techniques"
+DECLARED_TECHNIQUES = "#declared techniques"
+
+
+@dataclass(frozen=True)
+class RuleColumn:
+    """One column of a rule table, and where each row's cell is read from.
+
+    ``reads`` are tried in order, and the cell is the first that holds
+    anything (the last one read when none does): ``=name`` is the value the
+    tool's declaration names ``name`` (``values``), a plain name the row's own
+    field of the answer shape the tools of the kind share (``meta.level`` one
+    level down), and :data:`TAGGED_TECHNIQUES` or :data:`DECLARED_TECHNIQUES`
+    a technique list. Each column but a technique column reads a declared
+    value of its own name first, so a tool whose rows are shaped otherwise
+    fills it by declaring where; a technique column reads its technique
+    sources in its order (the row's own ids, then the declared ones, or the
+    reverse). ``compared`` is whether a run comparison pairs one rule's rows on
+    the cell (``run_diff``): where a rule matched is not which rule it is.
+    """
+
+    heading: str
+    reads: tuple[str, ...]
+    compared: bool = False
+
+
+@dataclass(frozen=True)
+class RuleTable:
+    """The table every tool of one rule kind is drawn in.
+
+    ``title`` names the tool by its declared display name; ``rows`` is the
+    answer field the rows are under where the declaration names none.
+    """
+
+    title: str
+    rows: str
+    columns: tuple[RuleColumn, ...]
+
+
+# The rule tables, by the declared kind whose rows each holds: a rule-match
+# list (signature rules over the bytes, event rules over a sandbox's events)
+# and a capability list with its ATT&CK ids. Any tool that declares one of
+# these kinds is drawn in its kind's table, under its kind's key
+# (:func:`section_key_of_kind`), from any server.
+RULE_TABLES: dict[str, RuleTable] = {
+    "signature_rules": RuleTable(
+        RULE_MATCHES_TITLE,
+        "matches",
+        (
+            RuleColumn("Rule", ("=rule", "rule", "name")),
+            RuleColumn("Tags", ("=tags", "tags"), compared=True),
+            RuleColumn("Where", ("=where", "strings", "offsets", "meta")),
+        ),
+    ),
+    "event_rules": RuleTable(
+        RULE_MATCHES_TITLE,
+        "matches",
+        (
+            RuleColumn("Rule", ("=title", "title", "=rule", "rule", "id")),
+            RuleColumn("Level", ("=level", "level", "meta.level"), compared=True),
+            RuleColumn("Technique", (TAGGED_TECHNIQUES, DECLARED_TECHNIQUES), compared=True),
+            RuleColumn("Matched fields", ("=matched_fields", "matched_fields")),
+        ),
+    ),
+    "capability_rules": RuleTable(
+        CAPABILITIES_TITLE,
+        "capabilities",
+        (
+            RuleColumn("Namespace", ("=namespace", "namespace"), compared=True),
+            RuleColumn("Rule", ("=rule", "rule")),
+            RuleColumn("ATT&CK", ("attck", DECLARED_TECHNIQUES), compared=True),
+            RuleColumn("MBC", ("=mbc", "mbc")),
+        ),
+    ),
 }
+
+# The kinds of rule-match list, in the order a reader names them.
+RULE_MATCH_KINDS: tuple[str, ...] = ("event_rules", "signature_rules")
+
+# The column a rule table gains once it holds the rows of more than one tool:
+# each row's tool, by its declared display name. A table one tool filled has
+# none, and its title names that tool.
+TOOL_COLUMN = "Tool"
+
+
+def section_key_of_kind(kind: str) -> str:
+    """The key of the table a kind's tools are drawn in, whichever tool filled it."""
+    return tool_kinds.stored_section_key(kind)
 
 
 def titled_tool(title: Any, template: str) -> str:
@@ -635,9 +734,30 @@ def titled_tool(title: Any, template: str) -> str:
     return ""
 
 
+def rule_table_tools(section: Any, template: str) -> list[str]:
+    """Every tool a rule table's rows came from, in the order they were first drawn.
+
+    The table's :data:`TOOL_COLUMN` where it holds more than one tool's rows,
+    else the one tool its title names in ``template`` (:func:`titled_tool`);
+    ``[]`` for a title of another form. ``section`` is the model or a stored
+    report's dictionary.
+    """
+
+    def field(name: str) -> Any:
+        return section.get(name) if isinstance(section, dict) else getattr(section, name, None)
+
+    columns = [str(column) for column in field("columns") or []]
+    if TOOL_COLUMN in columns:
+        at = columns.index(TOOL_COLUMN)
+        named = (str(row[at]) for row in field("rows") or [] if len(row) > at and row[at])
+        return list(dict.fromkeys(named))
+    tool = titled_tool(field("title"), template)
+    return [tool] if tool else []
+
+
 def _rule_rows(entry: LedgerEntry, data: dict[str, Any], key: str) -> Any:
-    """A rule answer's rows: where its declaration says, else under ``key`` as the
-    built-in rule tools answer."""
+    """A rule answer's rows: where its declaration says, else under ``key``, the
+    answer field the tools of its kind share."""
     facts = tool_kinds.declared_facts(entry)
     if facts is not None and facts.rows:
         return select(data, facts.rows)
@@ -662,85 +782,59 @@ def _declared_techniques(entry: LedgerEntry, row: dict[str, Any]) -> list[str]:
     return tool_kinds.row_technique_ids(row, facts) if facts is not None else []
 
 
-def _yara(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
-    matches = _rule_rows(entry, data, "matches")
-    if not isinstance(matches, list) or not matches:
+def _rule_cell(entry: LedgerEntry, row: dict[str, Any], column: RuleColumn) -> Any:
+    """One cell of a rule table: the first of the column's reads that holds anything."""
+    value: Any = None
+    for read in column.reads:
+        if read == TAGGED_TECHNIQUES:
+            value = sigma_technique_ids(row)
+        elif read == DECLARED_TECHNIQUES:
+            value = _declared_techniques(entry, row)
+        elif read.startswith("="):
+            value = _declared(entry, row, read[1:])
+        else:
+            value = row
+            for step in read.split("."):
+                value = value.get(step) if isinstance(value, dict) else None
+        if value:
+            return value
+    return value
+
+
+def _rule_table(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    """A rule tool's rows, in the table of its declared kind (:data:`RULE_TABLES`)."""
+    kind = tool_kinds.kind_of(entry)
+    of_kind = RULE_TABLES.get(kind)
+    if of_kind is None:
         return
-    table = acc.get(
-        RULE_TABLE_OF_KIND["signature_rules"],
-        RULE_MATCHES_TITLE.format(tool=tool_kinds.display_name(entry)),
-        "table",
-        columns=["Rule", "Tags", "Where"],
-    )
-    for row in matches:
-        if not isinstance(row, dict):
-            continue
-        acc.add_row(
-            table,
-            [
-                _text(_declared(entry, row, "rule") or row.get("rule") or row.get("name")),
-                _text(row.get("tags")),
-                _text(row.get("strings") or row.get("offsets") or row.get("meta")),
-            ],
-        )
-    acc.credit(table, entry)
-
-
-def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
-    matches = _rule_rows(entry, data, "matches")
-    if not isinstance(matches, list) or not matches:
-        return
-    table = acc.get(
-        RULE_TABLE_OF_KIND["event_rules"],
-        RULE_MATCHES_TITLE.format(tool=tool_kinds.display_name(entry)),
-        "table",
-        columns=["Rule", "Level", "Technique", "Matched fields"],
-    )
-    for row in matches:
-        if not isinstance(row, dict):
-            continue
-        raw_meta = row.get("meta")
-        meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
-        acc.add_row(
-            table,
-            [
-                _text(
-                    _declared(entry, row, "title")
-                    or row.get("title")
-                    or _declared(entry, row, "rule")
-                    or row.get("rule")
-                    or row.get("id")
-                ),
-                _text(row.get("level") or meta.get("level")),
-                _text(sigma_technique_ids(row) or _declared_techniques(entry, row)),
-                _text(row.get("matched_fields")),
-            ],
-        )
-    acc.credit(table, entry)
-
-
-def _capa(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
-    rows = _rule_rows(entry, data, "capabilities")
+    rows = _rule_rows(entry, data, of_kind.rows)
     if not isinstance(rows, list) or not rows:
         return
+    named = tool_kinds.display_name(entry)
     table = acc.get(
-        "capa_capabilities",
-        CAPABILITIES_TITLE.format(tool=tool_kinds.display_name(entry)),
+        section_key_of_kind(kind),
+        of_kind.title.format(tool=named),
         "table",
-        columns=["Namespace", "Rule", "ATT&CK", "MBC"],
+        columns=[column.heading for column in of_kind.columns],
     )
+    # Each row says which tool it came from once a second tool's rows join
+    # the table, and the title names every tool; a table one tool filled is
+    # drawn as it always was.
+    tools = acc.row_tools.setdefault(table.key, [])
+    if TOOL_COLUMN not in table.columns and any(tool != named for tool in tools):
+        acc.fill_column(table, TOOL_COLUMN, tools)
     for row in rows:
         if not isinstance(row, dict):
             continue
-        acc.add_row(
-            table,
-            [
-                _text(_declared(entry, row, "namespace") or row.get("namespace")),
-                _text(_declared(entry, row, "rule") or row.get("rule")),
-                _text(row.get("attck") or _declared_techniques(entry, row)),
-                _text(row.get("mbc")),
-            ],
-        )
+        cells = [_text(_rule_cell(entry, row, column)) for column in of_kind.columns]
+        if TOOL_COLUMN in table.columns:
+            cells.append(named)
+        held = len(table.rows)
+        acc.add_row(table, cells)
+        if len(table.rows) > held:
+            tools.append(named)
+    if TOOL_COLUMN in table.columns:
+        table.title = of_kind.title.format(tool=" and ".join(dict.fromkeys(tools)))
     acc.credit(table, entry)
 
 
@@ -1203,19 +1297,18 @@ def _finding_confidence(value: Any) -> str:
 
 
 def _reputation(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
-    """A reputation lookup, with the engine counts as rows of their own.
+    """A lookup of any reputation kind, with the engine counts as rows of their own.
 
     The service answers the counts nested inside its payload, and the generic
     block flattens that into one cell a reader has to scroll to; the count is
     the one fact of the lookup a report states. The counts are the record the
     lookup's declaration read from the answer when the entry was written
-    (``core.reputation``), from any server.
+    (``core.reputation``, its ``reputation`` shape), from any server.
     """
-    _generic_kv(acc, entry, data)
+    section = _generic_kv(acc, entry, data)
     answer = reputation_of(entry)
     if answer is None:
         return
-    section = acc.get(f"tool_{entry.tool}", tool_kinds.section_title(entry), "kv")
     for name in ("malicious", "suspicious", "undetected", "harmless"):
         if name in answer.stats:
             acc.add_row(section, [f"engines {name}", str(answer.stats[name])])
@@ -1235,9 +1328,7 @@ _BUILDERS: dict[str, Any] = {
         _binary_info,
         _strings,
         _iocs,
-        _yara,
-        _sigma,
-        _capa,
+        _rule_table,
         _sandbox_processes,
         _sandbox_network,
         _sandbox_signatures,
@@ -1261,6 +1352,18 @@ _BUILDERS: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 
+def _answer_key(entry: LedgerEntry) -> str:
+    """The key of the generic block an entry's answer is drawn in: one block per tool.
+
+    The generic block draws an answer in its tool's own shape, a kind it has
+    no reader of or none at all (an undeclared tool, at full strength): two
+    tools of one kind answer in two shapes, and one block of both would mix
+    their columns under one tool's title. A kind with a reader of its answer
+    shape is drawn by kind instead (``BUILDER_OF_KIND``, :data:`RULE_TABLES`).
+    """
+    return f"tool_{entry.tool}"
+
+
 def _generic_table(
     acc: _Sections,
     entry: LedgerEntry,
@@ -1279,7 +1382,7 @@ def _generic_table(
             if column not in columns:
                 columns.append(str(column))
     section = acc.get(
-        key or f"tool_{entry.tool}",
+        key or _answer_key(entry),
         title or tool_kinds.section_title(entry),
         "table",
         columns=columns,
@@ -1307,9 +1410,10 @@ def _generic_kv(
     *,
     key: str = "",
     title: str = "",
-) -> None:
+) -> EvidenceSection:
+    """A JSON object, as field and value rows; a list of objects in it as a table of its own."""
     section = acc.get(
-        key or f"tool_{entry.tool}",
+        key or _answer_key(entry),
         title or tool_kinds.section_title(entry),
         "kv",
         columns=["Field", "Value"],
@@ -1333,12 +1437,13 @@ def _generic_kv(
             [str(name).replace("_", " "), _code_or_text(value, (name,), declared)],
         )
     acc.credit(section, entry)
+    return section
 
 
 def _generic_text(acc: _Sections, entry: LedgerEntry) -> None:
     if not entry.output.strip():
         return
-    section = acc.get(f"tool_{entry.tool}", tool_kinds.section_title(entry), "text")
+    section = acc.get(_answer_key(entry), tool_kinds.section_title(entry), "text")
     if not section.text:
         section.text = _cut_text(entry.output, entry.id)
     acc.credit(section, entry)
@@ -1353,7 +1458,7 @@ def _fallback(acc: _Sections, entry: LedgerEntry) -> None:
         if any(isinstance(row, dict) for row in data):
             _generic_table(acc, entry, data)
         else:
-            section = acc.get(f"tool_{entry.tool}", tool_kinds.section_title(entry), "list")
+            section = acc.get(_answer_key(entry), tool_kinds.section_title(entry), "list")
             for item in data:
                 acc.add_item(section, _text(item))
             acc.credit(section, entry)

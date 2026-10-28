@@ -412,8 +412,29 @@ def stored_reputation_counts(rows: Mapping[str, str]) -> tuple[str, str, str]:
 
 
 def stored_builder_of(tool: str) -> str | None:
-    """The section builder a source-less entry of ``tool`` was drawn with."""
-    return legacy.BUILDERS.get(tool)
+    """The section builder a source-less entry of ``tool`` is drawn with.
+
+    The builder its table names, or the reader of its kind's answer shape
+    that replaced that builder (``legacy_tool_names.RENAMED_BUILDERS``).
+    """
+    named = legacy.BUILDERS.get(tool)
+    return legacy.RENAMED_BUILDERS.get(named, named) if named is not None else None
+
+
+def stored_section_key(kind: str) -> str:
+    """The key the table of ``kind`` is held under: its stored reports' key, else the kind.
+
+    Keyed by the kind, whichever tool of it filled the table; a kind whose
+    table stored reports hold under an older key keeps that key
+    (``legacy_tool_names.STORED_SECTION_KEY_BY_KIND``), so a stored report,
+    a rebuilt one and the console read one key.
+    """
+    return legacy.STORED_SECTION_KEY_BY_KIND.get(kind, kind)
+
+
+def stored_rule_word(kind: str) -> str:
+    """The word a stored rule table of ``kind`` whose title names no tool is labelled by."""
+    return legacy.STORED_RULE_WORD_BY_KIND.get(kind, kind)
 
 
 def stored_section_hint(section: str, tool: str) -> bool:

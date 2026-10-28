@@ -299,6 +299,8 @@ def test_the_section_builders_are_drawn_by_kind(declared: ToolDeclarations) -> N
     differ = []
     for source, name, facts in _built_in_tools(declared):
         expected = legacy_tool_names.BUILDERS.get(name) or SHIPPED_AFTER_THE_NAME_TABLES.get(name)
+        # A builder one reader of its kind's answer shape replaced is drawn by that reader.
+        expected = legacy_tool_names.RENAMED_BUILDERS.get(expected or "", expected)
         by_kind = BUILDER_OF_KIND.get(facts.kind)  # type: ignore[attr-defined]
         if expected != by_kind:
             differ.append((source, name, expected, by_kind))

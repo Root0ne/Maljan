@@ -208,6 +208,30 @@ STORED_WORD_BY_KIND: dict[str, str] = {
 # Each ordered table, by the consumer it orders.
 ORDERED: dict[str, tuple[str, ...]] = {"markdown._ANALYSIS_TOOLS": ANALYSIS_TOOLS}
 
+# ``ledger_report``: the keys the rule tables of each kind are stored under,
+# named after the tools that first filled them. Every stored report holds its
+# tables under these keys, the replay compares them, and the console routes
+# them to its tabs, so a table of the kind keeps its key whichever tool fills
+# it; a kind with a table and no stored key is keyed by the kind itself.
+STORED_SECTION_KEY_BY_KIND: dict[str, str] = {
+    "signature_rules": "yara_matches",
+    "event_rules": "sigma_matches",
+    "capability_rules": "capa_capabilities",
+}
+# The word a stored rule table whose title names no tool was labelled by.
+STORED_RULE_WORD_BY_KIND: dict[str, str] = {
+    "signature_rules": "yara",
+    "event_rules": "sigma",
+    "capability_rules": "capa",
+}
+# The builders of :data:`BUILDERS` that one reader of a kind's answer shape
+# replaced, by the reader that draws their entries now.
+RENAMED_BUILDERS: dict[str, str] = {
+    "_yara": "_rule_table",
+    "_sigma": "_rule_table",
+    "_capa": "_rule_table",
+}
+
 
 def _names(values: Any) -> Callable[[str], bool]:
     held = frozenset(values)

@@ -68,15 +68,26 @@ INDICATOR_SHAPE_NOTE = (
     "different shapes are not paired; each is listed by run."
 )
 
-# The rule-match sections the report builds from the rule tools' ledger rows,
-# the engine each belongs to, and the columns compared on a pair. ``Where`` and
-# ``Matched fields`` say where a rule matched, which is not a fact about which
-# rule matched, and are left out of the comparison.
-DETECTION_SECTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "yara_matches": ("yara", ("Tags",)),
-    "sigma_matches": ("sigma", ("Level", "Technique")),
-    "capa_capabilities": ("capa", ("Namespace", "ATT&CK")),
-}
+
+def detection_sections() -> dict[str, tuple[str, tuple[str, ...]]]:
+    """The rule-match sections the report builds, by key: each one's kind and compared columns.
+
+    Read from the rule tables of each kind (``ledger_report.RULE_TABLES``):
+    the key a kind's table is held under, whichever tool filled it, and the
+    columns compared on a pair. A column that says where a rule matched
+    (``Where``, ``Matched fields``) is not a fact about which rule matched,
+    and is left out of the comparison.
+    """
+    from maljan.reporting.ledger_report import RULE_TABLES, section_key_of_kind
+
+    return {
+        section_key_of_kind(kind): (
+            kind,
+            tuple(column.heading for column in table.columns if column.compared),
+        )
+        for kind, table in RULE_TABLES.items()
+    }
+
 
 # The one case rule, applied to indicator values and STIX keys alike: a value
 # is compared without regard to case only where it is case-insensitive by
@@ -774,21 +785,29 @@ def _detection_items(run: RunRecord) -> tuple[list[_Item], bool, list[str]]:
     A rule section cites its ledger entries as a whole, not per rule, so the
     ids are the section's and no row carries them.
     """
+    from maljan.reporting import tool_kinds
+    from maljan.reporting.ledger_report import TOOL_COLUMN
+
     items: list[_Item] = []
     evidence: list[str] = []
     recorded = False
+    specs = detection_sections()
     for raw in _list(_map(run.malware_report).get("sections")):
         section = _map(raw)
-        spec = DETECTION_SECTIONS.get(_text(section.get("key")))
+        spec = specs.get(_text(section.get("key")))
         if spec is None:
             continue
         recorded = True
-        kind_engine, compared = spec
+        kind, compared = spec
         # Rows pair by the section's kind, so one rule matched by two tools of
-        # the kind in two runs is one detection; the label names the tool the
-        # table's title names (a swapped one as itself), else the kind's engine.
-        label_engine = _titled_engine(section.get("title")) or kind_engine
+        # the kind in two runs is one detection, keyed by the kind's word (the
+        # key the record has always given a row); the label names the row's
+        # own tool where the table holds several tools' rows, else the tool
+        # the table's title names (a swapped one as itself), else that word.
+        kind_word = tool_kinds.stored_rule_word(kind)
+        label_engine = _titled_engine(section.get("title")) or kind_word
         columns = [_text(c).lower() for c in _list(section.get("columns"))]
+        tool_at = columns.index(TOOL_COLUMN.lower()) if TOOL_COLUMN.lower() in columns else None
         try:
             rule_at = columns.index("rule")
         except ValueError:
@@ -806,7 +825,9 @@ def _detection_items(run: RunRecord) -> tuple[list[_Item], bool, list[str]]:
                 name.lower(): (_text(cells[pos]) if pos < len(cells) else "") or None
                 for name, pos in positions.items()
             }
-            items.append(_Item(f"{kind_engine}|{rule}", f"{label_engine}: {rule}", fields))
+            row_tool = _text(cells[tool_at]) if tool_at is not None and tool_at < len(cells) else ""
+            label = f"{row_tool.lower() or label_engine}: {rule}"
+            items.append(_Item(f"{kind_word}|{rule}", label, fields))
     return items, recorded, evidence
 
 

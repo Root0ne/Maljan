@@ -180,22 +180,29 @@ def _shipped_rule_word(kind: str) -> str:
 def rule_pointer(report: Any = None) -> str:
     """The rule pointer rule 5 offers, read from the rule tables ``report`` holds.
 
-    One word per rule-table kind (event rules, then signature rules): the
-    tool the report's table of that kind is titled by, lower-cased, so a tool
-    swapped in for a shipped one is named as itself; a kind the report holds
-    no table of keeps the shipped tool's word ("sigma/yara" for a built-in
-    run, as before).
+    One word per tool of each rule-table kind (event rules, then signature
+    rules): every tool the report's table of that kind holds rows of, by its
+    display name lower-cased (``ledger_report.rule_table_tools``), so a tool
+    swapped in for a shipped one, or added beside it, is named as itself; a
+    kind the report holds no table of keeps the shipped tool's word
+    ("sigma/yara" for a built-in run, as before).
     """
-    from maljan.reporting.ledger_report import RULE_MATCHES_TITLE, RULE_TABLE_OF_KIND, titled_tool
+    from maljan.reporting.ledger_report import (
+        RULE_MATCH_KINDS,
+        RULE_MATCHES_TITLE,
+        rule_table_tools,
+        section_key_of_kind,
+    )
 
-    titles = {
-        str(getattr(section, "key", "")): getattr(section, "title", "")
+    tables = {
+        str(getattr(section, "key", "")): section
         for section in getattr(report, "sections", None) or ()
     }
-    words = [
-        titled_tool(titles.get(key), RULE_MATCHES_TITLE).lower() or _shipped_rule_word(kind)
-        for kind, key in RULE_TABLE_OF_KIND.items()
-    ]
+    words: list[str] = []
+    for kind in RULE_MATCH_KINDS:
+        table = tables.get(section_key_of_kind(kind))
+        named = rule_table_tools(table, RULE_MATCHES_TITLE) if table is not None else []
+        words.extend([tool.lower() for tool in named] or [_shipped_rule_word(kind)])
     pointer = "/".join(dict.fromkeys(words))
     return f"{'an' if pointer[:1] in 'aeiou' else 'a'} {pointer} pointer"
 

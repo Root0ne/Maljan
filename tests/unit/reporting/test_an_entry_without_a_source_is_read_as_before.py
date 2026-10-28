@@ -151,12 +151,14 @@ def test_each_prefix_table_is_kept_as_it_was(consumer: str) -> None:
 
 
 def test_the_builders_and_the_analysis_order_are_kept_as_they_were() -> None:
+    """Each tool is drawn by the builder it was, or by the reader of its kind that replaced it."""
     assert legacy.BUILDERS == BEFORE_BUILDERS
     assert legacy.ANALYSIS_TOOLS == BEFORE_ANALYSIS_ORDER
     for name, builder in BEFORE_BUILDERS.items():
-        assert tool_kinds.builder_of({"tool": name}) == builder
+        drawn = legacy.RENAMED_BUILDERS.get(builder, builder)
+        assert tool_kinds.builder_of({"tool": name}) == drawn
         facts = legacy.builtin_facts(name)
-        assert facts is not None and BUILDER_OF_KIND.get(facts.kind) == builder
+        assert facts is not None and BUILDER_OF_KIND.get(facts.kind) == drawn
 
 
 def test_no_two_built_in_sources_declare_one_name_two_ways() -> None:

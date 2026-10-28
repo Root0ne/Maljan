@@ -25,7 +25,7 @@ from maljan.agents.function_map import build_function_map, function_artefacts, f
 from maljan.core.declared_reading import shipped_by_name, stored_record
 from maljan.pipeline.run_state import index_sentence
 from maljan.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import _capa_table, _capability_owner
+from maljan.reporting.renderers.markdown import _capability_owner, _capability_table
 from maljan.schemas.evidence import LedgerEntry
 
 _DECODED = json.dumps({"strings": [{"kind": "decoded", "string": "a", "function_rva": "0x2000"}]})
@@ -80,10 +80,10 @@ def _report(title: str) -> MalwareReport:
 
 def test_the_capability_tables_name_the_tool_their_title_names() -> None:
     rule = ({"namespace": "anti-analysis", "rule": "r", "attck": "", "mbc": ""}, ["ev_0001"])
-    assert "_Measured:_ capa rules" in "\n".join(_capa_table([rule], lambda _: True, "capa"))
-    swapped = "\n".join(_capa_table([rule], lambda _: True, "RuleBench"))
+    assert "_Measured:_ capa rules" in "\n".join(_capability_table([rule], lambda _: True, "capa"))
+    swapped = "\n".join(_capability_table([rule], lambda _: True, "RuleBench"))
     assert "RuleBench rules" in swapped and "capa" not in swapped
-    assert "capability rules" in "\n".join(_capa_table([rule], lambda _: True))
+    assert "capability rules" in "\n".join(_capability_table([rule], lambda _: True))
     assert _capability_owner(_report("capa capabilities")) == "capa's"
     assert _capability_owner(_report("RuleBench capabilities")) == "RuleBench's"
     assert _capability_owner(_report("Capabilities")) == "a capability rule tool's"
