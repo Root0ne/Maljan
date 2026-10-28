@@ -720,8 +720,8 @@ class TestAPartialAnswerSaysSo:
 
         assert said.endswith(
             "Completeness: the platform left out 5,000 characters of this answer to fit the "
-            "room for a tool answer. Anything not shown here is unknown, not absent; this tool "
-            "takes no argument that pages it."
+            "room for a tool answer. Anything not shown here is unknown, not absent; read "
+            "further with `offset`, `limit`."
         )
 
     def test_a_whole_answer_carries_no_line(self) -> None:

@@ -217,6 +217,9 @@ class LedgerReads:
         shortened = shortened_notice(text, narrowing=narrowing)
         complete = completeness_notice(
             text,
+            # Not paged: the held answer is read again through this tool's own
+            # paging arguments, which the line names.
+            narrowing=() if paged else narrowing,
             args=None if paged or not isinstance(held_args, Mapping) else held_args,
             cut=cut if paged else max(platform_cut(row), cut),
             shortened=bool(shortened),
