@@ -2839,6 +2839,23 @@ once more, as any retry after a failure is. A replayed conversation keeps the
 seeds. A run's second chunk re-ran ten
 decompiles the first had done.
 
+The repeat stop is a stall limit, not a cap on tool use
+(`RepeatGuard.ENDS_AT`, 8). Only a refused call counts toward it: one whose tool
+and arguments, as the guard's key writes them (arguments in any order, an
+address in either case of its `0x` spelling), are identical to a call already
+answered. A served second call never counts, and neither does a call that
+differs in any argument, a page (`offset`, `limit`) included. Each refusal
+names the ledger id that holds the answer and says how to read it again and
+page through it (`read_evidence` with that `evidence_id`, `offset` and
+`limit`), and the seventh says the next one ends the loop. Eight is a stall
+limit, not a measured optimum: no stored run has a single refusal by the
+guard, so none comes near it (the most calls one loop of a stored run had
+answered without a run was four, from earlier rounds, and a useful distinct
+call still followed the fourth), and it still ends both live loops the guard
+was written from (16 of 19 steps on one `pe_info`; 11 identical `strings`
+calls, nine of them refused with one served repeat). A call outside a tool loop that reads the ledger
+(`ledger_reads`) ends at the same count of refused reads.
+
 Every call the repeat guard answers without running is filed in the ledger as
 a repeat of the entry that holds its answer (`EvidenceRecorder.record_repeat`):
 an earlier chunk's call answered from its entry, and a refused third identical
@@ -3189,13 +3206,28 @@ call on the ledger.
 One agent does one thing at a time, on both sides. A caller's asks take its own
 lock, so two `ask_*` calls in one assistant turn — which langgraph gathers and
 runs at once — go one after the other rather than putting two nested loops on
-one llama-server slot. An ask of an agent, a second ask of it and its own stage
+one llama-server slot. The judge's asks, as mediator or verdict, run at once
+where the asked agent's models serve concurrent requests
+(`delegation.asks_run_at_once`), read the way the job's analyst run mode is
+(see *The pipeline*): `llm.parallel_analysts` where an operator set
+it, else each provider's declared concurrency — a hosted API serves any
+number, a runtime taken to serve one request at a time keeps them serial, a
+local server serves as many as its `/props` slots — and only when the job's
+analysts run in parallel; never by a provider's name. An asked agent in no
+stage is read by the `auto` rule over its own models whatever the setting
+says, once per job. The ask tool tells a judge whose asks run at once so, and
+every other caller reads the sentence it always read. Each answer is its own
+call's tool result, in the order of the calls, and the asked agents' ledger
+entries are merged into the judge's in ledger-id order, never in the order the
+asks finished. A caller that merges answered asks into its own report (a lead)
+keeps them serial, since it promotes them in the order it asked. An ask of an agent, a second ask of it and its own stage
 run take *its* lock, because all three drive the same buffers and the same call
 chain. The two are different objects, which is what lets an ask made from
 inside an ask still nest. A caller waits for a busy callee only as long as it
 can still read an answer in, and one that does not free up in that time is a
 refusal like the others. An agent asked twice with the same task is served the
-second time and refused the third, by the same repeat guard every tool has.
+second time and refused from the third on, by the same repeat guard every tool
+has.
 
 ### The stage graph
 

@@ -33,7 +33,11 @@ set is its own definition narrowed by the tool policy of the stage asking.
 One agent does one thing at a time, on both sides. A caller's asks take its
 own ``asks_lock``, so two ``ask_*`` calls in one turn — which langgraph
 gathers — run one after the other rather than putting two nested loops on one
-llama-server slot. An ask of an agent, a second ask of it and its own stage
+llama-server slot. Where the asked agent's models serve concurrent requests (a
+hosted API, as the job's analyst run mode reads it: ``asks_run_at_once``) the
+ask takes no such lock and runs beside the caller's other asks; each answer is
+still the result of its own call, and the callee's ledger entries are merged
+into the caller's in ledger order, never in the order the asks finished. An ask of an agent, a second ask of it and its own stage
 run take *its* lock, because all three drive the same buffers and the same
 call chain. The two locks are different objects, which is what lets an ask
 made from inside an ask still nest. A caller waits only as long as it can
@@ -50,6 +54,7 @@ spent by its specialists' work — only by the wall clock it waits through.
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from collections.abc import Sequence
@@ -125,6 +130,15 @@ class AskArguments(BaseModel):
     )
 
 
+# The ask tool's last sentence: how two asks in one turn run. A caller whose
+# asks run one after the other (a lead, or any caller on a model served one
+# request at a time) reads the sentence it always read.
+ONE_AT_A_TIME_SENTENCE = "Ask one at a time and read each answer before the next."
+AT_ONCE_SENTENCE = (
+    "Asks in one turn run at once, and each answer comes back as its own call's result."
+)
+
+
 def tool_name(agent_key: str) -> str:
     """The name the tool carries in a caller's toolbox."""
     return f"ask_{agent_key}"
@@ -152,7 +166,11 @@ def ask_tool(container: Any, caller_key: str, callee_key: str, caller: Any = Non
         "own tools over this sample. Its answer comes back as its own claims, each with "
         "the ledger ids it cited, exactly as it gave them. "
         f"{_what_an_ask_gets_sentence(caller_key, steps, seconds)} "
-        "Ask one at a time and read each answer before the next."
+        + (
+            AT_ONCE_SENTENCE
+            if caller is not None and asks_run_at_once(container, caller, callee_key)
+            else ONE_AT_A_TIME_SENTENCE
+        )
     )
 
     def _ask(task: str, context: str = "") -> str:
@@ -359,6 +377,7 @@ def ask(
         raise DelegationRefused(why)
     callee = container.get_agent(callee_key)
     wait = _seconds_to_wait_for(caller)
+    at_once = asks_run_at_once(container, caller, callee_key)
     # One ask at a time per caller. A model that emits two ``ask_*`` calls in
     # one turn has them run concurrently — langgraph gathers a turn's tool
     # calls — and two nested loops against one llama-server slot is the
@@ -366,8 +385,9 @@ def ask(
     # recurrent state is clobbered, every step re-processes the whole prompt,
     # and the run times out looking like a model problem. The caller's own
     # lock is a different object from any callee's, so an ask made from inside
-    # an ask still nests.
-    if not _held(caller.asks_lock, wait):
+    # an ask still nests. An ask whose callee's models serve concurrent
+    # requests clobbers no slot, and takes no turn (``asks_run_at_once``).
+    if not at_once and not _held(caller.asks_lock, wait):
         raise DelegationRefused(
             f"another of your asks is still running and did not finish within {int(wait or 0)} s; "
             "ask one agent at a time, or answer from what you have"
@@ -403,12 +423,84 @@ def ask(
                 logger.info("delegation refused (%s -> %s): %s", caller_key, callee_key, why)
                 raise DelegationRefused(why)
             return _ask(
-                container, caller, callee, str(task or "").strip(), str(context or "").strip()
+                container,
+                caller,
+                callee,
+                str(task or "").strip(),
+                str(context or "").strip(),
+                at_once=at_once,
             )
         finally:
             callee.delegation_lock.release()
     finally:
-        caller.asks_lock.release()
+        if not at_once:
+            caller.asks_lock.release()
+
+
+def asks_run_at_once(container: Any, caller: Any, callee_key: str) -> bool:
+    """Whether ``caller``'s ask of ``callee_key`` may run beside its other asks.
+
+    Decided the way the job's analysts' run mode is (``pipeline.analyst_mode``),
+    never from a provider's name: ``llm.parallel_analysts`` where an operator
+    set it, else each model's declared concurrency — a hosted API serves any
+    number of requests, a runtime taken to serve one at a time (one
+    llama-server slot) does not, and a local server serves as many as its
+    ``/props`` slots. Only when the job's analysts run in parallel: an asked
+    analyst is covered by that mode. An asked specialist is in no stage, so
+    the operator's setting says nothing about its models: they are read by the
+    ``auto`` rule whatever the setting, with no server probed, once per job
+    (kept on the container). A container with no run mode (a script, a test
+    harness) and anything that cannot be read keep the asks one after the
+    other.
+
+    Only for a caller whose asks reach it as their tool results alone, the
+    judge as mediator or verdict, and which holds an ``evidence_lock`` for the
+    hand-over: one that keeps report buffers (an analyst lead) merges each
+    answered ask into its own report in the order it was asked, which asks
+    running at once could not keep.
+    """
+    if isinstance(getattr(caller, "_artifacts_buffer", None), list):
+        return False
+    if getattr(caller, "evidence_lock", None) is None:
+        return False
+    job_mode = getattr(container, "analyst_mode", None)
+    if not callable(job_mode):
+        return False
+    try:
+        if not bool(getattr(job_mode(), "parallel", False)):
+            return False
+        if callee_key in container.analyst_keys():
+            return True
+        return _a_specialist_serves_at_once(container, callee_key)
+    except Exception as exc:  # noqa: BLE001 — serial is always safe
+        logger.debug("delegation: the ask's run mode could not be read (%s).", exc)
+        return False
+
+
+def _a_specialist_serves_at_once(container: Any, callee_key: str) -> bool:
+    """Whether every model an agent in no stage may call serves concurrent requests.
+
+    The ``auto`` rule over the agent's own models (``analyst_mode._auto_mode``),
+    never the operator's ``llm.parallel_analysts``, which speaks for the
+    stages' analysts. Kept per job on the container: the rule resolves names.
+    """
+    held = getattr(container, "_asks_at_once", None)
+    if not isinstance(held, dict):
+        held = {}
+        container._asks_at_once = held
+    if callee_key not in held:
+        from maljan.core.model_assignments import assignments_for
+        from maljan.pipeline.analyst_mode import _auto_mode
+
+        mode = _auto_mode(
+            container.config,
+            "auto",
+            assignments_for(container.config, [callee_key]),
+            probe=False,
+            nobody=f"{callee_key} names no model",
+        )
+        held[callee_key] = bool(mode.parallel)
+    return bool(held[callee_key])
 
 
 def _held(lock: Any, wait: float | None) -> bool:
@@ -509,7 +601,9 @@ def _seconds_to_wait_for(caller: Any) -> float | None:
     return max(1.0, float(left) - SECONDS_KEPT_FOR_THE_CALLER)
 
 
-def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> str:
+def _ask(
+    container: Any, caller: Any, callee: Any, task: str, context: str, *, at_once: bool = False
+) -> str:
     stage = str(getattr(caller, "pipeline_stage", "") or "analysis")
     round_index = int(getattr(caller, "current_round", 0) or 0)
     sink = getattr(container, "event_sink", None)
@@ -546,12 +640,20 @@ def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> s
         callee.call_chain = ()
         _give_the_callee_back_what_it_had(callee, its_own)
         spent = int(getattr(callee, "steps_spent", 0) or 0) - spent_before
-        if budget is not None:
-            # Noted, not charged: the caller's own step budget is its own.
-            budget.note_delegated(spent)
-        _hand_over_the_record(
-            caller, callee, still_running=getattr(caller, "loop_budget", None) is budget
-        )
+        # Every ask hands over under the caller's own ``evidence_lock`` where
+        # it has one, which its loop takes to add or drain its entries: in one
+        # turn an ask that runs at once and one that does not may hand over
+        # together, and the caller's meter and buffers are written here.
+        with getattr(caller, "evidence_lock", None) or contextlib.nullcontext():
+            if budget is not None:
+                # Noted, not charged: the caller's own step budget is its own.
+                budget.note_delegated(spent)
+            _hand_over_the_record(
+                caller,
+                callee,
+                still_running=getattr(caller, "loop_budget", None) is budget,
+                in_ledger_order=at_once,
+            )
         logger.info(
             "delegation %s -> %s: %d step(s), %.1f s",
             caller.name,
@@ -868,7 +970,9 @@ def joined_within_the_bound(
     return f"{ELIDED_CHAIN}{chain}{sentence}", tuple(kept)
 
 
-def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = True) -> None:
+def _hand_over_the_record(
+    caller: Any, callee: Any, *, still_running: bool = True, in_ledger_order: bool = False
+) -> None:
     """Move what the callee recorded onto the caller, so one node writes it all.
 
     The ledger entries keep the callee's key; the stage node that drains the
@@ -884,6 +988,11 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
     the container (``ServiceContainer.hand_over_evidence``): their ids were
     issued and may already have been shown. The budget rows and the validation
     state, which belong to the caller's finished round, are logged and dropped.
+
+    ``in_ledger_order`` is an ask that ran beside the caller's other asks,
+    handed over under the caller's ``evidence_lock``: each entry is inserted
+    at the place its ledger id gives it, so asks that finish in any order
+    leave the same record. The list is never sorted again.
     """
     try:
         entries = callee.drain_evidence_entries()
@@ -909,7 +1018,10 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
         )
         _drop_the_callee_s_validation_state(callee)
         return
-    if entries:
+    if entries and in_ledger_order:
+        for entry in entries:
+            _insert_in_ledger_order(caller._evidence_entries, entry)
+    elif entries:
         caller._evidence_entries.extend(entries)
     # The callee's loop spent a budget too, and a callee that runs no stage of
     # its own is drained by nobody else: its rows would stay on it until its
@@ -980,6 +1092,23 @@ def _drain_budget_rows(callee: Any) -> list[dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001 — the meter never costs a run
         logger.debug("delegation: the callee's budget rows could not be read (%s).", exc)
         return []
+
+
+def _ledger_number(entry: Any) -> float:
+    """The number an entry's ledger id carries; an entry with none sorts after every one."""
+    from maljan.schemas.evidence import ENTRY_ID_RE
+
+    found = str(getattr(entry, "id", "") or "")
+    if not ENTRY_ID_RE.fullmatch(found):
+        return float("inf")
+    return float(found.rsplit("_", 1)[-1])
+
+
+def _insert_in_ledger_order(entries: list[Any], entry: Any) -> None:
+    """Insert ``entry`` into ``entries`` after every entry whose ledger id is not greater."""
+    import bisect
+
+    entries.insert(bisect.bisect_right(entries, _ledger_number(entry), key=_ledger_number), entry)
 
 
 def _drop_the_callee_s_validation_state(callee: Any) -> None:
