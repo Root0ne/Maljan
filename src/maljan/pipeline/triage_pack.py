@@ -827,7 +827,7 @@ class _Pack:
         error: Any = parts[1] if parts else None
         remediation = parts[2] if parts else None
         if not error and isinstance(value, dict) and value.get("reason"):
-            established = _ESTABLISHED.get(tool)
+            established = _ESTABLISHED.get(_pack_kind(tool))
             if established is not None and not established(value):
                 error = value.get("reason")
         entry = self.recorder.record(
@@ -1174,7 +1174,8 @@ class _Pack:
         ``(None, "measured")`` for a step that measures its peak and has not
         yet in this worker; ``(None, "declared")`` for one with neither.
         """
-        measure = _MEASURED_PEAKS.get(step.id) if step.builtin else None
+        implementation = _BUILTIN_STEPS.get(step.id) if step.builtin else None
+        measure = _MEASURED_PEAKS.get(implementation) if implementation is not None else None
         if measure is not None:
             value = measure()
             if value is not None:
@@ -2025,12 +2026,6 @@ MEASURED = "measured"
 DECLARED = "declared"
 _MIB = 1024 * 1024
 
-# The platform's own steps that measure their peak memory in this worker, by
-# id: the in-process adapter of each knows where its measure is kept.
-_MEASURED_PEAKS: dict[str, Callable[[], int | None]] = {
-    "capa": lambda: _capa_peak(),
-}
-
 
 def _capa_peak() -> int | None:
     from maljan.providers.static.capa_yara import measured_capa_peak_bytes
@@ -2084,6 +2079,14 @@ _BUILTIN_STEPS: dict[str, Callable[[_Pack, PackStep], None]] = {
     sandbox_sections.SECTIONS_TOOL: _Pack._sandbox_sections,
     directed_text.TOOL: _Pack._directed_text,
     behaviour_code.TOOL: _Pack._behaviour_code_links,
+}
+
+
+# The platform's own in-process implementations that measure their peak memory
+# in this worker, by the implementation (``_BUILTIN_STEPS``), never by a step's
+# id or a tool's name: each knows where its own measure is kept.
+_MEASURED_PEAKS: dict[Callable[[_Pack, PackStep], None], Callable[[], int | None]] = {
+    _Pack._capa: _capa_peak,
 }
 
 
@@ -5693,11 +5696,19 @@ def _detection_labels(labels: list[str]) -> str:
     return text
 
 
-# For the tools that answer ``reason`` beside their rows: whether the rows
-# establish anything. A ``reason`` beside nothing established is a failure.
+def _pack_kind(tool: str) -> str:
+    """The kind the pack's entry of ``tool`` is about to store: its declaration's in force."""
+    from maljan.core.declared_reading import facts_record
+
+    return kind_of({"source": PACK_SOURCE, "tool": tool, "facts": facts_record(PACK_SOURCE, tool)})
+
+
+# For the kinds whose answer says ``reason`` beside its rows: whether the rows
+# establish anything, by the kind the answer's tool declares, never the tool's
+# name. A ``reason`` beside nothing established is a failure.
 _ESTABLISHED: dict[str, Callable[[dict[str, Any]], bool]] = {
     "function_matches": lambda value: bool(value.get("matches")),
-    "api_capability": lambda value: any(
+    "api_catalogue": lambda value: any(
         isinstance(row, dict) and (row.get("category") or row.get("techniques"))
         for row in value.get("capabilities") or []
     ),

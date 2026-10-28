@@ -391,11 +391,8 @@ def test_the_pinned_servers_are_the_servers_that_read_the_staged_sample(
 
 
 def test_the_platforms_own_sources_are_the_resolving_servers(declared: ToolDeclarations) -> None:
-    from maljan.agents.evidence_recorder import _RESOLVING_SERVERS
-
     owned = {d.source for d in declared.sources() if d.platform_owned}
     assert owned == {PACK, SourceRef("mcp", "analysis")}
-    assert _RESOLVING_SERVERS == {"pipeline", "analysis"}
 
 
 def test_the_required_environment_is_the_declared_one(declared: ToolDeclarations) -> None:

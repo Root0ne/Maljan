@@ -84,6 +84,7 @@ from maljan.core.tool_declarations import (
     ReputationService,
     ToolFacts,
     check_auto_name_prefixes,
+    check_data_label_prefixes,
     check_env_names,
     check_fragment_template,
     check_mount,
@@ -1669,6 +1670,9 @@ class MCPServerConfig(BaseModel):
     # The prefixes the server's decompiler writes before an address when it
     # names a function itself (``FUN_``, ``fcn.``).
     auto_name_prefixes: list[str] = Field(default_factory=list)
+    # The prefixes it writes before an address when it names a datum itself
+    # (``DAT_``): read as a code location, never as a function's name.
+    data_label_prefixes: list[str] = Field(default_factory=list)
     # Reference URL templates for a sample (``{sha256}``, ``{md5}``, ``{sha1}``).
     reference_urls: list[str] = Field(default_factory=list)
     # Per tool: what kind of fact its answer is and where the facts sit in it.
@@ -1753,6 +1757,11 @@ class MCPServerConfig(BaseModel):
     @classmethod
     def _prefixes_are_prefixes(cls, value: list[str]) -> list[str]:
         return check_auto_name_prefixes(value)
+
+    @field_validator("data_label_prefixes")
+    @classmethod
+    def _data_prefixes_are_prefixes(cls, value: list[str]) -> list[str]:
+        return check_data_label_prefixes(value)
 
     @field_validator("prompt_fragment")
     @classmethod

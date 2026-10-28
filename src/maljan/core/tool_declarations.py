@@ -1522,6 +1522,7 @@ DECLARATION_FIELDS: tuple[str, ...] = (
     "launcher_depth",
     "prepass_tools",
     "reputation_service",
+    "data_label_prefixes",
 )
 # The declaration fields a settings snapshot records only where an operator
 # set them (the shipped values are named by a digest instead).
@@ -1576,6 +1577,16 @@ def check_auto_name_prefixes(value: list[str]) -> list[str]:
             raise ValueError(
                 f"auto_name_prefixes {prefix!r} is letters and digits ending in '_' or '.', "
                 "as a decompiler writes before the address (FUN_, fcn.)"
+            )
+    return value
+
+
+def check_data_label_prefixes(value: list[str]) -> list[str]:
+    for prefix in value:
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*[_.]", prefix):
+            raise ValueError(
+                f"data_label_prefixes {prefix!r} is letters and digits ending in '_' or '.', "
+                "as a decompiler writes before the address of a datum it names (DAT_)"
             )
     return value
 
@@ -2189,6 +2200,11 @@ def _digested_tools(tool_facts: Any) -> Any:
     }
 
 
+# The declaration fields added after digests were first recorded that a block
+# leaves empty, left out of its digest so adding one moves no digest.
+_DIGEST_OMITS_WHEN_EMPTY: tuple[str, ...] = ("data_label_prefixes",)
+
+
 def declaration_digest(cfg: Any) -> str:
     """A short digest of one block's whole declaration, as it is in force."""
     dumped = cfg.model_dump(mode="json") if isinstance(cfg, BaseModel) else dict(cfg)
@@ -2200,6 +2216,7 @@ def declaration_digest(cfg: Any) -> str:
         for name in DECLARATION_FIELDS
         if dumped.get(name) is not None
         and not (name == "trusts_served_declaration" and dumped.get(name) is False)
+        and not (name in _DIGEST_OMITS_WHEN_EMPTY and not dumped.get(name))
     }
     if "tool_facts" in body:
         body["tool_facts"] = _digested_tools(body["tool_facts"])
@@ -2654,6 +2671,7 @@ class Declared:
     reads_staged_sample: bool = False
     platform_owned: bool = False
     auto_name_prefixes: tuple[str, ...] = ()
+    data_label_prefixes: tuple[str, ...] = ()
     reference_urls: tuple[str, ...] = ()
     tools: Mapping[str, ToolFacts] = field(default_factory=dict)
     # Per tool, the kind-dependent fields the block sets with no kind of its
@@ -2696,6 +2714,7 @@ class Declared:
             reads_staged_sample=bool(getattr(copied, "reads_staged_sample", False)),
             platform_owned=bool(getattr(copied, "platform_owned", False)),
             auto_name_prefixes=tuple(getattr(copied, "auto_name_prefixes", ()) or ()),
+            data_label_prefixes=tuple(getattr(copied, "data_label_prefixes", ()) or ()),
             reference_urls=tuple(getattr(copied, "reference_urls", ()) or ()),
             tools=dict(getattr(copied, "tool_facts", {}) or {}),
             reputation_service=getattr(copied, "reputation_service", None),
@@ -2854,6 +2873,7 @@ class ToolDeclarations:
                     "reads_staged_sample": d.reads_staged_sample,
                     "platform_owned": d.platform_owned,
                     "auto_name_prefixes": list(d.auto_name_prefixes),
+                    "data_label_prefixes": list(d.data_label_prefixes),
                     "reference_urls": list(d.reference_urls),
                     "tool_facts": {n: f.model_dump(mode="json") for n, f in d.tools.items()},
                     # Named only where set, so a block that does not set it

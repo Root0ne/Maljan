@@ -50,21 +50,15 @@ while Ghidra rests stops the pass too, and the entry states the guard's.
 from __future__ import annotations
 
 import json
-import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from maljan.analysis.anti_analysis import (
-    INSTRUCTION_CATEGORY,
-    TEB_CATEGORY,
-    Code,
+    STATED_RULE,
     PassFailed,
-    cpuid_leaf_said,
-    gs_reads,
     image_of,
-    int3_is_a_trap,
-    operand_value,
+    read_findings,
     starts_of,
 )
 
@@ -78,17 +72,6 @@ GHIDRA_FORMATS = frozenset({"pe", "elf", "macho"})
 SCAN_CHECKS = (
     "calls to the APIs on Ghidra's list, the x86 instructions RDTSC, CPUID, INT3, INT 0x2d, SIDT, "
     "SGDT, SLDT and STR, and reads through FS:[0x30] or FS:[0x18]"
-)
-
-# How the stated part is chosen, said in every answer.
-STATED_RULE = (
-    "stated: an instruction that is the listed one (the same mnemonic and operand), an INT3 only "
-    "alone, not as padding before a function and not right after a call, jump or return, a "
-    "CPUID only where the code sets the hypervisor leaf or sets leaf 1 and tests ECX bit 31 "
-    "before ECX is written again, and a read through FS:[0x30] or FS:[0x18], or a GS:[0x60] or "
-    "GS:[0x30] read the platform finds in an x64 file's code bytes, exactly where a capa rule in "
-    "the same function agrees; API calls, and every other distinct match, are counted, not "
-    "stated"
 )
 
 GHIDRA_SWITCHED_OFF = "Ghidra is switched off (core.static.ghidra.enabled)"
@@ -107,96 +90,6 @@ SCAN_CHECKS_SHORT = "listed API calls, listed x86 instructions, FS:[0x30] and FS
 
 class GhidraPassFailed(PassFailed):
     """A Ghidra pass that was made and did not complete, with what happened."""
-
-
-_TEB_OPERAND = re.compile(r"\bFS:\[0x(?:30|18)\]", re.IGNORECASE)
-
-
-def _is_the_listed_instruction(technique: str, instruction: str) -> bool:
-    """Whether ``instruction`` (Ghidra's text) is exactly what ``technique`` names."""
-    listed = technique.strip().upper().split(None, 1)
-    found = instruction.strip().upper().split(None, 1)
-    if not listed or not found:
-        return False
-    listed_operand = operand_value(listed[1]) if len(listed) > 1 else None
-    found_operand = operand_value(found[1]) if len(found) > 1 else None
-    # ``INT3`` is the one-byte form of ``INT 3``.
-    if found[0] == "INT3" and len(found) == 1:
-        found, found_operand = ["INT"], 3
-    if listed[0] != found[0]:
-        return False
-    if len(listed) > 1:
-        return listed_operand is not None and listed_operand == found_operand
-    return True
-
-
-def read_findings(
-    findings: Iterable[dict[str, Any]],
-    image: Any = None,
-    function_starts: Iterable[int] = (),
-) -> dict[str, Any]:
-    """The exact part of Ghidra's findings as facts, and how many distinct others there were.
-
-    ``image`` is the sample as ``tools.pe_image`` maps it, for the two
-    instructions whose meaning the bytes around them decide: an ``INT3`` is a
-    trap only alone and not as the padding before a function, and a ``CPUID``
-    is the hypervisor question only when the code sets the hypervisor leaf, or
-    sets leaf 1 and then tests ECX's bit 31. Without the bytes neither is
-    stated. ``function_starts`` (offsets from the image base) add to the
-    image's own table. Ghidra's rows are read once per place and match.
-
-    An exact TEB/PEB read is not stated here: it goes in ``beside_capa``, for
-    the pack to state where a capa rule in the same function agrees and to
-    count otherwise (``triage_pack._anti_analysis_with_capa``). A language
-    runtime reads the PEB too (the UCRT's exit path reads ``NtGlobalFlag``),
-    and capa leaves the library functions it recognises out.
-    """
-    code = Code(image, function_starts)
-    stated: list[dict[str, Any]] = []
-    beside_capa: list[dict[str, Any]] = []
-    stated_keys: set[tuple[str, str]] = set()
-    unstated_keys: set[tuple[str, str]] = set()
-    for row in findings:
-        if not isinstance(row, dict):
-            continue
-        category = str(row.get("category") or "")
-        technique = str(row.get("technique") or "")
-        instruction = str(row.get("instruction") or "").strip()
-        where = str(row.get("offset") or row.get("address") or "")
-        key = (where, instruction.upper() if instruction else f"call {technique}")
-        what = ""
-        if category == INSTRUCTION_CATEGORY:
-            if _is_the_listed_instruction(technique, instruction):
-                mnemonic = instruction.upper().split(None, 1)[0]
-                if mnemonic == "INT3":
-                    what = instruction if int3_is_a_trap(code, where) else ""
-                elif mnemonic == "CPUID":
-                    what = cpuid_leaf_said(code, where)
-                else:
-                    what = instruction
-        elif category == TEB_CATEGORY:
-            if _TEB_OPERAND.search(instruction):
-                what = instruction
-        if not what:
-            unstated_keys.add(key)
-            continue
-        if key in stated_keys:
-            continue
-        stated_keys.add(key)
-        fact = {"category": category, "what": what, "offset": where}
-        if row.get("function"):
-            fact["function"] = str(row["function"])
-        (beside_capa if category == TEB_CATEGORY else stated).append(fact)
-    for fact in gs_reads(image):
-        key = (fact["offset"], fact["what"])
-        if key not in stated_keys:
-            stated_keys.add(key)
-            beside_capa.append(fact)
-    return {
-        "stated": stated,
-        "beside_capa": beside_capa,
-        "not_stated": len(unstated_keys - stated_keys),
-    }
 
 
 @dataclass

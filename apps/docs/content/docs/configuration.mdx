@@ -3684,7 +3684,9 @@ argument when the job has one capture; each tool's `long_running` and
 `timeout_seconds` by the server guard of a registry server (an `mcp.servers`
 entry), as a manifest's own (the larger budget wins); a static provider's own
 client does not read them;
-`auto_name_prefixes` wherever a function's auto-name is read as its address;
+`auto_name_prefixes` wherever a function's auto-name is read as its address,
+and with `data_label_prefixes` wherever the report reads a claim's code
+locations;
 `reference_urls` by the report's references; and each tool's `kind`, `reader`,
 `asserts_techniques`, `source`, `techniques`, `rows`, `places`, `values`,
 `words`, `display_name`, `category` and `arguments` by the evidence summary, the
@@ -3733,7 +3735,8 @@ are ever removed.
 | `reads_staged_sample` | whether the server's path-taking tools read the sample the platform staged |
 | `platform_owned` | whether the server is the platform's own, whose answers are the platform's code |
 | `trusts_served_declaration` | whether what the server declares of its own tools when it lists them (each tool's `_meta` at `maljan/tool_facts`) is read as this block's declaration, under what the block itself says; off, only its cautious claims are read, as the server's own statement, and the rest is proposed (see [Writing a tool server](#writing-a-tool-server)). Shipped on for the platform's own sidecars, and that shipped trust holds only while the block still starts or reaches the server it shipped with (its transport, command, arguments, working directory and address); a block pointed at another server trusts it only where you set the flag yourself, so set it when you point a built-in block at that sidecar's own container: the platform ships no table of its sidecars' tools, and an untrusted block reads only their cautious claims |
-| `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`); every server's join the shipped ones (`FUN_`, `fcn.`, `sub_`, `func.`, `loc.`, `LAB_`) wherever a function's auto-name is read as its address |
+| `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`); every server's join the shipped ones (`FUN_`, `fcn.`, `sub_`, `func.`, `loc.`, `LAB_`, `SUB_`, `sub.`) wherever a function's auto-name is read as its address |
+| `data_label_prefixes` | the prefixes its decompiler writes before an address when it names a datum itself (`DAT_`); every server's join the shipped one (`DAT_`, which the Ghidra block also declares) wherever the report reads a claim's code locations (claims not discussed), and are never read as a function's name |
 | `reference_urls` | sample lookup URL templates, `https://` and naming `{sha256}`, `{md5}` or `{sha1}`; a report links them, under the name its lookup's record gives (else the server's label), only when the run recorded an entry from this server. `reporting.reference_urls` holds the lookups linked on every report (shipped with VirusTotal's and MalwareBazaar's) |
 | `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
 | `credential_bootstrap` | how the server's credential is obtained by one request (below); empty when its token is typed in |

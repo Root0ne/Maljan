@@ -18,7 +18,11 @@ What is here is the part no scanner owns:
   (``gs_reads``);
 * which rule of a capability-rule tool (a tool of declared kind
   ``capability_rules``) agrees with a stated row, by the rule's namespace and
-  name (``rule_agrees``).
+  name (``rule_agrees``);
+* the reading of a scan's rows into that shape (``read_findings``) and the
+  rule it states them by (``STATED_RULE``), the same for every provider's
+  scan: Ghidra's own pass and a server's declared scan tool
+  (``providers.static.declared_prepass``) both read their rows here.
 """
 
 from __future__ import annotations
@@ -75,7 +79,7 @@ class AntiAnalysisScan(Protocol):
     formats its scan reads, ``sample_path`` the copy of the sample it reads.
     ``unavailable`` is the sentence the pack records when nothing can be
     scanned; nothing is called then. ``anti_analysis`` makes the scan and
-    answers in this module's shape (``read_findings``-style ``stated``,
+    answers in this module's shape (:func:`read_findings`'s ``stated``,
     ``beside_capa`` and ``not_stated``), raising a :class:`PassFailed` when it
     did not complete.
     """
@@ -501,3 +505,110 @@ def starts_of(values: Sequence[Any]) -> list[int]:
         except ValueError:
             continue
     return starts
+
+
+# How the stated part is chosen, said in every answer.
+STATED_RULE = (
+    "stated: an instruction that is the listed one (the same mnemonic and operand), an INT3 only "
+    "alone, not as padding before a function and not right after a call, jump or return, a "
+    "CPUID only where the code sets the hypervisor leaf or sets leaf 1 and tests ECX bit 31 "
+    "before ECX is written again, and a read through FS:[0x30] or FS:[0x18], or a GS:[0x60] or "
+    "GS:[0x30] read the platform finds in an x64 file's code bytes, exactly where a capa rule in "
+    "the same function agrees; API calls, and every other distinct match, are counted, not "
+    "stated"
+)
+
+
+_TEB_OPERAND = re.compile(r"\bFS:\[0x(?:30|18)\]", re.IGNORECASE)
+
+
+def _is_the_listed_instruction(technique: str, instruction: str) -> bool:
+    """Whether ``instruction`` (the scan's text) is exactly what ``technique`` names."""
+    listed = technique.strip().upper().split(None, 1)
+    found = instruction.strip().upper().split(None, 1)
+    if not listed or not found:
+        return False
+    listed_operand = operand_value(listed[1]) if len(listed) > 1 else None
+    found_operand = operand_value(found[1]) if len(found) > 1 else None
+    # ``INT3`` is the one-byte form of ``INT 3``.
+    if found[0] == "INT3" and len(found) == 1:
+        found, found_operand = ["INT"], 3
+    if listed[0] != found[0]:
+        return False
+    if len(listed) > 1:
+        return listed_operand is not None and listed_operand == found_operand
+    return True
+
+
+def read_findings(
+    findings: Iterable[dict[str, Any]],
+    image: Any = None,
+    function_starts: Iterable[int] = (),
+) -> dict[str, Any]:
+    """The exact part of a scan's findings as facts, and how many distinct others there were.
+
+    ``findings`` are the scan's rows (``category``, ``technique``,
+    ``instruction``, ``offset`` or ``address``, ``function``), as any
+    provider's scan answers them (``providers.static.declared_prepass``
+    reads a declared scan tool's rows into them).
+
+    ``image`` is the sample as ``tools.pe_image`` maps it, for the two
+    instructions whose meaning the bytes around them decide: an ``INT3`` is a
+    trap only alone and not as the padding before a function, and a ``CPUID``
+    is the hypervisor question only when the code sets the hypervisor leaf, or
+    sets leaf 1 and then tests ECX's bit 31. Without the bytes neither is
+    stated. ``function_starts`` (offsets from the image base) add to the
+    image's own table. The rows are read once per place and match.
+
+    An exact TEB/PEB read is not stated here: it goes in ``beside_capa``, for
+    the pack to state where a capa rule in the same function agrees and to
+    count otherwise (``triage_pack._anti_analysis_with_capa``). A language
+    runtime reads the PEB too (the UCRT's exit path reads ``NtGlobalFlag``),
+    and capa leaves the library functions it recognises out.
+    """
+    code = Code(image, function_starts)
+    stated: list[dict[str, Any]] = []
+    beside_capa: list[dict[str, Any]] = []
+    stated_keys: set[tuple[str, str]] = set()
+    unstated_keys: set[tuple[str, str]] = set()
+    for row in findings:
+        if not isinstance(row, dict):
+            continue
+        category = str(row.get("category") or "")
+        technique = str(row.get("technique") or "")
+        instruction = str(row.get("instruction") or "").strip()
+        where = str(row.get("offset") or row.get("address") or "")
+        key = (where, instruction.upper() if instruction else f"call {technique}")
+        what = ""
+        if category == INSTRUCTION_CATEGORY:
+            if _is_the_listed_instruction(technique, instruction):
+                mnemonic = instruction.upper().split(None, 1)[0]
+                if mnemonic == "INT3":
+                    what = instruction if int3_is_a_trap(code, where) else ""
+                elif mnemonic == "CPUID":
+                    what = cpuid_leaf_said(code, where)
+                else:
+                    what = instruction
+        elif category == TEB_CATEGORY:
+            if _TEB_OPERAND.search(instruction):
+                what = instruction
+        if not what:
+            unstated_keys.add(key)
+            continue
+        if key in stated_keys:
+            continue
+        stated_keys.add(key)
+        fact = {"category": category, "what": what, "offset": where}
+        if row.get("function"):
+            fact["function"] = str(row["function"])
+        (beside_capa if category == TEB_CATEGORY else stated).append(fact)
+    for fact in gs_reads(image):
+        key = (fact["offset"], fact["what"])
+        if key not in stated_keys:
+            stated_keys.add(key)
+            beside_capa.append(fact)
+    return {
+        "stated": stated,
+        "beside_capa": beside_capa,
+        "not_stated": len(unstated_keys - stated_keys),
+    }

@@ -21,6 +21,7 @@ import re
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, NamedTuple
 
@@ -497,20 +498,56 @@ def address_arguments(facts: Any, offered: Iterable[Any] = ()) -> tuple[str, ...
 
 
 # The prefixes a decompiler writes before an address when it names a function
-# itself, as words without their separator: the ones the platform has always
-# read (Ghidra's ``FUN_``/``LAB_``/``SUB_``, radare2's ``fcn.``/``loc.``/
+# itself: the ones the platform has always read, whichever source the name
+# came from (Ghidra's ``FUN_``/``LAB_``/``SUB_``, radare2's ``fcn.``/``loc.``/
 # ``func.``/``sub.``, IDA's ``sub_``), which the built-in blocks also declare.
-DEFAULT_AUTO_NAME_WORDS: tuple[str, ...] = ("fun", "fcn", "sub", "func", "loc", "lab")
+# A naming convention read in every tool's answer alike, never a tool's name:
+# a decompiler nobody declared is read by them at full strength.
+DEFAULT_AUTO_NAME_PREFIXES: tuple[str, ...] = (
+    "FUN_",
+    "fcn.",
+    "sub_",
+    "func.",
+    "loc.",
+    "LAB_",
+    "SUB_",
+    "sub.",
+)
+# The prefix it writes when it names a datum itself (Ghidra's ``DAT_``, which
+# its block also declares as ``data_label_prefixes``): a code location, never
+# a function's name.
+DEFAULT_DATA_LABEL_PREFIXES: tuple[str, ...] = ("DAT_",)
 
 
-def auto_name_words(declared: Iterable[str] = ()) -> tuple[str, ...]:
-    """The default words, then each declared prefix's word (``FUN_`` → ``fun``) not among them."""
-    words = list(DEFAULT_AUTO_NAME_WORDS)
+def label_words(declared: Iterable[str] = (), defaults: tuple[str, ...] = ()) -> tuple[str, ...]:
+    """``defaults``, then each declared prefix's word (``FUN_`` → ``fun``) not among them."""
+    words = list(defaults)
     for prefix in declared:
         word = str(prefix).rstrip("_.").lower()
         if word and word.isalnum() and word not in words:
             words.append(word)
     return tuple(words)
+
+
+# The default prefixes as words without their separator.
+DEFAULT_AUTO_NAME_WORDS: tuple[str, ...] = label_words(DEFAULT_AUTO_NAME_PREFIXES)
+
+
+def auto_name_words(declared: Iterable[str] = ()) -> tuple[str, ...]:
+    """The default words, then each declared prefix's word (``FUN_`` → ``fun``) not among them."""
+    return label_words(declared, DEFAULT_AUTO_NAME_WORDS)
+
+
+def _prefixes(declared: Iterable[str], defaults: tuple[str, ...]) -> tuple[str, ...]:
+    """``defaults``, then each declared prefix not among them in either case."""
+    out = list(defaults)
+    seen = {prefix.lower() for prefix in out}
+    for prefix in declared:
+        text = str(prefix)
+        if text and text.lower() not in seen:
+            seen.add(text.lower())
+            out.append(text)
+    return tuple(out)
 
 
 @lru_cache(maxsize=64)
@@ -523,16 +560,35 @@ def auto_name_pattern(words: tuple[str, ...] = DEFAULT_AUTO_NAME_WORDS) -> re.Pa
     )
 
 
-# The pattern of the declarations last asked for, held with them.
-_HELD_PATTERN: list[Any] = [None, None]
+@dataclass(frozen=True)
+class DeclaredLabels:
+    """The prefixes every enabled source declares before an address, with the defaults.
+
+    ``functions``: what a decompiler writes when it names a function or a
+    label itself (``auto_name_prefixes``, :data:`DEFAULT_AUTO_NAME_PREFIXES`);
+    ``data``: what it writes when it names a datum (``data_label_prefixes``,
+    :data:`DEFAULT_DATA_LABEL_PREFIXES`). Each as written, separator included.
+    """
+
+    functions: tuple[str, ...] = DEFAULT_AUTO_NAME_PREFIXES
+    data: tuple[str, ...] = DEFAULT_DATA_LABEL_PREFIXES
+
+    @property
+    def function_words(self) -> tuple[str, ...]:
+        """The function prefixes as words without their separator (``FUN_`` → ``fun``)."""
+        return auto_name_words(self.functions)
 
 
-def declared_auto_name_pattern(settings: Any = None) -> re.Pattern[str]:
-    """The auto-name pattern for every prefix an enabled source declares, and the defaults.
+# The labels and auto-name pattern of the declarations last asked for, held with them.
+_HELD_LABELS: list[Any] = [None, None, None]
+
+
+def declared_labels(settings: Any = None) -> DeclaredLabels:
+    """The prefixes every enabled source declares before an address, with the defaults.
 
     Read from the live declarations (``core.declared_reading.declarations``),
     once per declarations object; settings that cannot be read give the
-    defaults' pattern.
+    defaults.
     """
     try:
         from maljan.core.config import get_settings
@@ -541,22 +597,37 @@ def declared_auto_name_pattern(settings: Any = None) -> re.Pattern[str]:
         settings = settings if settings is not None else get_settings()
         held = declarations(settings)
     except Exception:  # noqa: BLE001 — unreadable settings declare nothing more
-        return auto_name_pattern()
-    if _HELD_PATTERN[0] is held:
-        return _HELD_PATTERN[1]  # type: ignore[no-any-return]
+        return DeclaredLabels()
+    if _HELD_LABELS[0] is held:
+        return _HELD_LABELS[1]  # type: ignore[no-any-return]
     # Only the sources this deployment switches on, and the static provider
     # blocks any agent resolves to: a disabled server's prefix names no
     # function any run can have listed.
     resolved = _resolved_static_providers(settings)
-    declared = [
-        prefix
+    sources = [
+        source
         for source in held.sources()
         if source.enabled or (source.source.kind == "provider" and source.source.key in resolved)
-        for prefix in source.auto_name_prefixes
     ]
-    pattern = auto_name_pattern(auto_name_words(declared))
-    _HELD_PATTERN[0], _HELD_PATTERN[1] = held, pattern
-    return pattern
+    labels = DeclaredLabels(
+        functions=_prefixes(
+            (p for s in sources for p in s.auto_name_prefixes), DEFAULT_AUTO_NAME_PREFIXES
+        ),
+        data=_prefixes(
+            (p for s in sources for p in s.data_label_prefixes), DEFAULT_DATA_LABEL_PREFIXES
+        ),
+    )
+    pattern = auto_name_pattern(labels.function_words)
+    _HELD_LABELS[0], _HELD_LABELS[1], _HELD_LABELS[2] = held, labels, pattern
+    return labels
+
+
+def declared_auto_name_pattern(settings: Any = None) -> re.Pattern[str]:
+    """The auto-name pattern for every prefix an enabled source declares, and the defaults."""
+    labels = declared_labels(settings)
+    if _HELD_LABELS[1] is labels and _HELD_LABELS[2] is not None:
+        return _HELD_LABELS[2]  # type: ignore[no-any-return]
+    return auto_name_pattern(labels.function_words)
 
 
 def _resolved_static_providers(settings: Any) -> set[str]:
