@@ -70,3 +70,16 @@ host](/configuration/#tool-servers-on-another-host).
 The importable all-tools team runs `all_tools_static_r2` with
 `static_provider: "r2"` beside two other static analysts, each reading a tool
 of its own. See [An all-tools team](/configuration/#an-all-tools-team).
+
+## What its tools are read as
+
+The platform ships no table of r2mcp's tools' effects, arguments or read-only
+readings, only their kinds for now. Each one is read from what r2mcp
+lists, by its verb and its arguments' role words. The block says once that its
+tools run nothing, reach no network and send nothing (`default_effects`). Its
+`sample_open` names `analyze` as its analysis step, with no open tool, because
+the provider opens the sample itself. `analyse_effects` says that step emulates
+the sample's code at analysis level 2 and above, where r2mcp runs `aaa`. When
+r2mcp is started with `-r`, `run_command` runs whatever command it is given, so
+it declares no effect. See [A decompiler's or disassembler's tools read from
+what it lists](/configuration/#what-a-server-declares-about-its-tools).

@@ -1523,6 +1523,8 @@ DECLARATION_FIELDS: tuple[str, ...] = (
     "prepass_tools",
     "reputation_service",
     "data_label_prefixes",
+    "default_effects",
+    "analyse_effects",
 )
 # The declaration fields a settings snapshot records only where an operator
 # set them (the shipped values are named by a digest instead).
@@ -2681,6 +2683,11 @@ class Declared:
     # What a reputation service's server says of its lookups as a whole
     # (``ReputationService``), laid under the lookups read from its listing.
     reputation_service: ReputationService | None = None
+    # What the block says of its tools as a whole (``default_effects``) and of
+    # its analysis tool (``analyse_effects``), laid under each tool's effects
+    # (``derived_declarations.with_server_effects``).
+    default_effects: ToolEffects | None = None
+    analyse_effects: ToolEffects | None = None
     # Whether the server's own declaration of its tools is read as the block's
     # (``trusts_served_declaration``), and the block's launch identity, which
     # a server's declaration is kept under (``core.served_declarations``).
@@ -2718,6 +2725,8 @@ class Declared:
             reference_urls=tuple(getattr(copied, "reference_urls", ()) or ()),
             tools=dict(getattr(copied, "tool_facts", {}) or {}),
             reputation_service=getattr(copied, "reputation_service", None),
+            default_effects=getattr(copied, "default_effects", None),
+            analyse_effects=getattr(copied, "analyse_effects", None),
             kind_free=dict(getattr(copied, "kind_free_changes", None) or {}),
             trusts_served=trusts_served(source, cfg),
             launch=launch_identity(copied),

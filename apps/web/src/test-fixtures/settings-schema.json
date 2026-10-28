@@ -2716,6 +2716,47 @@
      "type": "list"
     },
     {
+     "advanced": true,
+     "agent_keys": null,
+     "always_enabled_agent_keys": null,
+     "applies": "next_job",
+     "applies_when": {
+      "core.static.provider": [
+       "ghidra"
+      ]
+     },
+     "builtin_agent_keys": null,
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "data_source_choices": null,
+     "editable": true,
+     "editor": null,
+     "group": "static",
+     "key": "core.static.ghidra.analyse_effects",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "needs_current_password": false,
+     "nullable": true,
+     "order": 0,
+     "pack_step_vocabulary": null,
+     "path": "static.ghidra.analyse_effects",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": "Declaration",
+     "title": "Ghidra MCP effects of the analysis tool",
+     "type": "json"
+    },
+    {
      "advanced": false,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
@@ -4515,6 +4556,47 @@
      "subgroup": null,
      "title": "radare2 MCP receiving analysts",
      "type": "list"
+    },
+    {
+     "advanced": true,
+     "agent_keys": null,
+     "always_enabled_agent_keys": null,
+     "applies": "next_job",
+     "applies_when": {
+      "core.static.provider": [
+       "r2"
+      ]
+     },
+     "builtin_agent_keys": null,
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "data_source_choices": null,
+     "editable": true,
+     "editor": null,
+     "group": "static",
+     "key": "core.static.r2.analyse_effects",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "needs_current_password": false,
+     "nullable": true,
+     "order": 0,
+     "pack_step_vocabulary": null,
+     "path": "static.r2.analyse_effects",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": "Declaration",
+     "title": "radare2 MCP effects of the analysis tool",
+     "type": "json"
     },
     {
      "advanced": false,
@@ -6423,6 +6505,7 @@
       "cape2": {
        "guide_advanced_keys": [
         "core.sandbox.cape2.mcp.agents",
+        "core.sandbox.cape2.mcp.analyse_effects",
         "core.sandbox.cape2.mcp.args",
         "core.sandbox.cape2.mcp.auth_token",
         "core.sandbox.cape2.mcp.auto_name_prefixes",
@@ -6671,6 +6754,47 @@
      "subgroup": null,
      "title": "CAPE MCP receiving analysts",
      "type": "list"
+    },
+    {
+     "advanced": true,
+     "agent_keys": null,
+     "always_enabled_agent_keys": null,
+     "applies": "next_job",
+     "applies_when": {
+      "core.sandbox.provider": [
+       "cape2"
+      ]
+     },
+     "builtin_agent_keys": null,
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "data_source_choices": null,
+     "editable": true,
+     "editor": null,
+     "group": "sandbox",
+     "key": "core.sandbox.cape2.mcp.analyse_effects",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "needs_current_password": false,
+     "nullable": true,
+     "order": 0,
+     "pack_step_vocabulary": null,
+     "path": "sandbox.cape2.mcp.analyse_effects",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": "Declaration",
+     "title": "CAPE MCP effects of the analysis tool",
+     "type": "json"
     },
     {
      "advanced": false,

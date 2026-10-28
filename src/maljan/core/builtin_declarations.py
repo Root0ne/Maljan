@@ -16,8 +16,13 @@ module under whatever an operator stored (``tool_declarations.fill_declaration``
 
 The static providers' and the CAPE sidecar's workflow prompts and radare2's
 error patterns live here as the text of their declarations; the adapters read
-the workflow from their block, so there is one copy of each. The Ghidra and
-radare2 tool tables are data in ``maljan.core.builtin_reverser_tools``.
+the workflow from their block, so there is one copy of each. A Ghidra or
+radare2 tool's category, arguments, read-only reading and effects are read
+from what its server lists (``core.program_reading``), under what their
+blocks say of their tools as a whole (``default_effects``) and of radare2's
+analysis (``analyse_effects``); only what is read by a tool's kind is still
+data (``core.builtin_reverser_kinds``, a leftover the verb-and-object reading
+removes).
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ from collections.abc import Mapping
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
-from maljan.core.builtin_reverser_tools import GHIDRA_TOOLS, R2_TOOLS
+from maljan.core.builtin_reverser_kinds import GHIDRA_KINDS, R2_KINDS
 from maljan.core.legacy_reputation import STORED_REPUTATION_KINDS
 from maljan.core.reputation import REPUTATION_KIND
 from maljan.tools.errors import BAD_ARGUMENT, TOOL_FAILED
@@ -700,20 +705,14 @@ _SUBMITS_TO_THE_OPERATOR_SANDBOX: dict[str, Any] = {
     "executes": "sandbox",
     "network": "operator_sandbox",
 }
-# A tool that runs whatever script or command it is given: what it does is
-# what it is told, so none of its effects can be declared.
-# radare2's analysis: at level 2 and above r2mcp runs ``aaa`` (the provider's
-# own account of the levels, ``providers.static.r2``), whose type matching
-# (``aaft``) emulates each function with ESIL; the levels below do not.
-_ANALYSES: dict[str, Any] = {
-    **_NO_EFFECT,
+# radare2's analysis step (its ``sample_open.analyse_tool``,
+# ``config.R2_SAMPLE_OPEN``): at level 2 and above r2mcp runs ``aaa`` (the
+# provider's own account of the levels, ``providers.static.r2``), whose type
+# matching (``aaft``) emulates each function with ESIL; the levels below do not.
+_R2_ANALYSIS_EMULATES: dict[str, Any] = {
     "executes": "emulation",
     "when": "at analysis level 2 and above, where radare2's aaa type matching (aaft) emulates "
     "each function with ESIL",
-}
-_RUNS_ANYTHING: dict[str, Any] = {
-    "why_undeclared": "it runs whatever script or command it is given, so what it does is "
-    "whatever that does"
 }
 
 
@@ -735,6 +734,11 @@ def _with_effects(
         held = effects.get(name, default)
         out[name] = {**facts, "effects": dict(held)} if held is not None else dict(facts)
     return out
+
+
+def _copy_tables(tools: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """A fresh copy of a leftover kind table (``builtin_reverser_kinds``)."""
+    return {name: dict(facts) for name, facts in tools.items()}
 
 
 def _one_program_block(role: str) -> dict[str, Any]:
@@ -809,7 +813,11 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
 }
 
 # The static providers' own blocks (``static.ghidra``, ``static.r2``) and the
-# CAPE MCP sidecar's (``sandbox.cape2.mcp``). Ghidra's mount is the container
+# CAPE MCP sidecar's (``sandbox.cape2.mcp``). Ghidra and radare2 run on the
+# operator's machine, reach no network and send nothing anywhere: their
+# ``default_effects`` say so of every tool, and a tool whose definition says
+# otherwise (it emulates, it runs the script or command it is given) is read
+# as it says (``core.program_reading``). Ghidra's mount is the container
 # path the shipped compose file mounts the samples directory at, which its
 # provider's ``mirror_spec`` reads; its ``sample_open`` is
 # ``config.GHIDRA_SAMPLE_OPEN``, set where it has always been set; its work
@@ -829,16 +837,8 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "variable_names": ["GHIDRA_CONTAINER_SAMPLES_PATH"],
         "auto_name_prefixes": ["FUN_", "LAB_", "SUB_"],
         "data_label_prefixes": ["DAT_"],
-        "tool_facts": _with_effects(
-            GHIDRA_TOOLS,
-            {
-                "emulate_function": _EMULATES,
-                "emulate_hash_batch": _EMULATES,
-                "run_ghidra_script": _RUNS_ANYTHING,
-                "run_script_inline": _RUNS_ANYTHING,
-            },
-            default=_NO_EFFECT,
-        ),
+        "default_effects": dict(_NO_EFFECT),
+        "tool_facts": _copy_tables(GHIDRA_KINDS),
     },
     "r2": {
         "work_dir": "r2-work",
@@ -846,11 +846,9 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "prompt_fragment": R2_WORKFLOW,
         "error_patterns": list(R2_ERROR_PATTERNS),
         "auto_name_prefixes": ["fcn.", "loc.", "sub.", "func."],
-        "tool_facts": _with_effects(
-            R2_TOOLS,
-            {"analyze": _ANALYSES, "run_command": _RUNS_ANYTHING},
-            default=_NO_EFFECT,
-        ),
+        "default_effects": dict(_NO_EFFECT),
+        "tool_facts": _copy_tables(R2_KINDS),
+        "analyse_effects": dict(_R2_ANALYSIS_EMULATES),
     },
     # The workflow's ``submit_file`` sends the sample to the sandbox: declared
     # so the run's disclosure block names the upload. It names no kind on

@@ -85,6 +85,7 @@ from maljan.core.reputation import (
 from maljan.core.tool_declarations import (
     EXECUTES_NO,
     EXECUTES_SANDBOX,
+    THIRD_PARTY_BYTES,
     THIRD_PARTY_HASH,
     THIRD_PARTY_NO,
     ToolFacts,
@@ -94,11 +95,15 @@ from maljan.core.tool_declarations import (
 __all__ = [
     "DERIVED_SHOWS",
     "closed_by_hints",
+    "closes_the_world",
     "derived_facts_of",
     "derived_tool_facts",
     "discloses",
     "lay_under",
+    "program_arguments",
+    "program_readings_of",
     "service_facts",
+    "with_server_effects",
 ]
 
 # The kinds a reputation service's tools are read as.
@@ -515,6 +520,44 @@ def derived_tool_facts(definitions: Iterable[Any], where: str = "") -> dict[str,
     return derived_readings(definitions, where)[0]
 
 
+def program_readings_of(definitions: Iterable[Any], where: str = "") -> dict[str, ToolFacts]:
+    """What every tool of a listing is read as on a program-analysis server, by its listed name.
+
+    ``core.program_reading``, for every tool its server does not declare
+    under ``_meta``; a tool that says it submits or uploads now and is read
+    as sending the file is read as sending its bytes. A definition whose name
+    no tool can have is left out; one that cannot be read is left out, with
+    a warning (its disclosure is read by :func:`derived_readings`).
+    """
+    from maljan.core.program_reading import program_facts
+
+    held: list[tuple[str, Any]] = []
+    for definition in definitions:
+        name = str(_get(definition, "name") or "")
+        try:
+            check_tool_name(name)
+        except ValueError:
+            continue
+        held.append((name, definition))
+    names = [name for name, _definition in held]
+    out: dict[str, ToolFacts] = {}
+    for name, definition in held:
+        try:
+            tool = _listed(definition)
+            if tool.declares_itself:
+                continue
+            sends = tool.says_it_submits_now and _discloses(tool)
+            facts = program_facts(definition, names, sends=sends)
+        except Exception as exc:  # noqa: BLE001 — one odd definition costs its own reading
+            logger.warning(
+                "Tool %s%s was not read as a program tool (%s).", where, name, type(exc).__name__
+            )
+            continue
+        if facts is not None:
+            out[name] = facts
+    return out
+
+
 def closed_by_hints(definitions: Iterable[Any]) -> dict[str, ToolFacts]:
     """The tools of a listing whose disclosure only their server's own hints could lift.
 
@@ -598,6 +641,9 @@ def lay_under(
     service: Any = None,
     closed: Mapping[str, ToolFacts] | None = None,
     kind_free: Mapping[str, Mapping[str, Any]] | None = None,
+    program: Mapping[str, ToolFacts] | None = None,
+    default_effects: Any = None,
+    sample_open: Any = None,
 ) -> dict[str, ToolFacts]:
     """``tools`` with what was read of each listed tool laid under, field by field.
 
@@ -615,7 +661,18 @@ def lay_under(
     kind-dependent fields the block stored for a tool with no kind of its own
     (``tool_declarations.kind_free_changes``): laid over the reading once it
     puts a kind in force, a ``reputation`` change field by field.
+
+    For a block whose ``roles`` hold a program role
+    (``program_reading.PROGRAM_ROLES``), ``program`` is what each listed tool
+    is read as on a program-analysis server, laid under the rest of the
+    reading (:func:`_in_block`: the tools its ``sample_open`` names are read
+    as opening, selecting, analysing and closing a program, and a read is
+    read-only only where the block allows it). Where the block says what its
+    tools send as a whole (``default_effects`` with a ``third_party``), the
+    disclosure reading is dropped as for a tool the block declares, but for
+    a tool the reading says sends the file's bytes by itself.
     """
+    from maljan.core.program_reading import PROGRAM_ROLES
     from maljan.core.reputation import is_lookup
     from maljan.core.served_declarations import _over
 
@@ -624,19 +681,28 @@ def lay_under(
     lifted = dict(closed or {})
     block = tools if own is None else own
     is_service = REPUTATION_ROLE in set(roles)
+    programs = dict(program or {}) if PROGRAM_ROLES & set(roles) else {}
+    says_for_all = bool(getattr(default_effects, "third_party", ""))
     out = dict(tools)
-    for tool, facts in derived.items():
+    for tool in dict.fromkeys([*derived, *programs]):
         if tool in gone:
             continue
-        if tool in lifted:
-            facts = lifted[tool]
+        facts = lifted.get(tool, derived.get(tool))
         reading: ToolFacts | None = facts
-        if not is_service or tool in vouched:
+        if facts is not None and (not is_service or tool in vouched):
             reading = ToolFacts(discloses_sample=True) if facts.discloses_sample else None
+        as_program = programs.get(tool)
+        if as_program is not None and tool not in vouched:
+            as_program = _in_block(as_program, tool, default_effects, sample_open)
+            reading = as_program if reading is None else _over(reading, as_program)
         if (
             reading is not None
             and reading.discloses_sample
-            and (tool in vouched or _says_what_it_sends(block.get(tool)))
+            and (
+                tool in vouched
+                or _says_what_it_sends(block.get(tool))
+                or (says_for_all and as_program is not None and not _sends_by_itself(as_program))
+            )
         ):
             kept = {k: v for k, v in _set(reading).items() if k != "discloses_sample"}
             reading = ToolFacts.model_validate(kept) if kept else None
@@ -661,6 +727,130 @@ def lay_under(
             merged = _with_service(merged, service, said)
         out[tool] = merged
     return out
+
+
+def _sends_by_itself(facts: ToolFacts | None) -> bool:
+    """Whether a program reading says its tool sends the file's bytes by itself."""
+    effects = facts.effects if facts is not None else None
+    return effects is not None and effects.third_party == THIRD_PARTY_BYTES
+
+
+# The kind each tool a block's ``sample_open`` names is read as.
+_SAMPLE_OPEN_KINDS: tuple[tuple[str, str], ...] = (
+    ("open_tool", "open_sample"),
+    ("select_tool", "select_sample"),
+    ("analyse_tool", "analyse_sample"),
+    ("close_tool", "sample_close"),
+)
+
+
+def closes_the_world(effects: Any) -> bool:
+    """Whether a block's ``default_effects`` say its tools run nothing and reach no network."""
+    return (
+        effects is not None
+        and getattr(effects, "executes", "") == EXECUTES_NO
+        and getattr(effects, "network", None) is False
+    )
+
+
+def program_arguments(sample_open: Any) -> frozenset[str]:
+    """The arguments a block's ``sample_open`` says a program is named by; empty for none."""
+    if sample_open is None:
+        return frozenset()
+    named = [
+        str(getattr(sample_open, "select_argument", "") or ""),
+        str(getattr(sample_open, "analyse_argument", "") or ""),
+        *(str(a) for a in getattr(sample_open, "program_arguments", None) or ()),
+    ]
+    return frozenset(a for a in named if a)
+
+
+def _in_block(facts: ToolFacts, tool: str, default_effects: Any, sample_open: Any) -> ToolFacts:
+    """A program reading as the block reads it: its ``sample_open`` tools, its read-only rule.
+
+    A tool the block's ``sample_open`` names to open, select, analyse or close
+    a program is read as that. A read is read-only only where the block's
+    ``default_effects`` say its tools run nothing and reach no network, and,
+    where its ``sample_open`` names the arguments a program is named by
+    (:func:`program_arguments`), the tool takes one: a tool of such a server
+    that names no program reads what every job shares (the programs open on
+    it, its scripts, its project), which another job may change.
+    """
+    held = _set(facts)
+    for field_name, kind in _SAMPLE_OPEN_KINDS:
+        if tool and str(getattr(sample_open, field_name, "") or "") == tool:
+            held["kind"] = kind
+            held.pop("read_only", None)
+            break
+    if held.get("read_only"):
+        named = program_arguments(sample_open)
+        program = str((held.get("arguments") or {}).get("program") or "")
+        if not closes_the_world(default_effects) or (named and program not in named):
+            held.pop("read_only", None)
+    try:
+        return ToolFacts.model_validate(held)
+    except ValueError:
+        return facts
+
+
+def with_server_effects(
+    tools: Mapping[str, ToolFacts],
+    default_effects: Any = None,
+    analyse_effects: Any = None,
+    sample_open: Any = None,
+    *,
+    listed: Iterable[str] | None = None,
+) -> dict[str, ToolFacts]:
+    """``tools`` with what the block says of its tools as a whole laid under each one's effects.
+
+    With ``listed``, only under the tools its server listed: a tool nothing
+    has listed has not said whether it does otherwise.
+
+    ``default_effects`` under every tool's own ``effects``, sub-field by
+    sub-field, so a tool that says otherwise (it emulates, it sends the
+    file's bytes) keeps what it says; ``analyse_effects`` over them for the
+    tool the block's ``sample_open`` names to analyse. A tool whose effects
+    say they cannot be declared (``why_undeclared``: it runs whatever it is
+    given) takes none of it, and a tool read as sending the sample sends its
+    bytes whatever the statement says.
+    """
+    if default_effects is None and analyse_effects is None:
+        return dict(tools)
+    analyse = str(getattr(sample_open, "analyse_tool", "") or "")
+    base = _effects_set(default_effects)
+    out: dict[str, ToolFacts] = {}
+    seen = None if listed is None else set(listed)
+    for name, facts in tools.items():
+        own = _effects_set(facts.effects)
+        if own.get("why_undeclared") or (seen is not None and name not in seen):
+            out[name] = facts
+            continue
+        under = dict(base)
+        if name == analyse and analyse_effects is not None:
+            under.update(_effects_set(analyse_effects))
+        if not under:
+            out[name] = facts
+            continue
+        held = _set(facts)
+        held["effects"] = {**under, **own}
+        try:
+            merged = ToolFacts.model_validate(held)
+        except ValueError:
+            out[name] = facts
+            continue
+        if merged.discloses_sample and merged.effects is not None:
+            merged = merged.model_copy(update={"effects": merged.effects.with_bytes_sent()})
+        out[name] = merged
+    return out
+
+
+def _effects_set(effects: Any) -> dict[str, Any]:
+    """The sub-fields an effects statement sets."""
+    if effects is None:
+        return {}
+    own = set(effects.model_fields_set)
+    own.update(effects.model_dump(exclude_defaults=True))
+    return dict(effects.model_dump(mode="json", include=own))
 
 
 def _with_kind_free(

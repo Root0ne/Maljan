@@ -82,6 +82,7 @@ from maljan.core.tool_declarations import (
     CredentialBootstrap,
     ErrorPattern,
     ReputationService,
+    ToolEffects,
     ToolFacts,
     check_auto_name_prefixes,
     check_data_label_prefixes,
@@ -1482,6 +1483,12 @@ class SampleOpenConfig(BaseModel):
     an opened program and the argument the program's name goes in. Declared,
     the platform closes each program the job opened there when the job ends;
     empty, a program the job opened stays on the server.
+
+    ``analyse_tool`` may be named without an ``open_tool``: the tool the
+    server's analysis runs through, which the platform then never calls
+    itself (the agent calls it). It is read as the server's analysis step
+    (its kind, and the block's ``analyse_effects``), and nothing else of the
+    declaration applies.
     """
 
     open_tool: str = ""
@@ -1504,7 +1511,6 @@ class SampleOpenConfig(BaseModel):
             self.name_field,
             self.select_tool,
             self.select_argument,
-            self.analyse_tool,
             self.close_tool,
             self.close_argument,
         )
@@ -1523,6 +1529,12 @@ class SampleOpenConfig(BaseModel):
         ):
             raise ValueError("sample_open declares a select or analysis tool but no open_tool")
         return self
+
+
+# radare2's own declaration: ``analyze`` runs its analysis, which the agent
+# calls (the provider opens the sample itself, ``providers.static.r2``), so it
+# names no open tool. Data like any server's, editable in the settings.
+R2_SAMPLE_OPEN = SampleOpenConfig(analyse_tool="analyze")
 
 
 class PrepassToolsConfig(BaseModel):
@@ -1695,6 +1707,15 @@ class MCPServerConfig(BaseModel):
     # service's name and the rank the triage pack asks them at
     # (``ReputationService``). ``None`` says neither.
     reputation_service: ReputationService | None = None
+    # What every tool of the server does beyond answering, unless the tool
+    # says otherwise (``ToolEffects``): a statement of the server as a whole,
+    # laid under each tool's own ``effects`` sub-field by sub-field
+    # (``derived_declarations.with_server_effects``). ``None`` says nothing.
+    default_effects: ToolEffects | None = None
+    # What the tool ``sample_open.analyse_tool`` names does beyond answering,
+    # over ``default_effects`` (an analysis that emulates the sample's code
+    # at some levels). ``None`` says nothing.
+    analyse_effects: ToolEffects | None = None
 
     @field_validator("roles")
     @classmethod
@@ -4236,7 +4257,7 @@ def r2_block() -> StaticR2Config:
     """The radare2 block as it ships, with its declaration."""
     from maljan.core.builtin_declarations import provider_declaration
 
-    return StaticR2Config(**provider_declaration("r2"))
+    return StaticR2Config(sample_open=R2_SAMPLE_OPEN.model_copy(), **provider_declaration("r2"))
 
 
 def cape_mcp_block() -> MCPServerConfig:

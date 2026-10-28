@@ -963,12 +963,14 @@ class ServerHandle:
         # (``core.derived_declarations``), kept beside it.
         # A reading that failed (``None``) keeps what was read before.
         read = getattr(toolkit, "derived_tool_facts", None)
+        program = getattr(toolkit, "derived_program", None)
         register_served(
             self._source_text(),
             held,
             launch_identity(self.config),
             read if isinstance(read, Mapping) else None,
             getattr(toolkit, "derived_closed", None) or None,
+            program if isinstance(program, Mapping) else None,
         )
         # What it declared is recorded by its own digest, beside the name and
         # version it gave (``server_versions``); the run's recorded declaration
@@ -986,6 +988,7 @@ class ServerHandle:
         held: Mapping[str, Any],
         read: Mapping[str, Any] | None = None,
         closed: Mapping[str, Any] | None = None,
+        program: Mapping[str, Any] | None = None,
     ) -> dict[str, str]:
         """The description tags in force with ``held``, what the server declared, laid under.
 
@@ -997,7 +1000,9 @@ class ServerHandle:
         from maljan.core.declared_reading import tools_in_force
         from maljan.core.undeclared_tools import categories_of
 
-        return categories_of(tools_in_force(self._source_text(), self.config, held, read, closed))
+        return categories_of(
+            tools_in_force(self._source_text(), self.config, held, read, closed, program)
+        )
 
     def _source_text(self) -> str:
         """The source this handle's tools are declared under."""

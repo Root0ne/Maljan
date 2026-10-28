@@ -454,10 +454,11 @@ def test_virustotals_reference_url_is_linked_on_a_run_that_asked_it(
 def test_ghidras_open_tools_are_its_long_running_tools(declared: ToolDeclarations) -> None:
     from maljan.providers.sample_open import long_running_tools
 
+    # Its block's ``sample_open`` holds them long-running; no tool says so itself.
     held = declared.source("provider:ghidra")
     assert held is not None
-    long_running = {name for name, facts in held.tools.items() if facts.long_running}
-    assert long_running == set(long_running_tools(held.sample_open))
+    assert {name for name, facts in held.tools.items() if facts.long_running} == set()
+    assert set(long_running_tools(held.sample_open)) == {"load_program", "run_analysis"}
 
 
 def test_the_analysis_servers_long_running_tools_and_budgets_are_its_manifests() -> None:

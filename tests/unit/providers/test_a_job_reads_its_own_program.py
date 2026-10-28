@@ -354,11 +354,13 @@ class TestToolsThatTakeNoProgram:
             held_path=lambda: A,
             withheld=withheld,
         )
-        from maljan.core.builtin_reverser_tools import GHIDRA_TOOLS
+        from tests.conftest import ghidra_listing
 
         # The fixture merges the knowledge and VirusTotal servers' tools in;
-        # none of them is Ghidra's to list, and none takes a program.
-        others = {entry for entry in withheld if entry not in GHIDRA_TOOLS}
+        # none of them is Ghidra's to list (its own ``/mcp/schema``), and none
+        # takes a program.
+        ghidras = {entry["name"] for entry in ghidra_listing()}
+        others = {entry for entry in withheld if entry not in ghidras}
         assert others and all("job_safe_tools" in withheld[n] for n in others)
         assert set(withheld) - others == {
             "create_folder",

@@ -93,3 +93,17 @@ deployment's global provider, so a reverser given `static_provider: "ghidra"`
 works under any global setting. The `deep_static` team's `reversing` stage and
 the importable all-tools team's reverser are the teams that use it most. See
 [Which agents open a static provider](/architecture/#which-agents-open-a-static-provider).
+
+## What its tools are read as
+
+The platform ships no table of Ghidra's tools' effects, arguments or read-only
+readings, only their kinds for now. Each one is read from what
+Ghidra lists, by its verb and its arguments' role words. Over HTTP that is its
+`/mcp/schema`, and over stdio its MCP listing; both read the same. The block
+says once that its tools run nothing, reach no network and send nothing
+(`default_effects`). A tool that says otherwise keeps what it says:
+`emulate_function` and `emulate_hash_batch` emulate, and `run_ghidra_script`
+and `run_script_inline` run whatever they are given. A read is read-only only
+when it names the job's program, so `list_open_programs` and `list_scripts`
+always run again. See [A decompiler's or disassembler's tools read from what it
+lists](/configuration/#what-a-server-declares-about-its-tools).

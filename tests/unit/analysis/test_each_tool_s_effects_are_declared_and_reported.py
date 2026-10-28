@@ -210,6 +210,25 @@ def _declared_as_shipped(key: str) -> dict[str, Any]:
     }
 
 
+def _provider_sources() -> list[str]:
+    from maljan.core import builtin_declarations as built
+
+    return list(built.provider_block_paths())
+
+
+def _in_force(source: str) -> dict[str, Any]:
+    """A shipped provider block's tools as the platform reads them, its listing included."""
+    from maljan.core.config import Settings
+    from maljan.core.tool_declarations import ToolDeclarations
+
+    held = ToolDeclarations.from_settings(Settings(_env_file=None)).source(source)
+    assert held is not None, source
+    return {
+        tool: facts.model_dump(mode="json", exclude_defaults=True)
+        for tool, facts in held.tools.items()
+    }
+
+
 def _shipped_blocks() -> list[tuple[str, dict[str, Any]]]:
     from maljan.core import builtin_declarations as built
 
@@ -217,9 +236,9 @@ def _shipped_blocks() -> list[tuple[str, dict[str, Any]]]:
         (f"mcp:{key}", {"tool_facts": _declared_as_shipped(key)})
         for key in built.builtin_server_names()
     ]
-    blocks += [
-        (f"provider:{key}", built.provider_declaration(key)) for key in built.provider_names()
-    ]
+    # A provider's tools as the platform reads them too: Ghidra's and radare2's
+    # effects are read from their listings under their blocks' statement.
+    blocks += [(source, {"tool_facts": _in_force(source)}) for source in _provider_sources()]
     blocks += [
         (str(ref), cfg.model_dump(mode="json"))
         for ref, cfg in built.in_process_declarations().items()

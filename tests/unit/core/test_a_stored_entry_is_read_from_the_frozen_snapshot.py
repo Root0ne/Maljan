@@ -6,16 +6,15 @@ declarations the platform ships. It now reads one versioned snapshot of what
 those gave (``core.legacy_tool_facts``), so the shipped declarations can
 change, or go, without changing how a stored run reads.
 
-Held here: the snapshot is the pinned file; it equals the shipped tables tool
-by tool and field by field, and each consumer's legacy names; and a shipped
-table emptied, given other kinds, or reshaped with each kind kept leaves every
-source-less entry reading as before, and a stored run's rule matchers named
-as the snapshot names them.
+Held here: the snapshot is the pinned file; it holds each consumer's legacy
+names; and a shipped table emptied, given other kinds, or reshaped with each
+kind kept leaves every source-less entry reading as before, and a stored run's
+rule matchers named as the snapshot names them.
 
-The snapshot is never regenerated. The tests that hold it equal to the shipped
-tables (the frozen-equals-live ones below) hold only while the shipped tables
-stand as they were cut: the later change that makes a shipped table diverge
-deletes those tests, it never updates them or the snapshot.
+The snapshot is never regenerated. The tests that held it equal to the
+shipped tables tool by tool were deleted when the Ghidra and radare2 tables
+went (T-418 PR4): their tools are read from what each server lists, and the
+snapshot keeps the facts the tables gave, for the stored runs alone.
 """
 
 from __future__ import annotations
@@ -36,8 +35,6 @@ from maljan.core.tool_declarations import ToolFacts
 from maljan.pipeline import validation
 from maljan.reporting import legacy_tool_names as legacy
 from maljan.reporting import tool_kinds
-
-_FIELDS = tuple(ToolFacts.model_fields)
 
 
 def _table_legacy_names(consumer: str) -> frozenset[str]:
@@ -62,20 +59,6 @@ def test_a_snapshot_whose_digest_is_not_the_pinned_one_is_refused(
             legacy_tool_facts._document()
     finally:
         legacy_tool_facts._document.cache_clear()
-
-
-def test_the_snapshot_names_every_tool_the_platform_s_own_sources_declare() -> None:
-    # The own servers' declarations are kept per tool, in no order of a table.
-    assert set(legacy_tool_facts.facts_by_name()) == set(declared_reading.shipped_by_name())
-
-
-@pytest.mark.parametrize("tool", sorted(declared_reading.shipped_by_name()))
-def test_each_tool_s_frozen_facts_are_its_shipped_facts_field_by_field(tool: str) -> None:
-    frozen = legacy_tool_facts.facts_by_name()[tool]
-    live = declared_reading.shipped_by_name()[tool]
-    assert frozen.model_fields_set == live.model_fields_set
-    differ = [name for name in _FIELDS if getattr(frozen, name) != getattr(live, name)]
-    assert differ == []
 
 
 @pytest.mark.parametrize("consumer", sorted(CONSUMER_KINDS))

@@ -263,6 +263,11 @@ export interface McpServerEntry {
    *  (`core.tool_declarations.ReputationService`): the service's name and the
    *  rank the triage pack asks them at. */
   reputation_service?: { name?: string; rank?: number | null } | null;
+  /** What every tool of the server does beyond answering unless the tool says
+   *  otherwise, and what its `sample_open.analyse_tool` does over that
+   *  (`core.tool_declarations.ToolEffects`), or null when nothing is said. */
+  default_effects?: Record<string, unknown> | null;
+  analyse_effects?: Record<string, unknown> | null;
   /** How many levels at the top of the process tree the worker starts for
    *  the server are a launcher that does not read the sample, or null when
    *  none is declared (`MCPServerConfig.launcher_depth`). */

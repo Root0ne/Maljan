@@ -121,6 +121,7 @@ __all__ = [
     "laid_under",
     "layered",
     "mark_saved",
+    "program_read",
     "register_served",
     "restore_served",
     "served",
@@ -143,14 +144,18 @@ _SERVED: dict[str, tuple[str, dict[str, ToolFacts]]] = {}
 # What the platform read of the same listing's undeclared tools
 # (``core.derived_declarations``), kept the same way, with the reading a
 # trusted block keeps of each tool whose disclosure only its server's own
-# hints could lift (``derived_declarations.closed_by_hints``).
-_DERIVED: dict[str, tuple[str, dict[str, ToolFacts], dict[str, ToolFacts]]] = {}
+# hints could lift (``derived_declarations.closed_by_hints``), and what each
+# tool is read as on a program-analysis server (``core.program_reading``).
+_DERIVED: dict[
+    str, tuple[str, dict[str, ToolFacts], dict[str, ToolFacts], dict[str, ToolFacts]]
+] = {}
 # The key of a kept row's declaration under which what was read of its
 # undeclared tools is kept. No tool can be named by it (a tool's name is never
 # empty), so a release that does not know it reads the row's tools as before.
 DERIVED_KEY = ""
 DERIVED_FORM = "derived"
 CLOSED_FORM = "closed_by_hints"
+PROGRAM_FORM = "program"
 # The sources whose declaration this process listed or forgot since it last
 # loaded or saved the kept ones (:func:`unsaved`).
 _UNSAVED: set[str] = set()
@@ -254,6 +259,7 @@ def register_served(
     launch: str,
     derived: Mapping[str, ToolFacts] | None = None,
     closed: Mapping[str, ToolFacts] | None = None,
+    program: Mapping[str, ToolFacts] | None = None,
 ) -> None:
     """Keep ``tool_facts`` as what ``source`` declares now; held declarations are rebuilt.
 
@@ -265,7 +271,9 @@ def register_served(
     listing's undeclared tools (``core.derived_declarations``), kept beside it
     the same way; ``None`` leaves what was read before as it is. ``closed``
     is the reading a trusted block keeps of each tool whose disclosure only
-    its server's own hints could lift (``derived_declarations.closed_by_hints``).
+    its server's own hints could lift (``derived_declarations.closed_by_hints``);
+    ``program`` what each tool is read as on a program-analysis server
+    (``derived_declarations.program_readings_of``), kept with ``derived``.
     """
     held = dict(tool_facts)
     with _LOCK:
@@ -273,7 +281,8 @@ def register_served(
         if derived is not None:
             read = dict(derived)
             shut = {n: f for n, f in (closed or {}).items() if n in read}
-            after = (launch, read, shut) if read else None
+            as_program = dict(program or {})
+            after = (launch, read, shut, as_program) if read or as_program else None
             changed = _put(_DERIVED, source, after) or changed
         if changed:
             _UNSAVED.add(source)
@@ -305,10 +314,19 @@ def derived(source: str, launch: str | None = None) -> Mapping[str, ToolFacts]:
         held = _DERIVED.get(str(source))
     if held is None:
         return {}
-    kept_under, facts, _closed = held
+    kept_under, facts, *_rest = held
     if launch is not None and kept_under != launch:
         return {}
     return dict(facts)
+
+
+def program_read(source: str, launch: str | None = None) -> Mapping[str, ToolFacts]:
+    """What ``source``'s tools were read as on a program-analysis server; as :func:`derived`."""
+    with _LOCK:
+        held = _DERIVED.get(str(source))
+    if held is None or (launch is not None and held[0] != launch):
+        return {}
+    return dict(held[3]) if len(held) > 3 else {}
 
 
 def closed_by_hints(source: str, launch: str | None = None) -> dict[str, ToolFacts]:
@@ -322,7 +340,7 @@ def closed_by_hints(source: str, launch: str | None = None) -> dict[str, ToolFac
 
 def kept(source: str, launch: str | None = None) -> bool:
     """Whether anything is kept of ``source``'s last listing: its declaration or a reading."""
-    return bool(served(source, launch) or derived(source, launch))
+    return bool(served(source, launch) or derived(source, launch) or program_read(source, launch))
 
 
 def held_served(source: str) -> tuple[str, dict[str, ToolFacts]] | None:
@@ -393,24 +411,28 @@ def stored_form(
     tool_facts: Mapping[str, ToolFacts],
     derived_facts: Mapping[str, ToolFacts] | None = None,
     closed: Mapping[str, ToolFacts] | None = None,
+    program: Mapping[str, ToolFacts] | None = None,
 ) -> dict[str, Any]:
     """``tool_facts`` as the store keeps them: per tool, each field it sets, as JSON.
 
     With ``derived_facts``, what was read of the listing's undeclared tools,
-    in the same form, under :data:`DERIVED_KEY`.
+    in the same form, under :data:`DERIVED_KEY`, and with ``program`` what
+    each tool is read as on a program-analysis server, beside it. A release
+    that does not know a form reads the row without it.
     """
     out: dict[str, Any] = {name: _set_fields(facts) for name, facts in sorted(tool_facts.items())}
-    if derived_facts:
+    read = dict(derived_facts or {})
+    if read or program:
         out[DERIVED_KEY] = {
-            DERIVED_FORM: {name: _set_fields(f) for name, f in sorted(derived_facts.items())}
+            DERIVED_FORM: {name: _set_fields(f) for name, f in sorted(read.items())}
         }
-        shut = {
-            name: _set_fields(f)
-            for name, f in sorted((closed or {}).items())
-            if name in derived_facts
-        }
+        shut = {name: _set_fields(f) for name, f in sorted((closed or {}).items()) if name in read}
         if shut:
             out[DERIVED_KEY][CLOSED_FORM] = shut
+        if program:
+            out[DERIVED_KEY][PROGRAM_FORM] = {
+                name: _set_fields(f) for name, f in sorted(program.items())
+            }
     return out
 
 
@@ -430,6 +452,13 @@ def _read_stored_derived(raw: Any, where: str) -> dict[str, ToolFacts]:
     """What a kept row holds of the listing's undeclared tools, read as its declaration is."""
     held = raw.get(DERIVED_KEY) if isinstance(raw, Mapping) else None
     read = held.get(DERIVED_FORM) if isinstance(held, Mapping) else None
+    return _read_stored(read, where) if isinstance(read, Mapping) else {}
+
+
+def _read_stored_program(raw: Any, where: str) -> dict[str, ToolFacts]:
+    """What a kept row holds of each tool read as a program-analysis server's, as declared."""
+    held = raw.get(DERIVED_KEY) if isinstance(raw, Mapping) else None
+    read = held.get(PROGRAM_FORM) if isinstance(held, Mapping) else None
     return _read_stored(read, where) if isinstance(read, Mapping) else {}
 
 
@@ -468,7 +497,9 @@ def install_persisted(rows: Iterable[Any]) -> None:
     from maljan.core.tool_declarations import shipped_launch
 
     kept_rows: dict[str, tuple[str, dict[str, ToolFacts]]] = {}
-    kept_read: dict[str, tuple[str, dict[str, ToolFacts], dict[str, ToolFacts]]] = {}
+    kept_read: dict[
+        str, tuple[str, dict[str, ToolFacts], dict[str, ToolFacts], dict[str, ToolFacts]]
+    ] = {}
     for row in rows:
         try:
             source, launch, raw, *rest = row
@@ -484,6 +515,7 @@ def install_persisted(rows: Iterable[Any]) -> None:
         try:
             facts = _read_stored(raw, f"{source}.")
             read = _read_stored_derived(raw, f"{source}.")
+            as_program = _read_stored_program(raw, f"{source}.")
         except Exception as exc:  # noqa: BLE001 — one unreadable row costs that source alone
             logger.warning(
                 "A kept server declaration was not read (%s); its source reads as undeclared.",
@@ -492,9 +524,14 @@ def install_persisted(rows: Iterable[Any]) -> None:
             continue
         if facts:
             kept_rows[source] = (launch, facts)
-        if read:
+        if read or as_program:
             shut = _read_stored_closed(raw, f"{source}.")
-            kept_read[source] = (launch, read, {n: f for n, f in shut.items() if n in read})
+            kept_read[source] = (
+                launch,
+                read,
+                {n: f for n, f in shut.items() if n in read},
+                as_program,
+            )
     with _LOCK:
         changed = False
         tables: tuple[tuple[dict[str, Any], Mapping[str, Any]], ...] = (
@@ -546,11 +583,15 @@ def _row(source: str) -> tuple[str, dict[str, Any]] | None:
     read = _DERIVED.get(source)
     if held is not None and held[0]:
         if read is not None and read[0] == held[0]:
-            return held[0], stored_form(held[1], read[1], read[2])
+            return held[0], stored_form(held[1], read[1], read[2], _program_part(read))
         return held[0], stored_form(held[1])
     if read is not None and read[0]:
-        return read[0], stored_form({}, read[1], read[2])
+        return read[0], stored_form({}, read[1], read[2], _program_part(read))
     return None
+
+
+def _program_part(read: tuple[Any, ...]) -> dict[str, ToolFacts]:
+    return dict(read[3]) if len(read) > 3 else {}
 
 
 def mark_saved(rows: Iterable[tuple[Any, ...]]) -> None:
@@ -783,6 +824,7 @@ def with_served(declared: Declared) -> Declared:
         served(source, launch),
         derived(source, launch),
         closed_by_hints(source, launch),
+        program_read(source, launch),
     )
 
 
@@ -791,17 +833,24 @@ def laid_under(
     held: Mapping[str, ToolFacts],
     read: Mapping[str, ToolFacts] | None = None,
     closed: Mapping[str, ToolFacts] | None = None,
+    program: Mapping[str, ToolFacts] | None = None,
 ) -> Declared:
     """``declared`` with ``held``, what its server declares of its tools, laid under its own.
 
     As :func:`with_served` lays what is kept, for a listing nothing has kept
     yet (a handle tagging its tools before its attach has succeeded). With
     ``read``, what the platform read of the listing's undeclared tools is laid
-    under both (``core.derived_declarations.lay_under``).
+    under both (``core.derived_declarations.lay_under``), with ``program``, what
+    each tool is read as on a program-analysis server. What the block says of
+    its tools as a whole (``default_effects``, ``analyse_effects``) is laid
+    under the effects of each tool its server listed, last
+    (``derived_declarations.with_server_effects``): a tool nothing has listed
+    has not said whether it does otherwise, so the statement says nothing of it.
     """
     from maljan.core.declared_reading import shipped_tools_of
+    from maljan.core.derived_declarations import with_server_effects
 
-    if not held and not read:
+    if not held and not read and not program:
         return declared
     removed = shipped_tools_of(str(declared.source)) - set(declared.tools)
     tools, said, claims = layered(
@@ -811,12 +860,12 @@ def laid_under(
         trusted=declared.trusts_served,
         roles=declared.roles,
     )
-    if read:
+    if read or program:
         from maljan.core.derived_declarations import lay_under
 
         tools = lay_under(
             tools,
-            read,
+            read or {},
             removed,
             roles=declared.roles,
             own=declared.tools,
@@ -824,5 +873,16 @@ def laid_under(
             service=declared.reputation_service,
             closed=closed if declared.trusts_served else None,
             kind_free=declared.kind_free,
+            program=program,
+            default_effects=declared.default_effects,
+            sample_open=declared.sample_open,
         )
+    listed = {*held, *(read or {}), *(program or {})}
+    tools = with_server_effects(
+        tools,
+        declared.default_effects,
+        declared.analyse_effects,
+        declared.sample_open,
+        listed=listed,
+    )
     return dataclasses.replace(declared, tools=tools, served_fields=said, served_claims=claims)

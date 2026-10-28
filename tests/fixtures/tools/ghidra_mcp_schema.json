@@ -1,0 +1,5143 @@
+{
+ "count": 165,
+ "tools": [
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Add a field to a structure",
+   "method": "POST",
+   "params": [
+    {
+     "name": "struct_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "field_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "field_type",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "-1",
+     "name": "offset",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/add_struct_field"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Get auto-analysis status for open programs",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Program name (omit for all open programs)",
+     "name": "program",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/analysis_status"
+  },
+  {
+   "category": "malware",
+   "category_description": "Anti-analysis detection, suspicious instructions, IOC extraction",
+   "description": "Detect suspicious API call patterns",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/analyze_api_call_chains"
+  },
+  {
+   "category": "xref",
+   "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+   "description": "Analyze call graph paths between functions",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Start function name",
+     "name": "start_function",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "End function name",
+     "name": "end_function",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "summary",
+     "description": "Analysis type (summary/paths/cycles)",
+     "name": "analysis_type",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/analyze_call_graph"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Analyze function control flow complexity",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Function name",
+     "name": "function_name",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/analyze_control_flow"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "1024",
+     "name": "max_scan_bytes",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "true",
+     "name": "include_xref_map",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "true",
+     "name": "include_assembly_patterns",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "true",
+     "name": "include_boundary_detection",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/analyze_data_region"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Trace how a value propagates through a function using the decompiler's PCode graph. Direction 'backward' walks producers (Varnode.getDef); 'forward' walks consumers (Varnode.getDescendants). Terminates at constants, parameters, call boundaries, or max_steps. Phi (MULTIEQUAL) nodes are summarized rather than recursed. On programs with multiple address spaces, prefix addresses with the space name (mem:1000).",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address inside the target function where the value is observed. Accepts 0x<hex> or <space>:<hex>.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Anchor selector. Register name (EAX, RCX), HighVariable name (param_1, local_14, iVar1), or empty to use the PcodeOp output at the address.",
+     "name": "variable",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "backward",
+     "description": "'backward' (producers) or 'forward' (consumers).",
+     "name": "direction",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "20",
+     "description": "Cap on nodes visited. Default 20, max 200.",
+     "name": "max_steps",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/analyze_dataflow"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/analyze_for_documentation"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Comprehensive single-call function analysis. Accepts function name or address.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Function reference (name or address)",
+     "name": "name",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "true",
+     "name": "include_xrefs",
+     "required": false,
+     "source": "query",
+     "type": "boolean"
+    },
+    {
+     "default": "true",
+     "name": "include_callees",
+     "required": false,
+     "source": "query",
+     "type": "boolean"
+    },
+    {
+     "default": "true",
+     "name": "include_callers",
+     "required": false,
+     "source": "query",
+     "type": "boolean"
+    },
+    {
+     "default": "true",
+     "name": "include_disasm",
+     "required": false,
+     "source": "query",
+     "type": "boolean"
+    },
+    {
+     "default": "true",
+     "name": "include_variables",
+     "required": false,
+     "source": "query",
+     "type": "boolean"
+    },
+    {
+     "default": "false",
+     "description": "Include completeness scoring (undefined vars, naming violations, recommendations)",
+     "name": "include_completeness",
+     "required": false,
+     "source": "query",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/analyze_function_complete"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Check function documentation completeness. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "false",
+     "description": "Compact output",
+     "name": "compact",
+     "required": false,
+     "source": "query",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/analyze_function_completeness"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Analyze structure field access patterns. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "struct_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "10",
+     "name": "max_functions",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/analyze_struct_field_usage"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Atomic type application with classification. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "classification",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "name",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "comment",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "type_definition",
+     "required": true,
+     "source": "body",
+     "type": "any"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/apply_data_classification"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Apply data type at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "type_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "true",
+     "name": "clear_existing",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/apply_data_type"
+  },
+  {
+   "category": "documentation",
+   "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
+   "description": "Import documentation to a target function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "name": "json_body",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/apply_function_documentation"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Analyze completeness for multiple functions",
+   "method": "POST",
+   "params": [
+    {
+     "name": "addresses",
+     "required": true,
+     "source": "body",
+     "type": "any"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/batch_analyze_completeness"
+  },
+  {
+   "category": "symbol",
+   "category_description": "Create/rename/delete labels, rename data, globals, external locations",
+   "description": "Create multiple labels at once",
+   "method": "POST",
+   "params": [
+    {
+     "name": "labels",
+     "required": true,
+     "source": "body",
+     "type": "array"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/batch_create_labels"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Decompile multiple functions at once. Accepts comma-separated function names or addresses.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Comma-separated function references (names or addresses)",
+     "name": "functions",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/batch_decompile"
+  },
+  {
+   "category": "symbol",
+   "category_description": "Create/rename/delete labels, rename data, globals, external locations",
+   "description": "Delete multiple labels at once",
+   "method": "POST",
+   "params": [
+    {
+     "name": "labels",
+     "required": true,
+     "source": "body",
+     "type": "array"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/batch_delete_labels"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Rename function and components atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "function_name",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "parameter_renames",
+     "required": true,
+     "source": "body",
+     "type": "object"
+    },
+    {
+     "name": "local_renames",
+     "required": true,
+     "source": "body",
+     "type": "object"
+    },
+    {
+     "default": "",
+     "name": "return_type",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/batch_rename_function_components"
+  },
+  {
+   "category": "comment",
+   "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
+   "description": "Set multiple comments in one operation. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "[]",
+     "name": "decompiler_comments",
+     "required": false,
+     "source": "body",
+     "type": "array"
+    },
+    {
+     "default": "[]",
+     "name": "disassembly_comments",
+     "required": false,
+     "source": "body",
+     "type": "array"
+    },
+    {
+     "default": "null",
+     "description": "Plate comment text. Omit to leave existing plate untouched. Pass empty string to explicitly clear.",
+     "name": "plate_comment",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/batch_set_comments"
+  },
+  {
+   "category": "documentation",
+   "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
+   "description": "Report of source file strings and their FUN_* functions",
+   "method": "GET",
+   "params": [
+    {
+     "default": ".cpp",
+     "description": "File pattern (e.g. .cpp)",
+     "name": "pattern",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/batch_string_anchor_report"
+  },
+  {
+   "category": "documentation",
+   "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
+   "description": "Bulk cross-binary function matching",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Source program name",
+     "name": "source_program",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "Target program name",
+     "name": "target_program",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0.7",
+     "description": "Similarity threshold",
+     "name": "threshold",
+     "required": false,
+     "source": "query",
+     "type": "number"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "50",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "description": "Name filter",
+     "name": "filter",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/bulk_fuzzy_match"
+  },
+  {
+   "category": "symbol",
+   "category_description": "Create/rename/delete labels, rename data, globals, external locations",
+   "description": "Check if address supports rename. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/can_rename_at_address"
+  },
+  {
+   "category": "comment",
+   "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
+   "description": "Clear all comments within a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "true",
+     "name": "clear_plate",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "true",
+     "name": "clear_pre",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "true",
+     "name": "clear_eol",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/clear_function_comments"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Clear flow override at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/clear_instruction_flow_override"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Clone a data type with new name",
+   "method": "POST",
+   "params": [
+    {
+     "name": "source_type",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "new_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/clone_data_type"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Close an open program by project path or name",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Program name or project path",
+     "name": "name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    }
+   ],
+   "path": "/close_program"
+  },
+  {
+   "category": "headless",
+   "category_description": "Headless server program management (no GUI required)",
+   "description": "Close the currently open project",
+   "method": "POST",
+   "params": [],
+   "path": "/close_project"
+  },
+  {
+   "category": "documentation",
+   "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
+   "description": "Compare documented vs undocumented counts",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/compare_programs_documentation"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "Convert number between hex/decimal/binary formats",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Number to convert",
+     "name": "text",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "4",
+     "description": "Size in bytes",
+     "name": "size",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    }
+   ],
+   "path": "/convert_number"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Create an array data type",
+   "method": "POST",
+   "params": [
+    {
+     "name": "base_type",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "1",
+     "name": "length",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "name": "name",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_array_type"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Create a new data type category",
+   "method": "POST",
+   "params": [
+    {
+     "name": "category_path",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_data_type_category"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Create an enum data type",
+   "method": "POST",
+   "params": [
+    {
+     "name": "name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "values",
+     "required": true,
+     "source": "body",
+     "type": "json"
+    },
+    {
+     "default": "4",
+     "name": "size",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_enum"
+  },
+  {
+   "category": "project",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Create a folder in the project",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Project folder path to create",
+     "name": "path",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_folder"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Create function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "name",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "true",
+     "name": "disassemble_first",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_function"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Create a function signature data type",
+   "method": "POST",
+   "params": [
+    {
+     "name": "name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "return_type",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "parameters",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_function_signature"
+  },
+  {
+   "category": "symbol",
+   "category_description": "Create/rename/delete labels, rename data, globals, external locations",
+   "description": "Create a label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_label"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Create a new memory block. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "name": "name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "size",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "true",
+     "name": "read",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "true",
+     "name": "write",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "false",
+     "name": "execute",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "false",
+     "name": "volatile",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "name": "comment",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_memory_block"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Create a pointer data type",
+   "method": "POST",
+   "params": [
+    {
+     "name": "base_type",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "name",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_pointer_type"
+  },
+  {
+   "category": "headless",
+   "category_description": "Headless server program management (no GUI required)",
+   "description": "Create a new Ghidra project",
+   "method": "POST",
+   "params": [
+    {
+     "name": "parentDir",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    }
+   ],
+   "path": "/create_project"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "New structure type name, for example UnitAny or SkillTableEntry",
+     "name": "name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "description": "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]",
+     "name": "fields",
+     "required": true,
+     "source": "body",
+     "type": "json"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_struct"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Create a typedef alias",
+   "method": "POST",
+   "params": [
+    {
+     "name": "name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "base_type",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_typedef"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Create a union data type",
+   "method": "POST",
+   "params": [
+    {
+     "name": "name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "fields",
+     "required": true,
+     "source": "body",
+     "type": "json"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/create_union"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Decompile function at address to pseudocode. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "60",
+     "description": "Decompile timeout in seconds",
+     "name": "timeout",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    }
+   ],
+   "path": "/decompile_function"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Delete a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "category",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/delete_bookmark"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Delete a data type",
+   "method": "POST",
+   "params": [
+    {
+     "name": "type_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/delete_data_type"
+  },
+  {
+   "category": "project",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Delete a file from the project",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Project file path to delete",
+     "name": "filePath",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    }
+   ],
+   "path": "/delete_file"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Delete function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/delete_function"
+  },
+  {
+   "category": "symbol",
+   "category_description": "Create/rename/delete labels, rename data, globals, external locations",
+   "description": "Delete a label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/delete_label"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "true",
+     "name": "analyze_loop_bounds",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "true",
+     "name": "analyze_indexing",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "2048",
+     "name": "max_scan_range",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/detect_array_bounds"
+  },
+  {
+   "category": "malware",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Detect crypto algorithm constants",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/detect_crypto_constants"
+  },
+  {
+   "category": "malware",
+   "category_description": "Anti-analysis detection, suspicious instructions, IOC extraction",
+   "description": "Detect common malware behaviors",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/detect_malware_behaviors"
+  },
+  {
+   "category": "documentation",
+   "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
+   "description": "Compute structured diff between two functions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address_a",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address_b",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "First program name",
+     "name": "program_a",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "Second program name",
+     "name": "program_b",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/diff_functions"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Disassemble a range of bytes. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "start_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "end_address",
+     "param_type": "address",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "length",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "true",
+     "name": "restrict_to_execute_memory",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/disassemble_bytes"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Get assembly listing of function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/disassemble_function"
+  },
+  {
+   "category": "emulation",
+   "category_description": "Targeted function emulation for hash resolution, crypto analysis, and controlled execution of isolated code paths",
+   "description": "Emulate a single function with controlled register/memory inputs. Returns final register state after execution. Ideal for understanding hash functions, crypto routines, or any pure-computation code path.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Entry point address of the function to emulate",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "description": "Initial register values as JSON: {\"EAX\": \"0x1234\", \"ECX\": \"0x7FFE0000\"}",
+     "name": "registers",
+     "required": true,
+     "source": "body",
+     "type": "json"
+    },
+    {
+     "description": "Memory regions to pre-populate as JSON array: [{\"address\": \"0x7FFE0000\", \"data\": \"base64...\"}] or [{\"address\": \"0x7FFE0000\", \"string\": \"CreateProcessW\\u0000\"}]",
+     "name": "memory",
+     "required": true,
+     "source": "body",
+     "type": "json"
+    },
+    {
+     "default": "10000",
+     "description": "Maximum P-code steps before timeout",
+     "name": "max_steps",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Comma-separated register names to return (empty = all general-purpose)",
+     "name": "return_registers",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/emulate_function"
+  },
+  {
+   "category": "emulation",
+   "category_description": "Targeted function emulation for hash resolution, crypto analysis, and controlled execution of isolated code paths",
+   "description": "Brute-force API hash resolution. Emulates a hash function with each candidate API name and returns the one that produces the target hash. Ideal for resolving ROR13, CRC32, djb2, FNV, and custom hash algorithms.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address of the hash computation function",
+     "name": "hash_function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "description": "Register that receives the pointer to the API name string (e.g., ECX, RCX, EDI)",
+     "name": "string_register",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "EAX",
+     "description": "Register that contains the computed hash after emulation (e.g., EAX, RAX)",
+     "name": "result_register",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "description": "Target hash value to match (hex string like 0x7C0DFCAA)",
+     "name": "target_hash",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "description": "JSON array of candidate API name strings: [\"CreateProcessW\", \"VirtualAlloc\", ...]",
+     "name": "candidates",
+     "required": true,
+     "source": "body",
+     "type": "json"
+    },
+    {
+     "default": "",
+     "description": "Additional register values to set before each emulation (JSON object)",
+     "name": "initial_registers",
+     "required": false,
+     "source": "body",
+     "type": "json"
+    },
+    {
+     "default": "false",
+     "description": "Write candidate strings as UTF-16LE (wide) instead of ASCII",
+     "name": "wide_string",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/emulate_hash_batch"
+  },
+  {
+   "category": "malware",
+   "category_description": "Anti-analysis detection, suspicious instructions, IOC extraction",
+   "description": "Enhanced IOC extraction with context",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/extract_iocs_with_context"
+  },
+  {
+   "category": "malware",
+   "category_description": "Anti-analysis detection, suspicious instructions, IOC extraction",
+   "description": "Detect anti-analysis and anti-debug techniques",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/find_anti_analysis_techniques"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Find gaps of undefined/unanalyzed bytes in executable memory not covered by any function body. Useful for discovering missed functions in firmware and embedded binaries. Reports each contiguous uncovered range with its size, content type, and the nearest functions on each side.",
+   "method": "GET",
+   "params": [
+    {
+     "default": "1",
+     "description": "Minimum gap size in addressable units to report (increase to filter alignment padding)",
+     "name": "min_size",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/find_code_gaps"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Identify unreachable code blocks",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Function name",
+     "name": "function_name",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/find_dead_code"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Find next function needing analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "start_address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "Search criteria",
+     "name": "criteria",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "Name pattern filter",
+     "name": "pattern",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "Search direction",
+     "name": "direction",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/find_next_undefined_function"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Find structurally similar functions",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Function name",
+     "name": "target_function",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0.8",
+     "description": "Similarity threshold",
+     "name": "threshold",
+     "required": false,
+     "source": "query",
+     "type": "number"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/find_similar_functions"
+  },
+  {
+   "category": "documentation",
+   "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
+   "description": "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "Source program name",
+     "name": "source_program",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "Target program name",
+     "name": "target_program",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0.7",
+     "description": "Similarity threshold",
+     "name": "threshold",
+     "required": false,
+     "source": "query",
+     "type": "number"
+    },
+    {
+     "default": "20",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    }
+   ],
+   "path": "/find_similar_functions_fuzzy"
+  },
+  {
+   "category": "documentation",
+   "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
+   "description": "Find FUN_* functions referencing a string. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/find_undocumented_by_string"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/force_decompile"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "List all physical address spaces in the program. On programs with multiple address spaces (e.g., embedded targets), use the returned space names to prefix addresses (e.g., mem:1000, code:ff00) for unambiguous resolution. Also check addressable_unit_size: a value > 1 means the space is word-addressed (e.g., AVR code space uses 2-byte words). MCP tools and Ghidra both use word addresses natively for such spaces — code:001478 is word 0x1478, not byte 0x1478. Do NOT multiply or divide addresses seen in Ghidra output; use them as-is.",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_address_spaces"
+  },
+  {
+   "category": "xref",
+   "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+   "description": "Get assembly pattern context for xref sources",
+   "method": "POST",
+   "params": [
+    {
+     "name": "xref_sources",
+     "required": true,
+     "source": "body",
+     "type": "any"
+    },
+    {
+     "default": "5",
+     "name": "context_instructions",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "name": "include_patterns",
+     "required": true,
+     "source": "body",
+     "type": "any"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_assembly_context"
+  },
+  {
+   "category": "documentation",
+   "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
+   "description": "Get hashes for multiple or all functions",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "description": "Name filter",
+     "name": "filter",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_bulk_function_hashes"
+  },
+  {
+   "category": "xref",
+   "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+   "description": "Batch cross-reference retrieval",
+   "method": "POST",
+   "params": [
+    {
+     "name": "addresses",
+     "required": true,
+     "source": "body",
+     "type": "any"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_bulk_xrefs"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Get detailed info about the active program. When multiple programs are open, call this first to confirm which program will receive tool calls that omit the program argument.",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_current_program_info"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "Get program entry points",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_entry_points"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Get enum member values",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Enum name",
+     "name": "enum_name",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_enum_values"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "Get external location details by address or DLL name",
+   "method": "GET",
+   "params": [
+    {
+     "name": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "name": "dll_name",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_external_location"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Get assembly context for struct field offsets. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "struct_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "field_offset",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "5",
+     "name": "num_examples",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_field_access_context"
+  },
+  {
+   "category": "xref",
+   "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+   "description": "Get entire program call graph",
+   "method": "GET",
+   "params": [
+    {
+     "default": "edges",
+     "description": "Output format: edges (text), adjacency, dot, mermaid, json_edges (address-based JSON for automation)",
+     "name": "format",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "1000",
+     "description": "Max edges to return. 0 = unlimited.",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_full_call_graph"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Get function info at a specific address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_by_address"
+  },
+  {
+   "category": "xref",
+   "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+   "description": "Traverse call graph from a function. Accepts function name or address.",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Function name",
+     "name": "name",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Function entry-point address (hex) — alternative to name",
+     "name": "address",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "2",
+     "description": "Traversal depth",
+     "name": "depth",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "both",
+     "description": "Traversal direction (both/callers/callees)",
+     "name": "direction",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_call_graph"
+  },
+  {
+   "category": "xref",
+   "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+   "description": "Get functions called by a function. Accepts function name or address.",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Function name",
+     "name": "name",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Function entry-point address (hex) — alternative to name",
+     "name": "address",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_callees"
+  },
+  {
+   "category": "xref",
+   "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+   "description": "Get functions calling a function. Accepts function name or address.",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Function name",
+     "name": "name",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Function entry-point address (hex) — alternative to name",
+     "name": "address",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_callers"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "Get total function count",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_count"
+  },
+  {
+   "category": "documentation",
+   "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
+   "description": "Export all documentation for a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_documentation"
+  },
+  {
+   "category": "documentation",
+   "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
+   "description": "Compute normalized opcode hash for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_hash"
+  },
+  {
+   "category": "xref",
+   "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+   "description": "Get jump targets within a function. Accepts function name or address.",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Function name",
+     "name": "name",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Function entry-point address (hex) — alternative to name",
+     "name": "address",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_jump_targets"
+  },
+  {
+   "category": "symbol",
+   "category_description": "Create/rename/delete labels, rename data, globals, external locations",
+   "description": "Get labels within a function body. Requires the function name — if you only have an address, call get_function_by_address first to retrieve the name.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Function name (not an address — use get_function_by_address to resolve an address to a name first)",
+     "name": "name",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "20",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_labels"
+  },
+  {
+   "category": "documentation",
+   "category_description": "Function hashing, cross-binary documentation, undocumented function discovery",
+   "description": "Get function signature for cross-binary comparison. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_signature"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "List all variables in a function. Accepts function_name (by name) or address (by address). If both are given, address takes precedence. Useful when the function was recently renamed — use address to avoid name-lookup race conditions.",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Function name (ignored if address is provided)",
+     "name": "function_name",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Function address (hex, e.g. 6fc583f0). If provided, overrides function_name lookup.",
+     "name": "address",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "200",
+     "description": "Max local variables to return (default 200, 0 = unlimited)",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "all",
+     "description": "Filter locals: 'all' (default), 'needs_work' (only needs_type or needs_rename), 'named' (only non-generic names)",
+     "name": "filter",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_variables"
+  },
+  {
+   "category": "xref",
+   "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+   "description": "Get cross-references to a function. Accepts function name or address (pass address as 'address' param, or as 'name').",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Function name",
+     "name": "name",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Function entry-point address (hex) — alternative to name",
+     "name": "address",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_function_xrefs"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Get program metadata",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_metadata"
+  },
+  {
+   "category": "comment",
+   "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
+   "description": "Get function header/plate comment. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_plate_comment"
+  },
+  {
+   "category": "headless",
+   "category_description": "Headless server program management (no GUI required)",
+   "description": "Get info about the currently open project",
+   "method": "GET",
+   "params": [],
+   "path": "/get_project_info"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Get structure field layout",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Structure name",
+     "name": "struct_name",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_struct_layout"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Get data type size and info",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Data type name",
+     "name": "type_name",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_type_size"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "List valid Ghidra data type strings",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Category filter",
+     "name": "category",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_valid_data_types"
+  },
+  {
+   "category": "xref",
+   "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+   "description": "Get cross-references from an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_xrefs_from"
+  },
+  {
+   "category": "xref",
+   "category_description": "Cross-references, call graphs, incoming/outgoing calls, data refs",
+   "description": "Get cross-references to an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/get_xrefs_to"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Import data types from C source",
+   "method": "POST",
+   "params": [
+    {
+     "name": "source",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "c",
+     "name": "format",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    }
+   ],
+   "path": "/import_data_types"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Import a binary file from disk into the current Ghidra project and open it. For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default').",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Absolute path to the binary file on disk",
+     "name": "file_path",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "/",
+     "description": "Destination folder in the Ghidra project",
+     "name": "project_folder",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Language ID for raw binaries (e.g. 'ARM:LE:32:Cortex', 'x86:LE:64:default'). If omitted, auto-detect.",
+     "name": "language",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Compiler spec ID (e.g. 'default', 'gcc', 'windows'). If omitted, uses language default.",
+     "name": "compiler_spec",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "true",
+     "description": "Start auto-analysis after import",
+     "name": "auto_analyze",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    }
+   ],
+   "path": "/import_file"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Inspect memory with string detection. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "64",
+     "description": "Bytes to read",
+     "name": "length",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "true",
+     "description": "Auto-detect strings",
+     "name": "detect_strings",
+     "required": false,
+     "source": "query",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/inspect_memory_content"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "List available analyzers",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_analyzers"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "List bookmarks with optional filter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Category filter (omit to return all categories)",
+     "name": "category",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Address filter (omit to return all addresses). Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_bookmarks"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List available calling conventions",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_calling_conventions"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List class and namespace names with pagination",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_classes"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List defined data items",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_data_items"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List data items sorted by cross-reference count",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "text",
+     "description": "Output format (text or json)",
+     "name": "format",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_data_items_by_xrefs"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "List all data type categories",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_data_type_categories"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "List all data types with optional category filter",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Category filter",
+     "name": "category",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_data_types"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List exported entry points",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_exports"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List external symbol locations",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_external_locations"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List all functions (no pagination)",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_functions"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List functions with thunk/external flags as JSON",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "10000",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_functions_enhanced"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List global symbols with optional filter",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Substring filter",
+     "name": "filter",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_globals"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List external/imported symbols",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_imports"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List all function names with pagination",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_methods"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List namespace hierarchy",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_namespaces"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "List all open programs. If more than one program is listed, always pass the program name explicitly in subsequent tool calls — omitting it will silently target the active program, which may not be the intended one.",
+   "method": "GET",
+   "params": [],
+   "path": "/list_open_programs"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "List files in the current project",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Project folder path",
+     "name": "folder",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_project_files"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "List available Ghidra scripts",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Script name filter",
+     "name": "filter",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_scripts"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List memory blocks/segments",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_segments"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "List defined strings with optional filter",
+   "method": "GET",
+   "params": [
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Substring filter",
+     "name": "filter",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/list_strings"
+  },
+  {
+   "category": "headless",
+   "category_description": "Headless server program management (no GUI required)",
+   "description": "Load a binary file into the headless server for analysis",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Absolute path to the binary file",
+     "name": "file",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    }
+   ],
+   "path": "/load_program"
+  },
+  {
+   "category": "headless",
+   "category_description": "Headless server program management (no GUI required)",
+   "description": "Load a program from the open project",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Program path within the project",
+     "name": "path",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    }
+   ],
+   "path": "/load_program_from_project"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Modify a field in a structure. Fields can be identified by name or by offset (for unnamed fields).",
+   "method": "POST",
+   "params": [
+    {
+     "name": "struct_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Field name to modify. For unnamed fields, use 'offset:N' (e.g., 'offset:16') to identify by byte offset.",
+     "name": "field_name",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "new_type",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "new_name",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/modify_struct_field"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Move data type to category",
+   "method": "POST",
+   "params": [
+    {
+     "name": "type_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "category_path",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/move_data_type_to_category"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Open a program from the current project",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Program path in project",
+     "name": "path",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "false",
+     "description": "Run auto-analysis",
+     "name": "auto_analyze",
+     "required": false,
+     "source": "query",
+     "type": "boolean"
+    }
+   ],
+   "path": "/open_program"
+  },
+  {
+   "category": "headless",
+   "category_description": "Headless server program management (no GUI required)",
+   "description": "Open an existing Ghidra project (.gpr file or directory)",
+   "method": "POST",
+   "params": [
+    {
+     "name": "path",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    }
+   ],
+   "path": "/open_project"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Read raw memory bytes. Always pass the 'program' argument to target the correct binary — especially when multiple programs are open. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "16",
+     "description": "Number of bytes",
+     "name": "length",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/read_memory"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Trigger full auto-analysis on a program",
+   "method": "POST",
+   "params": [
+    {
+     "default": "",
+     "description": "Program name (default: current program)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/reanalyze"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Remove a field from a structure",
+   "method": "POST",
+   "params": [
+    {
+     "name": "struct_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "field_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/remove_struct_field"
+  },
+  {
+   "category": "symbol",
+   "category_description": "Create/rename/delete labels, rename data, globals, external locations",
+   "description": "Rename data at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "newName",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/rename_data"
+  },
+  {
+   "category": "symbol",
+   "category_description": "Create/rename/delete labels, rename data, globals, external locations",
+   "description": "Rename external location. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "new_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/rename_external_location"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Rename function by old and new name",
+   "method": "POST",
+   "params": [
+    {
+     "name": "oldName",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "newName",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/rename_function"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Rename function at specific address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "new_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/rename_function_by_address"
+  },
+  {
+   "category": "symbol",
+   "category_description": "Create/rename/delete labels, rename data, globals, external locations",
+   "description": "Rename a global variable",
+   "method": "POST",
+   "params": [
+    {
+     "name": "old_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "new_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/rename_global_variable"
+  },
+  {
+   "category": "symbol",
+   "category_description": "Create/rename/delete labels, rename data, globals, external locations",
+   "description": "Rename a label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "old_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "new_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/rename_label"
+  },
+  {
+   "category": "symbol",
+   "category_description": "Create/rename/delete labels, rename data, globals, external locations",
+   "description": "Rename or create label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/rename_or_label"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Rename a variable in a function. Accepts functionName or function_address; address is more stable after recent renames.",
+   "method": "POST",
+   "params": [
+    {
+     "default": "",
+     "name": "functionName",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "function_address",
+     "param_type": "address",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "oldName",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "newName",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/rename_variable"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Rename multiple variables atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "variable_renames",
+     "required": true,
+     "source": "body",
+     "type": "object"
+    },
+    {
+     "default": "false",
+     "name": "force_individual",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/rename_variables"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Trigger auto-analysis on program",
+   "method": "POST",
+   "params": [
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/run_analysis"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Execute script with output capture and timeout. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).",
+   "method": "POST",
+   "params": [
+    {
+     "name": "script_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "args",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "300",
+     "name": "timeout_seconds",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "true",
+     "name": "capture_output",
+     "required": false,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/run_ghidra_script"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).",
+   "method": "POST",
+   "params": [
+    {
+     "name": "code",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "args",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/run_script_inline"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Save all open programs",
+   "method": "GET",
+   "params": [],
+   "path": "/save_all_programs"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Save current program",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/save_program"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Search for byte patterns with masks",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Hex byte pattern",
+     "name": "pattern",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Pattern mask (omit or leave empty for exact match)",
+     "name": "mask",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/search_byte_patterns"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Search data types by pattern",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Search pattern",
+     "name": "pattern",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/search_data_types"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "Search functions by name pattern. Omit name_pattern to list all functions.",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Substring to match against function names (omit or leave empty to return all functions)",
+     "name": "name_pattern",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/search_functions"
+  },
+  {
+   "category": "analysis",
+   "category_description": "Completeness analysis, control flow, similarity, crypto detection, memory inspection",
+   "description": "Advanced function search with filtering",
+   "method": "GET",
+   "params": [
+    {
+     "default": "",
+     "description": "Name pattern (omit to match all)",
+     "name": "name_pattern",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Minimum xref count filter (omit for no minimum)",
+     "name": "min_xrefs",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Maximum xref count filter (omit for no maximum)",
+     "name": "max_xrefs",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Calling convention filter (omit for any)",
+     "name": "calling_convention",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Filter by whether function has a user-defined name (omit for any)",
+     "name": "has_custom_name",
+     "required": false,
+     "source": "query",
+     "type": "boolean"
+    },
+    {
+     "default": "false",
+     "description": "Use regex matching",
+     "name": "regex",
+     "required": false,
+     "source": "query",
+     "type": "boolean"
+    },
+    {
+     "default": "address",
+     "description": "Sort field",
+     "name": "sort_by",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/search_functions_enhanced"
+  },
+  {
+   "category": "listing",
+   "category_description": "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items",
+   "description": "Search strings by regex pattern.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Regex search pattern",
+     "name": "search_term",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "4",
+     "name": "min_length",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "String encoding filter (omit for all encodings)",
+     "name": "encoding",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "offset",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "100",
+     "name": "limit",
+     "required": false,
+     "source": "query",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/search_strings"
+  },
+  {
+   "category": "headless",
+   "category_description": "Headless server program management (no GUI required)",
+   "description": "Check headless server connection status",
+   "method": "GET",
+   "params": [],
+   "path": "/server/status"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Create or update a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "category",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "comment",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/set_bookmark"
+  },
+  {
+   "category": "comment",
+   "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
+   "description": "Set decompiler PRE_COMMENT at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "comment",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/set_decompiler_comment"
+  },
+  {
+   "category": "comment",
+   "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
+   "description": "Set disassembly EOL_COMMENT at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "comment",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/set_disassembly_comment"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Mark function as no-return. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "no_return",
+     "required": true,
+     "source": "body",
+     "type": "boolean"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/set_function_no_return"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Set function prototype (return type, parameter types, calling convention) by address. NOTE: the function name in the prototype string is used only for parsing — it does NOT rename the function. To rename, call rename_function_by_address separately. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "prototype",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "calling_convention",
+     "required": false,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/set_function_prototype"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Set the base address of the program (rebases all addresses)",
+   "method": "POST",
+   "params": [
+    {
+     "description": "New base address (e.g. 0x08000000)",
+     "name": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/set_image_base"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Set the data type of a local variable. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "variable_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "new_type",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/set_local_variable_type"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Set the data type of a function parameter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "parameter_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "new_type",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/set_parameter_type"
+  },
+  {
+   "category": "comment",
+   "category_description": "Set/get plate, decompiler, disassembly, repeatable comments",
+   "description": "Set function header/plate comment. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "comment",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/set_plate_comment"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Set variable storage location. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "variable_name",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "storage",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/set_variable_storage"
+  },
+  {
+   "category": "function",
+   "category_description": "Decompile, rename, prototype, variables, batch rename, create/delete functions",
+   "description": "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. Hungarian prefix validation is enforced: the new name's prefix must match the type. On programs with multiple address spaces, prefix addresses with the space name.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Function entry point address",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "description": "JSON object mapping old variable names to {name, type} objects. Both fields optional: omit 'type' to rename only, omit 'name' to retype only. Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, \"local_c\": {\"type\": \"int\"}}",
+     "name": "variables",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "name": "program",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/set_variables"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "AI-assisted field name suggestions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "POST",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "struct_address",
+     "param_type": "address",
+     "required": true,
+     "source": "body",
+     "type": "string"
+    },
+    {
+     "default": "0",
+     "name": "struct_size",
+     "required": false,
+     "source": "body",
+     "type": "integer"
+    },
+    {
+     "default": "",
+     "description": "Target program name",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/suggest_field_names"
+  },
+  {
+   "category": "program",
+   "category_description": "Program management, script execution, memory read, bookmarks, save",
+   "description": "Switch MCP context to a different program",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Program name to switch to",
+     "name": "program",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/switch_program"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Validate data type applicability at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "Data type name",
+     "name": "type_name",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/validate_data_type"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Check if a data type exists",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Data type name",
+     "name": "type_name",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/validate_data_type_exists"
+  },
+  {
+   "category": "datatype",
+   "category_description": "Struct/enum/union CRUD, apply data types, type conflicts, validation",
+   "description": "Validate prototype before applying. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.",
+   "method": "GET",
+   "params": [
+    {
+     "description": "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> (e.g., mem:1000, code:ff00). Note: some programs — particularly embedded/microcontroller targets — are not address-space-agnostic; use get_address_spaces to discover spaces before assuming a plain hex address is unambiguous.",
+     "name": "function_address",
+     "param_type": "address",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "Function prototype",
+     "name": "prototype",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "description": "Calling convention",
+     "name": "calling_convention",
+     "required": true,
+     "source": "query",
+     "type": "string"
+    },
+    {
+     "default": "",
+     "description": "Target program name (omit to use the active program — always specify when multiple programs are open)",
+     "name": "program",
+     "required": false,
+     "source": "query",
+     "type": "string"
+    }
+   ],
+   "path": "/validate_function_prototype"
+  }
+ ]
+}

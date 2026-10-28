@@ -248,6 +248,8 @@ const SERVER_FIELDS = [
   "prepass_tools",
   "reputation_service",
   "data_label_prefixes",
+  "default_effects",
+  "analyse_effects",
 ] as const;
 
 function hasToken(v: unknown): boolean {
