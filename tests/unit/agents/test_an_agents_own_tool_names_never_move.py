@@ -192,6 +192,7 @@ class TestAGenericAgent:
 
 
 def test_many_colliding_tools_are_claimed_in_linear_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gc
     import time
 
     from maljan.providers.servers import ServerRegistry
@@ -203,12 +204,20 @@ def test_many_colliding_tools_are_claimed_in_linear_time(monkeypatch: pytest.Mon
         registry = ServerRegistry(Settings(_env_file=None))
         seen: dict[str, str] = {}
         tools: list[Any] = []
-        start = time.perf_counter()
-        registry.merge_tools("analysis", own, tools, seen)
-        registry.merge_tools("kit", added, tools, seen)
-        took = time.perf_counter() - start
+        # A collection of the suite's heap inside the timed span measures
+        # the collector, not the merge (seen at ~2 s on a loaded runner).
+        gc.collect()
+        gc.disable()
+        try:
+            start = time.perf_counter()
+            registry.merge_tools("analysis", own, tools, seen)
+            registry.merge_tools("kit", added, tools, seen)
+            took = time.perf_counter() - start
+        finally:
+            gc.enable()
         assert sum(1 for t in tools if t.name.startswith("kit__")) == n
         return took
 
-    small, large = _timed(300), _timed(3000)
+    small = min(_timed(300) for _ in range(3))
+    large = min(_timed(3000) for _ in range(3))
     assert large < max(small * 30, 0.5)
