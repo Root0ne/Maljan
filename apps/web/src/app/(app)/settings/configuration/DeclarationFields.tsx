@@ -433,6 +433,16 @@ export default function DeclarationFields({
           onValue={(auto_name_prefixes) => put({ auto_name_prefixes })}
         />
         <ReadField
+          id={box("data_label_prefixes")}
+          label="Data-label prefixes (comma-separated, such as DAT_)"
+          ariaLabel={`${serverKey} data_label_prefixes`}
+          value={server.data_label_prefixes ?? []}
+          show={joinComma}
+          rows={1}
+          read={readPrefixes}
+          onValue={(data_label_prefixes) => put({ data_label_prefixes })}
+        />
+        <ReadField
           id={box("required_env_allow")}
           label="Required environment names (one per line)"
           ariaLabel={`${serverKey} required_env_allow`}

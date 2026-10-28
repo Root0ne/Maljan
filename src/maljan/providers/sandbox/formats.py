@@ -8,7 +8,9 @@ function over a plain ``dict`` — no I/O — so every call site can use it.
 ``detect_sample_format`` and ``option_for_format`` are the submit-side pair:
 what a sample on disk is, and which of the operator's per-format settings that
 answers to. Every sandbox provider resolves its own package, profile or guest
-through them, so one file type means the same thing to all of them.
+through them, so one file type means the same thing to all of them; what a
+provider calls a guest platform is its adapter's own word for it, never named
+here.
 """
 
 from __future__ import annotations
@@ -21,15 +23,6 @@ from maljan.core.report_formats import UNKNOWN_FORMAT, ReportFormat, sniff
 
 # The key an operator writes for "every format I did not name".
 FALLBACK_FORMAT_KEY = "*"
-
-# Our platform vocabulary in the names CAPE knows its guests by. A platform
-# CAPE has no word for is left unset rather than guessed at, so CAPE picks the
-# guest itself instead of being sent to one that cannot run the sample.
-CAPE_PLATFORMS: dict[str, str] = {
-    "windows": "windows",
-    "linux": "linux",
-    "android": "android",
-}
 
 
 def detect_sample_format(sample_path: str | Path) -> tuple[str, str]:
@@ -57,11 +50,6 @@ def option_for_format(options: dict[str, str], file_type: str, fallback: str = "
     if exact:
         return exact
     return options.get(FALLBACK_FORMAT_KEY) or fallback
-
-
-def cape_platform(platform: str) -> str:
-    """The CAPE guest platform name for one of ours, or an empty string."""
-    return CAPE_PLATFORMS.get((platform or "").strip().lower(), "")
 
 
 def sniff_format(payload: dict[str, Any], formats: Iterable[ReportFormat] | None = None) -> str:

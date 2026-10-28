@@ -65,26 +65,29 @@ if TYPE_CHECKING:
     from maljan.agents.image_range import ImageRange
 
 
-# The servers whose ``resolve_api_hashes`` is this platform's own: the triage
-# pack (recorded as ``pipeline``) and the analysis server.
-_RESOLVING_SERVERS = frozenset({"pipeline", "analysis"})
-
-
 def _platforms_own_resolution(entry: Any) -> bool:
     """Whether ``entry`` is an API hash resolution the platform's own resolver answered.
 
-    By its declared kind, from a source that declares ``platform_owned``; an
-    entry with no stored facts by the legacy reading and the server it was
-    made to (``_RESOLVING_SERVERS``).
+    By its declared kind, from a source that declares ``platform_owned``. An
+    entry with no stored facts (the legacy reading) recorded no source, so its
+    source is the one the server it was made to names: the triage pack's for
+    an entry the pack recorded (``triage_pack.PIPELINE``), else the tool
+    server of that key; never a server's name compared to a list.
     """
     from maljan.core.declared_reading import declarations, kind_of, read_by_name
-    from maljan.core.tool_declarations import ToolDeclarations
+    from maljan.core.tool_declarations import PACK, SourceRef, ToolDeclarations
 
     if kind_of(entry) != "api_hash_resolution":
         return False
     if read_by_name(entry):
-        return str(getattr(entry, "server", "") or "") in _RESOLVING_SERVERS
-    ref = ToolDeclarations.source_of(entry)
+        from maljan.pipeline.triage_pack import PIPELINE
+
+        server = str(getattr(entry, "server", "") or "")
+        if not server:
+            return False
+        ref: SourceRef | None = PACK if server == PIPELINE else SourceRef("mcp", server)
+    else:
+        ref = ToolDeclarations.source_of(entry)
     held = declarations().source(ref) if ref is not None else None
     return bool(held is not None and held.platform_owned)
 

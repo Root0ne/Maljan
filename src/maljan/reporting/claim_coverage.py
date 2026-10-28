@@ -13,8 +13,14 @@ The rule, stated in the report beside the list:
   and the claim's number in its answer in force), the label every report
   model's input shows the claim under, is not listed.
 * **Code locations and API names.** Otherwise a claim is listed when the body
-  does not name one or more of its code locations — ``FUN_``, ``fcn.``,
-  ``sub_``, ``LAB_`` and ``DAT_`` names of four hex digits or more — or its
+  does not name one or more of its code locations — a decompiler's own name
+  for a function, a label or a datum, of four hex digits or more, after a
+  prefix every enabled source declares before an address
+  (``auto_name_prefixes`` and ``data_label_prefixes``: ``FUN_``, ``fcn.``,
+  ``DAT_``) or one the platform has always read
+  (``core.undeclared_tools.DEFAULT_AUTO_NAME_PREFIXES`` and
+  ``DEFAULT_DATA_LABEL_PREFIXES``), in either case and with its own
+  separator — or its
   API-style names (a word of six characters or more with lower case and two or
   more capitals: ``GetAdaptersInfo``), whatever share of them the body does
   name. Each row lists the names the body lacks, as the claim wrote them. A
@@ -40,6 +46,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 from maljan.reporting.models import ClaimNotDiscussed, MalwareReport
@@ -64,10 +71,8 @@ COVERAGE_RULE = (
     "five letters or more."
 )
 
-# Code locations: a function or label name, or an address, by its hexadecimal digits.
-_ADDRESS_RE = re.compile(
-    r"(?<![0-9A-Za-z_])(?:0x|FUN_(?:0x)?|fcn\.(?:0x)?|sub_|LAB_|DAT_)([0-9a-fA-F]{4,16})\b"
-)
+# Code locations: a function, label or datum name, or an address, by its
+# hexadecimal digits (:func:`_address_re`).
 _IDENTIFIER_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{5,}\b")
 _WORD_RE = re.compile(r"\b[A-Za-z]{5,}\b")
 # An image base is a whole number of 64 KiB, and a linker's default one is far
@@ -178,19 +183,36 @@ def _address(digits: str) -> int:
     return int(digits, 16)
 
 
+@lru_cache(maxsize=16)
+def _address_pattern(prefixes: tuple[str, ...]) -> re.Pattern[str]:
+    """``0x``, or one of ``prefixes`` in either case (and ``0x``), then four hex digits or more."""
+    joined = "|".join(re.escape(prefix) for prefix in prefixes)
+    named = r"|(?i:" + joined + r")(?:0x)?" if joined else ""
+    return re.compile(r"(?<![0-9A-Za-z_])(?:0x" + named + r")([0-9a-fA-F]{4,16})\b")
+
+
+def _address_re() -> re.Pattern[str]:
+    """Code locations, by the prefixes every enabled source declares and the defaults."""
+    from maljan.core.undeclared_tools import declared_labels
+
+    labels = declared_labels()
+    return _address_pattern((*labels.functions, *labels.data))
+
+
 def code_names(text: str) -> dict[tuple[str, int | str], str]:
     """The code locations and API-style names ``text`` names: ``{key: as written}``.
 
     An address is keyed by its value, an API-style name by its lower case.
     """
     found: dict[tuple[str, int | str], str] = {}
-    for m in _ADDRESS_RE.finditer(text):
+    address_re = _address_re()
+    for m in address_re.finditer(text):
         if not m.group(0).startswith("0x"):
             found.setdefault(("address", _address(m.group(1))), m.group(0))
     for m in _IDENTIFIER_RE.finditer(text):
         word = m.group(0)
         camel = any(ch.islower() for ch in word) and sum(ch.isupper() for ch in word) >= 2
-        if camel and not _ADDRESS_RE.fullmatch(word):
+        if camel and not address_re.fullmatch(word):
             found.setdefault(("name", word.lower()), word)
     return found
 
@@ -216,7 +238,7 @@ class _Body:
     def of(cls, text: str) -> _Body:
         return cls(
             lowered=text.lower(),
-            addresses=frozenset(_address(m.group(1)) for m in _ADDRESS_RE.finditer(text)),
+            addresses=frozenset(_address(m.group(1)) for m in _address_re().finditer(text)),
         )
 
     def cites(self, label: str) -> bool:

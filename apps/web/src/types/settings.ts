@@ -249,6 +249,7 @@ export interface McpServerEntry {
   platform_owned?: boolean;
   trusts_served_declaration?: boolean;
   auto_name_prefixes?: string[];
+  data_label_prefixes?: string[];
   reference_urls?: string[];
   /** Per tool, as served: its changes over the shipped declaration of that
    *  tool (the changed fields, `null` for a removed shipped tool, the whole

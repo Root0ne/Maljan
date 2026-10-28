@@ -39,14 +39,8 @@ PACKAGES = ("pipeline", "analysis", "agents")
 # Helpers any module of the product defines, for a literal handed to one imported.
 SHARED = tool_parameters_under(ROOT / "src" / "maljan")
 
-_PACK_STEP = (
-    "the triage pack reading the answer its own in-process step just produced, by that "
-    "step's tool, before the entry is written"
-)
-
 # ((module, what, code), count) -> why it is still by name.
 STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
-    ("pipeline/triage_pack.py", "looks", "_ESTABLISHED.get(tool)"): (1, _PACK_STEP),
     ("agents/evidence_recorder.py", "compares", "name != tool"): (
         1,
         "a repaired call matched to the note the same call left, by the tool name it gave",

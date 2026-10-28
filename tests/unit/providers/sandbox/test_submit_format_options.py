@@ -19,8 +19,8 @@ from pydantic import SecretStr
 
 from maljan.core.config import Settings
 from maljan.loaders.cape2_client import CAPEv2Client
-from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
-from maljan.providers.sandbox.formats import cape_platform, detect_sample_format, option_for_format
+from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider, cape_platform
+from maljan.providers.sandbox.formats import detect_sample_format, option_for_format
 from maljan.providers.sandbox.rest import RestSandboxProvider
 from maljan.providers.sandbox.triage import TriageSandboxProvider
 

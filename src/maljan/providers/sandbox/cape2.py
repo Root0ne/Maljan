@@ -57,6 +57,23 @@ def _probe_refusal(response: Any) -> str | None:
     return None
 
 
+# The guest platforms this adapter's sandbox names, in our platform vocabulary
+# (``extractors.sample_identity.infer_platform``): the adapter's own words for
+# its guests, kept with the adapter that sends them. A platform it has no word
+# for is left unset rather than guessed at, so CAPE picks the guest itself
+# instead of being sent to one that cannot run the sample.
+CAPE_PLATFORMS: dict[str, str] = {
+    "windows": "windows",
+    "linux": "linux",
+    "android": "android",
+}
+
+
+def cape_platform(platform: str) -> str:
+    """The CAPE guest platform name for one of ours, or an empty string."""
+    return CAPE_PLATFORMS.get((platform or "").strip().lower(), "")
+
+
 @register_sandbox_provider("cape2")
 class CAPE2SandboxProvider(SandboxProvider):
     """CAPEv2 behind the provider contract.
@@ -244,11 +261,7 @@ class CAPE2SandboxProvider(SandboxProvider):
         unconfigured format leaves both unset, which is CAPE deciding for
         itself exactly as it did before.
         """
-        from maljan.providers.sandbox.formats import (
-            cape_platform,
-            detect_sample_format,
-            option_for_format,
-        )
+        from maljan.providers.sandbox.formats import detect_sample_format, option_for_format
 
         file_type, platform = detect_sample_format(sample_path)
         package = option_for_format(self._cfg.package_by_format, file_type)

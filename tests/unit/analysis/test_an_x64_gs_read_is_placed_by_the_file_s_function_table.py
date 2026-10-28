@@ -19,9 +19,8 @@ from typing import Any
 
 from tests.unit.tools.synthetic_pe import TEXT_RVA, SyntheticPE
 
-from maljan.analysis.anti_analysis import GS_OFF_BOUNDARY, gs_reads
+from maljan.analysis.anti_analysis import GS_OFF_BOUNDARY, gs_reads, read_findings
 from maljan.pipeline import triage_pack
-from maljan.providers.static.ghidra.passes import read_findings
 from maljan.tools import pe_image
 
 GS_PEB = b"\x65\x48\x8b\x04\x25\x60\x00\x00\x00"

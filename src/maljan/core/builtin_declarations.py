@@ -755,8 +755,9 @@ def _one_program_block(role: str) -> dict[str, Any]:
 # which declares a reputation lookup. ``reads_staged_sample`` on the
 # three servers whose path-taking tools read the sample the platform staged
 # (``agents.tool_pinning.reads_staged_sample``). ``required_env_allow`` as
-# ``config.REQUIRED_ENV_ALLOW``. ``platform_owned`` on the servers of
-# ``agents.evidence_recorder._RESOLVING_SERVERS``. A built-in server that is
+# ``config.REQUIRED_ENV_ALLOW``. ``platform_owned`` on the analysis server, whose
+# API hash resolution is the platform's own, as the pack's is
+# (``agents.evidence_recorder._platforms_own_resolution``). A built-in server that is
 # not the platform's own (VirusTotal's) ships no block here: what its catalog
 # entry says of it as a whole (its role, its reference URL, how its credential
 # is obtained) is in its launch entry (``config._builtin_servers``), and its
@@ -816,7 +817,9 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
 # radare2's is ``r2-work``, which may not be hidden; its non-secret variable, which
 # texts written before the variable was retired still name, is kept whole by
 # the redaction of published text (``shipped_variable_names``). The
-# auto-name prefixes together are ``pipeline.validation._GENERIC_FUNCTION_NAME``'s.
+# auto-name prefixes together are ``pipeline.validation._GENERIC_FUNCTION_NAME``'s;
+# Ghidra's data-label prefix is one of ``undeclared_tools.DEFAULT_DATA_LABEL_WORDS``,
+# read with them as a code location (``reporting.claim_coverage``).
 _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
     "ghidra": {
         "sample_mount": "/data/samples",
@@ -825,6 +828,7 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "prompt_fragment": GHIDRA_WORKFLOW,
         "variable_names": ["GHIDRA_CONTAINER_SAMPLES_PATH"],
         "auto_name_prefixes": ["FUN_", "LAB_", "SUB_"],
+        "data_label_prefixes": ["DAT_"],
         "tool_facts": _with_effects(
             GHIDRA_TOOLS,
             {

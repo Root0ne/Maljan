@@ -245,8 +245,7 @@ class DeclaredScan:
     ) -> dict[str, Any]:
         """The server's scan, whole, with its exact part stated (``read_findings``), by the
         one rule every scan's stated part is chosen by (``STATED_RULE``)."""
-        from maljan.analysis.anti_analysis import image_of, starts_of
-        from maljan.providers.static.ghidra.passes import STATED_RULE, read_findings
+        from maljan.analysis.anti_analysis import STATED_RULE, image_of, read_findings, starts_of
         from maljan.tools.errors import error_parts
 
         if self.call is None:

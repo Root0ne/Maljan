@@ -247,6 +247,7 @@ const SERVER_FIELDS = [
   "launcher_depth",
   "prepass_tools",
   "reputation_service",
+  "data_label_prefixes",
 ] as const;
 
 function hasToken(v: unknown): boolean {

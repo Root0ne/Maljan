@@ -1663,6 +1663,12 @@ DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
         "function itself, such as FUN_ or fcn.",
     ),
     (
+        "data_label_prefixes",
+        "data-label prefixes",
+        "The prefixes the server's decompiler writes before an address when it names a "
+        "datum itself, such as DAT_: read as a code location, never as a function's name.",
+    ),
+    (
         "reference_urls",
         "reference URLs",
         "Reference URL templates for a sample, naming {sha256}, {md5} or {sha1}.",
