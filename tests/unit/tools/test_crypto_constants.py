@@ -15,6 +15,7 @@ from pathlib import Path
 
 from maljan.tools import crypto_constants
 from maljan.tools.crypto_constants import catalogue, find_crypto_constants
+from tests.linear_cost import assert_scales
 
 from .synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 
@@ -410,17 +411,15 @@ class TestTheNeighbourCheckScales:
             ), offsets
 
     def test_a_megabyte_of_far_apart_values_is_scanned_in_seconds(self, tmp_path: Path) -> None:
-        import time
+        def far(count: int) -> Path:
+            path = tmp_path / f"far{count}.bin"
+            path.write_bytes(
+                struct.pack("<I", 0x67452301) * count
+                + bytes(128)
+                + struct.pack("<I", 0xC3D2E1F0) * count
+            )
+            return path
 
-        count = 1_048_576 // 8
-        data = (
-            struct.pack("<I", 0x67452301) * count
-            + bytes(128)
-            + struct.pack("<I", 0xC3D2E1F0) * count
-        )
-        path = tmp_path / "far.bin"
-        path.write_bytes(data)
-        started = time.monotonic()
-        answer = find_crypto_constants(str(path))
-        assert time.monotonic() - started < 5.0
+        answer = find_crypto_constants(str(far(1_048_576 // 8)))
+        assert_scales(far, 16_384, lambda path: find_crypto_constants(str(path)))
         assert "sha1_init" not in _found(answer)

@@ -19,7 +19,7 @@ serialising it over and over.
 from __future__ import annotations
 
 import json
-import time
+from collections.abc import Callable
 from typing import Any
 
 from maljan.agents.output_shortening import (
@@ -27,11 +27,7 @@ from maljan.agents.output_shortening import (
     SHORTENING_BUDGET_SECONDS,
     shorten_json_document,
 )
-
-# A margin wide enough that a loaded machine cannot fail this on timing alone.
-# The shapes below are decided arithmetically, so the honest figure is
-# milliseconds; a whole second is two orders of magnitude of headroom.
-A_LOT_OF_TIME = 1.0
+from tests.linear_cost import assert_scales
 
 
 def _strings_answer(rows: int, *, total: int = 3876) -> str:
@@ -96,15 +92,29 @@ def _kept_and_omitted(row: dict[str, int]) -> tuple[int, int]:
     return row["kept_chars"], row["omitted_chars"]
 
 
-def _took(text: str, limit: int) -> tuple[Any, float]:
-    """How long the work takes, with the backstop out of the way.
+def _took(
+    build: Callable[[int], str],
+    size: int,
+    limit: int | Callable[[int], int],
+    factor: int = 8,
+) -> Any:
+    """Shorten ``build(size)``, asserting the work grows with the size and not with its square.
 
-    The clock these assert on is the work\'s, not the deadline\'s: a budget
+    The shapes below are decided arithmetically over sizes measured in one walk,
+    so ``factor`` times the document must cost under three times ``factor`` as much
+    CPU; a pass over every list per list would cost ``factor`` squared times as much.
+    A ``limit`` given as a function of the size keeps a smaller document as far
+    over its limit as the large one. The backstop is out of the way: a budget
     that fired would make a slow machine look like a fast refusal.
     """
-    started = time.monotonic()
-    result = shorten_json_document(text, limit, budget_seconds=30.0)
-    return result, time.monotonic() - started
+
+    def run(at: int) -> Callable[[], Any]:
+        text = build(at)
+        cut = limit(at) if callable(limit) else limit
+        return lambda: shorten_json_document(text, cut, budget_seconds=30.0)
+
+    assert_scales(run, size // factor, factor=factor)
+    return run(size)()
 
 
 class TestADocumentComesBackADocument:
@@ -512,56 +522,57 @@ class TestItRefusesWhatItCannotHelpAtOnce:
     the old code produced instantly."""
 
     def test_a_four_thousand_entry_keyed_map_is_refused_in_no_time(self) -> None:
-        result, elapsed = _took(_keyed_map(4000), 8000)
+        result = _took(_keyed_map, 4000, 8000)
 
         assert result.shortened is False
-        assert elapsed < A_LOT_OF_TIME, f"took {elapsed:.1f}s"
 
     def test_an_eight_thousand_entry_keyed_map_is_refused_in_no_time(self) -> None:
-        result, elapsed = _took(_keyed_map(8000), 8000)
+        result = _took(_keyed_map, 8000, 8000)
 
         assert result.shortened is False
-        assert elapsed < A_LOT_OF_TIME, f"took {elapsed:.1f}s"
 
     def test_twenty_thousand_small_lists_are_refused_in_no_time(self) -> None:
-        answer = json.dumps(
-            {f"k{index:06d}": {"rows": [index, index + 1]} for index in range(20_000)}
-        )
-        assert len(answer) > 700_000
+        def small_lists(count: int) -> str:
+            return json.dumps(
+                {f"k{index:06d}": {"rows": [index, index + 1]} for index in range(count)}
+            )
 
-        result, elapsed = _took(answer, 8000)
+        assert len(small_lists(20_000)) > 700_000
+
+        result = _took(small_lists, 20_000, 8000)
 
         assert result.shortened is False
-        assert elapsed < A_LOT_OF_TIME, f"took {elapsed:.1f}s"
 
     def test_a_many_list_document_that_can_fit_is_shortened_in_no_time(self) -> None:
         """The other half: many lists is not by itself a reason to refuse."""
-        answer = json.dumps({f"k{index}": [index] * 200 for index in range(400)})
 
-        result, elapsed = _took(answer, 200_000)
+        def many_lists(count: int) -> str:
+            return json.dumps({f"k{index}": [index] * 200 for index in range(count)})
+
+        result = _took(many_lists, 400, lambda count: 500 * count, factor=4)
 
         assert result.shortened
         assert len(result.text) <= 200_000
-        assert elapsed < A_LOT_OF_TIME, f"took {elapsed:.1f}s"
 
     def test_five_megabytes_is_shortened_in_no_time(self) -> None:
-        answer = json.dumps(
-            {
-                "read_path": "/staging/x",
-                "total": 200_000,
-                "strings": [
-                    {"text": f"row number {index} " + "y" * 20} for index in range(150_000)
-                ],
-            }
-        )
-        assert len(answer) > 5_000_000
+        def rows(count: int) -> str:
+            return json.dumps(
+                {
+                    "read_path": "/staging/x",
+                    "total": 200_000,
+                    "strings": [
+                        {"text": f"row number {index} " + "y" * 20} for index in range(count)
+                    ],
+                }
+            )
 
-        result, elapsed = _took(answer, 6000)
+        assert len(rows(150_000)) > 5_000_000
+
+        result = _took(rows, 150_000, 6000)
 
         assert result.shortened
         assert len(result.text) <= 6000
         assert json.loads(result.text)["read_path"] == "/staging/x"
-        assert elapsed < A_LOT_OF_TIME, f"took {elapsed:.1f}s"
 
     def test_a_clock_that_has_run_out_gives_up_rather_than_going_on(self) -> None:
         """The backstop, so no input anybody has not thought of can stall a loop."""
@@ -601,13 +612,14 @@ class TestTheOddInputsNobodyMeantToSend:
         """The wall cannot pre-empt the parse, so the parse is what is bounded."""
         from maljan.agents.output_shortening import MAX_SHORTENABLE_CHARS
 
-        answer = '{"rows": [' + ",".join(["1"] * (MAX_SHORTENABLE_CHARS // 2)) + "]}"
-        assert len(answer) > MAX_SHORTENABLE_CHARS
+        def ones(count: int) -> str:
+            return '{"rows": [' + ",".join(["1"] * count) + "]}"
 
-        result, elapsed = _took(answer, 6000)
+        assert len(ones(MAX_SHORTENABLE_CHARS // 2)) > MAX_SHORTENABLE_CHARS
+
+        result = _took(ones, MAX_SHORTENABLE_CHARS // 2, 6000)
 
         assert result.shortened is False
-        assert elapsed < A_LOT_OF_TIME, f"took {elapsed:.1f}s"
 
     def test_an_answer_this_module_already_shortened_is_left_alone(self) -> None:
         """Two maps on two baselines would be two accounts of one answer."""

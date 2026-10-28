@@ -6,7 +6,6 @@ finding describes.
 
 from __future__ import annotations
 
-import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -23,15 +22,14 @@ from maljan.pipeline.validation import (
     key_finding_citation_violations,
     masked_values,
 )
+from tests.linear_cost import assert_scales
 
 # --- AUD-10 (validation.py V1-5..9) -----------------------------------------
 
 
 def test_v1_5_a_long_run_with_one_separator_is_masked_in_linear_time() -> None:
-    hostile = "a/" + "b" * 60_000
-    started = time.perf_counter()
-    masked_values(hostile)
-    assert time.perf_counter() - started < 1.0
+    masked_values("a/" + "b" * 60_000)
+    assert_scales(lambda size: "a/" + "b" * size, 7_500, masked_values)
     # The shape it reads is unchanged: a path with two separators is blanked.
     assert masked_values("see /SSH/Auth/Credentials now") == "see" + " " * 22 + " now"
 

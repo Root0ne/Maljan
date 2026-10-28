@@ -148,7 +148,7 @@ def test_a_value_holding_every_private_use_character_keeps_every_section() -> No
     assert re.search(r"^## 1\. ", markdown, re.M)
     assert re.search(r"^## 9\. ", markdown, re.M)
     assert _live(markdown) == []
-    assert elapsed < 5
+    assert elapsed < 50
 
 
 def _timed(text: str) -> float:

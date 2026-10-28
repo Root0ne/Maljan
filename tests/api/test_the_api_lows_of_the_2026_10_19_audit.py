@@ -88,7 +88,7 @@ async def test_a_client_that_keeps_pinging_loses_its_socket_when_the_token_expir
 async def test_the_live_feed_is_not_paced_at_ten_events_a_second() -> None:
     from app.api import ws as ws_module
 
-    count = 40
+    count = 400
     manager = ws_module.ConnectionManager()
     job_id = "job-1"
     manager._active[job_id] = [MagicMock()]
@@ -117,8 +117,8 @@ async def test_the_live_feed_is_not_paced_at_ten_events_a_second() -> None:
     elapsed = time.monotonic() - started
 
     assert len(sent) == count
-    # A pause of 0.1 s after each message made this take four seconds.
-    assert elapsed < 1.5, f"{count} queued events took {elapsed:.1f}s to forward"
+    # A pause of 0.1 s after each message made this take forty seconds.
+    assert elapsed < 15, f"{count} queued events took {elapsed:.1f}s to forward"
 
 
 # ── API-L3 ───────────────────────────────────────────────────────────

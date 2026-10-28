@@ -18,12 +18,14 @@ import struct
 import time
 import tracemalloc
 import zlib
+from collections.abc import Callable
 from pathlib import Path
 
 import pefile
 import pytest
 
 from maljan.tools import binary, staging, upx
+from tests.linear_cost import assert_scales
 from tests.unit.tools import synthetic_upx as su
 from tests.unit.tools.synthetic_pe import SyntheticPE
 
@@ -406,24 +408,32 @@ def test_back_references_are_held_to_the_output_and_its_start() -> None:
 
 
 def test_an_endless_length_prefix_stops_at_the_room_left() -> None:
-    bits = su._Bits(4)
-    bits.bit(1)
-    bits.byte(0x41)
-    bits.bit(0)
-    su._gamma(bits, 3)
-    bits.byte(0)  # offset 1
-    bits.bit(0)
-    bits.bit(0)
-    for _ in range(200_000):
+    def endless(pairs: int) -> bytes:
+        bits = su._Bits(4)
         bits.bit(1)
+        bits.byte(0x41)
         bits.bit(0)
-    stream = bits.finish()
-    began = time.monotonic()
-    with pytest.raises(
-        upx.Damaged, match="a length at output byte 1 runs past the 4096 unpacked bytes"
-    ):
-        upx._nrv("2b", 4, stream, 4096)
-    assert time.monotonic() - began < 1.0
+        su._gamma(bits, 3)
+        bits.byte(0)  # offset 1
+        bits.bit(0)
+        bits.bit(0)
+        for _ in range(pairs):
+            bits.bit(1)
+            bits.bit(0)
+        return bits.finish()
+
+    def unpack(pairs: int) -> Callable[[], None]:
+        stream = endless(pairs)
+
+        def call() -> None:
+            with pytest.raises(
+                upx.Damaged, match="a length at output byte 1 runs past the 4096 unpacked bytes"
+            ):
+                upx._nrv("2b", 4, stream, 4096)
+
+        return call
+
+    assert_scales(unpack, 25_000)
 
 
 def test_random_bytes_as_a_stream_fail_in_linear_time() -> None:

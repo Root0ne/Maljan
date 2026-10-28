@@ -10,9 +10,9 @@ reading does not know.
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
+from tests.linear_cost import assert_scales
 from tests.unit.analysis.test_observed_behaviour_is_linked_to_code import (
     MUTEX,
     _blobs,
@@ -40,17 +40,18 @@ def _network(**kinds: Any) -> dict[str, Any]:
 
 class TestHivePrefixesCostTheirLength:
     def test_a_megabyte_of_hive_prefixes_is_stripped_in_bounded_time(self) -> None:
-        text = "HKCU\\" * 200_000 + "Software"
-        started = time.perf_counter()
-        assert hiveless_key(text) == "Software"
-        assert time.perf_counter() - started < 1.0
+        assert hiveless_key("HKCU\\" * 200_000 + "Software") == "Software"
+        assert_scales(lambda count: "HKCU\\" * count + "Software", 25_000, hiveless_key)
 
     def test_a_megabyte_of_hive_prefixes_in_the_strings_head_links_in_bounded_time(self) -> None:
         report = _report(keys=["HKCU\\Software\\X"])
         inputs = _strings_of("HKCU\\" * 200_000)
-        started = time.perf_counter()
         answer = bc.link_behaviour_to_code(report, None, inputs)
-        assert time.perf_counter() - started < 2.0
+        assert_scales(
+            lambda count: _strings_of("HKCU\\" * count),
+            25_000,
+            lambda held: bc.link_behaviour_to_code(report, None, held),
+        )
         assert _link(answer, "HKCU\\Software\\X")["held"] == []
 
     def test_long_and_short_prefixes_together_are_still_one_key(self) -> None:

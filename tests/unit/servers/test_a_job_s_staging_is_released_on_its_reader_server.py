@@ -474,9 +474,14 @@ def test_two_threads_noting_their_servers_at_once_lose_neither() -> None:
         assert nodes._noted_reading_servers(container, JOB) == sorted(keys)
 
 
+# What one release call takes. The bounds below are multiples of it, so a loaded
+# machine stretches the call and the bound together.
+RELEASE_CALL_SECONDS = 3.0
+
+
 class _SlowHandle(_Handle):
     async def deliver(self, tool: str, args: dict[str, Any], timeout: float | None = None) -> Any:
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(RELEASE_CALL_SECONDS)
         return await super().deliver(tool, args, timeout)
 
 
@@ -489,8 +494,8 @@ def test_every_server_is_asked_at_once(waits: list[Any]) -> None:
         _read_once(container, key)
     began = time.monotonic()
     assert nodes.release_reader_staging(container) == ["a", "b", "c"]
-    # Three calls of 0.8 s each, side by side, not one after another.
-    assert time.monotonic() - began < 2.0
+    # Three calls side by side take one call's time, not three.
+    assert time.monotonic() - began < 2 * RELEASE_CALL_SECONDS
 
 
 def test_a_release_that_outlasts_its_cap_is_abandoned_not_waited_for(
@@ -503,7 +508,7 @@ def test_a_release_that_outlasts_its_cap_is_abandoned_not_waited_for(
     _read_once(container, "a")
     began = time.monotonic()
     assert nodes.release_reader_staging(container) == []
-    assert time.monotonic() - began < 0.7
+    assert time.monotonic() - began < RELEASE_CALL_SECONDS / 2
 
 
 def test_the_teardown_budget_is_one_call_s_cap_and_a_second() -> None:

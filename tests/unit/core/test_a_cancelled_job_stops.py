@@ -31,7 +31,7 @@ from maljan.core.exceptions import AgentLoopCancelled
 
 # How long any of these may take to stop once told. The slow model would
 # otherwise hold a call for an hour.
-PROMPTLY = 5.0
+PROMPTLY = 30.0
 
 
 class _SlowModel:

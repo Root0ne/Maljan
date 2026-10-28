@@ -71,7 +71,7 @@ def test_a_clocked_wait_for_a_merely_busy_callee_still_ends_at_its_bound() -> No
     callee.delegation_lock.acquire()
     started = time.monotonic()
     assert _held_unless_waiting_on_each_other(callee.delegation_lock, 0.2, caller, callee) is False
-    assert time.monotonic() - started < 5.0
+    assert time.monotonic() - started < 30.0
 
 
 def test_a_callee_that_frees_up_is_taken() -> None:

@@ -16,6 +16,7 @@ import re
 import time
 
 import pytest
+from tests.linear_cost import cpu_seconds
 
 from maljan.analysis import directed_text
 from maljan.analysis.directed_text import Groups, scan_bytes_into, scan_text
@@ -26,11 +27,20 @@ _PROSE = b"the quick brown fox jumps over the lazy dog while reading logs; "
 
 def test_a_large_sample_with_no_match_stops_at_the_deadline() -> None:
     blob = _PROSE * (8 * 1024 * 1024 // len(_PROSE))
-    started = time.monotonic()
-    with pytest.raises(directed_text.Spent) as stopped:
-        scan_bytes_into(Groups(), blob, "file", deadline=started + 0.05)
-    assert time.monotonic() - started < 2.0
-    assert "file read as" in stopped.value.at
+
+    def stop() -> None:
+        with pytest.raises(directed_text.Spent) as stopped:
+            scan_bytes_into(Groups(), blob, "file", deadline=time.monotonic() + 0.05)
+        assert "file read as" in stopped.value.at
+
+    # Stopping at the deadline costs far less than reading a sixth of the
+    # sample to its end, which a scan that ignored the deadline would exceed
+    # eightfold: the clock it is held to is the machine's own.
+    sixth = _PROSE * (len(blob) // 6 // len(_PROSE))
+    reading = cpu_seconds(
+        lambda: scan_bytes_into(Groups(), sixth, "file"), 1, clock=time.perf_counter
+    )
+    assert cpu_seconds(stop, clock=time.perf_counter) < reading
 
 
 def _found(text: str) -> list[tuple[str, str, int, int, str]]:

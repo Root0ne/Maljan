@@ -12,16 +12,16 @@ pack step declared; a stored entry with no source is read as before.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-
-import pytest
 
 from maljan.extractors.sample_identity import unparsed_container_reason
 from maljan.pipeline.nodes import reason_applies_to_format
 from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.triage_pack import PIPELINE
 from maljan.schemas.evidence import build_entry, format_entry_id
+from tests.linear_cost import assert_scales
 
 PARSED = {"pages": 2, "objects": 14}
 
@@ -129,11 +129,12 @@ class TestTheRunStatePackLines:
         assert "[ev_0001]" in body
 
 
-@pytest.mark.parametrize("count", [1_000, 10_000])
-def test_the_readers_take_one_pass(tmp_path: Path, count: int) -> None:
-    import time
+def test_the_readers_take_one_pass(tmp_path: Path) -> None:
+    pdf = _pdf(tmp_path)
 
-    ledger = [_entry("document_info", source="mcp:kit", facts={"v": 1}) for _ in range(count)]
-    start = time.perf_counter()
-    assert unparsed_container_reason(_pdf(tmp_path), ledger) is not None
-    assert time.perf_counter() - start < max(0.0005 * count, 2.0)
+    def read(count: int) -> Callable[[], Any]:
+        ledger = [_entry("document_info", source="mcp:kit", facts={"v": 1}) for _ in range(count)]
+        return lambda: unparsed_container_reason(pdf, ledger)
+
+    assert read(1_000)() is not None
+    assert_scales(read, 1_250)

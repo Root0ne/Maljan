@@ -6,10 +6,13 @@ shape the scrub knows, and the event carries it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
 from maljan.pipeline.events import claims_to_payload, scrub, summarize_claims
 from tests.credential_shapes import prefixed_key
+from tests.linear_cost import assert_scales
 
 
 def _claim(text: str) -> SimpleNamespace:
@@ -50,25 +53,29 @@ def test_a_claim_of_many_urls_keeps_its_first_urls() -> None:
 
 
 def test_a_huge_claim_is_scrubbed_over_a_window_only() -> None:
-    import time
-
     key = prefixed_key("key-", 32)
-    text = "word " * 79 + key + " " + "filler " * 600_000
-    began = time.perf_counter()
-    (shown,) = claims_to_payload([_claim(text)])
-    assert time.perf_counter() - began < 1.0
+
+    def huge(filler: int) -> str:
+        return "word " * 79 + key + " " + "filler " * filler
+
+    (shown,) = claims_to_payload([_claim(huge(600_000))])
+    assert_scales(
+        lambda filler: _claim(huge(filler)), 75_000, lambda claim: claims_to_payload([claim])
+    )
     assert key[:12] not in shown["claim"]
     assert len(shown["claim"]) <= 400
 
 
 def test_a_huge_single_token_is_masked_at_the_window_edge() -> None:
-    import time
-
     text = "q" * 4_000_000
-    began = time.perf_counter()
     (shown,) = claims_to_payload([_claim(text)])
     headline = summarize_claims([_claim(text)], speaker="x")
-    assert time.perf_counter() - began < 1.0
+
+    def both(size: int) -> Callable[[], Any]:
+        claim = _claim("q" * size)
+        return lambda: (claims_to_payload([claim]), summarize_claims([claim], speaker="x"))
+
+    assert_scales(both, 500_000)
     assert shown["claim"].startswith("***") and "q" * 8 not in shown["claim"]
     assert "q" * 8 not in headline
 
