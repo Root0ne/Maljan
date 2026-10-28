@@ -615,6 +615,18 @@ def paged_answer(
         want = max(4, int(len(data) * 0.8))
 
 
+def read_evidence_narrowing() -> tuple[str, ...]:
+    """The arguments of ``read_evidence``'s own schema that page its answer.
+
+    Read off the tool as it is built, so the completeness line under a read of
+    an entry names what this tool is asked, and follows the tool when it changes.
+    """
+    from maljan.agents.output_shortening import narrowing_arguments
+
+    tool = read_evidence_tool(lambda _id: None)
+    return narrowing_arguments(getattr(tool, "args", None) or ())
+
+
 def read_evidence_tool(
     lookup: Callable[[str], str | None],
     sizer: Any = None,

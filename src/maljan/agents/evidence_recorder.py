@@ -2438,19 +2438,27 @@ def _record_tool(
         # offered this loop no narrowing.
         held = recorder.entry_of(holder)
         held_cut = recorder.cut_of(holder)
+        outside_row = False
         if held is None and recorder.outside is not None:
             from maljan.schemas.answer_completeness import platform_cut
 
             held = recorder.outside.row(holder)
             held_cut = platform_cut(held) if held is not None else 0
+            outside_row = held is not None
         held_args = held.get("args") if isinstance(held, Mapping) else getattr(held, "args", None)
+        held_narrowing = recorder.narrowing_of(holder)
+        if outside_row:
+            # The row is read through this tool, so the line names its paging.
+            from maljan.agents.tool_answer_clearing import read_evidence_narrowing
+
+            held_narrowing = read_evidence_narrowing()
         paged = bool(kwargs.get("offset") or kwargs.get("limit"))
         complete = _charged(
             completeness_notice(
                 text,
                 # A page states its own cut only: the held answer's cut and its
                 # tool's paging arguments are not what the page is.
-                narrowing=() if paged else recorder.narrowing_of(holder),
+                narrowing=() if paged else held_narrowing,
                 args=None if paged or not isinstance(held_args, Mapping) else held_args,
                 cut=int(cut or 0) if paged else max(held_cut, int(cut or 0)),
                 shortened=bool(shortened),
