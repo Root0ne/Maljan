@@ -480,15 +480,16 @@ NO_KIND = "unclassified"
 # kind. A kind-free field is read from the live declaration whatever the kind
 # (the guard's budget, a call's argument roles, the tag a description is shown
 # with, the words and name a tool is given, whether it discloses the sample,
-# the routed formats it serves, what a call does beyond answering, the tools
-# of its server it is the aggregate form of, what its answer shows and does
-# not show).
+# the routed formats and the runtimes it serves, what a call does beyond
+# answering, the tools of its server it is the aggregate form of, what its
+# answer shows and does not show).
 # A kind-dependent field is read only through the kind (an answer's rows and
 # the paths inside them, its techniques and reputation, a reader of its shape,
-# the report sections it is shown to): a declaration that names no kind may
-# not set one, since it would be read by nothing. The one place the split is
-# written; the console's tool-declaration box reads it, with each field's
-# default, from the served settings schema (:func:`declaration_fields`).
+# the report sections it is shown to, where it names the files it wrote): a
+# declaration that names no kind may not set one, since it would be read by
+# nothing. The one place the split is written; the console's tool-declaration
+# box reads it, with each field's default, from the served settings schema
+# (:func:`declaration_fields`).
 KIND_FREE_FIELDS: tuple[str, ...] = (
     "display_name",
     "category",
@@ -500,6 +501,7 @@ KIND_FREE_FIELDS: tuple[str, ...] = (
     "read_only",
     "arguments",
     "routed_formats",
+    "runtimes",
     "effects",
     "aggregate_of",
     "shows",
@@ -518,6 +520,7 @@ KIND_DEPENDENT_FIELDS: tuple[str, ...] = (
     "reader",
     "report_sections",
     "function_starts",
+    "outputs",
 )
 
 # Whether a tool declaration is read as an operator's edit being saved. The
@@ -1181,6 +1184,13 @@ class ToolFacts(BaseModel):
     formats a format-specific tool serves (``pe_info`` serves ``pe``): when the
     tool cannot answer on its server, a sample of another known format loses
     nothing by it, and its unavailability is not recorded for that sample.
+    ``runtimes`` names the code runtimes a runtime-specific tool reads
+    (``dotnet``, ``go``), in the words an identification answer gives as its
+    ``runtime`` value: a pack step of the tool runs only where such an answer
+    names one of them (``core.pack_steps.server_steps``). ``outputs`` is the
+    path of the answer that names each file the tool wrote, as its server
+    names it: a pack step of the tool takes each one into the job's artefact
+    store (``core.pack_steps.PackStep.outputs``).
     ``effects`` says what a call does beyond answering (:class:`ToolEffects`):
     whether it runs the sample's code, reaches the network, or sends the
     sample's hash or bytes to a third party. ``aggregate_of`` names the tools
@@ -1227,6 +1237,8 @@ class ToolFacts(BaseModel):
     display_name: str = ""
     category: str = ""
     routed_formats: tuple[str, ...] = ()
+    runtimes: tuple[str, ...] = ()
+    outputs: str = ""
     effects: ToolEffects | None = None
     aggregate_of: tuple[str, ...] = ()
     shows: str = ""
@@ -1267,7 +1279,7 @@ class ToolFacts(BaseModel):
     def _optional_word(cls, value: str, info: Any) -> str:
         return _word(value, info.field_name) if value else value
 
-    @field_validator("rows", "function_starts")
+    @field_validator("rows", "function_starts", "outputs")
     @classmethod
     def _rows_parse(cls, value: str) -> str:
         return _check_path(value)
@@ -1295,6 +1307,11 @@ class ToolFacts(BaseModel):
     @classmethod
     def _sections_are_words(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(_words(value, "report section"))
+
+    @field_validator("runtimes")
+    @classmethod
+    def _runtimes_are_words(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(_words(value, "runtime"))
 
     @field_validator("routed_formats")
     @classmethod
@@ -2192,7 +2209,13 @@ def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig)
 # The fields of a tool's declaration added after digests were first recorded,
 # left out of a block's digest where a tool leaves them at their default, so
 # adding one moves no digest of a block whose tools do not set it.
-DIGEST_OMITS_AT_DEFAULT: tuple[str, ...] = ("aggregate_of", "shows", "does_not_show")
+DIGEST_OMITS_AT_DEFAULT: tuple[str, ...] = (
+    "aggregate_of",
+    "shows",
+    "does_not_show",
+    "runtimes",
+    "outputs",
+)
 
 
 def _digested_tools(tool_facts: Any) -> Any:
@@ -2576,12 +2599,33 @@ def provider_declarations(settings: Any) -> dict[str, Any]:
     return blocks
 
 
+def _platform_release() -> str:
+    """The installed platform's version, ``""`` where the package records none."""
+    try:
+        from importlib.metadata import version
+
+        return version("maljan")
+    except Exception:  # noqa: BLE001 — a checkout run without the package installed
+        return ""
+
+
+# The release a trusted block's kept declarations hold for: the platform's
+# version and the generation of what the platform's own servers declare of
+# themselves, raised whenever a release changes that (T-418 PR6: the runtime
+# an identification answer names, the runtimes a tool reads, the files it
+# writes), so a server listed by an earlier release is listed again.
+SERVED_DECLARATIONS_GENERATION = 2
+KEPT_DECLARATIONS_RELEASE = f"{_platform_release()}+{SERVED_DECLARATIONS_GENERATION}"
+
+
 def launch_identity(cfg: Any) -> str:
     """A short digest of how a block starts or reaches its server; ``""`` for a block of none.
 
-    Its transport, command, arguments, working directory and address: a
-    server's own declaration is kept under it, so a block pointed at another
-    server stops reading what the last one declared. The command is read as
+    Its transport, command, arguments, working directory and address, and,
+    for a block that trusts what its server declares, the release that
+    declaration is kept for (:data:`KEPT_DECLARATIONS_RELEASE`): a server's
+    own declaration is kept under it, so a block pointed at another server,
+    or read by another release, stops reading what was declared before. The command is read as
     the file it runs (:func:`_launched_file`), so two names of one program in
     one directory (``bin/python`` and its link ``bin/python3``) start the same
     server.
@@ -2593,6 +2637,11 @@ def launch_identity(cfg: Any) -> str:
     }
     if not held:
         return ""
+    if getattr(cfg, "trusts_served_declaration", False) is True:
+        # What a block that trusts its server's declaration keeps of it is
+        # kept for this release alone: a release reads none kept by another,
+        # so its server is listed again before any run reads its tools.
+        held["kept_for"] = KEPT_DECLARATIONS_RELEASE
     command = held.get("command")
     if isinstance(command, str):
         held["command"] = _launched_file(command)

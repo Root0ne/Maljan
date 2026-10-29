@@ -647,7 +647,8 @@ class TestThePackPassesFiles:
             calls,
             artefacts=ArtefactStore("j"),
         )
-        assert _entries(dropped, "scan")[0].error.endswith("and unpack did not run")
+        # Switched off, it is no step of this run.
+        assert _entries(dropped, "scan")[0].error.endswith("and unpack is no step of this run")
 
     def test_a_run_with_no_store_runs_no_step_that_names_a_file(self, tmp_path: Path) -> None:
         calls = _Calls({"unpack": {"written": []}, "scan": {}})

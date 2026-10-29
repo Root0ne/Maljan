@@ -42,7 +42,7 @@ from maljan.core.declared_reading import (
     shipped_by_name,
     ships_tool,
 )
-from maljan.core.pack_steps import default_steps
+from maljan.core.pack_steps import PackStep, default_steps, effective_steps, server_steps
 from maljan.core.tool_declarations import (
     ToolDeclarations,
     ToolFacts,
@@ -311,8 +311,13 @@ def _readers() -> dict[str, Callable[[Settings], Any]]:
     from maljan.providers.static.declared_prepass import block_declaration
 
     def die_step_kind(s: Settings) -> str:
-        step = next(step for step in default_steps() if step.id == "die_scan")
-        return s._step_tool_kind(step)
+        return s._step_tool_kind(PackStep(id="die_scan", server="die", tool="die_scan"))
+
+    def server_step_ids(s: Settings) -> list[str]:
+        # The steps the tools give, off or not; a server not listed yet is
+        # off by its key, giving none.
+        found, off = server_steps(effective_steps(), s.mcp.servers)
+        return sorted({*(step.id for step in found), *off} - set(s.mcp.servers))
 
     return {
         "pack servers": lambda s: pack_servers._decoder_server_key(s.mcp.servers, default_steps()),
@@ -330,6 +335,7 @@ def _readers() -> dict[str, Callable[[Settings], Any]]:
         "known names": lambda s: "die_scan" in known_tool_names(s),
         "matchers": lambda s: "yara-x" in shipped_matcher_names(),
         "step kind": die_step_kind,
+        "server steps": server_step_ids,
         "ships": lambda s: ships_tool("mcp:die", "die_scan"),
     }
 

@@ -59,19 +59,26 @@ before any analyst starts. Each step is declared here as a :class:`PackStep`:
 * ``after``: where a step not in the shipped list goes: after the step it
   names, else after every shipped step.
 
-:func:`default_steps` is the shipped list. Ten of its steps call servers'
-tools: the identification servers', the document servers' and the container
-and Android servers' after the format readers, YARA-X's after the shipped YARA
-scan. Each is off, with why, while its server is not configured, switched off
-or does not offer the tool
-(:func:`steps_on_servers`), so a deployment without the server runs the list
-as it was. ``triage.steps`` holds the
+:func:`default_steps` is the shipped list: the platform's own steps, which
+name no server and no server's tool. A server's tool is a step of the pack by
+what its declaration in force says of it, never by its server's or its own
+name (:func:`server_steps`): a read-only tool that takes the sample by its
+path, sends nothing of it anywhere and runs none of it, and answers one of
+:data:`SERVER_STEP_KINDS`, on every server configured. Its formats are the
+routed formats it declares, and a tool that reads one code runtime alone
+(``ToolFacts.runtimes``) runs where an identification answer names that
+runtime. Each is placed after the platform's own step of the same kind, else
+after the format readers, and is off, with why, while its server is switched
+off or does not offer the tool (:func:`steps_on_servers`); a deployment with
+no such server runs the list as it was. ``triage.steps`` holds the
 operator's declarations (:func:`effective_steps`): one under a shipped step's
 id is laid over that step field by field, in its place (``enabled: false``
 drops it); one that changes the step's ``tool`` or ``server`` replaces it at
-that place, keeping only the id; a new id adds a step. So an operator adds any
-tool as a step, drops one, or swaps one for a tool of their own that answers
-the same kind.
+that place, keeping only the id; one that names neither under an id no
+shipped step has is laid over a server's step of that id where the run's
+servers give one (:func:`names_a_server_step`); a new id with a tool adds a
+step. So an operator adds any tool as a step, drops one, or swaps one for a
+tool of their own that answers the same kind.
 """
 
 from __future__ import annotations
@@ -92,7 +99,7 @@ from pydantic import (
     model_validator,
 )
 
-from maljan.core.tool_declarations import check_tool_name
+from maljan.core.tool_declarations import EXECUTES_NO, THIRD_PARTY_NO, check_tool_name
 
 __all__ = [
     "ARGUMENT_PLACEHOLDERS",
@@ -111,7 +118,11 @@ __all__ = [
     "LeftOutStep",
     "steps_left_out",
     "held_schedules",
-    "on_its_shipped_server",
+    "names_a_server_step",
+    "runs_as_a_step",
+    "server_step_ids",
+    "server_steps",
+    "SERVER_STEP_KINDS",
     "steps_on_servers",
     "read_answer_field",
     "runs_shipped",
@@ -212,30 +223,56 @@ LEGACY_STEP_NAMES: Mapping[str, str] = {"find_anti_analysis_techniques": "anti_a
 # The fields of a declared step that name another step.
 _STEP_REFERENCES = ("id", "after", "starts_after", "reads")
 
-# The shipped identification step, and the names its tool (Detect It Easy's
-# ``die_scan``) gives the runtimes a later step runs on, as Detect It Easy's
-# own signatures write them: the library of a managed .NET assembly, and the
-# Go compiler.
-IDENTIFY_STEP = "die_scan"
-DOTNET_RUNTIMES: tuple[str, ...] = (".NET Framework", ".NET Core")
-GO_COMPILERS: tuple[str, ...] = ("Go",)
-# The routed formats the document servers' steps run on: the Office
-# containers (OLE, OOXML), RTF, and the scripts webcrack reads (JavaScript, and
-# the HTA and WSF files whose script blocks it reads).
-OFFICE_FORMATS: tuple[str, ...] = ("ole2", "ooxml")
-RTF_FORMATS: tuple[str, ...] = ("rtf",)
-SCRIPT_FORMATS: tuple[str, ...] = ("js", "hta", "wsf")
-# The routed formats JADX's step runs on: an Android package and a dex file.
-ANDROID_FORMATS: tuple[str, ...] = ("apk", "dex")
-# Where unblob's answer names each file it extracted, as the artefact store
-# reads it back (``outputs``).
-EXTRACTED_FILES = "/files/*/path"
+# The kind of answer that names what a file is made with (its packers,
+# compilers, linkers, libraries), and the value of its rows that names the
+# code runtime a runtime-specific tool reads (``ToolFacts.runtimes``).
+IDENTIFICATION_KIND = "identification"
+RUNTIME_VALUE = "runtime"
 
-# Why a shipped step of a server's tool is off (:func:`steps_on_servers`).
-SERVER_NOT_CONFIGURED = "no tool server is configured as {server}"
+# The kinds of answer a server's tool gives about the whole file that the pack
+# asks of every server offering one (:func:`server_steps`): what the file is
+# made with (``identification``), the types or the functions a program defines
+# (``type_list``, ``function_list``), the signature rules matching its bytes
+# (``signature_rules``), a document's macros, links and embedded objects
+# (``vba_macros``, ``dde_links``, ``embedded_objects``), a script's deobfuscated
+# source (``deobfuscated_script``) and the files a container holds
+# (``extracted_files``). Kinds, never a server or a tool: a server never seen
+# before whose tool answers one of them gets the same step. Each with the
+# words the step's line names what it answers by, after its tool's display
+# name ("GoReSym · functions").
+SERVER_STEP_KINDS: Mapping[str, str] = {
+    IDENTIFICATION_KIND: "identification",
+    "type_list": "types",
+    "function_list": "functions",
+    "signature_rules": "rule matches",
+    "vba_macros": "macros",
+    "dde_links": "DDE links",
+    "embedded_objects": "embedded objects",
+    "deobfuscated_script": "deobfuscated script",
+    "extracted_files": "extracted files",
+}
+# How a server step's label joins its tool's display name and its kind's words.
+STEP_LABEL = "{tool} · {kind}"
+
+# The platform's own step after which the servers' steps run, unless a step of
+# the platform's own answers the same kind (:func:`server_steps`): after the
+# format readers, so every id the platform's own steps issue before them keeps
+# its value.
+SERVER_STEPS_AFTER = "archive_list"
+
+# Why a step of a server's tool is off (:func:`steps_on_servers`).
 SERVER_SWITCHED_OFF = "{server} is switched off"
 TOOL_NOT_TICKED = "{tool} is not among the tools {server} offers"
-NO_SERVER_CALLS_OFF = "this run calls no tool server"
+# Why a server's steps are off: it would be handed the sample over a network
+# (a server on another host with no mount of the samples), or nothing of its
+# tools is known yet (a server trusted to declare them that was never listed);
+# why an operator's declaration over a server's step lays over nothing.
+SAMPLE_WOULD_BE_SENT = "the sample would be sent to {server}"
+NOT_LISTED = "{server} has not been listed, so its tools are not known"
+NO_SUCH_SERVER_STEP = "no server of this run gives a step {step}"
+NO_RUNTIME_NAMED = (
+    "it reads {runtimes} code, and no step of an identification tool names a file's runtime"
+)
 
 # The renderers that read an answer through its tool's declared facts (its
 # rows, their values and places, its techniques) as well as in the shape of
@@ -457,8 +494,12 @@ class PackStep(BaseModel):
 
 
 def _builtin_problems(step: PackStep) -> list[str]:
-    """What a step with no server declares that no in-process step can honour."""
-    if step.server:
+    """What a step with no server declares that no in-process step can honour.
+
+    A declaration laid over a server's step (:func:`names_a_server_step`) is
+    that step's, read where the run's servers give it.
+    """
+    if step.server or names_a_server_step(step):
         return []
     problems: list[str] = []
     shipped = shipped_step(step.id)
@@ -524,93 +565,9 @@ def _shipped() -> tuple[PackStep, ...]:
             renderer="archive_listing",
             display_name="archive",
         ),
-        # The identification servers' steps (``builtin_declarations``), beside
-        # the format readers. Each is off while its server is not switched on
-        # (:func:`steps_on_servers`), and an off step writes no entry, so
-        # every later id keeps its value. Detect It Easy reads any file; ILSpy
-        # lists a .NET assembly's types, and GoReSym recovers a Go binary's
-        # functions, each only where Detect It Easy's answer named the runtime:
-        # the .NET library, or the Go compiler it tells by the Go build id or
-        # the symbol table Go writes.
-        _o(id=IDENTIFY_STEP, server="die", tool="die_scan", display_name="Detect It Easy"),
-        _o(
-            id="dotnet_types",
-            server="ilspy",
-            tool="dotnet_types",
-            formats=("pe",),
-            when=(StepCondition(step=IDENTIFY_STEP, value="name", equals=DOTNET_RUNTIMES),),
-            display_name=".NET types",
-        ),
-        _o(
-            id="go_symbols",
-            server="goresym",
-            tool="go_symbols",
-            formats=("pe", "elf", "mach-o"),
-            when=(StepCondition(step=IDENTIFY_STEP, value="name", equals=GO_COMPILERS),),
-            display_name="Go symbols",
-        ),
-        # The document servers' steps (``builtin_declarations``), each off
-        # while its server is not switched on, as the identification steps
-        # are, and each on the routed formats its tool reads: oletools' macro
-        # source and analysis of an Office container, its DDE links of an
-        # Office container or an RTF, its embedded objects of an RTF; and
-        # webcrack's rewrite of a JavaScript file, or of an HTA's or WSF's
-        # script blocks.
-        _o(
-            id="ole_vba",
-            server="oletools",
-            tool="ole_vba",
-            formats=OFFICE_FORMATS,
-            display_name="VBA macros",
-        ),
-        _o(
-            id="office_dde",
-            server="oletools",
-            tool="office_dde",
-            formats=(*OFFICE_FORMATS, *RTF_FORMATS),
-            display_name="DDE links",
-        ),
-        _o(
-            id="rtf_objects",
-            server="oletools",
-            tool="rtf_objects",
-            formats=RTF_FORMATS,
-            display_name="RTF objects",
-        ),
-        _o(
-            id="js_deobfuscate",
-            server="webcrack",
-            tool="js_deobfuscate",
-            formats=SCRIPT_FORMATS,
-            display_name="deobfuscated script",
-        ),
-        # The container and Android servers' steps, each off while its server
-        # is not switched on: unblob's extraction on every sample (it finds a
-        # chunk of a format it knows by the chunk's own bytes, whatever the
-        # router called the file), each file it wrote taken into the job's
-        # artefact store for a later step to read; and JADX's class list of an
-        # Android package or dex file.
-        _o(
-            id="container_extract",
-            server="unblob",
-            tool="container_extract",
-            outputs=EXTRACTED_FILES,
-            display_name="extracted files",
-        ),
-        _o(
-            id="android_classes",
-            server="jadx",
-            tool="android_classes",
-            formats=ANDROID_FORMATS,
-            display_name="Android classes",
-        ),
         _o(id="strings", renderer="string_runs", display_name="strings"),
         _o(id="iocs_from_file", renderer="file_iocs", display_name="iocs"),
         _o(id="yara_scan", renderer="signature_rules", display_name="yara", wall_clock=True),
-        # The operator's own YARA rule files, matched by YARA-X on every
-        # sample, right after the shipped corpus's scan; off while its server
-        # is not switched on.
-        _o(id="yarax_scan", server="yarax", tool="yarax_scan", display_name="YARA-X"),
         _o(id="capa", renderer="capability_rules", display_name="capa", wall_clock=True),
         _o(id="sigma_match_sandbox", renderer="event_rules", display_name="sigma"),
         _o(id="api_capability", renderer="api_catalogue", display_name="api catalogue"),
@@ -809,59 +766,349 @@ def read_answer_field(
     return None
 
 
-def on_its_shipped_server(step: PackStep) -> bool:
-    """Whether ``step`` is a shipped step of a server's tool, still calling that tool there.
+def names_a_server_step(step: PackStep) -> bool:
+    """Whether a declared ``step`` is laid over a server's step of its id, not a step of its own.
 
-    Such a step is in the shipped list for every deployment, whether or not
-    the server is there: it is off, never refused, where the server is not
-    configured, switched off or does not offer the tool (:func:`steps_on_servers`).
-    A declaration over it naming another tool is an operator's step, checked
-    as one.
+    It names no server and no tool, under an id no shipped step has. The steps
+    of the servers' tools are read from the run's servers (:func:`server_steps`),
+    so such a declaration is held in the list as it was declared and laid over
+    the server's step of that id where the run has one (:func:`steps_on_servers`).
     """
-    shipped = shipped_step(step.id)
-    return bool(
-        shipped is not None
-        and shipped.server
-        and step.server == shipped.server
-        and step.called == shipped.called
+    return not step.server and not step.tool and shipped_step(step.id) is None
+
+
+def _stays_here(facts: Any) -> bool:
+    """Whether a declaration says its tool runs none of the sample and sends nothing of it out.
+
+    Each effect as declared: one left unset is not declared, never taken as
+    none, and a tool that discloses the sample never stays here.
+    """
+    effects = getattr(facts, "effects", None)
+    return (
+        not getattr(facts, "discloses_sample", False)
+        and effects is not None
+        and effects.executes == EXECUTES_NO
+        and effects.network is False
+        and effects.third_party == THIRD_PARTY_NO
     )
+
+
+def runs_as_a_step(facts: Any) -> bool:
+    """Whether a server's tool is a step of the pack, by what its declaration in force says.
+
+    It answers one of :data:`SERVER_STEP_KINDS`, is read-only, takes the file
+    in the argument it declares for the ``path`` role, and its effects say it
+    runs none of the sample, reaches no network and sends nothing to a third
+    party (:func:`_stays_here`). A tool whose effects are not declared is any
+    agent's to call, and an operator's step may name it (``triage.steps``), but
+    the pack never calls it on its own.
+    """
+    return (
+        facts is not None
+        and getattr(facts, "kind", "") in SERVER_STEP_KINDS
+        and getattr(facts, "read_only", False) is True
+        and bool((getattr(facts, "arguments", None) or {}).get("path"))
+        and _stays_here(facts)
+    )
+
+
+# What of a tool's or a server's name a step id cannot hold.
+_NOT_IN_AN_ID = re.compile(r"[^a-z0-9_]+")
+
+
+def _as_id_word(text: str) -> str:
+    held = _NOT_IN_AN_ID.sub("_", text.lower()).strip("_")
+    return held if held[:1].isalpha() else f"t_{held}"
+
+
+def _step_id(tool: str, server: str, taken: set[str]) -> str:
+    """A server step's id: its tool's name as a step name, else with its server's key before it.
+
+    Whichever of the two no step of the list has; else the second with a
+    number after it.
+    """
+    alone = _as_id_word(tool)[:64]
+    keyed = f"{_as_id_word(server)}_{_as_id_word(tool)}"[:64]
+    for candidate in (alone, keyed):
+        if candidate not in taken:
+            return candidate
+    number = 2
+    while f"{keyed[:58]}_{number}" in taken:
+        number += 1
+    return f"{keyed[:58]}_{number}"
+
+
+def _own_kind(step: PackStep) -> str:
+    """The kind of answer a step of the platform's own records: its ``kind``, else its tool's."""
+    if step.kind:
+        return step.kind
+    from maljan.core.declared_reading import in_process_tools
+    from maljan.core.tool_declarations import PACK
+
+    facts = in_process_tools(PACK).get(step.called)
+    return str(getattr(facts, "kind", "") or "")
+
+
+def _why_no_steps(key: str, server: Any) -> str:
+    """Why none of ``server``'s tools is a step the pack takes on its own; ``""`` where they may be.
+
+    A server switched off is said tool by tool (:func:`_server_steps`). One on
+    another host that mounts none of the samples would be handed the sample
+    over its connection, which only an operator's own step may ask for. One
+    whose block trusts what it declares of its tools, and of which nothing is
+    kept under its launch, has not been listed yet: what its tools are is not
+    known until it is (``providers.served_listing``).
+    """
+    from maljan.core.served_declarations import kept
+    from maljan.core.tool_declarations import launch_identity, trusts_served
+    from maljan.pipeline.artefacts import shares_the_worker_filesystem
+
+    if not getattr(server, "enabled", True):
+        return ""
+    if not shares_the_worker_filesystem(server) and not getattr(server, "sample_mount", ""):
+        return SAMPLE_WOULD_BE_SENT.format(server=key)
+    source = f"mcp:{key}"
+    if trusts_served(source, server) and not kept(source, launch_identity(server)):
+        return NOT_LISTED.format(server=key)
+    return ""
+
+
+def server_steps(
+    steps: Iterable[PackStep], servers: Mapping[str, Any]
+) -> tuple[list[PackStep], dict[str, str]]:
+    """The steps of the servers' own tools, in the order they run, and each one off, with why.
+
+    Every tool of every server of ``servers`` (``mcp.servers``) that runs as a
+    step (:func:`runs_as_a_step`), by its declaration in force (its block's,
+    with what its server declares of itself under it). Each runs on the
+    routed formats its tool declares, writes the files its tool declares it
+    writes (``ToolFacts.outputs``), and is labelled by its tool's display name
+    and its kind's words (:data:`SERVER_STEP_KINDS`). A step of ``steps`` that
+    calls the same tool on the same server (and reads no other step's files)
+    is that step: it keeps its id and every field it declares, the rest read
+    from the tool, and runs where the server's step runs. A tool that reads
+    one code runtime alone (``ToolFacts.runtimes``) runs where the first
+    identification step whose tool declares a ``runtime`` value names one of
+    its runtimes, and is off where no such step runs. A step whose server is
+    switched off, does not offer the tool, would be handed the sample over a
+    network, or has not been listed, is off (:func:`_why_no_steps`). The
+    identification steps come first, as a later step runs on what they
+    answer; then the servers in their order, each one's tools by name, so the
+    order, and with it every id, is the same from one run to the next.
+    """
+    found, off, of_servers, _taken = _server_steps(steps, servers)
+    return [step for step, _kind in found], {**of_servers, **off}
+
+
+def server_step_ids(steps: Iterable[PackStep], servers: Mapping[str, Any]) -> frozenset[str]:
+    """The id of every step the tools of ``servers`` give, off or not: names a save may use.
+
+    The tools' steps alone: a server none of whose tools gives a step (it
+    would be handed the sample, or has not been listed) names none.
+    """
+    found, off, _of_servers, _taken = _server_steps(steps, servers)
+    return frozenset({*(step.id for step, _kind in found), *off})
+
+
+def _server_steps(
+    steps: Iterable[PackStep], servers: Mapping[str, Any], dropped: Iterable[str] = ()
+) -> tuple[list[tuple[PackStep, str]], dict[str, str], dict[str, str], set[str]]:
+    """:func:`server_steps`, each step with its tool's kind, apart from the servers off.
+
+    The steps, each with its tool's kind; each step off, by its id; each
+    server none of whose tools is a step, by its key (:func:`_why_no_steps`);
+    and the ids of ``steps`` it took.
+
+    A step of an id in ``dropped`` (a declaration switched it off) is left out
+    before any other step reads it, so no step runs on what it would answer.
+    """
+    from maljan.core.declared_reading import tools_in_force
+
+    switched_off = frozenset(dropped)
+    held = list(steps)
+    # Every id a step of the list has, and every id the shipped list and its
+    # old names hold, switched off or not: a server's step never reads as one.
+    taken = {step.id for step in held} | {step.id for step in default_steps()}
+    taken |= set(LEGACY_STEP_NAMES)
+    # The operator's own step of a server's tool, where it is that tool's step.
+    declared: dict[tuple[str, str], PackStep] = {}
+    for step in held:
+        if step.server and not step.reads:
+            declared.setdefault((step.server, step.called), step)
+    found: list[tuple[PackStep, Any]] = []
+    off: dict[str, str] = {}
+    of_servers: dict[str, str] = {}
+    took: set[str] = set()
+    for key, server in servers.items():
+        why_none = _why_no_steps(str(key), server)
+        if why_none:
+            of_servers[str(key)] = why_none
+            continue
+        in_force = tools_in_force(f"mcp:{key}", server)
+        offered = getattr(server, "tools", None)
+        for tool in sorted(in_force):
+            facts = in_force[tool]
+            if not runs_as_a_step(facts):
+                continue
+            own = declared.get((str(key), tool))
+            step_id = own.id if own is not None else _step_id(tool, str(key), taken)
+            taken.add(step_id)
+            if step_id in switched_off:
+                continue
+            if not getattr(server, "enabled", True):
+                off[step_id] = SERVER_SWITCHED_OFF.format(server=key)
+                continue
+            if offered is not None and tool not in offered:
+                off[step_id] = TOOL_NOT_TICKED.format(tool=tool, server=key)
+                continue
+            fields: dict[str, Any] = {"id": step_id, "server": str(key), "tool": tool}
+            if facts.routed_formats:
+                fields["formats"] = tuple(facts.routed_formats)
+            if facts.outputs:
+                fields["outputs"] = facts.outputs
+            fields["display_name"] = STEP_LABEL.format(
+                tool=facts.display_name or tool, kind=SERVER_STEP_KINDS[facts.kind]
+            )
+            step = PackStep.model_validate(fields)
+            if own is not None:
+                took.add(own.id)
+                step = _laid_over(step, own)
+                if not step.enabled:
+                    continue
+            found.append((step, facts))
+    found.sort(key=lambda held_step: held_step[1].kind != IDENTIFICATION_KIND)
+    reader = next(
+        (
+            step.id
+            for step, facts in found
+            if facts.kind == IDENTIFICATION_KIND and RUNTIME_VALUE in facts.values
+        ),
+        "",
+    )
+    out: list[tuple[PackStep, str]] = []
+    for step, facts in found:
+        if facts.runtimes and "when" not in step.model_fields_set:
+            if not reader:
+                off[step.id] = NO_RUNTIME_NAMED.format(runtimes=" or ".join(facts.runtimes))
+                continue
+            when = (StepCondition(step=reader, value=RUNTIME_VALUE, equals=tuple(facts.runtimes)),)
+            step = step.model_copy(update={"when": when})
+        out.append((step, facts.kind))
+    return out, off, of_servers, took
 
 
 def steps_on_servers(
     steps: Iterable[PackStep], servers: Mapping[str, Any] | None
 ) -> tuple[tuple[PackStep, ...], dict[str, str]]:
-    """The steps that run, and each shipped server step left off, by id, with why.
+    """The steps that run, the servers' steps in their places, and each one off, by id, with why.
 
-    A shipped step of a server's tool (:func:`on_its_shipped_server`) runs only
-    where ``servers`` (``mcp.servers``) holds its server, switched on, offering
-    its tool; otherwise it is off: no call and no entry, as a step of another
-    format is, and the reason is the pack's to say. ``None`` is a run that
-    calls no tool server. Every other step is kept as it is, an operator's
+    ``steps`` is the effective list (:func:`effective_steps`), ``servers`` the
+    run's (``mcp.servers``); ``None`` is a run that calls no tool server, which
+    has no server steps. Each server step (:func:`server_steps`) runs right
+    after the last step of the platform's own that answers its kind, else
+    after the format readers (:data:`SERVER_STEPS_AFTER`), and after an
+    operator's step placed there, so every id the shipped list issues before
+    it keeps its value. A declaration laid over a server's step
+    (:func:`names_a_server_step`), and an operator's step of the same tool on
+    the same server, is laid over it field by field, its ``after`` placing
+    it; ``enabled: false`` drops it. A declaration over a server's step that
+    no server of the run gives is off, with why. A step the operator placed
+    after a server's step is moved there; one placed after a step no step of
+    the run is stays last. Every other step is kept as it is, an operator's
     step on a server that is not there included: it is recorded as not run.
+    An off step makes no call and writes no entry; the reason is the pack's
+    to say.
     """
-    kept: list[PackStep] = []
-    off: dict[str, str] = {}
-    for step in steps:
-        why = _why_off(step, servers) if on_its_shipped_server(step) else ""
-        if why:
-            off[step.id] = why
-        else:
-            kept.append(step)
-    return tuple(kept), off
-
-
-def _why_off(step: PackStep, servers: Mapping[str, Any] | None) -> str:
+    own = [step for step in steps if not names_a_server_step(step)]
+    over = {step.id: step for step in steps if names_a_server_step(step)}
     if servers is None:
-        return NO_SERVER_CALLS_OFF
-    server = servers.get(step.server)
-    if server is None:
-        return SERVER_NOT_CONFIGURED.format(server=step.server)
-    if not getattr(server, "enabled", True):
-        return SERVER_SWITCHED_OFF.format(server=step.server)
-    offered = getattr(server, "tools", None)
-    if offered is not None and step.called not in offered:
-        return TOOL_NOT_TICKED.format(tool=step.called, server=step.server)
-    return ""
+        return tuple(own), {
+            step_id: NO_SUCH_SERVER_STEP.format(step=step_id)
+            for step_id, step in over.items()
+            if step.enabled
+        }
+    found, off, of_servers, took = _server_steps(
+        own, servers, (step_id for step_id, step in over.items() if not step.enabled)
+    )
+    off = {**of_servers, **off}
+    own = [step for step in own if step.id not in took]
+    given = {step.id for step, _kind in found} | set(off)
+    for step_id, step in over.items():
+        if step.enabled and step_id not in given:
+            off[step_id] = NO_SUCH_SERVER_STEP.format(step=step_id)
+    order = {step.id: at for at, step in enumerate(default_steps())}
+    readers_end = order.get(SERVER_STEPS_AFTER, len(order))
+    answering: dict[str, int] = {}
+    for at, step in enumerate(own):
+        if step.builtin:
+            kind = _own_kind(step)
+            if kind:
+                answering[kind] = at
+    readers = max(
+        (at for at, step in enumerate(own) if order.get(step.id, len(order)) <= readers_end),
+        default=-1,
+    )
+
+    def slot(anchor: int) -> int:
+        # After the anchor and the operator's steps placed right after it.
+        at = anchor + 1
+        while at < len(own) and own[at].id not in order:
+            at += 1
+        return at
+
+    placed: dict[int, list[PackStep]] = {}
+    moved: list[PackStep] = []
+    for step, kind in found:
+        declared = over.get(step.id)
+        if declared is not None:
+            step = _laid_over(step, declared)
+        if step.after:
+            moved.append(step)
+            continue
+        placed.setdefault(slot(answering.get(kind, readers)), []).append(step)
+    out: list[PackStep] = []
+    for at in range(len(own) + 1):
+        out.extend(placed.get(at, ()))
+        if at < len(own):
+            out.append(own[at])
+    return tuple(_moved_after(out, moved, {step.id for step, _kind in found})), off
+
+
+def _moved_after(
+    out: list[PackStep], moved: list[PackStep], server_ids: set[str]
+) -> list[PackStep]:
+    """``out`` with each of ``moved``, and each step placed after a server's step, after it.
+
+    A step of ``out`` placed after a server's step, which the list could not
+    place before the run's servers were read, moves after it, and with it
+    every step whose ``after`` leads to a step that moves, in the list's
+    order. A step whose anchor the run does not have goes last.
+    """
+    moving = {step.id for step in moved}
+    grew = True
+    while grew:
+        grew = False
+        for step in out:
+            if step.id not in moving and (step.after in server_ids or step.after in moving):
+                moving.add(step.id)
+                grew = True
+    pending = [*moved, *(step for step in out if step.id in moving)]
+    held = [step for step in out if step.id not in moving]
+    while pending:
+        ids = {step.id for step in held}
+        ready = [step for step in pending if step.after in ids]
+        if not ready:
+            held.extend(pending)
+            break
+        for step in ready:
+            at = [one.id for one in held].index(step.after) + 1
+            # After the steps already placed after the same anchor, in order.
+            while at < len(held) and held[at].after == step.after and held[at].id in moving:
+                at += 1
+            held.insert(at, step)
+        placed = {step.id for step in ready}
+        pending = [step for step in pending if step.id not in placed]
+    return held
 
 
 def shipped_step(step_id: str) -> PackStep | None:
@@ -947,11 +1194,19 @@ def _laid_over(shipped: PackStep, declared: PackStep) -> PackStep:
     return shipped.model_copy(update={name: getattr(declared, name) for name in held})
 
 
-def check_steps(value: Iterable[Any]) -> list[PackStep]:
+def check_steps(
+    value: Iterable[Any], servers: Mapping[str, Any] | Iterable[str] | None = None
+) -> list[PackStep]:
     """``value`` as declared steps, refusing a step declared twice and a list that cannot run.
 
     The list is also laid over the shipped one here, so every problem of the
     effective list is refused where it is saved, never found at run time.
+    ``servers`` are the configured servers (``mcp.servers``), or only the ids
+    of the steps their tools give (:func:`server_step_ids`):
+    (:func:`server_step_ids`): a reference to one of them, or a declaration
+    laid over one, is known; with ``None`` (no servers to read, as a field
+    alone is read) a reference to an id no step of the list has is left for
+    the run to resolve (:func:`_effective`).
     """
     steps = [_as_step(item) for item in value]
     if not steps:
@@ -961,17 +1216,28 @@ def check_steps(value: Iterable[Any]) -> list[PackStep]:
         if step.id in seen:
             raise ValueError(f"step {step.id!r} is declared twice")
         seen.add(step.id)
-    _effective(steps)
+    _effective(steps, servers=servers)
     return steps
 
 
 def effective_steps(declared: Iterable[Any] = ()) -> tuple[PackStep, ...]:
-    """The steps the pack runs, in order, the disabled ones left out (module docstring)."""
-    return tuple(step for step in _effective([_as_step(item) for item in declared]) if step.enabled)
+    """The steps the pack runs, in order, the disabled ones left out (module docstring).
+
+    A declaration laid over a server's step (:func:`names_a_server_step`) is
+    kept, switched off too, for :func:`steps_on_servers` to lay over the
+    server's step of its id.
+    """
+    return tuple(
+        step
+        for step in _effective([_as_step(item) for item in declared])
+        if step.enabled or names_a_server_step(step)
+    )
 
 
 def _effective(
-    declared: list[PackStep], found: dict[str, list[str]] | None = None
+    declared: list[PackStep],
+    found: dict[str, list[str]] | None = None,
+    servers: Mapping[str, Any] | Iterable[str] | None = None,
 ) -> list[PackStep]:
     """The shipped list with ``declared`` laid over it, in one pass over each.
 
@@ -980,7 +1246,26 @@ def _effective(
     the list is refused with one error naming them all, or, given ``found``,
     recorded there under the id of the step that has it (a step placed after
     no step stays last), for :func:`lenient_steps`.
+
+    A step a server's tool gives is not in the list: its id is read from the
+    run's servers (:func:`server_steps`). With ``servers`` (a save, which
+    knows the configured servers, or the ids their tools give), a step named
+    that no step of the list has and no server gives is a problem, and so is a
+    declaration laid over a server's step of an id no server gives; with the
+    servers themselves, so is a step that runs on, or reads, a step the run
+    places at or after it (:func:`steps_on_servers`). With ``None`` (a stored list read,
+    a run's list), such a name is kept as declared, for the run to resolve
+    (:func:`steps_on_servers`): a step placed after it stays last until then.
     """
+    if isinstance(servers, Mapping):
+        known_servers: frozenset[str] | None = server_step_ids(default_steps(), servers)
+    else:
+        known_servers = None if servers is None else frozenset(servers)
+
+    def unknown(name: str) -> bool:
+        """Whether a step named ``name`` is a problem: none of the list, nor a server's."""
+        return name not in held and known_servers is not None and name not in known_servers
+
     held: dict[str, PackStep] = {}
     after: dict[str, str] = {}
     before: dict[str, str] = {}
@@ -1031,12 +1316,12 @@ def _effective(
             held[step.id] = step
             anchor = tail
         if step.after:
-            if step.after not in held or step.after == step.id:
+            if unknown(step.after) or step.after == step.id:
                 said = f"step {step.id!r} comes after {step.after!r}, which no step is"
                 if found is None:
                     raise ValueError(said)
                 found.setdefault(step.id, []).append(said)
-            else:
+            elif step.after in held:
                 anchor = step.after
         link(step.id, anchor)
 
@@ -1098,7 +1383,6 @@ def _effective(
         steps.append(held[cursor])
         cursor = after.get(cursor, "")
     problems: list[str] = []
-    ids = {step.id for step in steps}
     placed_at = {step.id: at for at, step in enumerate(steps)}
     named_beside = {other for step in steps for other in step.beside}
     set_by = {step.id: step.model_fields_set for step in declared}
@@ -1107,21 +1391,63 @@ def _effective(
             *_builtin_problems(step),
             *_renderer_problems(step),
             *_schedule_problems(step, set_by.get(step.id, frozenset()), named_beside),
-            *_reading_problems(step, steps, placed_at),
+            *_reading_problems(step, steps, placed_at, unknown),
         ]
-        if step.starts_after and step.starts_after not in ids:
+        if step.starts_after and unknown(step.starts_after):
             own.append(f"step {step.id!r} starts after {step.starts_after!r}, which no step is")
         own.extend(
             f"step {step.id!r} runs beside {other!r}, which no step is"
             for other in step.beside
-            if other not in ids
+            if unknown(other)
         )
+        if known_servers is not None and names_a_server_step(step) and step.id not in known_servers:
+            own.append(
+                f"step {step.id!r} names no server and no tool, and no configured server's "
+                "tool gives a step of that id: name the server whose tool it is"
+            )
         if own and found is not None:
             found.setdefault(step.id, []).extend(own)
         problems.extend(own)
+    if isinstance(servers, Mapping) and not problems:
+        # The order the run gives the list, with the servers' steps in it: a
+        # step that runs on, or reads, a server's step that comes after it.
+        for step_id, said in _order_problems(
+            steps_on_servers(
+                [step for step in steps if step.enabled or names_a_server_step(step)], servers
+            )[0]
+        ):
+            if found is not None:
+                found.setdefault(step_id, []).append(said)
+            problems.append(said)
     if problems and found is None:
         raise ValueError("; ".join(problems))
     return steps
+
+
+def _order_problems(order: Iterable[PackStep]) -> list[tuple[str, str]]:
+    """Each step of the run's ``order`` that runs on, or reads, a step at or after it, with why."""
+    steps = list(order)
+    at = {step.id: place for place, step in enumerate(steps)}
+    out: list[tuple[str, str]] = []
+    for place, step in enumerate(steps):
+        for condition in step.when:
+            if at.get(condition.step, -1) >= place:
+                out.append(
+                    (
+                        step.id,
+                        f"step {step.id!r} runs on what {condition.step!r} answers, which does "
+                        "not come before it",
+                    )
+                )
+        if step.reads and at.get(step.reads, -1) >= place:
+            out.append(
+                (
+                    step.id,
+                    f"step {step.id!r} reads the files {step.reads!r} writes, which does not "
+                    "come before it",
+                )
+            )
+    return out
 
 
 class LeftOutStep(NamedTuple):
@@ -1159,7 +1485,9 @@ def _validation_said(exc: ValueError) -> str:
 
 
 def steps_left_out(
-    value: Any, problem: Callable[[PackStep], str] | None = None
+    value: Any,
+    problem: Callable[[PackStep], str] | None = None,
+    servers: Mapping[str, Any] | Iterable[str] | None = None,
 ) -> tuple[list[PackStep], list[LeftOutStep]]:
     """The stored steps the pack can run, and each step left out, where it is stored and why.
 
@@ -1172,7 +1500,9 @@ def steps_left_out(
     (``after``, ``starts_after``, ``beside``) is left out with it. A save is
     refused instead (:func:`check_steps`). Each round leaves out every step
     with a problem and the steps naming them, so the rounds stay few
-    whatever the list's length.
+    whatever the list's length. ``servers`` as :func:`_effective` reads
+    them: given on a save, ``None`` for a stored list read, whose names of a
+    server's step the run resolves.
     """
     if not isinstance(value, list):
         if value in (None, ""):
@@ -1198,7 +1528,7 @@ def steps_left_out(
     shipped = _indexes()[0]
     while steps:
         found: dict[str, list[str]] = {}
-        effective = _effective(steps, found)
+        effective = _effective(steps, found, servers)
         if problem is not None:
             for step in effective:
                 said = problem(step) if step.enabled else ""
@@ -1237,7 +1567,7 @@ def steps_left_out(
 
 def _starts_early(step: PackStep) -> bool:
     """Whether ``step`` can start beside the pack: any server's tool, or a built-in shipped so."""
-    if not step.builtin:
+    if not step.builtin or names_a_server_step(step):
         return True
     shipped = shipped_step(step.id)
     return shipped is not None and bool(shipped.starts_after)
@@ -1297,20 +1627,26 @@ def steps_named_at_run(step: PackStep) -> set[str]:
 
 
 def _reading_problems(
-    step: PackStep, steps: list[PackStep], position: Mapping[str, int]
+    step: PackStep,
+    steps: list[PackStep],
+    position: Mapping[str, int],
+    unknown: Callable[[str], bool] = lambda name: True,
 ) -> list[str]:
     """What ``step`` reads of other steps that no earlier step can give it.
 
     A condition's step and the step it ``reads`` come before it, or there is
     nothing to read when it starts; the step it reads declares ``outputs``,
     or it names no file. A step that reads runs once per file, in turn, so it
-    starts after no step beside the pack.
+    starts after no step beside the pack. A step the list does not hold is a
+    problem only where ``unknown`` says so: a server's step is read at run
+    time, and the run says where it is no step of the run.
     """
     problems: list[str] = []
     at = position[step.id]
     for condition in step.when:
         if condition.step not in position:
-            problems.append(f"step {step.id!r} runs when {condition.step!r}, which no step is")
+            if unknown(condition.step):
+                problems.append(f"step {step.id!r} runs when {condition.step!r}, which no step is")
         elif position[condition.step] >= at:
             problems.append(
                 f"step {step.id!r} runs on what {condition.step!r} answers, which does not come "
@@ -1318,7 +1654,8 @@ def _reading_problems(
             )
     if step.reads:
         if step.reads not in position:
-            problems.append(f"step {step.id!r} reads {step.reads!r}, which no step is")
+            if unknown(step.reads):
+                problems.append(f"step {step.id!r} reads {step.reads!r}, which no step is")
         elif position[step.reads] >= at:
             problems.append(
                 f"step {step.id!r} reads the files {step.reads!r} writes, which does not come "

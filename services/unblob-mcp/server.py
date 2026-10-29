@@ -187,6 +187,9 @@ _DECLARED: dict[str, dict[str, Any]] = {
             "kind": "extracted_files",
             "long_running": True,
             "rows": "/files/*",
+            # Each regular file's path, as this server opens it: a pack step
+            # takes each into the job's artefact store (never a link's).
+            "outputs": "/files/*/path",
             "values": {"name": "/name", "sha256": "/sha256", "magic": "/magic"},
             "arguments": {"path": "path"},
             "display_name": "unblob",

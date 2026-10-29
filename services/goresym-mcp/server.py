@@ -44,6 +44,9 @@ mcp = FastMCP("GoReSymMCP", stateless_http=True)
 
 # What each tool declares of itself (``cli_sidecar.reading_tool``).
 _EXECUTABLE_FORMATS = ["pe", "elf", "mach-o"]
+# The runtime every tool here reads, in the words an identification answer
+# names it by (``ToolFacts.runtimes``): a Go binary.
+_RUNTIMES = ["go"]
 _DECLARED: dict[str, dict[str, Any]] = {
     SYMBOLS_TOOL: sidecar.reading_tool(
         "Go symbols",
@@ -55,6 +58,7 @@ _DECLARED: dict[str, dict[str, Any]] = {
             "values": {"name": "/name", "package": "/package"},
             "arguments": {"path": "path"},
             "routed_formats": _EXECUTABLE_FORMATS,
+            "runtimes": _RUNTIMES,
             "display_name": "GoReSym",
             "shows": (
                 "the Go version, build id and build info, and each function's name, package and "
@@ -72,6 +76,7 @@ _DECLARED: dict[str, dict[str, Any]] = {
             "values": {"name": "/Str", "type_kind": "/Kind"},
             "arguments": {"path": "path"},
             "routed_formats": _EXECUTABLE_FORMATS,
+            "runtimes": _RUNTIMES,
             "display_name": "GoReSym",
             "shows": "the Go type structures and interfaces the binary's moduledata lists",
             "does_not_show": "how the types are used, or types of a Go version it misreads",
@@ -87,6 +92,7 @@ _DECLARED: dict[str, dict[str, Any]] = {
             "values": {"text": "/Str"},
             "arguments": {"path": "path"},
             "routed_formats": _EXECUTABLE_FORMATS,
+            "runtimes": _RUNTIMES,
             "display_name": "GoReSym",
             "shows": "the strings the binary's Go string table holds, each cut where Go cuts it",
             "does_not_show": "strings built, decoded or decrypted at run time",

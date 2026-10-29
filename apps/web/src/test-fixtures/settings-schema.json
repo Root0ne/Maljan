@@ -12850,109 +12850,6 @@
         "renderer": "archive_listing"
        },
        {
-        "display_name": "Detect It Easy",
-        "id": "die_scan",
-        "server": "die",
-        "tool": "die_scan"
-       },
-       {
-        "display_name": ".NET types",
-        "formats": [
-         "pe"
-        ],
-        "id": "dotnet_types",
-        "server": "ilspy",
-        "tool": "dotnet_types",
-        "when": [
-         {
-          "equals": [
-           ".NET Framework",
-           ".NET Core"
-          ],
-          "step": "die_scan",
-          "value": "name"
-         }
-        ]
-       },
-       {
-        "display_name": "Go symbols",
-        "formats": [
-         "pe",
-         "elf",
-         "mach-o"
-        ],
-        "id": "go_symbols",
-        "server": "goresym",
-        "tool": "go_symbols",
-        "when": [
-         {
-          "equals": [
-           "Go"
-          ],
-          "step": "die_scan",
-          "value": "name"
-         }
-        ]
-       },
-       {
-        "display_name": "VBA macros",
-        "formats": [
-         "ole2",
-         "ooxml"
-        ],
-        "id": "ole_vba",
-        "server": "oletools",
-        "tool": "ole_vba"
-       },
-       {
-        "display_name": "DDE links",
-        "formats": [
-         "ole2",
-         "ooxml",
-         "rtf"
-        ],
-        "id": "office_dde",
-        "server": "oletools",
-        "tool": "office_dde"
-       },
-       {
-        "display_name": "RTF objects",
-        "formats": [
-         "rtf"
-        ],
-        "id": "rtf_objects",
-        "server": "oletools",
-        "tool": "rtf_objects"
-       },
-       {
-        "display_name": "deobfuscated script",
-        "formats": [
-         "js",
-         "hta",
-         "wsf"
-        ],
-        "id": "js_deobfuscate",
-        "server": "webcrack",
-        "tool": "js_deobfuscate"
-       },
-       {
-        "display_name": "extracted files",
-        "id": "container_extract",
-        "outputs": "/files/*/path",
-        "server": "unblob",
-        "tool": "container_extract"
-       },
-       {
-        "display_name": "Android classes",
-        "formats": [
-         "apk",
-         "dex"
-        ],
-        "id": "android_classes",
-        "server": "jadx",
-        "tool": "android_classes"
-       },
-       {
         "display_name": "strings",
         "id": "strings",
         "renderer": "string_runs"
@@ -12966,12 +12863,6 @@
         "display_name": "yara",
         "id": "yara_scan",
         "renderer": "signature_rules"
-       },
-       {
-        "display_name": "YARA-X",
-        "id": "yarax_scan",
-        "server": "yarax",
-        "tool": "yarax_scan"
        },
        {
         "display_name": "capa",
@@ -13130,10 +13021,6 @@
        }
       ],
       "shipped_compared": {
-       "android_classes": {
-        "called": "android_classes",
-        "server": "jadx"
-       },
        "anti_analysis_scan": {
         "called": "anti_analysis_scan",
         "server": ""
@@ -13158,25 +13045,13 @@
         "called": "capa",
         "server": ""
        },
-       "container_extract": {
-        "called": "container_extract",
-        "server": "unblob"
-       },
        "decode_string_blobs": {
         "called": "decode_string_blobs",
         "server": ""
        },
-       "die_scan": {
-        "called": "die_scan",
-        "server": "die"
-       },
        "document_info": {
         "called": "document_info",
         "server": ""
-       },
-       "dotnet_types": {
-        "called": "dotnet_types",
-        "server": "ilspy"
        },
        "elf_info": {
         "called": "elf_info",
@@ -13202,10 +13077,6 @@
         "called": "function_matches",
         "server": ""
        },
-       "go_symbols": {
-        "called": "go_symbols",
-        "server": "goresym"
-       },
        "hashes": {
         "called": "hashes",
         "server": ""
@@ -13218,10 +13089,6 @@
         "called": "iocs_from_file",
         "server": ""
        },
-       "js_deobfuscate": {
-        "called": "js_deobfuscate",
-        "server": "webcrack"
-       },
        "lolbin_lookup": {
         "called": "lolbin_lookup",
         "server": ""
@@ -13229,14 +13096,6 @@
        "macho_info": {
         "called": "macho_info",
         "server": ""
-       },
-       "office_dde": {
-        "called": "office_dde",
-        "server": "oletools"
-       },
-       "ole_vba": {
-        "called": "ole_vba",
-        "server": "oletools"
        },
        "pcap_summary": {
         "called": "pcap_summary",
@@ -13257,10 +13116,6 @@
        "resolved_api_capability": {
         "called": "api_capability",
         "server": ""
-       },
-       "rtf_objects": {
-        "called": "rtf_objects",
-        "server": "oletools"
        },
        "sandbox_api_capability": {
         "called": "api_capability",
@@ -13313,10 +13168,6 @@
        "yara_scan": {
         "called": "yara_scan",
         "server": ""
-       },
-       "yarax_scan": {
-        "called": "yarax_scan",
-        "server": "yarax"
        }
       },
       "state_keys": [
@@ -16354,6 +16205,7 @@
    "asserts_techniques": false,
    "function_starts": "",
    "holds_strings": false,
+   "outputs": "",
    "places": {},
    "reader": "",
    "reads_delay_imports": false,
@@ -16376,6 +16228,7 @@
    "memory_peak_mb": null,
    "read_only": false,
    "routed_formats": [],
+   "runtimes": [],
    "shows": "",
    "timeout_seconds": null,
    "words": []

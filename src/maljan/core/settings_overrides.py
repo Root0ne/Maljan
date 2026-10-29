@@ -18,13 +18,18 @@ import json
 import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
+from contextvars import ContextVar
 from functools import cache
 from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from maljan.core.config import STORE_ONLY, Settings
-from maljan.core.pack_steps import LeftOutStep, PackStep, steps_left_out
+from maljan.core.pack_steps import (
+    LeftOutStep,
+    PackStep,
+    steps_left_out,
+)
 from maljan.core.tool_declarations import stored_in_force
 
 CORE_NS = "core"
@@ -209,6 +214,12 @@ def _warn_refused_values(refused: Mapping[str, str]) -> None:
 # The stored leaf of the triage pack's steps (``core.pack_steps``).
 PACK_STEPS_PATH = "triage.steps"
 
+# Whether the stored steps are read for a save (:func:`pack_step_refusals`):
+# a step named that no step of the list is and no configured server's tool
+# gives is then a problem; a stored list read for a run keeps such a name for
+# the run to resolve (``core.pack_steps._effective``).
+_SAVING: ContextVar[bool] = ContextVar("pack_steps_saving", default=False)
+
 
 def _built(
     core_overrides: Mapping[str, Any], set_aside: Callable[[PackStep], str | None] | None = None
@@ -241,7 +252,8 @@ def _built(
             said = held(step)
             return built.pack_step_problem(step) if said is None else said
 
-    kept, left = steps_left_out(stored, problem)
+    servers = built.mcp.servers if _SAVING.get() else None
+    kept, left = steps_left_out(stored, problem, servers)
     if left:
         _warn_left_out_steps(_names_once(left))
     built.triage = built.triage.model_copy(update={"steps": kept})
@@ -388,10 +400,14 @@ def pack_step_refusals(merged: Mapping[str, Any], current: Mapping[str, Any]) ->
     other settings of ``merged`` do not build, those are refused by the model
     itself and the steps are checked as :func:`_left_out_checked` says.
     """
-    left = _left_out_checked(merged)
-    if not left:
-        return {}
-    kept = Counter(_left_out_items(current, _left_out_checked(current)))
+    token = _SAVING.set(True)
+    try:
+        left = _left_out_checked(merged)
+        if not left:
+            return {}
+        kept = Counter(_left_out_items(current, _left_out_checked(current)))
+    finally:
+        _SAVING.reset(token)
     refused: list[LeftOutStep] = []
     for entry, item in zip(left, _left_out_items(merged, left), strict=True):
         if kept[item]:

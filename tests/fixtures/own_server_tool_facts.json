@@ -572,6 +572,7 @@
       "values": {
         "file_type": "/file_type",
         "name": "/name",
+        "runtime": "/runtime",
         "type": "/type",
         "version": "/version"
       }
@@ -608,6 +609,9 @@
         "mach-o"
       ],
       "rows": "/strings/*",
+      "runtimes": [
+        "go"
+      ],
       "shows": "the strings the binary's Go string table holds, each cut where Go cuts it",
       "values": {
         "text": "/Str"
@@ -636,6 +640,9 @@
         "mach-o"
       ],
       "rows": "/functions/*",
+      "runtimes": [
+        "go"
+      ],
       "shows": "the Go version, build id and build info, and each function's name, package and address range, read from the Go runtime's own tables in the file",
       "values": {
         "name": "/name",
@@ -662,6 +669,9 @@
         "mach-o"
       ],
       "rows": "/types/*",
+      "runtimes": [
+        "go"
+      ],
       "shows": "the Go type structures and interfaces the binary's moduledata lists",
       "values": {
         "name": "/Str",
@@ -711,6 +721,9 @@
       "routed_formats": [
         "pe"
       ],
+      "runtimes": [
+        "dotnet"
+      ],
       "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL"
     },
     "dotnet_decompile_member": {
@@ -739,6 +752,9 @@
       ],
       "routed_formats": [
         "pe"
+      ],
+      "runtimes": [
+        "dotnet"
       ],
       "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL"
     },
@@ -769,6 +785,9 @@
       "routed_formats": [
         "pe"
       ],
+      "runtimes": [
+        "dotnet"
+      ],
       "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL"
     },
     "dotnet_metadata_table": {
@@ -788,6 +807,9 @@
         "pe"
       ],
       "rows": "/rows/*",
+      "runtimes": [
+        "dotnet"
+      ],
       "shows": "every row of one ECMA-335 metadata table as the assembly holds it"
     },
     "dotnet_resources": {
@@ -807,6 +829,9 @@
         "pe"
       ],
       "rows": "/resources/*",
+      "runtimes": [
+        "dotnet"
+      ],
       "shows": "the names of the resources embedded in the assembly",
       "values": {
         "name": "/name"
@@ -829,6 +854,9 @@
         "pe"
       ],
       "rows": "/types/*",
+      "runtimes": [
+        "dotnet"
+      ],
       "shows": "the classes, interfaces, structs, delegates and enums the assembly defines",
       "values": {
         "name": "/name",
@@ -1257,7 +1285,7 @@
         "summary": "/summary",
         "suspicious": "/last_analysis_stats/suspicious",
         "text_patterns": [
-          "(?s)\\AHash [0-9A-Fa-f]+ \\(.*\\): (?:clean|suspicious|malicious) — (?P<malicious>\\d+)/(?P<total>\\d+) malicious, (?P<suspicious>\\d+)/\\d+ suspicious\\.\\s*\\z"
+          "(?s)\\AHash [0-9A-Fa-f]+ \\(.*\\): (?:clean|suspicious|malicious) \u2014 (?P<malicious>\\d+)/(?P<total>\\d+) malicious, (?P<suspicious>\\d+)/\\d+ suspicious\\.\\s*\\z"
         ]
       },
       "shows": "what VirusTotal reports of the hash: its engine counts and details of the file"
@@ -1307,6 +1335,7 @@
       },
       "kind": "extracted_files",
       "long_running": true,
+      "outputs": "/files/*/path",
       "read_only": true,
       "rows": "/files/*",
       "shows": "every file the container's chunks hold, extracted recursively, each with its place in the container, size, sha256 and file type; links by what they name, and what unblob refused (a member whose path or link leaves the extraction, a device file)",

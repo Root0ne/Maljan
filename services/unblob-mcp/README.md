@@ -66,6 +66,8 @@ extractor that failed or is missing. Every offset is a byte offset in the file
 named by `file` (`""` for the sample itself). `container_scan` keeps nothing:
 it carves into a scratch directory that goes with the call.
 
-The triage pack runs `container_extract` on an archive, disk image, virtual
-disk, compiled help file, shortcut or unrecognised sample, by the format the
-router gave it, and takes each file it wrote into the job's artefact store.
+The triage pack takes `container_extract` as a step by its kind
+(`extracted_files`), on every sample (it finds a chunk of a format it knows by
+the chunk's own bytes, whatever the router called the file), and takes each
+file it wrote into the job's artefact store: the tool declares where its
+answer names them (`outputs`).

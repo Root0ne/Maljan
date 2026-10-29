@@ -16,7 +16,11 @@ the tools stay callable on demand for anyone who wants more than the head.
 The steps are declared as data (``core.pack_steps``): each one's tool and
 server, its argument template, the formats it runs for, its budget, whether it
 runs beside the others and beside which, the renderer its line uses and the
-kind of answer it records. The shipped list is what follows below; an
+kind of answer it records. The shipped list is what follows below, the
+platform's own steps alone; every configured server's tool whose declaration
+says it reads the whole file, read-only, by its path, running and sending
+nothing, and answers one of the pack's server-step kinds is a step too, by
+that declaration and never by a name (``core.pack_steps.server_steps``). An
 operator's ``triage.steps`` adds a step (any server's tool: a step whose
 server is set is called through the tool server registry exactly as an
 agent's call is, and recorded under that server), drops one, or swaps one for
@@ -672,6 +676,7 @@ NO_SANDBOX_REPORT = "it names the sandbox report (sandbox_report_path), and this
 FILE_NOT_TAKEN_IN = "the job's {what} could not be taken into the artefact store: {why}"
 NOTHING_TO_READ = "it reads the files {step} writes, and {step} {why}"
 CONDITION_UNMET = "it runs when {step}'s {value} is {wanted}, and {why}"
+NO_STEP_OF_THIS_RUN = "{step} is no step of this run"
 
 # The name the sandbox report is kept under in the artefact store.
 SANDBOX_REPORT_NAME = "sandbox_report.json"
@@ -706,6 +711,9 @@ class _Pack:
         # A run with no tool server registry calls none; otherwise the run's servers.
         servers = None if server_step is None else (getattr(inputs, "servers", None) or {})
         self.steps, steps_off = steps_on_servers(steps, servers)
+        # The ids of this run's steps: a step named that is none of them was
+        # declared over a server's step this run's servers do not give.
+        self._ids = frozenset(step.id for step in self.steps)
         self.result = PackResult(steps_off=steps_off)
         for step_id, why in steps_off.items():
             logger.info("triage pack: %s is off: %s.", step_id, why)
@@ -986,8 +994,10 @@ class _Pack:
                 if why:
                     return why
         if step.reads and not self._wrote.get(step.reads):
-            if step.reads not in self._entries_of:
-                why = "did not run"
+            if step.reads not in self._ids:
+                why = "is no step of this run"
+            elif step.reads not in self._entries_of:
+                why = "runs after it"
             elif step.reads in self._format_skipped:
                 why = f"does not run for a sample routed as {self.routed or 'unknown'}"
             else:
@@ -1011,8 +1021,10 @@ class _Pack:
             )
 
         entries = self._entries_of.get(condition.step)
+        if entries is None and condition.step not in self._ids:
+            return unmet(NO_STEP_OF_THIS_RUN.format(step=condition.step))
         if entries is None:
-            return unmet(f"{condition.step} did not run")
+            return unmet(f"{condition.step} runs after it")
         answered = [entry for entry in entries if entry.ok and entry.structured is not None]
         if not answered:
             return unmet(f"{condition.step} gave no answer to read")
@@ -1143,7 +1155,8 @@ class _Pack:
     def _early_work(self, step: PackStep) -> Callable[[], Any] | None:
         """The work ``step`` would do at its place, ready to start; ``None`` if it would not run."""
         if step.builtin:
-            starter = _EARLY_BUILTINS.get(step.id)
+            implementation = _BUILTIN_STEPS.get(step.id)
+            starter = _EARLY_BUILTINS.get(implementation) if implementation is not None else None
             return starter(self, step) if starter is not None else None
         if self.server_step is None:
             return None
@@ -2090,9 +2103,13 @@ _MEASURED_PEAKS: dict[Callable[[_Pack, PackStep], None], Callable[[], int | None
 }
 
 
-# The platform's own steps that can start beside the rest of the pack, by id.
-_EARLY_BUILTINS: dict[str, Callable[[_Pack, PackStep], Callable[[], Any] | None]] = {
-    "floss": _Pack._floss_early,
+# The platform's own in-process implementations that can start beside the
+# rest of the pack, by the implementation (``_BUILTIN_STEPS``), never by a
+# step's id or a tool's name: each with the work it starts.
+_EARLY_BUILTINS: dict[
+    Callable[[_Pack, PackStep], None], Callable[[_Pack, PackStep], Callable[[], Any] | None]
+] = {
+    _Pack._floss: _Pack._floss_early,
 }
 
 

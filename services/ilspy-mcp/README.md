@@ -26,9 +26,10 @@ single-file bundle.
 
 The platform declares `dotnet_types` of kind `type_list`, the two single
 decompilers of kind `decompile`, and `dotnet_decompile_assembly` of kind
-`decompile_batch` as their aggregate form. The triage pack's `dotnet_types`
-step runs on a PE sample whose Detect It Easy answer names `.NET Framework` or
-`.NET Core`.
+`decompile_batch` as their aggregate form; every tool declares the runtime it
+reads, `dotnet` (`runtimes`). The triage pack takes `dotnet_types` as a step by
+its kind, on a PE sample whose identification answer names the `dotnet`
+runtime.
 
 A host that installs the tool globally (`dotnet tool install --global
 ilspycmd`) runs `ilspycmd` from `PATH`; the image sets `ILSPYCMD_DLL` to the

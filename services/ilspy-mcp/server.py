@@ -86,10 +86,14 @@ _DECOMPILED_CODE_SECTIONS = [
     "commands",
     "payloads",
 ]
+# The runtime every tool here reads, in the words an identification answer
+# names it by (``ToolFacts.runtimes``): a .NET assembly.
+_RUNTIMES = ["dotnet"]
 _DECOMPILE: dict[str, Any] = {
     "kind": "decompile",
     "arguments": {"path": "path"},
     "routed_formats": ["pe"],
+    "runtimes": _RUNTIMES,
     "report_sections": _DECOMPILED_CODE_SECTIONS,
     "display_name": "ILSpy",
     "shows": "C# (or IL) that ILSpy decompiled from the assembly's metadata and IL",
@@ -107,6 +111,7 @@ _DECLARED: dict[str, dict[str, Any]] = {
             "values": {"name": "/name", "type_kind": "/type_kind"},
             "arguments": {"path": "path"},
             "routed_formats": ["pe"],
+            "runtimes": _RUNTIMES,
             "display_name": "ILSpy",
             "shows": "the classes, interfaces, structs, delegates and enums the assembly defines",
             "does_not_show": "what any of them does, or types built or loaded at run time",
@@ -131,6 +136,7 @@ _DECLARED: dict[str, dict[str, Any]] = {
             "values": {"name": "/name"},
             "arguments": {"path": "path"},
             "routed_formats": ["pe"],
+            "runtimes": _RUNTIMES,
             "display_name": "ILSpy",
             "shows": "the names of the resources embedded in the assembly",
             "does_not_show": "what a resource holds",
@@ -143,6 +149,7 @@ _DECLARED: dict[str, dict[str, Any]] = {
             "rows": "/rows/*",
             "arguments": {"path": "path"},
             "routed_formats": ["pe"],
+            "runtimes": _RUNTIMES,
             "display_name": "ILSpy",
             "shows": "every row of one ECMA-335 metadata table as the assembly holds it",
             "does_not_show": "how the rows are used by the code",

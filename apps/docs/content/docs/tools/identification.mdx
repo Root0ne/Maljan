@@ -12,15 +12,15 @@ it advertises, and its triage pack step runs.
 | Server | Program | Offers | Pack step |
 | :-- | :-- | :-- | :-- |
 | `die` | Detect It Easy 3.21 (`diec`) | `die_scan`: the packers, compilers, linkers, protectors, installers and libraries its signatures name in any file, one row per detected item | `die_scan`, on every sample |
-| `ilspy` | ilspycmd 11.1.0.9782 on the .NET 10 runtime | `dotnet_types`, `dotnet_decompile_type`, `dotnet_decompile_member`, `dotnet_decompile_assembly`, `dotnet_resources`, `dotnet_metadata_table` | `dotnet_types`, on a PE sample whose `die_scan` answer names `.NET Framework` or `.NET Core` |
-| `goresym` | GoReSym 3.4.1 | `go_symbols`, `go_types`, `go_strings`: functions with their addresses, build facts, types and strings from the Go runtime's own tables | `go_symbols`, on a PE, ELF or Mach-O sample whose `die_scan` answer names the `Go` compiler |
+| `ilspy` | ilspycmd 11.1.0.9782 on the .NET 10 runtime | `dotnet_types`, `dotnet_decompile_type`, `dotnet_decompile_member`, `dotnet_decompile_assembly`, `dotnet_resources`, `dotnet_metadata_table` | `dotnet_types`, on a PE sample whose `die_scan` answer names the `dotnet` runtime (a `.NET Framework` or `.NET Core` detection) |
+| `goresym` | GoReSym 3.4.1 | `go_symbols`, `go_types`, `go_strings`: functions with their addresses, build facts, types and strings from the Go runtime's own tables | `go_symbols` and `go_types`, on a PE, ELF or Mach-O sample whose `die_scan` answer names the `go` runtime (the `Go` compiler) |
 
 None of the programs runs the sample: each reads the file it is given.
 
 Detect It Easy names the Go compiler from its PE and ELF signatures and has
-none for Mach-O, so on a Mach-O sample the `go_symbols` step runs only where
-Detect It Easy's answer still names `Go`; otherwise it is a `not run:` entry,
-and an agent can call `go_symbols` itself.
+none for Mach-O, so on a Mach-O sample the GoReSym steps run only where
+Detect It Easy's answer still names `Go`; otherwise each is a `not run:`
+entry, and an agent can call `go_symbols` itself.
 
 ## Turning one on
 
@@ -55,10 +55,12 @@ on).
 
 </Steps>
 
-A server that is switched off, not configured, or does not offer its step's
-tool (its `tools` list leaves it out) leaves its pack step off: no call, no
-entry, and the reason in the worker's log and on the pack's result. A
-deployment without these servers runs the pack exactly as before. A block
+A server that is switched off or does not offer its step's tool (its `tools`
+list leaves it out) leaves its pack step off: no call, no entry, and the
+reason in the worker's log and on the pack's result; one that is not
+configured gives no step. ILSpy's and GoReSym's steps are off too, said so,
+where no identification step's tool declares a `runtime` value. A deployment
+without these servers runs the pack exactly as before. A block
 switched on with no container behind it is a step that fails, said as such.
 
 ## What each container is held to
@@ -104,9 +106,14 @@ show (`shows`, `does_not_show`), so the console, the docs and, with
 | `go_strings` | `embedded_strings` (holds the sample's strings) | `/strings/*`: `text` |
 
 Every tool is read-only, runs nothing, reaches no network and sends nothing to
-a third party. The pack steps' conditions are on `die_scan`'s declared `name`
-value, never on a tool's name: an operator may replace any of the three
-servers with one of their own whose tools declare the same values.
+a third party. Each pack step is taken by its tool's declaration (its kind,
+read-only, its `path` argument and its effects; see
+[Configuration](/configuration/#the-packs-steps)), never by a server's or a
+tool's name. `die_scan` declares the `runtime` value of each detection, the
+code runtime its name is in the platform's words (`dotnet`, `go`), and ILSpy's
+and GoReSym's tools declare the runtime each reads (`runtimes`): their steps'
+conditions are on that value. An operator may replace any of the three servers
+with one of their own, under any names, whose tools declare the same.
 
 ## On the worker's host instead
 

@@ -106,10 +106,14 @@ instead (`http://localhost:8096/mcp` and so on).
 </Steps>
 
 `unblob` is offered to the `static` and `reverser` agents, `jadx` to the
-`android_static` and `reverser` agents. A server that is switched off, not
-configured, or does not offer its step's tool leaves the step off: no call, no
-entry, and the reason in the worker's log and on the pack's result. A
-deployment without these servers runs the pack exactly as before.
+`android_static` and `reverser` agents. Each pack step is taken by its tool's
+declared kind (see [Configuration](/configuration/#the-packs-steps));
+`container_extract` declares where its answer names the files it wrote
+(`outputs`), so its step takes each into the job's artefact store. A server
+that is switched off or does not offer its step's tool leaves the step off: no
+call, no entry, and the reason in the worker's log and on the pack's result;
+one that is not configured gives no step. A deployment without these servers
+runs the pack exactly as before.
 
 ## What each container is held to
 

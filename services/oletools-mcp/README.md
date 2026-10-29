@@ -31,6 +31,7 @@ Every tool takes `path`.
 | `capabilities` | | the capability manifest |
 
 `ole_vba` on an RTF, and `rtf_objects` on anything but RTF, answer
-`unsupported_format`. The triage pack runs `ole_vba` on an OLE or OOXML
-sample, `office_dde` on an OLE, OOXML or RTF sample and `rtf_objects` on an
-RTF sample, each by the format the router gave it.
+`unsupported_format`. The triage pack takes `ole_vba`, `office_dde` and
+`rtf_objects` as steps by their kinds, `office_dde` on an OLE, OOXML or RTF
+sample, `ole_vba` on an OLE or OOXML sample and `rtf_objects` on an RTF
+sample, each on the formats it declares.
