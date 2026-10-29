@@ -23,6 +23,7 @@ Every tool takes `path`, and `go_version` to override the detected Go version
 
 A file with no Go table GoReSym can read is answered `unsupported_format`.
 The platform declares `go_symbols` of kind `function_list`, `go_types` of kind
-`type_list` and `go_strings` of kind `embedded_strings`. The triage pack's
-`go_symbols` step runs on a PE, ELF or Mach-O sample whose Detect It Easy
-answer names the Go compiler.
+`type_list` and `go_strings` of kind `embedded_strings`, each reading the `go`
+runtime (`runtimes`). The triage pack takes `go_symbols` and `go_types` as
+steps by their kinds, on a PE, ELF or Mach-O sample whose identification
+answer names the `go` runtime.

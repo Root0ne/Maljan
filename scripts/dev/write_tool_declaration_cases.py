@@ -41,6 +41,7 @@ _GOOD: dict[str, Any] = {
     "read_only": True,
     "arguments": {"path": "file_path"},
     "routed_formats": ["pe"],
+    "runtimes": ["dotnet"],
     "effects": {"executes": "emulation", "network": False},
     "aggregate_of": ["t"],
     "shows": "what it shows",
@@ -57,6 +58,7 @@ _GOOD: dict[str, Any] = {
     "reputation": {"service": "svc"},
     "reader": "flow_table",
     "report_sections": ["sec"],
+    "outputs": "/files/*/path",
 }
 # Values that read differently as written and as a model reads them, or not at
 # all. JSON numbers are whole, so the console parses them as the API does.

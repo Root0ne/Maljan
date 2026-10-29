@@ -33,5 +33,5 @@ The platform declares `yarax_scan` of kind `signature_rules`, its rows at
 `/matches/*` with the value `rule` and each string's `offset`, and the
 technique ids a rule's metadata names (`attck`, `technique_id`). Its matches
 corroborate as the YARA layer, one layer with `yara_scan`'s, never a second
-independent one. The triage pack's `yarax_scan` step runs it on every sample,
-right after `yara_scan`.
+independent one. The triage pack takes it as a step by its kind, on every
+sample, right after the platform's own scan of the same kind (`yara_scan`).

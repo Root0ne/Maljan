@@ -143,11 +143,15 @@ class TestDetectItEasy:
         assert answer["file_types"] == ["PE32", "Binary"]
         assert answer["detection_count"] == 3
         first, _linker, overlay = answer["detections"]
+        # The runtime a detection's name is, in the platform's words; none on
+        # a detection that names no runtime.
         assert first == {
             "file_type": "PE32",
             "part": "Header",
             **DIE_JSON["detects"][0]["values"][0],
+            "runtime": "dotnet",
         }
+        assert "runtime" not in _linker
         assert overlay == {"file_type": "Binary", "part": "Overlay", "name": "ZIP"}
         args = _args(bin_dir, "diec")
         assert args == ["--json", "--deepscan", str((roots / "sample.bin").resolve())]

@@ -14,11 +14,13 @@ every tool it advertises, and its triage pack steps run.
 | Server | Program | Offers | Pack step |
 | :-- | :-- | :-- | :-- |
 | `yarax` | YARA-X 1.21.0 (`yr`) | `yarax_scan`: the operator's YARA rule files that match the file, each with its metadata, tags and every matching string's offset | `yarax_scan`, on every sample, right after `yara_scan` |
-| `oletools` | oletools 0.60.2 | `ole_vba` (olevba: VBA source and its keyword analysis, XLM macro sheets, VBA stomping), `ole_macro_risk` (MacroRaptor's auto-run, write and execute flags), `ole_indicators` (oleid), `rtf_objects` (rtfobj), `office_dde` (msodde) | `ole_vba` on `ole2` and `ooxml`; `office_dde` on `ole2`, `ooxml` and `rtf`; `rtf_objects` on `rtf` |
+| `oletools` | oletools 0.60.2 | `ole_vba` (olevba: VBA source and its keyword analysis, XLM macro sheets, VBA stomping), `ole_macro_risk` (MacroRaptor's auto-run, write and execute flags), `ole_indicators` (oleid), `rtf_objects` (rtfobj), `office_dde` (msodde) | `office_dde` on `ole2`, `ooxml` and `rtf`; `ole_vba` on `ole2` and `ooxml`; `rtf_objects` on `rtf` |
 | `webcrack` | webcrack 2.16.0 on Node.js 22 | `js_deobfuscate`: the script, or each script block of an HTA or WSF, unminified, unpacked from its bundle and cleared of self-defending and debugger traps | `js_deobfuscate` on `js`, `hta` and `wsf` |
 
-Each step runs on the format the router gave the sample, never on a tool's
-name. None of the programs runs what it reads:
+Each step is taken by its tool's declared kind and runs on the formats its
+tool declares, by the format the router gave the sample, never on a server's
+or a tool's name (see [Configuration](/configuration/#the-packs-steps)). None
+of the programs runs what it reads:
 
 - YARA-X compiles the rule files and matches them against the file's bytes.
 - oletools parses the document. olevba decompresses and scans the VBA source
@@ -92,10 +94,10 @@ on).
 
 </Steps>
 
-A server that is switched off, not configured, or does not offer its step's
-tool leaves the step off: no call, no entry, and the reason in the worker's
-log and on the pack's result. A deployment without these servers runs the
-pack exactly as before.
+A server that is switched off or does not offer its step's tool leaves the
+step off: no call, no entry, and the reason in the worker's log and on the
+pack's result; one that is not configured gives no step. A deployment without
+these servers runs the pack exactly as before.
 
 ## What each container is held to
 

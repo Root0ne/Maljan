@@ -56,7 +56,6 @@ from maljan.core.pack_steps import (
     PackStep,
     check_steps,
     effective_steps,
-    on_its_shipped_server,
     written_for,
 )
 from maljan.core.platform_secrets import platform_secrets_refusal
@@ -5178,6 +5177,13 @@ class Settings(BaseSettings):
             problem = self.pack_step_problem(step)
             if problem:
                 _refuse_at(("triage", "steps"), problem, step.id)
+        # A step named, or a declaration laid over a server's step, is known
+        # where the list or a configured server's tool gives it.
+        if self.triage.steps:
+            try:
+                check_steps(self.triage.steps, self.mcp.servers)
+            except ValueError as exc:
+                _refuse_at(("triage", "steps"), str(exc))
 
         self._rederive_converted_profiles()
 
@@ -5276,13 +5282,13 @@ class Settings(BaseSettings):
         another kind, or none, it would call that tool's rows what they are
         not. The step's own ``kind`` declares its tool's kind where it is set.
         Read strictly on a save, leniently for stored settings
-        (``core.pack_steps.lenient_steps``). A shipped step of a server's tool
-        still calling that server's shipped tool is never refused for its
-        server: it is off where the server is not configured, switched off or
-        does not offer the tool (``core.pack_steps.steps_on_servers``). Its
-        renderer and kind are held to the rule above as any step's are.
+        (``core.pack_steps.lenient_steps``). The servers' own steps are read
+        from the servers configured (``core.pack_steps.server_steps``), so a
+        server step here is always an operator's; a declaration laid over a
+        server's step (``core.pack_steps.names_a_server_step``) names no
+        server, and is checked where the run's servers give the step.
         """
-        if not step.builtin and not on_its_shipped_server(step):
+        if not step.builtin:
             try:
                 self._check_server_tool(f"triage step {step.id!r}", step.server, step.called)
             except ValueError as exc:

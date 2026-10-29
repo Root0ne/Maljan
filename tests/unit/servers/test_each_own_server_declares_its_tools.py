@@ -10,7 +10,10 @@ from the server's own listing equal, field by field, the facts captured from
 the platform's shipped tables before any of them is taken out
 (``tests/fixtures/own_server_tool_facts.json``). The capture is frozen: it is
 never regenerated, so it keeps holding the servers to what the platform read
-before. The tables are gone: what the platform reads of these servers is what
+before. A fact a server comes to declare is added to it by hand, with the
+change that declares it, and nothing else in it moves (T-418 PR6: Detect It
+Easy's ``runtime`` value, ILSpy's and GoReSym's ``runtimes``, unblob's
+extraction's ``outputs``). The tables are gone: what the platform reads of these servers is what
 each serves, and nothing else ships it.
 
 Each server is imported in-process and listed as a client's handshake lists
@@ -309,3 +312,25 @@ def test_what_a_built_in_server_declares_is_what_the_platform_reads(
         theirs = after.source(f"mcp:{key}")
         assert theirs is not None
         assert {t: _fields(f) for t, f in theirs.tools.items()} == _captured()[key]
+
+
+# The capture's digest at each generation of what the platform's own servers
+# declare of themselves (``tool_declarations.SERVED_DECLARATIONS_GENERATION``).
+CAPTURE_AT_GENERATION = {
+    2: "4785ff6ad199ab5d6fbe3fb65f12d404d33899f86f10558c5df8da0162478457",
+}
+
+
+def test_a_changed_declaration_raises_the_generation_kept_declarations_hold_for() -> None:
+    # What a trusted block keeps of its server's declaration is kept for one
+    # generation: a deployment that kept an earlier one lists its servers again.
+    import hashlib
+
+    from maljan.core.tool_declarations import SERVED_DECLARATIONS_GENERATION
+
+    digest = hashlib.sha256(CAPTURED.read_bytes()).hexdigest()
+    assert CAPTURE_AT_GENERATION.get(SERVED_DECLARATIONS_GENERATION) == digest, (
+        "a sidecar's declaration changed (tests/fixtures/own_server_tool_facts.json): raise "
+        "tool_declarations.SERVED_DECLARATIONS_GENERATION and pin the capture's new sha256 "
+        f"under it in CAPTURE_AT_GENERATION ({digest})"
+    )

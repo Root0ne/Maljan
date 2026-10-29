@@ -2494,8 +2494,9 @@ saved: an id twice, a placeholder no template may name (`{artefact_path}` or
 `{artefact_sha256}` on a step that `reads` nothing among them), a `when` or
 `reads` naming no step or one that does not come before it, a `reads` of a
 step with no `outputs` or with a `starts_after`, `outputs` or `reads` on one
-of the platform's own steps, a step with no server
-that is not one of the platform's own, on an enabled step a server
+of the platform's own steps, a step with no server that names a tool and is
+not one of the platform's own, a declaration with neither under an id no
+configured server's tool gives, on an enabled step a server
 `mcp.servers` does not hold or a tool outside its `tools` list (in the words an
 agent's reference is refused in, and removing a server a step uses is refused
 too), an `after`,
@@ -2522,33 +2523,84 @@ configured is a `not run:` entry, not a failure; a call that fails is a
 failure of its tool. Every entry an operator's step writes carries the step
 (`pack_step`), so the pack reads it back without the settings.
 
-**The shipped steps of a server's tool.** Three shipped steps, after the
-format readers, call the identification servers: `die_scan` (Detect It
-Easy's `die_scan`, on every sample), `dotnet_types` (ILSpy's, on `pe`, when
-`die_scan`'s `name` is `.NET Framework` or `.NET Core`) and `go_symbols`
-(GoReSym's, on `pe`, `elf` and `mach-o`, when `die_scan`'s `name` is `Go`).
-Each is **off** while its server is not configured, switched off, or does not
-offer its tool (`core.pack_steps.steps_on_servers`): it makes no call and
-writes no entry, as a step of another format does, and the pack's result and
-the worker's log say why. It is never refused for its server, so settings
-without the server stay valid. Its conditions read `die_scan`'s declared
-values, so a server of your own under the same key, or a step of yours laid
-over the shipped one, runs the same way. Switched on, a step whose condition
-does not hold is a `not run:` entry, as any condition is.
+**The steps of a server's tool.** The shipped list names no server and no
+server's tool. Every server in `mcp.servers` gives the pack a step for each of
+its tools whose declaration in force (the block's `tool_facts`, over what the
+server declares of itself) says all of this
+(`core.pack_steps.server_steps`): it answers one of the pack's server-step
+kinds about the whole file (`core.pack_steps.SERVER_STEP_KINDS`:
+`identification`, `type_list`, `function_list`, `signature_rules`,
+`vba_macros`, `dde_links`, `embedded_objects`, `deobfuscated_script`,
+`extracted_files`), it is `read_only`, it takes the file in the argument it
+declares for the `path` role, and its `effects` say it runs none of the
+sample (`executes: no`), reaches no network (`network: false`) and sends
+nothing to a third party; one that discloses the sample, or leaves any of
+these undeclared, is never a step the pack takes on its own (any agent may
+still call it, and a step of yours in `triage.steps` may name it). A server
+on another host that mounts none of the samples (a remote transport and no
+`sample_mount`) gives no step: the sample would be sent to it, which only a
+step of yours may ask for; its steps are off, saying so. A server whose block
+trusts what it declares of its tools and that has not been listed yet gives
+none either, and is off saying its tools are not known; it is listed before
+the next run (`providers.served_listing`). What such a block keeps of its
+server's declaration is kept for one release: another release lists the
+server again before reading its tools. Two releases run side by side against
+one store (a rolling upgrade) each forget what the other kept, and list the
+server again, until only one is left. Nothing here reads a server's or a
+tool's name: a server you add whose tools declare the same gets the same
+steps, whatever its tools are called.
 
-Five more shipped steps call the rule and document servers and are off the
-same way: `ole_vba` (on `ole2` and `ooxml`), `office_dde` (on `ole2`, `ooxml`
-and `rtf`) and `rtf_objects` (on `rtf`), oletools' tools, and
-`js_deobfuscate` (webcrack's, on `js`, `hta` and `wsf`), after the
-identification steps; and `yarax_scan` (YARA-X's, on every sample), right
-after `yara_scan`. Each runs on the routed format alone, the formats its
-tool declares.
+A step of yours that calls the same tool on the same server (and `reads` no
+other step's files) is that tool's step: it keeps its id and every field you
+set, the rest are read from the tool as above, and it runs where the server's
+step runs.
 
-Two more call the container and Android servers and are off the same way,
-after the document steps: `container_extract` (unblob's, on every sample),
-which declares `outputs` `/files/*/path`, so each file it wrote is taken into
-the job's artefact store for a step of yours that `reads` it; and
-`android_classes` (JADX's, on `apk` and `dex`).
+The step's id is its tool's name as a step name (lowercase, other characters
+`_`), with its server's key before it where another step has it; its line
+calls it by its tool's display name and the words of its kind (`GoReSym ·
+functions`, `GoReSym · types`). It runs on
+the routed formats its tool declares (`routed_formats`; none: every format),
+writes the files its tool declares (`outputs`), and a tool that reads one code
+runtime alone (`runtimes`) runs only where the first identification step whose
+tool declares a `runtime` value names one of them; with no such step it is
+off. The identification steps come first, then the servers in their order and
+each one's tools by name; each runs right after the last step of the
+platform's own that answers its kind (YARA-X's `yarax_scan` right after
+`yara_scan`), else right after the format readers (`archive_list`), after any
+step of yours placed there, so every id the shipped list issues before it
+keeps its value. A step is **off** while its server is switched off or does
+not offer its tool (`core.pack_steps.steps_on_servers`): it makes no call and
+writes no entry, and the pack's result and the worker's log say why. A run
+that calls no tool server has none. Switched on, a step whose condition does
+not hold is a `not run:` entry, as any condition is. Every entry such a step
+writes carries it (`pack_step`).
+
+With the shipped servers switched on that is: `die_scan` (Detect It Easy's, on
+every sample); `dotnet_types` (ILSpy's, on `pe`, where `die_scan`'s `runtime`
+is `dotnet`); `go_symbols` and `go_types` (GoReSym's, on `pe`, `elf` and
+`mach-o`, where it is `go`); `office_dde` (on `ole2`, `ooxml` and `rtf`),
+`ole_vba` (on `ole2` and `ooxml`) and `rtf_objects` (on `rtf`), oletools';
+`js_deobfuscate` (webcrack's, on `js`, `hta` and `wsf`); `container_extract`
+(unblob's, on every sample, with `outputs` `/files/*/path`, so each file it
+wrote is taken into the job's artefact store for a step of yours that `reads`
+it); `android_classes` (JADX's, on `apk` and `dex`); and `yarax_scan`.
+
+A declaration in `triage.steps` that names no `server` and no `tool`, under
+an id no shipped step has, is laid over the server's step of that id where
+the run's servers give one, field by field (its `after` places it; `enabled:
+false` drops it, and nothing then runs on what it would have answered). A
+save knows the steps the configured servers' tools give, off or not
+(`core.pack_steps.server_step_ids`): such a declaration under an id none of
+them gives, and an `after`, `starts_after`, `beside`, `when` or `reads` naming
+a step that is neither in the list nor one of them, is refused. A stored list
+is read without the servers: such a name is kept, and the run resolves it. A
+step placed after a server's step runs right after it, with every step placed
+after that one, and after one the run does not have, last. A save that knows
+the servers also refuses a `when` or `reads` on a step the run places at or
+after the step naming it; at run time such a step says it runs after it. A
+condition on, or a `reads` of, a step the run does not have is a `not run:`
+entry saying it is no step of this run; a declaration
+over a server's step the run does not have is off, saying so.
 
 **Files passed between servers.** A file one server's tool writes (a payload
 carved out of the sample, an archive member, a decoded script) reaches
@@ -3832,6 +3884,8 @@ it:
 | `holds_strings` | the answer holds the sample's strings as data though its kind is not a strings kind (a reverser's tool of another kind whose name says strings, such as Ghidra's `batch_string_anchor_report` and `find_undocumented_by_string`); a function claim's quoted value is looked for in it |
 | `reads_delay_imports` | the tool's import rows cover the imports the format binds late: the PE delay-load table, or the one import table ELF keeps them in (the shipped `pe_info` and `elf_info`). A format answer read whole is the binary's complete import list only when its tool declares this or the answer carries a `delay_imports` list; otherwise the report's binary facts call the list partial |
 | `routed_formats` | the routed sample formats a format-specific tool serves, each a known format the router gives a sample (`extractors.sample_identity.routed_formats()`: `pe`, `elf`, `mach-o`, `apk`, `dex`, `ole2`, `ooxml`, `pdf` …); a name it never gives, such as `macos` or `exe`, is refused on save, since it would drop the tool's reason for every sample, and so is `unknown`, the label of a sample of no known format, which no tool serves. When the tool cannot answer on its server, a sample of another known format loses nothing by it, so its unavailability is not recorded as a degradation of that run; a sample of an unknown format, and a tool that declares none, keep the reason. The shipped analysis server declares its parsers (`builtin_declarations.ANALYSIS_ROUTED_FORMATS`: `pe_info` `pe`, `elf_info` `elf`, `macho_info` `mach-o`, `apk_info` `apk` and `dex`, `document_info` `ole2`, `ooxml` and `pdf`); a map of the analysis server stored whole before the field existed reads those as shipped |
+| `runtimes` | the code runtimes a runtime-specific tool reads (`dotnet`, `go`), each a vocabulary word, in the words an identification answer gives as its `runtime` value. A pack step the platform takes of the tool by its kind (*The steps of a server's tool*, below) runs only where an identification step's answer names one of them, and is off where no identification step's tool declares a `runtime` value. The shipped ILSpy and GoReSym servers declare `dotnet` and `go` of their tools, and Detect It Easy's `die_scan` the `runtime` value of each detection |
+| `outputs` | the path of the answer that names each file the tool wrote, as its server names it (unblob's `container_extract`: `/files/*/path`). A pack step the platform takes of the tool by its kind declares it as its own `outputs`, so each file is taken into the job's artefact store for a step that `reads` it. Read through the kind |
 | `function_starts` | the path of the answer's list of function start addresses (offsets from the image base), read for a `function_list` or `capability_rules` answer by the triage pack's function index and the readings of an image with no function table of its own |
 | `rows` | the path of the answer's rows |
 | `places` | per kind of place (`offset`, `rva`, `address`, `addresses`, `call_site`, `function`, `pid`, `command_line` …), the path inside a row that holds one |

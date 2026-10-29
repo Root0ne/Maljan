@@ -34,5 +34,5 @@ Shipped as the built-in server block `webcrack`, switched off, reached at
 | `capabilities` | | the capability manifest |
 
 The platform declares `js_deobfuscate` of kind `deobfuscated_script`, its rows
-at `/scripts/*`. The triage pack's `js_deobfuscate` step runs it on a sample
-the router gave the format `js`, `hta` or `wsf`.
+at `/scripts/*`. The triage pack takes it as a step by its kind, on a sample
+the router gave the format `js`, `hta` or `wsf`, the formats it declares.

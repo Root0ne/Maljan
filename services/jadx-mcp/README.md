@@ -43,5 +43,6 @@ Every tool takes `path`.
 `android_classes` decompiles the whole package to index it, so a large APK
 takes a while; `android_decompile_class` decompiles the one class (and its inner
 classes). `decompilation_errors` is how many places JADX said it could not
-decompile; the code carries its comment there. The triage pack runs
-`android_classes` on an APK or dex sample.
+decompile; the code carries its comment there. The triage pack takes
+`android_classes` as a step by its kind (`type_list`), on an APK or dex
+sample, the formats it declares.

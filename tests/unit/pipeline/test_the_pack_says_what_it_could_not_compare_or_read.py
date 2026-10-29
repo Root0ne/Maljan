@@ -187,7 +187,7 @@ class TestAPartialCompareSetIsSaid:
 
         monkeypatch.setattr(emulated_strings, "floss_unavailable", lambda environ=None: None)
         monkeypatch.setitem(triage_pack._BUILTIN_STEPS, "floss", page_only)
-        monkeypatch.setitem(triage_pack._EARLY_BUILTINS, "floss", lambda pack, step: None)
+        monkeypatch.setitem(triage_pack._EARLY_BUILTINS, page_only, lambda pack, step: None)
         seen = _compared(monkeypatch)
         result = _pack(tmp_path, blob=_blob_file(tmp_path).read_bytes())
         assert seen == [WHOLE[:2]]

@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import TriageConfig
+from maljan.core.config import Settings, TriageConfig
 from maljan.core.pack_steps import (
     ARGUMENT_PLACEHOLDERS,
     FILE_PLACEHOLDERS,
@@ -92,11 +92,9 @@ class TestAListThatCannotRunIsRefused:
                 [{"id": "x", "server": "s", "tool": "t", "arguments": {"f": "{artefact_path}"}}],
                 "only a step that reads",
             ),
-            ([UNPACK, {**SCAN, "reads": "nowhere"}], "reads 'nowhere', which no step is"),
             ([SCAN, UNPACK], "which does not come before it"),
             ([{**UNPACK, "outputs": ""}, SCAN], "declares no outputs"),
             ([UNPACK, {**SCAN, "starts_after": "unpack"}], "starts_after would be ignored"),
-            ([DECOMPILE], "runs when 'identify', which no step is"),
             ([DECOMPILE, IDENTIFY], "which does not come before it"),
             ([{"id": "strings", "outputs": "/x"}], "passes no file between servers"),
             ([{"id": "strings", "reads": "hashes"}], "passes no file between servers"),
@@ -123,6 +121,23 @@ class TestAListThatCannotRunIsRefused:
     def test_where_it_is_saved(self, steps: list[dict[str, Any]], said: str) -> None:
         with pytest.raises(ValidationError, match=said):
             TriageConfig(steps=steps)
+
+    @pytest.mark.parametrize(
+        ("steps", "said"),
+        [
+            ([UNPACK, {**SCAN, "reads": "nowhere"}], "reads 'nowhere', which no step is"),
+            ([DECOMPILE], "runs when 'identify', which no step is"),
+        ],
+    )
+    def test_a_name_of_no_step_is_refused_where_the_servers_are_known(
+        self, steps: list[dict[str, Any]], said: str
+    ) -> None:
+        # Alone, the list cannot know the servers' own steps: the name is kept
+        # for the run, which says it is no step of the run.
+        assert TriageConfig(steps=steps).steps
+        servers = {step["server"]: {"command": "x"} for step in steps}
+        with pytest.raises(ValidationError, match=said):
+            Settings(_env_file=None, mcp={"servers": servers}, triage={"steps": steps})
 
     def test_a_condition_on_a_shipped_step_is_one_of_the_platform_s_own_steps_too(self) -> None:
         step = _step(
