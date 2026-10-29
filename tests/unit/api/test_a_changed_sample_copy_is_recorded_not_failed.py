@@ -387,7 +387,7 @@ class TestWhatIsNotRead:
         try:
             started = time.monotonic()
             sha, why = file_sha256(sparse, len(BYTES))
-            assert time.monotonic() - started < 5
+            assert time.monotonic() - started < 60
         finally:
             sparse.unlink()
         assert (sha, why) == ("", f"size {10 * 1024**4} is not the intake size {len(BYTES)}")

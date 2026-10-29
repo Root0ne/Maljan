@@ -25,6 +25,7 @@ from maljan.agents.evidence_recorder import (
 )
 from maljan.pipeline.validation import decompiled_functions, listed_function
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
+from tests.linear_cost import assert_scales
 
 # A function as a decompiler prints it: a comment line, then the signature
 # with the generic name that carries its start.
@@ -241,20 +242,23 @@ class TestALoopingOrOrphanRepeatHoldsNothing:
 
 class TestFilingRepeatsIsLinear:
     def test_eight_thousand_repeats_after_eight_thousand_entries(self) -> None:
-        import time
 
-        recorder = EvidenceRecorder("static_r2", counter=EvidenceCounter())
-        for n in range(8000):
-            recorder.record(tool="strings", args={"n": n}, server=None, output="x")
-        started = time.monotonic()
-        for n in range(8000):
-            recorder.record_repeat(
-                tool="strings", args={"n": n}, server=None, first=f"ev_{n + 1:04d}", said="note"
-            )
-        elapsed = time.monotonic() - started
+        def repeated(count: int) -> EvidenceRecorder:
+            recorder = EvidenceRecorder("static_r2", counter=EvidenceCounter())
+            for n in range(count):
+                recorder.record(tool="strings", args={"n": n}, server=None, output="x")
+            for n in range(count):
+                recorder.record_repeat(
+                    tool="strings",
+                    args={"n": n},
+                    server=None,
+                    first=f"ev_{n + 1:04d}",
+                    said="note",
+                )
+            return recorder
 
-        assert elapsed < 3.0, elapsed
-        assert recorder.entries[-1].repeated_of == "ev_8000"
+        assert repeated(8000).entries[-1].repeated_of == "ev_8000"
+        assert_scales(lambda count: lambda: repeated(count), 1000)
 
 
 class TestTheSampleCannotForgeARepeat:

@@ -1,0 +1,3 @@
+### Fixed
+
+- **Tests that held a reader to linear cost no longer fail on a loaded runner (T-431).** A test that asserted `elapsed < 1.0` against the wall clock failed whenever a CI machine was busy (`test_twenty_thousand_small_lists_are_refused_in_no_time` took 1.01 s). `tests/linear_cost.py` gives them one shared measure: the best of several CPU-time runs with the garbage collector off, taken at one size and at eight times that size, which must grow by under three times the size ratio (a quadratic reader grows by the ratio squared). Tests that guard a wait or a hang keep a bound at least ten times what they measured, or one set in multiples of the wait they inject. Tests only; no run changes.

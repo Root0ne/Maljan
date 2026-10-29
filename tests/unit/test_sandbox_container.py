@@ -425,7 +425,7 @@ class TestMaljanAppSandboxProvider:
         assert budget.cancelled() is True
         started = time.monotonic()
         budget.sleep(30)
-        assert time.monotonic() - started < 5
+        assert time.monotonic() - started < 20
 
     def test_a_non_reported_status_degrades_to_none(self, tmp_path: Path) -> None:
         sample = tmp_path / "s.exe"

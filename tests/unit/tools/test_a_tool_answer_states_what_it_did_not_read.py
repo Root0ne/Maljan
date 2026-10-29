@@ -30,6 +30,7 @@ import pytest
 from maljan.pipeline import triage_pack
 from maljan.tools import binary, emulated_strings, identify, rules, string_blobs, strings
 from maljan.tools.ioc_spans import string_iocs_with_spans
+from tests.linear_cost import assert_scales
 
 from .synthetic_pe import TEXT_RVA, SyntheticPE
 
@@ -186,16 +187,16 @@ class TestAFatMachOIsWalkedSliceBySlice:
 
     def test_ten_thousand_slices_at_one_offset_are_refused_fast(self) -> None:
         piece = _thin(True)
-        count = 10_000
-        start = 8 + 20 * count
-        blob = struct.pack(">II", 0xCAFEBABE, count)
-        blob += struct.pack(">iiIII", 0x01000007, 3, start, len(piece), 12) * count
-        blob += piece
-        began = time.perf_counter()
 
-        answer = identify._macho_signing(blob)
+        def fat(count: int) -> bytes:
+            start = 8 + 20 * count
+            blob = struct.pack(">II", 0xCAFEBABE, count)
+            blob += struct.pack(">iiIII", 0x01000007, 3, start, len(piece), 12) * count
+            return blob + piece
 
-        assert time.perf_counter() - began < 1.0
+        answer = identify._macho_signing(fat(10_000))
+
+        assert_scales(fat, 1250, identify._macho_signing)
         assert answer["present"] is None and "slices" not in answer
         assert answer["reason"].startswith(f"{identify.NOT_A_FAT_HEADER}: the slices at")
 
@@ -215,14 +216,17 @@ class TestAFatMachOIsWalkedSliceBySlice:
 
     def test_millions_of_commands_stop_at_the_slice_end(self) -> None:
         commands = struct.pack("<II", _LC_UUID, 8) * 100
-        header = struct.pack(
-            "<IiiIIIII", 0xFEEDFACF, 0x01000007, 3, 2, 5_000_000, len(commands), 0, 0
-        )
-        began = time.perf_counter()
 
-        answer = identify._macho_signing(header + commands)
+        def claiming(count: int) -> bytes:
+            header = struct.pack(
+                "<IiiIIIII", 0xFEEDFACF, 0x01000007, 3, 2, count, len(commands), 0, 0
+            )
+            return header + commands
 
-        assert time.perf_counter() - began < 1.0
+        answer = identify._macho_signing(claiming(5_000_000))
+
+        # The commands claimed do not set the work: the slice's end does.
+        assert_scales(claiming, 625_000, identify._macho_signing)
         assert answer["present"] is None
         assert answer["reason"].startswith("load commands unread:")
 

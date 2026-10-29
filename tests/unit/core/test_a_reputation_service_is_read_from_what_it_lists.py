@@ -24,12 +24,12 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.linear_cost import FLOOR_SECONDS, cpu_seconds
 
 from maljan.analysis.tool_effects import sends_sample_bytes
 from maljan.core import served_declarations as sd
@@ -253,9 +253,15 @@ def test_the_shape_reading_is_bounded() -> None:
     flat = {f"k{i}": i for i in range(1_000_000)}
     flat["malicious"] = 1
     listed = [[i] for i in range(1_000_000)]
-    started = time.perf_counter()
     read_shape({"x": flat, "y": listed})
-    assert time.perf_counter() - started < 2.0
+    # The walk stops at ``SHAPE_NODES``, so twenty-five times the document costs
+    # a few times what a document twice that cap does (the size is read once);
+    # a reader that went on to the end would cost twenty-five times as much.
+    capped = {"x": dict(list(flat.items())[: 2 * SHAPE_NODES]), "y": listed[: 2 * SHAPE_NODES]}
+    whole = {"x": flat, "y": listed}
+    assert cpu_seconds(lambda: read_shape(whole)) < 12 * max(
+        cpu_seconds(lambda: read_shape(capped)), FLOOR_SECONDS
+    )
     assert len(_shape_nodes({"x": flat})) <= SHAPE_NODES
 
 

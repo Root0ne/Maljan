@@ -323,7 +323,7 @@ async def test_a_wedged_server_open_is_bounded_by_the_probe_budget_not_by_its_ow
     assert "did not answer within" in result.detail
     # Bounded by the (monkeypatched) budget plus the fixed cancellation grace,
     # nowhere near the 999s + 0.2s the wedged server actually takes to unwind.
-    assert elapsed < 1.0
+    assert elapsed < 10.0
 
     # The container's close is still scheduled and eventually runs, in the
     # background, once the wedged cancellation finally gives up.

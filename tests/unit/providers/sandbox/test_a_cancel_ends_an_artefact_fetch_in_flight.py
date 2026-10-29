@@ -37,7 +37,7 @@ from maljan.providers.sandbox.triage import (
 
 # Far below every client's own timeout (60 s, 120 s on CAPE): a fetch that
 # ends inside it was ended by the cancel, not by a timeout.
-ENDED_WITHIN = 5.0
+ENDED_WITHIN = 30.0
 _OVERVIEW = json.dumps({"tasks": [{"name": "behavioral1", "kind": "behavioral"}]}).encode()
 
 

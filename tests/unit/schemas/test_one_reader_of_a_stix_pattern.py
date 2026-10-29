@@ -9,9 +9,8 @@ what the other vetoes. The tests below are about the one reader they now share.
 
 from __future__ import annotations
 
-import time
-
 from maljan.schemas.stix_pattern import read_comparisons
+from tests.linear_cost import assert_scales
 
 
 def _paths(pattern: str) -> list[tuple[str, str]]:
@@ -164,21 +163,22 @@ class TestWhatItCannotReadItSaysSo:
 class TestTheCostOfReadingOne:
     def test_chained_keys_cost_what_their_length_costs(self) -> None:
         """The text outside the quotes used to be copied at every key."""
-        keys = "".join(f".'k{index}'" for index in range(2000))
-        pattern = f"[file:hashes{keys} = 'abc']"
 
-        started = time.monotonic()
-        comparisons = read_comparisons(pattern)
+        def chained(count: int) -> str:
+            keys = "".join(f".'k{index}'" for index in range(count))
+            return f"[file:hashes{keys} = 'abc']"
+
+        comparisons = read_comparisons(chained(2000))
 
         assert [c.literal for c in comparisons] == ["abc"]
-        assert time.monotonic() - started < 2.0
+        assert_scales(chained, 250, read_comparisons)
 
     def test_a_thousand_literals_are_read_in_one_pass(self) -> None:
-        values = ", ".join(f"'10.0.{index // 256}.{index % 256}'" for index in range(1000))
-        pattern = f"[ipv4-addr:value IN ({values})]"
+        def listed(count: int) -> str:
+            values = ", ".join(f"'10.0.{index // 256}.{index % 256}'" for index in range(count))
+            return f"[ipv4-addr:value IN ({values})]"
 
-        started = time.monotonic()
-        comparisons = read_comparisons(pattern)
+        comparisons = read_comparisons(listed(1000))
 
         assert len(comparisons) == 1000
-        assert time.monotonic() - started < 2.0
+        assert_scales(listed, 125, read_comparisons)

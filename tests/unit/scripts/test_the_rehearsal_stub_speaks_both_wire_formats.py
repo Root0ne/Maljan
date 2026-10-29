@@ -797,7 +797,7 @@ class TestThePace:
             elapsed = time.monotonic() - started
         finally:
             server.stop()
-        assert elapsed < 2.0
+        assert elapsed < 10.0
 
     def test_three_characters_a_token_counts_more_tokens(self) -> None:
         wire.set_chars_per_token(3)

@@ -367,7 +367,7 @@ class TestAStallReachesTheFallback:
         started = time.monotonic()
         answer = chain.invoke([HumanMessage(content="go")])
         assert answer.content == "second says"
-        assert time.monotonic() - started < 1.5
+        assert time.monotonic() - started < 15
 
     def test_the_last_model_has_no_deadline_of_its_own(self) -> None:
         chain, _second = self._chain()
@@ -560,7 +560,7 @@ def test_an_abandoned_stall_does_not_hold_up_the_process_exit() -> None:
                 return "stalls"
 
             def _generate(self, *a: Any, **k: Any) -> Any:
-                time.sleep(8)
+                time.sleep(40)
                 raise RuntimeError("never reached")
 
         chain = FallbackChatModel(
@@ -576,7 +576,7 @@ def test_an_abandoned_stall_does_not_hold_up_the_process_exit() -> None:
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=False
     )
     assert done.stdout.strip().splitlines()[-1] == "answered", done.stderr
-    assert time.monotonic() - started < 6.0, "the stalled thread held the exit"
+    assert time.monotonic() - started < 20.0, "the stalled thread held the exit"
 
 
 class TestRetryAfter:

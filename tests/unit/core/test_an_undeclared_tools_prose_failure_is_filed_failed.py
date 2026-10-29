@@ -10,9 +10,10 @@ no source read as before.
 
 from __future__ import annotations
 
-import time
+from collections.abc import Callable
 
 import pytest
+from tests.linear_cost import assert_scales
 
 from maljan.core.undeclared_tools import PROSE_ERROR_CHARS, prose_error
 from maljan.schemas.evidence import build_entry
@@ -112,16 +113,23 @@ def test_a_call_with_no_source_is_read_as_before() -> None:
 
 
 def test_the_reading_is_one_pass_over_a_line() -> None:
-    def _timed(n: int) -> float:
+    def _timed(n: int) -> Callable[[], None]:
         text = "Error: " + "a" * n
-        start = time.perf_counter()
-        for _ in range(200):
-            prose_error(text)
-        return time.perf_counter() - start
 
-    assert _timed(39_000) < max(_timed(3_900) * 30, 0.5)
+        def call() -> None:
+            for _ in range(200):
+                prose_error(text)
+
+        return call
+
+    assert_scales(_timed, 3_900, factor=10)
     assert prose_error("x\n" * 100_000) is None
     big = "Traceback (most recent call last):\n" + "  frame\n" * 100_000 + "ValueError: x"
-    start = time.perf_counter()
     assert prose_error(big) == "ValueError: x"
-    assert time.perf_counter() - start < 1.0
+    assert_scales(
+        lambda frames: (
+            "Traceback (most recent call last):\n" + "  frame\n" * frames + "ValueError: x"
+        ),
+        12_500,
+        prose_error,
+    )
