@@ -553,6 +553,12 @@ class GhidraStaticProvider(StaticProvider):
 
             self._run_async(client.initialize())
             self._toolkit = client
+            # What the platform reads of each tool its schema lists, kept under
+            # this provider's source as any listing's is; a client that serves
+            # no listing reads nothing.
+            definitions = getattr(client, "tool_definitions", None)
+            if callable(definitions):
+                self._register_listing({}, definitions())
             self._all_tools = self._with_aggregate_notes(
                 self._pin_load_program_path(self._reading_errors(client.get_tools()))
             )
@@ -590,37 +596,84 @@ class GhidraStaticProvider(StaticProvider):
 
         self._run_async(toolkit.initialize())
         self._toolkit = toolkit  # type: ignore[assignment]
-        # What the server declared of its tools, kept under this provider's
-        # source (``core.served_declarations``).
-        from maljan.core.served_declarations import register_served
-        from maljan.core.tool_declarations import launch_identity
-
+        # What the server declared of its tools, and what the platform read of
+        # them, kept under this provider's source (``core.served_declarations``).
         held = getattr(toolkit, "served_tool_facts", None)
         if isinstance(held, dict):
-            register_served(self.declaration_source, held, launch_identity(self._cfg))
-            # Its budgets and long-running flags as now in force, for a guard
-            # this job already built.
-            if self._guard is not None:
-                self._guard.declare_tool_facts(tools_in_force(self.declaration_source, self._cfg))
+            read = getattr(toolkit, "derived_tool_facts", None)
+            self._register_listing(
+                held,
+                None,
+                read=read if isinstance(read, Mapping) else None,
+                closed=getattr(toolkit, "derived_closed", None) or None,
+                program=getattr(toolkit, "derived_program", None) or None,
+            )
         self._all_tools = self._with_aggregate_notes(
             self._pin_load_program_path(self._reading_errors(toolkit.get_tools()))
         )
         self.tools = list(self._all_tools)
         logger.info("Initialized Ghidra MCP tools: %d.", len(self.tools))
 
+    def _register_listing(
+        self,
+        held: Mapping[str, Any],
+        definitions: Any = None,
+        *,
+        read: Mapping[str, Any] | None = None,
+        closed: Mapping[str, Any] | None = None,
+        program: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Keep what the server declared and what the platform read of its listing.
+
+        ``definitions``, where given, is the listing to read
+        (``core.derived_declarations``): the HTTP transport's schema, read
+        here as any MCP listing is; otherwise ``read``, ``closed`` and
+        ``program`` are what the toolkit read of it. A reading that fails
+        keeps what was read before. The guard this job already built takes
+        the budgets and long-running flags now in force.
+        """
+        from maljan.core.served_declarations import register_served
+        from maljan.core.tool_declarations import launch_identity
+
+        if definitions is not None:
+            from maljan.core.derived_declarations import derived_readings, program_readings_of
+
+            try:
+                read, closed = derived_readings(definitions, where="ghidra.")
+                program = program_readings_of(definitions, where="ghidra.")
+            except Exception as exc:  # noqa: BLE001 — a reading never costs an attach
+                logger.warning(
+                    "The tools Ghidra listed were not read (%s); what was read before is kept.",
+                    type(exc).__name__,
+                )
+                read, closed, program = None, None, None
+        register_served(
+            self.declaration_source,
+            dict(held),
+            launch_identity(self._cfg),
+            read,
+            closed,
+            program,
+        )
+        if self._guard is not None:
+            self._guard.declare_tool_facts(tools_in_force(self.declaration_source, self._cfg))
+
     def _categories_with_served(
         self,
         held: Mapping[str, Any],
         read: Mapping[str, Any] | None = None,
         closed: Mapping[str, Any] | None = None,
+        program: Mapping[str, Any] | None = None,
     ) -> dict[str, str]:
         """The description tags in force with ``held``, what the server declared, laid under.
 
-        With ``read`` and ``closed``, what the platform read of the same
-        listing. Asked by the toolkit before it builds the tools; nothing is
-        kept until the attach succeeded.
+        With ``read``, ``closed`` and ``program``, what the platform read of
+        the same listing. Asked by the toolkit before it builds the tools;
+        nothing is kept until the attach succeeded.
         """
-        return categories_of(tools_in_force(self.declaration_source, self._cfg, held, read, closed))
+        return categories_of(
+            tools_in_force(self.declaration_source, self._cfg, held, read, closed, program)
+        )
 
     def server_guard(self) -> Any:
         """This job's breaker and call cap for Ghidra, or ``None`` where no settings can be read.

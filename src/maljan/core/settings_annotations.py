@@ -1706,6 +1706,22 @@ DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
         "listing; a lookup a declaration names keeps what it declares. Empty says neither.",
     ),
     (
+        "default_effects",
+        "effects of every tool",
+        "What every tool of the server does beyond answering, unless the tool says "
+        "otherwise, as JSON: executes (no, native, emulation, sandbox), network (true, "
+        "false or a named way) and third_party (no, hash, bytes). Laid under each tool's "
+        "own effects; a tool read as emulating, as running what it is given, or as "
+        "sending the file keeps what it says. Empty says nothing.",
+    ),
+    (
+        "analyse_effects",
+        "effects of the analysis tool",
+        "What the tool sample_open.analyse_tool names does beyond answering, over the "
+        "effects of every tool, as JSON (an analysis that emulates the sample's code at "
+        "some levels, with when). Empty says nothing.",
+    ),
+    (
         "launcher_depth",
         "launcher levels",
         "How many levels at the top of the process tree the worker starts for this server "
@@ -1887,7 +1903,9 @@ def mcp_server_annotations(
             "analyse_tool",
             "analysis tool",
             "The tool that runs or awaits the server's analysis after the first open; "
-            "an open is noted only once it answered. Empty runs none.",
+            "an open is noted only once it answered. Named with no open tool, it is "
+            "the server's analysis step the agent calls itself, read with the "
+            "block's analyse_effects. Empty runs none.",
         ),
         (
             "analyse_argument",

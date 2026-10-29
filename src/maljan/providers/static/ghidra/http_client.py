@@ -39,6 +39,18 @@ from maljan.tools.errors import SERVER_WORDS_LIMIT
 TRUNCATION_MARKER = "\n\n[OUTPUT TRUNCATED]"
 
 
+# The JSON schema type each ``/mcp/schema`` parameter type is, for a listing.
+_JSON_TYPES: dict[str, str] = {
+    "string": "string",
+    "integer": "integer",
+    "number": "number",
+    "boolean": "boolean",
+    "json": "string",
+    "array": "array",
+    "object": "object",
+}
+
+
 def tool_name_of_path(path: str) -> str:
     """The tool name an endpoint path becomes: the leading slash dropped, ``/`` read as ``_``."""
     return str(path).lstrip("/").replace("/", "_")
@@ -175,6 +187,44 @@ class GhidraHTTPClient:
     def get_tools(self) -> list[BaseTool]:
         """Return the list of LangChain tools."""
         return self._tools
+
+    def tool_definitions(self) -> list[dict[str, Any]]:
+        """The server's ``/mcp/schema`` entries as MCP tool definitions, as a listing gives them.
+
+        Each entry's tool name (:func:`tool_name_of_path`), its description
+        and an ``inputSchema`` of its parameters (each one's JSON type, and
+        the required ones), so what the platform reads of a listed tool
+        (``core.derived_declarations``) reads this server's tools as it reads
+        any MCP server's. The HTTP ``method`` is left out: the server serves
+        reads by ``POST`` and changes by ``GET`` alike, so it says nothing of
+        whether a call changes the program.
+        """
+        out: list[dict[str, Any]] = []
+        for entry in self._schema:
+            if not isinstance(entry, dict) or not entry.get("path"):
+                continue
+            properties: dict[str, Any] = {}
+            required: list[str] = []
+            for param in entry.get("params") or []:
+                if not isinstance(param, dict) or not param.get("name"):
+                    continue
+                name = str(param["name"])
+                ptype = str(param.get("type") or "string")
+                properties[name] = {"type": _JSON_TYPES.get(ptype, "string")}
+                if param.get("required"):
+                    required.append(name)
+            out.append(
+                {
+                    "name": tool_name_of_path(str(entry["path"])),
+                    "description": str(entry.get("description") or ""),
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                }
+            )
+        return out
 
     def _create_langchain_tool(self, tool_def: dict[str, Any]) -> BaseTool:
         """Convert a GhidraMCP schema entry into a LangChain StructuredTool."""

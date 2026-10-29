@@ -82,6 +82,7 @@ from maljan.core.tool_declarations import (
     CredentialBootstrap,
     ErrorPattern,
     ReputationService,
+    ToolEffects,
     ToolFacts,
     check_auto_name_prefixes,
     check_data_label_prefixes,
@@ -1482,6 +1483,12 @@ class SampleOpenConfig(BaseModel):
     an opened program and the argument the program's name goes in. Declared,
     the platform closes each program the job opened there when the job ends;
     empty, a program the job opened stays on the server.
+
+    ``analyse_tool`` may be named without an ``open_tool``: the tool the
+    server's analysis runs through, which the platform then never calls
+    itself (the agent calls it). It is read as the server's analysis step
+    (its kind, and the block's ``analyse_effects``), and nothing else of the
+    declaration applies.
     """
 
     open_tool: str = ""
@@ -1504,7 +1511,6 @@ class SampleOpenConfig(BaseModel):
             self.name_field,
             self.select_tool,
             self.select_argument,
-            self.analyse_tool,
             self.close_tool,
             self.close_argument,
         )
@@ -1523,6 +1529,12 @@ class SampleOpenConfig(BaseModel):
         ):
             raise ValueError("sample_open declares a select or analysis tool but no open_tool")
         return self
+
+
+# radare2's own declaration: ``analyze`` runs its analysis, which the agent
+# calls (the provider opens the sample itself, ``providers.static.r2``), so it
+# names no open tool. Data like any server's, editable in the settings.
+R2_SAMPLE_OPEN = SampleOpenConfig(analyse_tool="analyze")
 
 
 class PrepassToolsConfig(BaseModel):
@@ -1695,6 +1707,15 @@ class MCPServerConfig(BaseModel):
     # service's name and the rank the triage pack asks them at
     # (``ReputationService``). ``None`` says neither.
     reputation_service: ReputationService | None = None
+    # What every tool of the server does beyond answering, unless the tool
+    # says otherwise (``ToolEffects``): a statement of the server as a whole,
+    # laid under each tool's own ``effects`` sub-field by sub-field
+    # (``derived_declarations.with_server_effects``). ``None`` says nothing.
+    default_effects: ToolEffects | None = None
+    # What the tool ``sample_open.analyse_tool`` names does beyond answering,
+    # over ``default_effects`` (an analysis that emulates the sample's code
+    # at some levels). ``None`` says nothing.
+    analyse_effects: ToolEffects | None = None
 
     @field_validator("roles")
     @classmethod
@@ -1779,6 +1800,16 @@ class MCPServerConfig(BaseModel):
     # kind the server's listing puts in force (``core.derived_declarations``).
     _kind_free_changes: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
 
+    # The tools a stored change removed that the block does not ship (a stored
+    # ``null``, ``tool_declarations.stored_in_force``): nothing its server lists
+    # is read of them (``core.served_declarations.laid_under``).
+    _removed_tools: frozenset[str] = PrivateAttr(default_factory=frozenset)
+
+    @property
+    def removed_tools(self) -> frozenset[str]:
+        """The tools a stored change removed that the block does not ship."""
+        return frozenset(self._removed_tools)
+
     @property
     def kind_free_changes(self) -> dict[str, dict[str, Any]]:
         """The kind-dependent fields stored with no kind, per tool; a copy."""
@@ -1794,9 +1825,12 @@ class MCPServerConfig(BaseModel):
         """
         dumped = handler(value)
         held = self._kind_free_changes
-        if not held or not isinstance(dumped, dict):
+        gone = self._removed_tools
+        if not (held or gone) or not isinstance(dumped, dict):
             return dumped
         out = dict(dumped)
+        # A removal is dumped as stored, so it survives a dump and its validation.
+        out.update({tool: None for tool in sorted(gone) if tool not in out})
         for tool, fields in held.items():
             facts = value.get(tool) if isinstance(value, Mapping) else None
             if tool not in out or not isinstance(facts, BaseModel):
@@ -1815,9 +1849,17 @@ class MCPServerConfig(BaseModel):
         from maljan.core.tool_declarations import kind_free_changes
 
         held = kind_free_changes(data.get("tool_facts")) if isinstance(data, Mapping) else {}
+        gone: frozenset[str] = frozenset()
+        facts = data.get("tool_facts") if isinstance(data, Mapping) else None
+        if isinstance(facts, Mapping) and any(v is None for v in facts.values()):
+            gone = frozenset(str(t) for t, v in facts.items() if v is None)
+            data = {**data, "tool_facts": {t: v for t, v in facts.items() if v is not None}}
         model = handler(data)
-        if held and isinstance(model, MCPServerConfig):
-            model._kind_free_changes = held
+        if isinstance(model, MCPServerConfig):
+            if held:
+                model._kind_free_changes = held
+            if gone:
+                model._removed_tools = gone
         return model  # type: ignore[no-any-return]
 
     @field_validator("tool_facts", mode="before")
@@ -4236,7 +4278,7 @@ def r2_block() -> StaticR2Config:
     """The radare2 block as it ships, with its declaration."""
     from maljan.core.builtin_declarations import provider_declaration
 
-    return StaticR2Config(**provider_declaration("r2"))
+    return StaticR2Config(sample_open=R2_SAMPLE_OPEN.model_copy(), **provider_declaration("r2"))
 
 
 def cape_mcp_block() -> MCPServerConfig:

@@ -90,7 +90,82 @@ def _own_servers_kept() -> tuple[tuple[str, str, dict], ...]:
     own = tuple(
         (f"mcp:{key}", launch_identity(blocks[key]), tools) for key, tools in captured.items()
     )
-    return (*own, _reputation_service_kept(blocks))
+    return (*own, _reputation_service_kept(blocks), *_reversers_kept())
+
+
+def _reversers_kept() -> tuple[tuple[str, str, dict], ...]:
+    """What the platform read of Ghidra's and radare2's listings, as the store keeps it.
+
+    Neither server declares its tools, and the platform ships no table of
+    them: what each is, is read from its listing (``core.program_reading``),
+    here the vendored ones: Ghidra's ``/mcp/schema`` as its HTTP transport
+    reads it (``tests/fixtures/tools/ghidra_mcp_schema.json``) and r2mcp's
+    listing (``tests/fixtures/tools/r2mcp_tool_definitions.json``).
+    """
+    from maljan.core.config import ghidra_block, r2_block
+    from maljan.core.tool_declarations import launch_identity
+
+    return (
+        reverser_row("provider:ghidra", launch_identity(ghidra_block()), ghidra_listing()),
+        reverser_row("provider:r2", launch_identity(r2_block()), r2_listing()),
+    )
+
+
+def ghidra_listing() -> list[dict]:
+    """Ghidra's vendored ``/mcp/schema``, as the HTTP client lists its tools."""
+    import json
+    from pathlib import Path
+
+    from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+
+    schema = json.loads(
+        (Path(__file__).parent / "fixtures" / "tools" / "ghidra_mcp_schema.json").read_text()
+    )
+    client = GhidraHTTPClient(base_url="http://ghidra.invalid")
+    client._schema = list(schema["tools"])
+    return client.tool_definitions()
+
+
+def r2_listing() -> list[dict]:
+    """r2mcp's vendored listing, as MCP tool definitions, with ``run_command``.
+
+    r2mcp offers ``run_command`` when started with ``-r`` (``providers.static.r2``);
+    its definition takes the command to run.
+    """
+    import json
+    from pathlib import Path
+
+    held = json.loads(
+        (Path(__file__).parent / "fixtures" / "tools" / "r2mcp_tool_definitions.json").read_text()
+    )
+    return [
+        *(
+            {"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
+            for t in held
+        ),
+        R2_RUN_COMMAND,
+    ]
+
+
+# r2mcp's ``run_command``, as an r2mcp started with ``-r`` lists it.
+R2_RUN_COMMAND: dict = {
+    "name": "run_command",
+    "description": "Run a radare2 command and get the output",
+    "inputSchema": {
+        "type": "object",
+        "properties": {"command": {"type": "string", "description": "Command to execute"}},
+        "required": ["command"],
+    },
+}
+
+
+def reverser_row(source: str, launch: str, listing: list[dict]) -> tuple[str, str, dict]:
+    """A listing's readings as the store keeps them (``served_declarations.stored_form``)."""
+    from maljan.core.derived_declarations import derived_readings, program_readings_of
+    from maljan.core.served_declarations import stored_form
+
+    read, closed = derived_readings(listing)
+    return (source, launch, stored_form({}, read, closed, program_readings_of(listing)))
 
 
 def _reputation_service_kept(blocks: dict) -> tuple[str, str, dict]:

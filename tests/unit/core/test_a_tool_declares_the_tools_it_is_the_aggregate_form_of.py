@@ -5,9 +5,10 @@ tool of the same server, refused on save where it is not one and read without
 it, with a warning, where a stored block names one. The model is shown the
 fact after the tool's description, written once the names a request offers
 are settled, so it can choose one call over many; a tool that declares none
-is shown and called exactly as before. Ghidra's block declares its batch and
-whole-program tools, and the static workflows leave the number of functions
-to decompile to the model.
+is shown and called exactly as before. Ghidra's batch and whole-program tools
+are read as the aggregate forms they are from what Ghidra lists
+(``core.program_reading``), and the static workflows leave the number of
+functions to decompile to the model.
 """
 
 from __future__ import annotations
@@ -42,7 +43,10 @@ def _tool(name: str, description: str = "") -> StructuredTool:
 
 @pytest.fixture(scope="module")
 def ghidra() -> dict[str, ToolFacts]:
-    return dict(Settings().static.ghidra.tool_facts)
+    # As the platform reads them: from what Ghidra lists, under its block.
+    held = ToolDeclarations.from_settings(Settings()).source("provider:ghidra")
+    assert held is not None
+    return dict(held.tools)
 
 
 class TestTheField:
@@ -167,7 +171,8 @@ class TestGhidraDeclaresItsAggregates:
     ) -> None:
         # Its definition does not say references to or from each address.
         assert ghidra["get_bulk_xrefs"].aggregate_of == ()
-        assert aggregates_of(dict(Settings().static.r2.tool_facts)) == {}
+        r2 = ToolDeclarations.from_settings(Settings()).source("provider:r2")
+        assert r2 is not None and aggregates_of(dict(r2.tools)) == {}
 
 
 class TestTheModelIsShownIt:

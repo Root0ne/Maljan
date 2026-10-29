@@ -515,6 +515,9 @@ class MCPLangChainToolkit:
         # What a trusted block reads of the tools whose disclosure only their
         # server's own hints could lift (``derived_declarations.closed_by_hints``).
         self.derived_closed: dict[str, Any] = {}
+        # What each listed tool is read as on a program-analysis server
+        # (``derived_declarations.program_readings_of``), kept beside it.
+        self.derived_program: dict[str, Any] = {}
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools.
@@ -594,6 +597,7 @@ class MCPLangChainToolkit:
             # built so their tags are the ones in force from the first attach.
             self.served_tool_facts = self._served_tool_facts(response.tools)
             self.derived_tool_facts, self.derived_closed = self._derived_readings(response.tools)
+            self.derived_program = self._program_readings(response.tools)
             self._settle_categories()
             for tool in response.tools:
                 lc_tool = self._create_langchain_tool(tool)
@@ -642,7 +646,12 @@ class MCPLangChainToolkit:
             # With what the platform read of the same listing: the first
             # attach's tags read it as every later one does.
             self._categories = dict(
-                ask(self.served_tool_facts, self.derived_tool_facts, self.derived_closed)
+                ask(
+                    self.served_tool_facts,
+                    self.derived_tool_facts,
+                    self.derived_closed,
+                    self.derived_program,
+                )
             )
         except Exception as exc:  # noqa: BLE001 — a tag never costs an attach
             logger.warning(
@@ -691,6 +700,25 @@ class MCPLangChainToolkit:
                 type(exc).__name__,
             )
             return None, {}
+
+    def _program_readings(self, definitions: Sequence[Any]) -> dict[str, Any]:
+        """What each listed tool is read as on a program-analysis server; nothing on a failure.
+
+        Read for every server alike (``core.program_reading``); it is in force
+        only under a block whose roles hold a program role. A reading that
+        fails never costs the attach.
+        """
+        from maljan.core.derived_declarations import program_readings_of
+
+        try:
+            return program_readings_of(definitions, where=f"{self._server_name()}.")
+        except Exception as exc:  # noqa: BLE001 — a reading never costs an attach
+            logger.warning(
+                "The tools %s listed were not read as program tools (%s).",
+                self._server_name(),
+                type(exc).__name__,
+            )
+            return {}
 
     def get_tools(self) -> list[BaseTool]:
         """Return the list of LangChain tools exposed by the MCP server."""

@@ -117,15 +117,16 @@ class TestTheDigests:
         # its digest; without it each block is as recorded below. Both moved
         # again when their tool tables went: each server declares its tools
         # itself (T-418 PR1b), these fields with them. Ghidra's moved when its
-        # block declared its data-label prefix (``data_label_prefixes``, T-426);
-        # a block that leaves that field empty keeps its digest.
+        # block declared its data-label prefix (``data_label_prefixes``, T-426),
+        # and when its tools came to be read from its listing under its
+        # block's statement (T-418 PR4).
         settings = Settings(_env_file=None)
         for key in ("knowledge", "network"):
             object.__setattr__(settings.mcp.servers[key], "trusts_served_declaration", False)
         digests = ToolDeclarations.from_settings(settings).digests()
         assert digests["mcp:knowledge"] == "b261c17f07e13ef9"
         assert digests["mcp:network"] == "7211e6023885a063"
-        assert digests["provider:ghidra"] == "bd0160d126dd52b1"
+        assert digests["provider:ghidra"] == "01e22fee1043d4c4"
         assert digests["sandbox"] == "c2bf77971e47dfa4"
 
 

@@ -33,7 +33,9 @@ from maljan.core.tool_declarations import (
 pytestmark = pytest.mark.usefixtures("a_built_in_server_ships_a_tool_table")
 
 
-LEAF = "core.static.ghidra.tool_facts"
+# A provider leaf that ships a table of its tools (Ghidra's and radare2's are read
+# from their listings, T-418 PR4).
+LEAF = "core.sandbox.cape2.mcp.tool_facts"
 
 
 def _stored_map() -> dict[str, Any]:
@@ -138,7 +140,7 @@ def test_a_new_shipped_tool_appears_beside_the_stored_changes(shipped_release: A
 
 
 def test_a_provider_leaf_is_stored_one_tool_at_a_time() -> None:
-    shipped = so.shipped_tool_facts("static.ghidra")
+    shipped = so.shipped_tool_facts("sandbox.cape2.mcp")
     tool = next(iter(shipped))
     whole = {name: dict(entry) for name, entry in shipped.items()}
     whole[tool]["long_running"] = True
@@ -148,7 +150,7 @@ def test_a_provider_leaf_is_stored_one_tool_at_a_time() -> None:
     changes = {tool: {"long_running": True}, "my_script": {"kind": "strings"}, "not_shipped": None}
     stored = svc.stored_declaration_leaves({LEAF: changes})[LEAF]
     assert set(without_mark(stored)) == {tool, "my_script"}
-    held = so.build_settings({"static.ghidra.tool_facts": stored}).static.ghidra.tool_facts
+    held = so.build_settings({"sandbox.cape2.mcp.tool_facts": stored}).sandbox.cape2.mcp.tool_facts
     assert held[tool].long_running is True and held["my_script"].kind == "strings"
     assert set(held) == set(shipped) | {"my_script"}
 
@@ -166,7 +168,7 @@ def test_an_export_and_import_round_trip_keeps_the_changes() -> None:
         stored=stored,
     )
     leaf = svc.stored_declaration_leaves(
-        {LEAF: {next(iter(so.shipped_tool_facts("static.ghidra"))): {"long_running": True}}}
+        {LEAF: {next(iter(so.shipped_tool_facts("sandbox.cape2.mcp"))): {"long_running": True}}}
     )[LEAF]
     exported = {"core.mcp.servers": servers, LEAF: leaf}
     imported, warnings = svc.lenient_imported_declarations(exported)
@@ -235,13 +237,13 @@ def test_a_provider_leaf_change_a_later_release_makes_invalid_is_left_out(
     shipped = {"scan": {**_unset(), "kind": "strings", "rows": "/r/*"}}
     monkeypatch.setattr(so, "shipped_tool_facts", lambda block: shipped)
     stored = with_mark({"scan": {"places": {"offset": "/o"}}})
-    built = so.build_settings({"static.ghidra.tool_facts": stored})
-    assert built.static.ghidra.tool_facts["scan"].places == {"offset": "/o"}
+    built = so.build_settings({"sandbox.cape2.mcp.tool_facts": stored})
+    assert built.sandbox.cape2.mcp.tool_facts["scan"].places == {"offset": "/o"}
     shipped["scan"] = {**shipped["scan"], "rows": ""}
-    built = so.build_settings({"static.ghidra.tool_facts": stored})
-    assert built.static.ghidra.tool_facts["scan"].places == {}
-    assert so.refused_tool_changes({"static.ghidra.tool_facts": stored}) == {
-        "static.ghidra": ["scan"]
+    built = so.build_settings({"sandbox.cape2.mcp.tool_facts": stored})
+    assert built.sandbox.cape2.mcp.tool_facts["scan"].places == {}
+    assert so.refused_tool_changes({"sandbox.cape2.mcp.tool_facts": stored}) == {
+        "sandbox.cape2.mcp": ["scan"]
     }
 
 
@@ -268,12 +270,12 @@ def _every_path_in_force(server_facts: dict[str, Any], leaf_facts: dict[str, Any
     leaf = svc.stored_declaration_leaves(
         svc.incoming_declaration_leaves({LEAF: leaf_facts}, {}), {}
     )[LEAF]
-    built = so.build_settings({"mcp.servers": saved, "static.ghidra.tool_facts": leaf})
+    built = so.build_settings({"mcp.servers": saved, "sandbox.cape2.mcp.tool_facts": leaf})
     out.append(
         (
             "patch",
             set(built.mcp.servers["virustotal"].tool_facts),
-            set(built.static.ghidra.tool_facts),
+            set(built.sandbox.cape2.mcp.tool_facts),
         )
     )
 
@@ -285,7 +287,7 @@ def _every_path_in_force(server_facts: dict[str, Any], leaf_facts: dict[str, Any
         (
             "candidate",
             set(candidate.mcp.servers["virustotal"].tool_facts),
-            set(candidate.static.ghidra.tool_facts),
+            set(candidate.sandbox.cape2.mcp.tool_facts),
         )
     )
 
@@ -295,12 +297,12 @@ def _every_path_in_force(server_facts: dict[str, Any], leaf_facts: dict[str, Any
         )
         saved = validate_server_map(imported["core.mcp.servers"], stored=stored)
         leaf = svc.stored_declaration_leaves({LEAF: imported[LEAF]}, {})[LEAF]
-        built = so.build_settings({"mcp.servers": saved, "static.ghidra.tool_facts": leaf})
+        built = so.build_settings({"mcp.servers": saved, "sandbox.cape2.mcp.tool_facts": leaf})
         out.append(
             (
                 label,
                 set(built.mcp.servers["virustotal"].tool_facts),
-                set(built.static.ghidra.tool_facts),
+                set(built.sandbox.cape2.mcp.tool_facts),
             )
         )
     return out
@@ -310,10 +312,10 @@ def test_an_unmarked_map_is_read_whole_on_every_path() -> None:
     """One reading of a map without the mark, as dev read every map: whole, so
     a shipped tool it does not name is removed, whichever path it comes by."""
     shipped = so.shipped_tool_facts("mcp.servers.virustotal")
-    ghidra = so.shipped_tool_facts("static.ghidra")
+    cape = so.shipped_tool_facts("sandbox.cape2.mcp")
     first = next(iter(shipped))
-    leaf_tool = next(iter(ghidra))
-    held = _every_path_in_force({first: shipped[first]}, {leaf_tool: ghidra[leaf_tool]})
+    leaf_tool = next(iter(cape))
+    held = _every_path_in_force({first: shipped[first]}, {leaf_tool: cape[leaf_tool]})
     assert [path for path, *_ in held] == ["patch", "probe", "candidate", "import /2", "import /1"]
     for path, server_tools, leaf_tools in held:
         assert server_tools == {first}, path
@@ -325,14 +327,14 @@ def test_a_marked_map_is_read_as_changes_on_every_path() -> None:
     shipped and ``null`` removes one, on every path, a ``/1`` import too (only
     ``/2`` writes the mark, so such a document was relabelled from one)."""
     shipped = so.shipped_tool_facts("mcp.servers.virustotal")
-    ghidra = so.shipped_tool_facts("static.ghidra")
+    cape = so.shipped_tool_facts("sandbox.cape2.mcp")
     first = next(iter(shipped))
-    leaf_tool = next(iter(ghidra))
+    leaf_tool = next(iter(cape))
     held = _every_path_in_force(with_mark({first: None}), with_mark({leaf_tool: None}))
     assert [path for path, *_ in held] == ["patch", "probe", "candidate", "import /2", "import /1"]
     for path, server_tools, leaf_tools in held:
         assert server_tools == set(shipped) - {first}, path
-        assert leaf_tools == (set() if path == "probe" else set(ghidra) - {leaf_tool}), path
+        assert leaf_tools == (set() if path == "probe" else set(cape) - {leaf_tool}), path
 
 
 def test_a_whole_map_sent_back_as_stored_keeps_reading_whole() -> None:
@@ -356,7 +358,7 @@ async def test_the_api_serves_every_stored_map_as_marked_changes() -> None:
 
     from app.models import RuntimeSetting
 
-    shipped = so.shipped_tool_facts("static.ghidra")
+    shipped = so.shipped_tool_facts("sandbox.cape2.mcp")
     first, second, *_ = list(shipped)
     whole_leaf = {tool: facts for tool, facts in shipped.items() if tool != first}
     servers = _stored_map()
