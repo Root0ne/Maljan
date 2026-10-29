@@ -229,6 +229,19 @@ describe("the server editor's declaration readers", () => {
     expect(readReputationService("[1]").error).toMatch(/object/);
   });
 
+  it("reads the enrichment pace and thresholds of a server's reputation_service", () => {
+    const text = '{"rate_limit_seconds": 4, "malicious_when": [{"field": "malicious", "at_least": 1}]}';
+    expect(readReputationService(text).value).toEqual({
+      rate_limit_seconds: 4,
+      malicious_when: [{ field: "malicious", at_least: 1 }],
+    });
+    expect(readReputationService('{"rate_limit_seconds": -1}').error).toMatch(/pause/);
+    expect(
+      readReputationService('{"malicious_when": [{"field": "abuse", "at_least": 1}]}').error,
+    ).toMatch(/malicious_when/);
+    expect(readReputationService('{"malicious_when": {}}').error).toMatch(/malicious_when/);
+  });
+
   it("splits words without keeping empty entries", () => {
     expect(splitWords(" a ,\n\n b ")).toEqual(["a", "b"]);
   });

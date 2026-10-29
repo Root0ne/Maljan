@@ -145,6 +145,7 @@ def _status(user: Any) -> dict[str, Any]:
                     "enrichment_enabled": False,
                     "mock_mode_allowed": False,
                     "enrichment_sources": {},
+                    "enrichment_reputation_servers": False,
                     "enrichment_dedicated_worker": False,
                 }[n]
             ),

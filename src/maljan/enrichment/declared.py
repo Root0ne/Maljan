@@ -4,19 +4,26 @@ A source is one entry of ``api.enrichment_sources`` (or one the platform ships,
 :mod:`maljan.enrichment.builtin_sources`): the indicator kinds it answers, how
 it is asked, and where its answer's facts sit. It is asked one of two ways:
 
-* **a declared tool server's tool** (``server`` and ``tool``): a server tagged
-  ``reputation`` whose tool takes the indicator in the argument its
-  declaration names for that kind (``ToolFacts.arguments``, #266), or the one
-  the source names in ``arguments``;
+* **a declared tool server's tool** (``server``, and ``tool`` where it names
+  one): a server tagged ``reputation`` whose tool takes the indicator in the
+  argument its declaration names for that kind (``ToolFacts.arguments``,
+  #266), or the one the source names in ``arguments``. A source that names
+  no tool is asked through the server's indicator lookup for the kind: the
+  first tool its tools list ticks whose declaration in force (its block's,
+  its server's own, or what is read of its listing,
+  ``core.derived_declarations``) is a lookup about an indicator
+  (``core.reputation.INDICATOR_LOOKUP_KINDS``) and names an argument for the
+  kind, and that sends nothing of the sample;
 * **a REST endpoint** (``requests``): one request per kind, an https URL whose
   host is fixed by the declaration. ``{value}`` stands for the indicator (a
   URL-encoded path segment in the URL, as written in a query parameter or a
   JSON body) and ``{credential}`` for the source's credential, which may sit
   in a header, a query parameter or the body, never in the URL's path.
 
-The credential is read from ``credential`` (a settings key holding a secret,
-such as ``api.virustotal_api_key``) or, where that is empty, from the source's
-own ``api_key``, stored encrypted beside the map.
+The credential is read from ``credential`` (a secret setting the platform
+generates from a shipped source's declaration, :func:`credential_settings_of`)
+or, where that is empty, from the source's own ``api_key``, stored encrypted
+beside the map.
 
 The answer is read through ``record``: each field names a path under
 ``answer_root`` (``core.tool_declarations.select`` paths) and how the value is
@@ -24,7 +31,11 @@ held. The record is the shape every reader of ``network.domains[].reputation``
 and ``network.ips[].reputation`` already reads: ``source`` first, then the
 declared fields in their order. ``malicious_when`` says which counts mark the
 indicator malicious, and ``age_from`` which field holds the answer's date in
-whole seconds since the epoch.
+whole seconds since the epoch. A server source that declares no ``record``
+is read as a reputation answer (:func:`read_reputation_record`): through the
+paths its tool's declaration gives, else by the shape every reputation answer
+has (``core.reputation.read_shape``), into the fields of
+:data:`REPUTATION_RECORD_FIELDS`.
 
 Nothing here names a service: the built-in sources are entries of the same
 schema.
@@ -73,6 +84,22 @@ _MAX_VALUE_CHARS = 253
 PROBE_TIMEOUT_SECONDS = 10.0
 # How many times the age of a reputation must exceed this many days to be stale.
 STALE_REPUTATION_DAYS = 90
+# The fields a server source that declares no ``record`` stores, in order,
+# each only where the answer gave it (:func:`read_reputation_record`): the
+# engine counts, the labels, the dates and the link of a reputation answer,
+# and the service it attributes them to. The counts are the ones its
+# ``malicious_when`` may name.
+REPUTATION_RECORD_COUNTS: tuple[str, ...] = ("malicious", "suspicious", "total", "engines")
+REPUTATION_RECORD_FIELDS: tuple[str, ...] = (
+    *REPUTATION_RECORD_COUNTS,
+    "labels",
+    "first_seen",
+    "last_seen",
+    "link",
+    "service",
+)
+# How many labels such a record keeps, as a declared ``texts`` field's limit.
+REPUTATION_RECORD_LABELS = 5
 
 
 def check_source_key(key: str) -> str:
@@ -247,9 +274,10 @@ class EnrichmentSource(BaseModel):
     probe: RestRequest | None = None
     timeout_seconds: float = Field(default=30.0, gt=0)
     rate_limit_seconds: float = Field(default=0.0, ge=0)
-    # The answer.
+    # The answer. A server source that declares no record is read as a
+    # reputation answer (:func:`read_reputation_record`).
     answer_root: str = ""
-    record: list[RecordField] = Field(min_length=1)
+    record: list[RecordField] = Field(default_factory=list)
     record_source: str = ""
     malicious_when: list[Threshold] = Field(default_factory=list)
     age_from: str = ""
@@ -300,10 +328,17 @@ class EnrichmentSource(BaseModel):
         if by_server and self.requests:
             raise ValueError("declare either server and tool, or requests, not both")
         if by_server:
-            if not (self.server and self.tool):
-                raise ValueError("a server source needs both server and tool")
+            if not self.server:
+                raise ValueError("a server source needs server: the key of a server in mcp.servers")
+            if self.arguments and not self.tool:
+                raise ValueError(
+                    "arguments name a tool's argument; name the tool too, or leave both out "
+                    "to ask the server's indicator lookups"
+                )
         elif not self.requests:
             raise ValueError("declare server and tool, or one request per kind in requests")
+        elif not self.record:
+            raise ValueError("a REST source needs record: the fields its answer is read into")
         else:
             missing = [k for k in self.kinds if k not in self.requests]
             extra = [k for k in self.requests if k not in self.kinds]
@@ -323,7 +358,16 @@ class EnrichmentSource(BaseModel):
         names = [f.name for f in self.record]
         if len(set(names)) != len(names):
             raise ValueError("record names a field twice")
-        unknown = [t.field for t in self.malicious_when if t.field not in names]
+        if self.record:
+            counted: list[str] = names
+        else:
+            # Read as a reputation answer: its counts are the ones a threshold reads.
+            counted = list(REPUTATION_RECORD_COUNTS)
+            if self.answer_root:
+                raise ValueError(
+                    "answer_root names where a declared record is read; declare record"
+                )
+        unknown = [t.field for t in self.malicious_when if t.field not in counted]
         if unknown:
             raise ValueError(f"malicious_when names fields the record lacks: {', '.join(unknown)}")
         if self.age_from and self.age_from not in names:
@@ -401,6 +445,72 @@ def effective_sources(stored: Mapping[str, Any] | None) -> dict[str, EnrichmentS
                 logger.warning("enrich: source %s is not a valid declaration; left out.", key)
             else:
                 logger.warning("enrich: a source with an invalid key is left out.")
+    return out
+
+
+@dataclass(frozen=True)
+class CredentialSetting:
+    """The secret setting a source declaration reads its credential from, as the catalog lists it.
+
+    Made from the declaration alone (:func:`credential_settings_of`): its
+    title names the source by its label, and its description says what
+    leaves the host once it is set, and for where.
+    """
+
+    path: str
+    source: str
+    label: str
+    kinds: tuple[str, ...]
+    hosts: tuple[str, ...]
+    probe: bool
+
+    @property
+    def key(self) -> str:
+        return f"api.{self.path}"
+
+    @property
+    def title(self) -> str:
+        return f"{self.label} API key"
+
+    @property
+    def description(self) -> str:
+        kinds = " and ".join(
+            f"{kind}s" if kind == "domain" else f"{kind.upper()}s" for kind in self.kinds
+        )
+        hosts = ", ".join(self.hosts) or "the host its declaration names"
+        return (
+            f"The credential of the {self.label} enrichment source (`{self.source}`). While it is "
+            f"set, the report's {kinds} are looked up at {hosts} and leave this host."
+        )
+
+
+def credential_settings_of(entries: Mapping[str, Any]) -> dict[str, CredentialSetting]:
+    """Per ``api.*`` leaf, the secret setting the valid declarations of ``entries`` name.
+
+    Read from each declaration's ``credential`` (a leaf directly under
+    ``api``), in the entries' order; a leaf two sources name is the first's.
+    A declaration that does not validate names none.
+    """
+    from pydantic import ValidationError
+
+    out: dict[str, CredentialSetting] = {}
+    for key, entry in entries.items():
+        try:
+            check_source_key(str(key))
+            source = EnrichmentSource.model_validate(entry)
+        except (ValidationError, ValueError, TypeError):
+            continue
+        namespace, _, path = source.credential.partition(".")
+        if namespace != "api" or not path or "." in path or path in out:
+            continue
+        out[path] = CredentialSetting(
+            path=path,
+            source=str(key),
+            label=source.title(str(key)),
+            kinds=tuple(source.kinds),
+            hosts=tuple(sorted({request.host for request in source.requests.values()})),
+            probe=source.probe is not None,
+        )
     return out
 
 
@@ -499,6 +609,51 @@ def read_record(key: str, source: EnrichmentSource, answer: Any) -> dict[str, An
             items = list(value.values()) if isinstance(value, Mapping) else list(value)
             record[spec.name] = [str(v) for v in items[: spec.limit]]
     return record if gave else None
+
+
+def read_reputation_record(
+    key: str, source: EnrichmentSource, facts: Any, answer: Any
+) -> dict[str, Any] | None:
+    """The record a server source that declares no ``record`` keeps, or ``None``.
+
+    Its tool's answer read as every reputation answer is
+    (``core.reputation.read_answer``): through the paths its declaration in
+    force gives (``facts``), and where it gives none, by the answer's shape
+    (``core.reputation.read_shape``). The record holds ``source`` (the
+    source's ``record_source``, else its server's key) and each of
+    :data:`REPUTATION_RECORD_FIELDS` the answer gave, never one it did not;
+    ``service`` only where the answer names a service other than the source.
+    ``None`` when the answer gave no count and no label: a call that returned
+    is not an answer about the indicator.
+    """
+    from maljan.core.reputation import SHAPE_READER, declares_paths, read_answer
+    from maljan.core.tool_declarations import ToolFacts
+
+    if not isinstance(facts, ToolFacts):
+        facts = ToolFacts.model_construct()
+    if not declares_paths(facts.reputation):
+        facts = facts.model_copy(update={"reader": SHAPE_READER})
+    document = _document(answer)
+    text = answer if isinstance(answer, str) else ""
+    read = read_answer(facts, output=text, structured=document, server="")
+    named = source.record_source or source.server or key
+    record: dict[str, Any] = {"source": named}
+    values: dict[str, Any] = {
+        "malicious": read.malicious,
+        "suspicious": read.suspicious,
+        "total": read.total,
+        "engines": read.engines,
+        "labels": list(read.labels[:REPUTATION_RECORD_LABELS]) or None,
+        "first_seen": read.first_seen,
+        "last_seen": read.last_seen,
+        "link": read.link,
+        "service": read.service if read.service and read.service != named else None,
+    }
+    for name in REPUTATION_RECORD_FIELDS:
+        if values[name] is not None:
+            record[name] = values[name]
+    said = any(record.get(name) is not None for name in REPUTATION_RECORD_COUNTS)
+    return record if said or "labels" in record else None
 
 
 def annotate_age(record: dict[str, Any], source: EnrichmentSource) -> None:
@@ -624,9 +779,10 @@ class SourceAsker:
         """``ready``'s record for ``value``, or ``None`` on any failure (never raises)."""
         if not safe_value(kind, value):
             return None
+        facts: Any = None
         try:
             if ready.source.server:
-                answer = await self._ask_server(ready, kind, value)
+                answer, facts = await self._ask_server(ready, kind, value)
             else:
                 answer = await self._ask_rest(ready, kind, value)
         except Exception as exc:  # noqa: BLE001 — one source's failure is no lookup
@@ -643,31 +799,74 @@ class SourceAsker:
                 "enrich: source %s answered a failure (%s); not recorded.", ready.key, failure[0]
             )
             return None
+        if not ready.source.record:
+            return read_reputation_record(ready.key, ready.source, facts, answer)
         return read_record(ready.key, ready.source, answer)
 
-    async def _ask_server(self, ready: ReadySource, kind: str, value: str) -> Any:
+    async def _lookups(self, ready: ReadySource, kind: str) -> list[tuple[str, str, Any]]:
+        """The tools ``ready`` may be asked about ``kind`` through, in order, with their arguments.
+
+        The source's own tool and arguments where it names them; the
+        argument, and for a source that names no tool the tools too, as the
+        caller reads the server's declarations in force (``indicator_lookups``,
+        every candidate in the order to try them).
+        """
+        source = ready.source
+        lookups = getattr(self.tool_caller, "indicator_lookups", None)
+        tool, argument = source.tool, source.arguments.get(kind, "")
+        found: list[tuple[str, str, Any]] = []
+        if lookups is not None and (not tool or not argument or not source.record):
+            found = list(await lookups(source.server, kind, tool))
+        if tool:
+            facts = found[0][2] if found else None
+            argument = argument or (found[0][1] if found else "")
+            if not argument and self.tool_arguments is not None:
+                argument = self.tool_arguments(source.server, tool).get(kind, "")
+            if not argument:
+                logger.warning(
+                    "enrich: source %s names no argument for a kind; not asked.", ready.key
+                )
+                return []
+            return [(tool, argument, facts)]
+        if not found:
+            logger.info(
+                "enrich: source %s's server declares no indicator lookup for a kind; not asked.",
+                ready.key,
+            )
+        return found
+
+    async def _ask_server(self, ready: ReadySource, kind: str, value: str) -> tuple[Any, Any]:
+        """The first answer of ``ready``'s lookups for ``kind`` that is no failure, and its facts.
+
+        A lookup that fails (no answer, or a structured failure) is followed
+        by the next one, each told as its own question. A source paced by its
+        ``rate_limit_seconds`` pauses after each question, as a REST source does.
+        """
         source = ready.source
         if self.tool_caller is None:
-            return None
-        argument = source.arguments.get(kind)  # type: ignore[call-overload]
-        if not argument and self.tool_arguments is not None:
-            argument = self.tool_arguments(source.server, source.tool).get(kind)
-        if not argument:
-            logger.warning("enrich: source %s names no argument for a kind; not asked.", ready.key)
-            return None
-        # A tool its host withholds is never asked, so it is never told as a
-        # question either: the caller records it as withheld, with its reason.
-        withheld = getattr(self.tool_caller, "withheld_reason", None)
-        if withheld is not None and await withheld(source.server, source.tool):
-            return None
-        settle = await self._told(ready.key, "", kind, source.server)
-        answer = None
-        try:
-            answer = await self.tool_caller(source.server, source.tool, {argument: value})
-        finally:
-            # Answered only when the tool gave an answer that is not a failure.
-            settle_asked(settle, answer is not None and error_parts(answer) is None)
-        return answer
+            return None, None
+        answer: Any = None
+        facts: Any = None
+        for tool, argument, facts in await self._lookups(ready, kind):
+            # A tool its host withholds is never asked, so it is never told as a
+            # question either: the caller records it as withheld, with its reason.
+            withheld = getattr(self.tool_caller, "withheld_reason", None)
+            if withheld is not None and await withheld(source.server, tool):
+                continue
+            pace = self._paces.setdefault(ready.key, asyncio.Semaphore(1))
+            async with pace:
+                settle = await self._told(ready.key, "", kind, source.server)
+                answer = None
+                try:
+                    answer = await self.tool_caller(source.server, tool, {argument: value})
+                finally:
+                    # Answered only when the tool gave an answer that is not a failure.
+                    settle_asked(settle, answer is not None and error_parts(answer) is None)
+                if source.rate_limit_seconds:
+                    await asyncio.sleep(source.rate_limit_seconds)
+            if answer is not None and error_parts(answer) is None:
+                return answer, facts
+        return answer, facts
 
     async def _ask_rest(self, ready: ReadySource, kind: str, value: str) -> Any:
         source = ready.source

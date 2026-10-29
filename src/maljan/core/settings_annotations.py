@@ -1703,7 +1703,12 @@ DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
         "(the service its answers are attributed to and the name published text gives a "
         "lookup) and rank (the order the triage pack asks lookups in, lowest first; 100 "
         "when none says). Laid under each reputation lookup read from the server's "
-        "listing; a lookup a declaration names keeps what it declares. Empty says neither.",
+        "listing; a lookup a declaration names keeps what it declares. For post-verdict "
+        "enrichment asking every reputation server: rate_limit_seconds (the pause after "
+        "each question; empty, the slowest pace a shipped enrichment source declares) and "
+        "malicious_when (a list of {field, at_least} over malicious, suspicious, total or "
+        "engines; empty, its records carry no verdict and mark no indicator). Empty says "
+        "none of these.",
     ),
     (
         "default_effects",

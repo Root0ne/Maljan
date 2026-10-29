@@ -597,8 +597,15 @@ const ENRICHMENT_GUIDE: GuideDef = {
     {
       id: "switch",
       title: "Enrichment and its budget",
-      intro: "The budget caps how many lookups a single analysis may spend.",
-      keys: ["api.enrichment_enabled", "api.enrichment_max_lookups"],
+      intro:
+        "The budget caps how many lookups a single analysis may spend. Asking every reputation " +
+        "server sends the report's domains and IPs to each enabled one, through the indicator " +
+        "lookups its tools list ticks.",
+      keys: [
+        "api.enrichment_enabled",
+        "api.enrichment_max_lookups",
+        "api.enrichment_reputation_servers",
+      ],
     },
     ...enrichmentSourceSteps(ctx.schema),
     REVIEW_STEP,

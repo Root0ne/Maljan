@@ -1427,6 +1427,30 @@ def _with_family(value: Any, family: str) -> Any:
     return value
 
 
+# The counts of a reputation record a server-level threshold may read: the
+# ones ``enrichment.declared.REPUTATION_RECORD_COUNTS`` stores.
+REPUTATION_THRESHOLD_FIELDS: tuple[str, ...] = ("malicious", "suspicious", "total", "engines")
+
+
+class ReputationThreshold(BaseModel):
+    """A count of a reputation record at or above ``at_least`` marks the indicator malicious."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    field: str
+    at_least: float
+
+    @field_validator("field")
+    @classmethod
+    def _a_count(cls, value: str) -> str:
+        if value not in REPUTATION_THRESHOLD_FIELDS:
+            raise ValueError(
+                f"malicious_when field {value!r} is not one of "
+                + ", ".join(REPUTATION_THRESHOLD_FIELDS)
+            )
+        return value
+
+
 class ReputationService(BaseModel):
     """What a reputation service's server says of its lookups as a whole.
 
@@ -1436,12 +1460,23 @@ class ReputationService(BaseModel):
     each reputation lookup read from the server's listing
     (``core.derived_declarations``); a lookup a block or its server declares
     keeps what it declares.
+
+    For post-verdict enrichment, which asks the server about a report's
+    indicators as a source of its own (``api.enrichment_reputation_servers``):
+    ``rate_limit_seconds`` is the pause after each question (``None``: the
+    slowest pace any shipped enrichment source declares), and
+    ``malicious_when`` the counts of its record that mark an indicator
+    malicious, each ``{field, at_least}`` over ``malicious``, ``suspicious``,
+    ``total`` or ``engines`` (empty: the record carries no verdict, and an
+    indicator is never marked by it).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     name: str = ""
     rank: int | None = Field(default=None, ge=0)
+    rate_limit_seconds: float | None = Field(default=None, ge=0)
+    malicious_when: tuple[ReputationThreshold, ...] = ()
 
     @field_validator("name")
     @classmethod

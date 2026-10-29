@@ -38,6 +38,7 @@ def _enabled_patch():
                     "enrichment_enabled": True,
                     "enrichment_max_lookups": 25,
                     "enrichment_sources": {},
+                    "enrichment_reputation_servers": False,
                 }[n]
             ),
         ),
@@ -169,6 +170,7 @@ class TestEnrichWorkerSessionLifetime:
                         "enrichment_enabled": True,
                         "enrichment_max_lookups": 25,
                         "enrichment_sources": declared,
+                        "enrichment_reputation_servers": False,
                     }[n]
                 ),
             ),
@@ -194,6 +196,72 @@ class TestEnrichWorkerSessionLifetime:
         assert by_key["domainrep"].configured is True
         # No source is asked through a tool server, so none is attached.
         assert handed["tool_caller"] is None
+
+    @pytest.mark.asyncio
+    async def test_with_the_switch_on_an_enabled_reputation_server_reaches_the_orchestrator(
+        self,
+    ) -> None:
+        from types import SimpleNamespace
+
+        from maljan.core.config import MCPServerConfig
+
+        fake_report = MagicMock()
+        fake_report.job_id = uuid.uuid4()
+        fake_report.malware_report = _malware_report_dict()
+        db = MagicMock()
+        db.get = AsyncMock(return_value=fake_report)
+        db.commit = AsyncMock()
+        session_cm = AsyncMock()
+        session_cm.__aenter__.return_value = db
+        session_cm.__aexit__.return_value = None
+        ctx = {"redis": AsyncMock(), "db_session": MagicMock(return_value=session_cm)}
+        key = "-".join(["acme", "intel"])
+        server = MCPServerConfig(
+            enabled=True,
+            transport="streamable-http",
+            url="https://" + ".".join(["intel", "acme-labs", "net"]) + "/mcp",
+            roles=["reputation"],
+            reputation_service={
+                "rate_limit_seconds": 2,
+                "malicious_when": [{"field": "malicious", "at_least": 1}],
+            },
+        )
+        core = SimpleNamespace(mcp=SimpleNamespace(servers={key: server}))
+        handed: dict[str, Any] = {}
+
+        async def _lookups(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+            handed.update(kwargs)
+            return payload
+
+        with (
+            patch("maljan.enrichment.enrich_malware_report", new=_lookups),
+            patch(
+                "app.worker.enrich_worker.runtime_config.get",
+                AsyncMock(
+                    side_effect=lambda n: {
+                        "enrichment_enabled": True,
+                        "enrichment_max_lookups": 25,
+                        "enrichment_sources": {},
+                        "enrichment_reputation_servers": True,
+                    }[n]
+                ),
+            ),
+            patch("app.worker.enrich_worker.runtime_config.core", AsyncMock(return_value=core)),
+            patch(
+                "app.worker.enrich_worker.runtime_config.get_secret",
+                AsyncMock(side_effect=lambda n: ""),
+            ),
+            patch("app.worker.enrich_worker._get_memory_store", AsyncMock(return_value=None)),
+        ):
+            await enrich_threat_intel(ctx, str(uuid.uuid4()))
+
+        by_key = {s.key: s for s in handed["sources"]}
+        asked = by_key[f"mcp:{key}"]
+        assert asked.configured and asked.source.server == key
+        assert asked.source.rate_limit_seconds == 2
+        assert [(t.field, t.at_least) for t in asked.source.malicious_when] == [("malicious", 1)]
+        # Asked through a tool server, so the caller that attaches it is handed over.
+        assert handed["tool_caller"] is not None
 
     @pytest.mark.asyncio
     async def test_no_session_is_open_across_the_reputation_lookups(self) -> None:

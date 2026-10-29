@@ -452,8 +452,13 @@ admin-only, as they have always been; what was missing was the record.
 ### Enrichment sources
 
 Post-verdict enrichment asks the sources `api.enrichment_sources` declares,
-laid over the two the platform ships (`virustotal` and `abuseipdb`, whose keys
-stay `api.virustotal_api_key` and `api.abuseipdb_api_key`). An entry under a
+laid over the two the platform ships as declarations (`virustotal` and
+`abuseipdb`). The secret setting a shipped source reads its credential from is
+generated from its declaration's `credential`: its title is the source's label,
+its description says which indicator kinds leave the host for which host, and
+its Test button is the source's own declared `probe`; no table in the API or
+the console names a source (the shipped two keep `api.virustotal_api_key` and
+`api.abuseipdb_api_key`). An entry under a
 shipped key changes only the fields it names (`{"abuseipdb": {"enabled":
 false}}` turns one off); any other key adds a source. For every domain and IP
 worth asking about, the configured sources that answer that kind are asked in
@@ -465,12 +470,12 @@ read it whichever source wrote it.
 | :-- | :-- |
 | `label`, `enabled`, `order` | the name shown, whether it is asked, and its place (lower first) |
 | `kinds` | the indicator kinds it answers: `domain`, `ip` (the kinds the report holds a reputation slot for). A source naming `hash` or `url` is refused on save: the sample's hash reputation is declared as a reputation lookup tool (a server tool of kind `reputation` that takes the hash), which the triage pack and the judge ask |
-| `server`, `tool`, `arguments` | a tool of a server in `mcp.servers` whose `roles` holds `reputation`; the indicator goes in the argument the tool's declaration names for its kind (`tool_facts.<tool>.arguments`), or the one `arguments` names (only for kinds the source answers; a REST source takes none) |
+| `server`, `tool`, `arguments` | a tool of a server in `mcp.servers` whose `roles` holds `reputation`; the indicator goes in the argument the tool's declaration in force names for its kind (its block's `tool_facts.<tool>.arguments`, what the server declares of itself, or what is read of its listing), or the one `arguments` names (only for kinds the source answers, and only beside `tool`; a REST source takes none). With no `tool`, the server is asked through its indicator lookup for each kind: the first tool its `tools` list ticks whose declaration in force is a lookup about an indicator (`indicator_report`, `indicator_reputation`) and names an argument for the kind, never one that sends the sample |
 | `requests` | otherwise one https request per kind: `method` (`GET` or `POST`), `url`, `params`, `headers` and `json_body`, where `{value}` stands for the indicator and `{credential}` for the credential. Every placeholder is filled in one pass, so text the indicator brings (a `{credential}` in a domain name) is sent as written and never filled; the indicator is URL-encoded as one path segment in the URL, URL-encoded by the client in a query parameter, and an opaque value in a header or the body. A URL that carries a query of its own keeps its pairs, in order and repeated keys as written, and the declared `params` follow them. The host is the URL's own; the credential never goes in the URL's path |
 | `credential`, `api_key` | the settings key the credential is read from, or the source's own key, stored encrypted beside the map and shown masked |
 | `probe` | the request its Test button sends, under the source's key |
 | `timeout_seconds`, `rate_limit_seconds` | per request, and the pause after each one |
-| `answer_root`, `record` | where the answer's object sits, and each field of the record: `name`, `path`, `read` (`count`, `value`, `whole`, `texts` with `limit`) |
+| `answer_root`, `record` | where the answer's object sits, and each field of the record: `name`, `path`, `read` (`count`, `value`, `whole`, `texts` with `limit`). A REST source needs a record. A server source without one reads its tool's answer as a reputation answer, through the paths the tool's declaration gives, else by the shape every reputation answer has: `malicious`, `suspicious`, `total`, `engines`, `labels` (five at most), `first_seen`, `last_seen`, `link` and the `service` the answer names, each only where the answer gave it; its `malicious_when` may name the four counts |
 | `record_source`, `malicious_when`, `age_from` | the record's `source` (default: the key), the thresholds that mark an indicator suspicious, and the field holding the answer's date in epoch seconds (older than 90 days is `stale` and marks nothing) |
 
 `GET /api/v1/system/status` reports how many sources are configured
@@ -478,6 +483,26 @@ read it whichever source wrote it.
 `enrichment_sources: [{key, label, configured}]` to a signed-in caller only; a
 server source is configured only while its server is enabled. The enrichment
 guide offers one step per source.
+
+`api.enrichment_reputation_servers` (off by default) makes every enabled tool
+server whose `roles` hold `reputation`, and that no source names, a source of
+its own, under `mcp:<server key>`: asked about domains and IPs through its
+indicator lookups as a server source with no `tool` is, its answer read as a
+reputation answer, recorded under the server's key, and ordered by its
+`reputation_service.rank`. A lookup that fails is followed by the server's
+next one; a lookup whose listing requires an argument besides the indicator,
+or that its listing is read as sending the sample, is never asked, whatever a
+declaration says of it. After each question it pauses
+`reputation_service.rate_limit_seconds`; where the block says none, it pauses
+as long as the slowest shipped source does (16 s today, read from the shipped
+declarations), so a server that relays a service a shipped source asks
+directly never asks it faster. `reputation_service.malicious_when` (a list of
+`{field, at_least}` over `malicious`, `suspicious`, `total` and `engines`)
+gives its records a verdict; where the block says none, its records carry no
+`malicious_verdict` and mark no indicator suspicious. Each sends the report's indicators to that server
+and the service behind it, so it is the operator's consent: off, a server is
+asked only through a source that names it. The run's disclosure names every
+such server before the first question and every question asked.
 
 ### Where the enrichment runs
 
@@ -4018,7 +4043,8 @@ by the same rules for every server:
   (`kind: reputation`, that argument as `arguments.hash`, `reader:
   reputation_shape`, `effects` `executes: no`, `network: true`,
   `third_party: hash`); one that requires a domain, an address or a URL is a
-  report on it (`indicator_report`, `third_party: no`);
+  report on it (`indicator_report`, `third_party: no`, with the argument it
+  requires each indicator in under `arguments`);
 - `network: true` unless the server marks the tool `openWorldHint: false`;
 - what the block's `reputation_service` says of the service as a whole is
   laid under each of its lookups: its `name` as the lookup's `display_name`
@@ -4026,7 +4052,10 @@ by the same rules for every server:
   the lookup's declaration (the block's, an operator's row) says none; a
   lookup that names no rank is asked at the service's rank before the
   default. The built-in `virustotal` entry's is `{name: VirusTotal, rank:
-  10}`.
+  10}`. Its `rate_limit_seconds` and `malicious_when` are read only by
+  post-verdict enrichment, when it asks the server as a source of its own
+  ([Enrichment sources](#enrichment-sources)): the pause after each question
+  and the counts that give its records a verdict.
 
 A lookup that names the `reputation_shape` reader and declares no path is
 read by its answer's shape. Only such a lookup is: a lookup whose declaration

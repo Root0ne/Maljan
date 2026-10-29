@@ -8,6 +8,11 @@ v3 API (paced at one call per 16 s, its free tier's four a minute with a
 margin) and AbuseIPDB's v2 check, which answers for an address VirusTotal had
 nothing on. An operator turns one off, or changes any field, by storing an
 entry under the same key in ``api.enrichment_sources``.
+
+These declarations are the only place a shipped source is named: the secret
+setting each reads its credential from, its title, description and connection
+test are generated from its ``credential``, ``label``, ``kinds``, request
+hosts and ``probe`` (``enrichment.declared.credential_settings_of``).
 """
 
 from __future__ import annotations
