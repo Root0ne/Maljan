@@ -155,7 +155,11 @@ async def test_the_plan_is_none_while_enrichment_is_off() -> None:
 @pytest.mark.asyncio
 async def test_the_plan_names_rdap_and_every_configured_source() -> None:
     stored = {"abuseipdb": {"enabled": False}}
-    values = {"enrichment_enabled": True, "enrichment_sources": stored}
+    values = {
+        "enrichment_enabled": True,
+        "enrichment_sources": stored,
+        "enrichment_reputation_servers": False,
+    }
 
     with (
         patch(
@@ -254,7 +258,12 @@ async def test_the_enrichment_job_adds_what_it_asked_to_the_stored_record() -> N
     session = AsyncMock()
     session.__aenter__.return_value = db
     session.__aexit__.return_value = None
-    values = {"enrichment_enabled": True, "enrichment_max_lookups": 25, "enrichment_sources": {}}
+    values = {
+        "enrichment_enabled": True,
+        "enrichment_max_lookups": 25,
+        "enrichment_sources": {},
+        "enrichment_reputation_servers": False,
+    }
     with (
         patch("maljan.enrichment.enrich_malware_report", new=AsyncMock(side_effect=_lookups)),
         patch(
@@ -331,7 +340,12 @@ async def _enrich_on_demand(row: Any, lookups: Any) -> dict[str, Any]:
     session = AsyncMock()
     session.__aenter__.return_value = db
     session.__aexit__.return_value = None
-    values = {"enrichment_enabled": True, "enrichment_max_lookups": 25, "enrichment_sources": {}}
+    values = {
+        "enrichment_enabled": True,
+        "enrichment_max_lookups": 25,
+        "enrichment_sources": {},
+        "enrichment_reputation_servers": False,
+    }
     with (
         patch("maljan.enrichment.enrich_malware_report", new=AsyncMock(side_effect=lookups)),
         patch(
@@ -487,7 +501,12 @@ async def test_two_enrichments_of_one_report_at_once_lose_no_row() -> None:
         return _lookups
 
     row.malware_report["network"]["ips"] = [{"address": "1.2.3.4"}, {"address": "5.6.7.8"}]
-    values = {"enrichment_enabled": True, "enrichment_max_lookups": 25, "enrichment_sources": {}}
+    values = {
+        "enrichment_enabled": True,
+        "enrichment_max_lookups": 25,
+        "enrichment_sources": {},
+        "enrichment_reputation_servers": False,
+    }
     runs = iter(
         [
             _lookups_for("rdap", "rdap.arin.net", "1.2.3.4"),

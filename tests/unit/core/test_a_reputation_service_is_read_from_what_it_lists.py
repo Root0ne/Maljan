@@ -119,7 +119,13 @@ def test_the_built_in_listing_reads_as_its_former_declaration_did() -> None:
     former = legacy_by_name()
     read = derived_tool_facts(LISTING["tools"])
     for name, facts in read.items():
-        assert _dump(facts) == _dump(former[name]), name
+        dumped = _dump(facts)
+        # Beyond the former declaration, and only that: a report on an
+        # indicator names the argument it requires each indicator in.
+        if facts.kind == "indicator_report":
+            added = dumped.pop("arguments")
+            assert added and set(added) <= {"domain", "ip", "url"}, name
+        assert dumped == _dump(former[name]), name
 
 
 def test_a_never_seen_lookup_s_answer_gives_the_same_record() -> None:

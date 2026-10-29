@@ -16,6 +16,7 @@ import type {
   CredentialBootstrapEntry,
   ErrorPatternEntry,
   PrepassToolsEntry,
+  ReputationServiceEntry,
   ToolDeclarationFields,
   ToolFactsEntry,
 } from "@/types/settings";
@@ -304,11 +305,13 @@ export function readCredentialBootstrap(text: string): Read<CredentialBootstrapE
   return ok(parsed.value as unknown as CredentialBootstrapEntry);
 }
 
-/** A server's `reputation_service` as typed: an object of `name` and `rank`,
- *  or empty for none (`core.tool_declarations.ReputationService`). */
-export function readReputationService(
-  text: string,
-): Read<{ name?: string; rank?: number | null } | null> {
+/** The counts a server-level threshold may read. */
+const THRESHOLD_FIELDS = new Set(["malicious", "suspicious", "total", "engines"]);
+
+/** A server's `reputation_service` as typed: an object of `name`, `rank`,
+ *  `rate_limit_seconds` and `malicious_when`, or empty for none
+ *  (`core.tool_declarations.ReputationService`). */
+export function readReputationService(text: string): Read<ReputationServiceEntry | null> {
   const parsed = parseJson(text);
   if (parsed.error !== null) return bad(parsed.error);
   if (parsed.value === undefined) return ok(null);
@@ -320,7 +323,25 @@ export function readReputationService(
   if (rank !== undefined && rank !== null && !(Number.isInteger(rank) && (rank as number) >= 0)) {
     return bad("rank is a whole number of 0 or more: lower ranks are asked first");
   }
-  return ok(parsed.value as { name?: string; rank?: number | null });
+  const { rate_limit_seconds: pace, malicious_when: thresholds } = parsed.value;
+  if (pace !== undefined && pace !== null && !(typeof pace === "number" && pace >= 0)) {
+    return bad("rate_limit_seconds is the pause after each question, 0 or more seconds");
+  }
+  if (thresholds !== undefined) {
+    const each = Array.isArray(thresholds) ? thresholds : [null];
+    for (const threshold of each) {
+      if (
+        !isObject(threshold) ||
+        !THRESHOLD_FIELDS.has(String(threshold.field)) ||
+        typeof threshold.at_least !== "number"
+      ) {
+        return bad(
+          "malicious_when is a list of {field, at_least}, field one of malicious, suspicious, total, engines",
+        );
+      }
+    }
+  }
+  return ok(parsed.value as ReputationServiceEntry);
 }
 
 /** A JSON value as the box shows it: pretty, or empty for nothing declared. */

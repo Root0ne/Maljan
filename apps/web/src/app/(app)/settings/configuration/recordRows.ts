@@ -210,12 +210,17 @@ export const ENRICHMENT_SOURCES_SPEC: RowsSpec = {
       kind: "text",
       hint: "The key of a reputation tool server.",
     },
-    { name: "tool", label: "Tool", kind: "text" },
+    {
+      name: "tool",
+      label: "Tool",
+      kind: "text",
+      hint: "Empty: the server's indicator lookup for each kind, read from its declarations.",
+    },
     {
       name: "credential",
       label: "Credential setting",
       kind: "text",
-      hint: "A settings key holding the secret, for example api.virustotal_api_key.",
+      hint: "A secret setting of the enrichment group, such as one a shipped source reads.",
     },
     {
       name: "api_key",

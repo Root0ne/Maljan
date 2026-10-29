@@ -86,8 +86,8 @@ API_DEFAULTS: dict[str, Any] = {
     "enrichment_enabled": True,
     "enrichment_dedicated_worker": dedicated_enrichment_worker_default(),
     "enrichment_max_lookups": 25,
-    "virustotal_api_key": "",
-    "abuseipdb_api_key": "",
+    # Off: a tool server is asked only through a source that names it.
+    "enrichment_reputation_servers": False,
     # The operator's enrichment sources, laid over the shipped ones
     # (``maljan.enrichment.builtin_sources``); empty keeps those as shipped.
     "enrichment_sources": {},
@@ -268,6 +268,20 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "title": "Max lookups per kind",
         "description": "Cap on domains and on IPs sent to each source per report.",
     },
+    "enrichment_reputation_servers": {
+        "type": "bool",
+        "group": "enrichment",
+        "title": "Ask every reputation server",
+        "description": (
+            "Also ask every enabled tool server whose roles hold reputation, and that no "
+            "source names, about the report's domains and IPs: through each indicator "
+            "lookup its declarations name or its listing is read as, among the tools its "
+            "tools list ticks, never one that sends the sample. The indicators leave this "
+            "host for that server and the service behind it, and the run's disclosure "
+            "names every one asked. Off, a server is asked only through a source that "
+            "names it."
+        ),
+    },
     "enrichment_sources": {
         "type": "dict",
         "editor": "enrichment_sources",
@@ -281,26 +295,6 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
             "fields it names; any other key adds a source. A source's own api_key is "
             "stored encrypted on its own and shown here masked."
         ),
-    },
-    "virustotal_api_key": {
-        "type": "secret",
-        "group": "enrichment",
-        "title": "VirusTotal API key",
-        "description": (
-            "Used by enrichment and by the threat-intel MCP sidecar. Sample "
-            "hashes, domains and IPs leave the host when this is set."
-        ),
-        "probe": "virustotal",
-    },
-    "abuseipdb_api_key": {
-        "type": "secret",
-        "group": "enrichment",
-        "title": "AbuseIPDB API key",
-        "description": (
-            "Used by enrichment and by the threat-intel MCP sidecar. IPs leave "
-            "the host when this is set."
-        ),
-        "probe": "abuseipdb",
     },
     "upload_max_bytes": {
         "type": "int",
@@ -420,6 +414,35 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         ),
     },
 }
+
+
+def _add_source_credentials() -> None:
+    """Add the secret settings the shipped enrichment sources read their credentials from.
+
+    Generated from each shipped declaration's ``credential``
+    (``maljan.enrichment.declared.credential_settings_of``): its default is
+    empty, and its title, description and connection test are the
+    declaration's. These tables name no source. A leaf a fixed entry already
+    holds stays that entry's.
+    """
+    from maljan.enrichment.builtin_sources import builtin_source_entries
+    from maljan.enrichment.declared import credential_settings_of
+
+    for path, setting in credential_settings_of(builtin_source_entries()).items():
+        if path in API_DEFAULTS or path in API_EDITABLE:
+            continue
+        API_DEFAULTS[path] = ""
+        API_EDITABLE[path] = {
+            "type": "secret",
+            "group": "enrichment",
+            "title": setting.title,
+            "description": setting.description,
+            **({"probe": setting.source} if setting.probe else {}),
+        }
+
+
+_add_source_credentials()
+
 
 API_READONLY: dict[str, dict[str, Any]] = {
     "debug": {

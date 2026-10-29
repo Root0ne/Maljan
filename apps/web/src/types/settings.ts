@@ -37,6 +37,20 @@ export type Editor =
   | "enrichment_sources"
   | "report_formats";
 
+/** A count of a reputation record at or above `at_least` marks an indicator malicious. */
+export interface ReputationThresholdEntry {
+  field: "malicious" | "suspicious" | "total" | "engines";
+  at_least: number;
+}
+
+/** `core.tool_declarations.ReputationService`. */
+export interface ReputationServiceEntry {
+  name?: string;
+  rank?: number | null;
+  rate_limit_seconds?: number | null;
+  malicious_when?: ReputationThresholdEntry[];
+}
+
 export interface CatalogEntry {
   key: string;
   namespace: "core" | "api";
@@ -260,9 +274,10 @@ export interface McpServerEntry {
    *  token is typed in (`core.tool_declarations.CredentialBootstrap`). */
   credential_bootstrap?: CredentialBootstrapEntry | null;
   /** What a reputation service's server says of its lookups as a whole
-   *  (`core.tool_declarations.ReputationService`): the service's name and the
-   *  rank the triage pack asks them at. */
-  reputation_service?: { name?: string; rank?: number | null } | null;
+   *  (`core.tool_declarations.ReputationService`): the service's name, the
+   *  rank the triage pack asks them at, and for post-verdict enrichment the
+   *  pause after each question and the counts that mark an indicator. */
+  reputation_service?: ReputationServiceEntry | null;
   /** What every tool of the server does beyond answering unless the tool says
    *  otherwise, and what its `sample_open.analyse_tool` does over that
    *  (`core.tool_declarations.ToolEffects`), or null when nothing is said. */

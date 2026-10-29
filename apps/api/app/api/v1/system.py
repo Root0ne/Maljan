@@ -216,21 +216,23 @@ async def _enrichment_sources() -> list[EnrichmentSourceStatus] | None:
     authentication and must answer with what it knows rather than fail.
     """
     try:
-        from maljan.enrichment.declared import effective_sources
-
         from app.services.enrichment_sources import (
             ENRICHMENT_SOURCES_PATH,
+            asks_a_server,
             read_setting_secret,
             ready_sources,
-            stored_map,
+            reputation_servers_on,
         )
 
         stored = await runtime_config.get(ENRICHMENT_SOURCES_PATH)
+        reputation_servers = await reputation_servers_on()
         # The tool servers are read only where a source is asked through one.
         servers = None
-        if any(s.server for s in effective_sources(stored_map(stored)).values()):
+        if asks_a_server(stored, reputation_servers=reputation_servers):
             servers = (await runtime_config.core()).mcp.servers
-        ready = await ready_sources(stored, read_setting_secret, servers)
+        ready = await ready_sources(
+            stored, read_setting_secret, servers, reputation_servers=reputation_servers
+        )
     except Exception as exc:  # noqa: BLE001 — the status degrades, it never fails
         logger.warning("enrichment sources could not be read (%s)", type(exc).__name__)
         return None

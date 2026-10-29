@@ -5054,12 +5054,16 @@ async def enrichment_plan(core_settings: Any) -> list[dict[str, Any]] | None:
         ENRICHMENT_SOURCES_PATH,
         enrichment_reach,
         read_setting_secret,
+        reputation_servers_on,
     )
 
     try:
         servers = getattr(getattr(core_settings, "mcp", None), "servers", None)
         return await enrichment_reach(
-            await runtime_config.get(ENRICHMENT_SOURCES_PATH), read_setting_secret, servers
+            await runtime_config.get(ENRICHMENT_SOURCES_PATH),
+            read_setting_secret,
+            servers,
+            reputation_servers=await reputation_servers_on(),
         )
     except Exception as exc:  # noqa: BLE001 — a plan that cannot be read still says so
         logger.warning(

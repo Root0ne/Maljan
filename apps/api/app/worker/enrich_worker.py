@@ -374,24 +374,30 @@ async def enrich_threat_intel(
     # Lazy import keeps the API/worker startup graph free of optional
     # maljan-core dependencies.
     from maljan.enrichment import enrich_malware_report
-    from maljan.enrichment.declared import effective_sources
 
     from app.services.enrichment_sources import (
         ENRICHMENT_SOURCES_PATH,
+        asks_a_server,
         read_setting_secret,
         ready_sources,
-        stored_map,
+        reputation_servers_on,
     )
     from app.services.enrichment_tools import ServerToolCaller
 
     stored_sources = await runtime_config.get(ENRICHMENT_SOURCES_PATH)
+    # Every enabled reputation server is a source only with the operator's
+    # switch on; otherwise only a source that names one asks one.
+    reputation_servers = await reputation_servers_on()
     # The tool servers are read, and attached, only where a source is asked
     # through one.
     tools: ServerToolCaller | None = None
-    if any(s.server for s in effective_sources(stored_map(stored_sources)).values()):
+    if asks_a_server(stored_sources, reputation_servers=reputation_servers):
         tools = ServerToolCaller(await runtime_config.core(), job_key=f"enrich-{report_id}")
     sources = await ready_sources(
-        stored_sources, read_setting_secret, tools.servers() if tools is not None else None
+        stored_sources,
+        read_setting_secret,
+        tools.servers() if tools is not None else None,
+        reputation_servers=reputation_servers,
     )
 
     before_domain_reps = _count_reputations(payload, "domains")

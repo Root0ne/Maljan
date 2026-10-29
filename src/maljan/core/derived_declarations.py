@@ -41,7 +41,8 @@ Two readings come of it, and each has its own reach:
   (``submission_status``), one that requires the sample's hash a reputation
   lookup (``kind: reputation``, the argument it takes the hash in, its answer
   read by its shape, :data:`~maljan.core.reputation.SHAPE_READER`), one that
-  requires an indicator a report on it (``indicator_report``). Each says what
+  requires an indicator a report on it (``indicator_report``, with the
+  argument it requires each indicator in: ``domain``, ``ip``, ``url``). Each says what
   it sends: a lookup by the hash or by a submission's id sends the hash
   (``third_party: hash``), a report on an indicator nothing of the sample
   (``third_party: no``), and a submission that sends the file hands it to the
@@ -457,9 +458,18 @@ def _service(tool: _Listed, *, trusted: bool = False) -> dict[str, Any]:
             "effects": {"executes": EXECUTES_NO, **network, "third_party": THIRD_PARTY_HASH},
         }
     roles = tool.roles
-    if any(roles[role] in tool.required for role in NETWORK_INDICATOR_ARGUMENTS if role in roles):
+    # The indicator each required argument takes, so a caller that asks about
+    # one (post-verdict enrichment, the disclosure's count of what a call
+    # carried) knows which argument to give it in.
+    indicators = {
+        role: roles[role]
+        for role in NETWORK_INDICATOR_ARGUMENTS
+        if role in roles and roles[role] in tool.required
+    }
+    if indicators:
         return {
             "kind": INDICATOR_REPORT,
+            "arguments": indicators,
             "effects": {"executes": EXECUTES_NO, **network, "third_party": THIRD_PARTY_NO},
         }
     return {}

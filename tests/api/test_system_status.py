@@ -50,6 +50,7 @@ class TestSystemStatus:
                         "enrichment_enabled": True,
                         "mock_mode_allowed": True,
                         "enrichment_sources": {},
+                        "enrichment_reputation_servers": False,
                         # One process: the enrichment is queued beside the
                         # analyses, so there is no second worker to report on.
                         "enrichment_dedicated_worker": False,
@@ -100,6 +101,7 @@ class TestSystemStatus:
                             "enrichment_enabled": True,
                             "mock_mode_allowed": True,
                             "enrichment_sources": {},
+                            "enrichment_reputation_servers": False,
                         }[n]
                     ),
                 ),
@@ -142,6 +144,7 @@ class TestSystemStatus:
                         "enrichment_enabled": True,
                         "mock_mode_allowed": False,
                         "enrichment_sources": {},
+                        "enrichment_reputation_servers": False,
                     }[n]
                 ),
             ),
@@ -179,6 +182,7 @@ class TestSystemStatus:
                         "enrichment_enabled": True,
                         "mock_mode_allowed": False,
                         "enrichment_sources": declared,
+                        "enrichment_reputation_servers": False,
                     }[n]
                 ),
             ),
@@ -234,6 +238,7 @@ class TestSystemStatus:
                                 "enrichment_enabled": True,
                                 "mock_mode_allowed": False,
                                 "enrichment_sources": declared,
+                                "enrichment_reputation_servers": False,
                             }[n]
                         ),
                     ),
@@ -269,6 +274,7 @@ class TestSystemStatus:
                         "enrichment_enabled": True,
                         "mock_mode_allowed": False,
                         "enrichment_sources": declared,
+                        "enrichment_reputation_servers": False,
                     }[n]
                 ),
             ),
