@@ -1762,8 +1762,9 @@ def mcp_server_annotations(
     Every MCP server in the settings has the same nine transport/tool-selection
     knobs, plus six tool-server fields (``cwd``, ``env_allow``, ``tools``,
     ``agents``, ``label``, ``call_timeout_seconds``), the seven of
-    ``sample_open`` and the fifteen other declaration fields
-    (``DECLARATION_LEAVES``); writing them out six times invites drift between
+    ``sample_open``, the fifteen other declaration fields
+    (``DECLARATION_LEAVES``) and the launch a trust was granted for
+    (``trust_granted_for``); writing them out six times invites drift between
     blocks that must behave identically. The per-field wording is fixed, the
     server's name is the only variable.
 
@@ -1968,6 +1969,20 @@ def mcp_server_annotations(
     # changes over what the block ships, one tool at a time; the console's
     # editor shows which tools carry a change and resets one to shipped.
     entries[f"{prefix}.tool_facts"]["editor"] = "tool_facts"
+    # Recorded by a save of the tool-server map, never typed: shown nowhere a
+    # block's governing key decides what is shown.
+    grant = (owned_ann if never_shown else ann)(
+        f"{label} trust granted for",
+        "The launch an operator's trust in the server's own declaration was granted "
+        "for: a digest of its transport, command, arguments, working directory and "
+        "address, recorded by the tool-server editor when the trust is ticked. The "
+        "trust holds while the block still starts or reaches that server; pointing "
+        "the block elsewhere withdraws it. Empty: none recorded.",
+    )
+    if not never_shown:
+        grant["subgroup"] = "Declaration"
+        grant["advanced"] = True
+    entries[f"{prefix}.trust_granted_for"] = grant
 
     if provider_owned:
         # Only a tool server of ``mcp.servers`` has the route that performs a

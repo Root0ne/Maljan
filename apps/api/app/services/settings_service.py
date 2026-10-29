@@ -63,6 +63,7 @@ from app.services.server_map import (
     merge_server_secrets,
     server_env_key,
     server_token_key,
+    shown_trust_of,
     split_server_env,
     split_server_secrets,
 )
@@ -1040,7 +1041,8 @@ class SettingsService:
 
         An entry's tool declarations are shown as its changes over what the
         server ships, marked as such (:func:`served_tool_facts`), whichever
-        form they were stored in.
+        form they were stored in. Its trust in its server's own declaration is
+        shown as it is in force (``server_map.shown_trust_of``).
 
         The map shown is the stored one: a built-in key a row predates is
         re-seeded for the run and written back by the next save
@@ -1057,6 +1059,10 @@ class SettingsService:
                 )
             if name in BUILTIN_SERVER_KEYS:
                 shown["env_allow"] = builtin_env_allow(name, shown.get("env_allow") or [])
+            # The trust in the server's own declaration in force, with the
+            # launch it holds for, read from the entry before it is masked.
+            shown.pop("trust_granted_for", None)
+            shown.update(shown_trust_of(name, entry))
             if server_token_key(name) in rows:
                 shown["auth_token"], shown["auth_token_source"] = TOKEN_MASK, "ui"
             else:

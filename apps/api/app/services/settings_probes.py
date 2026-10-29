@@ -607,6 +607,7 @@ def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
         DECLARATION_FIELDS,
         fill_declaration,
         sent_in_force,
+        settled_trust,
         strip_declaration_defaults,
     )
 
@@ -615,6 +616,13 @@ def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
         shipped = shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}")
         entry = {**entry, "tool_facts": sent_in_force(shipped, facts)}
     builtin = _builtin_servers().get(name) if name in BUILTIN_SERVER_KEYS else None
+    # The trust in the server's own declaration as a save records it
+    # (``tool_declarations.settled_trust``): an operator's tick holds for the
+    # server the entry points at; a trust carried through a repoint does not.
+    sent = MCPServerConfig.model_validate(entry)
+    if builtin is not None:
+        fill_declaration(sent, builtin)
+    entry = {**entry, **settled_trust(f"mcp:{name}", sent, entry.get("trust_granted_for"))}
     if builtin is not None:
         # As a save reads it (``server_map.validate_server_map``): a declaration
         # field equal to the built-in's is the built-in's, not the operator's,

@@ -575,7 +575,15 @@ def _launch_and_trust(key: str, block: Any, version: int) -> tuple[str, bool]:
         key,
         *(
             repr(getattr(block, name, None))
-            for name in ("transport", "command", "args", "cwd", "url", "trusts_served_declaration")
+            for name in (
+                "transport",
+                "command",
+                "args",
+                "cwd",
+                "url",
+                "trusts_served_declaration",
+                "trust_granted_for",
+            )
         ),
         "trusts_served_declaration" in (getattr(block, "model_fields_set", None) or set()),
     )

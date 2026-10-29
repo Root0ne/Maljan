@@ -168,6 +168,7 @@ export default function ServerFormStep({
         editable={entry.editable}
         sections={[section]}
         agentKeys={serverAgentRoster(ctx)}
+        saved={(ctx.values[SERVERS_KEY]?.value as Record<string, McpServerEntry> | undefined)?.[serverKey]}
       />
     </div>
   );

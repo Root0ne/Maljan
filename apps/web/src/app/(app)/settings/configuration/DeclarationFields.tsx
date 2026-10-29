@@ -13,6 +13,7 @@ import { deepEqual } from "./mapEditorHelpers";
 import { useOptionalSettingsContext } from "./SettingsContext";
 import {
   DECLARATION_PANEL_COPY,
+  keptAsStored,
   readCallTimeout,
   readCredentialBootstrap,
   readReputationService,
@@ -253,6 +254,8 @@ export function ToolFactsBox({
   // stored map as a whole) is said on its own line, never dropped.
   const listed = new Set(changed.map(({ tool }) => tool));
   const unlisted = conflicts.filter((tool) => !listed.has(tool));
+  // Held as stored: what an edit could not write, kept while left as it is.
+  const kept = keptAsStored(inForce, serverKey, fields);
   return (
     <>
       <ReadField
@@ -267,13 +270,21 @@ export function ToolFactsBox({
         show={showJson}
         rows={6}
         mono
-        read={(text) => readToolFacts(text, serverKey, fields)}
+        read={(text) => readToolFacts(text, serverKey, fields, inForce)}
         onValue={(next) => {
           const staged = toolFactsChanges(next, shipped, fields);
           setHeld({ changes: staged, inForce: next });
           onChanges(staged);
         }}
       />
+      {kept.length > 0 && (
+        <p className="mt-1 text-[11px] text-text-secondary" data-tool-facts-kept={serverKey}>
+          {`Kept as stored while left as they are: ${kept.map(shownToolName).join(", ")}. ` +
+            "An edit could not write them (a change naming no kind of its own is read over " +
+            "the kind the server's listing declares); editing one checks it in full, and " +
+            "the other tools can be edited around them."}
+        </p>
+      )}
       {unlisted.length > 0 && (
         <p className="mt-1 text-[11px] text-status-orange" data-tool-conflicts-unlisted={serverKey}>
           {unlisted.includes(CHANGES_MARK)
@@ -322,6 +333,23 @@ export function ToolFactsBox({
   );
 }
 
+/* How a block starts or reaches its server (`tool_declarations.granted_launch`). */
+const LAUNCH_FIELDS = ["transport", "command", "args", "cwd", "url"] as const;
+
+/**
+ * Whether the trust `server` shows is withdrawn by the save: the API serves a
+ * block's trust as it is in force (`server_map.shown_trust_of`), and a trust
+ * holds only for the server it was shown or given for. A block pointed at
+ * another server in this edit loses it on save
+ * (`tool_declarations.settled_trust`) unless the operator ticks it again
+ * (staged as `""`), so the box shows it off until then.
+ */
+export function trustWithdrawn(server: McpServerEntry, saved: McpServerEntry | undefined): boolean {
+  if (!(server.trusts_served_declaration ?? false) || server.trust_granted_for === "") return false;
+  if (saved === undefined) return false;
+  return LAUNCH_FIELDS.some((name) => !deepEqual(server[name] ?? null, saved[name] ?? null));
+}
+
 const joinComma = (v: string[]) => v.join(", ");
 const joinLines = (v: string[]) => v.join("\n");
 const asIs = (v: string) => v;
@@ -337,14 +365,19 @@ const showDepth = (v: number | null) => (v === null ? "" : String(v));
 export default function DeclarationFields({
   serverKey,
   server,
+  saved,
   put,
 }: {
   serverKey: string;
   server: McpServerEntry;
+  /** The entry as saved, if it is: what its trust was shown for. */
+  saved?: McpServerEntry;
   put: (next: Partial<McpServerEntry>) => void;
 }) {
   const schema = useOptionalSettingsContext()?.schema;
   const fields = usableFields(schema?.tool_declaration_fields);
+  const withdrawn = trustWithdrawn(server, saved);
+  const trusted = (server.trusts_served_declaration ?? false) && !withdrawn;
   const shipped = shippedServerToolFacts(schema, serverKey);
   const open = server.sample_open ?? EMPTY_OPEN;
   const prepass = server.prepass_tools ?? EMPTY_PREPASS;
@@ -480,15 +513,29 @@ export default function DeclarationFields({
           />
           the platform&apos;s own server
         </label>
-        <label className="flex items-center gap-1 text-text-secondary">
-          <input
-            type="checkbox"
-            aria-label={`${serverKey} trusts_served_declaration`}
-            checked={server.trusts_served_declaration ?? false}
-            onChange={(e) => put({ trusts_served_declaration: e.target.checked })}
-          />
-          trust what the server declares of its own tools
-        </label>
+        <div className="text-text-secondary">
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              aria-label={`${serverKey} trusts_served_declaration`}
+              checked={trusted}
+              onChange={(e) =>
+                put({
+                  trusts_served_declaration: e.target.checked,
+                  // A tick is the operator's, for the server the block points at.
+                  trust_granted_for: e.target.checked ? "" : null,
+                })
+              }
+            />
+            trust what the server declares of its own tools
+          </label>
+          {withdrawn && (
+            <p className="text-[11px] text-status-orange mt-1" data-trust-withdrawn={serverKey}>
+              Pointed at another server than the one it trusts: the trust is withdrawn on save.
+              Tick it to trust the server it now points at.
+            </p>
+          )}
+        </div>
         <ReadField
           id={box("launcher_depth")}
           label="Launcher levels (top levels of the started process tree that are a launcher, not a reader; empty: none)"
