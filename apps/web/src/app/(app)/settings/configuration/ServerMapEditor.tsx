@@ -297,6 +297,7 @@ export function ServerDetail({
   editable = true,
   sections = ALL_SERVER_SECTIONS,
   agentKeys,
+  saved,
 }: {
   serverKey: string;
   /** The whole staged map, staged as a whole: the PATCH body is the full dict. */
@@ -320,6 +321,8 @@ export function ServerDetail({
   sections?: ServerSection[];
   /** The agents a server may be bound to: the roster (`rosterAgentKeys`). */
   agentKeys: readonly string[];
+  /** The server as saved, if it is: what its shown trust holds for. */
+  saved?: McpServerEntry;
 }) {
   const server = value[serverKey];
   const has = (section: ServerSection) => sections.includes(section);
@@ -651,6 +654,7 @@ export function ServerDetail({
         <DeclarationFields
           serverKey={serverKey}
           server={server}
+          saved={saved}
           put={(next) => put(serverKey, next)}
         />
       )}
@@ -840,6 +844,7 @@ export default function ServerMapEditor({
           builtinServers={new Set(entry.builtin_servers ?? [])}
           editable={entry.editable}
           agentKeys={agentRoster}
+          saved={savedMap[selected]}
         />
       )}
     </div>

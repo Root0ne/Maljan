@@ -378,3 +378,21 @@ async def test_a_repointed_built_in_does_not_post_back_its_shipped_trust(monkeyp
     kind = result.details["proposals"]["tools"]["scan"]["fields"]["kind"]
     assert kind["confidence"] == "medium"
     assert any("(the server's own claim)" in e for e in kind["evidence"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("granted", "confidence"), [("", "high"), ("0123456789abcdef", "medium")])
+async def test_a_repointed_built_in_is_probed_as_trusted_only_where_the_operator_ticked_it(
+    monkeypatch, granted, confidence
+):
+    """An operator's tick (``""``) holds for the server the entry points at;
+    the grant of another launch, carried through a repoint, does not."""
+    from maljan.core.config import Settings
+
+    monkeypatch.setattr("app.services.settings_probes.ServerHandle", _HandleThatDeclares)
+    entry = Settings(_env_file=None).mcp.servers["analysis"].model_dump(mode="json")
+    entry.update(command="/usr/bin/third-party-mcp", args=[], trust_granted_for=granted)
+    result = await probe_mcp({"name": "analysis", "entry": entry})
+    assert result.ok is True and result.details is not None
+    kind = result.details["proposals"]["tools"]["scan"]["fields"]["kind"]
+    assert kind["confidence"] == confidence

@@ -262,6 +262,11 @@ export interface McpServerEntry {
   reads_staged_sample?: boolean;
   platform_owned?: boolean;
   trusts_served_declaration?: boolean;
+  /** The launch the trust above holds for, as the API serves a trusted
+   *  block; sent back unchanged it keeps the trust, and pointing the block
+   *  elsewhere withdraws it. `""` is an operator's tick: the API records the
+   *  trust for the server the block is saved pointing at. */
+  trust_granted_for?: string | null;
   auto_name_prefixes?: string[];
   data_label_prefixes?: string[];
   reference_urls?: string[];

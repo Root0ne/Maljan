@@ -1678,6 +1678,14 @@ class MCPServerConfig(BaseModel):
     # cautious claims are read, said as the server's own, and the rest is
     # proposed to the operator.
     trusts_served_declaration: bool = False
+    # The launch an operator's trust in the server's own declaration was
+    # granted for (``tool_declarations.granted_launch``), recorded by a save
+    # where no shipped trust holds: the trust holds while the block still
+    # starts or reaches that server, and pointing the block elsewhere
+    # withdraws it. ``None``: no grant recorded. In an edit, ``""`` is the
+    # operator granting it now, for the launch the block is saved with
+    # (``tool_declarations.settled_trust``).
+    trust_granted_for: str | None = None
     # The prefixes the server's decompiler writes before an address when it
     # names a function itself (``FUN_``, ``fcn.``).
     auto_name_prefixes: list[str] = Field(default_factory=list)

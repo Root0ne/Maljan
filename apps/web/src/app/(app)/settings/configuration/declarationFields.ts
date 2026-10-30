@@ -237,11 +237,19 @@ export function readsNoKind(facts: Record<string, unknown>, fields: ToolDeclarat
  *  no kind sets at least one field and no kind-dependent one, a field
  *  counting as set only when it differs from its default (`isSet`). Without
  *  a split it can read (none, or one missing either half) the box checks the
- *  shape alone and the API answers the rest on save. */
+ *  shape alone and the API answers the rest on save.
+ *
+ *  `held` is what the box holds in force before this edit: a tool whose
+ *  declaration is typed exactly as held there is not this edit's and is not
+ *  checked against the field rules again, as the API keeps a stored change
+ *  sent back unchanged (a change stored with no kind of its own, laid over
+ *  the kind the server's listing declares). Every tool the edit adds or
+ *  changes is checked in full. */
 export function readToolFacts(
   text: string,
   serverKey = "",
-  served: ToolDeclarationFields | null = null
+  served: ToolDeclarationFields | null = null,
+  held: Record<string, unknown> = {}
 ): Read<Record<string, ToolFactsEntry>> {
   const fields = usableFields(served);
   const parsed = parseJson(text);
@@ -256,6 +264,7 @@ export function readToolFacts(
       return bad(`${tool}: spelled as this server's renamed tool; use the tool's own name`);
     }
     if (!isObject(facts)) return bad(`${tool}: expected an object of the tool's facts`);
+    if (Object.prototype.hasOwnProperty.call(held, tool) && sameJson(facts, held[tool])) continue;
     const kind = fields !== null && readsNoKind(facts, fields) ? "" : facts.kind;
     const noKind = kind === undefined || kind === "";
     if (!noKind && (typeof kind !== "string" || !WORD.test(kind))) {
@@ -285,6 +294,25 @@ export function readToolFacts(
     }
   }
   return ok(parsed.value as Record<string, ToolFactsEntry>);
+}
+
+/** The tools of `held` (a box's declarations in force) that the field rules
+ *  refuse in an edit: changes the API keeps as stored, such as one that names
+ *  no kind of its own and is laid over the kind the server's listing
+ *  declares. The box keeps them as they are (`readToolFacts`) and says so. */
+export function keptAsStored(
+  held: Record<string, unknown>,
+  serverKey: string,
+  served: ToolDeclarationFields | null
+): string[] {
+  if (usableFields(served) === null) return [];
+  return Object.entries(held)
+    .filter(([tool, facts]) => {
+      const one: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+      one[tool] = facts;
+      return readToolFacts(JSON.stringify(one), serverKey, served).error !== null;
+    })
+    .map(([tool]) => tool);
 }
 
 /** How the server's credential is obtained: a JSON object with an https `url`

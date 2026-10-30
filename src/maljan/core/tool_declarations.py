@@ -74,6 +74,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import lru_cache, partial
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import (
@@ -2731,20 +2732,116 @@ def shipped_launch(source: Any) -> str:
     return _shipped_launches().get(str(source), "")
 
 
+# How a block starts or reaches its server, as :func:`granted_launch` reads it.
+_LAUNCH_FIELDS: tuple[str, ...] = ("transport", "command", "args", "cwd", "url")
+
+
+def granted_launch(cfg: Any) -> str:
+    """A short digest of how a block starts or reaches its server, as written; ``""`` for none.
+
+    What an operator's trust in a server's own declaration is recorded with
+    (``trust_granted_for``): the block's transport, command, arguments,
+    working directory and address exactly as the block writes them. No file
+    is resolved and no release is read, so a grant reads alike on every host
+    and after every upgrade, and holds until the block is pointed elsewhere.
+    """
+    held = {
+        name: getattr(cfg, name, None)
+        for name in _LAUNCH_FIELDS
+        if getattr(cfg, name, None) not in (None, "", [], ())
+    }
+    if not held:
+        return ""
+    text = json.dumps(held, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _at_shipped_launch(source: Any, cfg: Any) -> bool:
+    """Whether ``cfg`` starts or reaches the server the built-in ``source`` ships trusting."""
+    shipped = shipped_launch(source)
+    if not shipped:
+        return False
+    trusting = {name: getattr(cfg, name, None) for name in _LAUNCH_FIELDS}
+    trusting["trusts_served_declaration"] = True
+    return launch_identity(SimpleNamespace(**trusting)) == shipped
+
+
 def trusts_served(source: Any, cfg: Any) -> bool:
     """Whether ``cfg``, the block of ``source``, trusts what its server declares of its tools.
 
     Its ``trusts_served_declaration``. The trust a built-in block ships with
     holds only while the block still starts or reaches the server it shipped
-    with (the same :func:`launch_identity`): a block pointed at another server
-    trusts it only where the operator set the flag themselves.
+    with (the same :func:`launch_identity`). Elsewhere a trust an operator
+    granted from the console holds only for the launch it was granted for
+    (``trust_granted_for``, :func:`granted_launch`), so pointing the block at
+    another server withdraws it; with no grant recorded, a block pointed away
+    from a built-in's server trusts it only where the flag was set in the
+    block itself (a configuration file), and a server an operator added
+    trusts it by its flag.
     """
     if getattr(cfg, "trusts_served_declaration", False) is not True:
         return False
     shipped = _shipped_launches().get(str(source))
-    if shipped is None or launch_identity(cfg) == shipped:
+    if shipped is not None and launch_identity(cfg) == shipped:
+        return True
+    granted = getattr(cfg, "trust_granted_for", None)
+    if granted:
+        return bool(granted == granted_launch(cfg))
+    if shipped is None:
         return True
     return "trusts_served_declaration" in (getattr(cfg, "model_fields_set", None) or set())
+
+
+def settled_trust(source: Any, cfg: Any, sent: Any) -> dict[str, Any]:
+    """What a save records of ``cfg``'s trust in its server's own declaration.
+
+    ``cfg`` is the block as saved, a built-in's fields it leaves out filled
+    from what it ships, and ``sent`` the ``trust_granted_for`` the edit sent.
+    The console serves a trusted block with the launch its trust holds for
+    (:func:`shown_trust`), and sends an operator's tick as ``""``:
+
+    * at the server a built-in ships trusting, the shipped trust holds and no
+      grant is recorded;
+    * elsewhere, a trust sent with ``""`` or with this launch's grant is the
+      operator's and is recorded with this launch;
+    * a trust sent with the grant of another launch is a trusted block
+      pointed elsewhere in this edit: it is withdrawn, never carried over (a
+      built-in's flag is left to what it ships, which holds only at its
+      shipped server; any other block's is turned off);
+    * a trust sent with no grant (``None``: a shipped default posted back, an
+      older client, a script) records none, and is read as ever: a built-in
+      pointed elsewhere does not trust its server.
+
+    Returns the two fields to store; ``trust_granted_for`` is ``None`` for none.
+    """
+    flag = getattr(cfg, "trusts_served_declaration", False) is True
+    if not flag or _at_shipped_launch(source, cfg):
+        return {"trusts_served_declaration": flag, "trust_granted_for": None}
+    if sent is None:
+        return {"trusts_served_declaration": True, "trust_granted_for": None}
+    here = granted_launch(cfg)
+    if here and sent in ("", here):
+        return {"trusts_served_declaration": True, "trust_granted_for": here}
+    return {
+        "trusts_served_declaration": bool(shipped_launch(source)),
+        "trust_granted_for": None,
+    }
+
+
+def shown_trust(source: Any, cfg: Any) -> dict[str, Any]:
+    """The trust of ``cfg`` as the console shows it: in force, with the launch it holds for.
+
+    ``trusts_served_declaration`` is whether the block trusts its server's
+    declaration now (:func:`trusts_served`), never a shipped value a block
+    pointed elsewhere no longer holds; ``trust_granted_for`` is the launch a
+    trust in force holds for (:func:`granted_launch`), which an unchanged
+    save sends back and :func:`settled_trust` reads.
+    """
+    trusted = trusts_served(source, cfg)
+    return {
+        "trusts_served_declaration": trusted,
+        "trust_granted_for": (granted_launch(cfg) or None) if trusted else None,
+    }
 
 
 @dataclass(frozen=True)

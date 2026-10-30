@@ -46,6 +46,8 @@ from maljan.core.tool_declarations import (
     kept_stored_changes,
     merge_tool_facts,
     sent_names_refusal,
+    settled_trust,
+    shown_trust,
     stored_changes,
     strip_declaration_defaults,
     with_mark,
@@ -135,6 +137,47 @@ def env_of_row(row_value: Any) -> dict[str, Any] | None:
     except ValueError:
         return None
     return env if isinstance(env, dict) else None
+
+
+# The fields of a stored entry its trust in its server's own declaration is read from.
+_TRUST_FIELDS = (
+    "transport",
+    "command",
+    "args",
+    "cwd",
+    "url",
+    "trusts_served_declaration",
+    "trust_granted_for",
+)
+
+
+def shown_trust_of(key: str, entry: Any) -> dict[str, Any]:
+    """A stored entry's trust in its server's own declaration as the console shows it.
+
+    In force (``tool_declarations.shown_trust``): a built-in pointed at
+    another server shows no trust its shipped value no longer gives it, and a
+    trusted entry carries the launch its trust holds for, which a save of the
+    entry unchanged sends back (``tool_declarations.settled_trust``). An entry
+    that trusts nothing and never set the flag is shown without it, so a save
+    of it unchanged stores no flag and the block keeps following what ships.
+    Empty for an entry that does not read as a block (shown as stored).
+    """
+    if not isinstance(entry, dict):
+        return {}
+    held = {name: entry[name] for name in _TRUST_FIELDS if name in entry}
+    try:
+        cfg = MCPServerConfig.model_validate(held)
+    except ValidationError:
+        return {}
+    builtin = _builtin_servers().get(key)
+    if builtin is not None:
+        fill_declaration(cfg, builtin)
+    shown = shown_trust(f"mcp:{key}", cfg)
+    if shown["trust_granted_for"] is None:
+        shown.pop("trust_granted_for")
+    if not shown["trusts_served_declaration"] and "trusts_served_declaration" not in entry:
+        shown.pop("trusts_served_declaration")
+    return shown
 
 
 class ServerMapError(Exception):
@@ -263,8 +306,16 @@ def validate_server_map(
             fill_declaration(model, builtin)
         dumped = model.model_dump(mode="json")
         dumped.pop("auth_token", None)
+        # The trust in the server's own declaration is the operator's only where
+        # they gave it, and only for the server the block points at
+        # (``tool_declarations.settled_trust``): a shipped trust posted back by a
+        # block pointed elsewhere, or a granted one carried through a repoint,
+        # is never stored as a grant.
+        dumped.update(settled_trust(f"mcp:{key}", model, entry.get("trust_granted_for")))
         if builtin is not None:
             dumped = strip_declaration_defaults(dumped, builtin)
+        if not dumped.get("trust_granted_for"):
+            dumped.pop("trust_granted_for", None)
         if isinstance(facts_in, dict):
             if facts_in == stored_facts and holds_changes(stored_facts):
                 # Sent back as stored: stored as it was, a change this release
@@ -299,6 +350,7 @@ def validate_server_map(
         if key not in out:
             entry = default.model_dump(mode="json")
             entry.pop("auth_token", None)
+            entry.pop("trust_granted_for", None)
             out[key] = strip_declaration_defaults(entry, default)
     return out
 
