@@ -133,16 +133,262 @@ def browser_user_agent_prefixes(path: str = DEFAULT_ARGUMENT_ROLES) -> tuple[str
     return tuple(str(prefix) for prefix in listed if prefix)
 
 
+@dataclass(frozen=True)
+class BrowserTokens:
+    """The tokens the common browsers send in their user agents, casefolded."""
+
+    products: frozenset[str]
+    # A product a browser sends only beside one of the products named for it.
+    products_beside: Mapping[str, frozenset[str]]
+    words: frozenset[str]
+    # A comment word a browser sends only right after one of the words named for it.
+    words_after: Mapping[str, frozenset[str]]
+    # The bare language codes an older browser placed in its comment.
+    languages: frozenset[str]
+    # A comment word after which the comment's entries name the device.
+    device_follows: frozenset[str]
+    # The well-known crawlers' own names, each with the domains its info URL is at.
+    crawlers: Mapping[str, tuple[str, ...]]
+
+
+@lru_cache(maxsize=4)
+def browser_user_agent_tokens(path: str = DEFAULT_ARGUMENT_ROLES) -> BrowserTokens:
+    """The product names and comment words of the browsers' user agents, from the table."""
+    document = json.loads(resolve_data(path).read_text(encoding="utf-8"))
+    listed = (document.get("browser_user_agents") or {}).get("tokens") or {}
+
+    def _set(words: Any) -> frozenset[str]:
+        return frozenset(str(word).casefold() for word in words or () if word)
+
+    def _bound(key: str) -> dict[str, frozenset[str]]:
+        return {str(name).casefold(): _set(by) for name, by in (listed.get(key) or {}).items()}
+
+    return BrowserTokens(
+        products=_set(listed.get("products")),
+        products_beside=_bound("products_beside"),
+        words=_set(listed.get("comment_words")),
+        words_after=_bound("comment_words_after"),
+        languages=_set(listed.get("languages")),
+        device_follows=_set(listed.get("device_follows")),
+        crawlers={
+            str(name).casefold(): tuple(sorted(_set(domains)))
+            for name, domains in (listed.get("crawlers") or {}).items()
+        },
+    )
+
+
+# The characters a product token takes besides letters and digits (RFC 9110, tchar).
+_TCHAR = frozenset("!#$%&'*+-.^_`|~")
+_DIGITS = "0123456789"
+_VERSION_CHARS = frozenset(_DIGITS + "._")
+# What a version after a word's ``/`` or ``:`` holds past its leading digit.
+_VERSION_TAIL_CHARS = frozenset(_DIGITS + "._-")
+_UPPER = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
+def _is_product(text: str) -> bool:
+    name, _, version = text.partition("/")
+    return all(
+        part and all(c.isascii() and (c.isalnum() or c in _TCHAR) for c in part)
+        for part in ((name, version) if "/" in text else (name,))
+    )
+
+
+def _all_digits(text: str) -> bool:
+    return bool(text) and all(c in _DIGITS for c in text)
+
+
+def _is_version_word(word: str) -> bool:
+    """``5.1``, ``10_15_7`` or a build such as ``15E148``: a version, not a word."""
+    if word[:1].isdigit() and all(c in _VERSION_CHARS for c in word):
+        return True
+    # A build: digits, one capital letter, digits.
+    rest = word.lstrip(_DIGITS)
+    return len(rest) < len(word) and rest[:1] in _UPPER and _all_digits(rest[1:])
+
+
+def _is_version_tail(tail: str) -> bool:
+    """What a word's ``/`` or ``:`` is followed by when it is that word's version."""
+    return tail[:1].isdigit() and all(c in _VERSION_TAIL_CHARS for c in tail)
+
+
+def _is_locale(word: str, languages: frozenset[str]) -> bool:
+    """``en-US``, or a bare language code the table lists: the locale an older browser sent."""
+    primary, dash, region = word.partition("-")
+    if not dash:
+        return word in languages
+    return (
+        len(primary) == 2
+        and primary.isascii()
+        and primary.isalpha()
+        and primary.islower()
+        and len(region) == 2
+        and region.isascii()
+        and region.isalpha()
+    )
+
+
+def _comment_word_is_known(word: str, previous: str, tokens: BrowserTokens) -> bool:
+    if word[0].isdigit():
+        return _is_version_word(word)
+    if _is_locale(word, tokens.languages):
+        return True
+    folded = word.casefold()
+    if folded in tokens.words:
+        return True
+    if folded in tokens.words_after:
+        # Xbox One: the word is a browser's only right after its own.
+        return previous.casefold() in tokens.words_after[folded]
+    for separator in ("/", ":"):
+        if separator in folded:
+            # A word's own version after it: rv:121.0, Trident/7.0; never rv:evil.
+            head, _, tail = folded.partition(separator)
+            return head in tokens.words and _is_version_tail(tail)
+    # A version run onto the word: InfoPath.2, SLCC2, GTB7.5.
+    return folded.rstrip("0123456789._") in tokens.words
+
+
+def _crawler(entry: str, tokens: BrowserTokens) -> str:
+    """The listed crawler a whole product or comment entry is, ``""`` for none.
+
+    ``name``, ``name/<version>`` or ``name <version>``: the crawler's own token,
+    with no more than its version beside it.
+    """
+    text = " ".join(entry.split()).casefold()
+    if text in tokens.crawlers:
+        return text
+    name, slash, tail = text.partition("/")
+    if slash:
+        return name if name in tokens.crawlers and _is_version_tail(tail) else ""
+    name, _, version = text.rpartition(" ")
+    return name if name in tokens.crawlers and _is_version_word(version) else ""
+
+
+def _is_crawler_info_url(entry: str, crawler: str, tokens: BrowserTokens) -> bool:
+    """``+http://host/page`` at the crawler's own domain, as its own token names it."""
+    words = entry.split()
+    if len(words) != 1:
+        return False
+    scheme, separator, rest = words[0].removeprefix("+").partition("://")
+    if not separator or scheme.casefold() not in ("http", "https"):
+        return False
+    host = rest
+    for end in "/?#:":
+        host = host.split(end, 1)[0]
+    host = host.casefold()
+    return any(host == domain or host.endswith("." + domain) for domain in tokens.crawlers[crawler])
+
+
+def _user_agent_parts(text: str) -> list[tuple[str, str]] | None:
+    """The header's products and comments in order, or None where it is not its grammar.
+
+    One pass over the text: a comment runs to the first ``)`` after its ``(``, and
+    a nested or unclosed comment, a backslash in one, or a product holding a
+    character no token takes reads as no header at all.
+    """
+    parts: list[tuple[str, str]] = []
+    i, end = 0, len(text)
+    while i < end:
+        c = text[i]
+        if c.isspace():
+            i += 1
+        elif c == "(":
+            close = text.find(")", i + 1)
+            if close < 0:
+                return None
+            body = text[i + 1 : close]
+            if "(" in body or "\\" in body:
+                return None
+            parts.append(("comment", body))
+            i = close + 1
+        else:
+            j = i
+            while j < end and not text[j].isspace() and text[j] != "(":
+                j += 1
+            product = text[i:j]
+            if not _is_product(product):
+                return None
+            parts.append(("product", product))
+            i = j
+    return parts
+
+
+def _product_is_known(name: str, names: frozenset[str], tokens: BrowserTokens) -> bool:
+    """A browser's product, or one it sends beside its own (QQBrowser's ``Core``)."""
+    if name in tokens.products:
+        return True
+    beside = tokens.products_beside.get(name)
+    return beside is not None and not beside.isdisjoint(names)
+
+
+def distinctive_user_agent_token(value: Any) -> str:
+    """The first token a browser-shaped user agent carries that the browsers do not send.
+
+    ``""`` for one that does not begin as the browsers' do, for one whose every
+    product and comment token the browsers send, and for one that cannot be read
+    as the header's grammar: each stays a browser's, unpublished. A well-known
+    crawler's own token, and its info URL at its own domain right after it, is not
+    distinctive: an indicator on it would match that crawler's traffic.
+    """
+    text = str(value or "")
+    if not text.startswith(browser_user_agent_prefixes()):
+        return ""
+    parts = _user_agent_parts(text)
+    if not parts:
+        return ""
+    tokens = browser_user_agent_tokens()
+    names = frozenset(part.split("/", 1)[0].casefold() for kind, part in parts if kind == "product")
+    crawler = ""  # the crawler whose token came last, whose info URL may follow
+    for kind, part in parts:
+        if kind == "product":
+            crawler = _crawler(part, tokens)
+            name = part.split("/", 1)[0].casefold()
+            if not crawler and not _product_is_known(name, names, tokens):
+                return part
+            continue
+        for entry in (entry for entry in part.replace(",", ";").split(";") if entry.strip()):
+            if crawler and _is_crawler_info_url(entry, crawler, tokens):
+                crawler = ""
+                continue
+            crawler = ""
+            words = entry.split()
+            if words[0].casefold() in tokens.device_follows:
+                break  # the rest of the comment names the device
+            if all(
+                _comment_word_is_known(word, words[i - 1] if i else "", tokens)
+                for i, word in enumerate(words)
+            ):
+                continue
+            crawler = _crawler(entry, tokens)
+            if not crawler:
+                return entry.strip()
+        crawler = ""
+    return ""
+
+
 def reads_as_a_browser_user_agent(value: Any) -> bool:
-    """Whether a user agent begins as the common browsers' do: no pattern is written for it."""
-    return str(value or "").startswith(browser_user_agent_prefixes())
+    """Whether a user agent reads as the common browsers' own: no pattern is written for it.
+
+    It begins as theirs do and carries no token they do not send
+    (:func:`distinctive_user_agent_token`).
+    """
+    text = str(value or "")
+    return text.startswith(browser_user_agent_prefixes()) and not distinctive_user_agent_token(text)
 
 
-# Why a bound user agent that begins as a browser's is not published.
+# Why a bound user agent that reads as a browser's is not published.
 BROWSER_LIKE = (
     "but it begins as the common browsers' user agents do, and an indicator for it would "
     "match their ordinary traffic"
 )
+
+
+def carries_its_own_token(token: str) -> str:
+    """Why a bound user agent that begins as a browser's is published all the same."""
+    return (
+        f"it begins as the common browsers' user agents do, but carries '{token}', "
+        "a token their own user agents do not send"
+    )
 
 
 def _field(obj: Any, name: str) -> Any:
