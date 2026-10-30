@@ -24,13 +24,13 @@ import re
 from typing import Any
 
 from maljan.core.config import (
-    BUILTIN_SERVER_KEYS,
-    RESERVED_SERVER_KEYS,
     SERVER_KEY_PATTERN,
     MCPServerConfig,
     _builtin_definitions,
     _builtin_servers,
     builtin_env_allow,
+    reserved_server_keys,
+    shipped_server_keys,
 )
 from maljan.core.settings_overrides import (
     SERVER_MAP_PATH,
@@ -201,6 +201,8 @@ def validate_server_map(
 
     out: dict[str, Any] = {}
     builtins = _builtin_servers()
+    shipped_keys = set(shipped_server_keys(builtins))
+    reserved = set(reserved_server_keys())
     for key, entry in value.items():
         if not _KEY_RE.match(str(key)):
             errors[str(key)] = (
@@ -208,8 +210,8 @@ def validate_server_map(
                 "characters of letters, digits, '-' or '_'"
             )
             continue
-        known = set(stored or {}) | set(BUILTIN_SERVER_KEYS)
-        if key in RESERVED_SERVER_KEYS and key not in BUILTIN_SERVER_KEYS and key not in known:
+        known = set(stored or {}) | shipped_keys
+        if key in reserved and key not in known:
             errors[key] = f"{key!r} is reserved for a provider-owned server"
             continue
         if not isinstance(entry, dict):
@@ -331,7 +333,7 @@ def validate_server_map(
                 changes.update(kept)
                 if changes:
                     dumped["tool_facts"] = with_mark(changes)
-        if key in BUILTIN_SERVER_KEYS:
+        if key in shipped_keys:
             # The row an operator saves is the one every later load starts
             # from, so the names the sidecar cannot run without are written
             # into it rather than left for the settings model to repair on each

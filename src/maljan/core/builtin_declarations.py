@@ -817,7 +817,8 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
 # radare2's is ``r2-work``, which may not be hidden; its non-secret variable, which
 # texts written before the variable was retired still name, is kept whole by
 # the redaction of published text (``shipped_variable_names``). The
-# auto-name prefixes together are ``pipeline.validation._GENERIC_FUNCTION_NAME``'s;
+# auto-name prefixes are read with every other source's by
+# ``pipeline.validation.generic_function_name``;
 # Ghidra's data-label prefix is one of ``undeclared_tools.DEFAULT_DATA_LABEL_WORDS``,
 # read with them as a code location (``reporting.claim_coverage``).
 _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {

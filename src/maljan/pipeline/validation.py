@@ -62,7 +62,6 @@ from maljan.core.declared_reading import (
 from maljan.core.logger import logger
 from maljan.core.spend import validation_retry
 from maljan.core.undeclared_tools import (
-    auto_name_pattern,
     declared_auto_name_pattern,
     entry_address_arguments,
     entry_decompiles,
@@ -5473,10 +5472,7 @@ _ADDRESS_LIST_ARGUMENTS = ("functions", "addresses")
 _NAME_ARGUMENTS = ("name", "function_name", "function", "symbol")
 # A decompiler's own name for a function it was given no name for: the address
 # after a prefix its server declares (``auto_name_prefixes``: ``FUN_``,
-# ``fcn.``) or one of the defaults. ``_GENERIC_FUNCTION_NAME`` is the defaults'
-# pattern; :func:`generic_function_name` adds every prefix the run's servers
-# declare.
-_GENERIC_FUNCTION_NAME = auto_name_pattern()
+# ``fcn.``) or one of the defaults, read by :func:`generic_function_name`.
 
 
 def generic_function_name() -> re.Pattern[str]:

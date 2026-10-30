@@ -117,13 +117,16 @@ def test_the_mcp_group_exposes_the_server_registry_and_the_breaker():
     """``mcp.servers`` is the operator-configurable server surface and
     ``mcp.breaker.*`` how a job treats a server that keeps failing;
     ``mcp.answer_scope_notes`` whether the model is shown what each tool's
-    answer shows (X21, off until its A/B); the catalog walks ``model_fields``
-    and must not grow another ``mcp.*`` leaf without a deliberate decision."""
+    answer shows (X21, off until its A/B); ``mcp.breaker.default_call_timeout_seconds``
+    the budget of a server that declares none (T-430); the catalog walks
+    ``model_fields`` and must not grow another ``mcp.*`` leaf without a
+    deliberate decision."""
     paths = {e.path for e in cat.core_catalog()}
     assert sorted(p for p in paths if p.startswith("mcp.")) == [
         "mcp.answer_scope_notes",
         "mcp.breaker.call_timeout_seconds",
         "mcp.breaker.cooldown_seconds",
+        "mcp.breaker.default_call_timeout_seconds",
         "mcp.breaker.failures_to_open",
         "mcp.breaker.max_concurrent_calls",
         "mcp.servers",
