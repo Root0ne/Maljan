@@ -291,6 +291,40 @@ select:disabled {
   }
 }
 
+/* ── Light theme ────────────────────────────────────────────────────────
+   The same tokens on paper. Only a page that sets `data-ui-theme="light"` on
+   <html> reads them (the analysis preview does, by the reader's choice or the
+   OS setting), so every page that does not ask stays as it was. Contrast vs
+   --bg-surface (#ffffff): primary ~15.8:1, secondary ~6.1:1, muted ~5.9:1,
+   tertiary ~4.6:1; the status hues are the darker rungs so a word in one
+   still clears AA on white and on --bg-deep (#f6f8fa). */
+html[data-ui-theme="light"] {
+  color-scheme: light;
+  --bg-deep: #f6f8fa;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f3f5f7;
+  --bg-active: #eaeef2;
+  --bg-hover: #f3f5f7;
+  --bg-reading: #fbfaf8;
+  --border: #d0d7de;
+  --border-light: #e4e8ec;
+  --text-primary: #1f2328;
+  --text-secondary: #57606a;
+  --text-muted: #59636e;
+  --text-tertiary: #6e7781;
+  --text-disabled: #8c959f;
+  --status-red: #cf222e;
+  --status-orange: #bc4c00;
+  --status-green: #1a7f37;
+  --status-blue: #0969da;
+  --status-purple: #8250df;
+  --accent: #0969da;
+  --accent-hover: #0550ae;
+  --accent-fill: #0969da;
+  --accent-fill-hover: #0550ae;
+  --accent-strong: #0550ae;
+}
+
 /* ── Table ──────────────────────────────────────────── */
 table {
   border-collapse: collapse;

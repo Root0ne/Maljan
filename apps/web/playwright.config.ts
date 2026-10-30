@@ -93,6 +93,10 @@ export default defineConfig({
       // flow exists even on a machine configured to bypass it.
       NEXT_PUBLIC_AUTH_DISABLED: "false",
 
+      // The analysis preview answers 404 unless the build opts in; the suite
+      // covers it (analysis-preview.spec.ts), and today's pages ignore it.
+      NEXT_PUBLIC_UI_NEXT: "true",
+
       /* Point the client at the page's own origin. Two things follow.
        *
        * Hermetic: `lib/api.ts` otherwise defaults to http://127.0.0.1:8000, so
