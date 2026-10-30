@@ -503,7 +503,12 @@ class MarkdownRenderer:
         # not headed as if it were: each of its lines names its own voice.
         lines = [_heading(1, "Key findings", REPORT_MODEL if written else PER_ROW), ""]
         for finding in report.key_findings:
-            lines.append(_item(_cited(ctx.line(finding.text), finding.evidence_ids, finding.text)))
+            lines.append(
+                _item(
+                    _cited(ctx.line(finding.text), finding.evidence_ids, finding.text)
+                    + ctx.cited_row_mark(finding)
+                )
+            )
         if summary:
             if report.key_findings:
                 lines.append("")
@@ -748,6 +753,7 @@ class MarkdownRenderer:
                 _step(
                     index,
                     _cited(f"{ctx.line(step.action)} ({mark})", step.evidence_refs, step.action)
+                    + ctx.cited_row_mark(step)
                     + note,
                 )
             )
@@ -887,6 +893,7 @@ class MarkdownRenderer:
                 cited = ", ".join(item.evidence_refs) or "no evidence cited"
                 if index + 1 in ctx.config_unheld:
                     cited += " (unresolved: report.value_not_in_cited_entry)"
+                cited += ctx.cited_row_mark(item)
                 value = ctx.cell(item.value) + ctx.publish_state(item.value)
                 body.append(_row(ctx.cell(item.key), value, how, cited))
             blocks.append("\n".join(body))
@@ -998,7 +1005,8 @@ class MarkdownRenderer:
                             ctx.cell(cmd.id or "-"),
                             ctx.cell(cmd.name),
                             ctx.cell(cmd.description or "-"),
-                            ", ".join(cmd.evidence_refs) or "no evidence cited",
+                            (", ".join(cmd.evidence_refs) or "no evidence cited")
+                            + ctx.cited_row_mark(cmd),
                         )
                     )
                 body.append("")
@@ -1014,7 +1022,7 @@ class MarkdownRenderer:
                         _row(
                             _code_span(ctx.plain(flag.flag)),
                             ctx.cell(flag.description or "-"),
-                            flag.evidence_ref or "no evidence cited",
+                            (flag.evidence_ref or "no evidence cited") + ctx.cited_row_mark(flag),
                         )
                     )
             blocks.append("\n".join(body).rstrip())
@@ -1053,7 +1061,8 @@ class MarkdownRenderer:
                         "; ".join(_endpoint_with_state(e, ctx) for e in ch.endpoints) or "-",
                         ctx.cell(ch.encryption or "-"),
                         ctx.cell(fmt or "-"),
-                        ", ".join(dict.fromkeys(refs)) or "no evidence cited",
+                        (", ".join(dict.fromkeys(refs)) or "no evidence cited")
+                        + ctx.cited_row_mark(ch),
                     )
                 )
         net = report.network
@@ -2605,8 +2614,16 @@ class _Context:
         # not wherever its word stands in prose.
         marks: dict[str, list[str]] = {}
         self.category_mark = ""
+        # The IOC table's answers, read on first use by ``publish_state``.
+        self._answers: Any = None
         stored = list(getattr(report, "flagged_statements", None) or [])
-        for statement in with_decided_statements(stored, report):
+        for statement in _joined_marks(with_decided_statements(stored, report)):
+            if statement.code == "report.unpublished_value" and self._all_stated(
+                statement.sentence
+            ):
+                # Every value of the sentence stands with a publish state the
+                # table agrees with: a mark beside it would state it twice.
+                continue
             if statement.sentence.strip():
                 try:
                     label = _inline_safe(statement.label, pipes=False, plain=self._defang)
@@ -2619,8 +2636,6 @@ class _Context:
                     continue
                 if mark not in marks.setdefault(statement.sentence, []):
                     marks[statement.sentence].append(mark)
-        # The IOC table's answers, read on first use by ``publish_state``.
-        self._answers: Any = None
         self.flagged = sorted(
             ((sentence, " ".join(found)) for sentence, found in marks.items()),
             key=lambda pair: -len(pair[0]),
@@ -2717,20 +2732,9 @@ class _Context:
         that reason, and a lookup that fails says the state is unknown.
         """
         try:
-            from maljan.pipeline.validation import _unstated_values
             from maljan.reporting.defang import defang
 
-            if self._answers is None:
-                try:
-                    from maljan.reporting.narrative_agent import published_answers
-
-                    if not self._table_read:
-                        raise RuntimeError("the IOC table could not be read")
-                    self._answers = published_answers(self.report, rows=self.iocs)
-                except Exception as exc:  # noqa: BLE001 — every value is then refused
-                    logger.debug("markdown: the IOC table was not read (%s).", exc)
-                    self._answers = lambda kind, value: TABLE_NOT_READ
-            found = _unstated_values(str(text or ""), self._answers)
+            found = self._unstated(text)
             if not found:
                 return ""
             if len(found) == 1:
@@ -2741,6 +2745,63 @@ class _Context:
         except Exception as exc:  # noqa: BLE001 — the cell says what is not known
             logger.debug("markdown: a cell's publish state was not read (%s).", exc)
             return f" ({STATE_UNKNOWN})" if _names_a_network_value(text) else ""
+
+    def _all_stated(self, sentence: str) -> bool:
+        """Whether each unpublished value of ``sentence`` has a state the table agrees with.
+
+        Fails towards the mark: a sentence that cannot be read keeps it.
+        """
+        try:
+            return not self._unstated(sentence)
+        except Exception as exc:  # noqa: BLE001 — the mark is kept
+            logger.debug("markdown: a marked sentence was not read again (%s).", exc)
+            return False
+
+    def _unstated(self, text: Any) -> list[tuple[str, str, str]]:
+        """``(kind, value, state)`` for each value of ``text`` this run does not publish,
+        written without a publish state the IOC table agrees with (``_unstated_values``).
+
+        The table's answers are read once, on first use; a table that cannot be
+        read refuses every value for that reason.
+        """
+        from maljan.pipeline.validation import _unstated_values
+
+        if self._answers is None:
+            try:
+                from maljan.reporting.narrative_agent import published_answers
+
+                if not self._table_read:
+                    raise RuntimeError("the IOC table could not be read")
+                self._answers = published_answers(self.report, rows=self.iocs)
+            except Exception as exc:  # noqa: BLE001 — every value is then refused
+                logger.debug("markdown: the IOC table was not read (%s).", exc)
+                self._answers = lambda kind, value: TABLE_NOT_READ
+        return _unstated_values(str(text or ""), self._answers)
+
+    def cited_row_mark(self, row: Any) -> str:
+        """The marks of a table row's wrong citations, printed beside its evidence, or ``""``.
+
+        A wrong citation a row states under its record's citations is recorded
+        as one of the row's texts under the ids it cites (``cited_row_text``);
+        the row is found by the same text, so the same words in a row citing
+        other entries are not marked.
+        """
+        from maljan.pipeline.validation import cited_row_text
+
+        try:
+            cited = row if isinstance(row, dict) else row.model_dump()
+            texts = [
+                text
+                for value in cited.values()
+                for text in (value if isinstance(value, list | tuple) else [value])
+                if isinstance(text, str) and text.strip()
+            ]
+            keys = {cited_row_text(text, cited) for text in texts}
+        except Exception as exc:  # noqa: BLE001 — a mark is never worth a report
+            logger.debug("markdown: a row's citations were not read (%s).", exc)
+            return ""
+        marks = [mark for sentence, mark in self.flagged if sentence in keys]
+        return f" {' '.join(dict.fromkeys(marks))}" if marks else ""
 
     def plain(self, text: str) -> str:
         """A value with the run's network indicators defanged and nothing else changed."""
@@ -3106,6 +3167,7 @@ _FLAG_WORDS = {
     "narrative.ungrounded_capability": "not established by this run",
     "report.rule_match_as_action": "a rule match only, stated as an action",
     "report.unpublished_value": "not published by this run",
+    "report.citation_wrong_entry": "cited to an entry that does not hold it",
     PUBLISHED_TECHNIQUE_DOUBTED_CODE: "published by this run",
     CATEGORY_TYPE_UNSTATED_CODE: "not the export's malware type",
 }
@@ -4169,6 +4231,29 @@ def _finding_text(row: dict[str, Any], plain: Callable[[str], str] = _defanged_t
         return STATE_UNKNOWN
 
 
+# The marks whose labels name values: several on one sentence or row read as
+# one list in one mark.
+_JOINED_MARK_CODES = frozenset({"report.citation_wrong_entry"})
+
+
+def _joined_marks(rows: Sequence[Any]) -> list[Any]:
+    """``rows`` with the labels of one sentence's marks of a joined code in one row."""
+    out: list[Any] = []
+    joined: dict[tuple[str, str, bool], int] = {}
+    for row in rows:
+        if row.code not in _JOINED_MARK_CODES:
+            out.append(row)
+            continue
+        key = (row.sentence, row.code, row.asked)
+        if key not in joined:
+            joined[key] = len(out)
+            out.append(row)
+        elif row.label and row.label not in out[joined[key]].label:
+            first = out[joined[key]]
+            out[joined[key]] = first.model_copy(update={"label": f"{first.label}; {row.label}"})
+    return out
+
+
 def _flag_mark(code: str, label: str, *, asked: bool = True) -> str:
     """The mark printed after a sentence a check left standing, in the platform's voice.
 
@@ -4739,7 +4824,12 @@ def _encryption_table(enc: Any, ctx: _Context) -> list[str]:
         return []
     out = [f"_{REPORT_MODEL}:_ encryption scheme", "", _row("Property", "Value"), _divider(2)]
     out.extend(_row(label, ctx.cell(value)) for label, value in present)
-    out.append(_row("Evidence", _said(enc.evidence_ref) or "no evidence cited"))
+    out.append(
+        _row(
+            "Evidence",
+            (_said(enc.evidence_ref) or "no evidence cited") + ctx.cited_row_mark(enc),
+        )
+    )
     return out
 
 
@@ -5039,6 +5129,7 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
             cited += " (unresolved: report.identifier_uncited)"
         if index + 1 in ctx.identifier_unheld:
             cited += " (unresolved: report.value_not_in_cited_entry)"
+        cited += ctx.cited_row_mark(item)
         where = published(item.value)
         lines.append(
             _row(

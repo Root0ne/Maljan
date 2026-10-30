@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import nullcontext
+from dataclasses import replace
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -62,6 +63,7 @@ from maljan.pipeline.validation import (
     misstated_entry_contents,
     narrative_capability_violations,
     pack_line_ids,
+    raised_only_in_retry,
     recommendation_indicator_violations,
     recommendation_technique_violations,
     record_flagged_statements,
@@ -623,6 +625,14 @@ def findings_lines(
 # The narrative's prose fields: the only ones a citation is looked for in.
 NARRATIVE_PROSE = ("executive_summary", "key_findings")
 
+# What a finding first raised by the answer to the summary's retry says of
+# itself: the retry was spent on the first answer's findings, all asked
+# together, and none was left for this one.
+ONLY_IN_THE_RETRY = (
+    "Not asked: it first appeared in the answer to the summary's retry, which had asked "
+    "about the first answer's findings, and no retry was left."
+)
+
 
 def published_technique_ids(report: MalwareReport) -> list[str]:
     """The technique ids the report's ATT&CK table publishes, in its order."""
@@ -1059,6 +1069,14 @@ class NarrativeAgent:
             answer_read[0] = structured_answer_text(answer, _message_text)
             return _narrative_payload(answer)
 
+        # Every finding the summary was shown: one first raised by the retry's
+        # answer was never put to the model, and is recorded as not asked.
+        shown: list[Violation] = []
+
+        def _on_feedback(found: Sequence[Violation]) -> None:
+            shown.extend(found)
+            self.validation_tally.count(found)
+
         try:
             payload, violations, retries = await retry_with_feedback(
                 _run,
@@ -1080,7 +1098,7 @@ class NarrativeAgent:
                     lambda p: recommendation_technique_violations(p, published),
                 ],
                 parse=_parse,
-                on_feedback=self.validation_tally.count,
+                on_feedback=_on_feedback,
                 # Only a kept structured answer's retry offers the schema's tool again.
                 reply_to_calls=kept is not None,
             )
@@ -1117,7 +1135,12 @@ class NarrativeAgent:
                 "; ".join(f"{v.path}: {v.message}" for v in broken),
             )
             return None
-        self._record_ungrounded(ungrounded)
+        late = [v for v in ungrounded if retries and raised_only_in_retry(v, shown)]
+        self._record_ungrounded([v for v in ungrounded if v not in late])
+        self._record_ungrounded(
+            [replace(v, message=f"{v.message} {ONLY_IN_THE_RETRY}", sentence="") for v in late],
+            asked=False,
+        )
         try:
             return NarrativeOutput.model_validate(payload)
         except Exception as exc:  # noqa: BLE001
@@ -1265,7 +1288,7 @@ class NarrativeAgent:
             len(violations),
             ", ".join(v.path for v in violations),
         )
-        self.validation_tally.record_unresolved("narrative", violations)
+        self.validation_tally.record_unresolved("narrative", violations, asked=asked)
         record_flagged_statements(getattr(self, "_report", None), violations, asked=asked)
 
     def _kept_with_ungrounded_recorded(
