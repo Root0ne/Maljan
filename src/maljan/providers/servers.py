@@ -24,7 +24,6 @@ import sys
 import threading
 import weakref
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
@@ -553,31 +552,41 @@ class ServerHandle:
         must stay inside it; an absolute value is allowed but must exist.
         Neither check is a sandbox — an operator who can edit settings can
         already run a command — it is there so a typo fails loudly at attach
-        time instead of starting a server in an unexpected directory.
+        time instead of starting a server in an unexpected directory
+        (``subprocess_env.launch_cwd``, read alike by a trust grant).
         """
-        from maljan.core.paths import get_project_root
+        from maljan.agents.subprocess_env import LaunchCwdError, launch_cwd
 
-        if not self.config.cwd:
-            return None
-        root = Path(get_project_root()).resolve()
-        candidate = Path(self.config.cwd)
-        if candidate.is_absolute():
-            resolved = candidate.resolve()
-            if not resolved.is_dir():
-                raise ProviderConfigurationError(
-                    f"mcp server {self.name!r}: cwd {resolved} does not exist"
-                )
-            return str(resolved)
-        resolved = (root / candidate).resolve()
-        if not resolved.is_relative_to(root):
-            raise ProviderConfigurationError(
-                f"mcp server {self.name!r}: cwd {self.config.cwd!r} resolves outside the project"
-            )
-        if not resolved.is_dir():
-            raise ProviderConfigurationError(
-                f"mcp server {self.name!r}: cwd {resolved} does not exist"
-            )
-        return str(resolved)
+        try:
+            return launch_cwd(self.config.cwd)
+        except LaunchCwdError as exc:
+            raise ProviderConfigurationError(f"mcp server {self.name!r}: {exc}") from exc
+
+    def _withdraw_a_grant_that_no_longer_holds(self) -> None:
+        """Turn off a console trust grant the launch about to start no longer matches.
+
+        A grant is recorded with the launch it was given for
+        (``tool_declarations.granted_launch``, the files the launch resolves
+        to); read again here, where the server is started, a block whose
+        command, script or environment now resolves elsewhere does not trust
+        what its server declares: the trust is dropped for this handle, and
+        said.
+        """
+        from maljan.core.tool_declarations import granted_launch
+
+        granted = getattr(self.config, "trust_granted_for", None)
+        if self.config.trusts_served_declaration is not True or not granted:
+            return
+        if granted == granted_launch(self.config):
+            return
+        logger.warning(
+            "mcp server '%s' no longer starts the launch its trust was granted for; "
+            "what it declares of its tools is not trusted until the trust is granted again.",
+            self.name,
+        )
+        self.config = self.config.model_copy(
+            update={"trusts_served_declaration": False, "trust_granted_for": None}
+        )
 
     def _stages_per_job(self) -> bool:
         """Whether this server writes or reads a staging directory at all.
@@ -659,14 +668,19 @@ class ServerHandle:
         from maljan.agents.mcp_client import MCPLangChainToolkit
         from maljan.core.undeclared_tools import categories_of
 
+        self._withdraw_a_grant_that_no_longer_holds()
         if self.config.transport == "stdio":
             from mcp import StdioServerParameters
 
-            from maljan.agents.subprocess_env import child_env
+            from maljan.agents.subprocess_env import LaunchCwdError, stdio_launch
             from maljan.core.config import BUILTIN_SERVER_KEYS
-            from maljan.core.paths import resolve_mcp_args
 
-            env = child_env(self.config.env, allow=tuple(self.config.env_allow), server=self.name)
+            # One reading of the launch, the one a trust grant holds for.
+            try:
+                launch = stdio_launch(self.config, server=self.name)
+            except LaunchCwdError as exc:
+                raise ProviderConfigurationError(f"mcp server {self.name!r}: {exc}") from exc
+            env = launch.env
             self._name_the_job_staging(env)
             self._name_the_sample(env)
             if self.name not in BUILTIN_SERVER_KEYS:
@@ -677,7 +691,7 @@ class ServerHandle:
                 # operator adds through the catalog gets the more predictable
                 # default instead.
                 env.setdefault("PYTHONIOENCODING", "utf-8")
-            args = resolve_mcp_args(list(self.config.args))
+            args = launch.args
             # Kept so the backstop reap can tell this handle's child from any
             # other subprocess that happened to start in the same window; see
             # ``_child_matches``.
@@ -687,7 +701,7 @@ class ServerHandle:
                 command=self.config.command,
                 args=args,
                 env=env,
-                cwd=self._resolve_cwd(),
+                cwd=launch.cwd,
             )
             return MCPLangChainToolkit(
                 params,

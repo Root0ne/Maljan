@@ -69,6 +69,7 @@ import json
 import os
 import posixpath
 import re
+import shutil
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -2737,23 +2738,104 @@ _LAUNCH_FIELDS: tuple[str, ...] = ("transport", "command", "args", "cwd", "url")
 
 
 def granted_launch(cfg: Any) -> str:
-    """A short digest of how a block starts or reaches its server, as written; ``""`` for none.
+    """A short digest of how a block starts or reaches its server; ``""`` for none.
 
     What an operator's trust in a server's own declaration is recorded with
     (``trust_granted_for``): the block's transport, command, arguments,
-    working directory and address exactly as the block writes them. No file
-    is resolved and no release is read, so a grant reads alike on every host
-    and after every upgrade, and holds until the block is pointed elsewhere.
+    working directory and address as the block writes them; the names it
+    lets through (``env_allow``) and its own ``env``, each value by its
+    digest, so a changed ``PATH``, ``LD_PRELOAD``, ``PYTHONPATH`` or
+    ``NODE_OPTIONS`` is another launch and no secret is held in the clear;
+    and the files a stdio launch resolves to here (:func:`_resolved_launch`),
+    so a grant does not survive the block being pointed elsewhere through a
+    link or a relative path. Where a stdio command or working directory does
+    not resolve, there is no launch to hold a grant for: ``""``, so no grant
+    is recorded and none recorded before holds. No release is read, and a
+    file replaced in place keeps its path, so a grant holds after an upgrade.
     """
-    held = {
+    held: dict[str, Any] = {
         name: getattr(cfg, name, None)
         for name in _LAUNCH_FIELDS
         if getattr(cfg, name, None) not in (None, "", [], ())
     }
     if not held:
         return ""
+    env = getattr(cfg, "env", None)
+    if isinstance(env, Mapping) and env:
+        held["env"] = {
+            str(name): hashlib.sha256(str(value).encode("utf-8")).hexdigest()
+            for name, value in env.items()
+        }
+    allow = getattr(cfg, "env_allow", None)
+    if allow:
+        held["env_allow"] = sorted(str(name) for name in allow)
+    if getattr(cfg, "transport", "stdio") in (None, "", "stdio"):
+        resolved = _resolved_launch(cfg)
+        if resolved is None:
+            return ""
+        if resolved:
+            held["resolved"] = resolved
     text = json.dumps(held, sort_keys=True, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _named_path(value: str) -> bool:
+    """Whether a launch value is written as a path (``bin/server``, ``./run.py``, ``~/x``)."""
+    return os.sep in value or value.startswith((".", "~"))
+
+
+def _real(value: str, base: Path) -> str | None:
+    """The real path of a value written as a path that exists, from ``base``; ``None`` otherwise."""
+    if not _named_path(value):
+        return None
+    path = Path(value).expanduser()
+    path = path if path.is_absolute() else base / path
+    return os.path.realpath(path) if path.exists() else None
+
+
+def _resolved_launch(cfg: Any) -> dict[str, Any] | None:
+    """The files a stdio block's launch resolves to; ``None`` where its command or cwd does not.
+
+    Read from the launch as the server is started
+    (``subprocess_env.stdio_launch``): its working directory, rooted at the
+    project as the launch roots it; its command, as the real file it runs (a
+    path, relative ones from that directory, or a bare name found on the
+    ``PATH`` the child is given); and each argument as the launch roots it,
+    written as a path that names an existing file or directory (an
+    interpreter's script), or an option's value after ``=`` that does
+    (``--script=./x.py``, keyed ``<index>=``), as its real path. An argument
+    that names nothing here is read as written.
+    """
+    from maljan.agents.subprocess_env import LaunchCwdError, stdio_launch
+
+    try:
+        launch = stdio_launch(cfg)
+        out: dict[str, Any] = {}
+        base = Path(launch.cwd) if launch.cwd else Path.cwd()
+        if launch.cwd:
+            out["cwd"] = os.path.realpath(launch.cwd)
+        command = getattr(cfg, "command", None)
+        if isinstance(command, str) and command:
+            if _named_path(command):
+                path = Path(command).expanduser()
+                path = path if path.is_absolute() else base / path
+                found = str(path) if path.is_file() else None
+            else:
+                found = shutil.which(command, path=launch.env.get("PATH", os.defpath))
+            if found is None:
+                return None
+            out["command"] = os.path.realpath(found)
+        for at, arg in enumerate(launch.args):
+            real = _real(arg, base)
+            if real is not None:
+                out.setdefault("args", {})[str(at)] = real
+            elif "=" in arg:
+                real = _real(arg.split("=", 1)[1], base)
+                if real is not None:
+                    out.setdefault("args", {})[f"{at}="] = real
+        return out
+    except (LaunchCwdError, OSError, ValueError, RuntimeError):
+        return None
 
 
 def _at_shipped_launch(source: Any, cfg: Any) -> bool:

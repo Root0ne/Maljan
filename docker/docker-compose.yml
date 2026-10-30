@@ -1142,9 +1142,17 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: 2g
+    # The trees a stdio server's command, working directory or arguments may
+    # live in, mounted as backend-api mounts them: a console trust grant is
+    # recorded with the files its launch resolves to there, and holds here
+    # only where they resolve alike. The sample and upload directories are
+    # seen read-only through ../data; this service writes neither.
     volumes:
       - ../src:/app/src:ro
       - ../apps:/app/apps:ro
+      - ../data:/app/data:ro
+      - ../tests:/app/tests:ro
+      - ../services:/app/services:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

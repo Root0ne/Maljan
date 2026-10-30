@@ -11,6 +11,7 @@ release that changes nothing of the launch keeps the grant.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -32,6 +33,14 @@ def _shipped(key: str = "analysis") -> dict[str, Any]:
     entry = Settings(_env_file=None).mcp.servers[key].model_dump(mode="json")
     entry.pop("auth_token", None)
     return entry
+
+
+def _server(tmp_path: Path, name: str) -> str:
+    """A server program that exists here: a grant is recorded only for a launch that resolves."""
+    path = tmp_path / name
+    path.write_text("#!/bin/sh\n")
+    path.chmod(0o755)
+    return str(path)
 
 
 def _shown(key: str, stored: dict[str, Any]) -> dict[str, Any]:
@@ -64,10 +73,12 @@ def test_a_repointed_built_in_is_shown_without_the_trust_it_no_longer_has() -> N
     assert _trusted(again, "analysis") is False
 
 
-def test_an_operator_s_tick_on_a_repointed_built_in_trusts_the_server_it_points_at() -> None:
+def test_an_operator_s_tick_on_a_repointed_built_in_trusts_the_server_it_points_at(
+    tmp_path: Path,
+) -> None:
     entry = {
         **_shipped(),
-        "command": "/usr/bin/third-party-mcp",
+        "command": _server(tmp_path, "third-party-mcp"),
         "args": [],
         "trusts_served_declaration": True,
         "trust_granted_for": "",
@@ -78,10 +89,12 @@ def test_an_operator_s_tick_on_a_repointed_built_in_trusts_the_server_it_points_
     assert shown_trust_of("analysis", out["analysis"])["trusts_served_declaration"] is True
 
 
-def test_a_granted_trust_is_kept_by_an_unchanged_save_and_withdrawn_by_a_repoint() -> None:
+def test_a_granted_trust_is_kept_by_an_unchanged_save_and_withdrawn_by_a_repoint(
+    tmp_path: Path,
+) -> None:
     ticked = {
         **_shipped(),
-        "command": "/usr/bin/third-party-mcp",
+        "command": _server(tmp_path, "third-party-mcp"),
         "args": [],
         "trusts_served_declaration": True,
         "trust_granted_for": "",
@@ -91,7 +104,7 @@ def test_a_granted_trust_is_kept_by_an_unchanged_save_and_withdrawn_by_a_repoint
     assert again["analysis"]["trust_granted_for"] == stored["trust_granted_for"]
     assert _trusted(again, "analysis") is True
 
-    moved = {**_shown("analysis", stored), "command": "/usr/bin/yet-another-mcp"}
+    moved = {**_shown("analysis", stored), "command": _server(tmp_path, "yet-another-mcp")}
     assert moved["trusts_served_declaration"] is True
     out = validate_server_map({"analysis": moved})
     assert "trust_granted_for" not in out["analysis"]
@@ -102,17 +115,19 @@ def test_a_granted_trust_is_kept_by_an_unchanged_save_and_withdrawn_by_a_repoint
     assert _trusted(validate_server_map({"analysis": back}), "analysis") is True
 
 
-def test_a_trusted_server_an_operator_added_loses_its_trust_when_pointed_elsewhere() -> None:
+def test_a_trusted_server_an_operator_added_loses_its_trust_when_pointed_elsewhere(
+    tmp_path: Path,
+) -> None:
     entry = {
         "enabled": True,
-        "command": "/usr/bin/mine-mcp",
+        "command": _server(tmp_path, "mine-mcp"),
         "agents": [],
         "trusts_served_declaration": True,
         "trust_granted_for": "",
     }
     stored = validate_server_map({"mine": entry})["mine"]
     assert _trusted({"mine": stored}, "mine") is True
-    moved = {**_shown("mine", stored), "command": "/usr/bin/other-mcp"}
+    moved = {**_shown("mine", stored), "command": _server(tmp_path, "other-mcp")}
     out = validate_server_map({"mine": moved})
     assert out["mine"]["trusts_served_declaration"] is False
     assert _trusted(out, "mine") is False
@@ -135,13 +150,13 @@ def test_an_untick_turns_the_trust_off() -> None:
 
 
 def test_a_grant_outlives_a_release_that_changes_nothing_of_the_launch(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import maljan.core.tool_declarations as td
 
     entry = {
         **_shipped(),
-        "command": "/usr/bin/third-party-mcp",
+        "command": _server(tmp_path, "third-party-mcp"),
         "args": [],
         "trusts_served_declaration": True,
         "trust_granted_for": "",
