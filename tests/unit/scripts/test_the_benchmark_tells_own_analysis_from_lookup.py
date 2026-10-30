@@ -145,6 +145,55 @@ def test_a_fragment_is_cited_by_its_own_sentence_only() -> None:
     assert not closes_sentence(" key. Its labels come from engines ")
 
 
+# The same report in the analyst layout: each citation a numbered note, read back
+# through the evidence bundle's notes beside it.
+def _note(number: int) -> str:
+    return f"[[{number}]](evidence-bundle.html#cite-{number})"
+
+
+ANALYST_REPORT = "\n".join(
+    [
+        "# Report",
+        "",
+        f"**Family:** Example (moderate confidence){_note(1)}",
+        "The routine at 0x3868 returns -1 when the debugger flag is set. _(assessed)_" + _note(2),
+        "It decodes the C2 list with a rolling XOR key. Its labels come from engines"
+        + _note(3)
+        + ".",
+        f"| name | `Custom_update` | the static analyst{_note(4)} |",
+        "Category: loader with no citation on this line.",
+        "",
+    ]
+)
+BUNDLE_NOTES = {
+    "notes": [
+        {"number": 1, "evidence_ids": ["ev_0002", "ev_0007"]},
+        {"number": 2, "evidence_ids": ["ev_0001"]},
+        {"number": 3, "evidence_ids": ["ev_0003"]},
+        {"number": 4, "evidence_ids": ["ev_0006"]},
+    ]
+}
+
+
+def test_a_citation_note_is_read_back_through_the_bundle(tmp_path: Path) -> None:
+    path = _stored_run(tmp_path / "run9", report=ANALYST_REPORT)
+    (path.parent / prov.BUNDLE_FILE).write_text(json.dumps(BUNDLE_NOTES), encoding="utf-8")
+    analyst = read_key_score(path)
+    single = read_key_score(_stored_run(tmp_path / "single"))
+
+    assert "evidence-bundle.json" in analyst.provenance_note
+    for key in ("K1.1a", "K2.2", "K6.3", "K1.2", "K9 custom_update", "K1.1b"):
+        assert analyst.provenance[key].tag == single.provenance[key].tag, key
+        assert analyst.provenance[key].entries == single.provenance[key].entries, key
+
+
+def test_without_the_bundle_a_note_credits_nothing_and_says_so(tmp_path: Path) -> None:
+    run = read_key_score(_stored_run(tmp_path / "run9", report=ANALYST_REPORT))
+
+    assert "credit nothing: no evidence-bundle.json" in run.provenance_note
+    assert run.provenance["K2.2"].tag == prov.NO_ENTRY
+
+
 def test_each_credited_item_names_the_entries_that_credited_it(tmp_path: Path) -> None:
     run = read_key_score(_stored_run(tmp_path / "run9"))
     assert run.provenance_note == "read from evidence.json, report.md, mitre.json beside the score"

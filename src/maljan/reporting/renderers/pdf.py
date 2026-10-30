@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers.html import HtmlRenderer
+from maljan.reporting.renderers.layout import FULL
 
 
 class PdfUnavailableError(RuntimeError):
@@ -25,7 +26,17 @@ class PdfUnavailableError(RuntimeError):
 
 
 class PdfRenderer:
-    """Render a complete ``MalwareReport`` as PDF bytes."""
+    """Render a complete ``MalwareReport`` as PDF bytes.
+
+    ``layout`` is the HTML renderer's (``renderers/layout.py``). The analyst
+    report's PDF reads alone: it ends with the list of its notes and their
+    evidence ids, and says where the bundle is, ``bundle_location`` (the API path)
+    among it, as text (``HtmlRenderer(self_contained=True)``).
+    """
+
+    def __init__(self, *, layout: str = FULL, bundle_location: str | None = None) -> None:
+        self._layout = layout
+        self._bundle_location = bundle_location
 
     def render(self, report: MalwareReport) -> bytes:
         """Return the report as a PDF document.
@@ -33,7 +44,9 @@ class PdfRenderer:
         Raises:
             PdfUnavailableError: WeasyPrint cannot be loaded on this host.
         """
-        html_doc = HtmlRenderer().render(report)
+        html_doc = HtmlRenderer(
+            layout=self._layout, self_contained=True, bundle_location=self._bundle_location
+        ).render(report)
         return self.render_html(html_doc)
 
     @staticmethod

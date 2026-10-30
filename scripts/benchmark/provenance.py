@@ -34,6 +34,14 @@ verdict:
 lookup" counts :data:`LOOKUP_ONLY`. Locating a fragment is a substring search
 of the report, so time is the fragments times the report's length; the rest is
 linear in the items and the entries they cite.
+
+A ``report.md`` in the analyst layout cites by numbered note
+(``[[3]](evidence-bundle.html#cite-3)``): each note is read back to its
+evidence ids from the ``evidence-bundle.json`` beside it (``notes[]``) and
+stands in the line as the citation it replaces (``[ev_0012, ev_0014]``), so a
+fragment is credited as it was in the single-file layout. Without the bundle a
+note credits nothing, and the reading says so; a report in the single-file
+layout cites its ids inline and is read as it always was.
 """
 
 from __future__ import annotations
@@ -51,6 +59,7 @@ from maljan.core.builtin_declarations import OUTWARD_KINDS
 from maljan.core.declared_reading import kind_of
 
 LEDGER_FILE, REPORT_FILE, TECHNIQUES_FILE = "evidence.json", "report.md", "mitre.json"
+BUNDLE_FILE = "evidence-bundle.json"
 # The kinds whose answer is what a service outside the deployment already holds.
 LOOKUP_KINDS: frozenset[str] = frozenset(OUTWARD_KINDS)
 
@@ -83,6 +92,10 @@ _CLOSING_STOP = re.compile(r"[.!?]?\s*(?:\([^()]*\)\s*)?$")
 _TECHNIQUE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 _EMPHASIS = re.compile(r"[*`]")
 _SPACE = re.compile(r"\s+")
+_ITALIC_NOTE = re.compile(r"(?<!\w)_(\([^()]*\))_(?!\w)")
+# A citation note of the analyst layout: a numbered marker, or an id written as
+# a word and linked to its note.
+_NOTE = re.compile(r"\[(\[\d+\]|ev_\d+)\]\(evidence-bundle\.html#cite-(\d+)\)")
 
 
 @dataclass
@@ -117,7 +130,41 @@ def entry_class(entry: Mapping[str, Any]) -> str:
     return LOOKUP if kind in LOOKUP_KINDS else ANALYSIS
 
 
+def bundle_notes(path: Path) -> dict[str, list[str]]:
+    """``{note number: evidence ids}`` of an evidence bundle's JSON, or ``{}`` without one."""
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return {}
+    notes = data.get("notes") if isinstance(data, dict) else None
+    return {
+        str(note.get("number")): [str(i) for i in note.get("evidence_ids") or []]
+        for note in notes or []
+        if isinstance(note, dict)
+    }
+
+
+def with_notes(line: str, notes: Mapping[str, list[str]]) -> str:
+    """``line`` with each citation note written as the citation it stands for.
+
+    A note the bundle does not hold is dropped, citing nothing.
+    """
+
+    def cited(found: re.Match[str]) -> str:
+        word = found.group(1) if found.group(1).startswith("ev_") else ""
+        ids = notes.get(found.group(2)) or []
+        if not ids:
+            return word
+        return f"{word} [{', '.join(ids)}]"
+
+    return _NOTE.sub(cited, line)
+
+
 def _plain(text: str) -> str:
+    # A bracketed note in italics (``_(assessed)_``) reads as the note it is.
+    text = _ITALIC_NOTE.sub(r"\1", text)
     return _SPACE.sub(" ", _EMPHASIS.sub("", text.replace("\\|", "|"))).strip().casefold()
 
 
@@ -202,15 +249,16 @@ def read_beside(score: Path) -> tuple[StoredEvidence | None, str]:
         return None, f"not read: {why}"
     entries = {str(r["entry_id"]): r for r in rows if r.get("entry_id")}
     report_path = root / REPORT_FILE
-    report = (
-        [_plain(line) for line in report_path.read_text(encoding="utf-8").splitlines()]
-        if report_path.is_file()
-        else []
-    )
+    text = report_path.read_text(encoding="utf-8") if report_path.is_file() else ""
+    notes = bundle_notes(root / BUNDLE_FILE)
+    report = [_plain(with_notes(line, notes)) for line in text.splitlines()]
     stored = StoredEvidence(entries, report, _technique_ids(root / TECHNIQUES_FILE))
-    held = ((REPORT_FILE, report), (TECHNIQUES_FILE, stored.techniques))
+    held = ((REPORT_FILE, report), (BUNDLE_FILE, notes), (TECHNIQUES_FILE, stored.techniques))
     read = [LEDGER_FILE, *(name for name, there in held if there)]
-    return stored, f"read from {', '.join(read)} beside the score"
+    note = f"read from {', '.join(read)} beside the score"
+    if _NOTE.search(text) and not notes:
+        note += f"; its citation notes credit nothing: no {BUNDLE_FILE} beside the score"
+    return stored, note
 
 
 def attribute(key: str, row: str, stored: StoredEvidence) -> ItemProvenance:

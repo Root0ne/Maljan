@@ -21,6 +21,8 @@ vi.mock("@/lib/api", () => {
     api: {
       getReportPdf: record("getReportPdf", new Blob(["%PDF"])),
       getReportHtml: record("getReportHtml", "<html></html>"),
+      getReportEvidenceBundleHtml: record("getReportEvidenceBundleHtml", "<html>bundle</html>"),
+      getReportEvidenceBundleJson: record("getReportEvidenceBundleJson", '{"notes":[]}'),
       getReportMarkdown: record("getReportMarkdown", "# report"),
       getReportIOCs: record("getReportIOCs", { items: [], total: 0 }),
       getReportStix: async (...args: unknown[]) => {
@@ -82,7 +84,15 @@ describe("the export groups", () => {
   it("offer one rule download per kind the report generated, in a fixed order", () => {
     expect(ruleKinds(report())).toEqual(["yara", "sigma"]);
     const deep = reportExportGroups("r1", report(), "b")[1].items.map((i) => i.key);
-    expect(deep).toEqual(["stix", "misp", "attack-layer", "rules-yara", "rules-sigma"]);
+    expect(deep).toEqual([
+      "stix",
+      "evidence-bundle-html",
+      "evidence-bundle-json",
+      "misp",
+      "attack-layer",
+      "rules-yara",
+      "rules-sigma",
+    ]);
     expect(ruleKinds(null)).toEqual([]);
   });
 
@@ -105,6 +115,8 @@ describe("the export groups", () => {
       "getReportMarkdown(r1)",
       "getReportIOCs(r1)",
       "getReportStix(r1)",
+      "getReportEvidenceBundleHtml(r1)",
+      "getReportEvidenceBundleJson(r1)",
       "getReportAttackLayer(r1)",
       "getReportSignature(r1,yara)",
       "getReportSignature(r1,sigma)",
@@ -119,6 +131,8 @@ describe("the export groups", () => {
       "maljan-9f86d081884c.md",
       "maljan-9f86d081884c-iocs.json",
       "maljan-stix-bundle.json",
+      "evidence-bundle.html",
+      "evidence-bundle.json",
       "maljan-attack-layer.json",
       "maljan-yara.yar",
       "maljan-sigma.yml",
@@ -136,6 +150,29 @@ describe("the export groups", () => {
     expect(names.stixDraft).toBe("maljan-stix-bundle-draft.json");
     expect(names.rules("suricata")).toBe("maljan-suricata.rules");
     expect(names.rules("snort")).toBe("maljan-snort.rules");
+  });
+});
+
+describe("the evidence bundle", () => {
+  it("is saved under exactly the names the analyst report links to, never prefixed", async () => {
+    const names = exportFileNames("maljan-9f86d081884c");
+    expect(names.evidenceBundleHtml).toBe("evidence-bundle.html");
+    expect(names.evidenceBundleJson).toBe("evidence-bundle.json");
+    await item("evidence-bundle-html").run();
+    await item("evidence-bundle-json").run();
+    expect(calls).toEqual(["getReportEvidenceBundleHtml(r1)", "getReportEvidenceBundleJson(r1)"]);
+    expect(saved).toEqual([
+      { name: "evidence-bundle.html", body: "<html>bundle</html>", type: "text/html" },
+      { name: "evidence-bundle.json", body: '{"notes":[]}', type: "application/json" },
+    ]);
+  });
+
+  it("keeps the report's HTML name and says the bundle downloads beside it", () => {
+    const html = item("html");
+    expect(exportFileNames("maljan-9f86d081884c").html).toBe("maljan-9f86d081884c.html");
+    expect(html.hint).toMatch(/evidence bundle \(HTML\) beside it/);
+    expect(item("evidence-bundle-html").label).toBe("Evidence bundle (HTML)");
+    expect(item("evidence-bundle-json").label).toBe("Evidence bundle (JSON)");
   });
 });
 

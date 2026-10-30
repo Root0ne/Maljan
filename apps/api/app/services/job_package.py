@@ -19,7 +19,11 @@ is. It holds:
   hash and name, the report row, the report document, the evidence ledger, the
   run summary, the judge's bundle, the events), exactly what
   ``python -m scripts.ledger.verify --run`` checks the seal against;
-- ``report/report.md``: the report rendered by the Markdown exporter;
+- ``report/report.md``: the report rendered by the Markdown exporter, in the
+  layout the served report prints (``reporting.full_report_in_one_file``);
+- ``report/evidence-bundle.html`` and ``report/evidence-bundle.json``: the
+  evidence bundle behind the analyst report, beside it under the names its
+  links name (``maljan.reporting.renderers.bundle``);
 - ``export/stix-bundle.json``: the STIX bundle the report row serves;
 - ``ledger/spilled.json`` and ``ledger/objects/<sha256>``: every part of an
   answer the ledger does not keep whole (``maljan.schemas.evidence_spill``),
@@ -100,6 +104,8 @@ SIGNATURE = "manifest.sig"
 SEAL = "seal.json"
 RUN = "run"
 MARKDOWN = "report/report.md"
+BUNDLE_HTML = "report/evidence-bundle.html"
+BUNDLE_JSON = "report/evidence-bundle.json"
 STIX = "export/stix-bundle.json"
 SPILLED = "ledger/spilled.json"
 OBJECTS = "ledger/objects"
@@ -338,8 +344,35 @@ def _is_hex(value: Any, length: int) -> bool:
     return isinstance(value, str) and len(value) == length and set(value) <= _HEX
 
 
-def _markdown(report: Any, job: Any) -> tuple[str | None, str | None]:
+def _markdown(report: Any, job: Any, layout: str | None = None) -> tuple[str | None, str | None]:
     """The report rendered by the Markdown exporter, or ``None`` and why it is not.
+
+    ``layout`` is the served report's (``renderers/layout.py``); ``None`` reads
+    the process's own setting.
+    """
+    from maljan.reporting.renderers import MarkdownRenderer
+    from maljan.reporting.renderers.layout import report_layout
+
+    typed, why = _typed(report, job)
+    if typed is None:
+        return None, why
+    return str(MarkdownRenderer(layout=layout or report_layout()).render(typed)), None
+
+
+def _bundle(report: Any, job: Any) -> tuple[tuple[str, str] | None, str | None]:
+    """The evidence bundle's HTML and JSON, or ``None`` and why they are not rendered."""
+    from maljan.reporting.renderers import HtmlRenderer
+    from maljan.reporting.renderers.bundle import bundle_json
+    from maljan.reporting.renderers.layout import BUNDLE
+
+    typed, why = _typed(report, job)
+    if typed is None:
+        return None, why
+    return (HtmlRenderer(layout=BUNDLE).render(typed), bundle_json(typed)), None
+
+
+def _typed(report: Any, job: Any) -> tuple[Any, str | None]:
+    """The stored report as the model the renderers read, or ``None`` and why it is not.
 
     A report stored without ``generated_at`` is dated with the job's stored
     completion time, never the build's clock, so the rendering is the same on
@@ -349,7 +382,6 @@ def _markdown(report: Any, job: Any) -> tuple[str | None, str | None]:
     if not isinstance(report, Mapping):
         return None, "The run holds no report document (report.json), so nothing is rendered."
     from maljan.reporting.models import MalwareReport, key_ordered
-    from maljan.reporting.renderers import MarkdownRenderer
 
     document = key_ordered(report)
     if not document.get("generated_at"):
@@ -361,10 +393,9 @@ def _markdown(report: Any, job: Any) -> tuple[str | None, str | None]:
             )
         document["generated_at"] = completed
     try:
-        typed = MalwareReport.model_validate(document)
+        return MalwareReport.model_validate(document), None
     except ValueError as exc:
         return None, f"The report document does not validate ({type(exc).__name__})."
-    return str(MarkdownRenderer().render(typed)), None
 
 
 def spilled_refs(items: Iterable[Any]) -> list[dict[str, Any]]:
@@ -493,6 +524,7 @@ def build_package(
     max_object_bytes: Any = None,
     bound_name: str = "upload_max_bytes",
     refs: list[dict[str, Any]] | None = None,
+    layout: str | None = None,
 ) -> dict[str, Any]:
     """Build the package of the run in ``run_dir`` into ``out``; returns the manifest.
 
@@ -506,7 +538,8 @@ def build_package(
     is listed with ``unfetched``. ``max_object_bytes`` is the bound one kept
     part was kept under (``bound_name``). ``refs`` are the ledger's spilled
     references when the caller already holds the rows; otherwise they are read
-    from the run's ``evidence.json``.
+    from the run's ``evidence.json``. ``layout`` is the served report's, which
+    ``report/report.md`` prints (``None`` reads the process's own setting).
     """
     run_dir = Path(run_dir)
     if not run_dir.is_dir():
@@ -562,10 +595,18 @@ def build_package(
         if seal is None and isinstance(report, Mapping):
             seal = report.get(ledger_chain.SEAL_KEY)
 
-        rendered, why = _markdown(report, job)
+        rendered, why = _markdown(report, job, layout)
         if rendered is not None:
             stage.text(MARKDOWN, rendered, "the report rendered by the Markdown exporter")
         _part("report_markdown", MARKDOWN if rendered is not None else None, why)
+        del rendered
+        bundle, why = _bundle(report, job)
+        if bundle is not None:
+            stage.text(BUNDLE_HTML, bundle[0], "the evidence bundle behind the analyst report")
+            stage.text(BUNDLE_JSON, bundle[1], "the evidence bundle behind the analyst report")
+        _part("evidence_bundle_html", BUNDLE_HTML if bundle is not None else None, why)
+        _part("evidence_bundle_json", BUNDLE_JSON if bundle is not None else None, why)
+        del bundle
         dynamic = report.get("dynamic") if isinstance(report, Mapping) else None
         if dynamic:
             _part("sandbox_behaviour", f"{RUN}/report.json", None, pointer="/dynamic")
@@ -1399,8 +1440,13 @@ def _check_signature(
     )
 
 
-async def build_for_job(engine: Any, job_id: Any, out: IO[bytes]) -> dict[str, Any] | None:
+async def build_for_job(
+    engine: Any, job_id: Any, out: IO[bytes], *, layout: str | None = None
+) -> dict[str, Any] | None:
     """Build the package of one stored job into ``out``; ``None`` when there is no such job.
+
+    ``layout`` is the served report's, which the package's ``report/report.md``
+    prints as the served Markdown does.
 
     The job's rows and the seal's verification are read in one snapshot: a
     connection of ``engine`` in a ``REPEATABLE READ READ ONLY`` transaction
@@ -1465,6 +1511,7 @@ async def build_for_job(engine: Any, job_id: Any, out: IO[bytes]) -> dict[str, A
             max_object_bytes=bound,
             bound_name=object_store.EVIDENCE_BOUND_SETTING,
             refs=refs,
+            layout=layout,
         )
 
 

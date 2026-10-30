@@ -115,6 +115,7 @@ from maljan.reporting.prose_decisions import (
     PUBLISHED_TECHNIQUE_DOUBTED_CODE,
     with_decided_statements,
 )
+from maljan.reporting.renderers.layout import ANALYST, BUNDLE, FULL, checked
 from maljan.schemas.evidence import is_guard_answer
 from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, UNVERIFIED_TECHNIQUE_MARKER
 from maljan.utils.marked_cut import CUT_MARK
@@ -296,17 +297,33 @@ _UNCITED_NOTE = (
 
 
 class MarkdownRenderer:
-    """Render a complete ``MalwareReport`` as a single markdown string."""
+    """Render a complete ``MalwareReport`` as a single markdown string.
+
+    ``layout`` names which report (``renderers/layout.py``): the single-file
+    report this renderer has always printed (the default), the analyst report
+    (``renderers/analyst.py``) or the evidence bundle behind it
+    (``renderers/bundle.py``). The closing defang and escape pass is the same
+    for all three.
+    """
 
     # Section order is kept in one place; each ``_section_*`` call returns
     # a block with one heading and its subsections, or "" when it has nothing.
 
-    def __init__(self, *, failed_marker: str = "") -> None:
+    def __init__(self, *, failed_marker: str = "", layout: str = FULL) -> None:
         # The word a failed section's stub carries (:meth:`_safe_section`);
         # empty for the Markdown export, which prints the stub as it always did.
         self._failed_marker = failed_marker
+        self._layout = checked(layout)
 
     def render(self, report: MalwareReport) -> str:
+        return self.render_with_notes(report)[0]
+
+    def render_with_notes(self, report: MalwareReport) -> tuple[str, list[Any]]:
+        """The report, and the citation notes the analyst report numbered (none for the others).
+
+        The notes are the analyst report's even when the bundle is rendered:
+        the bundle prints them, so its note numbers are the analyst report's.
+        """
         # The links this report keeps as links, for the whole of this render.
         token = _KEPT_LINKS.set(_Kept.of(report))
         try:
@@ -314,10 +331,28 @@ class MarkdownRenderer:
         finally:
             _KEPT_LINKS.reset(token)
 
-    def _render(self, report: MalwareReport) -> str:
+    def _render(self, report: MalwareReport) -> tuple[str, list[Any]]:
+        ctx = _Context.of(report)
+        notes: list[Any] = []
+        if self._layout == ANALYST:
+            from maljan.reporting.renderers.analyst import analyst_sections
+
+            sections, notes = analyst_sections(self, report, ctx)
+        else:
+            sections = self._full_sections(report, ctx)
+            if self._layout == BUNDLE:
+                from maljan.reporting.renderers.analyst import analyst_sections
+                from maljan.reporting.renderers.bundle import bundle_sections
+
+                # The analyst report's notes, numbered over a context of their
+                # own: what it set aside is not this render's to restore.
+                _, notes = analyst_sections(self, report, _Context.of(report))
+                sections = bundle_sections(self, report, ctx, sections, notes)
+        return self._closed(sections, ctx), notes
+
+    def _full_sections(self, report: MalwareReport, ctx: _Context) -> list[str]:
         # Each section is wrapped in _safe_section so a single malformed
         # subtree cannot 500 the whole ``/reports/{id}/markdown`` endpoint.
-        ctx = _Context.of(report)
         sections: list[str] = [
             self._safe_section("title", lambda: self._section_title(report, ctx)),
             self._safe_section("questions", lambda: self._section_questions(report, ctx)),
@@ -341,6 +376,10 @@ class MarkdownRenderer:
             self._safe_section("appendix_references", lambda: self._appendix_references(report)),
             self._safe_section("appendix_methodology", lambda: self._appendix_method(report, ctx)),
         ]
+        return sections
+
+    def _closed(self, sections: list[str], ctx: _Context) -> str:
+        """The sections joined, after the closing defang and escape pass over each."""
         # Every value a viewer could follow, wherever a section printed it, is
         # read once more by the report's defanger, the run's own values first:
         # a cell or a code span a sandbox, the sample's bytes or a model filled

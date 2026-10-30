@@ -1689,6 +1689,17 @@ export async function installApiMocks(
   await page.route("**/api/v1/reports/*/iocs**", (route) =>
     json(route, { items: [], total: 0 })
   );
+  // The evidence bundle behind the analyst report, downloaded from Export.
+  await page.route("**/api/v1/reports/*/evidence-bundle.html", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: "<!DOCTYPE html><html><body><h1>Evidence bundle: mock</h1></body></html>",
+    })
+  );
+  await page.route("**/api/v1/reports/*/evidence-bundle.json", (route) =>
+    json(route, { format: "maljan-evidence-bundle/1", notes: [], evidence_index: [], sections: [] })
+  );
   await page.route("**/api/v1/reports/*/signatures/*", (route) =>
     route.fulfill({
       status: 200,

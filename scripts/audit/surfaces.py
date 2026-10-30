@@ -32,7 +32,9 @@ whole, and a cut of it is a defect.
 ``stix-bundle.json``, ``stix-judge.json``, ``mitre.json``, ``iocs.json``
 (``include=all``), ``evidence.json``, ``events.json``, ``run-summary.json``,
 ``usage.json``, and ``follow-ups.json``, ``iocs-default.json``,
-``attack-layer.json`` where present). A surface whose file is absent is listed
+``attack-layer.json`` where present, and ``evidence-bundle.json`` and
+``evidence-bundle.html`` beside an analyst-layout ``report.md``, read with it as
+one Markdown and one HTML surface). A surface whose file is absent is listed
 under ``not_checked`` with the reason. ``--api`` reads the same surfaces from a
 running API with the bearer token in the environment variable ``--token-env``
 names (never printed), plus the job package.
@@ -56,6 +58,7 @@ import os
 import re
 import sys
 import tarfile
+import urllib.error
 import urllib.request
 from collections import Counter, deque
 from collections.abc import Iterable, Iterator
@@ -130,7 +133,38 @@ def load_run(directory: Path) -> dict[str, Any]:
     package = directory / SURFACES["package"]["file"]
     if package.is_file():
         out["package"] = _read_package(package.read_bytes())
-    return out
+    bundle_json, bundle_html = directory / BUNDLE_JSON, directory / BUNDLE_HTML
+    return with_bundle(
+        out,
+        _read_json(bundle_json) if bundle_json.is_file() else None,
+        bundle_html.read_text(encoding="utf-8") if bundle_html.is_file() else None,
+    )
+
+
+# The evidence bundle the analyst report prints its record in, beside it.
+BUNDLE_JSON, BUNDLE_HTML = "evidence-bundle.json", "evidence-bundle.html"
+
+
+def with_bundle(surfaces: dict[str, Any], bundle: Any, bundle_html: str | None) -> dict[str, Any]:
+    """The Markdown and HTML surfaces as a reader holds them: the report and its bundle.
+
+    A report in the analyst layout prints its findings and leaves the record
+    behind them to the evidence bundle beside it, so a finding is looked for in
+    the two together: the bundle's sections (its JSON's Markdown) after the
+    report's Markdown, its HTML after the report's HTML. A report in the
+    single-file layout, served without a bundle, is read as it is. The served
+    Markdown alone stays under ``markdown_served``, which the job package's
+    ``report.md`` is compared with.
+    """
+    if isinstance(surfaces.get("markdown"), str):
+        surfaces["markdown_served"] = surfaces["markdown"]
+        sections = _list(_dict(bundle).get("sections"))
+        parts = [str(_dict(part).get("markdown") or "") for part in sections]
+        if parts:
+            surfaces["markdown"] = "\n\n".join([surfaces["markdown"], *parts])
+    if isinstance(surfaces.get("html"), str) and bundle_html:
+        surfaces["html"] = surfaces["html"] + bundle_html
+    return surfaces
 
 
 def _read_package(blob: bytes) -> dict[str, Any]:
@@ -190,6 +224,16 @@ def load_live(api: str, job_id: str, token: str | None) -> dict[str, Any]:
         out[name] = get(path)
     out["markdown"] = get(f"/reports/{rid}/markdown", raw=True).decode("utf-8")
     out["html"] = get(f"/reports/{rid}/html", raw=True).decode("utf-8")
+    # The evidence bundle the analyst report links to; an API that predates it
+    # serves none, and the report is read as it is.
+    try:
+        bundle = get(f"/reports/{rid}/{BUNDLE_JSON}")
+        bundle_html = get(f"/reports/{rid}/{BUNDLE_HTML}", raw=True).decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        bundle, bundle_html = None, None
+    with_bundle(out, bundle, bundle_html)
     entries: list[Any] = []
     page = 1
     while True:
@@ -1667,9 +1711,10 @@ def _check_package(package: dict[str, Any], surfaces: dict[str, Any], out: Repor
                 "the package's STIX bundle and the served one carry different techniques or values",
             )
     md = package.get("report/report.md")
-    if isinstance(md, str) and isinstance(surfaces.get("markdown"), str):
+    markdown_served = surfaces.get("markdown_served", surfaces.get("markdown"))
+    if isinstance(md, str) and isinstance(markdown_served, str):
         out.checked["identity"] += 1
-        if md != surfaces["markdown"]:
+        if md != markdown_served:
             out.defect(
                 "differs",
                 "identity",

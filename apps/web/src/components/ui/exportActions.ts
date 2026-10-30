@@ -58,11 +58,20 @@ const RULE_MIME: Record<DetectionKind, string> = {
   snort: "text/plain",
 };
 
+/** The evidence bundle's two files, named as the analyst report's links name them. */
+export const EVIDENCE_BUNDLE_HTML = "evidence-bundle.html";
+export const EVIDENCE_BUNDLE_JSON = "evidence-bundle.json";
+
 /**
  * The file names the console's downloads have always had, kept as they were
  * when the downloads moved into this menu: a script that picks up
  * `maljan-<hash>-mitre.json` or `maljan-stix-bundle.json` keeps working.
  * Only the full-analysis JSON is new to the menu and named here first.
+ *
+ * The evidence bundle is saved under exactly the names the analyst report
+ * links to (`evidence-bundle.html`, `evidence-bundle.json`), never prefixed:
+ * saved beside the report's HTML, every citation and section link in the
+ * report resolves to it.
  */
 export function exportFileNames(baseName: string) {
   return {
@@ -78,6 +87,8 @@ export function exportFileNames(baseName: string) {
     report: `${baseName}-report.json`,
     techniques: `${baseName}-mitre.json`,
     timeline: `${baseName}-timeline.json`,
+    evidenceBundleHtml: EVIDENCE_BUNDLE_HTML,
+    evidenceBundleJson: EVIDENCE_BUNDLE_JSON,
   };
 }
 
@@ -123,7 +134,7 @@ export function reportExportGroups(
     {
       key: "html",
       label: "Report (HTML)",
-      hint: "Opens offline, no external requests",
+      hint: "Opens offline; save the evidence bundle (HTML) beside it so its links resolve",
       run: async () =>
         downloadBlob(await api.getReportHtml(reportId), names.html, "text/html"),
     },
@@ -164,6 +175,28 @@ export function reportExportGroups(
         const { bundle, draft } = readStixAnswer(answer);
         downloadBlob(json(bundle), draft ? names.stixDraft : names.stix, "application/json");
       },
+    },
+    {
+      key: "evidence-bundle-html",
+      label: "Evidence bundle (HTML)",
+      hint: "Every section and tool output the report links to; save beside the report",
+      run: async () =>
+        downloadBlob(
+          await api.getReportEvidenceBundleHtml(reportId),
+          names.evidenceBundleHtml,
+          "text/html",
+        ),
+    },
+    {
+      key: "evidence-bundle-json",
+      label: "Evidence bundle (JSON)",
+      hint: "The report's notes, the evidence index and every section",
+      run: async () =>
+        downloadBlob(
+          await api.getReportEvidenceBundleJson(reportId),
+          names.evidenceBundleJson,
+          "application/json",
+        ),
     },
     {
       key: "misp",
