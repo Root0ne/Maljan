@@ -151,7 +151,7 @@ def probe_labels(enrichment_sources: Any = None) -> dict[str, str]:
 
 
 def server_keys() -> tuple[list[str], list[str]]:
-    """The built-in tool-server keys, and the keys no operator's server may take."""
-    from maljan.core.config import BUILTIN_SERVER_KEYS, RESERVED_SERVER_KEYS
+    """The shipped tool-server keys, and the keys no operator's server may take."""
+    from maljan.core.config import reserved_server_keys, shipped_server_keys
 
-    return list(BUILTIN_SERVER_KEYS), list(RESERVED_SERVER_KEYS)
+    return list(shipped_server_keys()), list(reserved_server_keys())

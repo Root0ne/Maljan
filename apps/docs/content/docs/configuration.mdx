@@ -1500,7 +1500,7 @@ for as long as their caller asks (the triage pack passes
 `long_running`. A model's call of either is waited for with no client deadline
 unless you set `core.mcp.breaker.call_timeout_seconds`; every other call waits
 the `call_timeout_seconds` its server's block declares, or, where it declares
-none (every built-in), the deployment's floor; a timeout or a
+none (every built-in), `core.mcp.breaker.default_call_timeout_seconds`; a timeout or a
 cancellation of such a call is not counted by the breaker; a call the client
 gives up on, or a job that ends, is cancelled at the server, which kills the
 tool's child process with its process group; and a second call of the same
@@ -1511,7 +1511,8 @@ documented derivation constant; the Ghidra sink pre-pass — run for every agent
 whose own static provider is Ghidra, the static analyst, a clone of it and a
 generic agent given Ghidra's tools alike, as the provider's own open and call
 graph — waits one call's budget per request (Ghidra's block's
-`call_timeout_seconds` where declared, else the deployment's floor, or
+`call_timeout_seconds` where declared, else
+`core.mcp.breaker.default_call_timeout_seconds`, or
 `core.mcp.breaker.call_timeout_seconds` where set), or as long as Ghidra takes
 when that budget is zero.
 
@@ -2232,7 +2233,7 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 | `mode` | `parallel` or `sequential`, for an analysis stage. Unset (the default), the stage follows the job's analyst mode (below). |
 | `inject_upstream` | `none`, `findings` (default) or `full`. |
 | `debate` | Round limit, consensus threshold and sycophancy check, for a debate stage. |
-| `builtin_tools` | `false` withholds every built-in server (`analysis`, `knowledge`, `network`, `threatintel`, `virustotal`) from this stage's agents. |
+| `builtin_tools` | `false` withholds every server the platform ships (`analysis`, `knowledge`, `network`, `threatintel`, `virustotal` and the container sidecars `die`, `ilspy`, `goresym`, `yarax`, `oletools`, `webcrack`, `unblob`, `jadx`) from this stage's agents. A server is shipped by the mark its seed carries, which no operator can set or post. A shipped container sidecar an operator switches on is attached after the definition's own servers, as a server of theirs is, so every tool keeps the name it had. |
 
 ### How an analysis stage runs its agents
 
@@ -4839,8 +4840,9 @@ Per job and per tool server, three settings under **Tool servers → Resilience*
 |---|---|---|
 | `core.mcp.breaker.failures_to_open` | 3 | The number of attempts the platform already gives a model call that drops its connection before calling it a failure. No recorded live run had a tool server fail at the transport, so it is a judgement, not a measurement. |
 | `core.mcp.breaker.cooldown_seconds` | 60 | A judgement: long enough for a sidecar being restarted to come back, short against the analysts' own loop budgets. |
-| `core.mcp.breaker.call_timeout_seconds` | 0 (per server) | Set, the budget of every call to every server. Zero gives each server the `call_timeout_seconds` its own block declares, and a server that declares none (every built-in) the deployment's floor: the longest of `core.static.capa.timeout_seconds` and `core.static.yara.timeout_seconds` (300 by default, 900 on a slow host), as every server got before. A tool whose server declares a longer budget in its manifest or its declaration (`tool_facts.<tool>.timeout_seconds`) gets that, a long-running tool (by either) none unless this is set, and thirty seconds of grace are added either way. |
-| `<server block>.call_timeout_seconds` | empty | Each server's own budget per call (an `mcp.servers` entry, `static.ghidra`, `static.r2`, `sandbox.cape2.mcp`), read when `core.mcp.breaker.call_timeout_seconds` is zero; zero sends its calls with no deadline of their own, empty takes the deployment's floor. Ghidra's REST requests (open, call graph, anti-analysis scan) and radare2's open before the loop wait it too. |
+| `core.mcp.breaker.call_timeout_seconds` | 0 (per server) | Set, the budget of every call to every server. Zero gives each server the `call_timeout_seconds` its own block declares, and a server that declares none (every built-in) `core.mcp.breaker.default_call_timeout_seconds`. A tool whose server declares a longer budget in its manifest or its declaration (`tool_facts.<tool>.timeout_seconds`) gets that, a long-running tool (by either) none unless this is set, and thirty seconds of grace are added either way. |
+| `<server block>.call_timeout_seconds` | empty | Each server's own budget per call (an `mcp.servers` entry, `static.ghidra`, `static.r2`, `sandbox.cape2.mcp`), read when `core.mcp.breaker.call_timeout_seconds` is zero; zero sends its calls with no deadline of their own, empty takes `core.mcp.breaker.default_call_timeout_seconds`. Ghidra's REST requests (open, call graph, anti-analysis scan) and radare2's open before the loop wait it too. |
+| `core.mcp.breaker.default_call_timeout_seconds` | 300 | The budget per call of every server whose block declares none (every built-in), read alike whatever the server or its tools are called; zero sends their calls with no deadline of their own. 300 is the floor every server got before servers declared their own, the longer of the two static timeouts as they ship. It used to be derived from `core.static.capa.timeout_seconds` and `core.static.yara.timeout_seconds`, two blocks named for one provider's tools; the upgrade wrote a deployment's own floor here (900 on a slow host still fits), so no server's budget changed, and importing a `maljan-settings/2` or `/1` export gives it the floor that export carried. |
 | `core.mcp.breaker.max_concurrent_calls` | 4 | A judgement: the shipped teams run their analysts one after another, and four lets one analyst's parallel tool calls through while bounding a team that fans out. `0` leaves the calls uncapped, as every server was before. |
 
 An unanswered call is either a transport failure — a timeout, a refused or
@@ -5308,7 +5310,7 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
 
 ```json
 {
-  "format": "maljan-settings/2",
+  "format": "maljan-settings/3",
   "exported_at": "2026-09-12T00:00:00Z",
   "values": { "core.llm.provider": "openai" },
   "secrets_omitted": ["core.llm.openai.api_key"]
@@ -5332,14 +5334,21 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
   fails the settings page or the export.
 
 `POST /api/v1/settings/import` (admin) accepts the same document. In
-`maljan-settings/2` a built-in block's tool declarations are stored as their
+`maljan-settings/3`, as in `/2`, a built-in block's tool declarations are stored as their
 changes over the shipped ones, one tool at a time (see **Tool declarations are
 saved one tool at a time**), so an export and import round trip keeps exactly
-those changes. A map in a `/2` document without the mark is read whole, as
-a stored one is. A document in `maljan-settings/1`, written before, is still
+those changes. A map in a `/3` or `/2` document without the mark is read whole, as
+a stored one is. A document in `maljan-settings/2`, written before a server's
+call budget had a setting of its own, is read as `/3` is, except that where it
+carries `core.static.capa.timeout_seconds` or `core.static.yara.timeout_seconds`
+and no `core.mcp.breaker.default_call_timeout_seconds`, the budget is given the
+floor that document gave every server (the longer of the two, each at its
+shipped default where it is absent), and its YARA timeout is the check budget
+`core.reporting.detection_rule_check_seconds`; a `/3` document's static
+timeouts are their own. A document in `maljan-settings/1`, written before, is still
 accepted: a built-in block's tool declarations there are its whole map, so a
 shipped tool it does not name stays removed and a tool it names reads as
-written; a map marked as changes reads as it does in `/2`. A `format` other than these two is rejected with 422; unknown or read-only keys
+written; a map marked as changes reads as it does in `/2`, and its call budget as in `/2`. A `format` other than these three is rejected with 422; unknown or read-only keys
 are rejected with 422 and a per-key error, and nothing is applied when any key
 fails. A key of a setting retired with no effect — `core.preprocessing.summarizer_provider`,
 `core.preprocessing.summarizer_model`, `core.reporting.narrative_max_tokens` —

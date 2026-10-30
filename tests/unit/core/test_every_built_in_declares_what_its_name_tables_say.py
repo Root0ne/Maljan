@@ -423,15 +423,18 @@ def test_the_work_directories_are_the_providers(declared: ToolDeclarations) -> N
 
 
 def test_the_auto_name_prefixes_are_the_validation_patterns(declared: ToolDeclarations) -> None:
-    from maljan.pipeline.validation import _GENERIC_FUNCTION_NAME
+    from maljan.core.undeclared_tools import auto_name_pattern
+    from maljan.pipeline import validation
 
-    alternation = re.search(r"\(\?:([a-z|]+)\)", _GENERIC_FUNCTION_NAME.pattern)
+    alternation = re.search(r"\(\?:([a-z|]+)\)", auto_name_pattern().pattern)
     assert alternation is not None
     stems = set(alternation.group(1).split("|"))
     prefixes = {p for d in declared.sources() for p in d.auto_name_prefixes}
     assert {p[:-1].lower() for p in prefixes} == stems
     for prefix in prefixes:
-        assert _GENERIC_FUNCTION_NAME.search(f"{prefix}401000")
+        assert validation.generic_function_name().search(f"{prefix}401000")
+    # The validation reads the declared prefixes alone, never a pattern of the shipped ones.
+    assert not hasattr(validation, "_GENERIC_FUNCTION_NAME")
 
 
 def test_virustotals_reference_url_is_linked_on_a_run_that_asked_it(

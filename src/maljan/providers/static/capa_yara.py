@@ -624,7 +624,7 @@ class CapaYaraStaticProvider(StaticProvider):
         the engine matches in time linear in the sample, 0.03 s for 16 MB and
         1.1 s for 512 MB against the 31 shipped rules. A ``timeout`` would cut
         a real scan of a large sample short for a risk this rule form does not
-        carry; ``core.static.yara.timeout_seconds`` bounds the drafted rule's
+        carry; ``core.reporting.detection_rule_check_seconds`` bounds the drafted rule's
         check (a full YARA condition language), which this is not.
         """
         self._native_yara_ran = False

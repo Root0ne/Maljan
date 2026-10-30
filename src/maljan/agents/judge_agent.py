@@ -2331,7 +2331,7 @@ class JudgeAgent(BudgetMeter):
         (``delegation._own_policy``).
         """
         from maljan.agents.composition import active_profile
-        from maljan.core.config import BUILTIN_SERVER_KEYS
+        from maljan.core.config import shipped_server_keys
 
         config = getattr(getattr(self, "_container", None), "config", None)
         if config is None:
@@ -2341,7 +2341,7 @@ class JudgeAgent(BudgetMeter):
         here = str(getattr(self, "pipeline_stage", "") or "")
         for stage in team.stages:
             if str(stage.key) == here and not stage.builtin_tools:
-                withheld.update(BUILTIN_SERVER_KEYS)
+                withheld.update(shipped_server_keys(config.mcp.servers))
         return withheld
 
     def drain_validation_findings(self) -> tuple[list[dict[str, str]], int, dict[str, int]]:

@@ -42,10 +42,10 @@ def _path_taking_sidecars() -> list[str]:
     that starts confining paths has to start receiving the roots in the same
     change, and a list kept by hand is what lets the two drift.
     """
-    from maljan.core.config import BUILTIN_SERVER_KEYS
+    from maljan.core.config import shipped_server_keys
 
     found = []
-    for key in BUILTIN_SERVER_KEYS:
+    for key in shipped_server_keys():
         server = ROOT / "services" / f"{key}-mcp" / "server.py"
         if server.is_file() and "resolve_under_roots" in server.read_text(encoding="utf-8"):
             found.append(key)
@@ -56,9 +56,9 @@ PATH_TAKING = _path_taking_sidecars()
 
 
 def _builtin_keys() -> list[str]:
-    from maljan.core.config import BUILTIN_SERVER_KEYS
+    from maljan.core.config import shipped_server_keys
 
-    return list(BUILTIN_SERVER_KEYS)
+    return list(shipped_server_keys())
 
 
 BUILTIN_KEYS = _builtin_keys()
@@ -163,13 +163,13 @@ class TestEveryPathTakingSidecarMayReadTheRoots:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from maljan.agents.subprocess_env import child_env
-        from maljan.core.config import BUILTIN_SERVER_KEYS, Settings
+        from maljan.core.config import Settings, shipped_server_keys
         from maljan.tools.roots import SAMPLE_ROOTS_ENV
 
         monkeypatch.setenv(SAMPLE_ROOTS_ENV, str(tmp_path))
         servers = Settings(_env_file=None).mcp.servers
 
-        for name in BUILTIN_SERVER_KEYS:
+        for name in shipped_server_keys():
             if name in PATH_TAKING:
                 continue
             config = servers[name]

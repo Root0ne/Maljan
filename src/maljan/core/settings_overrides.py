@@ -235,9 +235,14 @@ def _built(
     (anything but ``None``) is not held to the settings' own check: its
     answer is its problem, ``""`` for none (:func:`_left_out_checked`).
     """
+    from maljan.core.settings_annotations import MOVED_UNREAD_BY_MODELS, read_as_current
+
     token = STORE_ONLY.set(True)
     try:
-        in_force = declarations_in_force(core_overrides)
+        # A row a revision has not moved yet is read as the key that now holds
+        # it, where no settings model reads the old key itself.
+        moved = read_as_current(core_overrides, prefix="", only=MOVED_UNREAD_BY_MODELS)
+        in_force = declarations_in_force(moved)
         if PACK_STEPS_PATH not in in_force:
             return Settings(**nest(in_force)), []
         stored = in_force.pop(PACK_STEPS_PATH)

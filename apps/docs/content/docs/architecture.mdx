@@ -5531,7 +5531,7 @@ is assembled from what the run gathered rather than recomputed beside it:
   parts. Once the draft compiles (includes refused by the engine, so no file
   is opened at compile time), the same engine scans the probe ruleset over the
   file the run analysed, mapped read-only where it lies, in its fast mode and
-  within `core.static.yara.timeout_seconds` (the report node passes both, and
+  within `core.reporting.detection_rule_check_seconds` (the report node passes both, and
   drafts off the event loop). The draft itself is never scanned: its
   `N of them` lists every match up to the engine's limit of a million per
   string, which a sample repeating a published name could turn into

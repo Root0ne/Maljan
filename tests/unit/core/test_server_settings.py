@@ -9,11 +9,11 @@ import pytest
 from pydantic import SecretStr
 
 from maljan.core.config import (
-    BUILTIN_SERVER_KEYS,
-    RESERVED_SERVER_KEYS,
     SERVER_KEY_PATTERN,
     MCPServerConfig,
     Settings,
+    reserved_server_keys,
+    shipped_server_keys,
 )
 
 
@@ -41,18 +41,10 @@ def test_the_two_sidecars_are_seeded_with_todays_launch_parameters():
 
 
 def test_builtin_keys_are_reserved_and_the_key_pattern_is_a_slug():
-    assert set(BUILTIN_SERVER_KEYS) <= set(RESERVED_SERVER_KEYS)
-    assert set(RESERVED_SERVER_KEYS) == {
-        "analysis",
-        "knowledge",
-        "network",
-        "threatintel",
-        "virustotal",
-        "ghidra",
-        "cape",
-        "pipeline",
-        "sandbox",
-    }
+    shipped = set(shipped_server_keys())
+    assert shipped == set(Settings(_env_file=None).mcp.servers)
+    assert shipped <= set(reserved_server_keys())
+    assert set(reserved_server_keys()) - shipped == {"ghidra", "cape", "pipeline", "sandbox"}
     pattern = re.compile(SERVER_KEY_PATTERN)
     assert pattern.match("r2custom") and pattern.match("a")
     assert not pattern.match("R2") and not pattern.match("1a") and not pattern.match("a" * 33)

@@ -1253,10 +1253,10 @@ def _job_id_of(container: Any) -> str | None:
     return str(key()) if callable(key) else None
 
 
-def _yara_scan_budget(container: Any) -> int | None:
-    """The operator's wall clock for one YARA scan of the sample, or ``None`` when unread."""
+def _rule_check_budget(container: Any) -> int | None:
+    """The operator's wall clock for the check of a drafted rule, or ``None`` when unread."""
     try:
-        return int(container.config.static.yara.timeout_seconds)
+        return int(container.config.reporting.detection_rule_check_seconds)
     except (AttributeError, TypeError, ValueError):
         return None
 
@@ -8189,7 +8189,7 @@ def make_report_node(
         # once the export has decided them. Disabled via config when desired.
         # The YARA draft is run against the sample it was drafted from, the
         # file the builder read the hashes from, within the operator's budget
-        # for one YARA scan of the sample. The scan is synchronous, so the
+        # for that check. The scan is synchronous, so the
         # drafting runs off the event loop the worker's heartbeat shares.
         if cfg is None or cfg.auto_generate_detection_rules:
             try:
@@ -8200,7 +8200,7 @@ def make_report_node(
                     report,
                     OwnSample(
                         path=state.get("sample_path"),
-                        budget_seconds=_yara_scan_budget(container),
+                        budget_seconds=_rule_check_budget(container),
                         on_open=_noting_the_report_read(container),
                     ),
                 )

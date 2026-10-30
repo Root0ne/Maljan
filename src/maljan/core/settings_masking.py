@@ -103,23 +103,105 @@ def _masked_one_url(url: str, mask: str) -> str:
 # What follows the last "@" of an address written with no scheme: a host or a
 # bracketed IPv6 address, an optional port, then an optional path, query or
 # fragment; punctuation that closes a sentence, a quote or a JSON object may
-# trail a bare host.
+# trail a bare host, a quote also as JSON text inside a JSON string escapes it
+# (``{"a":"{\"u\":\"user:pw@h:8080\"}"}``).
 _BARE_AUTHORITY_TAIL = re.compile(
     r"(?:\[[0-9A-Fa-f:.%]+\]|[A-Za-z0-9][A-Za-z0-9.-]*)(?P<port>:\d{1,5})?"
-    r"(?:(?P<path>[/?#]\S*)|[)\]}>\"'.,;:]*)"
+    r"(?:(?P<path>[/?#]\S*)|(?:\\(?=[\"'])|[)\]}>\"'.,;:])*)"
 )
 # What may open a token before an address's first character: a quote, a
 # bracket, or a JSON object's brace (``{"u":"user:pw@host"}``).
 TOKEN_OPENERS = "\"'(<[{"
-# A backslash that is not JSON's escape of a quote or of a backslash: a
-# Windows path's separator.
-_PATH_BACKSLASH = re.compile(r'\\(?![\\"])')
+# The characters no Windows path holds: what stands before the last of them is
+# not the path an address may end in (``{"a":"C:\\x","b":"p\\ss@h:8080"}``).
+_NO_PATH_CHARS = '"<>|'
+# Where a Windows path begins, as written or as JSON text escapes it: a drive
+# (``C:\``), a UNC share with its server's host name (``\\srv\``), a long-path
+# or device prefix (``\\?\``, ``\\.\``), a relative path (``.\``, ``..\``), an
+# environment variable (``%ProgramFiles(x86)%\``, ``$env:APPDATA\``), at the
+# start of what may be a path or after a character that opens a value
+# (``--out=C:\``, ``('C:\``); a drive written with a slash and a name after it
+# (``C:/Users``) only at the start. Possessive, so each start costs time
+# linear in what it reads.
+_PATH_START = re.compile(
+    r"\A[A-Za-z]:/(?=[\w.~$-])"
+    r"|(?:\A|(?<=['(\[{=,;]))"
+    r"(?:[A-Za-z]:\\|\\\\(?:\\\\)?[?.](?:\\\\)?\\|\\\\(?:\\\\)?[\w.-]++\\|\.{1,2}\\"
+    r"|%[A-Za-z_][A-Za-z0-9_() ]*+%\\|\$env:[A-Za-z_]\w*+\\)"
+)
+# A backslash with the character it escapes, or a quote it leaves unescaped.
+_ESCAPE_OR_QUOTE = re.compile(r"\\.|[\"']", re.DOTALL)
+# What may stand right before a single quote that opens a value.
+_VALUE_OPENERS = ":=,;([{"
 # The words before a colon that open a mailbox rather than a user name: the
 # schemes whose address is one (``mailto:ops@example.com``) and the mail
 # headers that name one (``From:alice@example.com``), any case.
 _MAILBOX_WORDS = frozenset(
     {"mailto", "xmpp", "sip", "sips", "im", "pres", "acct", "from", "to", "cc", "bcc", "sender"}
 )
+
+
+def _reads_as_a_windows_path(head: str) -> bool:
+    """Whether ``head``, what stands before an address's last ``@``, ends in a Windows path.
+
+    It does where what follows its last character no path holds begins as a
+    path does (:data:`_PATH_START`): at the start of ``head`` or of a quoted
+    value (``path:'C:\\x``), or after a character that opens a value where
+    no ``:`` stands between the quoted value's start and the path
+    (``--out=C:\\``, but not ``user:pw;\\\\x``, whose colon marks userinfo).
+    A double quote opens a value unescaped, a single quote also only after
+    the start or a character that opens a value (:data:`_VALUE_OPENERS`). A
+    path never follows a JSON-escaped quote (``p\\"C:\\\\k``). A backslash
+    elsewhere, such as JSON's escape of a backslash before a letter in a
+    password (``p\\\\ss``), marks no path.
+
+    A rooted path (``\\Windows\\x``) and one behind a colon (``file:C:\\x``)
+    read as userinfo and are masked: a password may begin that way, and
+    masking a path costs less than keeping a password. A password that
+    itself reads as a path after a separator with no colon before it stays
+    kept: two escaped backslashes and a name (``Xy,\\\\\\\\9k\\\\z@h:8080``,
+    a UNC share as JSON text writes it) or a relative path
+    (``Xy,.\\k@h:8080``). Linear in ``head``.
+    """
+    cut = max(head.rfind(c) for c in _NO_PATH_CHARS)
+    tail = head[cut + 1 :]
+    if "\\" not in tail:
+        return False
+    opens = _value_starts(head)
+    colons = [found.start() for found in re.finditer(":", head)]
+    value, last_colon, next_open, next_colon = 0, -1, 0, 0
+    for found in _PATH_START.finditer(tail):
+        at = cut + 1 + found.start()
+        while next_open < len(opens) and opens[next_open] <= at:
+            value = opens[next_open]
+            next_open += 1
+        while next_colon < len(colons) and colons[next_colon] < at:
+            last_colon = colons[next_colon]
+            next_colon += 1
+        if at == 0 or (value == at and value > 0):
+            return True
+        if at == cut + 1 and head[cut] == '"':
+            continue  # a JSON-escaped quote
+        if last_colon < value:
+            return True
+    return False
+
+
+def _value_starts(head: str) -> list[int]:
+    """Where each value an unescaped quote opens in ``head`` begins, in order.
+
+    A quote behind an odd run of backslashes is JSON's escape of one inside
+    the value; a single quote opens one only at the start or after a
+    character that opens a value. Linear in ``head``.
+    """
+    starts = []
+    for found in _ESCAPE_OR_QUOTE.finditer(head):
+        quote = found.start()
+        if found.group() == '"' or (
+            found.group() == "'" and (quote == 0 or head[quote - 1] in _VALUE_OPENERS)
+        ):
+            starts.append(quote + 1)
+    return starts
 
 
 def bare_userinfo(token: str) -> tuple[str, str] | None:
@@ -134,10 +216,12 @@ def bare_userinfo(token: str) -> tuple[str, str] | None:
     ``@scope/pkg@latest``), a Git remote (``git@host:org/repo``), a mailbox
     after its scheme or header (``mailto:ops@example.com``,
     ``From:alice@example.com``) and a Windows path (``C:\\Users\\bob@corp``)
-    are none. A backslash that escapes a quote or a backslash, as JSON text
-    writes a password (``{"password":"p\\"ss@h:8080"}``), is no path where
-    the address names a port or a path; before a mail address's host
-    (``{"to":"\\"bob\\"@corp.com"}``) any backslash refuses it.
+    are none. Where the address names a port or a path, a backslash marks a
+    path only where the userinfo ends in one (:func:`_reads_as_a_windows_path`),
+    so a password JSON text escapes (``{"password":"p\\"ss@h:8080"}``,
+    ``{"password":"p\\\\ss@h:8080"}``) is masked and ``C:\\Users\\bob@h:8080``
+    is kept; before a mail address's host (``{"to":"\\"bob\\"@corp.com"}``)
+    any backslash refuses it.
     """
     head, at, tail = token.rpartition("@")
     if not at or not head or not tail:
@@ -146,7 +230,7 @@ def bare_userinfo(token: str) -> tuple[str, str] | None:
     if found is None:
         return None
     if "\\" in head and (
-        _PATH_BACKSLASH.search(head) or not (found.group("port") or found.group("path"))
+        _reads_as_a_windows_path(head) or not (found.group("port") or found.group("path"))
     ):
         return None
     slash = head.find("/")
@@ -198,6 +282,22 @@ def _opener_is_its_own(opener: str, tail: str) -> bool:
     return found is not None and (found.group("port") is not None or _CLOSERS[opener] not in tail)
 
 
+def _path_start_holds(word: str, lead: int, start: int, last_at: int) -> bool:
+    """Whether a path start (:data:`_PATH_START`) holds the opener right before ``start``.
+
+    Only such a path is read from the word's ``lead`` leading openers rather
+    than from that opener; a path that ends before it shields nothing after
+    it (``.\\x('tok\\q@h:8080')``). Linear in the word.
+    """
+    head = word[lead:last_at]
+    for found in _PATH_START.finditer(head):
+        if found.start() >= start - lead:
+            break
+        if start - lead <= found.end():
+            return _reads_as_a_windows_path(head)
+    return False
+
+
 def _address_in(word: str) -> int | None:
     """Where the address written with no scheme in ``word`` begins, or ``None`` for none.
 
@@ -234,6 +334,13 @@ def _address_in(word: str) -> int | None:
             and (start < last_at or _opener_is_its_own(opener, whole[1]))
         ):
             start = lead
+    if (
+        start > lead
+        and "\\" in word[start:last_at]
+        and _path_start_holds(word, lead, start, last_at)
+    ):
+        # A path whose start holds an opener (``%ProgramFiles(x86)%\x@h:8080``).
+        return None
     return start if bare_userinfo(word[start:]) is not None else None
 
 

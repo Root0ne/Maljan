@@ -26,6 +26,7 @@
     "cross-env": "^10.1.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "16.4.3",
+    "jsdom": "^26.1.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^5.0.5"

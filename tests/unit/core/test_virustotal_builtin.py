@@ -15,8 +15,6 @@ from pathlib import Path
 
 from maljan.core import virustotal
 from maljan.core.config import (
-    BUILTIN_SERVER_KEYS,
-    RESERVED_SERVER_KEYS,
     Settings,
     ToolRef,
 )
@@ -48,8 +46,11 @@ class TestTheSeed:
         assert not set(server.tools or []) & set(virustotal.SUBMIT_TOOLS)
 
     def test_the_key_is_a_built_in_and_reserved(self) -> None:
-        assert virustotal.SERVER_KEY in BUILTIN_SERVER_KEYS
-        assert virustotal.SERVER_KEY in RESERVED_SERVER_KEYS
+        from maljan.core.config import reserved_server_keys, shipped_server_keys
+
+        assert Settings(_env_file=None).mcp.servers[virustotal.SERVER_KEY].shipped
+        assert virustotal.SERVER_KEY in shipped_server_keys()
+        assert virustotal.SERVER_KEY in reserved_server_keys()
 
     def test_the_network_analyst_the_judge_and_triage_reach_it_by_capability(self) -> None:
         from maljan.agents.composition import mcp_refs_for

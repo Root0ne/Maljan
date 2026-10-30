@@ -15,6 +15,8 @@ module and no other.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 # ``analysis.evidence_roots``: the tools whose fact is about the file as a whole.
 WHOLE_FILE_TOOLS = frozenset({"hashes", "identify_file", "signing_info"})
 # A third party's assessment of the whole file (a reputation lookup by hash);
@@ -86,26 +88,37 @@ SIGNATURE_RULE_TOOLS = ("yara_scan",)
 API_CATALOGUE_TOOLS = ("api_capability",)
 
 
-# ``providers.server_guard``: the settings blocks whose ``timeout_seconds`` the
-# deployment-wide per-call floor was derived from before each server declared
-# its own budget (``MCPServerConfig.call_timeout_seconds``). Read only for a
-# server that declares none, so a deployment's stored settings keep every
-# server's budget exactly as it was.
-LEGACY_CALL_FLOOR_BLOCKS = ("capa", "yara")
+# ``core.config.reserved_server_keys``: the keys the provider-owned Ghidra and
+# CAPE servers held in ``mcp`` before the provider layer owned them
+# (``MCPConfig``). Still refused to a server of an operator's own, as they have
+# been since, so no stored key changes what it names.
+FORMER_PROVIDER_SERVER_KEYS = ("ghidra", "cape")
 
 
-def legacy_call_floor(cfg: object) -> float:
-    """The per-call floor every server got before servers declared their own budget.
+# ``core.mcp.breaker.default_call_timeout_seconds``: the two static timeouts,
+# each with its shipped default, whose longer was the per-call budget of every
+# server that declares none before that setting held it. Read only where a
+# document written before the move arrives without the setting (an older
+# export, ``api.v1.settings``), so the floor it carried is kept; revision
+# ``20261102000000`` restates the same rule for the store.
+FORMER_CALL_FLOOR_SOURCES: dict[str, float] = {
+    "core.static.capa.timeout_seconds": 300.0,
+    "core.static.yara.timeout_seconds": 60.0,
+}
 
-    The longest ``static.<block>.timeout_seconds`` of the blocks above, as
-    ``deployment_call_budget`` derived it; ``0`` with none set.
+
+def former_call_floor(values: Mapping[str, object]) -> float:
+    """The floor a document written before the move gave every such server.
+
+    The longer of :data:`FORMER_CALL_FLOOR_SOURCES` as ``values`` holds them,
+    each one it does not hold (or holds as no number) at its shipped default.
     """
-    static = getattr(cfg, "static", None)
-    budgets = [
-        float(getattr(getattr(static, name, None), "timeout_seconds", 0) or 0)
-        for name in LEGACY_CALL_FLOOR_BLOCKS
-    ]
-    return max([b for b in budgets if b > 0], default=0.0)
+    floors = []
+    for key, default in FORMER_CALL_FLOOR_SOURCES.items():
+        value = values.get(key)
+        held = isinstance(value, int | float) and not isinstance(value, bool)
+        floors.append(float(value) if held else default)  # type: ignore[arg-type]
+    return max(floors)
 
 
 # ``core.config.StaticConfig``: how the whole static fragment opened when the

@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any
 
 from maljan.core import settings_secrets as box
-from maljan.core.config import BUILTIN_SERVER_KEYS, Settings, builtin_env_allow
+from maljan.core.config import Settings, builtin_env_allow
 from maljan.core.plugins import (
     ALLOW_LIST_KEY,
     dropped_selections,
@@ -1057,7 +1057,7 @@ class SettingsService:
                 shown["tool_facts"] = served_tool_facts(
                     shown["tool_facts"], shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}")
                 )
-            if name in BUILTIN_SERVER_KEYS:
+            if getattr(default_servers.get(name), "shipped", False) is True:
                 shown["env_allow"] = builtin_env_allow(name, shown.get("env_allow") or [])
             # The trust in the server's own declaration in force, with the
             # launch it holds for, read from the entry before it is masked.
