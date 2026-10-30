@@ -152,3 +152,15 @@ export function detectionsFigure(
   if (reputation.malicious === null) return { count: "not counted", known: false };
   return { count: String(reputation.malicious), known: true };
 }
+
+/**
+ * What an enrichment record says, as words a tooltip can carry: one line per
+ * field that holds a plain value, its name with the underscores read as
+ * spaces. A nested value is left to the evidence record it came from.
+ */
+export function reputationTooltip(rep: Record<string, unknown>): string {
+  return Object.entries(rep)
+    .filter(([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+    .map(([k, v]) => `${k.replace(/_/g, " ")}: ${typeof v === "boolean" ? (v ? "yes" : "no") : String(v)}`)
+    .join("\n");
+}

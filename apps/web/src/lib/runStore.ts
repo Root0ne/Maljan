@@ -23,7 +23,7 @@ import type { StageEvent, StageTimelineRow } from "@/components/analysis/stageTi
 import type { StageRow } from "@/components/analysis/pipelineSteps";
 import { api } from "@/lib/api";
 import { ApiError, getErrorMessage, isNetworkFailure } from "@/lib/errors";
-import { pollDelay, pollFailure } from "@/app/(app)/analysis/[id]/polling";
+import { pollDelay, pollFailure } from "@/components/analysis/polling";
 import { API_BASE } from "@/lib/apiBase";
 import { knownKind } from "@/lib/conversation";
 import type { TranscriptRow } from "@/lib/conversation";

@@ -215,7 +215,7 @@ function ComparePage() {
       <h1 className="mb-3 text-lg font-semibold text-text-primary">Compare two runs</h1>
       {!a ? (
         <p className="text-sm text-text-secondary">
-          Open an analysis and choose Compare, or pick a run from{" "}
+          Open an analysis and choose Evidence › Compare with another run, or pick a run from{" "}
           <Link href="/jobs" className="text-accent-strong hover:underline">
             the analyses list
           </Link>

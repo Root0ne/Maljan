@@ -1,7 +1,7 @@
 "use client";
 
 import { CONFIDENCE_BAR_COLOR, confidencePercent } from "./agentConfidence";
-import { useReport } from "@/app/(app)/analysis/[id]/layout";
+import { useReport } from "@/components/analysis/AnalysisContext";
 import { rosterNames } from "@/lib/rosterNames";
 import { statusTone } from "@/lib/status";
 import type { AgentFindingStatus, JobRoster } from "@/types";

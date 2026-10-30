@@ -52,7 +52,7 @@ export const KIND_STEPS: Record<
   triage: {
     id: "triage",
     title: "Triage pack",
-    description: "The deterministic tools, run by the pipeline and written to the evidence ledger.",
+    description: "The deterministic tools, run by the pipeline and written to the evidence.",
   },
   debate: {
     id: "negotiation",

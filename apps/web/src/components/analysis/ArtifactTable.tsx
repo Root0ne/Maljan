@@ -201,7 +201,9 @@ function SectionTable({ section, rows }: { section: EvidenceSection; rows: strin
                       cell.includes("\n") ? "whitespace-pre-wrap" : ""
                     }`}
                   >
-                    {cell || "-"}
+                    {/* A cell naming records (`ev_0019, ev_0024`) cites
+                        them: drawn the way every citation is. */}
+                    {cell ? /\bev_\d+\b/.test(cell) ? <CitedText text={cell} /> : cell : "-"}
                   </td>
                 ))}
               </tr>

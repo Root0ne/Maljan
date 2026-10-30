@@ -3,16 +3,13 @@
 import { useState, useEffect } from "react";
 
 import { api } from "@/lib/api";
-import { copyToClipboard, downloadBlob } from "@/lib/report-utils";
+import { copyToClipboard } from "@/lib/report-utils";
 import { getErrorMessage } from "@/lib/errors";
-import { useReport } from "@/app/(app)/analysis/[id]/layout";
+import { useReport } from "@/components/analysis/AnalysisContext";
 import JsonNode from "@/components/analysis/JsonTree";
 import StixGraphView from "@/components/analysis/StixGraph";
 import {
   GRAPH_FIRST_LIMIT,
-  NAVIGATOR_LAYER_FILE,
-  STIX_DRAFT_FILE,
-  STIX_EXPORT_FILE,
   bundleObjects,
   graphViewHint,
   readStixAnswer,
@@ -112,41 +109,19 @@ export default function StixPanel() {
         >
           {copied ? "copied" : "Copy JSON"}
         </button>
-        <button
-          onClick={() =>
-            downloadBlob(raw, draft ? STIX_DRAFT_FILE : STIX_EXPORT_FILE, "application/json")
-          }
-          className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
-        >
-          Download
-        </button>
-        <button
-          onClick={async () => {
-            if (!report?.id) return;
-            try {
-              const layer = await api.getReportAttackLayer(report.id);
-              setActionError(null);
-              downloadBlob(
-                JSON.stringify(layer, null, 2),
-                NAVIGATOR_LAYER_FILE,
-                "application/json",
-              );
-            } catch (err: unknown) {
-              setActionError(`Could not fetch the ATT&CK Navigator layer: ${getErrorMessage(err)}`);
-            }
-          }}
-          title="ATT&CK Navigator layer of the techniques this report publishes"
-          className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
-        >
-          Navigator layer
-        </button>
       </div>
+      {/* The bundle and the ATT&CK Navigator layer download from the page's
+          one Export menu; a second pair of buttons here exported the same
+          two files again. */}
+      <p className="px-4 pt-3 text-[11px] text-text-muted">
+        To download the bundle or the ATT&amp;CK Navigator layer, use Export at the top of the page.
+      </p>
       {draft && (
         <div
           role="status"
           className="mx-4 mt-3 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded px-2 py-1.5"
         >
-          {notice ?? "This is the judge's unpublished draft, not the export."}
+          {notice ?? "This is the analysis's unpublished draft, not the export."}
         </div>
       )}
       {(fetchError || actionError) && (

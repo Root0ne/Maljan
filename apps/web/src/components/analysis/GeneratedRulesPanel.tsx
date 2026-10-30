@@ -2,11 +2,9 @@
 
 import { useMemo, useState } from "react";
 
-import { useReport } from "@/app/(app)/analysis/[id]/layout";
-import { api } from "@/lib/api";
+import { useReport } from "@/components/analysis/AnalysisContext";
 import { downloadBlob } from "@/lib/report-utils";
 import CopyButton from "@/components/ui/CopyButton";
-import { getErrorMessage } from "@/lib/errors";
 import type { DetectionKind, DetectionRule } from "@/types/malware-report";
 import { sampleMatchBadge, type SampleMatchTone } from "./sampleMatch";
 
@@ -42,9 +40,6 @@ const SAMPLE_FOOTER: Record<SampleMatchTone, string> = {
 export default function GeneratedRulesPanel() {
   const { report, loading } = useReport();
   const [activeKind, setActiveKind] = useState<DetectionKind | "all">("all");
-  // A failed bundle download
-  // used to do nothing at all — the button just felt broken.
-  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   /* The `?? []` is a fresh array on every render, which is a new dependency
    * for both memos below; the report's own list, memoised, is not. */
@@ -91,38 +86,12 @@ export default function GeneratedRulesPanel() {
             />
           ))}
         </div>
-        <div className="ml-auto flex gap-2">
-          {presentKinds.map((k) => (
-            <button
-              key={k}
-              onClick={async () => {
-                if (!report?.id) return;
-                try {
-                  const body = await api.getReportSignature(report.id, k);
-                  downloadBlob(body, `maljan-${k}.${KIND_EXT[k]}`, KIND_MIME[k]);
-                  setDownloadError(null);
-                } catch (err) {
-                  setDownloadError(
-                    `Could not download the ${k} bundle: ${getErrorMessage(err)}`,
-                  );
-                }
-              }}
-              className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
-            >
-              ↓ {k} bundle
-            </button>
-          ))}
-        </div>
+        {/* One file per kind is in the page's Export menu; each rule below
+            keeps its own copy and download. */}
+        <span className="ml-auto text-[11px] text-text-muted">
+          Every rule of one kind as one file: Export, at the top of the page.
+        </span>
       </div>
-
-      {downloadError && (
-        <div
-          role="alert"
-          className="text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
-        >
-          {downloadError}
-        </div>
-      )}
 
       <div className="space-y-3">
         {filtered.map((rule, i) => (

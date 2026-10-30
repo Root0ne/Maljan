@@ -1,383 +1,49 @@
 "use client";
 
-import { useReport } from "../layout";
-import ReportAbsent from "@/components/analysis/ReportAbsent";
-import { reportAbsence } from "@/components/analysis/reportAbsence";
-import Th from "@/components/ui/Th";
-import { ArtifactSections } from "@/components/analysis/ArtifactTable";
-import { isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
-import { endpointReputation, verdictWords } from "@/components/analysis/reputation";
-import { domainFacts, endpointCounts, ipFacts } from "@/components/analysis/networkFacts";
-import type { NetworkDomain, NetworkIP } from "@/types/malware-report";
+import { useReport } from "@/components/analysis/AnalysisContext";
+import EnrichButton from "@/components/analysis/EnrichButton";
+import ReportGate from "@/components/analysis/ReportGate";
+import TabBlock from "@/components/analysis/TabBlock";
+import { tabHasContent } from "@/components/analysis/analysisTabs";
+import { networkCounts } from "@/components/analysis/networkFacts";
+import NetworkContent from "@/components/analysis/tabs/NetworkContent";
+import KpiTile from "@/components/ui/KpiTile";
 
-export default function NetworkTab() {
-  const { report, job, loading, reportError } = useReport();
-
-  if (loading) {
-    return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
-  }
-
-  /* No report is not an empty report: say which absence this is rather than
-   * drawing this tab's negative (`reportAbsence`). */
-  const absent = reportAbsence({ report, job, reportError });
-  if (absent) return <ReportAbsent absence={absent} />;
-
-  const mr = report?.malware_report;
-  const net = mr?.network;
-  // Network IOCs recovered from the PE's static
-  // strings (e.g. a hard-coded C2 domain) live on ``static.interesting_strings``,
-  // not on the (sandbox-only) ``network`` block. Surface them here — clearly
-  // labelled as static-derived — so a domain like 888kafa.com is no longer
-  // reported as "0 domains" just because the sandbox never ran.
-  const staticIocs = (mr?.static?.interesting_strings ?? []).filter(
-    (s) => s.kind === "domain" || s.kind === "ip" || s.kind === "url",
-  );
-  const reportSections = mr?.sections;
-  const evidenceSections = sectionsForTab(reportSections, "network", report?.section_tabs);
-  // The observed-traffic tables and the static-string list each have one
-  // section that says the same thing; where it exists, the typed table stands
-  // down rather than printing the same endpoints a second time.
-  const showsObservedTraffic = !isCoveredBySection(reportSections, ["sandbox_network"]);
-  const showsStaticIocs =
-    staticIocs.length > 0 && !isCoveredBySection(reportSections, ["iocs"]);
-  const endpoints = endpointCounts(net, staticIocs);
-  if (!net && staticIocs.length === 0 && evidenceSections.length === 0) {
-    return (
-      <div className="p-8 text-center text-sm text-text-secondary">
-        Nothing on this run looked at the network: no capture, no sandbox
-        channel, and no endpoint in the sample&apos;s own strings.
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <ArtifactSections sections={evidenceSections} />
-
-      <div className="text-xs text-text-muted">
-        {endpoints.domains} domain(s) · {endpoints.ips} IP(s) · {endpoints.urls} URL(s)
-        {staticIocs.length > 0 && (
-          <span className="ml-1 text-text-tertiary">
-            ({staticIocs.length} from static strings)
-          </span>
-        )}
-      </div>
-
-      {showsStaticIocs && (
-        <div className="bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Static-string indicators ({staticIocs.length})
-            </h2>
-            <p className="mt-1 text-[11px] text-text-muted">
-              Extracted from the binary&apos;s strings — potential C2/network
-              endpoints that were not observed on the wire during analysis.
-            </p>
-          </div>
-          <div className="divide-y divide-border-light">
-            {staticIocs.map((s, i) => (
-              <div
-                key={`${s.kind}-${s.value}-${i}`}
-                className="px-4 py-2 flex items-center gap-3 hover:bg-bg-hover"
-              >
-                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-active text-text-muted shrink-0">
-                  {s.kind}
-                </span>
-                <code className="text-xs font-mono text-status-blue break-all">
-                  {s.value}
-                </code>
-                <span
-                  /* Secondary rather than tertiary: the row hovers to
-                     `bg-bg-hover`, where tertiary is 4.10:1. */
-                  className="ml-auto text-[10px] text-text-secondary shrink-0"
-                  title="Seen in static strings, not in sandbox network telemetry"
-                >
-                  static
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* A table with nothing in it is not a finding. The tab is offered only
-        * when the run saw traffic at all (see `analysisTabs`), and inside it
-        * each list draws only where there is something to list — five
-        * "No X observed." panels under one another said nothing five times. */}
-      {net && showsObservedTraffic && net.domains.length > 0 && (
-        <Panel title="Domains">
-          <div className="divide-y divide-border-light">
-            {net.domains.map((d, i) => (
-              <DomainCard key={`${d.fqdn}-${i}`} domain={d} />
-            ))}
-          </div>
-        </Panel>
-      )}
-
-      {net && showsObservedTraffic && net.ips.length > 0 && (
-        <Panel title="IP Endpoints">
-          <div className="divide-y divide-border-light">
-            {net.ips.map((ip, i) => (
-              <IPCard key={`${ip.address}-${i}`} ip={ip} />
-            ))}
-          </div>
-        </Panel>
-      )}
-
-      {net && showsObservedTraffic && net.urls.length > 0 && (
-        <Panel title="HTTP URLs">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <Th>Method</Th>
-                <Th>Status</Th>
-                <Th>URL</Th>
-                <Th>User-Agent</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-light">
-              {net.urls.map((u, i) => (
-                <tr key={i} className="hover:bg-bg-hover">
-                  <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
-                    {u.method ?? "-"}
-                  </td>
-                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
-                    {u.status ?? "-"}
-                  </td>
-                  <td className="px-4 py-2 text-xs font-mono text-status-blue break-all">
-                    {u.url}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-text-muted truncate" title={u.user_agent || undefined}>
-                    {u.user_agent || "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
-      )}
-
-      {net && net.user_agents.length > 0 && (
-        <Panel title={`User-Agents (${net.user_agents.length})`}>
-          <StringList values={net.user_agents} />
-        </Panel>
-      )}
-
-      {net && net.ja3_fingerprints.length > 0 && (
-        <Panel title={`JA3 Fingerprints (${net.ja3_fingerprints.length})`}>
-          <StringList values={net.ja3_fingerprints} />
-        </Panel>
-      )}
-
-      {net && net.ja3s_fingerprints.length > 0 && (
-        <Panel title={`JA3S Fingerprints (${net.ja3s_fingerprints.length})`}>
-          <StringList values={net.ja3s_fingerprints} />
-        </Panel>
-      )}
-    </div>
-  );
-}
-
-/** One titled card; the tab draws one per list that has something in it. */
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-bg-surface border border-border rounded">
-      <div className="px-4 py-3 border-b border-border">
-        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-          {title}
-        </h2>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-/** The fingerprint and user-agent lists, which are the same list twice over. */
-function StringList({ values }: { values: unknown[] }) {
-  return (
-    <ul className="divide-y divide-border-light">
-      {values.map((value, i) => (
-        <li
-          key={i}
-          className="px-4 py-2 text-xs font-mono text-text-secondary break-all hover:bg-bg-hover"
-        >
-          {typeof value === "string" ? value : JSON.stringify(value)}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function DomainCard({ domain }: { domain: NetworkDomain }) {
-  const rep = domain.reputation as Record<string, unknown> | null;
-  return (
-    <div className="p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <code className="text-sm font-mono text-status-blue break-all">{domain.fqdn}</code>
-            {domain.is_suspicious && (
-              <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red shrink-0">
-                SUSP
-              </span>
-            )}
-            {/* A punycode label is registered precisely so it reads as a
-                brand it is not, so the badge names the brand rather than
-                saying "punycode" and leaving the reader to look it up. */}
-            {domain.is_punycode && (
-              <span
-                className="text-[11px] px-1.5 py-0.5 rounded bg-status-orange/10 text-status-orange shrink-0"
-                title={
-                  domain.homograph_target
-                    ? `Renders like ${domain.homograph_target}`
-                    : undefined
-                }
-              >
-                {domain.homograph_target
-                  ? `LOOKS LIKE ${domain.homograph_target}`
-                  : "PUNYCODE"}
-              </span>
-            )}
-            {typeof domain.dga_score === "number" && domain.dga_score > 0 && (
-              <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-secondary font-mono shrink-0">
-                DGA {domain.dga_score.toFixed(2)}
-              </span>
-            )}
-            <SourceBadge source={domain.source} />
-          </div>
-          {domain.reason && (
-            <div className="text-xs text-text-muted mt-1">{domain.reason}</div>
-          )}
-          {domain.resolved_ips.length > 0 && (
-            <div className="text-xs text-text-secondary mt-1">
-              <span className="text-text-muted">Resolved: </span>
-              {domain.resolved_ips.join(", ")}
-            </div>
-          )}
-          {domain.resolved_ips_partial && (
-            <div className="text-xs text-text-muted mt-1">
-              Some addresses withheld for size ({domain.resolved_ips_withheld ?? 0} of its DNS
-              request&apos;s answers not read).
-            </div>
-          )}
-          {/* Sandbox telemetry only, so usually absent — but when a dropped
-              child resolves the C2 rather than the parent, this is the story. */}
-          {domain.queried_pids.length > 0 && (
-            <div className="text-xs text-text-secondary mt-1">
-              <span className="text-text-muted">Queried by PID: </span>
-              <span className="font-mono">{domain.queried_pids.join(", ")}</span>
-            </div>
-          )}
-          <FactLines lines={domainFacts(domain)} />
-        </div>
-        {rep && <ReputationBadge rep={rep} />}
-      </div>
-    </div>
-  );
-}
-
-function IPCard({ ip }: { ip: NetworkIP }) {
-  return (
-    <div className="p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <code className="text-sm font-mono text-status-blue break-all">{ip.address}</code>
-            {ip.port !== null && (
-              <span className="text-xs text-text-secondary">
-                :{ip.port}
-                {ip.transport ? `/${ip.transport}` : ""}
-              </span>
-            )}
-            {ip.is_suspicious && (
-              <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red">
-                SUSP
-              </span>
-            )}
-            {ip.geo && (
-              <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
-                {ip.geo}
-              </span>
-            )}
-            {ip.asn && (
-              <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-secondary font-mono">
-                {ip.asn}
-              </span>
-            )}
-            <SourceBadge source={ip.source} />
-          </div>
-          <FactLines lines={ipFacts(ip)} />
-        </div>
-        {ip.reputation && <ReputationBadge rep={ip.reputation as Record<string, unknown>} />}
-      </div>
-    </div>
-  );
-}
-
-/* Where an endpoint came from.
- *
- * A name or an address the sandbox watched the sample reach and a run of bytes
- * shaped like one were drawn identically, and only the first is an observation
- * of infrastructure. The second is also held out of the exported bundle until a
- * second source knows it, so a reader comparing two rows needs to see which
- * this is. The same badge for every network kind, because the rule that reads
- * it is the same rule.
+/**
+ * Network: the counts first, then every endpoint the run saw or read out of
+ * the sample, with reputation beside each, and the one action that asks the
+ * threat-intel services about them.
  */
-function SourceBadge({ source }: { source?: string | null }) {
-  if (!source) return null;
-  const why =
-    source === "strings"
-      ? "Found in the sample's bytes, not observed on the wire"
-      : source === "sandbox"
-        ? "Resolved or requested by the sample under the sandbox"
-        : "Recorded by an analyst";
+export default function NetworkPage() {
+  const { job } = useReport();
   return (
-    <span
-      className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted shrink-0"
-      title={why}
-    >
-      {source}
-    </span>
-  );
-}
-
-/* The enrichment record beside a row, by the figure it carries and in a
- * neutral tone: whether the source calls the endpoint malicious is its own
- * declared rule, which the row's suspicious flag already carries
- * (`endpointReputation`). */
-function ReputationBadge({ rep }: { rep: Record<string, unknown> }) {
-  const badge = endpointReputation(rep);
-  if (!badge) return null;
-  const verdict = verdictWords(badge.verdict);
-  return (
-    <span
-      className="shrink-0 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded font-mono text-text-secondary bg-bg-active"
-      title={JSON.stringify(rep)}
-    >
-      {badge.source}
-      {badge.figure ? ` · ${badge.figure}` : ""}
-      {verdict && (
-        <span
-          className={verdict.tone === "red" ? "text-status-red" : "text-text-muted"}
-          title={`${badge.source}'s declared malicious_when thresholds`}
-        >
-          {` · ${verdict.text}`}
-        </span>
-      )}
-    </span>
-  );
-}
-
-/** The attribution and listing facts a row carries (`networkFacts`). */
-function FactLines({ lines }: { lines: string[] }) {
-  if (lines.length === 0) return null;
-  return (
-    <ul className="mt-1 space-y-0.5">
-      {lines.map((line) => (
-        <li key={line} className="text-xs text-text-muted">
-          {line}
-        </li>
-      ))}
-    </ul>
+    <ReportGate>
+      {(report) => {
+        const mr = report.malware_report;
+        const counts = mr ? networkCounts(mr) : null;
+        return (
+          <>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              {counts && (
+                <section aria-label="Network counts" className="grid flex-1 grid-cols-2 gap-2 sm:grid-cols-4">
+                  <KpiTile label="Domains" value={counts.domains} />
+                  <KpiTile label="IPs" value={counts.ips} />
+                  <KpiTile label="URLs" value={counts.urls} />
+                  <KpiTile label="Suspicious" value={counts.suspicious} />
+                </section>
+              )}
+              <EnrichButton reportId={report.id} />
+            </div>
+            <TabBlock
+              id="network"
+              title="Network activity"
+              empty={!tabHasContent("/network", report, job?.roster)}
+            >
+              <NetworkContent />
+            </TabBlock>
+          </>
+        );
+      }}
+    </ReportGate>
   );
 }

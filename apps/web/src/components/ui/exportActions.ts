@@ -12,6 +12,13 @@
 
 import { api } from "@/lib/api";
 import { downloadBlob, downloadObject } from "@/lib/report-utils";
+import { mispAbsence } from "@/components/analysis/indicators";
+import {
+  NAVIGATOR_LAYER_FILE,
+  STIX_DRAFT_FILE,
+  STIX_EXPORT_FILE,
+  readStixAnswer,
+} from "@/components/analysis/stixGraph";
 import type { DetectionKind, MalwareReport } from "@/types/malware-report";
 
 export interface ExportItem {
@@ -44,6 +51,41 @@ const RULE_EXT: Record<DetectionKind, string> = {
   snort: "rules",
 };
 
+const RULE_MIME: Record<DetectionKind, string> = {
+  yara: "text/x-yara",
+  sigma: "application/yaml",
+  suricata: "text/plain",
+  snort: "text/plain",
+};
+
+/**
+ * The file names the console's downloads have always had, kept as they were
+ * when the downloads moved into this menu: a script that picks up
+ * `maljan-<hash>-mitre.json` or `maljan-stix-bundle.json` keeps working.
+ * Only the full-analysis JSON is new to the menu and named here first.
+ */
+export function exportFileNames(baseName: string) {
+  return {
+    pdf: `${baseName}.pdf`,
+    html: `${baseName}.html`,
+    markdown: `${baseName}.md`,
+    iocs: `${baseName}-iocs.json`,
+    stix: STIX_EXPORT_FILE,
+    stixDraft: STIX_DRAFT_FILE,
+    misp: `${baseName}-misp.json`,
+    attackLayer: NAVIGATOR_LAYER_FILE,
+    rules: (kind: DetectionKind) => `maljan-${kind}.${RULE_EXT[kind]}`,
+    report: `${baseName}-report.json`,
+    techniques: `${baseName}-mitre.json`,
+    timeline: `${baseName}-timeline.json`,
+  };
+}
+
+/** A clause as a sentence: its first letter in capitals. */
+function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 function json(body: unknown): string {
   return JSON.stringify(body, null, 2);
 }
@@ -57,14 +99,17 @@ export function ruleKinds(mr: MalwareReport | null | undefined): DetectionKind[]
 /**
  * The menu for one stored report.
  *
- * `baseName` starts every file name ("maljan-9f86d081"), so a folder of
- * downloads sorts by sample.
+ * `baseName` starts the report's own file names ("maljan-9f86d081884c"), so a
+ * folder of downloads sorts by sample (`exportFileNames`). `storedStix` is the
+ * bundle the report record carries, downloaded when the STIX endpoint fails.
  */
 export function reportExportGroups(
   reportId: string,
   mr: MalwareReport | null | undefined,
   baseName: string,
+  storedStix?: Record<string, unknown> | null,
 ): ExportGroup[] {
+  const names = exportFileNames(baseName);
   const misp = mr?.misp_attributes;
   const hasMisp = Array.isArray(misp) && misp.length > 0;
 
@@ -73,27 +118,27 @@ export function reportExportGroups(
       key: "pdf",
       label: "Report (PDF)",
       hint: "Print-ready A4 with figures",
-      run: async () => downloadObject(await api.getReportPdf(reportId), `${baseName}.pdf`),
+      run: async () => downloadObject(await api.getReportPdf(reportId), names.pdf),
     },
     {
       key: "html",
       label: "Report (HTML)",
       hint: "Opens offline, no external requests",
       run: async () =>
-        downloadBlob(await api.getReportHtml(reportId), `${baseName}.html`, "text/html"),
+        downloadBlob(await api.getReportHtml(reportId), names.html, "text/html"),
     },
     {
       key: "markdown",
       label: "Report (Markdown)",
       run: async () =>
-        downloadBlob(await api.getReportMarkdown(reportId), `${baseName}.md`, "text/markdown"),
+        downloadBlob(await api.getReportMarkdown(reportId), names.markdown, "text/markdown"),
     },
     {
       key: "iocs",
       label: "Indicator list",
       hint: "Every indicator with why it is or is not published",
       run: async () =>
-        downloadBlob(json(await api.getReportIOCs(reportId)), `${baseName}-iocs.json`, "application/json"),
+        downloadBlob(json(await api.getReportIOCs(reportId)), names.iocs, "application/json"),
     },
   ];
 
@@ -101,14 +146,30 @@ export function reportExportGroups(
     {
       key: "stix",
       label: "STIX 2.1 bundle",
-      run: async () =>
-        downloadBlob(json(await api.getReportStix(reportId)), `${baseName}-stix.json`, "application/json"),
+      hint: "An unpublished draft downloads as a file named draft",
+      run: async () => {
+        // The endpoint wraps a draft it would not publish; the file is the
+        // bundle itself either way, and its name says which it is. When the
+        // endpoint fails, the bundle stored with the report is what there is.
+        let answer: unknown;
+        try {
+          answer = await api.getReportStix(reportId);
+        } catch (err) {
+          const stored = [mr?.stix_bundle_extended, storedStix].find(
+            (b) => b && Object.keys(b).length > 0,
+          );
+          if (!stored) throw err;
+          answer = stored;
+        }
+        const { bundle, draft } = readStixAnswer(answer);
+        downloadBlob(json(bundle), draft ? names.stixDraft : names.stix, "application/json");
+      },
     },
     {
       key: "misp",
       label: "MISP attributes",
-      unavailable: hasMisp ? undefined : "None were generated for this analysis",
-      run: async () => downloadBlob(json(misp ?? []), `${baseName}-misp.json`, "application/json"),
+      unavailable: hasMisp ? undefined : mr ? sentence(mispAbsence(mr)) : "None were generated for this analysis",
+      run: async () => downloadBlob(json(misp ?? []), names.misp, "application/json"),
     },
     {
       key: "attack-layer",
@@ -116,7 +177,7 @@ export function reportExportGroups(
       run: async () =>
         downloadBlob(
           json(await api.getReportAttackLayer(reportId)),
-          `${baseName}-attack-layer.json`,
+          names.attackLayer,
           "application/json",
         ),
     },
@@ -127,8 +188,8 @@ export function reportExportGroups(
         run: async () =>
           downloadBlob(
             await api.getReportSignature(reportId, kind),
-            `${baseName}.${RULE_EXT[kind]}`,
-            "text/plain",
+            names.rules(kind),
+            RULE_MIME[kind],
           ),
       }),
     ),
@@ -139,13 +200,13 @@ export function reportExportGroups(
       key: "report-json",
       label: "Full analysis (JSON)",
       unavailable: mr ? undefined : "The analysis has no stored report",
-      run: async () => downloadBlob(json(mr ?? {}), `${baseName}-report.json`, "application/json"),
+      run: async () => downloadBlob(json(mr ?? {}), names.report, "application/json"),
     },
     {
       key: "techniques",
       label: "ATT&CK techniques (JSON)",
       run: async () =>
-        downloadBlob(json(await api.getReportMitre(reportId)), `${baseName}-attack.json`, "application/json"),
+        downloadBlob(json(await api.getReportMitre(reportId)), names.techniques, "application/json"),
     },
     {
       key: "timeline",
@@ -153,7 +214,7 @@ export function reportExportGroups(
       run: async () =>
         downloadBlob(
           json(await api.getReportTimeline(reportId)),
-          `${baseName}-timeline.json`,
+          names.timeline,
           "application/json",
         ),
     },

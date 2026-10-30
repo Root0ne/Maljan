@@ -1,23 +1,19 @@
 /**
- * Which tabs an analysis offers, and why each one is there.
+ * Whether one block of the analysis has something of this run to draw.
  *
- * A tab is a promise that there is something behind it. The console used to
- * offer all twelve on every run and let ten of them apologise — "No dynamic
- * analysis data available", "No persistence mechanisms identified" — which
- * spends a reader's attention on finding out that nothing happened.
+ * The analysis page has six tabs, each drawn on every finished run; the
+ * blocks inside them are the pages the console used to offer as tabs of
+ * their own (dynamic behaviour, persistence, ATT&CK, attribution, …). A block
+ * the run never filled keeps its place and says "Not found" rather than
+ * drawing an apology of its own, and the answer to "did the run fill it" is
+ * this module's.
  *
- * So a tab is offered only when this run produced what it draws. Two rules
- * decide, and both are read from the report rather than from configuration: a
- * ledger-built section routed to that tab carries content
- * (`reportSections.sectionsForTab`), or the tab's own typed block does. A
- * configured-but-silent tool must not draw a tab any more than it draws a
- * header.
- *
- * Three tabs are unconditional and each for its own reason. SUMMARY is where
- * a run lands, CONVERSATION is offered whatever state the job is in (it is the
- * run happening as much as the run recorded), and EVIDENCE is the ledger every
- * citation resolves into — "no call matches these filters" is information
- * there, not an apology.
+ * Two rules decide, and both are read from the report rather than from
+ * configuration: a ledger-built section routed to that block carries content
+ * (`reportSections.sectionsForTab`), or the block's own typed field does. A
+ * configured-but-silent tool must not fill a block any more than it draws a
+ * header. The keys are the old tabs' path suffixes, which is also where their
+ * routes now redirect from (next.config.ts).
  */
 
 import type { ReportDetailDTO } from "@/lib/api";
@@ -26,63 +22,10 @@ import { sectionsForTab } from "./reportSections";
 import { hasIndicators } from "./indicators";
 import { hasRuleMatches } from "./ruleMatches";
 import { dynamicAnalystClaims } from "./dynamicClaims";
-import { disambiguate, extraTabs } from "./extraTabs";
 import type { JobRoster } from "@/types";
 import type { MalwareReport } from "@/types/malware-report";
 
-export type TabGroup = "overview" | "analysis" | "intel" | "extra" | "advanced";
-
-export interface TabDef {
-  /** Path suffix under `/analysis/{id}`; the empty string is SUMMARY. */
-  key: string;
-  label: string;
-  group: TabGroup;
-  /** The lucide icon name this tab is drawn with. */
-  icon: TabIcon;
-}
-
-export type TabIcon =
-  | "summary"
-  | "conversation"
-  | "identity"
-  | "static"
-  | "dynamic"
-  | "network"
-  | "persistence"
-  | "attack"
-  | "attribution"
-  | "detection"
-  | "defense"
-  | "evidence"
-  | "agent"
-  | "server";
-
-export const TABS: TabDef[] = [
-  { key: "", label: "SUMMARY", group: "overview", icon: "summary" },
-  // The run as it happens and as it happened: one route for both, which is
-  // what replaced the old LIVE and PROCESS pair.
-  { key: "/conversation", label: "CONVERSATION", group: "overview", icon: "conversation" },
-  { key: "/identity", label: "IDENTITY", group: "overview", icon: "identity" },
-  { key: "/static", label: "STATIC", group: "analysis", icon: "static" },
-  { key: "/dynamic", label: "DYNAMIC", group: "analysis", icon: "dynamic" },
-  { key: "/network", label: "NETWORK", group: "analysis", icon: "network" },
-  { key: "/persistence", label: "PERSISTENCE", group: "analysis", icon: "persistence" },
-  { key: "/capabilities", label: "ATT&CK", group: "intel", icon: "attack" },
-  { key: "/attribution", label: "ATTRIBUTION", group: "intel", icon: "attribution" },
-  // SIGNATURES + RULES merged into one DETECTION tab, which also folds the
-  // STIX export bundle in as a third section.
-  { key: "/detection", label: "DETECTION", group: "intel", icon: "detection" },
-  { key: "/defense", label: "DEFENSE", group: "intel", icon: "defense" },
-  // The ledger every other tab cites. A citation chip anywhere in the report
-  // links straight to one of its rows.
-  { key: "/evidence", label: "EVIDENCE", group: "advanced", icon: "evidence" },
-];
-
-// "extra" holds the tabs a run adds for its own agents and servers, after the
-// fixed ones and before the ledger.
-export const TAB_GROUP_ORDER: TabGroup[] = ["overview", "analysis", "intel", "extra", "advanced"];
-
-/** The three tabs a run offers before it has produced anything. */
+/** The blocks that answer something whatever the run produced. */
 const ALWAYS: ReadonlySet<string> = new Set(["", "/conversation", "/evidence"]);
 
 function nonEmpty(value: unknown): boolean {
@@ -111,11 +54,11 @@ export function attributionSaysSomething(mr: MalwareReport | null | undefined): 
 }
 
 /**
- * Whether one tab has something of this run to draw.
+ * Whether one block has something of this run to draw.
  *
- * Exported for its own test: the twelve answers below are the whole of the
- * rule, and each is a sentence about what the run produced rather than about
- * what the console can render.
+ * Exported for its own test: the answers below are the whole of the rule,
+ * and each is a sentence about what the run produced rather than about what
+ * the console can render.
  */
 export function tabHasContent(
   key: string,
@@ -198,18 +141,4 @@ export function tabHasContent(
       // one to `TABS` without a rule costs a reader nothing.
       return true;
   }
-}
-
-/**
- * The tabs this run offers, in the declared order, then one per agent and
- * server of the run's own that has something to draw (`extraTabs`).
- */
-export function tabsFor(report: ReportDetailDTO | null, roster?: JobRoster | null): TabDef[] {
-  const fixed = TABS.filter((tab) => tabHasContent(tab.key, report, roster));
-  if (!report) return fixed;
-  const extra = disambiguate(
-    extraTabs(report.malware_report?.sections, report.section_tabs, report.agent_findings, roster),
-    TABS.map((tab) => tab.label),
-  ).map((tab): TabDef => ({ key: tab.key, label: tab.label, group: "extra", icon: tab.kind }));
-  return [...fixed, ...extra];
 }

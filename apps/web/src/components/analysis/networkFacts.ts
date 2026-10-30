@@ -14,7 +14,7 @@
  * is "the report does not say", which is not the same as "no".
  */
 
-import type { NetworkDomain, NetworkIP } from "@/types/malware-report";
+import type { MalwareReport, NetworkDomain, NetworkIP } from "@/types/malware-report";
 
 function names(values: string[] | null | undefined): string {
   return (values ?? []).filter((v) => typeof v === "string" && v.trim()).join(", ");
@@ -84,4 +84,26 @@ export function endpointCounts(
     else if (s.kind === "url") urls.add(String(s.value ?? "").trim());
   }
   return { domains: domains.size, ips: ips.size, urls: urls.size };
+}
+
+/**
+ * The counts the Network tab leads with: the endpoints the capture and the
+ * binary's own strings name (a hard-coded C2 domain is not "0 domains"), and
+ * how many of the capture's endpoints were found suspicious.
+ */
+export function networkCounts(mr: MalwareReport): {
+  domains: number;
+  ips: number;
+  urls: number;
+  suspicious: number;
+} {
+  const n = mr.network;
+  const staticIocs = (mr.static?.interesting_strings ?? []).filter(
+    (s) => s.kind === "domain" || s.kind === "ip" || s.kind === "url",
+  );
+  const counts = endpointCounts(n, staticIocs);
+  if (!n) return { ...counts, suspicious: 0 };
+  const suspicious =
+    n.domains.filter((d) => d.is_suspicious).length + n.ips.filter((i) => i.is_suspicious).length;
+  return { ...counts, suspicious };
 }

@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 
-import { useReport } from "@/app/(app)/analysis/[id]/layout";
+import { useReport } from "@/components/analysis/AnalysisContext";
 import AnalystFindings from "./AnalystFindings";
 import { ArtifactSections } from "./ArtifactTable";
 import ReportAbsent from "./ReportAbsent";

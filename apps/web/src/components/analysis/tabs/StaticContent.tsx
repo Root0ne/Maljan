@@ -1,0 +1,554 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import Link from "next/link";
+
+import { useReport } from "@/components/analysis/AnalysisContext";
+import ShowMoreRows from "@/components/ui/ShowMoreRows";
+import { ROWS_PER_STEP, visibleRows } from "@/lib/pagedRows";
+import ReportAbsent from "@/components/analysis/ReportAbsent";
+import { reportAbsence } from "@/components/analysis/reportAbsence";
+import { entropyClass, formatBytes } from "@/lib/report-utils";
+import Th from "@/components/ui/Th";
+import { ArtifactSections } from "@/components/analysis/ArtifactTable";
+import {
+  binarySectionKeys,
+  importContainerLabel,
+  hasSection,
+  isCoveredBySection,
+  sectionsForTab,
+} from "@/components/analysis/reportSections";
+import { SIGMA_SECTION, YARA_SECTION } from "@/components/analysis/ruleMatches";
+import { fileTypeLabel } from "@/types/malware-report";
+import type { StringIOC, StringIOCKind } from "@/types/malware-report";
+
+/* Ordered by what an analyst reaches for first, not alphabetically. `secret`
+ * and `crypto_wallet` sit high because a leaked credential is the one finding
+ * that changes what someone does in the next five minutes. */
+const STRING_KINDS: (StringIOCKind | "all")[] = [
+  "all",
+  "secret",
+  "crypto_wallet",
+  "url",
+  "domain",
+  "ip",
+  "registry",
+  "path",
+  "mutex",
+  "email",
+  "command",
+  "other",
+];
+
+export default function StaticTab() {
+  const { report, job, loading, reportError } = useReport();
+  const [stringKind, setStringKind] = useState<StringIOCKind | "all">("all");
+  /* How many rows each long table draws; every row stays reachable
+   * (`lib/pagedRows`). */
+  const [shown, setShown] = useState<Record<string, number>>({});
+  const shownOf = (table: string) => shown[table] ?? ROWS_PER_STEP;
+  const show = (table: string) => (count: number) =>
+    setShown((current) => ({ ...current, [table]: count }));
+
+  const staticData = report?.malware_report?.static;
+  const fileType = report?.malware_report?.identity?.file_type;
+  const sectionsLabel = fileType ? `${fileTypeLabel(fileType)} Sections` : "Sections";
+  // The sections the tools produced lead the page; the extractor's typed
+  // tables draw underneath them, and only where a section has not already
+  // said the same thing.
+  const reportSections = report?.malware_report?.sections;
+  const evidenceSections = sectionsForTab(reportSections, "static", report?.section_tabs);
+  /* The YARA and Sigma rules that fired are DETECTION's, where each Sigma
+   * rule's level sits on the severity ladder. This page points there rather
+   * than drawing the same table a second time. */
+  const rulesFired =
+    hasSection(reportSections, YARA_SECTION) || hasSection(reportSections, SIGMA_SECTION);
+  const rulesLink = rulesFired && report?.job_id ? (
+    <p className="text-xs text-text-secondary" data-rules-moved>
+      The YARA and Sigma rules that fired on this sample are on{" "}
+      <Link href={`/analysis/${report.job_id}/indicators#detection`} className="text-accent-strong hover:underline">
+        Indicators &amp; detection
+      </Link>
+      .
+    </p>
+  ) : null;
+  const showsExtractedSections = !isCoveredBySection(
+    reportSections,
+    binarySectionKeys("sections")
+  );
+  const showsImports = !isCoveredBySection(reportSections, binarySectionKeys("imports"));
+  const showsExports = !isCoveredBySection(reportSections, binarySectionKeys("exports"));
+  const showsStrings = !isCoveredBySection(reportSections, ["strings"]);
+  const importContainer = importContainerLabel(fileType);
+
+  const imports = useMemo(() => staticData?.imports ?? [], [staticData]);
+
+  const carvedPayloads = useMemo(
+    () => (staticData?.embedded_resources ?? []).filter((r) => r.carved),
+    [staticData],
+  );
+  const packerMatches = useMemo(() => staticData?.packer_matches ?? [], [staticData]);
+  const techniqueHits = useMemo(
+    () =>
+      [...(staticData?.api_technique_hits ?? [])].sort(
+        (a, b) => (b.confidence ?? 0) - (a.confidence ?? 0),
+      ),
+    [staticData],
+  );
+  // A row is a rule, and two rules can name one technique by two mechanisms —
+  // so the heading counts techniques and the table draws the rule that tells
+  // the two rows apart. Counting rows called two mechanisms two techniques.
+  const techniqueCount = useMemo(
+    () => new Set(techniqueHits.map((h) => h.technique_id ?? "")).size,
+    [techniqueHits],
+  );
+  const capabilityProfile = useMemo(
+    () =>
+      Object.entries(staticData?.api_capabilities ?? {}).sort((a, b) => b[1] - a[1]),
+    [staticData],
+  );
+
+  const filteredStrings: StringIOC[] = useMemo(() => {
+    if (!staticData) return [];
+    return stringKind === "all"
+      ? staticData.interesting_strings
+      : staticData.interesting_strings.filter((s) => s.kind === stringKind);
+  }, [staticData, stringKind]);
+
+  if (loading) {
+    return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
+  }
+
+  /* No report is not an empty report: say which absence this is rather than
+   * drawing this tab's negative (`reportAbsence`). */
+  const absent = reportAbsence({ report, job, reportError });
+  if (absent) return <ReportAbsent absence={absent} />;
+
+  if (!staticData) {
+    return (
+      <div className="space-y-4">
+        {rulesLink}
+        <ArtifactSections sections={evidenceSections} />
+        <div className="p-8 text-center text-sm text-text-secondary">
+          No format-aware extractor produced a typed static block for this{" "}
+          {fileType ? <code>{fileTypeLabel(fileType)}</code> : "sample"}.{" "}
+          {evidenceSections.length > 0
+            ? "What the tools returned is above."
+            : "No static tool returned anything either."}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {rulesLink}
+      <ArtifactSections sections={evidenceSections} />
+
+      {/* Carved payloads lead the page. A nested executable inside a dropper
+        * is the actual malware, and it was invisible here — `embedded_resources`
+        * was in the type and rendered nowhere. */}
+      {carvedPayloads.length > 0 && (
+        <div className="bg-bg-surface border border-status-red/40 rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-status-red uppercase tracking-wider">
+              Carved payloads ({carvedPayloads.length})
+            </h2>
+            <p className="text-[11px] text-text-muted mt-1">
+              Executables found inside the sample — appended past the last section, or
+              embedded in a resource. Scanned by the signature layer separately.
+            </p>
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <Th>Type</Th>
+                <Th>Location</Th>
+                <Th>Size</Th>
+                <Th>Entropy</Th>
+                <Th>SHA-256</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-light">
+              {carvedPayloads.map((p, i) => (
+                <tr key={i} className="hover:bg-bg-hover">
+                  <td className="px-4 py-2 text-xs font-mono text-status-red">{p.type ?? "-"}</td>
+                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
+                    {p.id ?? "-"}
+                    {p.source && <span className="text-text-muted"> ({p.source})</span>}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-text-secondary">
+                    {typeof p.size === "number" ? formatBytes(p.size) : "-"}
+                  </td>
+                  <td
+                    className={`px-4 py-2 text-xs font-mono ${
+                      typeof p.entropy === "number" ? entropyClass(p.entropy) : "text-text-muted"
+                    }`}
+                  >
+                    {typeof p.entropy === "number" ? p.entropy.toFixed(2) : "-"}
+                  </td>
+                  <td
+                    className="px-4 py-2 text-xs font-mono text-text-muted truncate max-w-[16rem]"
+                    title={p.sha256 ?? ""}
+                  >
+                    {p.sha256 ? `${p.sha256.slice(0, 24)}…` : "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {techniqueHits.length > 0 && (
+        <div className="bg-bg-surface border border-border rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              ATT&amp;CK from imports ({techniqueCount})
+            </h2>
+            <p className="text-[11px] text-text-muted mt-1">
+              Derived from the import table alone — no sandbox, no model. This is the
+              audit trail behind the capability matrix. A row is an association, not a
+              finding: the last column is how much ordinary software the same rule
+              fires on, measured over the corpus it names, and it says nothing about
+              how likely this sample is to be benign.
+            </p>
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <Th>Technique</Th>
+                <Th>Name</Th>
+                <Th>Rule</Th>
+                <Th>Confidence</Th>
+                <Th>Imports</Th>
+                <Th>Benign rate</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-light">
+              {techniqueHits.map((h, i) => (
+                <tr key={i} className="hover:bg-bg-hover">
+                  <td className="px-4 py-2 text-xs font-mono text-accent">
+                    {h.technique_id ?? "-"}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-text-primary">{h.name ?? "-"}</td>
+                  {/* What distinguishes two rules for one technique. A
+                      producer with no rules of its own leaves the cell bare. */}
+                  <td className="px-4 py-2 text-xs text-text-secondary">{h.rule || "-"}</td>
+                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
+                    {typeof h.confidence === "number" ? h.confidence.toFixed(2) : "-"}
+                  </td>
+                  <td className="px-4 py-2 text-xs font-mono text-text-muted">
+                    {(h.matched_apis ?? []).slice(0, 4).join(", ")}
+                    {(h.matched_apis ?? []).length > 4 &&
+                      ` +${(h.matched_apis ?? []).length - 4}`}
+                  </td>
+                  {/* An unmeasured rule says so. A blank cell here would read
+                      as a rule that never fires on anything benign, which is
+                      the opposite of what an absent measurement means. */}
+                  <td className="px-4 py-2 text-xs text-text-secondary">
+                    {h.benign_rate || "not measured"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(staticData.packer_hint ||
+        staticData.obfuscation_indicators.length > 0 ||
+        packerMatches.length > 0 ||
+        capabilityProfile.length > 0) && (
+        <div className="bg-bg-surface border border-border rounded p-4">
+          <div className="text-[11px] text-text-muted uppercase tracking-wider mb-2">
+            Packer / Obfuscation
+          </div>
+          {/* Ranked matches beat the bare hint: a reader needs to know whether
+            * the detector saw a section name or just a string. */}
+          {packerMatches.length > 0 ? (
+            <div className="space-y-1 mb-2">
+              {packerMatches.map((pm, i) => (
+                <div key={i} className="text-sm text-text-primary">
+                  {pm.name}
+                  {pm.kind && <span className="text-text-muted"> ({pm.kind})</span>}
+                  <span className="text-text-muted text-xs ml-2 font-mono">
+                    {typeof pm.confidence === "number" ? pm.confidence.toFixed(2) : "-"}
+                    {pm.method ? ` · ${pm.method}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            staticData.packer_hint && (
+              <div className="text-sm text-text-primary mb-1">
+                <span className="text-text-muted">Packer hint:</span> {staticData.packer_hint}
+              </div>
+            )
+          )}
+          {staticData.pdb_path && (
+            <div className="text-sm text-text-primary mt-1">
+              <span className="text-text-muted">Debug PDB:</span>{" "}
+              <span className="font-mono text-xs break-all">{staticData.pdb_path}</span>
+            </div>
+          )}
+          {capabilityProfile.length > 0 && (
+            <>
+              <div className="flex flex-wrap gap-1.5 mt-2 items-center">
+                {capabilityProfile.map(([cat, count]) => {
+                  const share = (staticData.api_capability_rates ?? {})[cat];
+                  return (
+                    <span
+                      key={cat}
+                      className="text-[11px] px-1.5 py-0.5 rounded bg-bg-hover text-text-secondary font-mono"
+                    >
+                      {cat} ×{count}
+                      {typeof share === "number" && ` (${share.toFixed(1)}%)`}
+                    </span>
+                  );
+                })}
+                {(staticData.api_capabilities_evidence_ids ?? []).length > 0 && (
+                  <span className="text-[11px] text-text-muted font-mono">
+                    from {(staticData.api_capabilities_evidence_ids ?? []).join(", ")}
+                  </span>
+                )}
+              </div>
+              {/* Said once rather than on every chip. A count of imports in a
+                * group is not a fact about the sample until a reader knows how
+                * much ordinary software is in the same group. */}
+              {staticData.api_capability_corpus && (
+                <div className="text-[11px] text-text-muted mt-1.5">
+                  The bracketed share is how much of {staticData.api_capability_corpus} the
+                  category appears on; it says nothing about how likely this sample is to be
+                  benign.
+                </div>
+              )}
+            </>
+          )}
+          {staticData.obfuscation_indicators.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {staticData.obfuscation_indicators.map((ind, i) => (
+                <span
+                  key={`${ind}-${i}`}
+                  className="text-[11px] px-1.5 py-0.5 rounded bg-status-orange/10 text-status-orange"
+                >
+                  {ind}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showsExtractedSections && staticData.sections.length > 0 && (
+      <div className="bg-bg-surface border border-border rounded">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+            {sectionsLabel} ({staticData.sections.length})
+          </h2>
+        </div>
+        <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <Th>Name</Th>
+                <Th>VA</Th>
+                <Th>Virtual Size</Th>
+                <Th>Raw Size</Th>
+                {/* PointerToRawData. The carved-payload table above reports a
+                    file offset; without this column there is nothing on the
+                    page to match it against. */}
+                <Th>Raw Offset</Th>
+                <Th>Entropy</Th>
+                <Th>Characteristics</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-light">
+              {visibleRows(staticData.sections, shownOf("sections")).visible.map((s, i) => (
+                <tr key={`${s.name}-${i}`} className="hover:bg-bg-hover">
+                  <td className="px-4 py-2 text-xs font-mono text-text-primary">
+                    {s.name}
+                    {s.is_suspicious && (
+                      <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red">
+                        SUSP
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
+                    {s.virtual_address}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-text-secondary">
+                    {formatBytes(s.virtual_size)}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-text-secondary">
+                    {formatBytes(s.raw_size)}
+                  </td>
+                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
+                    {typeof s.raw_offset === "number"
+                      ? `0x${s.raw_offset.toString(16)}`
+                      : "-"}
+                  </td>
+                  <td className={`px-4 py-2 text-xs font-mono ${entropyClass(s.entropy)}`}>
+                    {s.entropy.toFixed(3)}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-text-muted font-mono truncate" title={s.characteristics}>
+                    {s.characteristics || "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        <ShowMoreRows
+          shown={Math.min(shownOf("sections"), staticData.sections.length)}
+          total={staticData.sections.length}
+          onShow={show("sections")}
+        />
+      </div>
+      )}
+
+      {showsImports && imports.length > 0 && (
+      <div className="bg-bg-surface border border-border rounded">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+            Imports ({imports.length})
+          </h2>
+        </div>
+        <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <Th>{importContainer}</Th>
+                <Th>Function</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-light">
+              {visibleRows(imports, shownOf("imports")).visible.map((row, i) => (
+                <tr key={i} className="hover:bg-bg-hover">
+                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">{row.dll}</td>
+                  <td className="px-4 py-2 text-xs font-mono text-text-primary">{row.function}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        <ShowMoreRows
+          shown={Math.min(shownOf("imports"), imports.length)}
+          total={imports.length}
+          onShow={show("imports")}
+        />
+      </div>
+      )}
+
+      {showsStrings && staticData.interesting_strings.length > 0 && (
+      <div className="bg-bg-surface border border-border rounded">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
+          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+            Interesting Strings ({filteredStrings.length})
+          </h2>
+          <div className="flex flex-wrap gap-1">
+            {STRING_KINDS.map((k) => (
+              <button
+                key={k}
+                onClick={() => setStringKind(k)}
+                className={`text-[11px] uppercase tracking-wider px-2 py-0.5 rounded border ${
+                  stringKind === k
+                    ? "border-accent text-accent"
+                    : "border-border text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+        </div>
+        {filteredStrings.length === 0 ? (
+          <div className="p-8 text-center text-sm text-text-muted">
+            No string of this kind was extracted.
+          </div>
+        ) : (
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <Th>Kind</Th>
+                <Th>Value</Th>
+                <Th>Notes</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border-light">
+              {visibleRows(filteredStrings, shownOf("strings")).visible.map((s, i) => (
+                <tr key={i} className="hover:bg-bg-hover">
+                  <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
+                    {s.kind}
+                  </td>
+                  <td className="px-4 py-2 text-xs font-mono text-status-blue break-all">
+                    {s.value}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-text-muted">{s.notes || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <ShowMoreRows
+          shown={Math.min(shownOf("strings"), filteredStrings.length)}
+          total={filteredStrings.length}
+          onShow={show("strings")}
+        />
+      </div>
+      )}
+
+      {showsExports && staticData.exports.length > 0 && (
+        <div className="bg-bg-surface border border-border rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              Exports ({staticData.exports.length})
+            </h2>
+          </div>
+          {/* With the ordinal and the address when the format tool reported
+              them: several exports sharing one address is a fact the names
+              alone hide. */}
+          {(staticData.export_rows ?? []).length > 0 ? (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-text-muted">
+                  <th className="px-4 py-1.5 font-medium">Name</th>
+                  <th className="px-4 py-1.5 font-medium">Ordinal</th>
+                  <th className="px-4 py-1.5 font-medium">RVA</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows(staticData.export_rows ?? [], shownOf("exports")).visible.map((row, i) => (
+                  <tr key={`${row.name}-${i}`} className="border-t border-border">
+                    <td className="px-4 py-1 font-mono text-text-secondary">
+                      {row.name || "(unnamed)"}
+                    </td>
+                    <td className="px-4 py-1 font-mono text-text-muted">{row.ordinal ?? "-"}</td>
+                    <td className="px-4 py-1 font-mono text-text-muted">{row.rva ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="p-4 flex flex-wrap gap-1">
+              {/* Two exports can share a name (forwarders, ordinals): the key
+                  is the position, so neither is dropped by React. */}
+              {visibleRows(staticData.exports, shownOf("exports")).visible.map((e, i) => (
+                <span
+                  key={`${e}-${i}`}
+                  className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-bg-active text-text-secondary"
+                >
+                  {e}
+                </span>
+              ))}
+            </div>
+          )}
+          <ShowMoreRows
+            shown={Math.min(
+              shownOf("exports"),
+              (staticData.export_rows ?? []).length || staticData.exports.length,
+            )}
+            total={(staticData.export_rows ?? []).length || staticData.exports.length}
+            onShow={show("exports")}
+          />
+        </div>
+      )}
+    </div>
+  );
+}

@@ -14,9 +14,10 @@ import { COMPLETED_JOB, JOB_ID, REPORT } from "./report-fixture";
  * half of its ten tabs, and twenty-seven elements sat past the right edge of a
  * document that did not scroll horizontally to reach them.
  *
- * **A verdict and a severity that disagree say so.** Both are the judge's, so
- * neither is overruled; the header carries them in one line instead of
- * presenting two confident contradictory facts two cards apart.
+ * **A verdict and a severity that disagree say so.** Neither is overruled;
+ * a remark under the header says they disagree in plain words, and run
+ * quality names both, instead of presenting two confident contradictory
+ * facts two cards apart.
  *
  * The widths are asserted against the *document*, not against a component:
  * what went wrong was always a parent, and `scrollWidth` versus the viewport
@@ -48,7 +49,7 @@ test.describe("nothing is cut off", () => {
     );
   });
 
-  for (const tab of ["/detection", "/conversation", "/evidence"] as const) {
+  for (const tab of ["/indicators", "/evidence/conversation", "/evidence"] as const) {
     test(`${tab} scrolls its own wide content at 1280 px`, async ({
       authenticatedPage: page,
     }) => {
@@ -89,7 +90,7 @@ test.describe("at 375 px", () => {
     });
   }
 
-  test("the analysis header and its tab strip wrap", async ({ authenticatedPage: page }) => {
+  test("the analysis header and its tab strip fit", async ({ authenticatedPage: page }) => {
     await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
       route.fulfill({ json: REPORT }),
     );
@@ -99,14 +100,21 @@ test.describe("at 375 px", () => {
     await page.goto(`/analysis/${JOB_ID}`);
     await expect(page.getByRole("navigation", { name: "Analysis sections" })).toBeVisible();
 
-    // Every tab the run earned is reachable, not two and a half of them.
-    await expect(page.getByRole("link", { name: /EVIDENCE/ })).toBeVisible();
-    expect(await widestOverflow(page)).toBeLessThanOrEqual(1);
+    // Every tab is reachable: the strip scrolls sideways inside itself
+    // rather than pushing the page wider.
+    const nav = page.getByRole("navigation", { name: "Analysis sections" });
+    await expect(nav.getByRole("link")).toHaveCount(6);
+    await nav.getByRole("link", { name: /^Evidence/ }).scrollIntoViewIfNeeded();
+    await expect(nav.getByRole("link", { name: /^Evidence/ })).toBeInViewport();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
   });
 });
 
 test.describe("a verdict against its own severity", () => {
-  test("names the disagreement once, in the header", async ({ authenticatedPage: page }) => {
+  test("names the disagreement once under the header, and both facts in run quality", async ({ authenticatedPage: page }) => {
     await page.route(`**/api/v1/jobs/${JOB_ID}`, (route) =>
       route.fulfill({ json: COMPLETED_JOB }),
     );
@@ -127,10 +135,15 @@ test.describe("a verdict against its own severity", () => {
     );
     await page.goto(`/analysis/${JOB_ID}`);
 
-    await expect(
-      page.getByText("Judge: Malicious 0.95 · Severity: Informational"),
-    ).toBeVisible();
-    await expect(page.getByText(/verdict and the severity rating of this run disagree/)).toBeVisible();
+    const remarks = page.getByRole("region", { name: "Remarks" });
+    await expect(remarks.getByText(/verdict and the severity rating disagree/)).toHaveCount(1);
+    await expect(remarks).not.toContainText("Judge");
+
+    await page.goto(`/analysis/${JOB_ID}/evidence`);
+    await page.getByRole("button", { name: /Run quality/ }).click();
+    const notes = page.getByTestId("verdict-notes");
+    await expect(notes.getByText("Judge: Malicious 0.95 · Severity: Informational")).toBeVisible();
+    await expect(notes.getByText(/verdict and the severity rating of this run disagree/)).toBeVisible();
   });
 
   test("says confidence once, and only where it agrees", async ({
@@ -144,10 +157,17 @@ test.describe("a verdict against its own severity", () => {
     );
     await page.goto(`/analysis/${JOB_ID}`);
 
-    await expect(page.getByText("Malicious · Confidence: 0.91")).toBeVisible();
+    const header = page.getByRole("region", { name: "Analysis summary" });
+    await expect(header.getByRole("img", { name: "Malicious, confidence 91 percent" })).toHaveCount(1);
     // The filename is the heading and is not restated under it.
     await expect(page.getByText("Sample:")).toHaveCount(0);
     await expect(page.getByText(/Confidence: \d+\/100/)).toHaveCount(0);
+    // Agreeing, nothing is remarked on.
+    await expect(page.getByRole("region", { name: "Remarks" })).toHaveCount(0);
+    // The verdict line as the run recorded it is in run quality.
+    await page.goto(`/analysis/${JOB_ID}/evidence`);
+    await page.getByRole("button", { name: /Run quality/ }).click();
+    await expect(page.getByTestId("verdict-notes").getByText("Malicious · Confidence: 0.91")).toBeVisible();
   });
 
   test("says a fallback verdict was never assessed", async ({ authenticatedPage: page }) => {
@@ -159,6 +179,11 @@ test.describe("a verdict against its own severity", () => {
     );
     await page.goto(`/analysis/${JOB_ID}`);
 
-    await expect(page.getByText("Confidence: not assessed")).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Analysis summary" }).getByRole("img", { name: "Malicious, confidence not assessed" }),
+    ).toBeVisible();
+    await page.goto(`/analysis/${JOB_ID}/evidence`);
+    await page.getByRole("button", { name: /Run quality/ }).click();
+    await expect(page.getByTestId("verdict-notes").getByText("Malicious · Confidence: not assessed")).toBeVisible();
   });
 });

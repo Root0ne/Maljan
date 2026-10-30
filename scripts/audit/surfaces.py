@@ -1780,7 +1780,8 @@ def web_view(surfaces: dict[str, Any], spec: dict[str, Any], out: Report) -> str
                     "section",
                     "web",
                     key,
-                    "placed on DETECTION, which draws only the first "
+                    "placed on the detection block (Indicators & detection), "
+                    "which draws only the first "
                     f"{'/'.join(detection['keys'])} with rows "
                     f"({detection['ref']})",
                 )

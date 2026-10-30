@@ -105,7 +105,7 @@ describe("the consolidated indicator table (T-346)", () => {
         }),
       }),
     );
-    expect(html).toContain("Judge&#x27;s indicators (1)");
+    expect(html).toContain("Indicators named in the verdict (1)");
     expect(html).toContain("not in the indicator table");
   });
 
@@ -129,7 +129,7 @@ describe("why the MISP export is empty (T-333)", () => {
     const said = mispAbsence(report());
     expect(said).not.toContain("this run generated no MISP attributes");
     expect(said).toContain("it was stored before the platform built them");
-    expect(said).toContain("its 5 indicators are on DETECTION");
+    expect(said).toContain("its 5 indicators are under Indicators & detection");
   });
 
   it("says a run produced none only when an empty list was written", () => {

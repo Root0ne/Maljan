@@ -23,10 +23,7 @@ import type {
 } from "@/types/malware-report";
 
 /** The voice every block in this module speaks with. */
-export const REPORT_MODEL_VOICE = "Written by the report model";
-
-/** The platform's own voice: what a tool returned, or what the run recorded. */
-export const MEASURED_VOICE = "Measured";
+export const REPORT_MODEL_VOICE = "AI-written";
 
 /** How the reason for an absent summary begins, as the report builder writes it. */
 export const NO_SUMMARY_PREFIX = "the report model wrote no summary";
@@ -40,7 +37,7 @@ export function noSummaryReason(mr: MalwareReport | null | undefined): string {
   const reason = (mr?.degradation_reasons ?? []).find((r) => r.startsWith(NO_SUMMARY_PREFIX));
   if (!reason) return "";
   const colon = reason.indexOf(":");
-  return colon === -1 ? "the report model wrote none" : reason.slice(colon + 1).trim();
+  return colon === -1 ? "none was written" : reason.slice(colon + 1).trim();
 }
 
 export function executionFlow(mr: MalwareReport | null | undefined): FlowStep[] {
@@ -333,7 +330,7 @@ export function outcomeLine(answer: QuestionAnswer): string {
   const words = OUTCOME_WORDS[answer.outcome] ?? answer.outcome;
   if (!answer.answered) return words;
   const asked = OUTCOME_WORDS[answer.answered] ?? answer.answered;
-  return `${words} (the report model answered ${asked}; the platform's check refused it)`;
+  return `${words} (the AI answer said ${asked}; an automatic check did not accept it)`;
 }
 
 /** The analyst claims in force the body neither cites nor discusses. */

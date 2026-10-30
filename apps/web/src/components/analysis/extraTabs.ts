@@ -1,13 +1,15 @@
 /**
- * The tabs a run adds for what an operator connected: one per agent of its
- * own and one per tool server whose output no other tab draws.
+ * The views a run adds under its Evidence tab for what an operator
+ * connected: one per agent of its own and one per tool server whose output no
+ * other tab draws. (They were top-level tabs of their own once; an analysis
+ * now has six fixed tabs, and these are sub-views of the sixth.)
  *
- * The twelve fixed tabs were written against the agents and servers the
- * platform ships. An agent an operator defines (a generic one, a lead) and a
- * server nobody here knows reached the console in two places only: a row on
- * CONVERSATION and the EVIDENCE tab's footer of sections no tab draws. So a
- * run now offers a tab named after each of them, when it has something to put
- * there (the same promise `analysisTabs` makes for every tab).
+ * The fixed tabs were written against the agents and servers the platform
+ * ships. An agent an operator defines (a generic one, a lead) and a server
+ * nobody here knows reached the console in two places only: a row in the
+ * discussion and the evidence footer of sections no tab draws. So a run
+ * offers a view named after each of them, when it has something to put there
+ * (the same promise `analysisTabs` makes for every block).
  *
  * Everything is read from what the run recorded: the roster (role, stages),
  * the agents' findings, and each section's `source` and `source_server`. No
@@ -25,7 +27,7 @@
  * report is a built-in's and gets none.
  */
 
-import type { AgentFindingDTO } from "@/lib/api";
+import type { AgentFindingDTO, ReportDetailDTO } from "@/lib/api";
 import type { JobRoster } from "@/types";
 import type { EvidenceSection } from "@/types/malware-report";
 import {
@@ -224,7 +226,38 @@ export function extraTabs(
   return tabs;
 }
 
-/** The sections no tab draws at all: what the EVIDENCE footer keeps. */
+export interface EvidenceView {
+  /** The path suffix under the Evidence tab; empty for the records. */
+  key: string;
+  label: string;
+  kind: "records" | "conversation" | ExtraTabKind;
+}
+
+/** The two views every analysis has under Evidence. */
+export const EVIDENCE_VIEWS: readonly EvidenceView[] = [
+  { key: "", label: "Records", kind: "records" },
+  { key: "/conversation", label: "Analyst discussion", kind: "conversation" },
+];
+
+/**
+ * The views under the Evidence tab: the records, the analysts' discussion,
+ * then one per agent and server of the run's own that has something to draw
+ * (`extraTabs`), in that order. An agent or a server never gets a top-level
+ * tab of its own.
+ */
+export function evidenceViews(
+  report: ReportDetailDTO | null | undefined,
+  roster?: JobRoster | null,
+): EvidenceView[] {
+  if (!report) return [...EVIDENCE_VIEWS];
+  const extra = disambiguate(
+    extraTabs(report.malware_report?.sections, report.section_tabs, report.agent_findings, roster),
+    EVIDENCE_VIEWS.map((v) => v.label),
+  ).map((tab): EvidenceView => ({ key: tab.key, label: tab.label, kind: tab.kind }));
+  return [...EVIDENCE_VIEWS, ...extra];
+}
+
+/** The sections no tab draws at all: what the Evidence records' footer keeps. */
 export function unroutedSections(
   sections: EvidenceSection[] | null | undefined,
   placed: SectionPlacements,

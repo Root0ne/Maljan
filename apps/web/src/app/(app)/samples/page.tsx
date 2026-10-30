@@ -209,7 +209,7 @@ function SamplesPageContent() {
       // Straight to the conversation, which is where a run is watched. A
       // client-side push rather than a document load: the store, the session
       // and the socket all survive it.
-      router.push(`/analysis/${job.id}/conversation`);
+      router.push(`/analysis/${job.id}/evidence/conversation`);
     } catch (err) {
       // The API's own sentence, shown as it was written: an unknown profile, a
       // disabled analyst, or a model whose probe has not passed — each names

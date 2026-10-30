@@ -80,10 +80,10 @@ export default function IndicatorsPanel({ mr }: { mr: MalwareReport | null | und
         <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h3 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Judge&apos;s indicators ({judged.length})
+              Indicators named in the verdict ({judged.length})
             </h3>
             <p className="mt-1 text-[11px] text-text-muted">
-              The values the judge&apos;s own STIX patterns name, each with the decision the
+              The values the verdict&apos;s own STIX patterns name, each with the decision the
               indicator table records for the same value.
             </p>
           </div>

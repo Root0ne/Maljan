@@ -2,9 +2,10 @@
 
 /* The team, as a strip of stages.
  *
- * It lives on the analysis header and only there: the shape of a run is a
- * property of the run, not of the tab being read, so every tab shows the same
- * strip in the same place rather than each drawing its own. Live stage events
+ * The shape of a run is a fact about the run, not about the sample, so it is
+ * drawn in run quality under Evidence once the run has finished, and while it
+ * runs on Overview and above the live discussion, where a reader watching it
+ * wants to see how far it has got. Live stage events
  * are laid over the stored rollup by `stageTimeline`, which is what lets a
  * stage that has not happened yet appear beside one that just finished.
  *

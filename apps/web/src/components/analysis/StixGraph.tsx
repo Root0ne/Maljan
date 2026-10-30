@@ -219,7 +219,7 @@ function EvidenceLine({ ids }: { ids: string[] }) {
       <EvidenceChips ids={ids} />
     </div>
   ) : (
-    <p className="text-xs text-text-muted">This object carries no evidence-ledger ids.</p>
+    <p className="text-xs text-text-muted">This object cites no evidence records.</p>
   );
 }
 

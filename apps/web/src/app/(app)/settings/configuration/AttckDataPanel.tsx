@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { api } from "@/lib/api";
-import { pollFailure } from "@/app/(app)/analysis/[id]/polling";
+import { pollFailure } from "@/components/analysis/polling";
 import type { AttckCheckResult, AttckStatus, AttckUpdateResult } from "@/types/settings";
 import {
   UPDATE_POLL_MS,

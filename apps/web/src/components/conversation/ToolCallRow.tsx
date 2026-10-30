@@ -72,7 +72,7 @@ export default function ToolCallRow({
           <Link
             href={`/analysis/${jobId}/evidence?evidence=${encodeURIComponent(tool.evidenceId)}`}
             className="rounded bg-accent/15 px-1.5 font-mono text-accent-strong hover:underline"
-            title="Open this call in the evidence ledger"
+            title="Open this call in the evidence"
           >
             {tool.evidenceId}
           </Link>

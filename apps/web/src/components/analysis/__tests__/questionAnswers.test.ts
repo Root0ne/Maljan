@@ -44,8 +44,8 @@ describe("the questions asked of a run", () => {
 
   it("say a refused word beside the outcome the report stands by", () => {
     expect(outcomeLine(answer({ outcome: "not_determinable", answered: "established" }))).toBe(
-      "not determinable from this run (the report model answered established; " +
-        "the platform's check refused it)"
+      "not determinable from this run (the AI answer said established; " +
+        "an automatic check did not accept it)"
     );
   });
 });
