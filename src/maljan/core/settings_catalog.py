@@ -9,6 +9,7 @@ new field cannot be added to config.py without also being explained.
 
 from __future__ import annotations
 
+import re
 import types
 import typing
 from collections.abc import Mapping
@@ -473,6 +474,10 @@ def _reads_as_a_credential(value: str) -> bool:
         return True
 
 
+# A run of backslashes, colons and token openers (``settings_masking.TOKEN_OPENERS``).
+_ESCAPE_OR_OPENER_RUN = re.compile(r"[\\:\"'(<\[{]+")
+
+
 def _bare_secrets(address: str) -> list[str]:
     """The credentials an address written with no scheme carries (``bare_userinfo``).
 
@@ -482,8 +487,12 @@ def _bare_secrets(address: str) -> list[str]:
     colon stands in front of a user name (``to:user:pw@host:8080``). A token
     alone in its user name slot where it has a token's shape or holds an
     opener no user name holds (``p"ss@h:8080``), then also what follows its
-    last opener where that has a token's shape, and each query value whose
-    key names a credential, as in a URL with a scheme.
+    last opener where that has a token's shape. Where the userinfo holds a
+    backslash, each run between backslashes, openers and colons that has a
+    token's shape, so a password JSON text escapes is registered as it is
+    written unescaped too (``p\\<token>@h:8080``), while a domain account
+    (``CORP\\Administrator@dc01:389``) registers nothing. And each query
+    value whose key names a credential, as in a URL with a scheme.
     """
     from maljan.core.settings_masking import TOKEN_OPENERS, bare_userinfo
 
@@ -503,6 +512,15 @@ def _bare_secrets(address: str) -> list[str]:
         after = head[last_opener + 1 :]
         if 0 <= last_opener and after and _reads_as_a_credential(after):
             found.append(after)
+    if "\\" in head:
+        # A backslash, as JSON text escapes one, may stand beside the password
+        # (``p\\<token>``): each run between backslashes, openers and colons
+        # that has a token's shape is registered too.
+        seen = set(found)
+        for piece in _ESCAPE_OR_OPENER_RUN.split(head):
+            if piece and piece not in seen and _reads_as_a_credential(piece):
+                seen.add(piece)
+                found.append(piece)
     found.extend(_url_secrets("//host" + tail[len(tail.split("?", 1)[0]) :]))
     return found
 
