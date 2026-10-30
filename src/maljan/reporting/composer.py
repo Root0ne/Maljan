@@ -83,6 +83,7 @@ from maljan.pipeline.validation import (
     pack_line_ids,
     persistence_not_observed_violations,
     quoted_values,
+    raised_only_in_retry,
     record_flagged_statements,
     repeated_item_violations,
     retry_with_feedback,
@@ -2472,20 +2473,10 @@ class ReportComposer:
                 f"report section '{section or schema.__name__}' kept its findings unasked: "
                 f"{_UNFIT_QUESTION}"
             )
-        # By finding and, for a finding about sentences, by sentence: a new
-        # sentence under a term already asked about was not asked either.
-        asked_about: dict[tuple[str, str], set[str]] = {}
-        for v in shown:
-            asked_about.setdefault((v.code, v.path), set()).update(v.quoted)
-        late = [
-            v
-            for v in ungrounded
-            if retries
-            and (
-                (v.code, v.path) not in asked_about
-                or (v.quoted and not set(v.quoted) & asked_about[(v.code, v.path)])
-            )
-        ]
+        # By finding and, for a finding about sentences or values, by
+        # sentence or value: a new one under a term already asked about was
+        # not asked either.
+        late = [v for v in ungrounded if retries and raised_only_in_retry(v, shown)]
         self._record_ungrounded(
             section or schema.__name__, [v for v in ungrounded if v not in late]
         )

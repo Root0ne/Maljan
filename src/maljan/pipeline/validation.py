@@ -199,6 +199,11 @@ class Violation:
     # each sentence carries its own label (a value and its publish state).
     # Never shown to the producer and never stored on the channel.
     labels: tuple[str, ...] = ()
+    # The values the finding is about, where a question is about values rather
+    # than sentences (``ASKED_BY_VALUE``): a later answer's finding was asked
+    # when it shares one with a finding shown. Never shown to the producer and
+    # never stored on the channel.
+    values: tuple[str, ...] = ()
     # The answer the finding is about, as the producer wrote it, where the
     # finding is that none of it could be read (``isr.unparsed_answer``). The
     # run record keeps it (``unparsed_answer_rows``); the event that asks says
@@ -6645,9 +6650,39 @@ ABSENCE_CONTRADICTS_LEDGER_CODE = "report.absence_contradicts_ledger"
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
 # The findings whose sentences survive marked where they stand in the report.
+# A wrong citation kept after its question is marked where it stands, with the
+# entry that holds its value; the model's id is never removed or replaced.
 MARKED_IN_PLACE: frozenset[str] = frozenset(
-    {UNGROUNDED_CAPABILITY_CODE, RULE_MATCH_AS_ACTION_CODE, UNPUBLISHED_VALUE_CODE}
+    {
+        UNGROUNDED_CAPABILITY_CODE,
+        RULE_MATCH_AS_ACTION_CODE,
+        UNPUBLISHED_VALUE_CODE,
+        CITATION_WRONG_ENTRY_CODE,
+    }
 )
+# The marked findings asked about by the value they name, not by the sentence:
+# an answer that rewrites the sentence around the same value was asked all the
+# same.
+ASKED_BY_VALUE: frozenset[str] = frozenset({CITATION_WRONG_ENTRY_CODE})
+
+
+def raised_only_in_retry(violation: Violation, shown: Sequence[Violation]) -> bool:
+    """Whether a finding on a retry's answer is one the producer was never shown.
+
+    Shown means a finding of the same code and path was put to it; for a
+    finding about values (``ASKED_BY_VALUE``) one that shares a value, and for
+    one about sentences (``quoted``) one that shares a sentence. A new value
+    or a new sentence under a question already asked was not asked.
+    """
+    same = [v for v in shown if (v.code, v.path) == (violation.code, violation.path)]
+    if not same:
+        return True
+    if violation.code in ASKED_BY_VALUE:
+        return not set(violation.values) & {value for v in same for value in v.values}
+    if violation.quoted:
+        return not set(violation.quoted) & {sentence for v in same for sentence in v.quoted}
+    return False
+
 
 KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
     {
@@ -7074,6 +7109,198 @@ def recommendation_technique_violations(
 # A publish state written beside a value: ``no: <reason>``, as the IOC table
 # prints it.
 _PUBLISH_STATE_RE = re.compile(r"(?<![\w-])no:\s*\S", re.IGNORECASE)
+# A publish state written under its own name: ``publish state: <what>``,
+# ``publication state is <what>``. What it says is read against the table.
+_NAMED_PUBLISH_STATE_RE = re.compile(
+    r"(?<![\w-])(?:publish(?:ed|ing)?|publication)\s+state\s*(?::|=|-|–|—|\bis\b)"
+    r"\s*(?P<said>[^)\]\n]*)",
+    re.IGNORECASE,
+)
+# A named state that reads as "not published": a negation that is not of
+# "unpublished", or a word that withholds the value. Anything else (unknown,
+# pending, likely published, kept as an indicator) says no such thing.
+_STATE_WITHHELD_RE = re.compile(
+    r"^\W*(?:(?:no|not|never)\b(?!\W+un\w*published\b)|un\w*published\b|withheld\b"
+    r"|kept\s+out\b|excluded\b)",
+    re.IGNORECASE,
+)
+# A named state that says the value is published.
+_STATE_AFFIRMS_RE = re.compile(r"^\W*(?:yes|published)\b", re.IGNORECASE)
+# The platform's own words for a value it does not publish, written by the model.
+_NOT_PUBLISHED_RE = re.compile(
+    r"(?<![\w-])(?:not|never)\s+published\s+(?:by|in)\s+this\s+(?:run|report)\b", re.IGNORECASE
+)
+# A claim that the value is published: ``is published``, ``was also published``,
+# ``publishes it``. Negated when a word of it is a negation.
+_PUBLISHED_CLAIM_RE = re.compile(
+    r"\b(?:(?:is|are|was|were|been|be)\s+(?:\w+\s+)?published|publish(?:es|ed)\s+(?:it|them))\b",
+    re.IGNORECASE,
+)
+# A claim that the value is kept: ``is kept``, ``kept as an indicator``. Read
+# only in the clause group that follows the value, since "kept" is said of
+# many other things a sentence goes on to name.
+_KEPT_CLAIM_RE = re.compile(
+    r"\b(?:(?:is|are|was|were|been|be)\s+(?:\w+\s+)?kept(?!\s+out\b)"
+    r"|kept\s+as\s+(?:an?\s+)?indicators?)\b",
+    re.IGNORECASE,
+)
+# A form of "publish" that is not "unpublished".
+_PUBLISH_WORD_RE = re.compile(r"(?<![a-z])publish(?:ed|es)?\b", re.IGNORECASE)
+# A named state's own "not published" opening: the one "published" it may carry.
+_NOT_PUBLISHED_OPENING_RE = re.compile(r"^\W*(?:not|never)\s+published\b", re.IGNORECASE)
+# The words that withhold a value, each read for a negation just before it.
+_WITHHOLDING_RE = re.compile(r"withheld|kept\s+out|excluded|un\w*published", re.IGNORECASE)
+# How many words before a withholding word a negation turns it around.
+_WITHHOLDING_NEGATION_WINDOW = 4
+_NEGATIONS = frozenset({"no", "not", "never", "nor"})
+# The words of a table's reason that carry no meaning of their own.
+_REASON_FILLER = frozenset(
+    {"the", "a", "an", "to", "it", "its", "of", "and", "or", "in", "on", "for", "by", "is"}
+)
+# How many words a reason has to carry for its restatement to be told apart.
+_REASON_MIN_WORDS = 3
+# How many words may stand between two words of a restated reason.
+_REASON_GAP = 3
+# How many of a reason's words a restatement written under a state's own name
+# may leave out, as a share of them: the name already says it is a state.
+_NAMED_REASON_SLACK = 0.25
+
+
+def _clause_after(after: str, ends: str = ";,") -> str:
+    """``after`` up to the end of the bracket or clause that follows the value.
+
+    ``ends`` are the marks that end it outside brackets: ``;`` alone reads
+    the whole clause group, its commas included.
+    """
+    depth = 0
+    for index, char in enumerate(after):
+        if char in "([":
+            depth += 1
+        elif char in ")]":
+            depth = max(depth - 1, 0)
+        elif depth == 0 and char in ends:
+            return after[:index]
+    return after
+
+
+def _claims_published(text: str) -> bool:
+    """Whether ``text`` says, with no negation in the claim, that the value is published.
+
+    A state under its own name that opens with "yes" or "published" says so too.
+    """
+    if any(_STATE_AFFIRMS_RE.search(said) for said in _NAMED_PUBLISH_STATE_RE.findall(text)):
+        return True
+    return _unnegated(_PUBLISHED_CLAIM_RE, text)
+
+
+def _claims_kept(text: str) -> bool:
+    """Whether the clause group right after the value (up to a ``;`` outside
+    brackets) says, with no negation in the claim, that the value is kept."""
+    return _unnegated(_KEPT_CLAIM_RE, _clause_after(text, ";"))
+
+
+def _unnegated(pattern: re.Pattern[str], text: str) -> bool:
+    """Whether ``pattern`` matches ``text`` somewhere with no negation among its words."""
+    return any(
+        not _NEGATIONS & set(match.group(0).lower().split()) for match in pattern.finditer(text)
+    )
+
+
+def _reads_withheld(said: str) -> bool:
+    """Whether a named state reads as not published, and nothing in it says otherwise.
+
+    It opens with a negation or a withholding word (``_STATE_WITHHELD_RE``);
+    it names "publish" nowhere but in its own "not published" opening; and no
+    negation stands within ``_WITHHOLDING_NEGATION_WINDOW`` words before a
+    withholding word ("not withheld", "no longer withheld"), the opening's own
+    negation aside ("never published; withheld"). When in doubt it is no state, and the
+    model is asked.
+    """
+    if not _STATE_WITHHELD_RE.search(said):
+        return False
+    rest = _NOT_PUBLISHED_OPENING_RE.sub(" ", said, count=1)
+    if _PUBLISH_WORD_RE.search(rest):
+        return False
+    for match in _WITHHOLDING_RE.finditer(rest):
+        before = re.findall(r"\w+", rest[: match.start()].lower())
+        if _NEGATIONS & set(before[-_WITHHOLDING_NEGATION_WINDOW:]):
+            return False
+    return True
+
+
+def _restates_reason(after: str, answer: str, *, slack: float = 0.0) -> bool:
+    """Whether ``after`` restates the table's reason: its words in order, a few apart.
+
+    The reason is the answer's first clause. Each of its words that carries
+    meaning is looked for after the last one found, at most ``_REASON_GAP``
+    words further on; ``slack`` is the share of them that may be missing, a
+    negation of the reason never among them. A negation in the restatement
+    that the reason does not carry turns it around and is no restatement.
+    """
+    reason = str(answer or "")
+    if reason.lower().startswith("no:"):
+        reason = reason[3:]
+    wanted = [
+        word
+        for word in re.findall(r"\w+", reason.split(";", 1)[0].lower())
+        if word not in _REASON_FILLER
+    ]
+    if len(wanted) < _REASON_MIN_WORDS:
+        return False
+    written = re.findall(r"\w+", after.lower())
+    allowed = int(len(wanted) * slack)
+    negations = set(wanted) & _NEGATIONS
+    for start in range(len(written)):
+        at: int | None = None
+        found: set[str] = set()
+        count = 0
+        for want in wanted:
+            if at is None:
+                if written[start] == want:
+                    at, count = start, 1
+                    found.add(want)
+                continue
+            ahead = written[at + 1 : at + 2 + _REASON_GAP]
+            if want in ahead:
+                at, count = at + 1 + ahead.index(want), count + 1
+                found.add(want)
+        if at is None or len(wanted) - count > allowed or not negations <= found:
+            continue
+        span = set(written[max(start - 2, 0) : at + 1])
+        if not (span & _NEGATIONS) - set(wanted):
+            return True
+    return False
+
+
+def _states_publish_state(after: str, answer: str) -> bool:
+    """Whether ``after`` (the text after a value) states a publish state the table agrees with.
+
+    ``answer`` is the IOC table's answer for the value, which does not
+    publish it. Nothing is accepted where the text after the value claims,
+    unnegated, that it is published. Then accepted: a ``no: <reason>`` as the
+    table prints it. Nothing more is accepted where the clause group after the
+    value claims it is kept (:func:`_claims_kept`). Then, in the bracket or
+    clause right after the value
+    (:func:`_clause_after`), a state under its own name that reads as not
+    published or restates most of the table's reason, the platform's own "not
+    published by this run", or the table's whole reason restated in order. A
+    named state that says anything else (unknown, pending, published) is no
+    state the table agrees with.
+    """
+    if _claims_published(after):
+        return False
+    if _PUBLISH_STATE_RE.search(after):
+        return True
+    if _claims_kept(after):
+        return False
+    clause = _clause_after(after)
+    named = [said for said in _NAMED_PUBLISH_STATE_RE.findall(clause) if said.strip()]
+    if named:
+        return all(
+            _reads_withheld(said) or _restates_reason(said, answer, slack=_NAMED_REASON_SLACK)
+            for said in named
+        )
+    return bool(_NOT_PUBLISHED_RE.search(clause)) or _restates_reason(clause, answer)
 
 
 def _prose_of_a_section(payload: Any) -> list[str]:
@@ -7133,16 +7360,21 @@ def _unstated_values(
     )
     out: list[tuple[str, str, str]] = []
     weighed: set[tuple[str, str]] = set()
+    answered: dict[tuple[str, str], str] = {}
     for position, (start, kind, value) in enumerate(places):
         end = places[position + 1][0] if position + 1 < len(places) else len(plain)
-        if start >= 0 and _PUBLISH_STATE_RE.search(plain[start + len(value) : max(end, start)]):
+        if (kind, value) not in answered:
+            answered[(kind, value)] = _answer(kind, value)
+        answer = answered[(kind, value)]
+        if publishes(answer):
+            continue
+        if start >= 0 and _states_publish_state(
+            plain[start + len(value) : max(end, start)], answer
+        ):
             continue
         if (kind, value) in weighed:
             continue
         weighed.add((kind, value))
-        answer = _answer(kind, value)
-        if publishes(answer):
-            continue
         if not answer and kind == "domain" and is_well_known_benign_host(value):
             continue
         out.append((kind, value, (answer or f"no: {NO_TABLE_ROW}").split(";", 1)[0].strip()))
@@ -8162,7 +8394,9 @@ def wrong_entry_citations(
     a reader at the wrong answer, and the model is asked once, with the entry
     that holds it offered. Found nowhere, nothing is said: a value the run's
     texts do not spell as the sentence does is a paraphrase or a composition
-    this check cannot judge. The id is never rewritten.
+    this check cannot judge. The id is never rewritten: a citation kept after
+    the question is marked where it stands, each place it is written with its
+    own label (``quoted``, ``labels``; :func:`_wrong_entry_label`).
 
     ``prose`` names the fields that are running text, read sentence by
     sentence under the brackets each sentence carries. Every other string is
@@ -8174,8 +8408,12 @@ def wrong_entry_citations(
         return []
     data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
     wrong: dict[tuple[tuple[str, ...], tuple[str, ...]], list[str]] = {}
+    # Where each group's values are written, in order: the sentence, or the
+    # row's own text under its citations (:func:`cited_row_text`), each with
+    # the values found there.
+    written: dict[tuple[tuple[str, ...], tuple[str, ...]], dict[str, list[str]]] = {}
 
-    def _ask(value: str, cited: Sequence[str]) -> None:
+    def _ask(value: str, cited: Sequence[str], where: str) -> None:
         value = str(value or "").strip()
         known = [entry_id for entry_id in cited if entries.has_text(entry_id)]
         if not decidable(value) or not known:
@@ -8189,14 +8427,18 @@ def wrong_entry_citations(
         holders = entries.holding(value, fields=True)
         if not holders:
             return
-        values = wrong.setdefault((tuple(known), tuple(holders)), [])
+        group = (tuple(known), tuple(holders))
+        values = wrong.setdefault(group, [])
         if value not in values:
             values.append(value)
+        found = written.setdefault(group, {}).setdefault(where, [])
+        if value not in found:
+            found.append(value)
 
     def _read_prose(text: Any) -> None:
         for sentence, cited in _sentences_with_citations(str(text or "")):
             for value in [*quoted_values(sentence), *literal_values(sentence)]:
-                _ask(value, cited)
+                _ask(value, cited, sentence.strip())
 
     def _walk(node: Any, depth: int = 0) -> None:
         if depth > 4:
@@ -8217,14 +8459,15 @@ def wrong_entry_citations(
                 if _sentences_with_citations(value):
                     _read_prose(value)
                 elif refs:
+                    where = cited_row_text(value, node)
                     if key in _VERBATIM_FIELDS:
-                        _ask(value, refs)
+                        _ask(value, refs, where)
                     for stated in [*quoted_values(value), *literal_values(value)]:
-                        _ask(stated, refs)
+                        _ask(stated, refs, where)
             elif key in _VERBATIM_FIELDS and isinstance(value, list | tuple) and refs:
                 for item in value:
                     if isinstance(item, str):
-                        _ask(item, refs)
+                        _ask(item, refs, cited_row_text(item, node))
             else:
                 _walk(value, depth + 1)
 
@@ -8258,10 +8501,56 @@ def wrong_entry_citations(
             f"{' (with ' + safe_finding_value(more) + ' more)' if more > 0 else ''}. "
             "Cite the entry that holds the value the text states."
         )
+        places = written.get((cited, holders), {})
         violations.append(
-            Violation(code=CITATION_WRONG_ENTRY_CODE, message=message, path="citation")
+            Violation(
+                code=CITATION_WRONG_ENTRY_CODE,
+                message=message,
+                path="citation",
+                quoted=tuple(places),
+                labels=tuple(
+                    _wrong_entry_label(stated, cited, holders, entries)
+                    for stated in places.values()
+                ),
+                values=tuple(values),
+            )
         )
     return violations
+
+
+def cited_row_text(text: str, row: Mapping[str, Any]) -> str:
+    """A table row's text under the ids the row cites: ``"<text> [ev_0003, ev_0007]"``.
+
+    How a finding names a value a row states under its record's citations
+    rather than its own brackets, for a renderer to find the row by: the same
+    text in a row citing other entries is another row.
+    """
+    refs: list[str] = []
+    for key in _CITING_FIELDS:
+        refs.extend(ref for ref in _ids_in(row.get(key)) if ref not in refs)
+    return f"{str(text or '').strip()} [{', '.join(refs)}]"
+
+
+def _wrong_entry_label(
+    values: Sequence[str], cited: Sequence[str], holders: Sequence[str], entries: EntryTexts
+) -> str:
+    """What a renderer prints beside a wrong citation: the values, the ids cited, the holder.
+
+    The entry that holds the value is named only when it is the only one: a
+    value several entries hold is no attribution to one of them, and the mark
+    says how many hold it. The model's ids stand as written.
+    """
+    # Written as stated: the renderer escapes the label, and a quoting of
+    # its own would double every backslash of a path.
+    said = ", ".join(f'"{value}"' for value in values[:_MAX_NAMED_IDS])
+    if len(values) > _MAX_NAMED_IDS:
+        said += f" and {len(values) - _MAX_NAMED_IDS} more"
+    held = (
+        f"{entries.named(holders[0])} holds {'it' if len(values) == 1 else 'them'}"
+        if len(holders) == 1
+        else f"{len(holders)} other entries hold {'it' if len(values) == 1 else 'them'}"
+    )
+    return f"{said} {'is' if len(values) == 1 else 'are'} not in {', '.join(cited)}; {held}"
 
 
 # The tables whose rows state one value each, by the list a section answers
