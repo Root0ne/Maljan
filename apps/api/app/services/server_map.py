@@ -146,6 +146,8 @@ _TRUST_FIELDS = (
     "args",
     "cwd",
     "url",
+    "env",
+    "env_allow",
     "trusts_served_declaration",
     "trust_granted_for",
 )

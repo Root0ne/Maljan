@@ -383,7 +383,7 @@ async def test_a_repointed_built_in_does_not_post_back_its_shipped_trust(monkeyp
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("granted", "confidence"), [("", "high"), ("0123456789abcdef", "medium")])
 async def test_a_repointed_built_in_is_probed_as_trusted_only_where_the_operator_ticked_it(
-    monkeypatch, granted, confidence
+    monkeypatch, tmp_path, granted, confidence
 ):
     """An operator's tick (``""``) holds for the server the entry points at;
     the grant of another launch, carried through a repoint, does not."""
@@ -391,7 +391,11 @@ async def test_a_repointed_built_in_is_probed_as_trusted_only_where_the_operator
 
     monkeypatch.setattr("app.services.settings_probes.ServerHandle", _HandleThatDeclares)
     entry = Settings(_env_file=None).mcp.servers["analysis"].model_dump(mode="json")
-    entry.update(command="/usr/bin/third-party-mcp", args=[], trust_granted_for=granted)
+    # A grant is recorded only for a launch that resolves here.
+    server = tmp_path / "third-party-mcp"
+    server.write_text("#!/bin/sh\n")
+    server.chmod(0o755)
+    entry.update(command=str(server), args=[], trust_granted_for=granted)
     result = await probe_mcp({"name": "analysis", "entry": entry})
     assert result.ok is True and result.details is not None
     kind = result.details["proposals"]["tools"]["scan"]["fields"]["kind"]

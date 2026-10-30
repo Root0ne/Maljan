@@ -364,8 +364,9 @@ def _with_schema(name: str, schema: dict[str, Any], **hints: Any) -> dict[str, A
         ({"type": "object", "properties": {"files": {"type": "array"}}}, True),
         ({"type": "object", "properties": {"samples": {"type": "array"}}}, True),
         ({"type": "object", "properties": {"paths": {"type": "array"}}}, True),
-        # A reference that resolves nowhere, and a cycle, read as nothing more.
-        ({"type": "object", "properties": {"req": {"$ref": "#/$defs/Missing"}}}, False),
+        # A reference that resolves nowhere could hold anything: read as
+        # sending. A cycle is read as nothing more.
+        ({"type": "object", "properties": {"req": {"$ref": "#/$defs/Missing"}}}, True),
         (
             {
                 "type": "object",
