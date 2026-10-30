@@ -458,7 +458,7 @@ def test_a_quoted_token_alone_keeps_what_stands_before_its_quote(text, masked, b
     assert not any(before in value for value in configured_secret_values_of(text))
 
 
-# A JSON-escaped backslash before a letter stays a path's (``C:\\\\Users``).
+# A JSON-escaped quote or backslash before the "@" marks no path.
 @pytest.mark.parametrize("password", ['p\\"{pw}', 'p\\\\\\"{pw}', 'user:p\\"{pw}'])
 def test_a_password_escaped_in_json_text_is_masked(password):
     from maljan.core.settings_masking import masked_text
@@ -475,6 +475,156 @@ def test_a_windows_path_is_kept(path):
     from maljan.core.settings_masking import masked_text
 
     assert masked_text(path) == path
+
+
+# A backslash before a letter inside a password, as JSON text escapes one
+# (``p\\\\ss``) or as written (``p\\ss``), a separator or an escaped quote
+# before such a backslash, and JSON text inside a JSON string, each with what
+# is left once it is masked.
+_BACKSLASHED_PASSWORDS = [
+    ('{"password":"p\\\\{pw}@h:8080"}', '{"***@h:8080"}'),
+    ('{"password":"p\\\\ss{pw}@h:8080"}', '{"***@h:8080"}'),
+    ("user:p\\\\{pw}@h:8080", "***@h:8080"),
+    ('{"u":"user:{pw}\\nx@h:8080/v1"}', '{"***@h:8080/v1"}'),
+    ('{"u":"user:{pw}\\\\nx@h:8080/v1"}', '{"***@h:8080/v1"}'),
+    ("p\\{pw}@h:8080", "***@h:8080"),
+    ("user:{pw}\\\\@h:8080", "***@h:8080"),
+    ('{"a":"C:\\\\x","b":"p\\\\{pw}@h:8080"}', '{"***@h:8080"}'),
+    ('{"password":"u:Xy;\\\\{pw}@h:8080"}', '{"***@h:8080"}'),
+    ('{"password":"Xy,\\\\{pw}@h:8080"}', '{"***@h:8080"}'),
+    ('{"password":"Xy=\\\\{pw}@h:8080"}', '{"***@h:8080"}'),
+    ('{"password":"Xy|\\\\{pw}@h:8080"}', '{"***@h:8080"}'),
+    ('{"password":"Xy<\\\\{pw}@h:8080"}', '{"***@h:8080"}'),
+    ('{"password":"Xy(\\\\{pw}@h:8080"}', '{"***@h:8080"}'),
+    ('{"password":"Xy\\"\\\\{pw}@h:8080"}', '{"***@h:8080"}'),
+    ("u:Xy;\\\\{pw}@h:8080", "***@h:8080"),
+    ("u:Xy,.\\{pw}@h:8080", "***@h:8080"),
+    ('{"password":"u:a=.\\\\{pw}@h:8080"}', '{"***@h:8080"}'),
+    ('{"password":"Xy\\"C:\\\\{pw}@h:8080"}', '{"***@h:8080"}'),
+    ('"\\\\{pw}@h:8080"', '"***@h:8080"'),
+    ('{"a":"{\\"password\\":\\"{pw}@h:8080\\"}"}', '{"***@h:8080\\"}"}'),
+    ('{"a":"{\\"u\\":\\"user:{pw}@h:8080/v1\\"}"}', '{"***@h:8080/v1\\"}"}'),
+    # A path that ends before an opener, and a drive written with a slash
+    # anywhere but at the start or with no name after it, shield nothing.
+    (".\\x('t\\{pw}@h:8080')", ".\\x('***@h:8080')"),
+    ("Xy=c:/k\\{pw}@h:8080", "***@h:8080"),
+    ("a:/\\{pw}@h:8080", "***@h:8080"),
+]
+
+
+def _credential_shaped_token() -> str:
+    from tests.credential_shapes import lowercase_body
+
+    return "Kq" + lowercase_body(30)
+
+
+@pytest.mark.parametrize(("written", "masked"), _BACKSLASHED_PASSWORDS)
+def test_a_backslash_before_a_letter_in_a_password_does_not_shield_it(written, masked):
+    from maljan.core.settings_masking import masked_text
+
+    secret = _credential_shaped_token()
+    text = written.replace("{pw}", secret)
+
+    assert masked_text(text) == masked
+    # At the end of a line of text, the password still goes.
+    assert masked_text(f"Error: cannot connect to {text}") == f"Error: cannot connect to {masked}"
+    # The event scrub registers the token as it is written unescaped too.
+    assert any(
+        secret in found and "\\" not in found and '"' not in found
+        for found in configured_secret_values_of(text)
+    )
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "https://user:p\\\\{pw}@h:8080/v1",
+        '{"a":"{\\"url\\":\\"https://user:{pw}@h:8080\\"}"}',
+        '{"a":"{\\"url\\":\\"https://user:{pw}@h:8080/v1\\"}"}',
+    ],
+)
+def test_a_backslashed_password_in_a_url_with_a_scheme_is_masked(written):
+    from maljan.core.settings_masking import masked_text
+
+    secret = _marker(512)
+    text = written.replace("{pw}", secret)
+
+    assert masked_text(text) == written.replace("p\\\\", "").replace("user:{pw}", "***")
+    assert secret not in masked_text(text)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "C:\\Users\\bob@h:8080",
+        "C:\\\\Users\\\\bob@h:8080/x",
+        "C:/Users/bob\\x@h:8080",
+        "\\\\srv\\share\\bob@h:8080",
+        "\\\\\\\\srv\\\\share\\\\bob@h:8080",
+        '{"path":"C:\\\\Users\\\\bob@h:8080"}',
+        '{"path":"C:\\\\Users\\\\bob@corp"}',
+        '{"unc":"\\\\\\\\srv\\\\share\\\\bob@h/x"}',
+        '{"p":"a=C:\\\\x@h:8080"}',
+        ".\\\\dir\\\\bob@h:8080",
+        "..\\dir\\bob@h:8080",
+        "%APPDATA%\\dir\\bob@h:8080",
+        "%ProgramFiles(x86)%\\dir\\bob@h:8080",
+        "$env:APPDATA\\dir\\bob@h:8080",
+        "--out=C:\\dir\\bob@h:8080",
+        "C:\\Users\\bob@corp\\file.txt",
+        '{"a":"{\\"to\\":\\"bob@corp.com\\"}"}',
+        "\\\\?\\C:\\x@h/y",
+        "\\\\?\\UNC\\srv\\x@h/y",
+        "\\\\.\\pipe\\x@h/y",
+        "path:'C:\\x@h/y'",
+    ],
+)
+def test_a_windows_path_holding_an_at_is_kept_and_registers_nothing(path):
+    from maljan.core.settings_masking import masked_text
+
+    assert masked_text(path) == path
+    assert masked_text(f"opened {path}") == f"opened {path}"
+    assert configured_secret_values_of(path) == set()
+
+
+@pytest.mark.parametrize(
+    "account",
+    ["CORP\\Administrator@dc01:389", "DOMAIN\\svc_sql_prod01@h:1433", "logs\\app@h/x"],
+)
+def test_a_backslashed_name_that_is_no_token_registers_nothing(account):
+    from maljan.core.settings_masking import masked_text
+
+    # Masked, as a token alone before a port or a path is; no part of it has
+    # a token's shape, so the event scrub registers none of it.
+    assert masked_text(account) == "***@" + account.rpartition("@")[2]
+    assert configured_secret_values_of(account) == set()
+
+
+def test_masking_backslashed_words_costs_time_linear_in_the_text():
+    from tests.linear_cost import assert_scales
+
+    from maljan.core.settings_masking import bare_addresses, masked_text
+
+    def masking(text: str) -> None:
+        masked_text(text)
+        bare_addresses(text)
+
+    word = '{"password":"' + "p\\\\" * 200 + '@h:8080"} C:\\\\' + "d\\\\" * 200 + "b@h:8080"
+    assert_scales(lambda size: " ".join([word] * size), 20, masking)
+    # One long word for each way a path start is read: backslashes and a
+    # quote, escaped quotes, a UNC share left open, an environment variable
+    # left open, a path holding openers and a JSON string's escaped trailer.
+    for build in (
+        lambda size: '"' * size + "a\\\\" * size + "@h:8080",
+        lambda size: "u:" + '\\\\\\"' * size + "\\x@h:8080",
+        lambda size: "=\\\\" + "a" * size + "@h:8080",
+        lambda size: "(%(" * size + "\\@h:8080",
+        lambda size: "%P(" * size + "x%\\x@h:8080",
+        lambda size: "u:p@h:8080" + '\\"}' * size,
+        lambda size: "u:" + ",'.\\:" * size + "x@h:8080",
+        lambda size: "C:\\" + "('" * size + "t\\@h:8080",
+    ):
+        assert_scales(build, 2_000, masking)
 
 
 def configured_secret_values_of(text: str) -> set[str]:
