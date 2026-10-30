@@ -11,7 +11,7 @@ kind, is not named, and a run with none has the facts it always had.
 
 from __future__ import annotations
 
-import time
+from typing import Any
 
 from maljan.reporting.evidence_bundles import bundle_for, crypto_finding_entries, is_empty
 from maljan.reporting.models import (
@@ -21,6 +21,7 @@ from maljan.reporting.models import (
     SampleIdentity,
     StaticAnalysis,
 )
+from tests.linear_cost import assert_scales
 
 
 def _row(n: int, tool: str, kind: str, ok: bool = True, source: str = "pack") -> EvidenceIndexRow:
@@ -72,12 +73,10 @@ def test_no_other_section_gains_the_fact() -> None:
 
 
 def test_the_fact_is_linear_in_the_index() -> None:
-    def took(n: int) -> float:
-        rows = [_row(i + 1, f"tool{i}", "crypto_constants") for i in range(n)]
-        report = _report(rows, static=True)
-        start = time.perf_counter()
-        assert len(crypto_finding_entries(report)) == n
-        return time.perf_counter() - start
+    def built(n: int) -> Any:
+        return _report([_row(i + 1, f"tool{i}", "crypto_constants") for i in range(n)], static=True)
 
-    small, large = took(2_000), took(20_000)
-    assert large < max(small, 0.01) * 30
+    def read(report: Any) -> None:
+        assert crypto_finding_entries(report)
+
+    assert_scales(built, 2_000, read, factor=10, repeats=5)
