@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import EvidenceChips from "./EvidenceChips";
 
 import { api } from "@/lib/api";
 import type { MalwareReport } from "@/types/malware-report";
@@ -103,12 +103,8 @@ export default function ReputationSection({
         <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
           {reputation.service}
         </h2>
-        <Link
-          href={`/analysis/${jobId}/evidence?evidence=${encodeURIComponent(reputation.entryId)}`}
-          className="text-[11px] font-mono text-accent-strong hover:underline"
-        >
-          {reputation.entryId}
-        </Link>
+        <EvidenceChips ids={[reputation.entryId]} />
+
         {link && (
           <a
             href={link}

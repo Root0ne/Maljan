@@ -257,7 +257,7 @@ export async function spilledProblem(
   }
   if (typeof ref.bytes === "number" && got !== ref.bytes) {
     return {
-      problem: `The download is ${got} bytes but the ledger kept ${ref.bytes}; nothing was saved.`,
+      problem: `The download is ${got} bytes but the evidence record kept ${ref.bytes}; nothing was saved.`,
       unverified: null,
     };
   }
@@ -275,7 +275,7 @@ export async function spilledProblem(
     const digest = hex(await subtle.digest("SHA-256", bytes));
     if (digest !== ref.sha256.toLowerCase()) {
       return {
-        problem: "The download does not match the digest the ledger recorded; nothing was saved.",
+        problem: "The download does not match the digest the evidence record holds; nothing was saved.",
         unverified: null,
       };
     }

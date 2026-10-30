@@ -110,7 +110,7 @@ export function mispAbsence(mr: MalwareReport | null | undefined): string {
   const count = mr?.consolidated_iocs?.length ?? 0;
   const where =
     count > 0
-      ? ` — its ${count} indicator${count === 1 ? " is" : "s are"} on DETECTION and in the IOC list`
+      ? ` — its ${count} indicator${count === 1 ? " is" : "s are"} under Indicators & detection and in the indicator list`
       : "";
   return `no MISP attributes are stored with this report: it was stored before the platform built them${where}`;
 }

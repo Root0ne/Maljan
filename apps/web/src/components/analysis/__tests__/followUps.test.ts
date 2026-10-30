@@ -83,13 +83,15 @@ describe("the follow-ups drawn", () => {
     const markup = render([row()]);
     expect(markup).toContain("F1. Which address does it beacon to?");
     expect(markup).toContain("established");
-    expect(markup).toContain("It beacons to the address in [ev_0007].");
+    // The answer's bracketed citation is a mark, not printed ids.
+    expect(markup).toContain("It beacons to the address in");
+    expect(markup).not.toContain("[ev_0007]");
     expect(markup).toContain("/analysis/j1/evidence?evidence=ev_0007");
     expect(markup).toContain("aaaaaaaaaaaa");
     expect(markup).toContain("recorded on the audit chain");
   });
 
-  it("say a refused word and the platform's check beside the outcome", () => {
+  it("say a refused word and the automatic check beside the outcome", () => {
     const markup = render([
       row({
         outcome: "not_determinable",
@@ -104,10 +106,10 @@ describe("the follow-ups drawn", () => {
       }),
     ]);
     expect(markup).toContain(
-      "not determinable from this run (the report model answered established; " +
-        "the platform&#x27;s check refused it)"
+      "not determinable from this run (the AI answer said established; " +
+        "an automatic check did not accept it)"
     );
-    expect(markup).toContain("Platform check: refused: answered established");
+    expect(markup).toContain("Check: refused: answered established");
     expect(markup).toContain("Note: this follow-up is not on the audit chain: no key");
     expect(markup).not.toContain("recorded on the audit chain");
   });

@@ -4,31 +4,47 @@ import { SECURITY_HEADERS } from "./src/lib/securityHeaders";
 
 /* The routes that moved, and where they moved to.
  *
- * Nine analysis routes were retired onto two destinations, and `/reports`
- * became a filter on the one list of runs. Each retired route used to be a
- * client component that mounted,
- * read its params and called `router.replace` — nine files whose only job was
- * to draw "Redirecting…" for one frame. The server answers now, before the
- * bundle is fetched, so a bookmark or a link in an already-issued report lands
- * on the tab that answers what it asked without loading a page that has
- * nothing to draw.
+ * The analysis page is six tabs (Overview, Behaviour, Network, Static & code,
+ * Indicators & detection, Evidence), and every route the page had before
+ * lands on the tab that now holds its content, at the block it became where
+ * the tab holds several. `/reports` became a filter on the one list of runs.
+ * The server answers before the bundle is fetched, so a bookmark or a link in
+ * an already-issued report lands on the tab that answers what it asked
+ * without loading a page that has nothing to draw.
  *
  * Permanent, because these are not coming back: a 308 is cached by the client
  * and tells a crawler the same thing.
  */
 const MOVED: Array<[string, string]> = [
-  // The run is one conversation now, live and replayed by the same view.
-  ["/analysis/:id/live", "/analysis/:id/conversation"],
-  ["/analysis/:id/process", "/analysis/:id/conversation"],
-  ["/analysis/:id/agents", "/analysis/:id/conversation"],
-  ["/analysis/:id/pipeline", "/analysis/:id/conversation"],
-  ["/analysis/:id/timeline", "/analysis/:id/conversation"],
-  // ATT&CK absorbed the separate technique browser.
-  ["/analysis/:id/ttps", "/analysis/:id/capabilities"],
-  // Rule matches, generated rules and the STIX bundle share one tab.
-  ["/analysis/:id/rules", "/analysis/:id/detection"],
-  ["/analysis/:id/signatures", "/analysis/:id/detection"],
-  ["/analysis/:id/stix", "/analysis/:id/detection"],
+  // The run's discussion, live and replayed by the same view, is a view of
+  // the evidence, and so is each agent's and server's own output.
+  ["/analysis/:id/conversation", "/analysis/:id/evidence/conversation"],
+  ["/analysis/:id/live", "/analysis/:id/evidence/conversation"],
+  ["/analysis/:id/process", "/analysis/:id/evidence/conversation"],
+  ["/analysis/:id/agents", "/analysis/:id/evidence/conversation"],
+  ["/analysis/:id/pipeline", "/analysis/:id/evidence/conversation"],
+  ["/analysis/:id/timeline", "/analysis/:id/evidence/conversation"],
+  ["/analysis/:id/agent/:key", "/analysis/:id/evidence/agent/:key"],
+  ["/analysis/:id/server/:key", "/analysis/:id/evidence/server/:key"],
+  // What the sample does: the sandbox, ATT&CK and persistence.
+  ["/analysis/:id/dynamic", "/analysis/:id/behaviour#dynamic"],
+  ["/analysis/:id/capabilities", "/analysis/:id/behaviour#attack"],
+  ["/analysis/:id/ttps", "/analysis/:id/behaviour#attack"],
+  ["/analysis/:id/persistence", "/analysis/:id/behaviour#persistence"],
+  // What the file is sits beside what reading it showed.
+  ["/analysis/:id/identity", "/analysis/:id/static#identity"],
+  // Rule matches, generated rules, indicators, the STIX bundle and
+  // attribution share one tab.
+  ["/analysis/:id/detection", "/analysis/:id/indicators#detection"],
+  ["/analysis/:id/rules", "/analysis/:id/indicators#detection"],
+  ["/analysis/:id/signatures", "/analysis/:id/indicators#detection"],
+  ["/analysis/:id/stix", "/analysis/:id/indicators#detection"],
+  ["/analysis/:id/attribution", "/analysis/:id/indicators#attribution"],
+  // The recommendations are the end of the Overview.
+  ["/analysis/:id/defense", "/analysis/:id#recommendations"],
+  // The preview of this page, before it became the page.
+  ["/preview/analysis/:id", "/analysis/:id"],
+  ["/preview/analysis/:id/:path*", "/analysis/:id/:path*"],
   // A report is a completed job, so the reports table was the jobs table with
   // one status filter already applied.
   ["/reports", "/jobs?status=completed"],

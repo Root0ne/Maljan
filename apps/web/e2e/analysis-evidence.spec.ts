@@ -3,14 +3,15 @@ import { COMPLETED_JOB, JOB_ID, REPORT } from "./report-fixture";
 import { assertNoUnmockedCalls } from "./mocks";
 
 /**
- * The evidence tab, which is the surface that makes the rest of the console
+ * The Evidence tab, which is the surface that makes the rest of the console
  * checkable.
  *
- * Every other tab now cites ledger ids, and a citation is only a citation if a
- * reader can follow it. What is exercised here is exactly that: the rows come
- * from the endpoint rather than from the report, the filters narrow on the
- * server, a row opens to show what the tool actually returned, and the deep
- * link a citation chip produces lands on the entry it names.
+ * Every other tab cites evidence records, and a citation is only a citation
+ * if a reader can follow it. What is exercised here is exactly that: the rows
+ * come from the endpoint rather than from the report, the filters narrow on
+ * the server, a row opens to show what the tool actually returned, and a
+ * citation mark on another tab opens the drawer whose link lands on the
+ * record it names.
  */
 test.beforeEach(async ({ authenticatedPage: page }) => {
   await page.route("**/api/v1/jobs/*", (route) =>
@@ -29,9 +30,9 @@ test.beforeEach(async ({ authenticatedPage: page }) => {
   );
 });
 
-test("the ledger lists one row per tool call", async ({ authenticatedPage: page }) => {
+test("the evidence lists one row per tool call", async ({ authenticatedPage: page }) => {
   await page.goto(`/analysis/${JOB_ID}/evidence`);
-  await expect(page.getByRole("heading", { name: /Evidence Ledger/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Evidence records/i })).toBeVisible();
   for (const id of ["ev_0001", "ev_0002", "ev_0003", "ev_0004"]) {
     await expect(page.getByRole("button", { name: `Toggle ${id}` })).toBeVisible();
   }
@@ -45,7 +46,7 @@ test("a failed call is marked as one", async ({ authenticatedPage: page }) => {
   await expect(row.getByText("error", { exact: true })).toBeVisible();
 });
 
-test("filtering by agent narrows the ledger", async ({ authenticatedPage: page }) => {
+test("filtering by agent narrows the evidence", async ({ authenticatedPage: page }) => {
   await page.goto(`/analysis/${JOB_ID}/evidence`);
   await expect(page.getByRole("button", { name: "Toggle ev_0002" })).toBeVisible();
 
@@ -58,7 +59,7 @@ test("filtering by agent narrows the ledger", async ({ authenticatedPage: page }
   await expect(page.getByRole("button", { name: "Toggle ev_0002" })).toBeVisible();
 });
 
-test("filtering by stage narrows the ledger", async ({ authenticatedPage: page }) => {
+test("filtering by stage narrows the evidence", async ({ authenticatedPage: page }) => {
   await page.goto(`/analysis/${JOB_ID}/evidence`);
   await page.getByLabel("Filter by stage").selectOption("verdict");
   await expect(page.getByRole("button", { name: "Toggle ev_0003" })).toBeVisible();
@@ -94,13 +95,17 @@ test("the deep link opens the entry it names", async ({ authenticatedPage: page 
   await expect(page.getByText("upstream refused the lookup")).toBeVisible();
 });
 
-test("a citation chip on a report section links to its entry", async ({
+test("a citation mark on a report section leads to its record", async ({
   authenticatedPage: page,
 }) => {
   await page.goto(`/analysis/${JOB_ID}/static`);
-  const chip = page.getByRole("link", { name: "ev_0001" }).first();
-  await expect(chip).toBeVisible();
-  await chip.click();
+  // Outside Evidence the id is never printed: the mark opens the drawer.
+  await expect(page.getByTestId("analysis-content")).not.toContainText("ev_0001");
+  const mark = page.getByRole("button", { name: /^Evidence for this statement/ }).first();
+  await expect(mark).toBeVisible();
+  await mark.click();
+  const drawer = page.getByRole("dialog");
+  await drawer.getByRole("link", { name: /ev_0001/ }).click();
   await expect(page).toHaveURL(/\/evidence\?evidence=ev_0001$/);
   await expect(page.getByRole("button", { name: "Toggle ev_0001" })).toHaveAttribute(
     "aria-expanded",
@@ -108,7 +113,7 @@ test("a citation chip on a report section links to its entry", async ({
   );
 });
 
-test("a section no tab draws is shown beside the ledger", async ({
+test("a section no tab draws is shown beside the records", async ({
   authenticatedPage: page,
 }) => {
   await page.goto(`/analysis/${JOB_ID}/evidence`);
@@ -117,10 +122,10 @@ test("a section no tab draws is shown beside the ledger", async ({
   await expect(page.getByText("fcn.00401000")).toBeVisible();
 });
 
-test("the identity tab draws the sections routed to it", async ({
+test("file identity draws the sections routed to it", async ({
   authenticatedPage: page,
 }) => {
-  await page.goto(`/analysis/${JOB_ID}/identity`);
+  await page.goto(`/analysis/${JOB_ID}/static`);
   await expect(page.getByRole("heading", { name: /PE header/i })).toBeVisible();
   await expect(page.getByText("0x14c")).toBeVisible();
   // The typed identity block stands down where a header section covers it,
@@ -140,9 +145,14 @@ test("a section covering a typed panel replaces it rather than repeating it", as
   await expect(page.getByRole("heading", { name: /^Imports \(/ })).toHaveCount(0);
 });
 
-test("the analysis header draws the run as its stages", async ({ authenticatedPage: page }) => {
-  // On the header, so the shape of the run is the same fact on every tab.
-  await page.goto(`/analysis/${JOB_ID}/conversation`);
+test("run quality draws the run as its stages", async ({ authenticatedPage: page }) => {
+  // A fact about the run, not the sample: in the collapsed run quality
+  // section under Evidence, and nowhere on the findings.
+  await page.goto(`/analysis/${JOB_ID}`);
+  await expect(page.getByRole("heading", { name: /Top findings/ })).toBeVisible();
+  await expect(page.getByTestId("pipeline-strip")).toHaveCount(0);
+  await page.goto(`/analysis/${JOB_ID}/evidence`);
+  await page.getByRole("button", { name: /Run quality/ }).click();
   const strip = page.getByTestId("pipeline-strip");
   await expect(strip).toContainText("analysis");
   // The stage that declined names the condition it failed, rather than being

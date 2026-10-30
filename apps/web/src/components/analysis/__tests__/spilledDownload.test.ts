@@ -32,7 +32,7 @@ describe("whether a fetched spilled part may be saved", () => {
   });
 
   it("may not when the size differs from what the ledger kept", async () => {
-    expect((await spilledProblem(bytes, { bytes: 9999 }, null, subtle)).problem).toMatch(/ledger kept 9999/);
+    expect((await spilledProblem(bytes, { bytes: 9999 }, null, subtle)).problem).toMatch(/evidence record kept 9999/);
   });
 
   it("may not when the digest differs", async () => {
@@ -49,7 +49,7 @@ describe("a spilled part fetched outside a secure context", () => {
 
   it("still checks the length when crypto.subtle is missing", async () => {
     const check = await spilledProblem(bytes, { bytes: 9999, sha256 }, null, null);
-    expect(check.problem).toMatch(/ledger kept 9999/);
+    expect(check.problem).toMatch(/evidence record kept 9999/);
     expect((await spilledProblem(bytes, { sha256 }, body.byteLength + 1, null)).problem).toMatch(/cut short/);
   });
 });

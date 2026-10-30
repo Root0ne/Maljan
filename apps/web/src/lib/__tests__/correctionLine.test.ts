@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { correctionLine } from "@/app/(app)/analysis/[id]/correctionLine";
+import { correctionLine } from "@/components/analysis/correctionLine";
 
 const label = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { JobDTO, ReportDetailDTO } from "@/lib/api";
 import { reportAbsence } from "../reportAbsence";
 import { ApiError } from "@/lib/errors";
-import { reportFetchError } from "@/app/(app)/analysis/[id]/polling";
+import { reportFetchError } from "@/components/analysis/polling";
 
 const job = (status: string) => ({ id: "j1", status }) as unknown as JobDTO;
 const report = { id: "r1" } as unknown as ReportDetailDTO;

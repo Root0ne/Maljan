@@ -25,3 +25,6 @@ export function modelLine(row: FollowUp): string {
   const model = row.model.trim() || "no model";
   return row.model_source.trim() ? `${model} (${row.model_source.trim()})` : model;
 }
+
+/** The window event a newly answered follow-up is announced on, with the row as its detail. */
+export const FOLLOW_UP_EVENT = "maljan:follow-up";

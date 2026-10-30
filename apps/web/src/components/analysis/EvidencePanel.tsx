@@ -134,7 +134,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-3">
           <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Evidence Ledger
+            Evidence records
           </h2>
           <span className="text-[11px] text-text-muted">
             {total} {total === 1 ? "call" : "calls"}
@@ -176,7 +176,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
 
         {error && (
           <p className="px-4 py-3 text-xs text-status-red" role="alert">
-            The ledger could not be read: {error}
+            The evidence could not be read: {error}
           </p>
         )}
 
@@ -376,7 +376,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                   <tr>
                     <td colSpan={7} className="px-3 py-6 text-center text-text-muted">
                       {loading
-                        ? "Reading the ledger\u2026"
+                        ? "Reading the evidence\u2026"
                         : filtered
                         ? "No call on this run matches these filters."
                         : "This run recorded no tool calls."}

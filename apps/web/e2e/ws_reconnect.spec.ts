@@ -46,7 +46,7 @@ test.describe("WebSocket reconnect", () => {
       if (attempts <= 2) ws.close({ code: 1011, reason: "e2e: forced drop" });
     });
 
-    await authenticatedPage.goto(`/analysis/${JOB_ID}/conversation`);
+    await authenticatedPage.goto(`/analysis/${JOB_ID}/evidence/conversation`);
 
     // Two drops must produce two retries. Generous timeout: the delay is
     // jittered, and on a successful open the schedule resets to its 1 s base.
@@ -71,7 +71,7 @@ test.describe("WebSocket reconnect", () => {
       ws.close({ code: 1008, reason: "e2e: invalid credentials" });
     });
 
-    await authenticatedPage.goto(`/analysis/${JOB_ID}/conversation`);
+    await authenticatedPage.goto(`/analysis/${JOB_ID}/evidence/conversation`);
 
     await expect.poll(() => attempts, { timeout: 10_000 }).toBe(1);
 
@@ -108,7 +108,7 @@ test.describe("WebSocket reconnect", () => {
       ws.close({ code: 4401, reason: "e2e: credential rejected" });
     });
 
-    await authenticatedPage.goto(`/analysis/${JOB_ID}/conversation`);
+    await authenticatedPage.goto(`/analysis/${JOB_ID}/evidence/conversation`);
 
     // The first dial, the renewal, and the one redial with the new token.
     await expect.poll(() => attempts, { timeout: 10_000 }).toBe(2);

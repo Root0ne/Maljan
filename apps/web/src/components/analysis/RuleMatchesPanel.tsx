@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { useReport } from "@/app/(app)/analysis/[id]/layout";
+import { useReport } from "@/components/analysis/AnalysisContext";
 import { SEVERITY_LADDER, ladderDots, severityRung, severityTone, severityWord } from "@/lib/severity";
 import type { EvidenceSection } from "@/types/malware-report";
 import EvidenceChips from "./EvidenceChips";

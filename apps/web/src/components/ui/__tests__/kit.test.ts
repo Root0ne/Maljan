@@ -70,20 +70,20 @@ describe("Section", () => {
 
 describe("Tabs", () => {
   const tabs: TabItem[] = [
-    { key: "overview", label: "Overview", href: "/preview/analysis/j" },
-    { key: "network", label: "Network", href: "/preview/analysis/j/network", count: 7 },
+    { key: "overview", label: "Overview", href: "/analysis/j" },
+    { key: "network", label: "Network", href: "/analysis/j/network", count: 7 },
   ];
 
   it("picks the longest matching href, so the parent tab is not current on a child", () => {
-    expect(activeTabKey(tabs, "/preview/analysis/j")).toBe("overview");
-    expect(activeTabKey(tabs, "/preview/analysis/j/network")).toBe("network");
+    expect(activeTabKey(tabs, "/analysis/j")).toBe("overview");
+    expect(activeTabKey(tabs, "/analysis/j/network")).toBe("network");
     expect(activeTabKey(tabs, "/elsewhere")).toBeNull();
   });
 
   it("draws links in a named landmark, the current one marked, counts said in words", () => {
     const out = html(createElement(Tabs, { tabs, active: "network", label: "Analysis sections" }));
     expect(out).toContain('aria-label="Analysis sections"');
-    expect(out).toContain('href="/preview/analysis/j/network"');
+    expect(out).toContain('href="/analysis/j/network"');
     expect(out.match(/aria-current="page"/g)).toHaveLength(1);
     expect(out).toMatch(/Network.*7.*items/);
   });

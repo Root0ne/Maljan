@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { AgentFindingDTO, ReportDetailDTO } from "@/lib/api";
 import type { JobRoster } from "@/types";
 import type { EvidenceSection, MalwareReport } from "@/types/malware-report";
-import { TABS, tabHasContent, tabsFor } from "../analysisTabs";
 import {
+  EVIDENCE_VIEWS,
   agentsOfSource,
+  evidenceViews,
   extraTabs,
   tabByParam,
   unroutedSections,
@@ -263,7 +264,7 @@ describe("the EVIDENCE footer", () => {
   });
 });
 
-describe("tabsFor with a stored run", () => {
+describe("evidenceViews with a stored run", () => {
   // A stored run: no `source_server` on its sections, no tab placements.
   const stored = report(
     [
@@ -273,35 +274,26 @@ describe("tabsFor with a stored run", () => {
     [finding("all_tools_qu1cksc0pe", "all_tools_qu1cksc0pe", 12)],
   );
 
-  it("keeps the fixed twelve in their order and appends an agent tab after them", () => {
-    const tabs = tabsFor(stored, ROSTER);
-    const fixed = keys(tabs).filter(
-      (k) => !k.startsWith("/agent") && !k.startsWith("/server"),
-    );
-    expect(fixed).toEqual(
-      TABS.map((t) => t.key).filter((k) => fixed.includes(k)),
-    );
-    expect(keys(tabs).slice(-1)).toEqual(["/agent/all_tools_qu1cksc0pe"]);
-    expect(tabs.find((t) => t.key.startsWith("/agent"))?.group).toBe("extra");
+  it("keeps the records and the discussion first and appends an agent view after them", () => {
+    const views = evidenceViews(stored, ROSTER);
+    expect(keys(views).slice(0, 2)).toEqual(["", "/conversation"]);
+    expect(keys(views).slice(-1)).toEqual(["/agent/all_tools_qu1cksc0pe"]);
+    expect(views.find((v) => v.key.startsWith("/agent"))?.kind).toBe("agent");
   });
 
-  it("adds a server tab once the section says its server", () => {
+  it("adds a server view once the section says its server", () => {
     const served = report(
       [section()],
       [finding("all_tools_qu1cksc0pe", "all_tools_qu1cksc0pe", 12)],
     );
-    expect(keys(tabsFor(served, ROSTER)).slice(-2)).toEqual([
+    expect(keys(evidenceViews(served, ROSTER)).slice(-2)).toEqual([
       "/agent/all_tools_qu1cksc0pe",
       "/server/qu1cksc0pe",
     ]);
   });
 
   it("adds nothing before there is a report", () => {
-    expect(keys(tabsFor(null, ROSTER))).toEqual([
-      "",
-      "/conversation",
-      "/evidence",
-    ]);
+    expect(keys(evidenceViews(null, ROSTER))).toEqual(["", "/conversation"]);
   });
 });
 
@@ -325,18 +317,18 @@ describe("a server named like a fixed tab", () => {
     );
   });
 
-  it("is told apart from the fixed tab and from an agent of the same name", () => {
+  it("is told apart from an agent of the same name, and needs nothing beside the evidence views", () => {
     const sections = [
       section({ key: "tool_a", source_server: "network" }),
       section({ key: "tool_b", source_server: "Quick Scope" }),
     ];
-    const tabs = tabsFor(
+    const tabs = evidenceViews(
       report(sections, [finding("all_tools_qu1cksc0pe", "x", 1)]),
       ROSTER,
-    ).filter((t) => t.group === "extra");
+    ).slice(EVIDENCE_VIEWS.length);
     expect(tabs.map((t) => t.label)).toEqual([
       "Quick Scope (agent)",
-      "network (server)",
+      "network",
       "Quick Scope (server)",
     ]);
   });
@@ -368,13 +360,11 @@ describe("the route key of an extra tab", () => {
 });
 
 describe("a run with no operator agent or server", () => {
-  it("offers exactly what it offered before the extra tabs", () => {
+  it("offers exactly the two built-in evidence views", () => {
     const run = report(
       [section({ key: "pe_imports", source_server: "analysis" })],
       [finding("static", "static", 3), finding("triage", "triage", 2)],
     );
-    expect(tabsFor(run, ROSTER)).toEqual(
-      TABS.filter((tab) => tabHasContent(tab.key, run, ROSTER)),
-    );
+    expect(evidenceViews(run, ROSTER)).toEqual([...EVIDENCE_VIEWS]);
   });
 });
