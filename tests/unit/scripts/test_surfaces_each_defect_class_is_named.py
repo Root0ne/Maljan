@@ -320,13 +320,13 @@ def test_one_break_is_one_named_defect(name: str) -> None:
 
 
 def test_an_ioc_no_tab_draws_is_one_named_defect() -> None:
-    # A console whose DETECTION tab no longer draws the IOC table.
+    # A console whose Indicators & detection tab no longer draws the IOC table.
     run = clean_run()
     _ioc_no_tab_draws(run)
     spec = clean_spec()
-    spec["tabs"]["detection"]["fields"] = [
+    spec["tabs"]["indicators"]["fields"] = [
         item
-        for item in spec["tabs"]["detection"]["fields"]
+        for item in spec["tabs"]["indicators"]["fields"]
         if "consolidated_iocs" not in item["path"]
     ]
     spec["kinds"].pop("ioc")

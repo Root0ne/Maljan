@@ -25,6 +25,7 @@ import { useReport } from "@/components/analysis/AnalysisContext";
 import PipelineStrip from "@/components/analysis/PipelineStrip";
 import ReportChecks from "@/components/analysis/ReportChecks";
 import { formatStageDuration, stageTiming } from "@/components/analysis/stageTimeline";
+import { jobStopNote } from "@/lib/runFailure";
 import { correctionLine } from "./correctionLine";
 import type { FpWarning, MalwareReport, NoToolCallAsk } from "@/types/malware-report";
 
@@ -70,6 +71,7 @@ export default function RunQuality() {
     assessedSeverity(mr),
   );
   const readingNote = verdictReadingNote(report?.verdict_reading);
+  const stopNote = jobStopNote(job?.status, job?.error_message);
   const profile = (runSummary as {
     profile?: { name?: string; analysts?: string[] } | null;
   } | null)?.profile;
@@ -105,8 +107,17 @@ export default function RunQuality() {
             <p className={headline.conflict ? "text-status-orange" : undefined}>{headline.text}</p>
             {headline.conflict && <p className="text-status-orange">{VERDICT_CONFLICT_NOTE}</p>}
             {readingNote && <p className="text-status-orange">{readingNote}</p>}
+            {/* The run's own words for why it is not whole, which the
+                remarks under the header say only generically. */}
+            {report.incomplete_reason && (
+              <p className="text-status-orange" data-testid="incomplete-reason">
+                {report.incomplete_reason}
+              </p>
+            )}
+            {stopNote && stopNote !== report.incomplete_reason && <p>{stopNote}</p>}
           </div>
         )}
+        {!report && stopNote && <p className="text-xs text-text-secondary">{stopNote}</p>}
 
         {isDegraded && (
           <div
