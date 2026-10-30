@@ -16,7 +16,7 @@ into the group's closed "Advanced" disclosure.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import PurePosixPath
 from typing import Any, Literal, NotRequired, TypedDict
 
@@ -67,6 +67,7 @@ RENAMED_SETTINGS: dict[str, str] = {
     "core.memory.qdrant_function_hash_collection": "core.memory.qdrant.function_hash_collection",
     "core.memory.qdrant_api_key": "core.memory.qdrant.api_key",
     "core.static.r2.mirror_dir": "core.static.r2.work_dir",
+    "core.static.yara.timeout_seconds": "core.reporting.detection_rule_check_seconds",
 }
 
 
@@ -80,6 +81,38 @@ def last_segment(value: Any) -> Any:
 RENAMED_SETTING_VALUES: dict[str, Callable[[Any], Any]] = {
     "core.static.r2.mirror_dir": last_segment,
 }
+
+
+# The moved settings no settings model reads under their old key itself. The
+# others are read there by their own model, which refuses a value it cannot
+# read (``StaticR2Config`` its ``mirror_dir``, ``MemoryConfig`` the flat
+# ``memory.qdrant_*`` keys), so the store's rows are left to it.
+MOVED_UNREAD_BY_MODELS: frozenset[str] = frozenset({"core.static.yara.timeout_seconds"})
+
+
+def read_as_current(
+    values: Mapping[str, Any], prefix: str = "core.", *, only: Iterable[str] | None = None
+) -> dict[str, Any]:
+    """``values`` with each moved key (:data:`RENAMED_SETTINGS`) read as the key that now holds it.
+
+    Wherever settings arrive: an export, the store's rows before the revision
+    that moved them has run (``only`` :data:`MOVED_UNREAD_BY_MODELS` there).
+    Keys are spelled with ``prefix`` (``core.`` in an export, none in the
+    store's core overrides). The old key's value is read as the new key holds
+    it (:data:`RENAMED_SETTING_VALUES`); a document carrying both keeps the
+    new one's value.
+    """
+    picked = set(RENAMED_SETTINGS if only is None else only)
+    moved = {
+        f"{prefix}{old.removeprefix('core.')}": (old, f"{prefix}{new.removeprefix('core.')}")
+        for old, new in RENAMED_SETTINGS.items()
+        if old in picked
+    }
+    out = {key: value for key, value in values.items() if key not in moved}
+    for key, (old, new) in moved.items():
+        if key in values and new not in out:
+            out[new] = RENAMED_SETTING_VALUES.get(old, lambda value: value)(values[key])
+    return out
 
 
 # Process environment variables a setting replaced, each with the settings key
@@ -1452,6 +1485,15 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Report content",
     },
+    "reporting.detection_rule_check_seconds": {
+        "title": "Drafted rule check timeout (s)",
+        "description": (
+            "Wall-clock budget for checking a drafted detection rule against the sample "
+            "it was drafted from (report §10.2), whichever static provider is selected; "
+            "a check that runs past it is reported as not checked."
+        ),
+        "subgroup": "Report content",
+    },
     "reporting.composer_enabled": {
         "title": "Report composer enabled",
         "description": (
@@ -1864,9 +1906,9 @@ def mcp_server_annotations(
             "as a server that did not answer, before thirty seconds of grace. A tool the "
             "server's capabilities manifest gives a longer budget gets that one. Zero sends "
             "its calls with no deadline of their own. Empty (every built-in) takes the "
-            "deployment's floor: the longest of core.static.capa.timeout_seconds and "
-            "core.static.yara.timeout_seconds. mcp.breaker.call_timeout_seconds, where "
-            "set, applies to every server instead.",
+            "deployment's budget for a server that declares none "
+            "(mcp.breaker.default_call_timeout_seconds). mcp.breaker.call_timeout_seconds, "
+            "where set, applies to every server instead.",
             subgroup="Connection",
             advanced=True,
         ),
@@ -2134,20 +2176,6 @@ ANNOTATIONS.update(
             "probe": "capa_yara",
             "subgroup": "Rules",
         },
-        # Shown under every provider: the check it bounds runs on every job that
-        # drafts detection rules, whichever static provider is selected.
-        "static.yara.timeout_seconds": {
-            "title": "YARA timeout (s)",
-            "description": (
-                "Wall-clock budget for checking the drafted YARA rule against the sample "
-                "it was drafted from (report §10.2); a check that runs past it is reported "
-                "as not checked. It is also one of the two values whose longer is the "
-                "per-call budget of a tool server that declares none, when "
-                "core.mcp.breaker.call_timeout_seconds is unset. The capa_yara provider's "
-                "own scan does not read it."
-            ),
-            "subgroup": "Rules",
-        },
         "sandbox.cape2.base_url": {
             "title": "CAPEv2 base URL",
             "description": (
@@ -2401,10 +2429,24 @@ ANNOTATIONS.update(
                 "own budget answers with its own timeout error first. Set, it applies to "
                 "every server. Zero, the default, gives each server the budget its own "
                 "block declares (its call_timeout_seconds), and a server that declares none "
-                "the longest of core.static.capa.timeout_seconds and "
-                "core.static.yara.timeout_seconds (300, and 900 on a slow host, still fits). "
-                "A call cut short by its caller's own budget while it waited on the server "
-                "counts as unanswered too."
+                "core.mcp.breaker.default_call_timeout_seconds. A call cut short by its "
+                "caller's own budget while it waited on the server counts as unanswered too."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
+        },
+        "mcp.breaker.default_call_timeout_seconds": {
+            "title": "Call budget of a server that declares none (seconds)",
+            "description": (
+                "How long one call may go unanswered, before thirty seconds of grace, on "
+                "every tool server whose block declares no call_timeout_seconds of its own "
+                "(every built-in), whatever the server or its tools are called. A tool "
+                "whose server declares a longer budget gets that one. Zero sends their "
+                "calls with no deadline of their own. The default, 300, is the floor every "
+                "server had before servers declared their own; a deployment's own floor "
+                "was carried over when this setting came (900 on a slow host still fits). "
+                "core.mcp.breaker.call_timeout_seconds, where set, applies to every server "
+                "instead."
             ),
             "subgroup": "Resilience",
             "advanced": True,

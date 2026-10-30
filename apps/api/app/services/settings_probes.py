@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from maljan.core.config import BUILTIN_SERVER_KEYS, MCPServerConfig, builtin_env_allow
+from maljan.core.config import MCPServerConfig, builtin_env_allow
 from maljan.core.logger import logger
 from maljan.core.model_assignments import endpoint_for, endpoint_label
 from maljan.core.plugins import ALLOW_LIST_KEY, PLUGIN_GROUPS
@@ -615,7 +615,8 @@ def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
     if isinstance(facts, dict):
         shipped = shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}")
         entry = {**entry, "tool_facts": sent_in_force(shipped, facts)}
-    builtin = _builtin_servers().get(name) if name in BUILTIN_SERVER_KEYS else None
+    seed = _builtin_servers().get(name)
+    builtin = seed if seed is not None and seed.shipped else None
     # The trust in the server's own declaration as a save records it
     # (``tool_declarations.settled_trust``): an operator's tick holds for the
     # server the entry points at; a trust carried through a repoint does not.
@@ -638,8 +639,10 @@ def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
     config = MCPServerConfig.model_validate(entry)
     if builtin is not None:
         fill_declaration(config, builtin)
+        # Probed as a run starts it: with the seed's marks, as a load re-seeds it.
+        config.mark_as_seed_of(builtin)
     update: dict[str, Any] = {"enabled": True, "tools": None}
-    if name in BUILTIN_SERVER_KEYS:
+    if builtin is not None:
         update["env_allow"] = builtin_env_allow(name, config.env_allow)
     return config.model_copy(update=update)
 

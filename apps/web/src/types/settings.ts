@@ -637,10 +637,15 @@ export interface PatchResult {
 
 /** The wire format `GET /settings/export` writes, mirrored from
  *  `EXPORT_FORMAT` in `apps/api/app/api/v1/settings.py`. */
-export const SETTINGS_EXPORT_FORMAT = "maljan-settings/2";
-/** Every format `POST /settings/import` reads (`IMPORT_FORMATS`): `/1`, written
+export const SETTINGS_EXPORT_FORMAT = "maljan-settings/3";
+/** Every format `POST /settings/import` reads (`IMPORT_FORMATS`): `/2`, written
+ *  before a server's call budget left the static blocks, and `/1`, written
  *  before a built-in block's tool declarations were stored per tool, too. */
-export const SETTINGS_IMPORT_FORMATS: readonly string[] = [SETTINGS_EXPORT_FORMAT, "maljan-settings/1"];
+export const SETTINGS_IMPORT_FORMATS: readonly string[] = [
+  SETTINGS_EXPORT_FORMAT,
+  "maljan-settings/2",
+  "maljan-settings/1",
+];
 
 export interface ExportResponse {
   format: string;

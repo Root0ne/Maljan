@@ -673,7 +673,6 @@ class ServerHandle:
             from mcp import StdioServerParameters
 
             from maljan.agents.subprocess_env import LaunchCwdError, stdio_launch
-            from maljan.core.config import BUILTIN_SERVER_KEYS
 
             # One reading of the launch, the one a trust grant holds for.
             try:
@@ -683,7 +682,7 @@ class ServerHandle:
             env = launch.env
             self._name_the_job_staging(env)
             self._name_the_sample(env)
-            if self.name not in BUILTIN_SERVER_KEYS:
+            if not self.config.shipped:
                 # Byte-for-byte with the pre-branch built-ins (spec S3.2): the
                 # in-repo network/threatintel sidecars were launched with a
                 # bare ``child_env(...)``, which carries PYTHONIOENCODING only
@@ -2301,6 +2300,15 @@ class ServerRegistry:
         built-ins, then the servers the agent's own definition names, and only
         then the operator's servers bound by ``agents``.
 
+        A built-in here is a server its seed attaches with the built-ins
+        (``MCPServerConfig.attaches_as_builtin``: shipped switched on, or with
+        its binding left to the definitions). A shipped server that ships off
+        and bound to roles of its own runs only once an operator switches it
+        on, and is attached as the operator's servers are,
+        after the definition's own, so a tool it shares with a server the
+        definition names (every server's ``capabilities``) leaves that
+        server's tool its bare name.
+
         ``builtin`` keeps only the built-in servers (``True``) or only the
         others (``False``); ``None`` keeps both, in the order above.
 
@@ -2313,7 +2321,7 @@ class ServerRegistry:
         every server, so a baseline stays tool-free against servers that did
         not exist when it was written.
         """
-        from maljan.core.config import ALL_SERVERS, BUILTIN_SERVER_KEYS
+        from maljan.core.config import ALL_SERVERS
 
         excluded = {name.strip() for name in exclude.split(",") if name.strip()}
         if ALL_SERVERS in excluded:
@@ -2324,9 +2332,9 @@ class ServerRegistry:
             if handle.config.enabled
             and role in handle.config.agents
             and handle.name not in excluded
-            and (builtin is None or (handle.name in BUILTIN_SERVER_KEYS) is builtin)
+            and (builtin is None or handle.config.attaches_as_builtin is builtin)
         ]
-        return sorted(bound, key=lambda h: (h.name not in BUILTIN_SERVER_KEYS, h.name))
+        return sorted(bound, key=lambda h: (not h.config.attaches_as_builtin, h.name))
 
     def merge_tools(
         self,
@@ -2673,7 +2681,8 @@ class ServerRegistry:
         """An agent's server tools under one collision rule: its own names never move.
 
         Three halves under one ``seen`` map, claimed in this order: the
-        built-in servers bound to ``role`` by ``MCPServerConfig.agents``, the
+        built-in servers (:meth:`for_agent`) bound to
+        ``role`` by ``MCPServerConfig.agents``, the
         servers the agent's own definition names (``refs``, its ``ToolRef``
         servers), then every other server bound to ``role`` by ``agents``. A
         server an operator binds to a role is an addition to the agent: where

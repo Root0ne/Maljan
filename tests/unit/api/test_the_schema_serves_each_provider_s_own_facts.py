@@ -15,7 +15,7 @@ import pytest
 
 from app.services.provider_facts import OWN_PROBE_LABELS, probe_labels
 from app.services.settings_catalog_api import resolved_catalog
-from maljan.core.config import BUILTIN_SERVER_KEYS, RESERVED_SERVER_KEYS
+from maljan.core.config import reserved_server_keys, shipped_server_keys
 from maljan.llm import registry
 from maljan.llm.provider_base import _FACTS, LLMProvider, facts_of, provider_names
 
@@ -78,8 +78,8 @@ def test_every_probe_the_route_answers_is_labelled():
 
 def test_the_server_map_carries_the_built_in_and_reserved_keys():
     entry = next(e for e in resolved_catalog([]) if e.editor == "server_map")
-    assert entry.builtin_servers == list(BUILTIN_SERVER_KEYS)
-    assert entry.reserved_servers == list(RESERVED_SERVER_KEYS)
+    assert entry.builtin_servers == list(shipped_server_keys())
+    assert entry.reserved_servers == list(reserved_server_keys())
 
 
 class _Invented(LLMProvider):

@@ -755,17 +755,17 @@ def _withheld_servers(settings: Settings, key: str) -> set[str]:
 
     Two sources, and they stack. The profile's own ``exclude_servers`` is the
     tool-free baseline's lever and applies to every member. A stage's
-    ``builtin_tools=False`` is the narrower one: it withholds every built-in
-    server from that stage's agents only, so a triage stage can be made to
-    read what it was handed instead of going looking, without cloning the
-    definitions it runs.
+    ``builtin_tools=False`` is the narrower one: it withholds every server the
+    platform ships (``MCPServerConfig.shipped``) from that stage's agents
+    only, so a triage stage can be made to read what it was handed instead of
+    going looking, without cloning the definitions it runs.
     """
-    from maljan.core.config import BUILTIN_SERVER_KEYS
+    from maljan.core.config import shipped_server_keys
 
     excluded = set(active_profile(settings).exclude_servers)
     stage = stage_for_agent(settings, key)
     if stage is not None and not stage.builtin_tools:
-        excluded.update(BUILTIN_SERVER_KEYS)
+        excluded.update(shipped_server_keys(settings.mcp.servers))
     return excluded
 
 

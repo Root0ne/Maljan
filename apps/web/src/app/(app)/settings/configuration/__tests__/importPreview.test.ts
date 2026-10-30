@@ -77,7 +77,7 @@ describe("buildImportPreview", () => {
   });
 
   it("reads the format an export writes now and the one written before", () => {
-    for (const format of ["maljan-settings/2", "maljan-settings/1"]) {
+    for (const format of ["maljan-settings/3", "maljan-settings/2", "maljan-settings/1"]) {
       const result = buildImportPreview(doc({ [knownEntry.key]: 20 }, format), entriesByKey, {
         [knownEntry.key]: 5,
       });
@@ -88,7 +88,7 @@ describe("buildImportPreview", () => {
 
   it("errors an unsupported format and skips every value", () => {
     const result = buildImportPreview(
-      doc({ [knownEntry.key]: 20 }, "maljan-settings/3"),
+      doc({ [knownEntry.key]: 20 }, "maljan-settings/4"),
       entriesByKey,
       { [knownEntry.key]: 5 }
     );

@@ -1427,28 +1427,10 @@ SERVER_KEY_PATTERN = r"^[a-z][a-z0-9_-]{0,31}$"
 # The one value in ``ProfileDefinition.exclude_servers`` that is not a key.
 # It cannot collide with one: the key pattern above admits no ``*``.
 ALL_SERVERS = "*"
-BUILTIN_SERVER_KEYS: tuple[str, ...] = (
-    "analysis",
-    "knowledge",
-    "network",
-    "threatintel",
-    virustotal.SERVER_KEY,
-)
-# Names a server may not take: the built-ins', the providers' own, and the two
-# in-process sources the evidence ledger files calls under (``pipeline`` for the
-# triage pack, ``sandbox`` for the job's sandbox) — a server of either name
-# would be read as that source. A key already in the stored map is kept.
-RESERVED_SERVER_KEYS: tuple[str, ...] = (
-    "analysis",
-    "knowledge",
-    "network",
-    "threatintel",
-    virustotal.SERVER_KEY,
-    "ghidra",
-    "cape",
-    "pipeline",
-    "sandbox",
-)
+# The two in-process sources the evidence ledger files calls under
+# (``pipeline`` for the triage pack, ``sandbox`` for the job's sandbox): a
+# server of either name would be read as that source.
+IN_PROCESS_SOURCE_KEYS: tuple[str, ...] = ("pipeline", "sandbox")
 
 
 class SampleOpenConfig(BaseModel):
@@ -1635,8 +1617,8 @@ class MCPServerConfig(BaseModel):
     # a transport failure, before the grace (``providers.server_guard``); a tool
     # the server's manifest gives a longer budget gets that one. Zero sends its
     # calls with no deadline of their own. Unset (``None``, every built-in), the
-    # server gets the deployment's floor as it always did
-    # (``core.legacy_tool_tables.legacy_call_floor``).
+    # server gets the deployment's budget for a server that declares none
+    # (``mcp.breaker.default_call_timeout_seconds``).
     # ``mcp.breaker.call_timeout_seconds``, where an operator set it, applies to
     # every server instead.
     call_timeout_seconds: Annotated[float, Field(ge=0.0)] | None = None
@@ -1812,6 +1794,33 @@ class MCPServerConfig(BaseModel):
     # is read of them (``core.served_declarations.laid_under``).
     _removed_tools: frozenset[str] = PrivateAttr(default_factory=frozenset)
 
+    # Whether the platform ships this server: set on the deployment's seed
+    # (``_builtin_servers``) and on the stored block re-seeded under it
+    # (``MCPConfig._reseed_builtins``), never read from what is stored or
+    # posted, so no operator can set it.
+    _shipped: bool = PrivateAttr(default=False)
+    # Whether its seed attaches it with the built-ins, marked the same way: a
+    # seed that ships switched on, or that leaves its binding to the
+    # definitions (no ``agents`` of its own). A shipped server that ships off
+    # and bound to roles of its own runs only once an operator switches it on,
+    # and is attached as an operator's server is (``ServerRegistry.for_agent``).
+    _attaches_as_builtin: bool = PrivateAttr(default=False)
+
+    @property
+    def shipped(self) -> bool:
+        """Whether the platform ships this server (a built-in), as its seed marks it."""
+        return self._shipped
+
+    @property
+    def attaches_as_builtin(self) -> bool:
+        """Whether its seed attaches this server with the built-ins, as the seed marks it."""
+        return self._shipped and self._attaches_as_builtin
+
+    def mark_as_seed_of(self, seed: "MCPServerConfig") -> None:
+        """Carry ``seed``'s marks onto this block of the same server; never from data."""
+        self._shipped = seed._shipped
+        self._attaches_as_builtin = seed._attaches_as_builtin
+
     @property
     def removed_tools(self) -> frozenset[str]:
         """The tools a stored change removed that the block does not ship."""
@@ -1967,7 +1976,10 @@ def _declared(key: str, **fields: Any) -> MCPServerConfig:
     """
     from maljan.core.builtin_declarations import server_declaration
 
-    return MCPServerConfig(**fields, **server_declaration(key))
+    block = MCPServerConfig(**fields, **server_declaration(key))
+    block._shipped = True
+    block._attaches_as_builtin = block.enabled or not block.agents
+    return block
 
 
 # The analysts a built-in sidecar of one analysis program is offered to: the
@@ -2124,6 +2136,32 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
     }
 
 
+def shipped_server_keys(servers: Mapping[str, Any] | None = None) -> tuple[str, ...]:
+    """The keys of the servers the platform ships (``MCPServerConfig.shipped``), in order.
+
+    Of ``servers``, a run's ``mcp.servers``; of the deployment's seed when
+    none is given.
+    """
+    held = _builtin_servers() if servers is None else servers
+    return tuple(key for key, block in held.items() if getattr(block, "shipped", False) is True)
+
+
+def reserved_server_keys() -> tuple[str, ...]:
+    """The keys no operator's server may take, of which a stored one is kept.
+
+    The shipped servers' (:func:`shipped_server_keys`), the providers' former
+    ones (``core.legacy_tool_tables.FORMER_PROVIDER_SERVER_KEYS``) and the
+    in-process sources' (``IN_PROCESS_SOURCE_KEYS``).
+    """
+    from maljan.core.legacy_tool_tables import FORMER_PROVIDER_SERVER_KEYS
+
+    return tuple(
+        dict.fromkeys(
+            [*shipped_server_keys(), *FORMER_PROVIDER_SERVER_KEYS, *IN_PROCESS_SOURCE_KEYS]
+        )
+    )
+
+
 def builtin_env_allow(key: str, configured: Iterable[str]) -> list[str]:
     """The names a built-in's child may read: the required ones, then the stored ones.
 
@@ -2181,6 +2219,14 @@ class MCPBreakerConfig(BaseModel):
     # to every server; zero gives each server its own block's
     # ``call_timeout_seconds``.
     call_timeout_seconds: Annotated[float, Field(ge=0.0)] = 0.0
+    # The budget of a server whose block declares none of its own (every
+    # built-in), read for every such server alike, whatever its name or its
+    # tools'. Zero sends their calls with no deadline of their own. The default
+    # is the floor every server got before servers declared a budget, the
+    # longer of the two static timeouts as they ship; a stored deployment's own
+    # floor was written here when this setting came
+    # (``20261102000000_budgets_leave_the_static_blocks``).
+    default_call_timeout_seconds: Annotated[float, Field(ge=0.0)] = 300.0
 
 
 class MCPConfig(BaseModel):
@@ -2237,6 +2283,7 @@ class MCPConfig(BaseModel):
             if stored is not default:
                 stored.env_allow = builtin_env_allow(key, stored.env_allow)
                 fill_declaration(stored, default)
+                stored.mark_as_seed_of(default)
         return self
 
 
@@ -4242,21 +4289,15 @@ class StaticCapaConfig(BaseModel):
 
 
 class StaticYaraConfig(BaseModel):
-    """The capa_yara provider's YARA rule directory, and the drafted rule's check budget.
+    """The capa_yara provider's YARA rule directory.
 
     The deterministic YARA *layer* (``analysis/yara_layer.py``) keeps its own
     vendored corpus; ``rules_dir`` is the operator's own rule directory, scanned
-    only by the capa_yara static provider. ``timeout_seconds`` is in force under
-    every provider: it bounds the check of the drafted YARA rule against its
-    sample (``reporting.detection_signatures``), and it is one of the two values
-    whose longer is the per-call budget of a tool server that declares none,
-    when ``mcp.breaker.call_timeout_seconds`` is unset
-    (``core.legacy_tool_tables.legacy_call_floor``). The capa_yara provider's
-    own scan does not read it.
+    only by the capa_yara static provider. The check of a drafted rule against
+    its sample has its own budget (``reporting.detection_rule_check_seconds``).
     """
 
     rules_dir: str = "data/yara_rules"
-    timeout_seconds: Annotated[int, Field(ge=1)] = 60
 
 
 class StaticGenericConfig(BaseModel):
@@ -4312,9 +4353,8 @@ class StaticConfig(BaseModel):
     """Which static-analysis tool the static analyst attaches, and its settings.
 
     ``provider`` is the single switch; every block below is the configuration of
-    one provider, read when that provider is selected. Some fields are read
-    under every provider as well, ``yara.timeout_seconds`` among them
-    (``StaticYaraConfig``). ``ghidra`` is the default.
+    one provider, read when that provider is selected. ``ghidra`` is the
+    default.
     """
 
     # A registered static provider's id (``maljan.providers.registry``): the
@@ -4612,6 +4652,10 @@ class ReportingConfig(BaseModel):
     # the same bound.
     upstream_findings_max_chars: Annotated[int, Field(ge=0)] = 0
     auto_generate_detection_rules: bool = True
+    # The wall clock for the check of a drafted detection rule against the
+    # sample it was drafted from (``reporting.detection_signatures``); a check
+    # that runs past it leaves the rule marked as not checked.
+    detection_rule_check_seconds: Annotated[int, Field(ge=1)] = 60
 
     # --- Report-reshaping (professional-report front-matter + Composer) ---
     # Front-matter identity for the report cover / TLP banner.

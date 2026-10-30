@@ -191,11 +191,12 @@ def test_the_caveats_on_a_measured_number_reach_the_model_that_reads_them() -> N
 def test_the_sidecar_is_registered_as_a_built_in_with_the_launch_parameters_it_needs(
     name: str,
 ) -> None:
-    from maljan.core.config import BUILTIN_SERVER_KEYS, RESERVED_SERVER_KEYS, Settings
+    from maljan.core.config import Settings, reserved_server_keys, shipped_server_keys
 
-    assert name in BUILTIN_SERVER_KEYS
-    assert name in RESERVED_SERVER_KEYS
+    assert name in shipped_server_keys()
+    assert name in reserved_server_keys()
     server = Settings(_env_file=None).mcp.servers[name]
+    assert server.shipped
     assert server.enabled is True
     assert server.transport == "stdio"
     assert server.command == sys.executable

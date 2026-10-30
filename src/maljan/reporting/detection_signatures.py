@@ -84,7 +84,7 @@ class OwnSample:
 
     ``path`` is the file the run analysed: the engine maps it read-only where
     it lies, and it is never copied. ``budget_seconds`` is the operator's wall
-    clock for the check (``core.static.yara.timeout_seconds``), ``None`` when it
+    clock for the check (``core.reporting.detection_rule_check_seconds``), ``None`` when it
     could not be read, and then the rule is not checked rather than run
     unbounded. ``on_open`` is called once, just before the engine is handed
     the file, so the run can say where the sample's bytes were read
@@ -102,11 +102,13 @@ NOT_CHECKED_NO_ENGINE = "yara-python is not installed"
 NOT_CHECKED_UNCOMPILED = "the rule did not compile"
 NOT_CHECKED_NO_SAMPLE = "no sample was handed to the rule drafter"
 NOT_CHECKED_NO_PATH = "the run recorded no path for the sample"
-NOT_CHECKED_NO_BUDGET = "the check's budget (core.static.yara.timeout_seconds) could not be read"
+NOT_CHECKED_NO_BUDGET = (
+    "the check's budget (core.reporting.detection_rule_check_seconds) could not be read"
+)
 NOT_CHECKED_UNREAD = "the sample could not be read ({why})"
 NOT_CHECKED_PROBE = "the check's probe rules did not compile ({why})"
 NOT_CHECKED_TIMED_OUT = (
-    "the scan ran past its budget of {seconds} s (core.static.yara.timeout_seconds)"
+    "the scan ran past its budget of {seconds} s (core.reporting.detection_rule_check_seconds)"
 )
 NOT_CHECKED_REFUSED = "the engine could not scan the sample ({why})"
 NOT_CHECKED_NO_ANSWER = "the engine gave no answer for the rule"

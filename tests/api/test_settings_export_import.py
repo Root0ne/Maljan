@@ -50,7 +50,7 @@ def test_export_omits_secrets_and_lists_their_names(client):
     assert r.headers["content-type"].startswith("application/json")
     assert r.headers["content-disposition"] == "attachment; filename=maljan-settings.json"
     body = r.json()
-    assert body["format"] == "maljan-settings/2"
+    assert body["format"] == "maljan-settings/3"
     assert body["values"] == {"core.llm.provider": "openai"}
     assert body["secrets_omitted"] == ["core.llm.openai.api_key"]
     exported_at = datetime.fromisoformat(body["exported_at"])

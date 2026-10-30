@@ -16,9 +16,8 @@ from maljan.core.plugins import ALLOW_LIST_KEY
 from maljan.core.settings_annotations import (
     GROUP_DESCRIPTIONS,
     GROUP_ORDER,
-    RENAMED_SETTING_VALUES,
-    RENAMED_SETTINGS,
     RETIRED_SETTINGS,
+    read_as_current,
 )
 from maljan.core.settings_masking import mask_left_in
 from maljan.core.settings_overrides import redact_url
@@ -105,10 +104,16 @@ from app.services.settings_service import (
 # block's tool declarations are its changes over what the block ships, one
 # tool at a time, as they are stored; an import also reads ``/1``, written
 # before that, where a block's tool declarations are its whole map (a map
-# marked as changes, which only ``/2`` writes, reads as it does there).
-EXPORT_FORMAT = "maljan-settings/2"
+# marked as changes, which only ``/2`` and later write, reads as it does there).
+# ``/3`` is written since a server's call budget left the static blocks
+# (``CALL_BUDGET_KEY``); a document in an earlier format gave every server that
+# declares none the floor its two static timeouts set (:func:`_imported_keys`).
+EXPORT_FORMAT = "maljan-settings/3"
+CHANGES_FORMAT = "maljan-settings/2"
 WHOLE_MAP_FORMAT = "maljan-settings/1"
-IMPORT_FORMATS = (EXPORT_FORMAT, WHOLE_MAP_FORMAT)
+IMPORT_FORMATS = (EXPORT_FORMAT, CHANGES_FORMAT, WHOLE_MAP_FORMAT)
+# The formats written before ``CALL_BUDGET_KEY`` existed.
+FORMER_FLOOR_FORMATS = (CHANGES_FORMAT, WHOLE_MAP_FORMAT)
 
 logger = get_logger("api.settings")
 
@@ -913,10 +918,35 @@ def _current_keys(values: dict[str, Any]) -> dict[str, Any]:
     form changed with the move), and a file carrying both keeps the new one's
     value.
     """
-    out = {key: value for key, value in values.items() if key not in RENAMED_SETTINGS}
-    for old, new in RENAMED_SETTINGS.items():
-        if old in values and new not in out:
-            out[new] = RENAMED_SETTING_VALUES.get(old, lambda value: value)(values[old])
+    return read_as_current(values)
+
+
+# The setting that took over the per-call floor two static timeouts set.
+CALL_BUDGET_KEY = "core.mcp.breaker.default_call_timeout_seconds"
+
+
+def _imported_keys(values: dict[str, Any], fmt: str) -> dict[str, Any]:
+    """An imported document's values as this release holds them (:func:`_current_keys`).
+
+    A document in a format written before ``CALL_BUDGET_KEY`` existed
+    (``FORMER_FLOOR_FORMATS``) gave every server that declares no budget the
+    floor its two static timeouts set; where it carries either and not the
+    key, the key is given that floor as the
+    store's revision gives it (``core.legacy_tool_tables.former_call_floor``),
+    read before the YARA timeout moves to the check budget, and only where it
+    differs from the key's default. A document this release wrote carries
+    the key where it is set, and its static timeouts are their own.
+    """
+    from maljan.core.config import MCPBreakerConfig
+    from maljan.core.legacy_tool_tables import FORMER_CALL_FLOOR_SOURCES, former_call_floor
+
+    out = _current_keys(values)
+    if fmt not in FORMER_FLOOR_FORMATS or CALL_BUDGET_KEY in values:
+        return out
+    if any(key in values for key in FORMER_CALL_FLOOR_SOURCES):
+        floor = former_call_floor(values)
+        if floor != MCPBreakerConfig().default_call_timeout_seconds:
+            out[CALL_BUDGET_KEY] = int(floor) if floor.is_integer() else floor
     return out
 
 
@@ -936,7 +966,7 @@ async def import_values(
     # unless the document drops it from the allow-list. A block key sent back
     # as stored, as an export writes it, is no write and loads nothing, so an
     # unedited or list-edited export imports without loading a plugin.
-    values, stored = await _plugin_block_writes(db, _current_keys(body.values))
+    values, stored = await _plugin_block_writes(db, _imported_keys(body.values, body.format))
     stored_allowed = stored.get(ALLOW_LIST_KEY) if stored is not None else None
     leaves = values[ALLOW_LIST_KEY] if ALLOW_LIST_KEY in values else stored_allowed
     index = catalog_index()

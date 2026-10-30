@@ -645,7 +645,7 @@ class TestARuleNotCheckedSaysWhy:
         rule = _yara(_report(), OwnSample(path=str(path), budget_seconds=7))
 
         assert rule.sample_not_checked == NOT_CHECKED_TIMED_OUT.format(seconds=7)
-        assert "7 s (core.static.yara.timeout_seconds)" in rule.sample_not_checked
+        assert "7 s (core.reporting.detection_rule_check_seconds)" in rule.sample_not_checked
 
     @needs_engine
     @pytest.mark.parametrize(
@@ -872,14 +872,24 @@ class TestAStoredRuleReadsAsBefore:
 class TestTheReportNodeHandsTheDrafterItsSample:
     def test_the_budget_is_the_operator_s_setting(self) -> None:
         from maljan.core.config import Settings
-        from maljan.pipeline.nodes import _yara_scan_budget
+        from maljan.pipeline.nodes import _rule_check_budget
 
         settings = Settings()
 
-        assert _yara_scan_budget(SimpleNamespace(config=settings)) == (
-            settings.static.yara.timeout_seconds
+        assert _rule_check_budget(SimpleNamespace(config=settings)) == (
+            settings.reporting.detection_rule_check_seconds
         )
-        assert _yara_scan_budget(SimpleNamespace(config=SimpleNamespace())) is None
+        assert _rule_check_budget(SimpleNamespace(config=SimpleNamespace())) is None
+
+    def test_the_budget_is_read_from_no_tool_s_block(self) -> None:
+        """The check's budget is the report's own setting, whatever the static blocks hold."""
+        from maljan.core.config import Settings
+        from maljan.pipeline.nodes import _rule_check_budget
+
+        settings = Settings.model_validate({"reporting": {"detection_rule_check_seconds": 12}})
+
+        assert _rule_check_budget(SimpleNamespace(config=settings)) == 12
+        assert not hasattr(settings.static.yara, "timeout_seconds")
 
     @needs_engine
     @pytest.mark.asyncio
@@ -898,7 +908,7 @@ class TestTheReportNodeHandsTheDrafterItsSample:
         fake.config.reporting.enabled = True
         fake.config.llm.parallel_analysts = False
         fake.config.negotiation.max_iterations = 3
-        fake.config.static.yara.timeout_seconds = 9
+        fake.config.reporting.detection_rule_check_seconds = 9
         fake.active_profile.return_value = paper_profile(["static"], parallel=False)
         fake.get_narrative_agent.return_value = None
         fake.get_report_composer.return_value = None
