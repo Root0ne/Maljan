@@ -65,6 +65,8 @@ from maljan.reporting import tool_kinds
 from maljan.reporting.call_bindings import (
     BOUND_SOURCE,
     BROWSER_LIKE,
+    carries_its_own_token,
+    distinctive_user_agent_token,
     reads_as_a_browser_user_agent,
 )
 from maljan.reporting.dedupe import distinct_processes, process_identity
@@ -2478,7 +2480,9 @@ def indicator_publish_reason(
             return None
         if kind == "path" and not path_names_a_file(value):
             return None
-        return bound
+        token = distinctive_user_agent_token(value) if kind == "user_agent" else ""
+        # A browser-shaped one is published for the token the browsers do not send.
+        return f"{bound}; {carries_its_own_token(token)}" if token else bound
     if unattributed and kind in HOST_KINDS:
         # A host row no process of the sample's tree made is not its
         # observation: it is published only on the judge's keep against that fact.
