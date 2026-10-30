@@ -14,6 +14,6 @@
 
 export const THEME_STORAGE_KEY = "maljan.ui-theme";
 
-export const THEME_BOOT_SCRIPT = `(function(){try{var t=null;try{t=localStorage.getItem(${JSON.stringify(
-  THEME_STORAGE_KEY,
-)})}catch(e){}if(t!=="light"&&t!=="dark"){t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"}document.documentElement.setAttribute("data-ui-theme",t)}catch(e){}})();`;
+// The key is written into the script as a literal, not interpolated, so the
+// script is one constant string; a test pins it to THEME_STORAGE_KEY.
+export const THEME_BOOT_SCRIPT = `(function(){try{var t=null;try{t=localStorage.getItem("maljan.ui-theme")}catch(e){}if(t!=="light"&&t!=="dark"){t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"}document.documentElement.setAttribute("data-ui-theme",t)}catch(e){}})();`;
