@@ -11,7 +11,10 @@ and never by a server's or a tool's name:
   (a domain, an address, a URL), a path or a file, the file's content as
   bytes, or the id of a submission, an analysis, a task or a request, by the
   words of each argument's name and its schema ``format`` and
-  ``contentEncoding``, one level of nested objects included;
+  ``contentEncoding``, nested objects at any depth included (a schema too
+  large to read whole, or with a reference that cannot be followed, is read
+  as taking a path or the file's content wherever what was left unread
+  could);
 * the MCP ``annotations``, read as MCP defines them: ``readOnlyHint`` (the
   tool does not change its environment; MCP's default is that it does),
   ``destructiveHint`` and ``openWorldHint`` (it reaches outside its server;
@@ -70,10 +73,14 @@ model validates.
 
 from __future__ import annotations
 
+import itertools
 import re
-from collections.abc import Iterable, Mapping
+import unicodedata
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
+from urllib.parse import unquote
 
 from maljan.core.logger import logger
 from maljan.core.reputation import (
@@ -160,14 +167,81 @@ _SUBMIT_RE = re.compile(
     r"(?<![A-Za-z0-9])(?:submit|submits|submitted|upload|uploads|uploaded)(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
-# How deep into nested objects an input schema's arguments are read, how many
-# of them at most, and how many local references one argument's schema may
-# follow.
-_NESTED_DEPTH = 2
+# How many of an input schema's schemas are read at most (nested objects at any
+# depth), how many may wait to be read, and how many local references one
+# argument's schema may follow.
 _MAX_ARGUMENTS = 512
 _MAX_REFERENCES = 32
-# The members of a schema that are each a schema the argument may take.
+# The members of a schema that are each a schema the argument may take: lists
+# of them, single ones, and the map of them ``dependentSchemas`` holds.
 _ALTERNATIVES = ("anyOf", "oneOf", "allOf")
+_SAME_ARGUMENT_LISTS = (*_ALTERNATIVES, "prefixItems")
+_SAME_ARGUMENT_ONES = ("additionalItems", "contains", "if", "then", "else", "unevaluatedItems")
+# The members of an object schema that are schemas of the arguments it takes
+# under names it does not list.
+_UNLISTED_ARGUMENTS = ("additionalProperties", "unevaluatedProperties")
+# Every member that holds a schema or a map of them.
+_HOLDERS = (
+    *_SAME_ARGUMENT_ONES,
+    *_UNLISTED_ARGUMENTS,
+    "properties",
+    "patternProperties",
+    "dependentSchemas",
+    "dependencies",
+)
+# The keywords that may hold a mapping or a flag and are read, or say nothing
+# of what an argument takes (annotations, a flag on a value's range, the
+# definitions references name, what an argument is not); a vendor's ``x-``
+# keywords are annotations too.
+_KNOWN_KEYWORDS = frozenset(
+    {
+        *_HOLDERS,
+        *_SAME_ARGUMENT_LISTS,
+        "items",
+        "not",
+        "title",
+        "description",
+        "default",
+        "examples",
+        "example",
+        "const",
+        "enum",
+        "format",
+        "contentEncoding",
+        "contentMediaType",
+        "$comment",
+        "deprecated",
+        "readOnly",
+        "writeOnly",
+        "nullable",
+        "uniqueItems",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "required",
+        "dependentRequired",
+        "$schema",
+        "$id",
+        "$anchor",
+        "$dynamicAnchor",
+        "$vocabulary",
+        "$defs",
+        "definitions",
+    }
+)
+# A reference's keys. A ``$dynamicRef`` is resolved by the scope it is
+# evaluated in, which a listing does not show, so it is never followed.
+_REF = "$ref"
+_DYNAMIC_REF = "$dynamicRef"
+# A ``patternProperties`` pattern that names one argument (``^path$``).
+_LITERAL_PATTERN = re.compile(r"\^(\w+)\$")
+# The types that hold no path and no bytes.
+_NO_FILE_TYPES = frozenset({"integer", "number", "boolean", "null"})
+# A ``true`` schema: any value.
+_ANY: Mapping[str, Any] = MappingProxyType({})
+# A schema a form holds: its argument's name, the schema (``None`` for a value
+# that is no schema), whether it starts an argument, and whether that argument
+# has no name of its own.
+_Child = tuple[str | None, Mapping[str, Any] | None, bool, bool]
 
 
 def _get(definition: Any, key: str) -> Any:
@@ -191,8 +265,9 @@ def _plain(value: Any) -> Mapping[str, Any]:
 
 
 def _tokens(name: str) -> frozenset[str]:
-    """A name's words: split at ``_``, ``-`` and spaces, camelCase split, lowercased."""
-    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+    """A name's words: NFKC-normalised (a full-width ``ｐａｔｈ`` is ``path``), split at
+    ``_``, ``-`` and spaces, camelCase split, lowercased."""
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", unicodedata.normalize("NFKC", name))
     return frozenset(part for part in re.split(r"[_\-\s]+", spaced.lower()) if part)
 
 
@@ -214,69 +289,391 @@ def _properties(input_schema: Any) -> dict[str, Mapping[str, Any]]:
     return {str(name): prop for name, prop in props.items() if isinstance(prop, Mapping)}
 
 
-def _resolved(root: Any, schema: Any, seen: set[str]) -> Mapping[str, Any] | None:
-    """``schema`` with a local ``$ref`` (``#/$defs/…``, ``#/definitions/…``) followed in ``root``.
+def _foreign(name: str) -> bool:
+    """Whether a name cannot be read as written, even NFKC-normalised (a Cyrillic ``a``).
 
-    ``None`` for a reference that is not local, does not resolve, or was
-    followed already for this argument (a cycle), and past
-    :data:`_MAX_REFERENCES` references.
+    It holds a control, format or combining mark (Unicode categories ``C*``
+    and ``M*``: a zero-width joiner hides between the letters of ``path``),
+    or any character outside ASCII; either way it could name a path or the
+    file's content in a look-alike spelling.
     """
-    held = schema
-    while isinstance(held, Mapping) and isinstance(held.get("$ref"), str):
-        ref = str(held["$ref"])
-        if ref in seen or len(seen) >= _MAX_REFERENCES or not ref.startswith("#/"):
-            return None
-        seen.add(ref)
-        node: Any = root
-        for part in ref[2:].split("/"):
+    normal = unicodedata.normalize("NFKC", name)
+    return any(ord(c) > 127 or unicodedata.category(c)[0] in "CM" for c in normal)
+
+
+class _Unresolved(Exception):
+    """A reference that is not local, names nothing in the schema that holds it, or an
+    ambiguous anchor."""
+
+
+def _resource(schema: Mapping[str, Any], root: Any) -> bool:
+    """Whether a schema below the root is an embedded resource (its own ``$id``, no fragment)."""
+    own = schema.get("$id")
+    return schema is not root and isinstance(own, str) and not own.startswith("#")
+
+
+class _References:
+    """One schema's local references, each looked up once: ``#``, a JSON pointer, an anchor."""
+
+    def __init__(self, root: Any) -> None:
+        self.root = root
+        self.found: dict[str, tuple[Mapping[str, Any] | None, bool]] = {}
+        self.anchors: dict[str, Any] | None = None
+        self.ambiguous: set[str] = set()
+        self.rests: dict[int, Mapping[str, Any] | None] = {}
+
+    def target(self, ref: str) -> tuple[Mapping[str, Any], bool]:
+        """The schema ``ref`` names, and whether it lies inside an embedded resource.
+
+        :class:`_Unresolved` for none.
+        """
+        if ref not in self.found:
+            held, inside = self._lookup(ref)
+            self.found[ref] = (held if isinstance(held, Mapping) else None, inside)
+        found, inside = self.found[ref]
+        if found is None:
+            raise _Unresolved
+        return found, inside
+
+    def rest(self, schema: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        """A schema's own keywords beside its references and its ``$id``; ``None`` for none.
+
+        The walk carries the scope the ``$id`` opens beside it.
+        """
+        key = id(schema)
+        if key not in self.rests:
+            rest = {k: v for k, v in schema.items() if k not in (_REF, _DYNAMIC_REF, "$id")}
+            self.rests[key] = rest or None
+        return self.rests[key]
+
+    def _lookup(self, ref: str) -> tuple[Any, bool]:
+        if not ref.startswith("#"):
+            return None, False
+        pointer = unquote(ref[1:])
+        if not pointer:
+            return self.root, False
+        if not pointer.startswith("/"):
+            anchors = self._anchored()
+            return (None if pointer in self.ambiguous else anchors.get(pointer)), False
+        node: Any = self.root
+        inside = False
+        for part in pointer[1:].split("/"):
             part = part.replace("~1", "/").replace("~0", "~")
-            node = node.get(part) if isinstance(node, Mapping) else None
-        held = node
-    return held if isinstance(held, Mapping) else None
+            # A step through a schema with an ``$id`` of its own enters that
+            # resource; its own ``$id`` the walk reads where it lands.
+            inside = inside or (isinstance(node, Mapping) and _resource(node, self.root))
+            if isinstance(node, Mapping):
+                node = node.get(part)
+            elif isinstance(node, list) and part.isdigit() and int(part) < len(node):
+                node = node[int(part)]
+            else:
+                return None, inside
+        return node, inside
+
+    def _anchored(self) -> dict[str, Any]:
+        """Every ``$anchor`` (and a draft-07 ``$id`` of ``#name``) in the schema, read once.
+
+        An anchor defined more than once, or inside an embedded resource (a
+        schema below the root with an ``$id`` of its own that is not a
+        fragment), is :attr:`ambiguous`: which schema it names is not read.
+        """
+        if self.anchors is None:
+            self.anchors = {}
+            # (node, whether it is inside an embedded resource).
+            stack: list[tuple[Any, bool]] = [(self.root, False)]
+            while stack:
+                node, embedded = stack.pop()
+                if isinstance(node, Mapping):
+                    own = node.get("$id")
+                    if node is not self.root and isinstance(own, str) and not own.startswith("#"):
+                        embedded = True
+                    names = [node.get("$anchor")]
+                    if isinstance(own, str) and own.startswith("#") and len(own) > 1:
+                        names.append(own[1:])
+                    for anchor in names:
+                        if not isinstance(anchor, str):
+                            continue
+                        if embedded or anchor in self.anchors:
+                            self.ambiguous.add(anchor)
+                        self.anchors[anchor] = node
+                    stack.extend((value, embedded) for value in node.values())
+                elif isinstance(node, list):
+                    stack.extend((value, embedded) for value in node)
+        return self.anchors
 
 
-def _forms(root: Any, schema: Any, seen: set[str]) -> list[Mapping[str, Any]]:
-    """Every schema an argument may take: itself, its alternatives and its items, resolved."""
-    out: list[Mapping[str, Any]] = []
-    stack = [schema]
-    while stack and len(out) < _MAX_ARGUMENTS:
-        held = _resolved(root, stack.pop(), seen)
-        if held is None:
-            continue
-        out.append(held)
-        for key in _ALTERNATIVES:
-            members = held.get(key)
-            if isinstance(members, list):
-                stack.extend(m for m in members if isinstance(m, Mapping))
-        items = held.get("items")
-        if isinstance(items, Mapping):
-            stack.append(items)
-    return out
+def _nested(form: Mapping[str, Any]) -> bool:
+    """Whether a schema holds further schemas: a reference, alternatives, items or arguments."""
+    return (
+        isinstance(form.get(_REF), str)
+        or isinstance(form.get(_DYNAMIC_REF), str)
+        or any(isinstance(form.get(key), list) for key in _SAME_ARGUMENT_LISTS)
+        or isinstance(form.get("items"), (Mapping, list))
+        or any(isinstance(form.get(key), Mapping) for key in _HOLDERS)
+    )
 
 
-def _all_properties(input_schema: Any) -> list[tuple[str, Mapping[str, Any]]]:
-    """Every argument, by its name and each schema it may take, at most :data:`_MAX_ARGUMENTS`.
+def _could_carry(name: str | None, schema: Any) -> bool:
+    """Whether a schema the walk left unread could take a path or the file's content.
 
-    Local references are followed from the root schema, each argument's at
-    most once (a cycle ends there); ``anyOf``, ``oneOf`` and ``allOf`` members
-    and array items are read as the argument's own schemas; nested objects'
-    arguments are read to :data:`_NESTED_DEPTH`.
+    One that holds further schemas could; a leaf could as its argument's name
+    and schema say (:func:`_takes_content`, :func:`_takes_path`), or where its
+    name cannot be read as written (:func:`_foreign`); a leaf of the root
+    schema itself is no argument.
     """
-    root = input_schema
+    if not isinstance(schema, Mapping):
+        return False
+    if _nested(schema):
+        return True
+    return name is not None and (
+        _takes_content(name, schema) or _takes_path(name, schema) or _foreign(name)
+    )
+
+
+def _no_file(schema: Mapping[str, Any]) -> bool:
+    """Whether a schema's own type says it holds no path and no bytes, and it holds nothing more."""
+    held = schema.get("type")
+    types = [held] if isinstance(held, str) else held if isinstance(held, list) else []
+    return (
+        bool(types)
+        and all(isinstance(t, str) and t.lower() in _NO_FILE_TYPES for t in types)
+        and not _nested(schema)
+    )
+
+
+def _member(value: Any) -> Mapping[str, Any] | None:
+    """A schema as a mapping: ``true`` (any value) as an empty one; ``None`` for one that is not."""
+    if isinstance(value, Mapping):
+        return value
+    return _ANY if value is True else None
+
+
+def _names_beside(form: Mapping[str, Any]) -> Iterator[str]:
+    """The argument names a form gives outside ``properties``.
+
+    Each name ``required`` lists, each in a list ``dependentRequired`` or
+    ``dependencies`` holds, and the ``const`` or ``enum`` names
+    ``propertyNames`` allows.
+    """
+    lists: list[Any] = [form.get("required")]
+    for key in ("dependentRequired", "dependencies"):
+        held = form.get(key)
+        if isinstance(held, Mapping):
+            lists.extend(held.values())
+    names = form.get("propertyNames")
+    if isinstance(names, Mapping):
+        lists.append([names.get("const")])
+        lists.append(names.get("enum"))
+    for held in lists:
+        if isinstance(held, list):
+            yield from (value for value in held if isinstance(value, str))
+
+
+def _children(form: Mapping[str, Any], name: str | None) -> Iterator[_Child]:
+    """The schemas a form holds, each with the argument it belongs to and how it is named.
+
+    Its alternatives, items (``items``, ``prefixItems``, ``additionalItems``,
+    ``contains``, ``unevaluatedItems``), conditional branches (``if``,
+    ``then``, ``else``), ``dependentSchemas`` and the schemas of
+    ``dependencies`` (never its lists of names) are the same argument's
+    schemas; each of its ``properties`` is an argument of its own, and so is
+    each of its ``patternProperties``, named by a pattern that is an anchored
+    literal (``^path$``) and otherwise unnamed, as its
+    ``additionalProperties`` and ``unevaluatedProperties`` are. ``not`` says
+    what an argument is not, and is not read. A ``true`` schema is any value
+    (an empty schema), a ``false`` one none; any other value where a schema
+    belongs is yielded as ``None``, which the walk cannot read, and so is a
+    mapping or a flag under a keyword not in :data:`_KNOWN_KEYWORDS` nor a
+    vendor's ``x-`` one. The values of a free-form map
+    (``additionalProperties`` or ``unevaluatedProperties`` of ``true`` or
+    ``{}``) are read by their object's name instead. Each argument the form
+    names only outside ``properties`` (:func:`_names_beside`) is one of its
+    own, of any value.
+    """
+
+    def one(
+        child_name: str | None, value: Any, starts: bool, unnamed: bool, free_form: bool = False
+    ) -> Iterator[_Child]:
+        if value is not False:
+            member = _member(value)
+            # The values of a free-form map (``additionalProperties`` or
+            # ``unevaluatedProperties`` of ``true`` or ``{}``) are read by
+            # their object's name. This is looser than a map typed
+            # ``{"type": "string"}``, which fails closed: a ``dict[str, Any]``
+            # argument is listed exactly so (pydantic), and an untyped map's
+            # object name is what an operator reads; reading it as sending
+            # would mark every such tool so. A pattern's values never are.
+            yield child_name, member, starts, unnamed and not (free_form and member == {})
+
+    props = form.get("properties")
+    listed: Mapping[str, Any] = props if isinstance(props, Mapping) else {}
+
+    for key in _SAME_ARGUMENT_LISTS:
+        if key in form:
+            members = form[key]
+            if not isinstance(members, list):
+                yield name, None, False, False
+                continue
+            for member in members:
+                yield from one(name, member, False, False)
+    if "items" in form:
+        items = form["items"]
+        for member in items if isinstance(items, list) else [items]:
+            yield from one(name, member, False, False)
+    for key in _SAME_ARGUMENT_ONES:
+        if key in form:
+            yield from one(name, form[key], False, False)
+    for key in ("dependentSchemas", "dependencies", "properties", "patternProperties"):
+        if key not in form:
+            continue
+        held = form[key]
+        if not isinstance(held, Mapping):
+            yield name, None, False, False
+            continue
+        for key_name, value in held.items():
+            if key == "dependencies":
+                # A list names the arguments one requires (read below).
+                if not isinstance(value, list):
+                    yield from one(name, value, False, False)
+            elif key == "dependentSchemas":
+                yield from one(name, value, False, False)
+            elif key == "properties":
+                yield from one(str(key_name), value, True, False)
+            else:
+                literal = _LITERAL_PATTERN.fullmatch(str(key_name))
+                if literal:
+                    yield from one(literal.group(1), value, True, False)
+                else:
+                    yield from one(name or "", value, True, True)
+    for key in _UNLISTED_ARGUMENTS:
+        if key in form:
+            yield from one(name or "", form[key], True, True, free_form=True)
+    # An argument named only where the form requires it, or where its names
+    # are listed, takes any value under that name.
+    for named in _names_beside(form):
+        if named not in listed:
+            yield named, _ANY, True, False
+    # A keyword the walk does not know that holds a schema or a map of them
+    # could hold an argument it cannot read.
+    for key, value in form.items():
+        if (
+            isinstance(value, (Mapping, bool))
+            and key not in _KNOWN_KEYWORDS
+            and not str(key).startswith("x-")
+        ):
+            yield name, None, False, False
+
+
+def _carries(child_name: str | None, child: Mapping[str, Any] | None, unnamed: bool) -> bool:
+    """Whether a child schema left unread, or one the walk cannot read, could carry the file.
+
+    One that is no schema could; an argument with no name of its own could,
+    unless its own type says it holds no path and no bytes (:func:`_no_file`):
+    there is no name for the name rules to clear it by.
+    """
+    if child is None:
+        return True
+    if unnamed and not _no_file(child):
+        return True
+    return _could_carry(child_name, child)
+
+
+def _walk(input_schema: Any) -> tuple[list[tuple[str, Mapping[str, Any]]], bool]:
+    """Every argument, by its name and each schema it may take, and whether the rest could carry.
+
+    Nested objects are read at any depth (:func:`_children`). Local
+    references (``#``, a JSON pointer, percent-escaped or not, an
+    ``$anchor``) are followed from the root schema, each looked up once, and
+    a reference's sibling keywords are read beside its target; each chain of
+    references is at most :data:`_MAX_REFERENCES` long and follows each at
+    most once (a cycle ends there). Each schema is read once for each
+    argument it belongs to, and its own arguments are taken from it once, so
+    the walk is linear in the schema's size; it reads at most
+    :data:`_MAX_ARGUMENTS` schemas, with at most as many waiting.
+
+    The second value says the reading fails closed: the walk stopped at a cap
+    and something it left unread could take a path or the file's content
+    (:func:`_could_carry`); or a reference could not be followed (not local,
+    naming nothing, an ambiguous anchor, a ``$dynamicRef``, or one inside an
+    embedded resource, which resolves against that resource's ``$id``; an
+    argument's name is kept among the arguments, so the name rules still read
+    it); or a value where a schema belongs is no schema; or an
+    argument with no name of its own (:func:`_children`) has a schema whose
+    type does not say it holds no path and no bytes (:func:`_carries`).
+    """
+    refs = _References(input_schema)
     out: list[tuple[str, Mapping[str, Any]]] = []
-    level: list[Any] = [input_schema]
-    for _depth in range(_NESTED_DEPTH):
-        below: list[Any] = []
-        for schema in level:
-            for form in _forms(root, schema, set()):
-                for name, prop in _properties(form).items():
-                    for held in _forms(root, prop, set()):
-                        if len(out) >= _MAX_ARGUMENTS:
-                            return out
-                        out.append((name, held))
-                        below.append(held)
-        level = below
-    return out
+    # (argument name, schema, the references its chain followed so far,
+    # whether it lies inside an embedded resource).
+    waiting: list[tuple[str | None, Any, set[str], bool]] = [(None, input_schema, set(), False)]
+    seen_forms: set[tuple[str | None, int]] = set()
+    expanded: set[int] = set()
+    read = 0
+    unread = False
+
+    def stopped(*rest: Iterable[tuple[str | None, Any]]) -> tuple[list[Any], bool]:
+        left = itertools.chain(((n, s) for n, s, _chain, _in in waiting), *rest)
+        return out, unread or any(_could_carry(n, s) for n, s in left)
+
+    while waiting:
+        if read >= _MAX_ARGUMENTS:
+            return stopped()
+        name, schema, chain, embedded = waiting.pop()
+        if not isinstance(schema, Mapping):
+            continue
+        embedded = embedded or _resource(schema, input_schema)
+        ref, dynamic = schema.get(_REF), schema.get(_DYNAMIC_REF)
+        if isinstance(ref, str) or isinstance(dynamic, str):
+            rest = refs.rest(schema)
+            ahead: list[tuple[str | None, Any, set[str], bool]] = []
+            if rest is not None:
+                ahead.append((name, rest, set(chain), embedded))
+            if isinstance(dynamic, str) or (isinstance(ref, str) and ref not in chain):
+                # A reference resolved against an embedded resource's own
+                # ``$id``, or by the scope it is evaluated in, is not read.
+                try:
+                    if isinstance(dynamic, str) or embedded:
+                        raise _Unresolved
+                    if len(chain) >= _MAX_REFERENCES:
+                        unread = True
+                    else:
+                        chain.add(str(ref))
+                        target, inside = refs.target(str(ref))
+                        ahead.append((name, target, chain, inside))
+                except _Unresolved:
+                    read += 1
+                    if name is not None:
+                        out.append((name, rest or {}))
+                    unread = True
+            for at, item in enumerate(ahead):
+                if len(waiting) >= _MAX_ARGUMENTS:
+                    return stopped((n, s) for n, s, _chain, _in in ahead[at:])
+                waiting.append(item)
+            continue
+        if (name, id(schema)) in seen_forms:
+            continue
+        seen_forms.add((name, id(schema)))
+        read += 1
+        if name is not None:
+            out.append((name, schema))
+        opens = id(schema) not in expanded
+        expanded.add(id(schema))
+        children = _children(schema, name)
+        for child_name, child, starts, unnamed in children:
+            if starts and not opens:
+                continue
+            if child is None or unnamed:
+                unread = unread or _carries(child_name, child, unnamed)
+                if child is None:
+                    continue
+            if len(waiting) >= _MAX_ARGUMENTS:
+                rest_children = itertools.chain([(child_name, child, starts, unnamed)], children)
+                return out, unread or any(
+                    _carries(n, s, u) for n, s, st, u in rest_children if opens or not st
+                ) or any(_could_carry(n, s) for n, s, _chain, _in in waiting)
+            # A chain of references gets its own budget down each branch.
+            waiting.append((child_name, child, set() if starts else set(chain), embedded))
+    return out, unread
 
 
 def _takes_content(name: str, prop: Mapping[str, Any]) -> bool:
@@ -360,6 +757,9 @@ class _Listed:
     name: str
     hints: Mapping[str, Any]
     arguments: tuple[tuple[str, Mapping[str, Any]], ...]
+    # Whether the walk stopped at a cap with something unread that could take
+    # a path or the file's content (``_walk``): the tool is read as sending.
+    unread: bool
     props: Mapping[str, Mapping[str, Any]]
     roles: Mapping[str, str]
     required: tuple[str, ...]
@@ -384,10 +784,12 @@ def _listed(definition: Any) -> _Listed:
     words = _tokens(name)
     input_schema = _get(definition, "inputSchema")
     roles, required = _roles(input_schema)
+    arguments, unread = _walk(input_schema)
     return _Listed(
         name=name,
         hints=_plain(_get(definition, "annotations")),
-        arguments=tuple(_all_properties(input_schema)),
+        arguments=tuple(arguments),
+        unread=unread,
         props=_properties(input_schema),
         roles=roles,
         required=required,
@@ -398,6 +800,12 @@ def _listed(definition: Any) -> _Listed:
 
 
 def _discloses(tool: _Listed, *, trusted: bool = False) -> bool:
+    if tool.unread:
+        return True
+    # A name an untrusted server spells with letters its words cannot be read
+    # by could name a path or the file's content (``_foreign``).
+    if not trusted and any(_foreign(name) for name, _prop in tool.arguments):
+        return True
     if not tool.read_only and tool.says_it_submits_now:
         return True
     if any(_takes_content(name, prop) for name, prop in tool.arguments) and not (
@@ -424,6 +832,11 @@ def discloses(definition: Any, *, trusted: bool = False) -> bool:
     others did) does whatever it takes, since it may hand over the sample by
     an id or a hash the rule cannot see. Read-only alone never excuses
     sending: it says the tool changes nothing, not that it sends nothing.
+    Arguments are read at any depth of nested objects; a schema too large
+    to read whole, whose unread rest could take a path or the file's
+    content, or an argument whose reference cannot be followed, is read as
+    sending, whatever its hints; so is an untrusted server's argument whose
+    name holds letters outside ASCII even NFKC-normalised.
     """
     return _discloses(_listed(definition), trusted=trusted)
 
@@ -581,7 +994,9 @@ def program_readings_of(definitions: Iterable[Any], where: str = "") -> dict[str
             says = tool.says_it_submits_now or _says_it_sends(definition)
             # The file's content, read by the one rule the disclosure reads it
             # by, every schema form and nested object included: it is sent.
-            content = takes_content(tool.arguments)
+            # A schema read only in part, whose unread rest could take the
+            # file, is read as taking it (``_walk``).
+            content = takes_content(tool.arguments) or tool.unread
             sends = says and (
                 not tool.read_only
                 or any(

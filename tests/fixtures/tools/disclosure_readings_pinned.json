@@ -1,0 +1,841 @@
+{
+ "ghidra": {
+  "discloses": {
+   "add_struct_field": [
+    false,
+    false
+   ],
+   "analysis_status": [
+    false,
+    false
+   ],
+   "analyze_api_call_chains": [
+    false,
+    false
+   ],
+   "analyze_call_graph": [
+    false,
+    false
+   ],
+   "analyze_control_flow": [
+    false,
+    false
+   ],
+   "analyze_data_region": [
+    false,
+    false
+   ],
+   "analyze_dataflow": [
+    false,
+    false
+   ],
+   "analyze_for_documentation": [
+    false,
+    false
+   ],
+   "analyze_function_complete": [
+    false,
+    false
+   ],
+   "analyze_function_completeness": [
+    false,
+    false
+   ],
+   "analyze_struct_field_usage": [
+    false,
+    false
+   ],
+   "apply_data_classification": [
+    false,
+    false
+   ],
+   "apply_data_type": [
+    false,
+    false
+   ],
+   "apply_function_documentation": [
+    false,
+    false
+   ],
+   "batch_analyze_completeness": [
+    false,
+    false
+   ],
+   "batch_create_labels": [
+    false,
+    false
+   ],
+   "batch_decompile": [
+    false,
+    false
+   ],
+   "batch_delete_labels": [
+    false,
+    false
+   ],
+   "batch_rename_function_components": [
+    false,
+    false
+   ],
+   "batch_set_comments": [
+    false,
+    false
+   ],
+   "batch_string_anchor_report": [
+    false,
+    false
+   ],
+   "bulk_fuzzy_match": [
+    false,
+    false
+   ],
+   "can_rename_at_address": [
+    false,
+    false
+   ],
+   "clear_function_comments": [
+    false,
+    false
+   ],
+   "clear_instruction_flow_override": [
+    false,
+    false
+   ],
+   "clone_data_type": [
+    false,
+    false
+   ],
+   "close_program": [
+    false,
+    false
+   ],
+   "close_project": [
+    false,
+    false
+   ],
+   "compare_programs_documentation": [
+    false,
+    false
+   ],
+   "convert_number": [
+    false,
+    false
+   ],
+   "create_array_type": [
+    false,
+    false
+   ],
+   "create_data_type_category": [
+    true,
+    true
+   ],
+   "create_enum": [
+    false,
+    false
+   ],
+   "create_folder": [
+    true,
+    true
+   ],
+   "create_function": [
+    false,
+    false
+   ],
+   "create_function_signature": [
+    false,
+    false
+   ],
+   "create_label": [
+    false,
+    false
+   ],
+   "create_memory_block": [
+    false,
+    false
+   ],
+   "create_pointer_type": [
+    false,
+    false
+   ],
+   "create_project": [
+    false,
+    false
+   ],
+   "create_struct": [
+    false,
+    false
+   ],
+   "create_typedef": [
+    false,
+    false
+   ],
+   "create_union": [
+    false,
+    false
+   ],
+   "decompile_function": [
+    false,
+    false
+   ],
+   "delete_bookmark": [
+    false,
+    false
+   ],
+   "delete_data_type": [
+    false,
+    false
+   ],
+   "delete_file": [
+    true,
+    true
+   ],
+   "delete_function": [
+    false,
+    false
+   ],
+   "delete_label": [
+    false,
+    false
+   ],
+   "detect_array_bounds": [
+    false,
+    false
+   ],
+   "detect_crypto_constants": [
+    false,
+    false
+   ],
+   "detect_malware_behaviors": [
+    false,
+    false
+   ],
+   "diff_functions": [
+    false,
+    false
+   ],
+   "disassemble_bytes": [
+    false,
+    false
+   ],
+   "disassemble_function": [
+    false,
+    false
+   ],
+   "emulate_function": [
+    false,
+    false
+   ],
+   "emulate_hash_batch": [
+    false,
+    false
+   ],
+   "extract_iocs_with_context": [
+    false,
+    false
+   ],
+   "find_anti_analysis_techniques": [
+    false,
+    false
+   ],
+   "find_code_gaps": [
+    false,
+    false
+   ],
+   "find_dead_code": [
+    false,
+    false
+   ],
+   "find_next_undefined_function": [
+    false,
+    false
+   ],
+   "find_similar_functions": [
+    false,
+    false
+   ],
+   "find_similar_functions_fuzzy": [
+    false,
+    false
+   ],
+   "find_undocumented_by_string": [
+    false,
+    false
+   ],
+   "force_decompile": [
+    false,
+    false
+   ],
+   "get_address_spaces": [
+    false,
+    false
+   ],
+   "get_assembly_context": [
+    false,
+    false
+   ],
+   "get_bulk_function_hashes": [
+    false,
+    false
+   ],
+   "get_bulk_xrefs": [
+    false,
+    false
+   ],
+   "get_current_program_info": [
+    false,
+    false
+   ],
+   "get_entry_points": [
+    false,
+    false
+   ],
+   "get_enum_values": [
+    false,
+    false
+   ],
+   "get_external_location": [
+    false,
+    false
+   ],
+   "get_field_access_context": [
+    false,
+    false
+   ],
+   "get_full_call_graph": [
+    false,
+    false
+   ],
+   "get_function_by_address": [
+    false,
+    false
+   ],
+   "get_function_call_graph": [
+    false,
+    false
+   ],
+   "get_function_callees": [
+    false,
+    false
+   ],
+   "get_function_callers": [
+    false,
+    false
+   ],
+   "get_function_count": [
+    false,
+    false
+   ],
+   "get_function_documentation": [
+    false,
+    false
+   ],
+   "get_function_hash": [
+    false,
+    false
+   ],
+   "get_function_jump_targets": [
+    false,
+    false
+   ],
+   "get_function_labels": [
+    false,
+    false
+   ],
+   "get_function_signature": [
+    false,
+    false
+   ],
+   "get_function_variables": [
+    false,
+    false
+   ],
+   "get_function_xrefs": [
+    false,
+    false
+   ],
+   "get_metadata": [
+    false,
+    false
+   ],
+   "get_plate_comment": [
+    false,
+    false
+   ],
+   "get_project_info": [
+    false,
+    false
+   ],
+   "get_struct_layout": [
+    false,
+    false
+   ],
+   "get_type_size": [
+    false,
+    false
+   ],
+   "get_valid_data_types": [
+    false,
+    false
+   ],
+   "get_xrefs_from": [
+    false,
+    false
+   ],
+   "get_xrefs_to": [
+    false,
+    false
+   ],
+   "import_data_types": [
+    false,
+    false
+   ],
+   "import_file": [
+    true,
+    true
+   ],
+   "inspect_memory_content": [
+    false,
+    false
+   ],
+   "list_analyzers": [
+    false,
+    false
+   ],
+   "list_bookmarks": [
+    false,
+    false
+   ],
+   "list_calling_conventions": [
+    false,
+    false
+   ],
+   "list_classes": [
+    false,
+    false
+   ],
+   "list_data_items": [
+    false,
+    false
+   ],
+   "list_data_items_by_xrefs": [
+    false,
+    false
+   ],
+   "list_data_type_categories": [
+    false,
+    false
+   ],
+   "list_data_types": [
+    false,
+    false
+   ],
+   "list_exports": [
+    false,
+    false
+   ],
+   "list_external_locations": [
+    false,
+    false
+   ],
+   "list_functions": [
+    false,
+    false
+   ],
+   "list_functions_enhanced": [
+    false,
+    false
+   ],
+   "list_globals": [
+    false,
+    false
+   ],
+   "list_imports": [
+    false,
+    false
+   ],
+   "list_methods": [
+    false,
+    false
+   ],
+   "list_namespaces": [
+    false,
+    false
+   ],
+   "list_open_programs": [
+    false,
+    false
+   ],
+   "list_project_files": [
+    false,
+    false
+   ],
+   "list_scripts": [
+    false,
+    false
+   ],
+   "list_segments": [
+    false,
+    false
+   ],
+   "list_strings": [
+    false,
+    false
+   ],
+   "load_program": [
+    true,
+    true
+   ],
+   "load_program_from_project": [
+    true,
+    true
+   ],
+   "modify_struct_field": [
+    false,
+    false
+   ],
+   "move_data_type_to_category": [
+    true,
+    true
+   ],
+   "open_program": [
+    true,
+    true
+   ],
+   "open_project": [
+    true,
+    true
+   ],
+   "read_memory": [
+    false,
+    false
+   ],
+   "reanalyze": [
+    false,
+    false
+   ],
+   "remove_struct_field": [
+    false,
+    false
+   ],
+   "rename_data": [
+    false,
+    false
+   ],
+   "rename_external_location": [
+    false,
+    false
+   ],
+   "rename_function": [
+    false,
+    false
+   ],
+   "rename_function_by_address": [
+    false,
+    false
+   ],
+   "rename_global_variable": [
+    false,
+    false
+   ],
+   "rename_label": [
+    false,
+    false
+   ],
+   "rename_or_label": [
+    false,
+    false
+   ],
+   "rename_variable": [
+    false,
+    false
+   ],
+   "rename_variables": [
+    false,
+    false
+   ],
+   "run_analysis": [
+    false,
+    false
+   ],
+   "run_ghidra_script": [
+    false,
+    false
+   ],
+   "run_script_inline": [
+    false,
+    false
+   ],
+   "save_all_programs": [
+    false,
+    false
+   ],
+   "save_program": [
+    false,
+    false
+   ],
+   "search_byte_patterns": [
+    false,
+    false
+   ],
+   "search_data_types": [
+    false,
+    false
+   ],
+   "search_functions": [
+    false,
+    false
+   ],
+   "search_functions_enhanced": [
+    false,
+    false
+   ],
+   "search_strings": [
+    false,
+    false
+   ],
+   "server_status": [
+    false,
+    false
+   ],
+   "set_bookmark": [
+    false,
+    false
+   ],
+   "set_decompiler_comment": [
+    false,
+    false
+   ],
+   "set_disassembly_comment": [
+    false,
+    false
+   ],
+   "set_function_no_return": [
+    false,
+    false
+   ],
+   "set_function_prototype": [
+    false,
+    false
+   ],
+   "set_image_base": [
+    false,
+    false
+   ],
+   "set_local_variable_type": [
+    false,
+    false
+   ],
+   "set_parameter_type": [
+    false,
+    false
+   ],
+   "set_plate_comment": [
+    false,
+    false
+   ],
+   "set_variable_storage": [
+    false,
+    false
+   ],
+   "set_variables": [
+    false,
+    false
+   ],
+   "suggest_field_names": [
+    false,
+    false
+   ],
+   "switch_program": [
+    false,
+    false
+   ],
+   "validate_data_type": [
+    false,
+    false
+   ],
+   "validate_data_type_exists": [
+    false,
+    false
+   ],
+   "validate_function_prototype": [
+    false,
+    false
+   ]
+  },
+  "program_readings": "{'add_struct_field': ToolFacts(kind='utility', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='tool', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'analysis_status': ToolFacts(kind='status', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='tool', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'analyze_api_call_chains': ToolFacts(kind='call_chains', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'analyze_call_graph': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'analyze_control_flow': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'analyze_data_region': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'analyze_dataflow': ToolFacts(kind='dataflow', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'analyze_for_documentation': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'analyze_function_complete': ToolFacts(kind='function_analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'analyze_function_completeness': ToolFacts(kind='documentation_completeness', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'analyze_struct_field_usage': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'apply_data_classification': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'apply_data_type': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'apply_function_documentation': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'batch_analyze_completeness': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='batch', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=('analyze_function_completeness',), shows='', does_not_show=''), 'batch_create_labels': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='batch', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=('create_label',), shows='', does_not_show=''), 'batch_decompile': ToolFacts(kind='decompile_batch', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='batch', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=('decompile_function',), shows='', does_not_show=''), 'batch_delete_labels': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='batch', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=('delete_label',), shows='', does_not_show=''), 'batch_rename_function_components': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='batch', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'batch_set_comments': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='batch', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=('set_decompiler_comment', 'set_disassembly_comment', 'set_plate_comment'), shows='', does_not_show=''), 'batch_string_anchor_report': ToolFacts(kind='utility', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=True, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='batch', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'bulk_fuzzy_match': ToolFacts(kind='utility', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='batch', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'can_rename_at_address': ToolFacts(kind='check', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='check', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'clear_function_comments': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'clear_instruction_flow_override': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'clone_data_type': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'close_program': ToolFacts(kind='sample_close', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='nav', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'close_project': ToolFacts(kind='sample_close', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='nav', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'compare_programs_documentation': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'convert_number': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_array_type': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_data_type_category': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_enum': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_folder': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_function': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_function_signature': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_label': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_memory_block': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_pointer_type': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_project': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_struct': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_typedef': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'create_union': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'decompile_function': ToolFacts(kind='decompile', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'delete_bookmark': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'delete_data_type': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'delete_file': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'delete_function': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'delete_label': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'detect_array_bounds': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'detect_crypto_constants': ToolFacts(kind='crypto_constants', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'detect_malware_behaviors': ToolFacts(kind='behaviour_scan', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'diff_functions': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'disassemble_bytes': ToolFacts(kind='disassembly', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'start_address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'disassemble_function': ToolFacts(kind='function_disassembly', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'emulate_function': ToolFacts(kind='emulation', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=ToolEffects(executes='emulation', network=None, third_party='', why_undeclared='', when='', offline_without_credentials=None), aggregate_of=(), shows='', does_not_show=''), 'emulate_hash_batch': ToolFacts(kind='emulation', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=ToolEffects(executes='emulation', network=None, third_party='', why_undeclared='', when='', offline_without_credentials=None), aggregate_of=(), shows='', does_not_show=''), 'extract_iocs_with_context': ToolFacts(kind='iocs_with_context', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'find_anti_analysis_techniques': ToolFacts(kind='anti_analysis_scan', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'find_code_gaps': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'find_dead_code': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'find_next_undefined_function': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'start_address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'find_similar_functions': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'find_similar_functions_fuzzy': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'find_undocumented_by_string': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=True, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'force_decompile': ToolFacts(kind='decompile_refresh', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_address_spaces': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_assembly_context': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_bulk_function_hashes': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=('get_function_hash',), shows='', does_not_show=''), 'get_bulk_xrefs': ToolFacts(kind='xrefs', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_current_program_info': ToolFacts(kind='program_info', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_entry_points': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_enum_values': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_external_location': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_field_access_context': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_full_call_graph': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=('get_function_call_graph',), shows='', does_not_show=''), 'get_function_by_address': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_call_graph': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_callees': ToolFacts(kind='callees', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_callers': ToolFacts(kind='callers', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_count': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_documentation': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_hash': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_jump_targets': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_labels': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_signature': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_variables': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_xrefs': ToolFacts(kind='xrefs', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_metadata': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_plate_comment': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_project_info': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_struct_layout': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_type_size': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_valid_data_types': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_xrefs_from': ToolFacts(kind='xrefs', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_xrefs_to': ToolFacts(kind='xrefs', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'import_data_types': ToolFacts(kind='import', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='import', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'import_file': ToolFacts(kind='file_import', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'path': 'file_path'}, reader='', report_sections=(), words=(), display_name='', category='import', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'inspect_memory_content': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_analyzers': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_bookmarks': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_calling_conventions': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_classes': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_data_items': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_data_items_by_xrefs': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_data_type_categories': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_data_types': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_exports': ToolFacts(kind='export_listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_external_locations': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_functions': ToolFacts(kind='function_list', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_functions_enhanced': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_globals': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_imports': ToolFacts(kind='import_listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_methods': ToolFacts(kind='method_list', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_namespaces': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_open_programs': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_project_files': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_scripts': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_segments': ToolFacts(kind='segments', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_strings': ToolFacts(kind='listing_strings', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'load_program': ToolFacts(kind='open_sample', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'path': 'file'}, reader='', report_sections=(), words=(), display_name='', category='nav', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'load_program_from_project': ToolFacts(kind='project_load', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'path': 'path'}, reader='', report_sections=(), words=(), display_name='', category='nav', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'modify_struct_field': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'move_data_type_to_category': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'open_program': ToolFacts(kind='open_sample', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'path': 'path'}, reader='', report_sections=(), words=(), display_name='', category='nav', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'open_project': ToolFacts(kind='project_navigation', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'path': 'path'}, reader='', report_sections=(), words=(), display_name='', category='nav', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'read_memory': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='read', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'reanalyze': ToolFacts(kind='utility', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='tool', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'remove_struct_field': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'rename_data': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'rename_external_location': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'rename_function': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'rename_function_by_address': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'rename_global_variable': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'rename_label': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'rename_or_label': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'rename_variable': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'rename_variables': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=('rename_variable',), shows='', does_not_show=''), 'run_analysis': ToolFacts(kind='run', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='exec', routed_formats=(), runtimes=(), outputs='', effects=ToolEffects(executes='', network=None, third_party='', why_undeclared='it runs what it is asked to run, and its definition does not say what', when='', offline_without_credentials=None), aggregate_of=(), shows='', does_not_show=''), 'run_ghidra_script': ToolFacts(kind='run', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='exec', routed_formats=(), runtimes=(), outputs='', effects=ToolEffects(executes='', network=None, third_party='', why_undeclared='it runs whatever script or command it is given, so what it does is whatever that does', when='', offline_without_credentials=None), aggregate_of=(), shows='', does_not_show=''), 'run_script_inline': ToolFacts(kind='run', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='exec', routed_formats=(), runtimes=(), outputs='', effects=ToolEffects(executes='', network=None, third_party='', why_undeclared='it runs whatever script or command it is given, so what it does is whatever that does', when='', offline_without_credentials=None), aggregate_of=(), shows='', does_not_show=''), 'save_all_programs': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='nav', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'save_program': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='nav', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'search_byte_patterns': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'search_data_types': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'search_functions': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'search_functions_enhanced': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'search_strings': ToolFacts(kind='string_search', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'server_status': ToolFacts(kind='status', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='meta', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_bookmark': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_decompiler_comment': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_disassembly_comment': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_function_no_return': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_function_prototype': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_image_base': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_local_variable_type': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_parameter_type': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_plate_comment': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_variable_storage': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_variables': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'suggest_field_names': ToolFacts(kind='utility', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='tool', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'switch_program': ToolFacts(kind='select_sample', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='nav', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'validate_data_type': ToolFacts(kind='check', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='check', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'validate_data_type_exists': ToolFacts(kind='check', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program'}, reader='', report_sections=(), words=(), display_name='', category='check', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'validate_function_prototype': ToolFacts(kind='check', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'program': 'program', 'address': 'function_address'}, reader='', report_sections=(), words=(), display_name='', category='check', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show='')}"
+ },
+ "r2": {
+  "discloses": {
+   "analyze": [
+    false,
+    false
+   ],
+   "calculate": [
+    false,
+    false
+   ],
+   "close_file": [
+    false,
+    false
+   ],
+   "decompile_function": [
+    false,
+    false
+   ],
+   "disassemble": [
+    false,
+    false
+   ],
+   "disassemble_function": [
+    false,
+    false
+   ],
+   "get_current_address": [
+    false,
+    false
+   ],
+   "get_function_prototype": [
+    false,
+    false
+   ],
+   "list_all_strings": [
+    false,
+    false
+   ],
+   "list_classes": [
+    false,
+    false
+   ],
+   "list_decompilers": [
+    false,
+    false
+   ],
+   "list_entrypoints": [
+    false,
+    false
+   ],
+   "list_exports": [
+    false,
+    false
+   ],
+   "list_files": [
+    true,
+    true
+   ],
+   "list_functions": [
+    false,
+    false
+   ],
+   "list_functions_tree": [
+    false,
+    false
+   ],
+   "list_imports": [
+    false,
+    false
+   ],
+   "list_libraries": [
+    false,
+    false
+   ],
+   "list_memory_maps": [
+    false,
+    false
+   ],
+   "list_methods": [
+    false,
+    false
+   ],
+   "list_sections": [
+    false,
+    false
+   ],
+   "list_strings": [
+    false,
+    false
+   ],
+   "list_symbols": [
+    false,
+    false
+   ],
+   "open_file": [
+    true,
+    true
+   ],
+   "rename_flag": [
+    false,
+    false
+   ],
+   "rename_function": [
+    false,
+    false
+   ],
+   "run_command": [
+    false,
+    false
+   ],
+   "set_comment": [
+    false,
+    false
+   ],
+   "set_function_prototype": [
+    false,
+    false
+   ],
+   "show_function_details": [
+    false,
+    false
+   ],
+   "show_info": [
+    false,
+    false
+   ],
+   "use_decompiler": [
+    false,
+    false
+   ],
+   "xrefs_to": [
+    false,
+    false
+   ]
+  },
+  "program_readings": "{'open_file': ToolFacts(kind='open_sample', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'path': 'file_path'}, reader='', report_sections=(), words=(), display_name='', category='nav', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'close_file': ToolFacts(kind='sample_close', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='nav', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_functions': ToolFacts(kind='function_list', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_functions_tree': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_libraries': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_imports': ToolFacts(kind='import_listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_exports': ToolFacts(kind='export_listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_sections': ToolFacts(kind='segments', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_memory_maps': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'show_function_details': ToolFacts(kind='utility', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='tool', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_current_address': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'show_info': ToolFacts(kind='utility', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='tool', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_symbols': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_entrypoints': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_methods': ToolFacts(kind='method_list', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_classes': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_decompilers': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'rename_function': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'rename_flag': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'use_decompiler': ToolFacts(kind='utility', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='tool', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_function_prototype': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_function_prototype': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'set_comment': ToolFacts(kind='program_edit', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='modify', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_strings': ToolFacts(kind='listing_strings', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_all_strings': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=True, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'analyze': ToolFacts(kind='analysis', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'xrefs_to': ToolFacts(kind='xrefs', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='tool', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'decompile_function': ToolFacts(kind='decompile', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'list_files': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'path': 'path'}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'disassemble_function': ToolFacts(kind='function_disassembly', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'disassemble': ToolFacts(kind='disassembly', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'address': 'address'}, reader='', report_sections=(), words=(), display_name='', category='analyze', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'calculate': ToolFacts(kind='utility', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='tool', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'run_command': ToolFacts(kind='run', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='exec', routed_formats=(), runtimes=(), outputs='', effects=ToolEffects(executes='', network=None, third_party='', why_undeclared='it runs whatever script or command it is given, so what it does is whatever that does', when='', offline_without_credentials=None), aggregate_of=(), shows='', does_not_show='')}"
+ },
+ "virustotal": {
+  "discloses": {
+   "get_analysis": [
+    false,
+    false
+   ],
+   "get_domain_report": [
+    false,
+    false
+   ],
+   "get_file_report": [
+    false,
+    false
+   ],
+   "get_ip_report": [
+    false,
+    false
+   ],
+   "get_submission": [
+    false,
+    false
+   ],
+   "get_url_report": [
+    false,
+    false
+   ],
+   "submit_file": [
+    true,
+    true
+   ],
+   "submit_local_file": [
+    true,
+    true
+   ]
+  },
+  "program_readings": "{'get_analysis': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_domain_report': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_file_report': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_ip_report': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_submission': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'get_url_report': ToolFacts(kind='listing', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=True, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='list', routed_formats=(), runtimes=(), outputs='', effects=None, aggregate_of=(), shows='', does_not_show=''), 'submit_file': ToolFacts(kind='utility', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={}, reader='', report_sections=(), words=(), display_name='', category='tool', routed_formats=(), runtimes=(), outputs='', effects=ToolEffects(executes='', network=True, third_party='bytes', why_undeclared='', when='', offline_without_credentials=None), aggregate_of=(), shows='', does_not_show=''), 'submit_local_file': ToolFacts(kind='utility', asserts_techniques=False, source='', long_running=False, timeout_seconds=None, memory_peak_mb=None, discloses_sample=False, read_only=False, holds_strings=False, reads_delay_imports=False, rows='', places={}, values={}, techniques=(), reputation=None, function_starts='', arguments={'path': 'path'}, reader='', report_sections=(), words=(), display_name='', category='tool', routed_formats=(), runtimes=(), outputs='', effects=ToolEffects(executes='', network=True, third_party='bytes', why_undeclared='', when='', offline_without_credentials=None), aggregate_of=(), shows='', does_not_show='')}"
+ }
+}
