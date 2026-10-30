@@ -12,12 +12,12 @@ search's hits, a refusal) is not drawn; a plain text answer is drawn as before.
 from __future__ import annotations
 
 import json
-import time
 from typing import Any
 
 from maljan.core.undeclared_tools import code_listing, code_text, holds_code
 from maljan.reporting.figures import LISTING_CUT_FOR_STORAGE, build_code_listings
 from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from tests.linear_cost import assert_scales
 
 CODE = (
     "\n/* WARNING: bad instruction */\n\nvoid entry(void)\n\n{\n  char c;\n  *(char *)p = c;\n}\n"
@@ -100,15 +100,14 @@ def test_code_is_read_by_its_shape() -> None:
 
 
 def test_reading_code_stays_linear() -> None:
-    def took(size: int) -> float:
-        hostile = json.dumps({"a": "x(" * size, "b": "{" * size, "c": "0x1234 " * size})
-        start = time.perf_counter()
-        code_text(hostile)
-        code_text(hostile[: len(hostile) // 2])
-        return time.perf_counter() - start
+    def hostile(size: int) -> str:
+        return json.dumps({"a": "x(" * size, "b": "{" * size, "c": "0x1234 " * size})
 
-    small, large = took(20_000), took(200_000)
-    assert large < small * 30, (small, large)
+    def read(text: str) -> None:
+        code_text(text)
+        code_text(text[: len(text) // 2])
+
+    assert_scales(hostile, 20_000, read, factor=10, repeats=5)
 
 
 def test_prose_holding_numbers_is_not_read_as_code() -> None:
@@ -187,11 +186,7 @@ def test_short_prose_lines_under_a_code_key_are_not_drawn() -> None:
 
 
 def test_a_bare_listing_is_read_in_linear_time() -> None:
-    def took(size: int) -> float:
-        hostile = json.dumps({"disassembly": ("mov eax, " + "a " * 40 + "\n") * size})
-        start = time.perf_counter()
-        code_text(hostile)
-        return time.perf_counter() - start
+    def hostile(size: int) -> str:
+        return json.dumps({"disassembly": ("mov eax, " + "a " * 40 + "\n") * size})
 
-    small, large = took(2_000), took(20_000)
-    assert large < max(small, 0.01) * 30, (small, large)
+    assert_scales(hostile, 2_000, code_text, factor=10, repeats=5)
