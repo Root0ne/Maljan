@@ -12,6 +12,7 @@ import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import { isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
 import { endpointReputation, reputationTooltip, verdictWords } from "@/components/analysis/reputation";
 import { domainFacts, ipFacts } from "@/components/analysis/networkFacts";
+import StructuredValue, { StructuredCell } from "@/components/analysis/StructuredValue";
 import {
   NETWORK_ROWS_STEP,
   hostReputation,
@@ -58,11 +59,11 @@ export default function NetworkContent({ report }: { report: ReportDetailDTO }) 
   const hosts = hostRows(net);
   const urls = net?.urls ?? [];
   const domains = net?.domains ?? [];
-  const tls: { kind: string; value: string }[] = [
-    ...(net?.ja3_fingerprints ?? []).map((v) => ({ kind: "JA3", value: text(v) })),
-    ...(net?.ja3s_fingerprints ?? []).map((v) => ({ kind: "JA3S", value: text(v) })),
+  const tls: { kind: string; value: unknown }[] = [
+    ...(net?.ja3_fingerprints ?? []).map((v) => ({ kind: "JA3", value: v as unknown })),
+    ...(net?.ja3s_fingerprints ?? []).map((v) => ({ kind: "JA3S", value: v as unknown })),
   ];
-  const agents = (net?.user_agents ?? []).map(text);
+  const agents: unknown[] = net?.user_agents ?? [];
 
   return (
     <div className="space-y-4">
@@ -178,7 +179,9 @@ export default function NetworkContent({ report }: { report: ReportDetailDTO }) 
                 .map((f, i) => (
                   <tr key={`${f.kind}-${i}`} className="hover:bg-bg-hover">
                     <td className="whitespace-nowrap px-4 py-2 align-top text-xs text-text-muted">{f.kind}</td>
-                    <td className="px-4 py-2 align-top font-mono text-xs text-text-secondary break-all">{f.value}</td>
+                    <td className="px-4 py-2 align-top font-mono text-xs text-text-secondary break-all">
+                      <StructuredCell value={f.value} name={`${f.kind} ${i + 1}`} />
+                    </td>
                   </tr>
                 ))}
             </tbody>
@@ -261,9 +264,6 @@ export default function NetworkContent({ report }: { report: ReportDetailDTO }) 
   );
 }
 
-function text(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value);
-}
 
 function RequestTable({
   urls,
@@ -356,9 +356,9 @@ function HostDetail({ row }: { row: HostRow }) {
       {rep && (
         <div>
           <h3 className="mb-1 text-xs font-semibold text-text-secondary">Reputation record</h3>
-          <pre className="whitespace-pre-wrap break-words rounded border border-border-light bg-bg-deep px-2 py-1 font-mono text-xs text-text-primary">
-            {reputationTooltip(rep)}
-          </pre>
+          <div className="rounded border border-border-light bg-bg-deep p-3">
+            <StructuredValue value={rep} name={`Reputation record of ${row.host}`} />
+          </div>
         </div>
       )}
       <div>
