@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**112 codes in 12 families:** [agreement](#agreement) 9 · [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 14 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 14 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**117 codes in 12 families:** [agreement](#agreement) 9 · [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 14 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 19 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## agreement
 
@@ -465,6 +465,14 @@ The report's category names a STIX malware type the judge's malware object, publ
 - **Constant** `maljan.reporting.prose_decisions:CATEGORY_TYPE_UNSTATED_CODE`
 - **Docs** none
 
+### `report.channel_binding`
+
+No comment names its meaning, and `maljan.reporting.composer_pro:channel_binding_violations` passes more than one message for it: see the messages there.
+
+- **Raised at** `maljan.reporting.composer_pro:channel_binding_violations`
+- **Constant** `maljan.pipeline.validation:CHANNEL_BINDING_CODE`
+- **Docs** none
+
 ### `report.citation_not_evidence`
 
 No comment names its meaning, and the message at `maljan.pipeline.validation:citation_violations` is made only of values it fills in: see the message there.
@@ -513,13 +521,37 @@ No comment names its meaning; the message at `maljan.pipeline.validation:identif
 - **Constant** `maljan.pipeline.validation:UNCITED_IDENTIFIER_CODE`
 - **Docs** [Architecture](/architecture/), [The console](/console/)
 
+### `report.numeric_confidence`
+
+No comment names its meaning; the message at `maljan.reporting.composer_pro:style_violations` reads: "\<path> writes a confidence as a number (\<said>). Say how confident the assessment is in words (high, moderate, low), never as a number."
+
+- **Raised at** `maljan.reporting.composer_pro:style_violations`
+- **Constant** `maljan.pipeline.validation:NUMERIC_CONFIDENCE_CODE`
+- **Docs** none
+
 ### `report.persistence_not_observed`
 
-No comment names its meaning; the message at `maljan.pipeline.validation:persistence_not_observed_violations` reads: "the section states persistence (\<first>), and \<fact>. Say in the section that persistence was not observed in this run and what the reading rests on, or write what in this run's evidence shows it."
+A section's prose states persistence where the sandbox, watching the registry and the files, recorded none: the report prints "no persistence observed" under that same section. Asked once; the prose kept is recorded.
 
 - **Raised at** `maljan.pipeline.validation:persistence_not_observed_violations`
 - **Constant** `maljan.pipeline.validation:PERSISTENCE_NOT_OBSERVED_CODE`
 - **Docs** [Architecture](/architecture/)
+
+### `report.process_words`
+
+No comment names its meaning; the message at `maljan.reporting.composer_pro:style_violations` reads: "\<path> names how this report was made (\<said>). State the finding itself, in the sample's terms: no ledger, judge, mediator, producer, model, agent or tool call, and no analyst's name or claim number."
+
+- **Raised at** `maljan.reporting.composer_pro:style_violations`
+- **Constant** `maljan.pipeline.validation:PROCESS_WORDS_CODE`
+- **Docs** none
+
+### `report.prose_shape`
+
+No comment names its meaning; the message at `maljan.reporting.composer_pro:conclusion_shape_violations` reads: "The conclusion is \<count> paragraph\<…>; write \<low> or \<high> short paragraphs, separated by a blank line."
+
+- **Raised at** `maljan.reporting.composer_pro:conclusion_shape_violations`, `maljan.reporting.composer_pro:limitations_shape_violations`, `maljan.reporting.composer_pro:procedure_violations`, `maljan.reporting.composer_pro:summary_shape_violations`
+- **Constant** `maljan.pipeline.validation:PROSE_SHAPE_CODE`
+- **Docs** none
 
 ### `report.published_technique_doubted`
 
@@ -552,6 +584,14 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unpubli
 - **Raised at** `maljan.pipeline.validation:unpublished_value_violations`
 - **Constant** `maljan.pipeline.validation:UNPUBLISHED_VALUE_CODE`
 - **Docs** [Architecture](/architecture/)
+
+### `report.value_not_carried`
+
+No comment names its meaning; the message at `maljan.reporting.composer_pro:procedure_value_violations` reads: "The procedure for \<tid> drops \<dropped>, which the first claim names. Carry the value that shows the procedure."
+
+- **Raised at** `maljan.reporting.composer_pro:procedure_value_violations`, `maljan.reporting.composer_pro:summary_value_violations`
+- **Constant** `maljan.pipeline.validation:VALUE_NOT_CARRIED_CODE`
+- **Docs** none
 
 ### `report.value_not_in_cited_entry`
 

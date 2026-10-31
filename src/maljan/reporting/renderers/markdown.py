@@ -3207,6 +3207,8 @@ _FLAG_WORDS = {
     "report.rule_match_as_action": "a rule match only, stated as an action",
     "report.unpublished_value": "not published by this run",
     "report.citation_wrong_entry": "cited to an entry that does not hold it",
+    "report.numeric_confidence": "a confidence written as a number",
+    "report.process_words": "names how the report was made",
     PUBLISHED_TECHNIQUE_DOUBTED_CODE: "published by this run",
     CATEGORY_TYPE_UNSTATED_CODE: "not the export's malware type",
 }

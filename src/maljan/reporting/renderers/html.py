@@ -56,6 +56,7 @@ from maljan.reporting.renderers.markdown import (
 # anything lands if every heading it could go under is absent — placement
 # degrades, the figure is never dropped.
 _FIGURE_ANCHORS: dict[str, tuple[str, ...]] = {
+    "execution_flow": ("Execution flow",),
     "infection_chain": ("Execution flow",),
     "entropy_chart": ("Packing, obfuscation and anti-analysis", "Static properties"),
     "process_tree": ("Process tree", "Observed behaviour"),
@@ -74,6 +75,8 @@ _SECTION_FAILED = r"<!--\s*section '([^']+)' rendering failed {marker} [^>]*-->"
 # How many random bytes the marker is drawn from.
 _MARKER_BYTES = 16
 
+# A Mermaid diagram's source as the Markdown renderer writes it into the HTML.
+_MERMAID_BLOCK = re.compile(r'<pre><code class="language-mermaid">.*?</code></pre>\n?', re.DOTALL)
 _H2_SPLIT_RE = re.compile(r"(?=<h2>)")
 _H2_HEAD_RE = re.compile(r"^<h2>(.*?)</h2>", re.DOTALL)
 _H3_RE = re.compile(r"<h3>(.*?)</h3>", re.DOTALL)
@@ -279,9 +282,15 @@ class HtmlRenderer:
         figures = list(report.figures or []) if embed_figures else []
         if self._layout == ANALYST:
             # The bundle draws the others, beside the sections they illustrate.
+            from maljan.reporting.figures import build_execution_flow
             from maljan.reporting.renderers.analyst import FIGURE_KINDS
 
             figures = [fig for fig in figures if fig.kind in FIGURE_KINDS]
+            # The execution flow is drawn from the steps the report holds now:
+            # the composer writes them after the stored figures were drawn.
+            flow = build_execution_flow(report) if embed_figures else None
+            if flow is not None:
+                figures.insert(0, flow)
         if figures:
             # A stored report's figures were drawn when it was built, perhaps
             # before their text was defanged: each is read again here, with
@@ -342,6 +351,8 @@ class HtmlRenderer:
         )
         html = self._markdown_to_html(markdown)
         if self._layout == ANALYST:
+            # The Markdown's diagram source; the HTML draws the flow as a figure.
+            html = _MERMAID_BLOCK.sub("", html)
             html = _cited_superscripts(html)
         if self._self_contained:
             html = _notes_in_the_document(html, self._notes, self._bundle_location)

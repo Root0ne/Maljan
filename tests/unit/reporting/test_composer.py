@@ -577,6 +577,11 @@ class TestEachSectionIsShownAnExampleOfItsShape:
             "host_identifiers": module._HostIdentifiersOut,
             "commands": module._CommandsOut,
             "communications": module._C2Out,
+            "encryption_scheme": module.EncryptionScheme,
+            "summary": module.SummaryOut,
+            "conclusion": module.ConclusionOut,
+            "limitations": module.LimitationsOut,
+            "attack_procedures": module.ProceduresOut,
         }
         assert set(schemas) == set(module._EXAMPLES)
         for key, schema in schemas.items():
