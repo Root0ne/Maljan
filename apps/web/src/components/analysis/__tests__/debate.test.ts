@@ -18,6 +18,7 @@ import {
   hasDebate,
   parseAgentReport,
   parseLine,
+  roundGist,
   splitMediation,
 } from "../debate";
 
@@ -91,6 +92,19 @@ describe("a contested line", () => {
     expect(line).toMatchObject({ analysts: [], standing: "unmarked", text: "Something the mediator wrote another way." });
   });
 
+  it("reads the standing from the mark that closes the line, whatever the point quotes", () => {
+    const quoting = parseLine(
+      "[analysts: A ANALYST] The analyst wrote [blocking: x] in its answer [not blocking: the quote is not a mark]",
+    );
+    expect(quoting.standing).toBe("not-blocking");
+    expect(quoting.reason).toBe("the quote is not a mark");
+    expect(quoting.text).toBe("The analyst wrote [blocking: x] in its answer");
+    const reverse = parseLine("[analysts: A ANALYST] It said [not blocking: y] before. [blocking: it blocks]");
+    expect(reverse).toMatchObject({ standing: "blocking", reason: "it blocks", text: "It said [not blocking: y] before." });
+    const bare = parseLine("[analysts: A ANALYST] A point. [blocking]");
+    expect(bare).toMatchObject({ standing: "blocking", reason: "", text: "A point." });
+  });
+
   it("maps the written name to the roster key", () => {
     expect(analystKey("ALL_TOOLS_SCANNER ANALYST")).toBe("all_tools_scanner");
     expect(analystKey("STATIC ANALYST")).toBe("static");
@@ -124,8 +138,17 @@ describe("a mediation", () => {
   it("puts each ledger fact under the line it quotes whole", () => {
     const lines = splitMediation(ARGUMENT).lines;
     const facts = factsByLine([TRANSCRIPT[2].text], lines);
-    expect(facts.get(LINE_1)).toBe("0x463c is listed in ev_0068.");
-    expect(facts.get(LINE_2)).toBe("0x5030 is listed in ev_0064.");
+    expect(facts.byLine.get(LINE_1)).toBe("0x463c is listed in ev_0068.");
+    expect(facts.byLine.get(LINE_2)).toBe("0x5030 is listed in ev_0064.");
+    expect(facts.unplaced).toEqual([]);
+  });
+
+  it("keeps a fact that quotes no listed line, and every other thing said, as unplaced", () => {
+    const lines = splitMediation(ARGUMENT).lines;
+    const stray = 'For the line "[analysts: X ANALYST] a line this round did not list [blocking: y]": 0x1 is listed in ev_0001.';
+    const facts = factsByLine([`${TRANSCRIPT[2].text}\n${stray}`, "Agents converged.", "  "], lines);
+    expect(facts.byLine.size).toBe(2);
+    expect(facts.unplaced).toEqual([stray, "Agents converged."]);
   });
 });
 
@@ -155,6 +178,20 @@ describe("the rounds", () => {
   it("has no rounds without a log", () => {
     expect(debateRounds(null, TRANSCRIPT)).toEqual([]);
     expect(debateRounds({ discussion_history: "x" }, [])).toEqual([]);
+  });
+
+  it("counts each standing apart in a round's gist, a mark not read among them", () => {
+    const round = { ...rounds[0], lines: [parseLine(LINE_1), parseLine(LINE_2), parseLine("[analysts: A ANALYST] no mark")] };
+    expect(roundGist(round)).toBe("1 blocking, 1 not blocking, 1 mark not read, 1 answer");
+    expect(roundGist({ ...rounds[0], lines: [], noneListed: true, answers: [] })).toBe("no contradiction listed, 0 answers");
+  });
+
+  it("skips a null or odd transcript row and history entry rather than throwing", () => {
+    const odd = [null, 7, ...TRANSCRIPT] as unknown as TranscriptRow[];
+    const rounds = debateRounds({ ...LOG, discussion_history: [null, ...LOG.discussion_history] }, odd);
+    expect(rounds).toHaveLength(2);
+    expect(rounds[0].answers).toHaveLength(1);
+    expect(debateRounds(LOG, "x" as unknown as TranscriptRow[])[0].answers).toEqual([]);
   });
 });
 
@@ -196,28 +233,89 @@ describe("the outcome", () => {
 });
 
 describe("an analyst's report", () => {
+  // The shape a stored run's final report has (`AgentISR.to_text_summary`
+  // and `answer_in_force_text`), cut down: a claim that runs on over
+  // unindented lines, its evidence and confidence on its last line, the
+  // lists after the claims, then the prose under its heading.
   const REPORT = [
-    "[ALL_TOOLS_DISASSEMBLER ANALYST — round 2]",
-    "Domain: static | Mean confidence: 0.72",
-    "  Claim 1: The file decodes `init -zzzz=\"%s\\%s\"` at run time. | Evidence: [ev_0019] 81 strings; [ev_0021] 101 | Confidence: 0.85",
-    "  Claim 2 (identity): An x64 DLL. | Evidence: ev_0004 (dll) | Confidence: 0.95",
+    "[DYNAMIC ANALYST — round 1]",
+    "Domain: dynamic | Mean confidence: 0.77",
+    "  Claim 1: The file is an unsigned 64-bit DLL. | Evidence: [ev_0001] pe windows; [ev_0003] signature none | Confidence: 0.95",
+    "  Claim 2: The environment gate in 0x3868 runs in this order.",
+    "(a) Resolver init 0x6328 must succeed.",
+    String.raw`(b) The format "%s\%s" builds C:\Users\Public\upd.exe.`,
     "",
-    "- **My round-1 claim 18: revised.** Cross-process access is not established.",
+    "(c) CreateMutexW, with exit if GetLastError == 0xb7. | Evidence: [ev_0064] 0x3868 listing | Confidence: 0.80",
+    "  Claim 3 (identity): An x64 DLL. | Evidence: ev_0004 (dll) | Confidence: 0.95",
+    "  Open questions (unknowns, not absences):",
+    "    - What name is passed to CreateMutexW in 0x3868 | Why open: tool_failed | Detail: The call passes (0, 0).",
+    "  Disputes:",
+    "    - Network claim 2 tags the wait T1497.003. Disputed.",
+    "The delay is literal (ev_0064).",
+    "    - QU claim 24 says no RC4 use is traced. Disputed.",
+    "  Findings:",
+    "    - Gated init: the export loops resident only on success.",
+    "Written in this answer besides its claims:",
+    "# DYNAMIC ANALYST, round 1 (revised)",
+    "",
+    "- **Citation scope.** I re-read ev_0064.",
   ].join("\n");
 
-  it("reads the head, each claim with its evidence and confidence, and the prose after", () => {
+  it("reads every claim whole, with its evidence and confidence, however many lines it runs on", () => {
     const parsed = parseAgentReport(REPORT);
-    expect(parsed).toMatchObject({ author: "ALL_TOOLS_DISASSEMBLER ANALYST", round: 2, domain: "static", meanConfidence: 0.72 });
-    expect(parsed.claims).toHaveLength(2);
-    expect(parsed.claims[0]).toEqual({
-      number: "1",
+    expect(parsed).toMatchObject({ author: "DYNAMIC ANALYST", round: 1, domain: "dynamic", meanConfidence: 0.77 });
+    expect(parsed.claims.map((c) => c.number)).toEqual(["1", "2", "3"]);
+    expect(parsed.claims.every((c) => c.evidence && c.confidence !== null)).toBe(true);
+    expect(parsed.claims[1]).toEqual({
+      number: "2",
       topic: "",
-      text: 'The file decodes `init -zzzz="%s\\%s"` at run time.',
-      evidence: "[ev_0019] 81 strings; [ev_0021] 101",
-      confidence: 0.85,
+      text: [
+        "The environment gate in 0x3868 runs in this order.",
+        "(a) Resolver init 0x6328 must succeed.",
+        String.raw`(b) The format "%s\%s" builds C:\Users\Public\upd.exe.`,
+        "",
+        "(c) CreateMutexW, with exit if GetLastError == 0xb7.",
+      ].join("\n"),
+      evidence: "[ev_0064] 0x3868 listing",
+      confidence: 0.8,
     });
-    expect(parsed.claims[1]).toMatchObject({ number: "2", topic: "identity", evidence: "ev_0004 (dll)" });
-    expect(parsed.prose).toBe("- **My round-1 claim 18: revised.** Cross-process access is not established.");
+    expect(parsed.claims[2]).toMatchObject({ topic: "identity", evidence: "ev_0004 (dll)", confidence: 0.95 });
+  });
+
+  it("reads the lists after the claims, an item that runs on kept whole, then the prose under its heading", () => {
+    const parsed = parseAgentReport(REPORT);
+    expect(parsed.lists).toEqual([
+      {
+        title: "Open questions (unknowns, not absences)",
+        items: ["What name is passed to CreateMutexW in 0x3868 | Why open: tool_failed | Detail: The call passes (0, 0)."],
+      },
+      {
+        title: "Disputes",
+        items: [
+          "Network claim 2 tags the wait T1497.003. Disputed.\nThe delay is literal (ev_0064).",
+          "QU claim 24 says no RC4 use is traced. Disputed.",
+        ],
+      },
+      { title: "Findings", items: ["Gated init: the export loops resident only on success."] },
+    ]);
+    expect(parsed.prose).toBe("# DYNAMIC ANALYST, round 1 (revised)\n\n- **Citation scope.** I re-read ev_0064.");
+  });
+
+  it("reads the convergence signal as a note, not a list", () => {
+    const parsed = parseAgentReport(
+      [
+        "[SCANNER ANALYST — round 3]",
+        "Domain: x | Mean confidence: 0.75",
+        "  Claim 1: A. | Evidence: ev_0001 | Confidence: 0.9",
+        "  [CONVERGENCE SIGNAL: no remaining disputes]",
+        "Written in this answer besides its claims:",
+        "DISPUTES",
+      ].join("\n"),
+    );
+    expect(parsed.claims).toHaveLength(1);
+    expect(parsed.lists).toEqual([]);
+    expect(parsed.signals).toEqual(["CONVERGENCE SIGNAL: no remaining disputes"]);
+    expect(parsed.prose).toBe("DISPUTES");
   });
 
   it("reads a report of any other shape as prose", () => {

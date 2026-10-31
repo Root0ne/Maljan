@@ -69,7 +69,8 @@ export interface DebateRound {
   confidence: number | null;
   /** The revisions that answered this round, in the order they were said. */
   answers: DebateAnswer[];
-  /** Other things the platform said in the round (a sycophancy flag). */
+  /** Everything else the platform said in the round: a sycophancy flag, a
+   *  fact about a line the mediation did not list. */
   notices: string[];
 }
 
@@ -145,15 +146,21 @@ export function parseLine(raw: string): ContestedLine {
   let standing: LineStanding = "unmarked";
   let reason = "";
   if (rest.endsWith("]")) {
+    // The mark that closes the line is the last one in it: a reason or a
+    // point may quote the other mark's words earlier on.
+    let best: { at: number; mark: string; kind: LineStanding } | null = null;
     for (const [mark, kind] of STANDING_MARKS) {
-      const at = rest.lastIndexOf(mark);
-      if (at < 0) continue;
-      const after = rest.slice(at + mark.length, -1);
-      if (after !== "" && !after.startsWith(":")) continue;
-      standing = kind;
-      reason = after.replace(/^:\s*/, "").trim();
-      rest = rest.slice(0, at).trim();
-      break;
+      for (let at = rest.lastIndexOf(mark); at >= 0; at = at > 0 ? rest.lastIndexOf(mark, at - 1) : -1) {
+        const after = rest.slice(at + mark.length, -1);
+        if (after !== "" && !after.startsWith(":")) continue;
+        if (!best || at > best.at) best = { at, mark, kind };
+        break;
+      }
+    }
+    if (best) {
+      standing = best.kind;
+      reason = rest.slice(best.at + best.mark.length, -1).replace(/^:\s*/, "").trim();
+      rest = rest.slice(0, best.at).trim();
     }
   }
   return { raw, analysts, markers, text: rest, standing, reason, facts: "" };
@@ -185,22 +192,38 @@ export function splitMediation(argument: string): {
   return { words, lines, noneListed: false, confidence };
 }
 
-/** What the platform told the mediator, by the line each fact quotes whole. */
-export function factsByLine(rows: readonly string[], lines: readonly ContestedLine[]): Map<string, string> {
-  const out = new Map<string, string>();
-  const facts = rows.flatMap((row) => row.split(/\n(?=For the line ")/));
-  for (const fact of facts) {
-    if (!fact.startsWith(FACT_HEAD)) continue;
-    // The longest line the fact opens with is the one it quotes.
-    let best: ContestedLine | null = null;
-    for (const line of lines) {
-      if (fact.startsWith(`${FACT_HEAD}${line.raw}": `) && (!best || line.raw.length > best.raw.length)) best = line;
+/**
+ * What the platform told the mediator, by the line each fact quotes whole,
+ * and every other thing it said in the round (`unplaced`): a fact quoting no
+ * listed line, a notice. Nothing said is dropped.
+ */
+export function factsByLine(
+  rows: readonly string[],
+  lines: readonly ContestedLine[],
+): { byLine: Map<string, string>; unplaced: string[] } {
+  const byLine = new Map<string, string>();
+  const unplaced: string[] = [];
+  for (const row of rows) {
+    if (!row.trim()) continue;
+    if (!row.startsWith(FACT_HEAD)) {
+      unplaced.push(row);
+      continue;
     }
-    if (!best) continue;
-    const said = fact.slice(FACT_HEAD.length + best.raw.length + 3).trim();
-    out.set(best.raw, out.has(best.raw) ? `${out.get(best.raw)}\n${said}` : said);
+    for (const fact of row.split(/\n(?=For the line ")/)) {
+      // The longest line the fact opens with is the one it quotes.
+      let best: ContestedLine | null = null;
+      for (const line of lines) {
+        if (fact.startsWith(`${FACT_HEAD}${line.raw}": `) && (!best || line.raw.length > best.raw.length)) best = line;
+      }
+      if (!best) {
+        unplaced.push(fact);
+        continue;
+      }
+      const said = fact.slice(FACT_HEAD.length + best.raw.length + 3).trim();
+      byLine.set(best.raw, byLine.has(best.raw) ? `${byLine.get(best.raw)}\n${said}` : said);
+    }
   }
-  return out;
+  return { byLine, unplaced };
 }
 
 /** The roster key an analyst named in a line goes by: "ALL_TOOLS_DISASSEMBLER ANALYST" is `all_tools_disassembler`. */
@@ -240,7 +263,10 @@ export function debateRounds(
   transcript: readonly TranscriptRow[] | null | undefined,
 ): DebateRound[] {
   const history = Array.isArray(log?.discussion_history) ? (log.discussion_history as unknown[]) : [];
-  const rows = transcript ?? [];
+  // A row of any other shape (a null a stored list may hold) is skipped, never thrown on.
+  const rows = (Array.isArray(transcript) ? transcript : []).filter(
+    (r): r is TranscriptRow => typeof r === "object" && r !== null,
+  );
   const mediations = history.filter(
     (e): e is Record<string, unknown> => typeof e === "object" && e !== null && isMediation(e as Record<string, unknown>),
   );
@@ -256,13 +282,30 @@ export function debateRounds(
       status: text(entry.status) || "complete",
       note: text(entry.note).trim(),
       words: split.words,
-      lines: split.lines.map((line) => ({ ...line, facts: facts.get(line.raw) ?? "" })),
+      lines: split.lines.map((line) => ({ ...line, facts: facts.byLine.get(line.raw) ?? "" })),
       noneListed: split.noneListed,
       confidence: split.confidence ?? asFraction(entry.confidence),
       answers: inRound.filter((r) => r.role === "reviser").map(answerOf),
-      notices: said.filter((s) => s.trim() && !s.startsWith(FACT_HEAD)),
+      notices: facts.unplaced,
     };
   });
+}
+
+/** A round in short: its lines by standing, each standing counted apart, and its answers. */
+export function roundGist(round: DebateRound): string {
+  const count = (standing: LineStanding) => round.lines.filter((l) => l.standing === standing).length;
+  const blocking = count("blocking");
+  const other = count("not-blocking");
+  const unread = count("unmarked");
+  const parts: string[] = [];
+  if (round.lines.length === 0) parts.push(round.noneListed ? "no contradiction listed" : "no lines listed");
+  else {
+    if (blocking) parts.push(`${blocking} blocking`);
+    if (other) parts.push(`${other} not blocking`);
+    if (unread) parts.push(`${unread} mark not read`);
+  }
+  parts.push(`${round.answers.length} answer${round.answers.length === 1 ? "" : "s"}`);
+  return parts.join(", ");
 }
 
 /** How a debate ended, by the reason the run summary records. */
@@ -341,6 +384,13 @@ export interface ReportClaim {
   confidence: number | null;
 }
 
+/** A list the summary closes with: open questions, disputes, findings. */
+export interface ReportList {
+  /** The heading as the summary writes it, without its colon. */
+  title: string;
+  items: string[];
+}
+
 export interface ParsedAgentReport {
   /** "STATIC ANALYST": who the report says wrote it; empty when it says nothing. */
   author: string;
@@ -348,25 +398,38 @@ export interface ParsedAgentReport {
   domain: string;
   meanConfidence: number | null;
   claims: ReportClaim[];
-  /** What follows the claims (or the whole report when it has none): the
-   *  analyst's own prose. */
+  /** The lists after the claims, in order. */
+  lists: ReportList[];
+  /** The summary's own notes after the claims (`[CONVERGENCE SIGNAL: ...]`), their brackets dropped. */
+  signals: string[];
+  /** What the analyst wrote besides its claims (or the whole report when it
+   *  is in no known shape): its own prose. */
   prose: string;
 }
 
 const REPORT_HEAD = /^\[(.+?)\s+[—-]\s+round\s+(\d+)\]\s*$/;
 const DOMAIN_LINE = /^Domain:\s*(.*?)\s*\|\s*Mean confidence:\s*(\d+(?:\.\d+)?)\s*$/;
-const CLAIM_LINE = /^\s+Claim\s+(\d+)(?:\s*\(([^)]*)\))?:\s?(.*)$/;
+const CLAIM_LINE = /^ {2}Claim\s+(\d+)(?:\s*\(([^)]*)\))?:\s?(.*)$/;
+/** A list heading of the summary (`  Disputes:`, `  Open questions (unknowns, not absences):`). */
+const LIST_HEAD = /^ {2}(\S[^\n]*?):\s*$/;
+/** A note of the summary (`  [CONVERGENCE SIGNAL: no remaining disputes]`). */
+const SIGNAL_LINE = /^ {2}\[([A-Z][A-Z ]*SIGNAL[^\]]*)\]\s*$/;
+const LIST_ITEM = /^ {4}- ?(.*)$/;
+/** The line the pipeline puts before what an analyst wrote besides its
+ *  claims (`base_agent.WRITTEN_BESIDES_CLAIMS`). */
+const WRITTEN_BESIDES_CLAIMS = "Written in this answer besides its claims:";
 
-function claimOf(match: RegExpExecArray): ReportClaim {
-  let body = match[3];
+/** One claim from its first line's match and every line that continues it. */
+function claimOf(match: RegExpExecArray, more: readonly string[]): ReportClaim {
+  let body = [match[3], ...more].join("\n").replace(/\s+$/, "");
   let confidence: number | null = null;
-  const conf = /\s\|\s*Confidence:\s*(\d+(?:\.\d+)?)\s*$/.exec(body);
+  const conf = /\s\|\s*Confidence:\s*(\d+(?:\.\d+)?)$/.exec(body);
   if (conf) {
     confidence = asFraction(Number(conf[1]));
     body = body.slice(0, conf.index);
   }
   let evidence = "";
-  const ev = body.indexOf(" | Evidence: ");
+  const ev = body.lastIndexOf(" | Evidence: ");
   if (ev >= 0) {
     evidence = body.slice(ev + " | Evidence: ".length).trim();
     body = body.slice(0, ev);
@@ -375,41 +438,95 @@ function claimOf(match: RegExpExecArray): ReportClaim {
 }
 
 /**
- * An analyst's report read into its parts. The pipeline writes a head
- * (`[STATIC ANALYST — round 2]`, `Domain: static | Mean confidence: 0.73`)
- * and one indented line per claim (`Claim 1: <text> | Evidence: <refs> |
- * Confidence: 0.95`); what follows is the analyst's own prose. A report in
- * any other shape is all prose.
+ * An analyst's report read into its parts, in the shape the pipeline writes
+ * it (`AgentISR.to_text_summary`, then `base_agent.answer_in_force_text`): a
+ * head (`[STATIC ANALYST — round 2]`, `Domain: static | Mean confidence:
+ * 0.73`); one claim per `  Claim N: <text> | Evidence: <refs> | Confidence:
+ * 0.95`, whose text may run on over unindented lines until the next claim;
+ * the lists the summary closes with (`  Open questions (...):`,
+ * `  Disputes:`, `  Findings:`, each item `    - <text>`) and its signals;
+ * then, under `Written in this answer besides its claims:`, the analyst's own
+ * prose. A report without the head is all prose.
  */
 export function parseAgentReport(report: string): ParsedAgentReport {
   const lines = report.replace(/\r\n/g, "\n").split("\n");
-  const out: ParsedAgentReport = { author: "", round: null, domain: "", meanConfidence: null, claims: [], prose: "" };
-  let i = 0;
+  const out: ParsedAgentReport = {
+    author: "",
+    round: null,
+    domain: "",
+    meanConfidence: null,
+    claims: [],
+    lists: [],
+    signals: [],
+    prose: "",
+  };
   const head = REPORT_HEAD.exec(lines[0] ?? "");
-  if (head) {
-    out.author = head[1].trim();
-    out.round = Number(head[2]);
-    i = 1;
+  if (!head) {
+    out.prose = report.trim();
+    return out;
   }
+  out.author = head[1].trim();
+  out.round = Number(head[2]);
+  let i = 1;
   const domain = DOMAIN_LINE.exec(lines[i] ?? "");
   if (domain) {
     out.domain = domain[1];
     out.meanConfidence = asFraction(Number(domain[2]));
     i += 1;
   }
+
+  let claim: { match: RegExpExecArray; more: string[] } | null = null;
+  let list: ReportList | null = null;
+  const closeClaim = () => {
+    if (claim) out.claims.push(claimOf(claim.match, claim.more));
+    claim = null;
+  };
   for (; i < lines.length; i++) {
-    const claim = CLAIM_LINE.exec(lines[i]);
+    const line = lines[i];
+    if (line.trim() === WRITTEN_BESIDES_CLAIMS) {
+      i += 1;
+      break;
+    }
+    const opened = CLAIM_LINE.exec(line);
+    if (opened && !list) {
+      closeClaim();
+      claim = { match: opened, more: [] };
+      continue;
+    }
+    const signal = SIGNAL_LINE.exec(line);
+    if (signal) {
+      closeClaim();
+      list = null;
+      out.signals.push(signal[1].trim());
+      continue;
+    }
+    const heading = LIST_HEAD.exec(line);
+    if (heading && !LIST_ITEM.test(line)) {
+      closeClaim();
+      list = { title: heading[1].trim(), items: [] };
+      out.lists.push(list);
+      continue;
+    }
+    const item = LIST_ITEM.exec(line);
+    if (list && item) {
+      list.items.push(item[1]);
+      continue;
+    }
+    // Any other line runs on: the item it follows, else the claim.
+    if (list) {
+      if (list.items.length > 0) list.items[list.items.length - 1] += `\n${line}`;
+      else list.items.push(line);
+      continue;
+    }
     if (claim) {
-      out.claims.push(claimOf(claim));
+      (claim as { more: string[] }).more.push(line);
       continue;
     }
-    // An indented line under a claim continues it.
-    if (out.claims.length > 0 && /^\s{3,}\S/.test(lines[i])) {
-      out.claims[out.claims.length - 1].text += ` ${lines[i].trim()}`;
-      continue;
-    }
+    // A line after the head that belongs to no claim: the prose begins.
     break;
   }
+  closeClaim();
+  for (const l of out.lists) l.items = l.items.map((t) => t.replace(/\s+$/, "")).filter((t) => t.trim() !== "");
   out.prose = lines.slice(i).join("\n").trim();
   return out;
 }

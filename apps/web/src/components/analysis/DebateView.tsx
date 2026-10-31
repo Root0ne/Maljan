@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type ReactNode } from "react";
+import { Component, useId, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import type { ReportDetailDTO } from "@/lib/api";
 import { prettyName } from "@/lib/conversation";
@@ -16,13 +16,13 @@ import {
   debateRounds,
   hasDebate,
   parseAgentReport,
+  roundGist,
   type ContestedLine,
   type DebateAnswer,
   type DebateOutcome,
   type DebateRound,
   type LineStanding,
 } from "./debate";
-import { keepBackslashes } from "./safeMarkdown";
 
 /**
  * The Debate view under Evidence: how the analysts argued their findings out.
@@ -42,6 +42,41 @@ import { keepBackslashes } from "./safeMarkdown";
  * analyst's claims stay literal.
  */
 export default function DebateView({ report }: { report: ReportDetailDTO }) {
+  return (
+    <DebateBoundary report={report}>
+      <DebateBody report={report} />
+    </DebateBoundary>
+  );
+}
+
+/**
+ * A stored debate this view fails to draw says so and leaves the rest of the
+ * analysis standing; a new report gets a fresh try.
+ */
+class DebateBoundary extends Component<{ report: ReportDetailDTO; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  componentDidUpdate(prev: { report: ReportDetailDTO }) {
+    if (this.state.failed && prev.report !== this.props.report) this.setState({ failed: false });
+  }
+
+  render() {
+    return this.state.failed ? (
+      <p role="alert" className="text-sm text-text-secondary">
+        This run&apos;s debate could not be drawn. The Analyst discussion shows it as it was said, and Export, Full
+        analysis (JSON) holds it whole.
+      </p>
+    ) : (
+      this.props.children
+    );
+  }
+}
+
+function DebateBody({ report }: { report: ReportDetailDTO }) {
   const { job } = useReport();
   const names = rosterNames(job?.roster, prettyName);
   const summary = report.malware_report?.negotiation_summary ?? null;
@@ -65,7 +100,13 @@ export default function DebateView({ report }: { report: ReportDetailDTO }) {
         ) : (
           <div className="divide-y divide-border-light rounded-md border border-border bg-bg-surface">
             {rounds.map((round, i) => (
-              <RoundRow key={`${round.round}-${i}`} round={round} names={names} startOpen={i === rounds.length - 1} />
+              <RoundRow
+                key={`${round.round}-${i}`}
+                round={round}
+                names={names}
+                startOpen={i === rounds.length - 1}
+                label={roundLabel(rounds, i)}
+              />
             ))}
           </div>
         )}
@@ -130,7 +171,12 @@ function Outcome({ outcome, recorded }: { outcome: DebateOutcome; recorded: bool
       </span>,
     ]);
   }
-  if (outcome.finalConfidence !== null) facts.push(["Mediator's last confidence", <span key="f" className="tabular-nums">{percent(outcome.finalConfidence)}</span>]);
+  // The last mean claim confidence is the history's last value; said apart
+  // only where the history does not say it.
+  const lastShown = outcome.confidenceHistory[outcome.confidenceHistory.length - 1];
+  if (outcome.finalConfidence !== null && (lastShown === undefined || Math.abs(lastShown - outcome.finalConfidence) >= 0.005)) {
+    facts.push(["Last mean claim confidence", <span key="f" className="tabular-nums">{percent(outcome.finalConfidence)}</span>]);
+  }
   if (outcome.sycophancy !== null) {
     facts.push([
       "Agreement without new evidence",
@@ -166,24 +212,26 @@ function Outcome({ outcome, recorded }: { outcome: DebateOutcome; recorded: bool
 
 /* ── One round ─────────────────────────────────────────────────────── */
 
-function roundGist(round: DebateRound): string {
-  const blocking = round.lines.filter((l) => l.standing === "blocking").length;
-  const other = round.lines.length - blocking;
-  const parts: string[] = [];
-  if (round.lines.length === 0) parts.push(round.noneListed ? "no contradiction listed" : "no lines listed");
-  else {
-    if (blocking) parts.push(`${blocking} blocking`);
-    if (other) parts.push(`${other} not blocking`);
-  }
-  parts.push(`${round.answers.length} answer${round.answers.length === 1 ? "" : "s"}`);
-  return parts.join(", ");
+/** A round's name, unique on the page: a round number the log repeats gets its place added. */
+function roundLabel(rounds: readonly DebateRound[], i: number): string {
+  const n = rounds[i].round;
+  return rounds.filter((r) => r.round === n).length > 1 ? `Round ${n} (${i + 1} of ${rounds.length})` : `Round ${n}`;
 }
 
-function RoundRow({ round, names, startOpen }: { round: DebateRound; names: RosterNames; startOpen: boolean }) {
+function RoundRow({
+  round,
+  names,
+  startOpen,
+  label,
+}: {
+  round: DebateRound;
+  names: RosterNames;
+  startOpen: boolean;
+  label: string;
+}) {
   const [open, setOpen] = useState(startOpen);
   const bodyId = useId();
   const failed = round.status !== "complete";
-  const label = `Round ${round.round}`;
   return (
     <section aria-label={label}>
       <h3>
@@ -206,13 +254,16 @@ function RoundRow({ round, names, startOpen }: { round: DebateRound; names: Rost
           {failed && <span className="text-xs text-status-red">{round.status === "timeout" ? "timed out" : round.status}</span>}
         </button>
       </h3>
-      {open && (
-        <div id={bodyId} className="space-y-5 px-4 pb-5 sm:pl-11">
+      {/* The body is always there for the toggle to name; it is filled when open. */}
+      <div id={bodyId} hidden={!open} className="space-y-5 px-4 pb-5 sm:pl-11">
+        {open && (
+          <>
           {round.words && (
             <div className="space-y-1">
               <h4 className="text-xs font-medium text-text-secondary">{round.agent}&apos;s reading</h4>
               <SafeMarkdown
-                markdown={keepBackslashes(round.words)}
+                markdown={round.words}
+                keepBackslashes
                 cite
                 regionName={`${label} reading`}
                 className="max-w-[75ch] space-y-3 text-sm leading-6 text-text-primary"
@@ -221,7 +272,7 @@ function RoundRow({ round, names, startOpen }: { round: DebateRound; names: Rost
           )}
           {round.note && <p className="text-xs text-text-secondary">{round.note}</p>}
           {round.notices.map((notice, i) => (
-            <p key={i} className="max-w-[75ch] whitespace-pre-wrap break-words text-xs text-status-orange">
+            <p key={`notice-${i}`} className="max-w-[75ch] whitespace-pre-wrap break-words text-xs text-status-orange">
               {notice}
             </p>
           ))}
@@ -248,13 +299,19 @@ function RoundRow({ round, names, startOpen }: { round: DebateRound; names: Rost
             ) : (
               <ul className="divide-y divide-border-light">
                 {round.answers.map((answer, i) => (
-                  <AnswerRow key={`${answer.speaker}-${i}`} answer={answer} names={names} name={`${label} answer of ${answer.speaker}`} />
+                  <AnswerRow
+                    key={`${answer.speaker}-${i}`}
+                    answer={answer}
+                    names={names}
+                    name={`${label} answer ${i + 1} of ${answer.speaker}`}
+                  />
                 ))}
               </ul>
             )}
           </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </section>
   );
 }
@@ -283,15 +340,16 @@ function LineRow({ line, names, name }: { line: ContestedLine; names: RosterName
           <span aria-hidden="true" className={`inline-block h-2 w-2 rounded-full border ${standing.glyph}`} />
           {standing.word}
         </span>
-        {line.markers.map((m) => (
-          <span key={m} className="text-text-muted">
+        {line.markers.map((m, i) => (
+          <span key={`${m}-${i}`} className="text-text-muted">
             {markerWords(m)}
           </span>
         ))}
         {asked.length > 0 && <span className="text-text-secondary">Asked to revise: {asked.join(", ")}</span>}
       </p>
       <SafeMarkdown
-        markdown={keepBackslashes(line.text)}
+        markdown={line.text}
+        keepBackslashes
         cite
         regionName={name}
         className="max-w-[75ch] space-y-2 text-sm leading-6 text-text-primary"
@@ -313,11 +371,9 @@ function LineRow({ line, names, name }: { line: ContestedLine; names: RosterName
           >
             {facts ? "Hide" : "Show"} what the ledger states for this line
           </button>
-          {facts && (
-            <p id={factsId} className="mt-1 max-w-[75ch] whitespace-pre-wrap break-words text-xs leading-5 text-text-secondary">
-              <CitedProse text={line.facts} />
-            </p>
-          )}
+          <p id={factsId} hidden={!facts} className="mt-1 max-w-[75ch] whitespace-pre-wrap break-words text-xs leading-5 text-text-secondary">
+            {facts && <CitedProse text={line.facts} />}
+          </p>
         </div>
       )}
     </li>
@@ -362,11 +418,9 @@ function AnswerRow({ answer, names, name }: { answer: DebateAnswer; names: Roste
           >
             {open ? "Hide" : "Read"} this answer in full
           </button>
-          {open && (
-            <div id={reportId} className="mt-2">
-              <AgentReport report={answer.report} name={name} truncated={answer.reportTruncated} />
-            </div>
-          )}
+          <div id={reportId} hidden={!open} className="mt-2">
+            {open && <AgentReport report={answer.report} name={name} truncated={answer.reportTruncated} />}
+          </div>
         </div>
       )}
     </li>
@@ -380,9 +434,12 @@ function ReportRow({ agent, label, text }: { agent: string; label: string; text:
   const bodyId = useId();
   const parsed = parseAgentReport(text);
   const gist: string[] = [];
+  if (parsed.domain) gist.push(`${parsed.domain} domain`);
   if (parsed.round !== null) gist.push(`round ${parsed.round}`);
   if (parsed.claims.length > 0) gist.push(`${parsed.claims.length} claim${parsed.claims.length === 1 ? "" : "s"}`);
   if (parsed.meanConfidence !== null) gist.push(`mean confidence ${percent(parsed.meanConfidence)}`);
+  // Who the report says wrote it, where that is not the agent the row names.
+  if (parsed.author && analystKey(parsed.author) !== agent) gist.push(`written as ${parsed.author}`);
   return (
     <section aria-label={`Report of ${label}`}>
       <h3>
@@ -401,11 +458,9 @@ function ReportRow({ agent, label, text }: { agent: string; label: string; text:
           {gist.length > 0 && <span className="text-sm text-text-secondary">{gist.join(", ")}</span>}
         </button>
       </h3>
-      {open && (
-        <div id={bodyId} className="px-4 pb-5 sm:pl-11">
-          <AgentReport report={text} name={`Report of ${agent}`} />
-        </div>
-      )}
+      <div id={bodyId} hidden={!open} className="px-4 pb-5 sm:pl-11">
+        {open && <AgentReport report={text} name={`Report of ${agent}`} />}
+      </div>
     </section>
   );
 }

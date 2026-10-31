@@ -29,7 +29,9 @@ test("the Debate view leads with how the debate ended", async ({ authenticatedPa
   const outcome = page.getByRole("region", { name: "How the debate ended" });
   await expect(outcome).toContainText("The debate reached its round limit, after 1 round.");
   await expect(outcome).toContainText("Flagged in 1 round");
-  await expect(outcome).toContainText("55%");
+  await expect(outcome).toContainText("88%");
+  // The last mean claim confidence is the history's last value: said once.
+  await expect(outcome).not.toContainText("Last mean claim confidence");
   assertNoUnmockedCalls(page);
 });
 
@@ -81,12 +83,24 @@ test("each analyst's report opens with its claims, confidences and citation mark
   await page.goto(`${BASE}/evidence/debate`);
   const reports = page.getByRole("region", { name: "Each analyst's report" });
   const row = reports.getByRole("region", { name: "Report of Static" });
-  await expect(row).toContainText("round 1, 2 claims, mean confidence 88%");
-  await row.getByRole("button", { name: /Static/ }).click();
+  await expect(row).toContainText("static domain, round 1, 2 claims, mean confidence 88%");
+  const toggle = row.getByRole("button", { name: /Static/ });
+  // The toggle names its body even while it is closed.
+  const body = page.locator(`[id="${await toggle.getAttribute("aria-controls")}"]`);
+  await expect(body).toBeHidden();
+  await toggle.click();
+  await expect(body).toBeVisible();
   const claims = row.getByRole("list", { name: "Claims in Report of static" });
   await expect(claims.getByRole("listitem")).toHaveCount(2);
+  // A claim that runs on over a second line is one claim, its evidence and confidence read off its last line.
   await expect(claims.getByRole("listitem").nth(1)).toContainText(String.raw`C:\Users\Public\upd.exe is built from "%s\%s"`);
+  await expect(claims.getByRole("listitem").nth(1)).toContainText("85%");
   await expect(claims.getByRole("listitem").nth(0)).toContainText("90%");
+  // The lists the summary closes with are lists.
+  const disputes = row.getByRole("region", { name: "Disputes in Report of static" });
+  await expect(disputes.getByRole("listitem")).toHaveText(["Dynamic analyst reported no data; absence is not contradiction."]);
+  const questions = row.getByRole("region", { name: "Open questions (unknowns, not absences) in Report of static" });
+  await expect(questions.getByRole("listitem")).toContainText("Why open: needs_sandbox_run");
   await claims.getByRole("button", { name: /\(ev_0002\)/ }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");

@@ -5,13 +5,13 @@ import CitedProse, { CiteMark } from "./CitedProse";
 import SafeMarkdown from "./SafeMarkdown";
 import { citedRecords } from "./citations";
 import { parseAgentReport, type ReportClaim } from "./debate";
-import { keepBackslashes } from "./safeMarkdown";
 
 /**
  * One analyst's report as a reader goes through it (`parseAgentReport`):
  * its claims as rows, each with the records it cites and the confidence the
- * analyst gave it, then the analyst's own prose as Markdown with the
- * report's one citation mark.
+ * analyst gave it; the lists its summary closes with (open questions,
+ * disputes, findings) as lists; then the analyst's own prose as Markdown with
+ * the report's one citation mark.
  *
  * A claim is the analyst's words about the sample and is kept as written,
  * paths and commands included; only its evidence ids become links. The prose
@@ -37,9 +37,29 @@ export default function AgentReport({
           ))}
         </ol>
       )}
+      {parsed.lists.map((list, i) => (
+        <section key={`${list.title}-${i}`} aria-label={`${list.title} in ${name}`} className="max-w-[75ch] space-y-1">
+          <h4 className="text-xs font-medium text-text-secondary">{list.title}</h4>
+          {list.items.length === 0 ? (
+            <p className="text-sm text-text-muted">None listed.</p>
+          ) : (
+            <ul className="list-disc space-y-1.5 pl-5 text-sm leading-6 text-text-primary">
+              {list.items.map((item, j) => (
+                <ListItem key={j} item={item} />
+              ))}
+            </ul>
+          )}
+        </section>
+      ))}
+      {parsed.signals.map((signal, i) => (
+        <p key={`signal-${i}`} className="text-xs text-text-secondary">
+          {signalWords(signal)}
+        </p>
+      ))}
       {parsed.prose && (
         <SafeMarkdown
-          markdown={keepBackslashes(parsed.prose)}
+          markdown={parsed.prose}
+          keepBackslashes
           cite
           regionName={name}
           className="max-w-[75ch] space-y-3 text-sm leading-6 text-text-primary"
@@ -50,6 +70,30 @@ export default function AgentReport({
       )}
       {truncated && <p className="text-xs text-text-muted">The producer cut this report at its size limit.</p>}
     </div>
+  );
+}
+
+/** A summary note in words: `CONVERGENCE SIGNAL: no remaining disputes` reads "No remaining disputes." */
+function signalWords(signal: string): string {
+  const said = signal.replace(/^[A-Z ]*SIGNAL:\s*/, "").trim() || signal;
+  return `${said.charAt(0).toUpperCase()}${said.slice(1)}.`;
+}
+
+/**
+ * One item of a list, as written. An open question's fields (`<question> |
+ * Why open: tool_failed | Detail: ...`) are set under it, one a line.
+ */
+function ListItem({ item }: { item: string }) {
+  const [first, ...fields] = item.split(" | ");
+  return (
+    <li className="whitespace-pre-wrap break-words">
+      <CitedProse text={first} />
+      {fields.map((field, i) => (
+        <span key={i} className="block text-xs text-text-secondary">
+          <CitedProse text={field} />
+        </span>
+      ))}
+    </li>
   );
 }
 

@@ -5,7 +5,6 @@ import SafeMarkdown from "../SafeMarkdown";
 import {
   MAX_MARKDOWN_CHARS,
   inlineText,
-  keepBackslashes,
   parseMarkdown,
   plainText,
   safeHref,
@@ -260,20 +259,41 @@ describe("no input exhausts the stack or the clock", () => {
 });
 
 describe("a model's backslashes", () => {
-  const draw = (markdown: string) => plainText(parseMarkdown(keepBackslashes(markdown)));
+  const read = (markdown: string) => parseMarkdown(markdown, { linkIds: false, keepBackslashes: true });
+  const words = (markdown: string) => plainText(read(markdown));
+  const html = (markdown: string) =>
+    renderToStaticMarkup(createElement(SafeMarkdown, { markdown, keepBackslashes: true, cite: false }));
 
-  it("survive the Markdown reading in prose: a format string, a UNC path, a path with a star", () => {
-    const literal = String.raw`init -zzzz="%s\%s" from \\server\share and C:\Users\*\AppData`;
-    expect(draw(literal)).toContain(literal);
+  it("survive in prose: a format string, a UNC path, a path with a star or a dunder", () => {
+    const literal = String.raw`init -zzzz="%s\%s" from \\server\share and C:\Users\*\AppData\__init__.py`;
+    expect(words(literal)).toBe(literal);
+    // The escaped star still opens no emphasis.
+    expect(JSON.stringify(read(String.raw`a \*b\* c`))).not.toContain('"em"');
   });
 
-  it("are left alone in a code span and a fenced block, which keep them already", () => {
-    expect(keepBackslashes(String.raw`a \% b ` + "`c \\% d`")).toBe(String.raw`a \\\% b ` + "`c \\% d`");
-    const fenced = ["```", String.raw`x\%y`, "```", String.raw`p\%q`].join("\n");
-    expect(keepBackslashes(fenced)).toBe(["```", String.raw`x\%y`, "```", String.raw`p\\\%q`].join("\n"));
+  it("leave a code span, a fenced block and an indented block exactly as written", () => {
+    const span = read(String.raw`run ` + "`" + String.raw`C:\a\%b` + "`" + " now");
+    expect(span).toEqual([{ t: "el", tag: "p", c: [{ t: "text", v: "run " }, { t: "code", v: String.raw`C:\a\%b` }, { t: "text", v: " now" }] }]);
+    const fenced = read(["```", String.raw`x\%y \\z`, "```"].join("\n"));
+    expect(fenced).toEqual([{ t: "pre", v: String.raw`x\%y \\z` }]);
+    const indented = read(`para\n\n    ${String.raw`a\%b`}`);
+    expect(indented[1]).toEqual({ t: "pre", v: String.raw`a\%b` });
   });
 
-  it("do not touch Markdown that has none", () => {
-    expect(keepBackslashes("- **bold** and _em_")).toBe("- **bold** and _em_");
+  it("leave a link's target and an autolink to the link rule", () => {
+    const link = html(String.raw`[the \[page\]](https://example.com/a\_b)`);
+    expect(link).toContain('href="https://example.com/a_b"');
+    expect(link).toContain(String.raw`the \[page\]`);
+    const auto = html("<https://example.com/x\\y>");
+    expect(auto).toContain("https://example.com/x%5Cy");
+  });
+
+  it("keep a backslash before a line break as a hard break", () => {
+    expect(read("one\\\ntwo")).toEqual([{ t: "el", tag: "p", c: [{ t: "text", v: "one" }, { t: "br" }, { t: "text", v: "two" }] }]);
+  });
+
+  it("change nothing for prose without a backslash, and nothing without the option", () => {
+    expect(read("- **bold** and _em_")).toEqual(parseMarkdown("- **bold** and _em_", { linkIds: false }));
+    expect(plainText(parseMarkdown(String.raw`a \% b`))).toBe("a % b");
   });
 });

@@ -349,13 +349,13 @@ export const MALWARE_REPORT: MalwareReport = {
       source: "tool:r2_analysis",
     },
   ],
-  // The shape `ReportBuilder` writes: the mediator's last number as the final
-  // confidence, the analysts' mean claim confidence per round as the history.
+  // The shape `ReportBuilder` writes: the analysts' mean claim confidence per
+  // round as the history, and its last value as the final confidence.
   negotiation_summary: {
     rounds_completed: 1,
     termination_reason: "hard_limit",
     confidence_history: [0.88],
-    final_confidence: 0.55,
+    final_confidence: 0.88,
     sycophancy_events: 1,
   },
   // One phrase written for a model reading the sample, so Static & code draws
@@ -579,8 +579,13 @@ export const REPORT: ReportDetailDTO = {
       "[STATIC ANALYST — round 1]",
       "Domain: static | Mean confidence: 0.88",
       "  Claim 1: Imports VirtualAllocEx and WriteProcessMemory, the remote-injection pair. | Evidence: [ev_0002] IAT: KERNEL32.dll!VirtualAllocEx | Confidence: 0.90",
-      String.raw`  Claim 2: The .text section has an entropy of 7.82 and the install path C:\Users\Public\upd.exe is built from "%s\%s". | Evidence: ev_0001 (sections) | Confidence: 0.85`,
-      "",
+      "  Claim 2: The .text section has an entropy of 7.82.",
+      String.raw`The install path C:\Users\Public\upd.exe is built from "%s\%s". | Evidence: ev_0001 (sections) | Confidence: 0.85`,
+      "  Open questions (unknowns, not absences):",
+      "    - Which process the injection targets | Why open: needs_sandbox_run | Detail: No run produced data.",
+      "  Disputes:",
+      "    - Dynamic analyst reported no data; absence is not contradiction.",
+      "Written in this answer besides its claims:",
       "- **Mediator line on the injection: I stand by it.** The dynamic layer produced no data rather than contrary data, so its silence is not a counter-argument.",
     ].join("\n"),
     dynamic: "[ERROR] dynamic: sandbox unreachable",

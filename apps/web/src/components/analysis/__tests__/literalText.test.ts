@@ -36,7 +36,7 @@ describe("literal text", () => {
   });
 
   it("keeps an analyst's claim as written, and its prose's backslashes through the Markdown", () => {
-    const report = `[STATIC ANALYST — round 1]\nDomain: static | Mean confidence: 0.70\n  Claim 1: ${LITERAL} | Evidence: ev_0001 | Confidence: 0.90\n\nIt reads ${LITERAL}.`;
+    const report = `[STATIC ANALYST — round 1]\nDomain: static | Mean confidence: 0.70\n  Claim 1: ${LITERAL} | Evidence: ev_0001 | Confidence: 0.90\nWritten in this answer besides its claims:\nIt reads ${LITERAL}.`;
     const html = renderToStaticMarkup(createElement(AgentReport, { report, name: "Report of static" }));
     expect(text(html).split(LITERAL)).toHaveLength(3);
     expect(html).not.toContain("<strong>init</strong>");
