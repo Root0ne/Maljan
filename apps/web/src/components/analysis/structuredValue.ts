@@ -76,12 +76,14 @@ export function scalarText(v: unknown): string {
 export const UNPRINTABLE = "(a value nested too deeply to print)";
 
 /** `JSON.stringify` that never throws: a value it cannot print (a cycle, a
- *  nesting deeper than the engine's stack) is printed as `String(value)`,
- *  and where even that recurses too deeply, as `UNPRINTABLE`. */
+ *  nesting deeper than the engine's stack) is printed as `UNPRINTABLE` when
+ *  it is an object or a list, and as `String(value)` otherwise. */
 function safeStringify(v: unknown, indent?: number): string {
   try {
     return JSON.stringify(v, null, indent) ?? String(v);
   } catch {
+    // An object's own String() is "[object Object]", which says nothing.
+    if (typeof v === "object" && v !== null) return UNPRINTABLE;
     try {
       return String(v);
     } catch {
@@ -160,4 +162,61 @@ export function jsonTextTokens(text: string): JsonToken[] {
   }
   if (at < text.length) out.push({ kind: "punct", text: text.slice(at) });
   return out;
+}
+
+/** The most significant digits a JavaScript number holds exactly. */
+const EXACT_DIGITS = 15;
+
+/**
+ * Whether a JSON number written as `token` survives being read as a
+ * JavaScript number: finite, not underflowed to zero, and no more than 15
+ * significant digits. Spelling is not a loss: `1.0`, `1e2` and `-0.50` read
+ * back as the numbers they wrote.
+ */
+export function numberIsExact(token: string): boolean {
+  const n = Number(token);
+  if (!Number.isFinite(n)) return false;
+  const m = /^-?(\d+)(?:\.(\d+))?(?:[eE][+-]?\d+)?$/.exec(token);
+  if (!m) return false;
+  const digits = `${m[1]}${m[2] ?? ""}`.replace(/^0+/, "").replace(/0+$/, "");
+  if (digits.length === 0) return true; // a zero, however it is written
+  if (n === 0) return false; // underflow: written non-zero, read as zero
+  return digits.length <= EXACT_DIGITS;
+}
+
+/**
+ * Whether laying out the value parsed from JSON `text` keeps everything the
+ * text says, read off the text's own tokens: no number past what a number
+ * holds exactly (`numberIsExact`), no key written twice in one object, and no
+ * nesting deeper than `maxDepth`. How the text spells a string (`é` for
+ * é, `\/` for /) and how it spaces its tokens are not losses; the raw view
+ * prints the text as written anyway.
+ */
+export function losslessJson(text: string, maxDepth = MAX_STRUCTURED_DEPTH): boolean {
+  /* One frame per open container: the keys seen so far in an object, null
+   * for a list. */
+  const stack: (Set<string> | null)[] = [];
+  for (const token of jsonTextTokens(text)) {
+    if (token.kind === "number" && !numberIsExact(token.text)) return false;
+    if (token.kind === "key") {
+      const keys = stack[stack.length - 1];
+      if (!keys) continue;
+      let key: string;
+      try {
+        key = JSON.parse(token.text) as string;
+      } catch {
+        return false;
+      }
+      if (keys.has(key)) return false;
+      keys.add(key);
+    }
+    if (token.kind !== "punct") continue;
+    for (const c of token.text) {
+      if (c === "{" || c === "[") {
+        stack.push(c === "{" ? new Set<string>() : null);
+        if (stack.length > maxDepth) return false;
+      } else if (c === "}" || c === "]") stack.pop();
+    }
+  }
+  return true;
 }

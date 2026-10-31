@@ -10,6 +10,9 @@ import { describe, expect, it } from "vitest";
 import StructuredValue from "../StructuredValue";
 import {
   MAX_STRUCTURED_DEPTH,
+  UNPRINTABLE,
+  losslessJson,
+  numberIsExact,
   columnsOf,
   compactJson,
   jsonTextTokens,
@@ -42,6 +45,33 @@ describe("a document that cannot be printed or drawn safely", () => {
     const html = renderToStaticMarkup(createElement(StructuredValue, { value: deep(200), name: "Deep" }));
     expect(html).toContain("<pre");
     expect(html).not.toContain("View raw");
+  });
+
+  it("says a value too deep to print is one, never [object Object]", () => {
+    const tooDeep = { a: deep(20_000) };
+    expect(compactJson(tooDeep)).toBe(UNPRINTABLE);
+    const html = renderToStaticMarkup(createElement(StructuredValue, { value: tooDeep, name: "Too deep" }));
+    expect(html).toContain(UNPRINTABLE);
+    expect(html).not.toContain("[object Object]");
+  });
+});
+
+describe("whether laying out JSON text loses anything", () => {
+  it("reads a number as exact unless it holds more than 15 significant digits or leaves a number's range", () => {
+    for (const ok of ["1.0", "1e2", "-0.50", "0", "0.000", "123456789012345", "9007199254740.5e3"]) {
+      expect(numberIsExact(ok)).toBe(true);
+    }
+    for (const lossy of ["18446744071562067968", "1234567890123456", "1e400", "1e-400", "0.1234567890123456"]) {
+      expect(numberIsExact(lossy)).toBe(false);
+    }
+  });
+
+  it("finds a repeated key within one object, and a nesting past the limit", () => {
+    expect(losslessJson('{"a": {"b": 1}, "c": [{"b": 2}]}')).toBe(true);
+    expect(losslessJson('{"a": 1, "b": {"x": 1}, "a": 2}')).toBe(false);
+    expect(losslessJson('{"name": "caf\\u00e9", "p": "a\\/b"}')).toBe(true);
+    expect(losslessJson(`${"[".repeat(65)}${"]".repeat(65)}`)).toBe(false);
+    expect(losslessJson(`${"[".repeat(64)}${"]".repeat(64)}`)).toBe(true);
   });
 });
 

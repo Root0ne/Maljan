@@ -146,6 +146,24 @@ describe("the output disclosure", () => {
     expect(structuredOutput('{\n  "a" : [ 1, 2 ]\n}')).toEqual({ a: [1, 2] });
   });
 
+  it("lays out an ordinary output however it spells its numbers and strings", () => {
+    // 1.0 and 1e2 read back as the numbers they wrote.
+    expect(structuredOutput('{"ratio": 1.0, "count": 1e2}')).toEqual({ ratio: 1, count: 100 });
+    // An escaped é and an escaped slash are spellings, not losses.
+    expect(structuredOutput('{"name": "caf\\u00e9", "path": "a\\/b"}')).toEqual({ name: "café", path: "a/b" });
+    // The same key in two different objects is not a repeat.
+    expect(structuredOutput('[{"a": 1}, {"a": 2}]')).toEqual([{ a: 1 }, { a: 2 }]);
+  });
+
+  it("shows as text an output whose number a JavaScript number cannot hold, or whose object repeats a key", () => {
+    expect(structuredOutput('{"base": 18446744071562067968}')).toBeNull();
+    expect(structuredOutput('{"tiny": 1e-400}')).toBeNull();
+    expect(structuredOutput('{"huge": 1e400}')).toBeNull();
+    expect(structuredOutput('{"outer": {"k": 1, "k": 1}}')).toBeNull();
+    // A key repeated through an escape is still the same key.
+    expect(structuredOutput('{"k": 1, "\\u006b": 2}')).toBeNull();
+  });
+
   it("shows a document nested deeper than the layout goes as its text, without throwing", () => {
     const deep = `${"[".repeat(5_000)}1${"]".repeat(5_000)}`;
     expect(() => structuredOutput(deep)).not.toThrow();
