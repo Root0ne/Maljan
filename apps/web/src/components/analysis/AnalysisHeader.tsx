@@ -149,7 +149,7 @@ export default function AnalysisHeader({
 
   return (
     <section className="px-4 pb-4 pt-4 sm:px-6" aria-label="Analysis summary">
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:gap-x-5">
         <p className={`flex items-center gap-2 text-base font-semibold ${tone.text}`} data-testid="verdict-word">
           <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ background: tone.fill }} />
           {facts.verdictWord}
@@ -276,7 +276,7 @@ export function CompactVerdict({ facts }: { facts: HeaderFacts }) {
 /** The button that opens the chat drawer. */
 export const ChatButton = forwardRef<
   HTMLButtonElement,
-  { open: boolean; onClick: () => void; controls: string; iconOnly?: boolean }
+  { open: boolean; onClick: (opener: HTMLElement) => void; controls: string; iconOnly?: boolean }
 >(function ChatButton({ open, onClick, controls, iconOnly = false }, ref) {
   return (
     <button
@@ -286,11 +286,13 @@ export const ChatButton = forwardRef<
       aria-expanded={open}
       aria-controls={controls}
       aria-label={iconOnly ? "Chat about this analysis" : undefined}
-      onClick={onClick}
+      onClick={(e) => onClick(e.currentTarget)}
       className={buttonClass("secondary", "sm")}
     >
       <MessageSquare aria-hidden="true" className="h-3.5 w-3.5" />
-      {!iconOnly && "Chat"}
+      {/* On a phone the word is the button's name only, so the verdict and
+          the actions keep one line. */}
+      {!iconOnly && <span className="sr-only sm:not-sr-only">Chat</span>}
     </button>
   );
 });

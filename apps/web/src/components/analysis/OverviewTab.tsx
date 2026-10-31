@@ -650,7 +650,7 @@ function FollowUpsLine({ jobId, status }: { jobId: string; status: string | null
             : `${countLabel(n, "question")} asked since the analysis finished. Latest: “${proseText(rows[n - 1].question).slice(0, 120)}”`}
       </p>
       {openChat && (
-        <button type="button" onClick={() => openChat()} className="mt-2 text-xs text-accent-strong hover:underline">
+        <button type="button" onClick={(e) => openChat(e.currentTarget)} className="mt-2 text-xs text-accent-strong hover:underline">
           {n > 0 ? "Open the conversation" : "Ask a question"}
         </button>
       )}

@@ -37,7 +37,11 @@ export default function ChatDrawer({
   open,
   docked,
   onClose,
+  returnFocusTo = null,
 }: {
+  /** The control that opened the panel; focus goes back to it on close.
+   *  Without one, whatever had focus at opening. */
+  returnFocusTo?: HTMLElement | null;
   /** The panel's id, which the Chat buttons control. */
   id: string;
   jobId: string;
@@ -61,9 +65,11 @@ export default function ChatDrawer({
   const [pending, setPending] = useState<string | null>(null);
   const [askError, setAskError] = useState<{ question: string; message: string } | null>(null);
   const closeHandler = useRef(onClose);
+  const returnTarget = useRef(returnFocusTo);
   useEffect(() => {
     closeHandler.current = onClose;
-  }, [onClose]);
+    returnTarget.current = returnFocusTo;
+  }, [onClose, returnFocusTo]);
 
   /* The earlier questions are read when the panel first opens, and again
    * when the reader asks after a failed read; until the answer arrives an
@@ -103,7 +109,7 @@ export default function ChatDrawer({
    * Covering the page, the panel is modal: everything else is inert. */
   useEffect(() => {
     if (!open) return;
-    const opener = document.activeElement;
+    const opener = returnTarget.current ?? document.activeElement;
     const restoreInert = !docked && root.current ? inertOutside(root.current) : () => {};
     field.current?.focus({ preventScroll: true });
     return () => {

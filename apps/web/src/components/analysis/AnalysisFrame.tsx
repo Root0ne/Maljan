@@ -246,7 +246,13 @@ export default function AnalysisFrame({ id, children }: { id: string; children: 
     return () => observer.disconnect();
   }, []);
 
-  const openChat = useCallback(() => setChatOpen(true), []);
+  /* The control that opened the chat gets focus back when it closes; held
+   * here because a click does not focus a button in every browser. */
+  const [chatOpener, setChatOpener] = useState<HTMLElement | null>(null);
+  const openChat = useCallback((from?: HTMLElement | null) => {
+    setChatOpener(from ?? null);
+    setChatOpen(true);
+  }, []);
   const closeChat = useCallback(() => setChatOpen(false), []);
 
   const showEvidence = useCallback((s: EvidenceSubject, from?: HTMLElement | null) => {
@@ -282,7 +288,12 @@ export default function AnalysisFrame({ id, children }: { id: string; children: 
     [id, job, report, loading, reportError, showEvidence, facts.askable, openChat],
   );
   const chatButton = (iconOnly = false) => (
-    <ChatButton open={chatOpen} onClick={() => setChatOpen((v) => !v)} controls={chatId} iconOnly={iconOnly} />
+    <ChatButton
+      open={chatOpen}
+      onClick={(from) => (chatOpen ? closeChat() : openChat(from))}
+      controls={chatId}
+      iconOnly={iconOnly}
+    />
   );
   /* Docked, the drawer takes the page's right edge and the page makes room. */
   const besideChat = chatOpen && docked && facts.askable;
@@ -375,7 +386,7 @@ export default function AnalysisFrame({ id, children }: { id: string; children: 
         </div>
       </div>
       {facts.askable && (
-        <ChatDrawer id={chatId} jobId={id} mr={mr} open={chatOpen} docked={docked} onClose={closeChat} />
+        <ChatDrawer id={chatId} jobId={id} mr={mr} open={chatOpen} docked={docked} onClose={closeChat} returnFocusTo={chatOpener} />
       )}
       <Drawer open={subject !== null} title={subject?.title ?? ""} onClose={closeEvidence} returnFocusTo={opener}>
         {subject && <EvidenceDetail jobId={id} subject={subject} />}
