@@ -1022,13 +1022,17 @@ def remember_process_secrets(core_settings: Any = None) -> None:
 
     The worker's own database, Redis and object-store credentials, and the
     core settings it starts with. Registered under the ``process`` scope, which
-    a job never replaces. Never raises: a failure here leaves the shape rules.
+    a job never replaces. Shown text (``core.settings_masking``) is masked by
+    the same values under the same scope. Never raises: a failure here leaves
+    the shape rules.
     """
     try:
         from maljan.core.settings_catalog import configured_secret_values
+        from maljan.core.settings_masking import remember_settings_values
         from maljan.pipeline.events import remember_secret_values
 
         sources = [get_settings()] + ([core_settings] if core_settings is not None else [])
+        remember_settings_values(*sources, scope="process")
         remember_secret_values(configured_secret_values(*sources), scope="process")
     except Exception as exc:  # noqa: BLE001 — the shape rules still run
         _registration_failed("process")
@@ -1049,11 +1053,15 @@ def remember_configured_secrets(core_settings: Any) -> None:
     The worker's own credentials are the ``process`` scope's
     (``remember_process_secrets``). The Windows function names the previous
     job's hash resolution read, which the scrub kept as written, are forgotten
-    here too: the job scope starts empty. Never raises.
+    here too: the job scope starts empty. Shown text
+    (``core.settings_masking``) is masked by the job's values under the same
+    scope. Never raises.
     """
+    from maljan.core.settings_masking import remember_settings_values
     from maljan.pipeline.events import forget_resolved_names
 
     forget_resolved_names()
+    remember_settings_values(core_settings, scope="job")
     try:
         from maljan.core.settings_catalog import configured_secret_values
         from maljan.pipeline.events import remember_secret_values
