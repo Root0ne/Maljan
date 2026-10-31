@@ -13,7 +13,6 @@ import { describe, expect, it } from "vitest";
 
 import { COMPLETED_JOB, MALWARE_REPORT, REPORT } from "../../../../e2e/report-fixture";
 import type { JobDTO } from "@/lib/api";
-import { gaugeDash } from "@/components/analysis/ConfidenceGauge";
 import { resolveTheme } from "@/components/analysis/theme";
 import { THEME_BOOT_SCRIPT, THEME_STORAGE_KEY } from "@/components/analysis/themeScript";
 import {
@@ -24,9 +23,16 @@ import {
   anchorFromHash,
   REMARK_TEXT,
   capChips,
+  claimBasis,
   classificationChips,
+  confidenceRung,
   configText,
   exportBaseName,
+  fileKind,
+  headerTags,
+  techniqueIdsIn,
+  techniqueVoices,
+  verdictSentence,
   filesWritten,
   findingRows,
   kpis,
@@ -88,12 +94,14 @@ describe("the tabs", () => {
   });
 });
 
-describe("the confidence ring", () => {
+describe("the confidence meter", () => {
   it("shows the stored confidence as it is, never a derived score", () => {
     expect(verdictConfidence("Malware", 0.91)).toEqual({
       percent: 91,
       verdict: "Malicious",
       label: "Malicious, confidence 91 percent",
+      step: 5,
+      word: "High confidence",
     });
     // A benign verdict held with high confidence reads high, not low.
     expect(verdictConfidence("Benign", 0.97).percent).toBe(97);
@@ -101,21 +109,43 @@ describe("the confidence ring", () => {
     expect(CONFIDENCE_WHY).toBe("How sure the analysis is of this verdict");
   });
 
+  it("reads a number on the report's own five rungs, at their floors", () => {
+    expect([0.95, 0.9, 0.85, 0.7, 0.6, 0.5, 0.4, 0.3, 0.1, 0].map((c) => confidenceRung(c).step)).toEqual([
+      5, 5, 4, 4, 3, 3, 2, 2, 1, 1,
+    ]);
+    expect(confidenceRung(0.85).word).toBe("Moderate-to-high confidence");
+    // Rounded to two places first, as the report rounds it: 0.895 is 0.90.
+    expect(confidenceRung(0.895).step).toBe(5);
+  });
+
   it("is absent, never zero, without a confidence", () => {
     expect(verdictConfidence("Malware", null)).toEqual({
       percent: null,
       verdict: "Malicious",
       label: "Malicious, confidence not assessed",
+      step: 0,
+      word: "Confidence not assessed",
     });
     expect(verdictConfidence("", 0.5).label).toBe("No verdict, confidence 50 percent");
-    expect(gaugeDash(null).startsWith("0.00 ")).toBe(true);
-    expect(gaugeDash(100).split(" ")[0]).toBe(gaugeDash(100).split(" ")[1]);
   });
 });
 
 describe("the header", () => {
   it("classifies by category, tactic and platform, once each", () => {
     expect(classificationChips(MALWARE_REPORT)).toEqual(["trojan", "Defense Evasion", "Windows"]);
+  });
+
+  it("says what the sample is in one sentence, and tags only what the sentence does not say", () => {
+    expect(verdictSentence(MALWARE_REPORT)).toBe("Trojan targeting Windows.");
+    expect(headerTags(MALWARE_REPORT)).toEqual(["Defense Evasion"]);
+    expect(verdictSentence(null, "loader / backdoor.")).toBe("Loader / backdoor.");
+    expect(verdictSentence(null)).toBe("");
+  });
+
+  it("names the file's kind from its architecture and format", () => {
+    expect(fileKind({ ...MALWARE_REPORT.identity, architecture: "x86-64", is_dll: true })).toBe("x86-64 DLL");
+    expect(fileKind({ ...MALWARE_REPORT.identity, architecture: null, is_dll: false, file_type: "pe" })).toBe("PE");
+    expect(fileKind(null)).toBe("");
   });
 
   it("shows at most five chips and counts the rest", () => {
@@ -192,6 +222,40 @@ describe("the remarks", () => {
     expect(remarks({ ...REPORT, incomplete_reason: "Cancelled by the operator" }, job)).toEqual([
       { text: REMARK_TEXT.incomplete, detail: "Cancelled by the operator" },
     ]);
+  });
+});
+
+describe("how a key finding is known", () => {
+  it("reads the technique ids a finding names, once each", () => {
+    expect(techniqueIdsIn("Decodes strings (T1140, T1027) and T1140 again; T1027.007 too.")).toEqual([
+      "T1140",
+      "T1027",
+      "T1027.007",
+    ]);
+    expect(techniqueIdsIn("No technique here, nor in XT1234.")).toEqual([]);
+  });
+
+  it("is seen, not seen or partly seen from the techniques it names, and unmarked otherwise", () => {
+    const voices = new Map([
+      ["T1", "observed"],
+      ["T2", "code"],
+      ["T3", "capability"],
+      ["T4", "unstated"],
+    ] as const);
+    expect(claimBasis(["T1"], voices)?.label).toBe("Seen in sandbox");
+    expect(claimBasis(["T2"], voices)?.label).toBe("Code only");
+    expect(claimBasis(["T2", "T3"], voices)).toMatchObject({ basis: "not-seen", label: "Not seen in sandbox" });
+    expect(claimBasis(["T1", "T2"], voices)).toMatchObject({ basis: "partly", label: "Partly seen" });
+    // A technique the report states no basis for, or does not map, says nothing.
+    expect(claimBasis(["T4", "T9"], voices)).toBeNull();
+    expect(claimBasis([], voices)).toBeNull();
+  });
+
+  it("takes each mapped technique's basis from the findings table", () => {
+    const voices = techniqueVoices(MALWARE_REPORT);
+    for (const row of findingRows(MALWARE_REPORT).filter((r) => r.id.startsWith("ttp-"))) {
+      expect(voices.get(row.techniques[0])).toBe(row.voice);
+    }
   });
 });
 

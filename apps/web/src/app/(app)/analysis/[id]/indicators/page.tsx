@@ -20,7 +20,7 @@ export default function IndicatorsPage() {
       {(report) => (
         <>
           {tabHasContent("/detection", report, job?.roster) ? (
-            <div id="detection" className="scroll-mt-40">
+            <div id="detection" className="scroll-mt-16">
               <DetectionContent />
             </div>
           ) : (

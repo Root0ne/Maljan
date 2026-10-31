@@ -25,13 +25,13 @@ export default function TabBlock({
 }) {
   if (empty) {
     return (
-      <div id={id} className="scroll-mt-40">
+      <div id={id} className="scroll-mt-16">
         <Section title={title} empty emptyText={emptyText} />
       </div>
     );
   }
   return (
-    <section id={id} aria-labelledby={`${id}-heading`} className="scroll-mt-40 space-y-3">
+    <section id={id} aria-labelledby={`${id}-heading`} className="scroll-mt-16 space-y-3">
       <h2 id={`${id}-heading`} className="text-sm font-semibold text-text-primary">
         {title}
       </h2>

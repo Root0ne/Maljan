@@ -158,7 +158,7 @@ function renderElement(node: Extract<MdNode, { t: "el" }>, key: number, ids: IdC
       const Tag = HEADING_TAG[node.tag];
       const id = node.sub ? ids.list[ids.next++] : undefined;
       return (
-        <Tag key={key} id={id} className={`${HEADING_CLASS[node.tag]} scroll-mt-40 text-text-primary`}>
+        <Tag key={key} id={id} className={`${HEADING_CLASS[node.tag]} scroll-mt-16 text-text-primary`}>
           {children}
         </Tag>
       );

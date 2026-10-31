@@ -14,11 +14,13 @@ import { runSignatureScale, signatureScore } from "@/lib/severity";
 import { jobStopNote } from "@/lib/runFailure";
 import { verdictBucket, verdictLabel } from "@/lib/verdict";
 import { assessedSeverity, verdictHeadline, verdictReadingNote } from "@/lib/verdictHeader";
-import type {
-  ConfigItem,
-  DefensiveRecommendation,
-  MalwareReport,
-  SeverityRating,
+import {
+  fileTypeLabel,
+  type ConfigItem,
+  type DefensiveRecommendation,
+  type MalwareReport,
+  type SampleIdentity,
+  type SeverityRating,
 } from "@/types/malware-report";
 
 /* ── Tabs ──────────────────────────────────────────────────────────── */
@@ -112,28 +114,57 @@ export interface VerdictConfidence {
   percent: number | null;
   /** The verdict in the reader's word. */
   verdict: string;
-  /** What the ring says to a screen reader: "Malicious, confidence 91 percent". */
+  /** What the meter says to a screen reader: "Malicious, confidence 91 percent". */
   label: string;
+  /** The rung on the five-step meter, 1 to 5; 0 when none was assessed. */
+  step: number;
+  /** The fixed word the rung reads as ("High confidence"), or "Confidence not assessed". */
+  word: string;
 }
 
-/** The line beside the ring, saying what its number is. */
+/** What the meter's word and number are about: its description. */
 export const CONFIDENCE_WHY = "How sure the analysis is of this verdict";
 
 /*
- * The ring shows the confidence the analysis put on its verdict, as stored,
- * and nothing derived from it. The report has no score field, so the page
- * draws no score until the backend emits one.
+ * The five rungs a confidence number reads as, highest first: the floors and
+ * words the exported report prints beside the same number
+ * (`CONFIDENCE_WORDS` in `src/maljan/reporting/renderers/markdown.py`), so the
+ * page and the report never word one number two ways.
+ */
+const CONFIDENCE_RUNGS: readonly (readonly [number, string])[] = [
+  [0.9, "High confidence"],
+  [0.7, "Moderate-to-high confidence"],
+  [0.5, "Moderate confidence"],
+  [0.3, "Low confidence"],
+  [0, "Very low confidence"],
+];
+
+/** The rung (5 at the top, 1 at the bottom, 0 for none) and word a confidence reads as. */
+export function confidenceRung(confidence: number | null | undefined): { step: number; word: string } {
+  if (confidence == null || Number.isNaN(confidence)) return { step: 0, word: "Confidence not assessed" };
+  const rounded = Math.round(Math.min(1, Math.max(0, confidence)) * 100) / 100;
+  const at = CONFIDENCE_RUNGS.findIndex(([floor]) => rounded >= floor);
+  const index = at === -1 ? CONFIDENCE_RUNGS.length - 1 : at;
+  return { step: CONFIDENCE_RUNGS.length - index, word: CONFIDENCE_RUNGS[index][1] };
+}
+
+/*
+ * The meter shows the confidence the analysis put on its verdict, as stored,
+ * read on the report's own five rungs, and nothing derived from it. The
+ * report has no score field, so the page draws no score until the backend
+ * emits one.
  */
 export function verdictConfidence(
   verdict: string | null | undefined,
   confidence: number | null | undefined,
 ): VerdictConfidence {
   const word = verdictBucket(verdict) === "unknown" ? "No verdict" : verdictLabel(verdict);
+  const rung = confidenceRung(confidence);
   if (confidence == null || Number.isNaN(confidence)) {
-    return { percent: null, verdict: word, label: `${word}, confidence not assessed` };
+    return { percent: null, verdict: word, label: `${word}, confidence not assessed`, ...rung };
   }
   const percent = Math.round(Math.min(1, Math.max(0, confidence)) * 100);
-  return { percent, verdict: word, label: `${word}, confidence ${percent} percent` };
+  return { percent, verdict: word, label: `${word}, confidence ${percent} percent`, ...rung };
 }
 
 /** The labels that classify the sample, most telling first, without repeats. */
@@ -148,6 +179,38 @@ export function classificationChips(mr: MalwareReport | null | undefined, catego
   for (const c of mr?.capability_matrix ?? []) add(c.tactic_name);
   for (const p of mr?.severity?.affected_platforms ?? []) add(platformWord(p));
   return out;
+}
+
+/**
+ * The one plain sentence under the family: what kind of thing the sample is
+ * and what it runs on, from the report's category and affected platforms
+ * ("Loader / backdoor targeting Windows."). Empty when the report states
+ * neither.
+ */
+export function verdictSentence(mr: MalwareReport | null | undefined, category?: string | null): string {
+  const kind = (mr?.malware_category ?? category ?? "").trim();
+  const platforms = [...new Set((mr?.severity?.affected_platforms ?? []).map(platformWord).filter(Boolean))];
+  if (!kind && platforms.length === 0) return "";
+  const head = kind ? kind.charAt(0).toUpperCase() + kind.slice(1) : "Runs on";
+  const tail = platforms.length === 0 ? "" : kind ? ` targeting ${platforms.join(", ")}` : ` ${platforms.join(", ")}`;
+  return `${head}${tail}`.replace(/[.\s]*$/, ".");
+}
+
+/**
+ * What the file is, in a few words: its architecture and, for a library,
+ * "DLL", else its format's name ("x86-64 DLL", "PE", "ELF"). Empty when the
+ * report holds no identity.
+ */
+export function fileKind(identity: SampleIdentity | null | undefined): string {
+  if (!identity) return "";
+  const format = identity.is_dll ? "DLL" : fileTypeLabel(identity.file_type);
+  return [identity.architecture?.trim(), format].filter(Boolean).join(" ");
+}
+
+/** The classification tags the sentence above does not already say. */
+export function headerTags(mr: MalwareReport | null | undefined, category?: string | null): string[] {
+  const said = verdictSentence(mr, category).toLowerCase();
+  return classificationChips(mr, category).filter((c) => !said.includes(c.toLowerCase()));
 }
 
 function platformWord(p: string): string {
@@ -351,6 +414,72 @@ export function techniqueVoice(
   return "unstated";
 }
 
+/**
+ * The one marker every claim on the page carries for how it is known, in two
+ * shapes: seen when the sample ran, or not seen (read from the code, matched
+ * by a rule, present in the file). `label` is the marker's short word;
+ * `VOICE_TEXT` says the same in full as its description.
+ */
+export type Basis = "seen" | "partly" | "not-seen" | "unstated";
+
+export const VOICE_BASIS: Record<Voice, { basis: Basis; label: string }> = {
+  observed: { basis: "seen", label: "Seen in sandbox" },
+  code: { basis: "not-seen", label: "Code only" },
+  rule: { basis: "not-seen", label: "Rule match only" },
+  capability: { basis: "not-seen", label: "In the file only" },
+  unobserved: { basis: "not-seen", label: "Not seen" },
+  unstated: { basis: "unstated", label: "Basis not stated" },
+};
+
+const TECHNIQUE_ID = /\bT\d{4}(?:\.\d{3})?\b/g;
+
+/** The ATT&CK technique ids a sentence names, in order, once each. */
+export function techniqueIdsIn(text: string | null | undefined): string[] {
+  return [...new Set((text ?? "").match(TECHNIQUE_ID) ?? [])];
+}
+
+/** Each technique the report maps, with how it is known. */
+export function techniqueVoices(mr: MalwareReport | null | undefined): Map<string, Voice> {
+  const out = new Map<string, Voice>();
+  for (const row of findingRows(mr)) {
+    if (row.id.startsWith("ttp-") && row.techniques[0]) out.set(row.techniques[0], row.voice);
+  }
+  return out;
+}
+
+export interface ClaimBasis {
+  basis: Basis;
+  label: string;
+  /** The full sentence: the marker's description. */
+  detail: string;
+}
+
+/**
+ * How a key finding is known, read from the techniques it names and nothing
+ * else: seen when every one it names was seen running, not seen when none
+ * was, partly seen when some were. A finding that names no mapped technique
+ * gets no marker rather than a guess.
+ */
+export function claimBasis(techniques: readonly string[], voices: ReadonlyMap<string, Voice>): ClaimBasis | null {
+  const known = techniques
+    .map((t) => voices.get(t))
+    .filter((v): v is Voice => v !== undefined && v !== "unstated");
+  if (known.length === 0) return null;
+  const seen = known.filter((v) => v === "observed").length;
+  if (seen === known.length) return { basis: "seen", label: VOICE_BASIS.observed.label, detail: VOICE_TEXT.observed };
+  if (seen > 0) {
+    return {
+      basis: "partly",
+      label: "Partly seen",
+      detail: `${seen} of the ${known.length} techniques it names were observed when the sample ran`,
+    };
+  }
+  const kinds = [...new Set(known)];
+  return kinds.length === 1
+    ? { ...VOICE_BASIS[kinds[0]], detail: VOICE_TEXT[kinds[0]] }
+    : { basis: "not-seen", label: "Not seen in sandbox", detail: "None of the techniques it names was observed when the sample ran" };
+}
+
 export interface FindingRow {
   id: string;
   severity: SeverityRating | null;
@@ -487,6 +616,17 @@ export function splitCitations(text: string | null | undefined): ProsePart[] {
   }
   if (at < source.length) parts.push({ kind: "text", text: source.slice(at) });
   return parts;
+}
+
+const BARE_ID = /\bev_[A-Za-z0-9_-]+/g;
+
+/**
+ * Every evidence id a text already cites, in a bracketed group or bare: a
+ * list of the evidence behind it then names only the rest, so one record is
+ * never marked twice beside one answer.
+ */
+export function citedIds(text: string | null | undefined): Set<string> {
+  return new Set((text ?? "").match(BARE_ID) ?? []);
 }
 
 /** The prose alone, its citation groups dropped: for a title or a label. */

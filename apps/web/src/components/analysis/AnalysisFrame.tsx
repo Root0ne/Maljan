@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "@/lib/api";
 import type { ReportDetailDTO, JobDTO } from "@/lib/api";
 import FailureNote from "@/components/ui/FailureNote";
@@ -16,7 +16,8 @@ import {
 import { useRun } from "@/lib/useRun";
 import { jobFailure, jobFinished } from "@/lib/runFailure";
 import { AnalysisContext, type AnalysisCtx } from "./AnalysisContext";
-import AnalysisHeader from "./AnalysisHeader";
+import AnalysisHeader, { ChatButton, CompactVerdict, headerFacts } from "./AnalysisHeader";
+import ChatDrawer from "./ChatDrawer";
 import EvidenceDetail, { type EvidenceSubject } from "./EvidenceDetail";
 import { ANALYSIS_TABS, RUNNING_TABS, analysisHref, remarks, tabCounts } from "./overview";
 import {
@@ -27,6 +28,24 @@ import {
   reportFetchError,
 } from "./polling";
 import { useUiTheme } from "./theme";
+
+/* Wide enough for the chat drawer to sit beside the page instead of over it. */
+const DOCKED = "(min-width: 1280px)";
+
+function subscribeDocked(onChange: () => void): () => void {
+  if (typeof window.matchMedia !== "function") return () => {};
+  const media = window.matchMedia(DOCKED);
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+}
+
+function useDocked(): boolean {
+  return useSyncExternalStore(
+    subscribeDocked,
+    () => typeof window.matchMedia === "function" && window.matchMedia(DOCKED).matches,
+    () => false,
+  );
+}
 
 /**
  * The frame of one analysis: the data, the sticky header, the remarks, the
@@ -56,6 +75,10 @@ export default function AnalysisFrame({ id, children }: { id: string; children: 
   const [subject, setSubject] = useState<EvidenceSubject | null>(null);
   const [opener, setOpener] = useState<HTMLElement | null>(null);
   const [compact, setCompact] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const chatId = useId();
+  const docked = useDocked();
+  const headerRef = useRef<HTMLDivElement>(null);
   const [theme, setTheme] = useUiTheme();
 
   useEffect(() => {
@@ -199,17 +222,32 @@ export default function AnalysisFrame({ id, children }: { id: string; children: 
     hydrateRunTranscript(id, report?.transcript);
   }, [id, report?.transcript]);
 
-  // The header folds to one row once the page scrolls under it.
+  /* The sticky bar takes the verdict in short once the header has scrolled
+   * out of view under it.
+   *
+   * The header used to fold itself on a scroll threshold, and its change of
+   * height was the page's scroll glitch: folding took ~45 px out of the
+   * document at the very scroll position the fold was decided on, so the
+   * content jumped under the pointer, and on a tab barely taller than the
+   * window the browser clamped the scroll position and the header opened and
+   * folded again. Now nothing above the content changes height: the header
+   * scrolls away as part of the document, the bar under it keeps one height,
+   * and only what the bar shows changes, read off an observer rather than a
+   * scroll listener. */
   useEffect(() => {
     const main = document.getElementById("main-content");
-    if (!main) return;
-    // Two thresholds, so the header's own change of height cannot flip it
-    // back: it folds past 72 px and opens again only near the top.
-    const onScroll = () =>
-      setCompact((was) => (was ? main.scrollTop > 8 : main.scrollTop > 72));
-    main.addEventListener("scroll", onScroll, { passive: true });
-    return () => main.removeEventListener("scroll", onScroll);
+    const header = headerRef.current;
+    if (!main || !header || typeof IntersectionObserver !== "function") return;
+    const observer = new IntersectionObserver(([entry]) => setCompact(!entry.isIntersecting), {
+      root: main,
+      threshold: 0,
+    });
+    observer.observe(header);
+    return () => observer.disconnect();
   }, []);
+
+  const openChat = useCallback(() => setChatOpen(true), []);
+  const closeChat = useCallback(() => setChatOpen(false), []);
 
   const showEvidence = useCallback((s: EvidenceSubject, from?: HTMLElement | null) => {
     setOpener(from ?? null);
@@ -238,10 +276,16 @@ export default function AnalysisFrame({ id, children }: { id: string; children: 
   const failure = jobFailure(job?.status, job?.error_message);
   const pollBanner = pollNotice(apiError, apiAvailable, pollStopped);
 
+  const facts = headerFacts(report, job);
   const ctx = useMemo<AnalysisCtx>(
-    () => ({ jobId: id, job, report, loading, reportError, showEvidence }),
-    [id, job, report, loading, reportError, showEvidence],
+    () => ({ jobId: id, job, report, loading, reportError, showEvidence, openChat: facts.askable ? openChat : null }),
+    [id, job, report, loading, reportError, showEvidence, facts.askable, openChat],
   );
+  const chatButton = (iconOnly = false) => (
+    <ChatButton open={chatOpen} onClick={() => setChatOpen((v) => !v)} controls={chatId} iconOnly={iconOnly} />
+  );
+  /* Docked, the drawer takes the page's right edge and the page makes room. */
+  const besideChat = chatOpen && docked && facts.askable;
 
   if (notFound) {
     return (
@@ -259,28 +303,41 @@ export default function AnalysisFrame({ id, children }: { id: string; children: 
 
   return (
     <AnalysisContext.Provider value={ctx}>
-      {/* `-m-6` undoes the shell's padding so the sticky header spans the
-          column and meets the top edge; the content restores it. The sticky
-          line is the scroller's padding edge, 24 px down, hence `-top-6`.
-          Scroll anchoring is off so folding the header cannot move the
-          scroll position the fold was decided on. */}
-      <div className="-m-6 min-h-full bg-bg-deep text-text-primary [overflow-anchor:none]" data-testid="analysis-page">
-        <div className="sticky -top-6 z-30 border-b border-border bg-bg-surface">
+      {/* `-m-6` undoes the shell's padding so the header and the sticky bar
+          span the column and meet the top edge; the content restores it. The
+          sticky line is the scroller's padding edge, 24 px down, hence
+          `-top-6`. The bar keeps one height whatever it shows, so nothing
+          above the content ever changes height while the page scrolls. */}
+      <div
+        className={`-m-6 min-h-full bg-bg-deep text-text-primary ${besideChat ? "pr-[420px]" : ""}`}
+        data-testid="analysis-page"
+      >
+        <div ref={headerRef} className="bg-bg-surface">
           <AnalysisHeader
             jobId={id}
             job={job}
             report={report}
             loading={loading}
-            compact={compact}
             theme={theme}
             onTheme={setTheme}
+            chat={chatButton()}
           />
-          {!loading && (
-            <div className="px-4 sm:px-6">
-              <Tabs tabs={tabs} active={active} label="Analysis sections" />
-            </div>
-          )}
         </div>
+        {!loading && (
+          <div className="sticky -top-6 z-30 border-b border-border bg-bg-surface" data-testid="analysis-bar">
+            <div className="flex h-11 items-end gap-3 px-4 sm:px-6">
+              <div className="min-w-0 flex-1">
+                <Tabs tabs={tabs} active={active} label="Analysis sections" />
+              </div>
+              {compact && (
+                <div className="flex shrink-0 items-center gap-3 self-center">
+                  <CompactVerdict facts={facts} />
+                  {facts.askable && chatButton(true)}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {(notes.length > 0 || failure) && (
           <section
             aria-label="Remarks"
@@ -298,7 +355,7 @@ export default function AnalysisFrame({ id, children }: { id: string; children: 
             {failure && <FailureNote failure={failure} className="mt-1" />}
           </section>
         )}
-        <div className="mx-auto max-w-[88rem] break-words px-4 py-5 sm:px-6" data-testid="analysis-content">
+        <div className="@container break-words px-4 py-5 sm:px-6" data-testid="analysis-content">
           {pollBanner && !loading && (
             <div role="alert" className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
               {pollBanner}
@@ -317,6 +374,9 @@ export default function AnalysisFrame({ id, children }: { id: string; children: 
           {children}
         </div>
       </div>
+      {facts.askable && (
+        <ChatDrawer id={chatId} jobId={id} mr={mr} open={chatOpen} docked={docked} onClose={closeChat} />
+      )}
       <Drawer open={subject !== null} title={subject?.title ?? ""} onClose={closeEvidence} returnFocusTo={opener}>
         {subject && <EvidenceDetail jobId={id} subject={subject} />}
       </Drawer>

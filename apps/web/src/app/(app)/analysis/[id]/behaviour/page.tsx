@@ -87,27 +87,27 @@ function BehaviourTab({ report }: { report: ReportDetailDTO }) {
         ))}
       </div>
 
-      <div id="dynamic" className="scroll-mt-40">
+      <div id="dynamic" className="scroll-mt-16">
         <ProcessesBlock report={report} />
       </div>
 
       {/* Where the old persistence page and the defence-evasion view land:
           the behaviours, in that view. One box under three names, so each
           anchor scrolls to the same place. */}
-      <div id="behaviours" className="scroll-mt-40">
-        <div id="persistence" className="scroll-mt-40">
-          <div id="defence-evasion" className="scroll-mt-40">
+      <div id="behaviours" className="scroll-mt-16">
+        <div id="persistence" className="scroll-mt-16">
+          <div id="defence-evasion" className="scroll-mt-16">
             <BehavioursBlock report={report} roster={job?.roster} view={view} tactics={tactics} />
           </div>
         </div>
       </div>
 
-      <div id="attack" className="scroll-mt-40">
+      <div id="attack" className="scroll-mt-16">
         <AttackContent view={view} empty={!tabHasContent("/capabilities", report, job?.roster)} />
       </div>
 
       {report.malware_report && hasTechnicalAnalysis(report.malware_report) ? (
-        <div id="technical-analysis" className="scroll-mt-40">
+        <div id="technical-analysis" className="scroll-mt-16">
           <TechnicalAnalysisPanel report={report.malware_report} />
         </div>
       ) : (
