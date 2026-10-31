@@ -26,7 +26,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from maljan.core.config import Settings
 from maljan.llm import anthropic_history
 from maljan.llm.anthropic_provider import AnthropicProvider
-from maljan.reporting.composer import COMPOSED_SECTIONS, ReportComposer
+from maljan.reporting.composer import (
+    COMPOSED_SECTIONS,
+    ReportComposer,
+    _published_techniques,
+)
 from tests.unit.reporting.test_the_composer_writes_its_sections_at_once import (
     _answer,
     _isr,
@@ -193,7 +197,9 @@ class TestTheHeadIsCachedOnce:
             assert head["cache_control"]["type"] == "ephemeral"
             assert "cache_control" not in rest
             heads.add(head["text"])
-        assert heads == {FACTS + "\n\n"}, "one prefix, the same on every section"
+        assert heads == {f"{FACTS}\n\n{_published_techniques(_report())}\n\n"}, (
+            "one prefix, the same on every section"
+        )
         assert len({json.dumps(b.get("system"), sort_keys=True) for b in wire.bodies}) == 1
 
     def test_on_the_manual_path_the_lead_section_is_sent_before_the_others(
