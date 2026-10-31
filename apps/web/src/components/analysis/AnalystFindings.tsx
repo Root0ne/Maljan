@@ -14,14 +14,14 @@ export default function AnalystFindings({
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border">
-        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        <h2 className="text-sm font-semibold text-text-primary">
           Analyst findings
         </h2>
       </div>
       <div className="p-4 space-y-3">
         {findings.map((f) => (
           <div key={f.agent}>
-            <p className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            <p className="text-xs text-text-muted mb-1.5">
               {f.agent}
             </p>
             <ul className="space-y-2">

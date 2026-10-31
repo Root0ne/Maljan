@@ -45,9 +45,25 @@ const BLOCKS: Block[] = [
   // covers it, and the fixture has one — so the hashes are what this block
   // always renders on a populated report, whichever half draws the rest.
   { was: "/identity", path: "/static", expect: heading(/File Hashes/i) },
-  { was: "/static", path: "/static", expect: heading(/Imports/i) },
+  {
+    was: "/static",
+    path: "/static",
+    // The imports are one sub-tab of the file's structure, drawn when chosen.
+    expect: async (page) => {
+      await page.getByRole("tab", { name: /^Imports/ }).click();
+      await expect(page.getByRole("heading", { name: /PE imports/i })).toBeVisible();
+    },
+  },
   { was: "/dynamic", path: "/behaviour", expect: heading(/Process Tree/i) },
-  { was: "/network", path: "/network", expect: heading(/Domains/i) },
+  {
+    was: "/network",
+    path: "/network",
+    // The domains are hosts now, listed with the addresses.
+    expect: async (page) => {
+      await expect(page.getByRole("heading", { name: /^Hosts/ })).toBeVisible();
+      await expect(page.getByRole("button", { name: "cdn.example-update.net", exact: true })).toBeVisible();
+    },
+  },
   {
     was: "/persistence",
     path: "/behaviour",
@@ -56,7 +72,16 @@ const BLOCKS: Block[] = [
       await expect(page.getByText(/CurrentVersion\\?\\Run\\?\\UpdateSvc/)).toBeVisible();
     },
   },
-  { was: "/capabilities", path: "/behaviour", expect: heading(/MITRE ATT&CK Matrix/i) },
+  {
+    was: "/capabilities",
+    path: "/behaviour",
+    // A compact list by default; the matrix is one toggle away.
+    expect: async (page) => {
+      await expect(page.getByRole("heading", { name: /ATT&CK techniques/ })).toBeVisible();
+      await page.getByRole("button", { name: "Matrix", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Defense Evasion", exact: true })).toBeVisible();
+    },
+  },
   { was: "/attribution", path: "/indicators", expect: heading(/Family Attribution/i) },
   { was: "/detection", path: "/indicators", expect: heading(/Generated detection rules/i) },
   {
@@ -539,7 +564,7 @@ test.describe("Analysis tabs", () => {
     await expect(nav.getByRole("link")).toHaveCount(6);
     // Every block of the tab keeps its place and says it found nothing.
     for (const block of ["dynamic", "attack", "persistence"]) {
-      await expect(page.locator(`#${block}`)).toContainText(/Not found|No sandbox run recorded/);
+      await expect(page.locator(`#${block}`)).toContainText(/Not found|Not detonated on this run/);
     }
     await page.goto(`/analysis/${JOB_ID}/indicators`);
     await expect(page.locator("#detection")).toContainText("No rule fired and none was written");

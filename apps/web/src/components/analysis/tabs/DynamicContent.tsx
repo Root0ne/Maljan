@@ -3,293 +3,365 @@
 import { useState } from "react";
 
 import { useReport } from "@/components/analysis/AnalysisContext";
-import ReportAbsent from "@/components/analysis/ReportAbsent";
-import { reportAbsence } from "@/components/analysis/reportAbsence";
-import type { ProcessNode } from "@/types/malware-report";
-import { bySignatureSeverity, runSignatureScale, signatureScore } from "@/lib/severity";
+import type { ReportDetailDTO } from "@/lib/api";
+import type { EvidenceSection, SandboxSignature } from "@/types/malware-report";
+import { runSignatureScale } from "@/lib/severity";
+import Section from "@/components/ui/Section";
+import ShowMoreRows from "@/components/ui/ShowMoreRows";
+import { SeverityPill, Tag } from "@/components/ui/Pill";
 import Th from "@/components/ui/Th";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
-import { hasSection, isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
+import { hasSection, sectionsForTab } from "@/components/analysis/reportSections";
 import { dynamicAnalystClaims } from "@/components/analysis/dynamicClaims";
 import AnalystFindings from "@/components/analysis/AnalystFindings";
+import {
+  signatureGroups,
+  viewKeeps,
+  type BehaviourView,
+  type SignatureRow,
+} from "@/components/analysis/behaviourView";
+import ProcessTree from "./ProcessTree";
+import PersistenceList from "./PersistenceContent";
+import type { JobRoster } from "@/types";
 
-export default function DynamicTab() {
-  const { report, job, loading, reportError } = useReport();
+/** How many rows the registry, file and API tables draw before offering more. */
+const STEP = 10;
 
-  if (loading) {
-    return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
-  }
+/* D10: detect anti-emulation / anti-VM / anti-debug signatures so the empty
+ * process-tree state can explain why the sandbox traced nothing. Mirrors the
+ * regex used by the worker's degradation_reasons builder
+ * (src/maljan/pipeline/nodes.py), so the banner copy and this hint stay in
+ * lockstep. */
+const ANTI_EMU_RE =
+  /emulation|anti[\s_-]?vm|anti[\s_-]?debug|sandbox\s*detect|qemu|virtualbox|vmware|hyper[\s_-]?v/i;
 
-  /* No report is not an empty report: say which absence this is rather than
-   * drawing this tab's negative (`reportAbsence`). */
-  const absent = reportAbsence({ report, job, reportError });
-  if (absent) return <ReportAbsent absence={absent} />;
+function antiEmulationHit(signatures: readonly SandboxSignature[]): SandboxSignature | undefined {
+  return signatures.find((s) => ANTI_EMU_RE.test(s.name) || ANTI_EMU_RE.test(s.description ?? ""));
+}
 
-  const analystFindings = dynamicAnalystClaims(report?.agent_findings, job?.roster);
-  const dyn = report?.malware_report?.dynamic;
-  // The registry exists on Windows and nowhere else, and an empty "Registry
-  // Modifications" panel on a Linux, macOS or Android sample reads as a
-  // sandbox that found nothing rather than a concept the platform does not
-  // have. The panel is therefore drawn from evidence — a registry section on
-  // the ledger, or typed rows the extractor produced — rather than from a
-  // guess about the platform, which drew it on every Windows run whether or
-  // not anything had ever touched a key.
-  const reportSections = report?.malware_report?.sections;
-  const evidenceSections = sectionsForTab(reportSections, "dynamic", report?.section_tabs);
-  const showsRegistry =
-    Boolean(dyn?.registry_mods.length) || hasSection(reportSections, "sandbox_registry");
-  const showsProcessTree = !isCoveredBySection(reportSections, ["sandbox_processes"]);
-  const showsSignatures = !isCoveredBySection(reportSections, ["sandbox_signatures"]);
-  if (!dyn) {
-    return (
-      <div className="space-y-4">
-        <ArtifactSections sections={evidenceSections} />
-        {evidenceSections.length === 0 && (
-          <div className="p-8 text-center text-sm text-text-secondary">
-            The sample was not detonated on this run, so there is no behaviour
-            to show.
-          </div>
-        )}
-        {analystFindings.length > 0 && <AnalystFindings findings={analystFindings} />}
+/** Sections that say the same as one of this tab's typed views, kept one click away. */
+function ToolOutput({ sections }: { sections: EvidenceSection[] }) {
+  if (sections.length === 0) return null;
+  return (
+    <details className="group">
+      <summary className="cursor-pointer text-xs text-text-secondary hover:text-text-primary">
+        The same, as the tools returned it ({sections.length})
+      </summary>
+      <div className="mt-2 space-y-3">
+        <ArtifactSections sections={sections} />
       </div>
-    );
-  }
+    </details>
+  );
+}
+
+/**
+ * The process tree, with the sample's path open (`ProcessTree`). A run whose
+ * sandbox traced nothing because the sample detected it says so; a run that
+ * was not detonated says that.
+ */
+export function ProcessesBlock({ report }: { report: ReportDetailDTO }) {
+  const mr = report.malware_report;
+  const dyn = mr?.dynamic;
+  const tree = dyn?.process_tree ?? [];
+  const evasion = antiEmulationHit(dyn?.sandbox_signatures ?? []);
+  const covering = sectionsForTab(mr?.sections, "dynamic", report.section_tabs).filter(
+    (s) => s.key === "sandbox_processes",
+  );
+  const empty = tree.length === 0 && !evasion && covering.length === 0;
+  return (
+    <Section
+      title="Process tree"
+      count={tree.length > 0 ? tree.length : null}
+      empty={empty}
+      emptyText={dyn ? "Not found" : "Not detonated on this run"}
+    >
+      <div className="space-y-3">
+        {tree.length > 0 ? (
+          <ProcessTree roots={tree} mr={mr} />
+        ) : evasion ? (
+          /* An empty tree is drawn only where the run can say why it is
+           * empty: a sample that detected the sandbox and left is a finding,
+           * and "no process activity recorded" beside nothing is not. */
+          <p className="text-xs text-text-muted">
+            Sandbox traced no process activity — sample employed anti-emulation behaviour
+            <span className="ml-1 text-status-orange">({evasion.name})</span>.
+          </p>
+        ) : null}
+        {tree.length > 0 ? (
+          <ToolOutput sections={covering} />
+        ) : (
+          <ArtifactSections sections={covering} />
+        )}
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * What the sample did: the sandbox's signatures by severity, then by ATT&CK
+ * technique; the persistence it established; and the registry, file and API
+ * activity the sandbox recorded. `view` keeps only what is under one tactic.
+ */
+export function BehavioursBlock({
+  report,
+  roster,
+  view,
+  tactics,
+}: {
+  report: ReportDetailDTO;
+  roster?: JobRoster | null;
+  view: BehaviourView;
+  tactics: ReadonlyMap<string, ReadonlySet<string>>;
+}) {
+  const { showEvidence } = useReport();
+  const [shown, setShown] = useState<Record<string, number>>({});
+  const shownOf = (t: string) => shown[t] ?? STEP;
+  const show = (t: string) => (n: number) => setShown((s) => ({ ...s, [t]: n }));
+
+  const mr = report.malware_report;
+  const dyn = mr?.dynamic ?? null;
+  const reportSections = mr?.sections;
+  const analystFindings = dynamicAnalystClaims(report.agent_findings, roster);
+  const dynamicSections = sectionsForTab(reportSections, "dynamic", report.section_tabs);
+  const covering = dynamicSections.filter((s) => s.key === "sandbox_signatures");
+  const otherSections = dynamicSections.filter((s) => s.key !== "sandbox_signatures" && s.key !== "sandbox_processes");
+  const persistenceSections = sectionsForTab(reportSections, "persistence", report.section_tabs);
+  const persistence = mr?.persistence ?? [];
 
   /* The scale the run recorded for its sandbox report, which is what says
    * what a signature's number means (`signatureScore`); a run recorded before
    * scales were is read by the legacy table. */
-  const signatureScale = runSignatureScale(report?.run_summary);
+  const scale = runSignatureScale(report.run_summary);
+  const signatures = (dyn?.sandbox_signatures ?? []).filter((s) => viewKeeps(view, s.technique_ids ?? [], tactics));
+  const groups = signatureGroups(signatures, scale);
+  const keptPersistence = view === "defence-evasion" ? [] : persistence;
+  // The registry exists on Windows and nowhere else; the table is drawn from
+  // evidence — typed rows or a registry section — never from the platform.
+  const showsRegistry = Boolean(dyn?.registry_mods.length) || hasSection(reportSections, "sandbox_registry");
 
-  const sortedSignatures = [...dyn.sandbox_signatures].sort(bySignatureSeverity);
+  const empty =
+    !dyn &&
+    analystFindings.length === 0 &&
+    dynamicSections.length === 0 &&
+    persistence.length === 0 &&
+    persistenceSections.length === 0;
 
-  // D10: detect anti-emulation / anti-VM / anti-debug signatures so the
-  // empty process-tree state can explain why the sandbox traced nothing.
-  // Mirrors the regex used by the worker's degradation_reasons builder
-  // (src/maljan/pipeline/nodes.py), so the banner copy and this hint
-  // stay in lockstep.
-  const ANTI_EMU_RE =
-    /emulation|anti[\s_-]?vm|anti[\s_-]?debug|sandbox\s*detect|qemu|virtualbox|vmware|hyper[\s_-]?v/i;
-  const antiEmulationHit = sortedSignatures.find(
-    (s) => ANTI_EMU_RE.test(s.name) || ANTI_EMU_RE.test(s.description ?? ""),
-  );
+  const openSignature = (row: SignatureRow, opener: HTMLElement) =>
+    showEvidence?.(
+      {
+        title: row.signature.name,
+        severity: row.rung,
+        category: `Sandbox signature · ${row.sandboxText}${row.scale ? ` on the ${row.scale} scale` : ""}`,
+        details: [row.signature.description, ...row.signature.marks].filter((d) => Boolean(d && d.trim())),
+        techniques: row.signature.technique_ids,
+        evidenceIds: [],
+      },
+      opener,
+    );
 
   return (
-    <div className="space-y-4">
-      <ArtifactSections sections={evidenceSections} />
+    <Section title="Behaviours" count={signatures.length + keptPersistence.length || null} empty={empty}>
+      <div className="space-y-5">
+        {view === "all" && analystFindings.length > 0 && <AnalystFindings findings={analystFindings} />}
 
-      {analystFindings.length > 0 && <AnalystFindings findings={analystFindings} />}
+        {!dyn && view === "all" && (
+          <p className="text-sm text-text-secondary">
+            The sample was not detonated on this run, so there is no behaviour to show.
+          </p>
+        )}
 
-      {dyn.unavailable && dyn.unavailable.length > 0 && (
-        <div className="text-xs text-text-muted border border-border rounded px-4 py-3 bg-bg-surface">
-          Not provided by this sandbox: {dyn.unavailable.join(", ")}.
-        </div>
-      )}
+        {dyn?.unavailable && dyn.unavailable.length > 0 && view === "all" && (
+          <p className="text-xs text-text-muted">Not provided by this sandbox: {dyn.unavailable.join(", ")}.</p>
+        )}
 
-      {showsProcessTree && (dyn.process_tree.length > 0 || antiEmulationHit) && (
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Process Tree ({dyn.process_tree.length} root{dyn.process_tree.length !== 1 ? "s" : ""})
-          </h2>
-        </div>
-        <div className="p-4">
-          {dyn.process_tree.length === 0 ? (
-            /* An empty tree is drawn only where the run can say why it is
-             * empty: a sample that detected the sandbox and left is a finding,
-             * and "no process activity recorded" beside nothing is not. */
-            <div className="text-xs text-text-muted">
-              Sandbox traced no process activity — sample employed
-              anti-emulation behaviour
-              <span className="ml-1 text-status-orange">({antiEmulationHit?.name})</span>.
-            </div>
-          ) : (
-            <div className="font-mono text-xs space-y-1">
-              {dyn.process_tree.map((node, i) => (
-                <ProcessTreeNode key={`${node.pid}-${i}`} node={node} depth={0} />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      )}
-
-      {showsSignatures && sortedSignatures.length > 0 && (
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Sandbox Signatures ({sortedSignatures.length})
-          </h2>
-        </div>
-        <div className="divide-y divide-border-light">
-            {sortedSignatures.map((sig, i) => (
-              <div key={i} className="p-4">
-                <div className="flex items-start gap-3">
-                  {(() => {
-                    const score = signatureScore(sig.severity, signatureScale);
-                    return (
-                      <span
-                        className={`text-[11px] font-mono px-1.5 py-0.5 rounded shrink-0 ${score.tone.bg} ${score.tone.text}`}
-                        title={
-                          score.rung
-                            ? `${score.rung} on the ${score.scale} scale`
-                            : "The sandbox's own number; its scale is not recorded for this run"
-                        }
-                      >
-                        SEV {score.text}
-                      </span>
-                    );
-                  })()}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-text-primary">{sig.name}</div>
-                    {sig.description && (
-                      <div className="text-xs text-text-secondary mt-1">{sig.description}</div>
-                    )}
-                    {sig.technique_ids.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {sig.technique_ids.map((tid) => (
-                          <span
-                            key={tid}
-                            className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue"
+        {dyn && (
+          <div className="space-y-3" aria-label="Sandbox signatures" role="group">
+            {groups.length === 0 && (
+              <p className="text-xs text-text-muted">
+                {view === "all" ? "No sandbox signature fired." : "No sandbox signature under this tactic."}
+              </p>
+            )}
+            {groups.map((group) => (
+              <div key={group.rung ?? "unrated"} className="space-y-2">
+                <h3 className="flex items-center gap-2 text-xs font-semibold text-text-secondary">
+                  <SeverityPill severity={group.rung} />
+                  <span>
+                    {group.count} signature{group.count === 1 ? "" : "s"}
+                  </span>
+                </h3>
+                <ul className="divide-y divide-border-light rounded border border-border-light">
+                  {group.techniques.map((t) =>
+                    t.rows.map((row, i) => (
+                      <li key={`${t.technique}-${i}`} className="flex items-start gap-3 px-3 py-2">
+                        <span className="w-20 shrink-0 font-mono text-[11px] text-status-blue">
+                          {i === 0 ? t.technique || "No technique" : ""}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <button
+                            type="button"
+                            onClick={(e) => openSignature(row, e.currentTarget)}
+                            className="text-left text-sm font-medium text-text-primary hover:underline"
                           >
-                            {tid}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {sig.marks.length > 0 && (
-                      <details className="mt-2">
-                        <summary className="text-[11px] text-text-muted cursor-pointer hover:text-text-primary">
-                          {sig.marks.length} evidence mark{sig.marks.length !== 1 ? "s" : ""}
-                        </summary>
-                        <ul className="mt-1 ml-3 space-y-1">
-                          {sig.marks.slice(0, 25).map((m, mi) => (
-                            <li
-                              key={mi}
-                              className="text-[11px] font-mono text-text-secondary break-all"
-                            >
-                              {m}
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
-                    )}
-                  </div>
-                </div>
+                            {row.signature.name}
+                          </button>
+                          {row.signature.description && (
+                            <p className="mt-0.5 text-xs text-text-secondary">{row.signature.description}</p>
+                          )}
+                          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-text-muted">
+                            <span title={row.scale ? `${row.sandboxText} on the ${row.scale} scale` : "The sandbox's own number; its scale is not recorded for this run"}>
+                              Sandbox: {row.sandboxText}
+                            </span>
+                            {row.signature.technique_ids.slice(1).map((tid) => (
+                              <Tag key={tid}>{tid}</Tag>
+                            ))}
+                            {row.signature.marks.length > 0 && (
+                              <span>
+                                · {row.signature.marks.length} evidence mark{row.signature.marks.length === 1 ? "" : "s"}
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </li>
+                    )),
+                  )}
+                </ul>
               </div>
             ))}
-        </div>
-      </div>
-      )}
-
-      {showsRegistry && dyn.registry_mods.length > 0 && (
-        <div className="bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Registry Modifications ({dyn.registry_mods.length})
-            </h2>
+            <ToolOutput sections={covering} />
           </div>
-          <table className="w-full">
-              <thead>
-                <tr className="border-b border-border">
-                  <Th>Op</Th>
-                  <Th>Hive</Th>
-                  <Th>Key</Th>
-                  <Th>Value Name</Th>
-                  <Th>New Value</Th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border-light">
-                {dyn.registry_mods.slice(0, 200).map((r, i) => (
-                  <tr key={i} className="hover:bg-bg-hover">
-                    <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
-                      {r.operation}
-                    </td>
-                    <td className="px-4 py-2 text-xs font-mono text-text-secondary">{r.hive}</td>
-                    <td className="px-4 py-2 text-xs font-mono text-status-blue break-all">{r.key}</td>
-                    <td className="px-4 py-2 text-xs font-mono text-text-secondary">
-                      {r.value_name || "-"}
-                    </td>
-                    <td className="px-4 py-2 text-xs text-text-secondary break-all">
-                      {r.new_value || "-"}
-                    </td>
+        )}
+        {!dyn && <ArtifactSections sections={covering} />}
+
+        {view !== "defence-evasion" && (
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-text-secondary">
+              Persistence mechanisms{keptPersistence.length > 0 ? ` (${keptPersistence.length})` : ""}
+            </h3>
+            {keptPersistence.length === 0 && persistenceSections.length === 0 ? (
+              <p className="text-xs text-text-muted">Not found</p>
+            ) : (
+              <PersistenceList items={keptPersistence} sections={persistenceSections} />
+            )}
+          </div>
+        )}
+
+        {view === "all" && showsRegistry && dyn && dyn.registry_mods.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-text-secondary">
+              Registry modifications ({dyn.registry_mods.length})
+            </h3>
+            <div className="overflow-x-auto rounded border border-border-light">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-border">
+                    <Th>Operation</Th>
+                    <Th>Hive</Th>
+                    <Th>Key</Th>
+                    <Th>Value name</Th>
+                    <Th>New value</Th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          {dyn.registry_mods.length > 200 && (
-            <div className="px-4 py-2 text-[11px] text-text-muted border-t border-border">
-              Showing first 200 of {dyn.registry_mods.length}.
+                </thead>
+                <tbody className="divide-y divide-border-light">
+                  {dyn.registry_mods.slice(0, shownOf("registry")).map((r, i) => (
+                    <tr key={i} className="hover:bg-bg-hover">
+                      <td className="px-4 py-2 text-xs text-text-muted">{r.operation}</td>
+                      <td className="px-4 py-2 text-xs font-mono text-text-secondary">{r.hive}</td>
+                      <td className="px-4 py-2 text-xs font-mono text-status-blue break-all">{r.key}</td>
+                      <td className="px-4 py-2 text-xs font-mono text-text-secondary">{r.value_name || "-"}</td>
+                      <td className="px-4 py-2 text-xs text-text-secondary break-all">{r.new_value || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <ShowMoreRows
+                shown={Math.min(shownOf("registry"), dyn.registry_mods.length)}
+                total={dyn.registry_mods.length}
+                onShow={show("registry")}
+                step={STEP}
+              />
             </div>
-          )}
-        </div>
-      )}
-
-      {dyn.notable_apis.length > 0 && (
-        <div className="bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Notable APIs ({dyn.notable_apis.length})
-            </h2>
           </div>
-          <pre className="p-4 text-[11px] text-text-muted overflow-x-auto leading-relaxed">
-            {JSON.stringify(dyn.notable_apis.slice(0, 50), null, 2)}
-          </pre>
-        </div>
-      )}
+        )}
 
-      {dyn.file_operations.length > 0 && (
-        <div className="bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              File Operations ({dyn.file_operations.length})
-            </h2>
-          </div>
-          <pre className="p-4 text-[11px] text-text-muted overflow-x-auto leading-relaxed">
-            {JSON.stringify(dyn.file_operations.slice(0, 50), null, 2)}
-          </pre>
-        </div>
-      )}
-    </div>
+        {view === "all" && dyn && dyn.file_operations.length > 0 && (
+          <RecordTable
+            title="File operations"
+            rows={dyn.file_operations}
+            shown={shownOf("files")}
+            onShow={show("files")}
+          />
+        )}
+
+        {view === "all" && dyn && dyn.notable_apis.length > 0 && (
+          <RecordTable
+            title="Notable API calls"
+            rows={dyn.notable_apis}
+            shown={shownOf("apis")}
+            onShow={show("apis")}
+          />
+        )}
+
+        {view === "all" && <ArtifactSections sections={otherSections} />}
+      </div>
+    </Section>
   );
 }
 
-function ProcessTreeNode({ node, depth }: { node: ProcessNode; depth: number }) {
-  const [open, setOpen] = useState(depth < 2);
-  const hasChildren = node.children.length > 0;
+/** A cell's words: a plain value as it is, anything else as compact JSON. */
+function cellText(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
 
+/**
+ * Records of no declared shape (the sandbox's file operations and API calls),
+ * drawn as a table headed by the keys the records use, in the order they
+ * first appear, rather than as a dump of JSON.
+ */
+function RecordTable({
+  title,
+  rows,
+  shown,
+  onShow,
+}: {
+  title: string;
+  rows: Record<string, unknown>[];
+  shown: number;
+  onShow: (n: number) => void;
+}) {
+  const columns: string[] = [];
+  for (const row of rows) {
+    for (const key of Object.keys(row ?? {})) if (!columns.includes(key)) columns.push(key);
+  }
   return (
-    <div>
-      <div
-        className="flex items-start gap-2 hover:bg-bg-hover py-0.5 px-1 rounded cursor-pointer"
-        style={{ paddingLeft: depth * 16 + 4 }}
-        onClick={() => hasChildren && setOpen(!open)}
-      >
-        <span className="text-text-muted w-3 inline-block shrink-0">
-          {hasChildren ? (open ? "−" : "+") : "·"}
-        </span>
-        <span className="text-status-blue shrink-0">{node.pid}</span>
-        <span className="text-text-muted shrink-0">/</span>
-        <span className="text-text-muted shrink-0">{node.ppid || "0"}</span>
-        <span className="text-text-primary shrink-0">{node.name || "(unknown)"}</span>
-        {node.command_line && (
-          <span className="text-text-secondary truncate" title={node.command_line}>
-            {node.command_line}
-          </span>
-        )}
-        {node.injected_into.length > 0 && (
-          <span className="text-[11px] px-1 rounded bg-status-red/10 text-status-red shrink-0">
-            injects→{node.injected_into.join(",")}
-          </span>
-        )}
+    <div className="space-y-2">
+      <h3 className="text-xs font-semibold text-text-secondary">
+        {title} ({rows.length})
+      </h3>
+      <div className="overflow-x-auto rounded border border-border-light">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border">
+              {columns.map((c) => (
+                <Th key={c}>{c.replace(/_/g, " ")}</Th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border-light">
+            {rows.slice(0, shown).map((row, i) => (
+              <tr key={i} className="hover:bg-bg-hover">
+                {columns.map((c) => (
+                  <td key={c} className="px-4 py-2 align-top text-xs font-mono text-text-secondary break-all">
+                    {cellText(row?.[c])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <ShowMoreRows shown={Math.min(shown, rows.length)} total={rows.length} onShow={onShow} step={STEP} />
       </div>
-      {open && hasChildren && (
-        <div>
-          {node.children.map((c, i) => (
-            <ProcessTreeNode key={`${c.pid}-${i}`} node={c} depth={depth + 1} />
-          ))}
-        </div>
-      )}
     </div>
   );
 }

@@ -8,9 +8,10 @@ import IdentityContent from "@/components/analysis/tabs/IdentityContent";
 import StaticContent from "@/components/analysis/tabs/StaticContent";
 
 /**
- * Static & code: what the file is (its identity, hashes, signature and
+ * Static & code: what the file is (its identity, metadata, hashes and
  * reputation), then what reading it without running it showed: its
- * structure, imports, strings and the functions examined.
+ * structure one part at a time, its strings, the configuration recovered
+ * from it and the functions examined.
  */
 export default function StaticPage() {
   const { job } = useReport();
@@ -18,12 +19,20 @@ export default function StaticPage() {
     <ReportGate>
       {(report) => (
         <>
-          <TabBlock id="identity" title="File identity" empty={!tabHasContent("/identity", report, job?.roster)}>
-            <IdentityContent />
-          </TabBlock>
-          <TabBlock id="static" title="Static analysis" empty={!tabHasContent("/static", report, job?.roster)}>
-            <StaticContent />
-          </TabBlock>
+          {tabHasContent("/identity", report, job?.roster) ? (
+            <div id="identity" className="scroll-mt-40">
+              <IdentityContent />
+            </div>
+          ) : (
+            <TabBlock id="identity" title="Identity and metadata" empty />
+          )}
+          {tabHasContent("/static", report, job?.roster) ? (
+            <div id="static" className="scroll-mt-40">
+              <StaticContent report={report} />
+            </div>
+          ) : (
+            <TabBlock id="static" title="Static analysis" empty />
+          )}
         </>
       )}
     </ReportGate>

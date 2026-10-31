@@ -2,13 +2,14 @@
  *
  * Three byte-identical `Th`
  * components lived in the STATIC, DYNAMIC and NETWORK tabs. One definition
- * keeps the table chrome consistent as the styling evolves.
+ * keeps the table chrome consistent as the styling evolves. Plain case, as
+ * every heading of the console is: capitals are not a second weight.
  */
 export default function Th({ children }: { children: React.ReactNode }) {
   return (
     <th
       scope="col"
-      className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider"
+      className="text-left text-xs text-text-muted font-medium px-4 py-2"
     >
       {children}
     </th>

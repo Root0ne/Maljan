@@ -50,7 +50,7 @@ function Section({
     <div className="border border-border rounded mb-4">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-text-primary uppercase tracking-wider hover:bg-bg-hover"
+        className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-medium text-text-primary hover:bg-bg-hover"
       >
         <span>{title}</span>
         <ChevronDown
@@ -117,7 +117,7 @@ export default function RulesTab() {
       {yaraMatches.length > 0 && (
         <Section title={`YARA Matches (${yaraMatches.length})`} defaultOpen={true}>
           <div className="flex flex-wrap items-center gap-2 bg-status-blue/10 px-4 py-2 border-b border-border">
-            <span className="text-xs font-medium text-status-blue uppercase tracking-wider">
+            <span className="text-xs font-medium text-status-blue">
               YARA Rules
             </span>
             <Provenance section={yaraSection} />
@@ -175,7 +175,7 @@ export default function RulesTab() {
         <Section title={`Sigma Matches (${sigmaMatches.length})`} defaultOpen={true}>
           <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-border bg-bg-elevated">
             <span className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              <span className="text-xs font-medium text-text-primary">
                 Sigma Rules
               </span>
               <Provenance section={sigmaSection} />

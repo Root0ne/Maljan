@@ -281,7 +281,7 @@ test.describe("Analysis page", () => {
     await nav.getByRole("link", { name: /^Network/ }).click();
     await expect(page).toHaveURL(`${BASE}/network`);
     await expect(nav.getByRole("link", { name: /^Network/ })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("heading", { name: /Domains/i }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Hosts/ })).toBeVisible();
 
     await nav.getByRole("link", { name: /^Evidence/ }).click();
     await expect(page).toHaveURL(`${BASE}/evidence`);

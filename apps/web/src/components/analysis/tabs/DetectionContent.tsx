@@ -1,116 +1,71 @@
 "use client";
 
 import { useReport } from "@/components/analysis/AnalysisContext";
-import ReportAbsent from "@/components/analysis/ReportAbsent";
-import { reportAbsence } from "@/components/analysis/reportAbsence";
+import Section from "@/components/ui/Section";
 import RuleMatchesPanel from "@/components/analysis/RuleMatchesPanel";
 import GeneratedRulesPanel from "@/components/analysis/GeneratedRulesPanel";
 import StixPanel from "@/components/analysis/StixPanel";
-import IndicatorsPanel from "@/components/analysis/IndicatorsPanel";
-import { hasIndicators } from "@/components/analysis/indicators";
+import IocBrowser from "@/components/analysis/IocBrowser";
 import { hasRuleMatches } from "@/components/analysis/ruleMatches";
 
 /**
- * Unified "Detection" tab.
- *
- * The two features that used to live in separate SIGNATURES and RULES tabs are
- * genuinely different things, and their old names implied the opposite of what
- * they showed. They are merged here under one tab with two clearly-labelled,
- * self-explanatory sections:
- *
- *   1. Rule matches from analysis  — YARA/Sigma rules that fired against the
- *      sample during this analysis (drives the ATT&CK techniques).
- *   2. Generated detection rules   — draft YARA/Sigma/Suricata rules Maljan
- *      produced for you to deploy to your own SOC tooling.
- *
- * Beside them, the indicators the export is made of: the consolidated IOC
- * table with each row's publish decision and reason, and the judge's own
- * indicators.
+ * Indicators and detection, in the order a reader acts on them: every
+ * indicator, browsable by type and export decision, each with its reason and
+ * what else the report says about it; the rules that fired against the
+ * sample during the analysis; the rules the analysis wrote for a reader to
+ * deploy, one list with a copy and a download per rule; and the STIX bundle
+ * the export is made of, drawn on request.
  */
-export default function DetectionTab() {
-  const { report, job, loading, reportError } = useReport();
+export default function DetectionContent() {
+  const { report } = useReport();
   const mr = report?.malware_report;
   const generated = mr?.detection_signatures ?? [];
   const matched = hasRuleMatches(report?.agent_findings, mr?.sections);
   // A bundle with no objects in it is a bundle nobody wants to export.
   const stix = Object.keys(mr?.stix_bundle_extended ?? report?.stix_bundle ?? {}).length > 0;
-  const indicators = hasIndicators(mr);
-
-  if (loading) {
-    return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
-  }
-  /* No report is not an empty report (`reportAbsence`). */
-  const absent = reportAbsence({ report, job, reportError });
-  if (absent) return <ReportAbsent absence={absent} />;
 
   return (
-    <div className="space-y-6">
-      {matched && (
-        <section>
-          <div className="mb-3">
-            <h2 className="text-sm font-semibold text-text-primary">
-              Rule matches from analysis
-            </h2>
-            <p className="text-xs text-text-muted mt-0.5">
-              Deterministic YARA / Sigma rules that fired against this sample
-              during analysis. These matches feed the ATT&amp;CK technique mapping.
-            </p>
-          </div>
-          <RuleMatchesPanel />
-        </section>
-      )}
+    <div className="space-y-4">
+      <div id="iocs" className="scroll-mt-40">
+        <IocBrowser mr={mr} />
+      </div>
 
-      {generated.length > 0 && (
-        <section>
-          <div className="mb-3 pt-4 border-t border-border">
-            <h2 className="text-sm font-semibold text-text-primary">
-              Generated detection rules
-            </h2>
-            <p className="text-xs text-text-muted mt-0.5">
-              Draft YARA / Sigma / Suricata rules Maljan generated from this
-              sample&apos;s IOCs — copy or download each one below into your own SOC tooling, or every rule of a kind from Export at the top of the page.
+      <div id="rule-matches" className="scroll-mt-40">
+        <Section title="Rules that fired" empty={!matched}>
+          <div className="space-y-3">
+            <p className="text-xs text-text-muted">
+              Deterministic YARA and Sigma rules that fired against this sample during analysis. These matches feed
+              the ATT&amp;CK technique mapping.
             </p>
+            <RuleMatchesPanel />
           </div>
-          <GeneratedRulesPanel />
-        </section>
-      )}
+        </Section>
+      </div>
 
-      {indicators && (
-        <section>
-          <div className="mb-3 pt-4 border-t border-border">
-            <h2 className="text-sm font-semibold text-text-primary">
-              Indicators and their export
-            </h2>
-            <p className="text-xs text-text-muted mt-0.5">
-              Every indicator the report recorded, typed, with whether the STIX
-              export publishes it and the publish rule&apos;s reason.
+      <div id="generated-rules" className="scroll-mt-40">
+        <Section title="Generated detection rules" count={generated.length || null} empty={generated.length === 0}>
+          <div className="space-y-3">
+            <p className="text-xs text-text-muted">
+              Draft YARA, Sigma and Suricata rules generated from this sample&apos;s indicators, for your own
+              detection tooling.
             </p>
+            <GeneratedRulesPanel />
           </div>
-          <IndicatorsPanel mr={mr} />
-        </section>
-      )}
+        </Section>
+      </div>
 
-      {stix && (
-        <section>
-          <div className="mb-3 pt-4 border-t border-border">
-            <h2 className="text-sm font-semibold text-text-primary">
-              STIX 2.1 bundle (export)
-            </h2>
-            <p className="text-xs text-text-muted mt-0.5">
-              Machine-readable STIX 2.1 bundle for sharing with other tooling,
-              drawn as a relationship graph, listed as a table, or shown as
-              JSON to copy; the bundle itself downloads from Export at the top of the page.
+      <div id="stix" className="scroll-mt-40">
+        <Section title="STIX 2.1 objects" empty={!stix} collapsible defaultOpen={false}>
+          <div className="space-y-3">
+            <p className="text-xs text-text-muted">
+              The machine-readable bundle the export shares with other tooling, drawn as a relationship graph,
+              listed as a table, or shown as JSON to copy; the bundle itself downloads from Export at the top of the
+              page.
             </p>
+            <StixPanel />
           </div>
-          <StixPanel />
-        </section>
-      )}
-
-      {!matched && generated.length === 0 && !indicators && !stix && (
-        <p className="p-8 text-center text-sm text-text-secondary">
-          No rule fired on this sample, and the run wrote none of its own.
-        </p>
-      )}
+        </Section>
+      </div>
     </div>
   );
 }

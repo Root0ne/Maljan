@@ -75,7 +75,7 @@ export default function AttributionTab() {
     <div className="space-y-4">
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          <h2 className="text-sm font-semibold text-text-primary">
             Family Attribution
           </h2>
         </div>
@@ -186,7 +186,7 @@ export default function AttributionTab() {
       {similars.length > 0 && (
         <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+            <h2 className="text-sm font-semibold text-text-primary">
               Similar Samples ({similars.length})
             </h2>
           </div>
@@ -244,7 +244,7 @@ function EvidenceTable({
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border">
-        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        <h2 className="text-sm font-semibold text-text-primary">
           {title}
         </h2>
         <p className="mt-1 text-[11px] text-text-muted">{note}</p>
@@ -307,12 +307,12 @@ function SimilarSampleCard({ sample }: { sample: SimilarSample }) {
             </button>
           )}
           {sample.malware_category && (
-            <span className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
+            <span className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
               {sample.malware_category}
             </span>
           )}
           {sample.source && (
-            <span className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue">
+            <span className="text-[11px] px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue">
               {sample.source}
             </span>
           )}

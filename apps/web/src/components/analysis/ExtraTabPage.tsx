@@ -47,7 +47,7 @@ export default function ExtraTabPage({ kind }: { kind: ExtraTabKind }) {
   return (
     <div className="space-y-4">
       {tab.claims && <AnalystFindings findings={[tab.claims]} />}
-      <ArtifactSections sections={tab.sections} />
+      <ArtifactSections sections={tab.sections} showKey />
     </div>
   );
 }

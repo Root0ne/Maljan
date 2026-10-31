@@ -206,6 +206,25 @@ describe("a tab earned by the ledger rather than by a typed block", () => {
     expect(tabHasContent("/dynamic", withSection)).toBe(true);
   });
 
+  it("fills STATIC for a recovered configuration with no static block (T-465)", () => {
+    // The configuration's table is drawn on Static & code alone, and the
+    // technical analysis on Behaviour links there: the block must be drawn.
+    const configOnly = report({
+      malware_report: malwareReport({
+        static: null,
+        sections: [],
+        technical_analysis: {
+          configuration: [{ key: "C2 host", value: "c2.test", how_obtained: "decrypted", evidence_refs: [] }],
+        },
+      } as Partial<MalwareReport>),
+    });
+    expect(tabHasContent("/static", configOnly)).toBe(true);
+    const neither = report({
+      malware_report: malwareReport({ static: null, sections: [], technical_analysis: { configuration: [] } } as Partial<MalwareReport>),
+    });
+    expect(tabHasContent("/static", neither)).toBe(false);
+  });
+
   it("does not offer DYNAMIC for a sandbox section that returned nothing", () => {
     const empty = report({
       malware_report: malwareReport({ sections: [section({ rows: [] })] }),
