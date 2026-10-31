@@ -1,6 +1,7 @@
 "use client";
 
 import { CONFIDENCE_BAR_COLOR, confidencePercent } from "./agentConfidence";
+import SafeMarkdown from "./SafeMarkdown";
 import { useReport } from "@/components/analysis/AnalysisContext";
 import { rosterNames } from "@/lib/rosterNames";
 import { statusTone } from "@/lib/status";
@@ -236,11 +237,17 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
                     <span className="text-xs text-text-muted font-mono">{agent.revision_rounds}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-xs text-text-secondary" title={agent.key_finding}>
-                      {agent.key_finding.length > 120
-                        ? agent.key_finding.slice(0, 117) + "..."
-                        : agent.key_finding}
-                    </span>
+                    {/* The whole finding is in the cell, as markdown, clamped
+                        to two lines; the title holds it for a pointer. */}
+                    <div className="line-clamp-2 text-xs text-text-secondary" title={agent.key_finding}>
+                      <SafeMarkdown
+                        markdown={agent.key_finding}
+                        cite
+                        inline
+                        regionName={`${agent.name} key finding`}
+                        className=""
+                      />
+                    </div>
                   </td>
                 </tr>
               );

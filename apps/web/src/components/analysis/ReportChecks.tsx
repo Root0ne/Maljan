@@ -1,5 +1,6 @@
 import type { MalwareReport } from "@/types/malware-report";
 import EvidenceChips from "./EvidenceChips";
+import SafeMarkdown from "./SafeMarkdown";
 import {
   claimTechniques,
   claimsNotDiscussed,
@@ -64,7 +65,13 @@ export default function ReportChecks({ mr }: { mr: MalwareReport }) {
                     {techniques && (
                       <span className="text-[11px] text-text-muted">({techniques}) </span>
                     )}
-                    {claim.claim}
+                    <SafeMarkdown
+                      markdown={claim.claim}
+                      cite
+                      inline
+                      regionName={`${claim.agent} claim ${claim.claim_number}`}
+                      className=""
+                    />
                     {(claim.missing ?? []).length > 0 && (
                       <span className="ml-2 text-[11px] text-text-muted">
                         not named in the body: {(claim.missing ?? []).join(", ")}

@@ -13,7 +13,6 @@ import {
   EMPTY_OPTIONS,
   EVIDENCE_PAGE_SIZE,
   NO_FILTERS,
-  argsDetail,
   argsSummary,
   deepLinkView,
   emptyOutputNote,
@@ -25,9 +24,13 @@ import {
   mergeOptions,
   outputPreview,
   pageCount,
+  structuredOutput,
   withFilter,
   type EvidenceFilters,
 } from "./evidenceRows";
+
+/** The heading over each part of an open row: a label, in sentence case. */
+const DETAIL_HEADING = "mb-1 text-xs font-medium text-text-secondary";
 
 /**
  * The evidence ledger: one row per tool call the run made.
@@ -206,6 +209,8 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                   const summary = argsSummary(entry.args);
                   const showAllArgs = fullArgs.has(entry.entry_id);
                   const preview = outputPreview(entry.output, fullOutput.has(entry.entry_id));
+                  /* Parsed only for an open row: a JSON output is laid out, text stays text. */
+                  const parsedOutput = expanded ? structuredOutput(entry.output) : null;
                   const cited = deepLink === entry.entry_id;
                   const notes = entryNotes(entry);
                   return (
@@ -292,10 +297,9 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                             )}
                             {entry.args_repaired && entry.args_raw && (
                               <div>
-                                <h3 className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
-                                  Arguments as the model wrote them
-                                </h3>
-                                <pre className="text-[11px] text-text-secondary overflow-auto max-h-64 whitespace-pre-wrap break-all">
+                                <h3 className={DETAIL_HEADING}>Arguments as the model wrote them</h3>
+                                {/* The literal text, kept raw on purpose: it is what was repaired. */}
+                                <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded border border-border-light bg-bg-surface px-3 py-2 font-mono text-[11px] leading-5 text-text-secondary">
                                   {entry.args_raw}
                                 </pre>
                               </div>
@@ -316,21 +320,19 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                             )}
                             {(showAllArgs || !summary.truncated) && entry.args && (
                               <div>
-                                <h3 className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
-                                  Arguments
-                                </h3>
-                                <pre className="text-[11px] text-text-secondary overflow-auto max-h-64 whitespace-pre-wrap break-all">
-                                  {argsDetail(entry.args)}
-                                </pre>
+                                <h3 className={DETAIL_HEADING}>Arguments</h3>
+                                {/* Laid out as fields; "View raw" prints them as JSON. */}
+                                <StructuredValue value={entry.args} name={`Arguments of ${entry.entry_id}`} />
                               </div>
                             )}
                             <div>
-                              <h3 className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
-                                Output
-                              </h3>
-                              {entry.output ? (
+                              <h3 className={DETAIL_HEADING}>Output</h3>
+                              {entry.output && parsedOutput !== null ? (
+                                <StructuredValue value={parsedOutput} name={`Output of ${entry.entry_id}`} />
+                              ) : entry.output ? (
                                 <>
-                                  <pre className="text-[11px] text-text-secondary overflow-auto max-h-96 whitespace-pre-wrap break-all">
+                                  {/* Text, not data: shown as written, a page at a time. */}
+                                  <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded border border-border-light bg-bg-surface px-3 py-2 font-mono text-[11px] leading-5 text-text-secondary">
                                     {preview.text}
                                   </pre>
                                   {preview.hidden > 0 && (
@@ -360,9 +362,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                             </div>
                             {entry.structured != null && (
                               <div>
-                                <h3 className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
-                                  Structured
-                                </h3>
+                                <h3 className={DETAIL_HEADING}>Structured</h3>
                                 <StructuredValue
                                   value={entry.structured}
                                   name={`Structured output of ${entry.entry_id}`}

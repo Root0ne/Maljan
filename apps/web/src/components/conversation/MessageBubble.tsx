@@ -17,6 +17,7 @@
 
 import { useState } from "react";
 import { ArrowRight, CircleHelp, Gavel } from "lucide-react";
+import SafeMarkdown from "@/components/analysis/SafeMarkdown";
 
 import { retryAddedLabel, type ConversationItem } from "@/lib/conversation";
 import { statusTone } from "@/lib/status";
@@ -119,12 +120,19 @@ export default function MessageBubble({
               Question
             </span>
           )}
-          <p className="whitespace-pre-wrap text-xs leading-relaxed text-text-primary">
-            {item.text}
+          {/* What the agent said is markdown; a turn still arriving is drawn
+              as far as it has come, with the cursor after it. */}
+          <div className="text-xs leading-relaxed text-text-primary">
+            <SafeMarkdown
+              markdown={item.text}
+              cite
+              regionName={`${item.speaker} message ${item.id}`}
+              className="space-y-2 break-words"
+            />
             {item.streaming && (
               <span className="ml-1 inline-block h-3 w-1.5 align-middle bg-text-muted animate-pulse" aria-hidden="true" />
             )}
-          </p>
+          </div>
 
           {item.dissent.length > 0 && (
             <p className="mt-1.5 text-[11px] text-status-orange">
@@ -181,10 +189,17 @@ export default function MessageBubble({
           )}
 
           {openReport && item.report && (
-            <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap border-t border-border-light pt-2 font-sans text-[11px] leading-relaxed text-text-secondary">
-              {item.report}
-              {item.reportTruncated ? "\n\n[The producer cut this report at its size limit.]" : ""}
-            </pre>
+            <div className="mt-2 border-t border-border-light pt-2">
+              <SafeMarkdown
+                markdown={item.report}
+                cite
+                regionName={`${item.speaker} report ${item.id}`}
+                className="space-y-2 text-[11px] leading-relaxed text-text-secondary break-words"
+              />
+              {item.reportTruncated && (
+                <p className="mt-2 text-[11px] italic text-text-muted">The producer cut this report at its size limit.</p>
+              )}
+            </div>
           )}
         </div>
       </div>

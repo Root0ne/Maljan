@@ -24,6 +24,7 @@ import Section from "@/components/ui/Section";
 import { useReport } from "@/components/analysis/AnalysisContext";
 import PipelineStrip from "@/components/analysis/PipelineStrip";
 import ReportChecks from "@/components/analysis/ReportChecks";
+import { StructuredCell } from "@/components/analysis/StructuredValue";
 import { formatStageDuration, stageTiming } from "@/components/analysis/stageTimeline";
 import { jobStopNote } from "@/lib/runFailure";
 import { correctionLine } from "./correctionLine";
@@ -328,11 +329,6 @@ function StageTimingCard({
   );
 }
 
-/** A job-config value as one line: a string as itself, anything else as JSON. */
-function configValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  return JSON.stringify(value);
-}
 
 /**
  * What this run was told to do, and what it spent doing it.
@@ -381,14 +377,16 @@ function RunRecord({
           {configRows.length === 0 ? (
             <p className="text-text-muted">Submitted with the stored settings, unchanged.</p>
           ) : (
-            <ul className="space-y-1">
+            <dl className="grid grid-cols-[minmax(6rem,max-content)_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11px]">
               {configRows.map(([key, value]) => (
-                <li key={key} className="font-mono text-[11px]">
-                  <span className="text-text-muted">{key}: </span>
-                  {configValue(value)}
-                </li>
+                <div key={key} className="contents">
+                  <dt className="font-mono text-text-muted">{key}</dt>
+                  <dd className="min-w-0 font-mono text-text-secondary">
+                    <StructuredCell value={value} name={`Configuration ${key}`} />
+                  </dd>
+                </div>
               ))}
-            </ul>
+            </dl>
           )}
           {/* What the configuration left out (a key never set, a server
               switched off, a tool a shared server withholds by policy). It

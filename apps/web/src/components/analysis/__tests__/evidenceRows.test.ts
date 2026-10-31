@@ -6,7 +6,7 @@ import {
   EMPTY_OPTIONS,
   EVIDENCE_PAGE_SIZE,
   NO_FILTERS,
-  argsDetail,
+  structuredOutput,
   argsSummary,
   deepLinkView,
   emptyOutputNote,
@@ -121,12 +121,19 @@ describe("the arguments cell", () => {
     expect(summary.text).toHaveLength(ARGS_SUMMARY_CHARS + 1);
   });
 
-  it("indents the whole object for the expanded row", () => {
-    expect(argsDetail({ a: 1 })).toBe('{\n  "a": 1\n}');
-  });
 });
 
 describe("the output disclosure", () => {
+  it("lays out an output that is a JSON object or list, and leaves text as text", () => {
+    expect(structuredOutput('{"pid": 4, "rows": [{"a": 1}]}')).toEqual({ pid: 4, rows: [{ a: 1 }] });
+    expect(structuredOutput("  [1, 2]\n")).toEqual([1, 2]);
+    // A scalar, prose, a broken document and an empty output are text.
+    for (const text of ["42", '"a"', "found 3 strings", "{not json", "", null]) {
+      expect(structuredOutput(text)).toBeNull();
+    }
+    expect(structuredOutput(`[${"1,".repeat(300_000)}1]`)).toBeNull();
+  });
+
   it("shows a short output whole and offers nothing more", () => {
     expect(outputPreview("hello", false)).toEqual({ text: "hello", hidden: 0 });
   });

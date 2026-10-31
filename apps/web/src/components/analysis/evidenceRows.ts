@@ -106,16 +106,6 @@ export function argsSummary(
   return { text: `${full.slice(0, limit)}…`, truncated: true };
 }
 
-/** The full argument object, indented, for an expanded row. */
-export function argsDetail(args: Record<string, unknown> | null | undefined): string {
-  if (!args) return "";
-  try {
-    return JSON.stringify(args, null, 2);
-  } catch {
-    return String(args);
-  }
-}
-
 /**
  * The values each filter offers, accumulated across the pages seen so far.
  *
@@ -146,6 +136,26 @@ export const EMPTY_OPTIONS: Record<keyof EvidenceFilters, string[]> = {
   agent: [],
   tool: [],
 };
+
+/** Above this many characters an output is shown as its text, never parsed. */
+export const MAX_PARSED_OUTPUT_CHARS = 500_000;
+
+/**
+ * A tool output that is a JSON object or list, parsed, so it can be laid out
+ * as fields and tables; null for text, for a scalar, for anything that does
+ * not parse, and for an output too large to lay out, all of which are shown
+ * as the text they are.
+ */
+export function structuredOutput(output: string | null | undefined): unknown {
+  const body = (output ?? "").trim();
+  if (!body || body.length > MAX_PARSED_OUTPUT_CHARS || !/^[[{]/.test(body)) return null;
+  try {
+    const value: unknown = JSON.parse(body);
+    return typeof value === "object" && value !== null ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 /** How much of a tool's output an unexpanded disclosure shows. */
 export const OUTPUT_PREVIEW_CHARS = 2_000;
