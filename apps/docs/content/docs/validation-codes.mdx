@@ -76,9 +76,9 @@ A rewrite that leaves out an id the sentence it replaces cites.
 
 ### `agreement.rewrite_ungrounded`
 
-A rewrite that cites none of the ids its sources cite, or rests only on sources that cite none.
+A rewrite that cites none of the ids its sources cite, or rests only on sources that cite none; for a section 5 sentence, one resting only on facts about nothing the sentence or its passage names (the routine or its caller, the address, the value or the call), or with no clause of their own.
 
-- **Raised at** `maljan.reporting.section_agreement:_grounding_violations`
+- **Raised at** `maljan.reporting.section_agreement:_grounding_violations`, `maljan.reporting.section_agreement:_row_violations`
 - **Constant** `maljan.reporting.section_agreement:REWRITE_UNGROUNDED_CODE`
 - **Docs** none
 

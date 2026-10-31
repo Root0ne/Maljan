@@ -15,7 +15,11 @@ So, after every section is written, the reporter's model is shown, once:
 
 - the facts the platform states: each decoded text the code passes to an API
   argument (``report.bound_values``), in the words every surface that
-  publishes it uses (``call_bindings.binding_words``);
+  publishes it uses (``call_bindings.binding_words``); each routine a read
+  routine calls whose code no entry lists, a fact of its own where a passage
+  names it (the rest counted), and each failed call for an address with the
+  later call that answered for it (``reporting.agreement_facts``), read off
+  the ledger;
 - section 5's passages written from the code: each prose subsection and each
   row of the configuration, command and flag tables, with the ids it cites;
 - the debate's mediations, in round order, as the mediator wrote them;
@@ -27,12 +31,15 @@ a fact or a closed debate line states, and each sentence of a section 5
 passage a fact contradicts; names the sources; and keeps the sentence or
 rewrites it. Nothing here reads a sentence's words: which sentences, and on
 which subject, is the model's call. A sentence of a passage written without
-the code may be rewritten; a section 5 passage and a table cell's value are
-shown for reading, and a sentence of one is listed and kept (no structure
-tells which fact a sentence of section 5 is about), the listing recorded as
-the model's answer. Code checks the answer's structure: the passage is one it
+the code may be rewritten on any source; a sentence of a section 5 prose
+passage only on the platform's facts, never on another model's words (a
+section 5 sentence was pulled toward an analyst's wrong claim when it could
+be), and kept, it is listed, the listing recorded as the model's answer; a
+table cell's value is shown for reading, and a sentence of one is listed and
+kept. Code checks the answer's structure: the passage is one it
 was shown, the copied text is one whole sentence of it standing there once,
-a section 5 passage is answered by a fact alone, and a rewrite keeps every id
+a section 5 passage is answered by a fact alone, about an address or a value
+the sentence or its rewrite names, and a rewrite keeps every id
 its sentence cites, cites at least one id its sources cite (sources citing no
 id ground no rewrite) and no id that neither they nor the passage cite;
 and it reads each rewrite as the report rounds read their prose (its
@@ -49,6 +56,7 @@ Every step is one pass over the passages and the answer's rows.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
@@ -56,7 +64,11 @@ from typing import Any, Literal
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from maljan.agents.tool_fence import QUOTED_VALUE_STATEMENT, quoted_value
+from maljan.agents.tool_fence import (
+    QUOTED_VALUE_STATEMENT,
+    quoted_value,
+    template_tokens_written_out,
+)
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
 from maljan.pipeline.events import safe_finding_value
@@ -64,6 +76,7 @@ from maljan.pipeline.validation import (
     EntryTexts,
     ValidationTally,
     Violation,
+    _addresses_written,
     citation_violations,
     ledger_absence_contradictions,
     misstated_entry_contents,
@@ -81,7 +94,7 @@ from maljan.reporting.models import (
     TechnicalSubsection,
 )
 from maljan.schemas.evidence import entry_ids_in
-from maljan.utils.written_forms import pack_reads
+from maljan.utils.written_forms import pack_escaped, pack_reads
 
 # The producer the round's unresolved findings are recorded under.
 AGREEMENT_PRODUCER = "agreement"
@@ -102,7 +115,9 @@ REWRITE_CITES_ELSEWHERE_CODE = "agreement.rewrite_cites_elsewhere"
 # A rewrite that leaves out an id the sentence it replaces cites.
 REWRITE_DROPS_CITATION_CODE = "agreement.rewrite_drops_citation"
 # A rewrite that cites none of the ids its sources cite, or rests only on
-# sources that cite none.
+# sources that cite none; for a section 5 sentence, one resting only on facts
+# about nothing the sentence or its passage names (the routine or its caller,
+# the address, the value or the call), or with no clause of their own.
 REWRITE_UNGROUNDED_CODE = "agreement.rewrite_ungrounded"
 # A sentence the agreement question rewrote: what stood, what replaced it and
 # on which sources, recorded as the model's answer.
@@ -150,6 +165,16 @@ class Passage:
     kind: str
     cites: frozenset[str] = frozenset()
     write: Callable[[str], None] | None = None
+    # What a fact is about, which a section 5 sentence it grounds a rewrite of
+    # must name: the addresses it names, in every spelling, or its value.
+    addresses: frozenset[int] = frozenset()
+    value: str = ""
+    # The call a bound value is passed to, by the API's name.
+    call: str = ""
+    # The fact's own clause, which the platform adds to a section 5 sentence
+    # the model chose to qualify on it (``_qualified``); none for a fact that
+    # grounds no rewrite.
+    qualifier: str = ""
 
 
 def _ids(*sources: Any) -> frozenset[str]:
@@ -220,6 +245,7 @@ def passages_of(
     *,
     narrative_written: bool = True,
     discussion: Iterable[Any] = (),
+    entries: Iterable[Any] = (),
 ) -> list[Passage]:
     """Every passage the round is shown, in the order the prompt lists them.
 
@@ -227,7 +253,8 @@ def passages_of(
     the debate's mediations, then the passages written without the code. The
     key findings and the summary are asked about only when the narrative round
     wrote them (``narrative_written``): the platform's own fallback is not the
-    report model's to rewrite.
+    report model's to rewrite. ``entries`` is the run's ledger, in its order,
+    which the facts after the bound values are read off.
     """
     from maljan.reporting.call_bindings import binding_words
     from maljan.reporting.composer import COMPOSED_SECTIONS
@@ -244,6 +271,21 @@ def passages_of(
                 text=f"{quoted_value(bound.value)}: {quoted_value(binding_words(bound))}",
                 kind=FACT,
                 cites=_ids([bound.entry, bound.named_by]),
+                addresses=frozenset(
+                    address
+                    for address in (
+                        _hex_address(where)
+                        for where in (bound.function, bound.site, bound.decoder_call, bound.call_at)
+                    )
+                    if address is not None
+                ),
+                value=str(bound.value or ""),
+                call=str(bound.api or ""),
+                qualifier=(
+                    f'the code passes "{_sample_text(bound.value)}" to '
+                    f"{_sample_text(bound.api)} as argument {bound.argument}"
+                    + (f" ({_sample_text(bound.parameter)})" if bound.parameter else "")
+                ),
             )
         )
 
@@ -262,9 +304,9 @@ def passages_of(
                 text=sub.body,
                 kind=kind,
                 cites=_ids(sub.evidence_refs, sub.body),
-                # Section 5 is read, not rewritten: no structure tells which
-                # fact a sentence of it is about.
-                write=None if kind == SECTION_5 else _setter(sub, "body"),
+                # A section 5 sentence is rewritten on a platform fact alone
+                # (``_row_violations`` names the sources it may rest on).
+                write=_setter(sub, "body"),
             )
         )
     if ta is not None:
@@ -371,7 +413,135 @@ def passages_of(
                 write=_setter(report, "intro_background"),
             )
         )
+    shown = [*facts, *coded, *debate, *uncoded]
+    facts.extend(_ledger_passages(entries, shown))
     return [*facts, *coded, *debate, *uncoded]
+
+
+def _sample_text(text: Any) -> str:
+    """Text the sample may control, as the composer writes it in prose: escaped, every
+    ledger id and every chat-template token written out, so it can neither cite an
+    entry nor speak as the template."""
+    return template_tokens_written_out(pack_escaped(str(text or ""), ids=True, delimiters=True))
+
+
+def _hex_address(where: str) -> int | None:
+    """An address a bound value's record writes (``0x…``), or ``None``."""
+    found = re.fullmatch(r"\s*0x([0-9a-fA-F]{1,16})\s*", str(where or ""))
+    return int(found.group(1), 16) if found else None
+
+
+def _named_addresses(passages: Iterable[Passage]) -> set[int]:
+    """Every address the passages write, as the absence check reads one (``0x…``, a
+    decompiler's name, ``…h``, bare hex). One pass over each text."""
+    named: set[int] = set()
+    for passage in passages:
+        named.update(_addresses_written(passage.text))
+    return named
+
+
+def _spelled_both(addresses: Iterable[int], bases: Sequence[int]) -> frozenset[int]:
+    """Each address and its offset, where the one image base read makes one."""
+    out: set[int] = set()
+    for address in addresses:
+        out.add(address)
+        if len(bases) == 1 and address >= bases[0]:
+            out.add(address - bases[0])
+    return frozenset(out)
+
+
+def _offsets(addresses: Sequence[int], bases: Sequence[int]) -> str:
+    """Addresses by their offsets where the one base read makes them offsets, else as written."""
+    if len(bases) == 1 and all(a >= bases[0] for a in addresses):
+        word = "offset " if len(addresses) == 1 else "offsets "
+        return word + ", ".join(hex(a - bases[0]) for a in addresses)
+    return ", ".join(hex(a) for a in addresses)
+
+
+# What a fact about a routine whose code no entry lists says, in the facts' words.
+_NOT_LISTED = "no entry lists its code (decompiled or disassembled)"
+
+
+def _ledger_passages(entries: Iterable[Any], shown: Sequence[Passage]) -> list[Passage]:
+    """The ledger's facts as passages: the unread callees, then each failed call answered later.
+
+    An unread callee is a fact of its own where a passage shown names its
+    address; the ones no passage names are one count, citing nothing: a
+    routine no passage names bears on no sentence by its address, and listing
+    each one per caller cost the prompt more than every fact of its own. Which
+    passage a fact bears on is the model's call. The addresses are the
+    platform's own; a tool's name is the run's record of a server's word, one
+    quoted value.
+    """
+    from maljan.reporting.agreement_facts import ledger_facts, spelled
+
+    held = list(entries or ())
+    if not held:
+        return []
+    found = ledger_facts(held)
+    bases = found.image_bases
+    named = _named_addresses(shown)
+    out: list[Passage] = []
+    left = 0
+    for unread in found.unread:
+        cites = _ids([*unread.read_in, *unread.stated_in])
+        if _spelled_both([unread.address], bases) & named:
+            plural = "routine" if len(unread.callers) == 1 else "routines"
+            out.append(
+                Passage(
+                    id=f"unread.{len(out) + 1}",
+                    label="routine a read routine calls whose code no entry lists",
+                    # The entries that read the callers and state the calls are
+                    # the passage's citations, listed beside it.
+                    text=(
+                        f"{spelled(unread.address, bases)} is called by the read {plural} at "
+                        f"{_offsets(unread.callers, bases)}; {_NOT_LISTED}"
+                    ),
+                    kind=FACT,
+                    cites=cites,
+                    addresses=_spelled_both([unread.address, *unread.callers], bases),
+                    qualifier=(
+                        f"the routine at {_offsets([unread.address], bases)}, called by the "
+                        f"read {plural} at {_offsets(unread.callers, bases)}, has no listed "
+                        "code (decompiled or disassembled)"
+                    ),
+                )
+            )
+            continue
+        left += 1
+    if left:
+        out.append(
+            Passage(
+                id=f"unread.{len(out) + 1}",
+                label="routines read routines call whose code no entry lists",
+                text=(
+                    f"{left} more {'routine' if left == 1 else 'routines'} that read routines "
+                    f"call, none of them named by a passage; for each, {_NOT_LISTED}"
+                ),
+                kind=FACT,
+            )
+        )
+    for index, link in enumerate(found.answered, 1):
+        out.append(
+            Passage(
+                id=f"answered.{index}",
+                label="failed call answered by a later call for the same address",
+                text=(
+                    f"{link.failed} ({quoted_value(link.failed_tool)}) for "
+                    f"{spelled(link.address, bases)} failed; the later call {link.answered} "
+                    f"({quoted_value(link.answered_tool)}) for the same address answered"
+                ),
+                kind=FACT,
+                cites=_ids([link.failed, link.answered]),
+                addresses=_spelled_both([link.address], bases),
+                qualifier=(
+                    f"a later call for {_offsets([link.address], bases)} answered it"
+                    # Read only where the answer is a listing of the code there.
+                    + (", so the address was not left unread" if link.answered_lists_code else "")
+                ),
+            )
+        )
+    return out
 
 
 def _field(obj: Any, name: str) -> Any:
@@ -517,7 +687,14 @@ def _form(value: Any) -> str:
 
 
 def _writable(passage: Passage) -> bool:
-    return passage.write is not None and passage.kind == CLAIM_LED
+    """Whether a sentence of the passage may be rewritten: prose written without the code,
+    or section 5 prose, whose rows rest on facts alone (``_row_violations``)."""
+    return passage.write is not None and passage.kind in (CLAIM_LED, SECTION_5)
+
+
+def _listed_when_kept(passage: Passage) -> bool:
+    """Whether a kept sentence of the passage is recorded as listed: section 5, or read only."""
+    return passage.kind == SECTION_5 or not _writable(passage)
 
 
 def _row_violations(
@@ -584,7 +761,8 @@ def _row_violations(
                     f"{safe_finding_value(', '.join(wrong))} as what "
                     f"states otherwise than {safe_finding_value(passage.id)}, but "
                     + (
-                        "a section 5 passage is answered by a platform fact (bound.N) alone."
+                        "a section 5 passage is answered by a platform fact (bound.N, "
+                        "unread.N, answered.N) alone."
                         if passage.kind == SECTION_5
                         else "only the facts, the section 5 passages and the debate rounds "
                         "listed are sources."
@@ -595,8 +773,131 @@ def _row_violations(
             )
         )
     if row.decision == "rewrite" and _writable(passage):
-        out.extend(_grounding_violations(row, index, passage, [s for s in sources if s], span))
+        # Only a source the passage may rest on grounds its rewrite: a section
+        # 5 sentence's, a fact about what the sentence or its rewrite names.
+        grounds = [s for s in sources if s is not None and s.kind in allowed]
+        if passage.kind == SECTION_5:
+            about = [s for s in grounds if _grounds_section_5(s, row, passage)]
+            if about and span is not None and row.rewrite != _qualified(span[2], about):
+                # Every section 5 rewrite is the platform's (``_platform_rewrites``):
+                # a row carrying other words is not one.
+                about = []
+            if grounds and not about:
+                out.append(
+                    Violation(
+                        code=REWRITE_UNGROUNDED_CODE,
+                        message=(
+                            f"row {safe_finding_value(index + 1)}: "
+                            f"{safe_finding_value(', '.join(s.id for s in grounds))} "
+                            "is about nothing the sentence or its passage names. A fact "
+                            "qualifies a section 5 sentence only where the sentence or its "
+                            "passage names the routine, the address, the value or the call "
+                            "it is about. Keep the sentence."
+                        ),
+                        path=f"{path}.rewrite",
+                    )
+                )
+                out.extend(
+                    _grounding_violations(row, index, passage, grounds, span, ungrounded=False)
+                )
+                return out
+            grounds = about
+        out.extend(_grounding_violations(row, index, passage, grounds, span))
     return out
+
+
+def _grounds_section_5(fact: Passage, row: AgreementRow, passage: Passage) -> bool:
+    """Whether a fact grounds a rewrite of a section 5 sentence: where the sentence or its
+    passage names what the fact is about (a routine whose code no entry lists or its
+    caller, the address of an answered call, a bound value, its call or where it is
+    passed). The platform writes the rewrite (``_qualified``); a fact with no clause of
+    its own grounds none."""
+    return _grounds(fact, row.sentence, passage)
+
+
+def _grounds(fact: Passage, sentence: str, passage: Passage) -> bool:
+    """:func:`_grounds_section_5` for a sentence as copied: a fact with a clause of its
+    own, about what the sentence or its passage names, whose clause the sentence does not
+    already carry."""
+    return (
+        bool(fact.qualifier)
+        and fact.qualifier.lower() not in sentence.lower()
+        and _about(fact, sentence, passage.text)
+    )
+
+
+def _qualified(sentence: str, facts: Sequence[Passage]) -> str:
+    """The sentence as written, with each fact's own clause and the entries they cite added.
+
+    The rewrite of a section 5 sentence on a fact is the platform's: the model
+    decides that the sentence is qualified, and its words for it are not read.
+    """
+    base = sentence.rstrip()
+    # A quote or a bracket closing after the end mark stays with the words it
+    # closes; the end mark moves after the clauses.
+    core = base.rstrip("\"')]")
+    closers = base[len(core) :]
+    end = "."
+    if core and core[-1] in ".!?":
+        end = core[-1]
+        base = core[:-1].rstrip() + closers
+    clauses = "; ".join(dict.fromkeys(fact.qualifier for fact in facts))
+    cites = "".join(f"[{c}]" for c in sorted(set().union(*(fact.cites for fact in facts))))
+    return f"{base}; {clauses} {cites}{end}"
+
+
+def _platform_rewrites(payload: Any, by_id: dict[str, Passage]) -> Any:
+    """The payload with each section 5 rewrite resting on a fact written by the platform:
+    the sentence unchanged and the facts' clauses (``_qualified``). Every other row as the
+    model wrote it. One pass over the rows."""
+    rows = payload.get("sentences") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return payload
+    out: list[Any] = []
+    for row in rows:
+        passage = by_id.get(_form(row.get("passage"))) if isinstance(row, dict) else None
+        if (
+            passage is not None
+            and passage.kind == SECTION_5
+            and isinstance(row, dict)
+            and row.get("decision") == "rewrite"
+        ):
+            named = row.get("sources")
+            standing = located(passage.text, str(row.get("sentence") or ""))
+            facts = [
+                fact
+                for fact in (
+                    by_id.get(_form(n)) for n in (named if isinstance(named, list) else [])
+                )
+                if fact is not None
+                and fact.kind == FACT
+                and standing
+                and _grounds(fact, standing, passage)
+            ]
+            if standing and facts:
+                row = {**row, "rewrite": _qualified(standing, facts)}
+        out.append(row)
+    return {**payload, "sentences": out}
+
+
+# A bound value is named only whole and at least this long: a shorter one is
+# part of too many words.
+_VALUE_FLOOR = 3
+
+
+def _about(fact: Passage, *texts: str) -> bool:
+    """Whether a fact is about what the texts name: an address it names, in any spelling
+    the absence check reads, or the value it binds or the call it is passed to, written
+    whole in one of them."""
+    joined = " ".join(texts)
+    for word in (fact.value, fact.call):
+        if len(word) >= _VALUE_FLOOR and re.search(
+            r"(?<!\w)" + re.escape(word) + r"(?!\w)", joined, re.IGNORECASE
+        ):
+            return True
+    return bool(fact.addresses) and any(
+        address in fact.addresses for address in _addresses_written(joined)
+    )
 
 
 def _grounding_violations(
@@ -605,8 +906,13 @@ def _grounding_violations(
     passage: Passage,
     sources: list[Passage],
     span: tuple[int, int, str, int] | None,
+    *,
+    ungrounded: bool = True,
 ) -> list[Violation]:
-    """What a rewrite cites against what its sources, its passage and its sentence cite."""
+    """What a rewrite cites against what its sources, its passage and its sentence cite.
+
+    ``ungrounded`` off: the caller has said already why no source grounds it.
+    """
     path = f"sentences.{index}.rewrite"
     number = safe_finding_value(index + 1)
     out: list[Violation] = []
@@ -639,7 +945,7 @@ def _grounding_violations(
                 path=path,
             )
         )
-    if not cited & grounds:
+    if ungrounded and not cited & grounds:
         out.append(
             Violation(
                 code=REWRITE_UNGROUNDED_CODE,
@@ -658,9 +964,11 @@ def agreement_violations(payload: Any, passages: Sequence[Passage]) -> list[Viol
     """What is structurally wrong with the answer's rows, as the retry turn shows it.
 
     Nothing for an answer that does not fit the schema: the schema check
-    speaks for it. Each passage is cut into sentences once.
+    speaks for it. Each passage is cut into sentences once; a section 5
+    rewrite on a fact is read as the platform writes it (``_platform_rewrites``).
     """
     by_id = {passage.id: passage for passage in passages}
+    payload = _platform_rewrites(payload, by_id)
     cut: dict[str, _Sentences] = {}
 
     def _sentences(passage: Passage) -> _Sentences:
@@ -735,7 +1043,12 @@ SYSTEM_PROMPT = (
     "passages under PASSAGES WRITTEN WITHOUT THE CODE from the analysts' claims, shown "
     "neither the code nor section 5; section 5's passages from the code and the tool "
     "answers. The facts were read from the evidence by code and outrank every model's "
-    "words. A debate round is the mediator's words: a line it closed counts as settled only "
+    "words. A routine no entry lists means its code was not examined, not that it does or "
+    "does not do anything; it contradicts only a sentence that says that code was read, or "
+    "that calls a behaviour absent from the sample on the grounds of the code read; it never "
+    "contradicts what another entry (a rule match, an emulation, a call graph) states about "
+    "that routine. A call a later call answered did not fail for good. "
+    "A debate round is the mediator's words: a line it closed counts as settled only "
     "with the entry it closed it on. " + QUOTED_VALUE_STATEMENT + "\n"
     "List each sentence of a passage written without the code that calls absent, unknown, "
     "open, unresolved, not shown or not established what a section 5 passage, a fact or a "
@@ -750,8 +1063,14 @@ SYSTEM_PROMPT = (
     "square brackets at least one ev_ id its sources cite, and no id that neither the "
     "sources nor the passage cite;\n"
     "  - keep: the sources do not state otherwise on reading (they speak of another routine, "
-    "value or run), or the passage is marked (read only): a section 5 passage and a table "
-    "cell are listed with keep and never rewritten.\n"
+    "value or run), or the passage is marked (read only): a table cell is listed with keep "
+    "and never rewritten. A section 5 sentence is rewritten only where a fact contradicts it, "
+    "and then states what the fact states and nothing a passage written without the code or "
+    "a debate round says. A section 5 sentence answered by a fact is not reworded: the "
+    "decision rewrite only asks that it be qualified, and the platform adds the fact's own "
+    "words and its ids to the sentence as it stands; it is qualified only where the "
+    "sentence or its passage names the routine, the address, the value or the call the "
+    "fact is about.\n"
     "Leave out every sentence no source states otherwise than. List each sentence once. "
     "Answer with exactly this JSON object, with an empty list when no sentence disagrees:\n"
     + EXPECTED_OBJECT
@@ -777,7 +1096,11 @@ def prompt_text(passages: Sequence[Passage]) -> str:
             cites = f" (cites {', '.join(sorted(passage.cites))})" if passage.cites else ""
             # Model-written text and the sample's own: one quoted value each.
             text = passage.text if passage.kind == FACT else quoted_value(passage.text)
-            shown = " (read only)" if passage.kind == CLAIM_LED and passage.write is None else ""
+            shown = (
+                " (read only)"
+                if passage.kind in (CLAIM_LED, SECTION_5) and passage.write is None
+                else ""
+            )
             lines.append(f"- [{passage.id}] {passage.label}{shown}{cites}: {text}")
         lines.append("")
     lines.extend(
@@ -827,9 +1150,12 @@ def apply_rows(
     its escapes read back has its rewrite read back the same way. Each rewrite
     put in is returned as a finding the model answered (``REWRITTEN_CODE``),
     with what stood; a sentence of a passage shown for reading is listed:
-    kept, and returned the same way (``LISTED_CODE``).
+    kept, and returned the same way (``LISTED_CODE``). A section 5 rewrite
+    resting on a routine whose code no entry lists is the platform's
+    (``_platform_rewrites``).
     """
     by_id = {passage.id: passage for passage in passages}
+    payload = _platform_rewrites(payload, by_id)
     cut: dict[str, _Sentences] = {}
 
     def _sentences(passage: Passage) -> _Sentences:
@@ -839,6 +1165,9 @@ def apply_rows(
 
     counts = {
         "passages": sum(1 for passage in passages if _writable(passage)),
+        "claim_led_passages": sum(
+            1 for passage in passages if _writable(passage) and passage.kind == CLAIM_LED
+        ),
         "sentences": 0,
         "rewritten": 0,
         "kept": 0,
@@ -853,7 +1182,9 @@ def apply_rows(
         passage = by_id.get(_form(row.passage))
         found = _row_violations(row, index, by_id, _sentences)
         if row.decision == "keep":
-            if passage is not None and not _writable(passage) and not found:
+            # A section 5 sentence a fact was listed against is recorded as
+            # listed, as it was before it could be rewritten.
+            if passage is not None and _listed_when_kept(passage) and not found:
                 counts["listed"] += 1
                 listed.append(
                     Violation(
@@ -862,8 +1193,7 @@ def apply_rows(
                             f"The agreement question lists a sentence of "
                             f"{safe_finding_value(passage.label)} as saying otherwise than "
                             f"{safe_finding_value(', '.join(_form(s) for s in row.sources))}; "
-                            "the passage is shown for reading, and the sentence stands as "
-                            "written."
+                            "the sentence stands as written."
                         ),
                         path=f"sentences.{index}",
                         answered=True,
@@ -883,8 +1213,10 @@ def apply_rows(
         ):
             counts["not_applied"] += 1
             continue
-        rewrite = " ".join(row.rewrite.split())
-        if span[3] >= 0:
+        # A section 5 rewrite is the platform's, built from the passage's own
+        # text: put in as it stands, never read back.
+        rewrite = row.rewrite if passage.kind == SECTION_5 else " ".join(row.rewrite.split())
+        if span[3] >= 0 and passage.kind != SECTION_5:
             # Read back as the sentence was: the model copied both from quoted text.
             reads = pack_reads(rewrite)
             rewrite = reads[min(span[3], len(reads) - 1)] if reads else rewrite
@@ -983,12 +1315,24 @@ async def _ask(
 
     if reporter is None:
         return AgreementRound(tally=tally)
-    passages = passages_of(report, narrative_written=narrative_written, discussion=discussion)
-    if not any(_writable(p) for p in passages) or not any(
-        p.kind in (FACT, SECTION_5, DEBATE) for p in passages
-    ):
+    passages = passages_of(
+        report,
+        narrative_written=narrative_written,
+        discussion=discussion,
+        entries=(evidence_texts.entries.values() if evidence_texts is not None else ()),
+    )
+    claim_led = any(_writable(p) and p.kind == CLAIM_LED for p in passages)
+    coded = any(_writable(p) and p.kind == SECTION_5 for p in passages)
+    # A fact that rests on entries: the count of routines no passage names
+    # grounds no rewrite, and asks nothing on its own.
+    facts = any(p.kind == FACT and p.cites for p in passages)
+    # A passage written without the code is asked against any source; a
+    # section 5 passage against a fact alone.
+    sourced = any((p.kind == FACT and p.cites) or p.kind in (SECTION_5, DEBATE) for p in passages)
+    if not (claim_led and sourced) and not (coded and facts):
         return AgreementRound(tally=tally)
     citable = list(dict.fromkeys(str(value) for value in citable_ids))
+    by_id = {passage.id: passage for passage in passages}
     answer_read = [""]
 
     def _parse(answer: Any) -> Any:
@@ -997,7 +1341,7 @@ async def _ask(
         # Shape only: a bare list of rows is the object the schema names.
         if isinstance(parsed, list):
             parsed = {"sentences": parsed}
-        return parsed if isinstance(parsed, dict) else None
+        return _platform_rewrites(parsed, by_id) if isinstance(parsed, dict) else None
 
     payload, violations, retries = await retry_with_feedback(
         lambda turns: reporter.ask(turns, call=call, what="section agreement question's"),

@@ -174,11 +174,13 @@ def test_each_passage_is_shown_as_what_wrote_it() -> None:
     assert "debate.2" not in kinds and "host_identifiers.2" not in kinds
 
 
-def test_only_prose_written_without_the_code_may_be_rewritten() -> None:
+def test_only_prose_may_be_rewritten() -> None:
     writable = {p.id for p in passages_of(_report(), discussion=_DEBATE) if p.write is not None}
     assert {"encryption_scheme.key_management", "execution_flow.2", "introduction"} <= writable
-    # A table cell's value and section 5 are shown for reading.
-    assert not {"encryption_scheme.cipher", "command_and_control", "bound.1"} & writable
+    # Section 5 prose is rewritten on a fact alone; a table cell's value and a
+    # fact are shown for reading.
+    assert "command_and_control" in writable
+    assert not {"encryption_scheme.cipher", "bound.1"} & writable
 
 
 def test_the_flow_is_numbered_as_the_report_prints_it() -> None:
@@ -228,7 +230,7 @@ def test_a_rewrite_takes_its_sentence_s_place_and_nothing_else_changes() -> None
     assert reporter.calls == [AGREEMENT_CALL] and len(reporter.asked) == 1
 
 
-def test_a_section_5_sentence_is_listed_against_a_fact_and_never_rewritten() -> None:
+def test_a_section_5_sentence_is_never_rewritten_on_another_passage_and_kept_is_listed() -> None:
     report = _report()
     rewrite = 'The code passes "runnung" to CreateMutexW as lpName [ev_0021].'
     asked = {"sentences": [_row("persistence_detail", MUTEX, ["command_and_control"], rewrite)]}
@@ -237,7 +239,6 @@ def test_a_section_5_sentence_is_listed_against_a_fact_and_never_rewritten() -> 
     done = _ask(report, reporter)
     feedback = str(reporter.asked[1][-1].content)
     assert "a section 5 passage is answered by a platform fact" in feedback
-    assert "is shown for reading" in feedback
     assert done.tally.by_code[UNKNOWN_SOURCE_CODE] == 1
     assert report.technical_analysis.persistence_detail.body.endswith(MUTEX)
     assert done.summary["listed"] == 1 and done.summary["rewritten"] == 0

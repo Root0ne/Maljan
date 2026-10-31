@@ -56,11 +56,14 @@ __all__ = [
     "FunctionArtefacts",
     "FunctionMap",
     "MapEntry",
+    "address_spellings",
     "build_function_map",
     "keeps_for_the_map",
     "function_artefacts",
     "merged_artefacts",
     "function_map_block",
+    "one_spelling",
+    "same_function",
 ]
 
 FUNCTION_MAP_HEAD = (
@@ -480,16 +483,76 @@ def _same(a: int | None, b: int | None, bases: Sequence[int]) -> bool:
     return any(low < base <= high and high - low == base for base in bases)
 
 
+def address_spellings(address: int, bases: Sequence[int]) -> tuple[int, ...]:
+    """Every address ``_same`` may join ``address`` to: itself, and a base apart either way."""
+    return (address, *(address + b for b in bases), *(address - b for b in bases if address >= b))
+
+
+def one_spelling(address: int, bases: Sequence[int]) -> int:
+    """One spelling per function: the virtual address, where the one image base read makes one."""
+    if len(bases) == 1 and address < bases[0]:
+        return address + bases[0]
+    return address
+
+
+def same_function(a: int | None, b: int | None, bases: Sequence[int]) -> bool:
+    """Whether two addresses are one function by the map's rule (``_same``)."""
+    return _same(a, b, bases)
+
+
+class _ByAddress:
+    """Visited entries by their address, for the first one ``_same`` joins an address to.
+
+    A lookup reads the address's spellings (:func:`address_spellings`), never every
+    entry, and returns the earliest entry held that ``_same`` joins: what a
+    scan of the entries in order returns.
+    """
+
+    def __init__(self, bases: Sequence[int]) -> None:
+        self.bases = tuple(bases)
+        self.at: dict[int, list[tuple[int, MapEntry]]] = {}
+        self.count = 0
+
+    def add(self, entry: MapEntry) -> None:
+        if entry.address is not None:
+            self.at.setdefault(entry.address, []).append((self.count, entry))
+        self.count += 1
+
+    def move(self, entry: MapEntry, address: int) -> None:
+        """Hold ``entry`` under ``address`` in place of the address it had."""
+        old = entry.address
+        held = self.at.get(old, []) if old is not None else []
+        place = next((n for n, e in held if e is entry), self.count)
+        if old is not None:
+            held[:] = [(n, e) for n, e in held if e is not entry]
+        entry.address = address
+        self.at.setdefault(address, []).append((place, entry))
+        self.at[address].sort(key=lambda pair: pair[0])
+
+    def first(self, address: int | None) -> MapEntry | None:
+        if address is None:
+            return None
+        found = [
+            (n, e)
+            for key in address_spellings(address, self.bases)
+            for n, e in self.at.get(key, ())
+            if _same(e.address, address, self.bases)
+        ]
+        return min(found, key=lambda pair: pair[0])[1] if found else None
+
+
 def _fold_spellings(visited: list[MapEntry], bases: Sequence[int]) -> list[MapEntry]:
     """``visited`` with an offset and its virtual address made one entry, at the larger address."""
     out: list[MapEntry] = []
+    held = _ByAddress(bases)
     for entry in visited:
-        into = next((e for e in out if _same(e.address, entry.address, bases)), None)
+        into = held.first(entry.address)
         if into is None:
             out.append(entry)
+            held.add(entry)
             continue
         if entry.address is not None and into.address is not None:
-            into.address = max(into.address, entry.address)
+            held.move(into, max(into.address, entry.address))
         into.names = tuple(dict.fromkeys([*into.names, *entry.names]))
         into.decompiled = tuple(dict.fromkeys([*into.decompiled, *entry.decompiled]))
         into.listed = tuple(dict.fromkeys([*into.listed, *entry.listed]))
@@ -536,36 +599,55 @@ def build_function_map(
         ],
         bases,
     )
-    known = [e.address for e in visited if e.address is not None] + list(found.by_function)
+    known = {e.address for e in visited if e.address is not None} | set(found.by_function)
+    by_address = _ByAddress(bases)
+    for visit in visited:
+        by_address.add(visit)
     for entry in entries:
         if not entry_lists_code(entry):
             continue
         address, names = _listed_at(entry)
         if address is None:
             continue
-        if not entry_lists_a_function(entry) and not any(_same(address, k, bases) for k in known):
+        if not entry_lists_a_function(entry) and not any(
+            k in known and _same(address, k, bases) for k in address_spellings(address, bases)
+        ):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
-        into = next((e for e in visited if _same(e.address, address, bases)), None)
+        into = by_address.first(address)
         if into is None:
             into = MapEntry(address=address, names=tuple(names))
             visited.append(into)
-            known.append(address)
+            by_address.add(into)
+            known.add(address)
         else:
             into.names = tuple(dict.fromkeys([*into.names, *names]))
         if entry_id and entry_id not in into.listed:
             into.listed = (*into.listed, entry_id)
 
     reached: set[int] = set()
+    # Each visited function's artefacts in the order the functions were tied,
+    # looked up by its address's spellings rather than read off every key.
+    order = {key: n for n, key in enumerate(found.by_function)}
     for entry in visited:
-        for key, tied in found.by_function.items():
-            if key in found.virtual:
-                if entry.address == key:
-                    entry.artefacts.extend(tied)
-                    reached.add(key)
-            elif _same(entry.address, key, bases):
-                entry.artefacts.extend(tied)
-                reached.add(key)
+        if entry.address is None:
+            continue
+        keys = sorted(
+            {
+                key
+                for key in address_spellings(entry.address, bases)
+                if key in order
+                and (
+                    entry.address == key
+                    if key in found.virtual
+                    else _same(entry.address, key, bases)
+                )
+            },
+            key=order.__getitem__,
+        )
+        for key in keys:
+            entry.artefacts.extend(found.by_function[key])
+            reached.add(key)
 
     said = [
         f"{getattr(c, 'claim', '') or ''} {getattr(c, 'evidence_ref', '') or ''}" for c in claims
