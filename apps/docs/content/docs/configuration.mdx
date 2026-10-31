@@ -4945,17 +4945,22 @@ the lost tools from it.
 
 **Data a tool reads.** A `ToolNeeds` entry may also declare a data path
 (`maljan.tools.capabilities.data`): the default path the tool reads, the core
-setting whose value it is handed instead, and the server environment variable
-that replaces the default. The built-in sidecars declare the corpora that are
-fetched rather than tracked: capa's rules (`static.capa.rules_dir`) and the Sigma
-corpus (`MALJAN_SIGMA_RULES_DIR`, else `data/sigma_rules`). `POST /jobs` and the
-system status look at each declared path where the tool would read it and name a
-tool whose path is missing, or is a directory holding no file, as unavailable: the
-reason gives the path and what named it
-(`data/capa-rules is missing or empty (named by static.capa.rules_dir)`), and the
-remedy says how to put it there. A server does not probe a data path in its
-manifest, since the path it is handed is the caller's setting. A tool that
-declares no data is checked as before.
+setting whose value a caller that reads it hands the tool instead, the server
+environment variable that replaces the default, and the file pattern a directory
+must hold. The built-in sidecars declare the corpora that are fetched rather than
+tracked: capa's rules (`*.yml`; the worker's own reading of capa is handed
+`static.capa.rules_dir`, the analysis server's `capa` tool reads `data/capa-rules`)
+and the Sigma corpus (`*.yml` or `*.yaml`; `MALJAN_SIGMA_RULES_DIR`, else
+`data/sigma_rules`). `POST /jobs` and the system status look at each declared path
+where the tool would read it: for a tool a server runs, its override or default;
+for the worker's own reading, the setting. A tool whose path is missing, an empty
+file, or a directory holding no matching file is named as unavailable: the reason
+gives what named the path, and the path relative to the project root
+(`data/capa-rules is missing or empty (named by the default)`; a path outside the
+project is not shown), and the remedy says how to put it there. A server whose
+block sets `PYTHONPATH` has neither its modules nor its data checked. A server
+does not probe a data path in its manifest. A tool that declares no data is
+checked as before.
 
 **Errors that name their remedy.** A tool that cannot answer returns, never
 raises:

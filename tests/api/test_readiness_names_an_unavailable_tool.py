@@ -51,7 +51,7 @@ def host(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     monkeypatch.setattr(importlib.util, "find_spec", find_spec)
     monkeypatch.setattr(emulated_strings, "find_floss", lambda environ=None: ("floss", ""))
-    monkeypatch.setattr(capabilities, "data_held", lambda path: True)
+    monkeypatch.setattr(capabilities, "data_held", lambda path, pattern="*": True)
     return missing
 
 
@@ -180,45 +180,43 @@ class TestStatus:
 _DATA_HELD = capabilities.data_held
 
 
-def _settings_with_capa_rules(tmp_path: Path, rules: Path) -> Settings:
-    """Settings whose capa rules are ``rules`` and whose Sigma rules are populated."""
-    sigma = tmp_path / "sigma"
-    sigma.mkdir()
-    (sigma / "r.yml").write_text("title: r\n", encoding="utf-8")
-    settings = Settings()
-    settings.static.capa.rules_dir = str(rules)
-    settings.mcp.servers["analysis"].env = {"MALJAN_SIGMA_RULES_DIR": str(sigma)}
-    return settings
+def _host_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
+    """A project root of ``tmp_path`` holding the Sigma corpus and no capa rules."""
+    monkeypatch.setattr(capabilities, "data_held", _DATA_HELD)
+    monkeypatch.setattr(capabilities, "_data_root", lambda: tmp_path)
+    (tmp_path / "data" / "sigma_rules").mkdir(parents=True)
+    (tmp_path / "data" / "sigma_rules" / "r.yml").write_text("title: r\n", encoding="utf-8")
+    return Settings()
 
 
 class TestADeclaredDataPath:
     """The haiku8 shape (T-492): capa installed, its rules directory not fetched."""
 
-    def test_an_empty_rules_directory_is_named_by_the_gate_and_the_status(
+    def test_a_rules_directory_never_fetched_is_named_by_the_gate_and_the_status(
         self, host: set[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr(capabilities, "data_held", _DATA_HELD)
-        empty = tmp_path / "capa-rules"
-        empty.mkdir()
-        settings = _settings_with_capa_rules(tmp_path, empty)
+        settings = _host_data(tmp_path, monkeypatch)
 
         response = _submit(settings=settings)
         assert response.status_code == 201
         (row,) = response.json()["unavailable_tools"]
         assert (row["server"], row["tool"]) == ("analysis", "capa")
-        assert row["reason"] == f"{empty} is missing or empty (named by static.capa.rules_dir)"
+        # The server's tool reads its default, the worker's reading the setting.
+        assert row["reason"] == (
+            "data/capa-rules is missing or empty (named by the default); "
+            "data/capa-rules is missing or empty (named by static.capa.rules_dir)"
+        )
         assert "static.capa.rules_dir" in row["remediation"]
+        assert str(tmp_path) not in str(row)
         assert row["manifest_code"] == "missing_dependency"
         assert _status(MagicMock(role="user"), settings)["unavailable_tools"] == [row]
 
     def test_a_populated_rules_directory_is_not_named(
         self, host: set[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        monkeypatch.setattr(capabilities, "data_held", _DATA_HELD)
-        rules = tmp_path / "capa-rules"
-        (rules / "nested").mkdir(parents=True)
-        (rules / "nested" / "r.yml").write_text("rule:\n", encoding="utf-8")
-        settings = _settings_with_capa_rules(tmp_path, rules)
+        settings = _host_data(tmp_path, monkeypatch)
+        (tmp_path / "data" / "capa-rules").mkdir()
+        (tmp_path / "data" / "capa-rules" / "r.yml").write_text("rule:\n", encoding="utf-8")
 
         assert _submit(settings=settings).json()["unavailable_tools"] is None
         assert _status(MagicMock(role="user"), settings)["unavailable_tools"] == []

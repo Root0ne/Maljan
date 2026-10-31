@@ -9,10 +9,9 @@ Two places a job runs a tool on this host are checked, each against the
 declared needs of the repository's sidecar the tool belongs to
 (``tools.sidecar_needs``), with ``Requirement.installed``: a module looked up
 on the import path, an executable looked for where it would be looked for, a
-declared data path (a rule corpus) read from the setting or environment that
-names it and looked at. Nothing is imported, started or run on a sample, so
-the check is cheap enough for every submit and every status read, and linear
-in the tools declared.
+declared data path (a rule corpus) looked at where the tool reads it. Nothing
+is imported, started or run on a sample, so the check is cheap enough for
+every submit and every status read, and linear in the tools declared.
 
 * **The servers the job calls** (``composition.servers_a_job_calls``: its
   team's, the triage pack's, the static provider's) that are switched on and
@@ -180,19 +179,20 @@ def _missing(
     answered: dict[Any, str | None],
     *,
     settings: Any = None,
-    modules: bool = True,
+    unchecked: frozenset[str] = frozenset(),
 ) -> Unavailable | None:
     """``need`` as unavailable when one of its requirements is absent, else ``None``.
 
     ``answered`` keeps each requirement's answer for ``environ``: an
     executable or a data path's override is looked for in it, so another
-    environment is asked again. ``settings`` names a data path a tool is
-    handed from them.
+    environment is asked again. ``settings`` is given where the caller hands
+    the tool a data path's setting (``Requirement.installed``), and the
+    requirements of a kind in ``unchecked`` are left to the server.
     """
     reasons = []
     absent = []
     for req in need.requires:
-        if req.kind == "module" and not modules:
+        if req.kind in unchecked:
             continue
         held = (req, id(environ))
         if held not in answered:
@@ -253,10 +253,13 @@ def unavailable_tools(
         if needs is None:
             continue
         offered = None if config.tools is None else set(config.tools)
-        modules = "PYTHONPATH" not in (config.env or {})
-        if not modules:
+        # A server with an import path of its own may import what this process
+        # cannot, and run from a tree whose data this process does not see.
+        own_path = "PYTHONPATH" in (config.env or {})
+        unchecked = frozenset({"module", "data"}) if own_path else frozenset()
+        if unchecked:
             logger.debug(
-                "tool availability: %s sets PYTHONPATH; its modules are not checked here",
+                "tool availability: %s sets PYTHONPATH; its modules and data are not checked here",
                 log_safe(key),
             )
         environ = _environ(key, config)
@@ -265,11 +268,13 @@ def unavailable_tools(
         for need in needs:
             if offered is not None and need.name not in offered:
                 continue
-            missing = _missing(need, environ, answered, settings=settings, modules=modules)
+            # No settings: the server's tool reads its own default or
+            # override, never the setting the worker hands its own reading.
+            missing = _missing(need, environ, answered, unchecked=unchecked)
             if missing is not None:
                 missing.server = key
                 found.append(missing)
-    named = {(u.server, u.tool) for u in found}
+    named = {(u.server, u.tool): u for u in found}
     try:
         readings = list(_in_process_readings(settings, level=chosen_at))
     except Exception as exc:  # noqa: BLE001 — the pack's steps unread: the servers' answer stands
@@ -277,13 +282,22 @@ def unavailable_tools(
         readings = []
     answered = {}
     for server, need, lent in readings:
-        if (server, need.name) in named:
-            continue
         missing = _missing(need, lent, answered, settings=settings)
-        if missing is not None:
-            missing.server = server
-            named.add((server, need.name))
+        if missing is None:
+            continue
+        missing.server = server
+        held = named.get((server, need.name))
+        if held is None:
+            named[(server, need.name)] = missing
             found.append(missing)
+            continue
+        # One row per tool: what the reading lacks beyond the server's answer
+        # (a setting's path where the server reads its default) joins it.
+        for part in missing.reason.split("; "):
+            if part not in held.reason.split("; "):
+                held.reason += f"; {part}"
+        if missing.remediation and missing.remediation not in (held.remediation or ""):
+            held.remediation = "; ".join(filter(None, (held.remediation, missing.remediation)))
     if found:
         logger.log(
             level,

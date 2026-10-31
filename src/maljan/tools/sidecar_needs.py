@@ -39,11 +39,12 @@ CAPA_REMEDIATION = "install capa on the host that runs this server: uv sync --ex
 YARA_REMEDIATION = "install yara-python on the host that runs this server: uv sync --extra yara"
 
 # The rule corpora fetched rather than vendored (``.gitignore``), so a fresh
-# clone or worktree has none until they are fetched. capa's are handed to it
-# from the operator's setting; Sigma's are the server's default unless its
-# environment names others. A tool whose data is vendored declares none.
-CAPA_RULES = data(rules.DEFAULT_CAPA_RULES, setting="static.capa.rules_dir")
-SIGMA_RULES = data(rules.DEFAULT_SIGMA_RULES, override=rules.SIGMA_RULES_ENV)
+# clone or worktree has none until they are fetched. The worker hands its own
+# reading of capa the operator's setting, and the server's tool reads the
+# default; Sigma's are the server's default unless its environment names
+# others. A tool whose data is vendored declares none.
+CAPA_RULES = data(rules.DEFAULT_CAPA_RULES, setting="static.capa.rules_dir", pattern="*.yml")
+SIGMA_RULES = data(rules.DEFAULT_SIGMA_RULES, override=rules.SIGMA_RULES_ENV, pattern="*.y*ml")
 
 # What each tool needs beyond the interpreter, probed once when the server
 # starts (a data path only before a job). A tool that is not listed always answers.

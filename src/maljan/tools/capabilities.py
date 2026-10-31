@@ -51,11 +51,14 @@ class Requirement:
     # when the check is made from outside it (``installed``).
     locate: Callable[..., str | None] | None = field(default=None, compare=False)
     # For data (a rule corpus, a signature set): the core setting whose value
-    # is the path the tool is handed, as a dotted path (``static.capa.rules_dir``),
-    # and the server environment variable that overrides ``name``, the default
-    # path, where the tool reads one instead. Either may be empty.
+    # is the path a caller hands the tool, as a dotted path
+    # (``static.capa.rules_dir``), and the server environment variable that
+    # overrides ``name``, the default path, where the tool reads one instead.
+    # Either may be empty. ``pattern`` is what a file in a directory must match
+    # for the directory to hold the data.
     setting: str = ""
     override: str = ""
+    pattern: str = "*"
 
     def probe(self) -> str | None:
         """``None`` when present, else the reason it is not.
@@ -104,11 +107,16 @@ class Requirement:
         value is handed to the server by its own settings, which this
         process's environment does not show.
 
-        A data path is read where the tool reads it: the declared setting of
-        ``settings`` when there are settings to read, else the override in
-        ``environ`` (this process's environment when ``None``), else the
-        default. It is missing when nothing is there or a directory holds no
-        file, and the reason names the path and what named it.
+        A data path is read where the tool reads it. ``settings`` is given
+        only by a caller that hands the tool the declared setting's value (the
+        worker's own reading): the setting is then the path. Otherwise, as for
+        a tool a server runs with its own defaults, the path is the override
+        in ``environ`` (this process's environment when ``None``), else the
+        default. It is missing when nothing is there, a file is empty or a
+        directory holds no file matching ``pattern``. The reason names what
+        named the path, and the path itself only relative to the project root:
+        the answer is read by any signed-in user, and a path outside the
+        project is the host's, not theirs.
 
         The import path looked on is this process's: a server started with a
         ``PYTHONPATH`` of its own can import what this answers is missing, so
@@ -142,11 +150,16 @@ class Requirement:
                 value, named_by = given, self.override
         if not value.strip():
             return f"{named_by} names no path"
-        from maljan.core.paths import resolve_data
-
-        if data_held(resolve_data(value)):
+        base = _data_root()
+        target = Path(value)
+        target = target if target.is_absolute() else base / target
+        if data_held(target, self.pattern):
             return None
-        return f"{value} is missing or empty (named by {named_by})"
+        try:
+            shown = target.relative_to(base).as_posix()
+        except ValueError:
+            return f"the path {named_by} names is missing or empty"
+        return f"{shown} is missing or empty (named by {named_by})"
 
     @property
     def remedy(self) -> str:
@@ -170,13 +183,20 @@ def _setting_value(settings: Any, dotted: str) -> Any:
     return node
 
 
-def data_held(path: str | os.PathLike[str]) -> bool:
-    """Whether ``path`` holds data: a non-empty file, or a directory with a file in it."""
+def _data_root() -> Path:
+    """The directory a relative data path is read against (``core.paths.resolve_data``)."""
+    from maljan.core.paths import get_project_root
+
+    return get_project_root()
+
+
+def data_held(path: str | os.PathLike[str], pattern: str = "*") -> bool:
+    """Whether ``path`` holds data: a non-empty file, or a directory with a file of ``pattern``."""
     target = Path(path)
     try:
         if target.is_file():
             return target.stat().st_size > 0
-        return target.is_dir() and any(entry.is_file() for entry in target.rglob("*"))
+        return target.is_dir() and any(entry.is_file() for entry in target.rglob(pattern))
     except OSError:
         return False
 
@@ -200,17 +220,19 @@ def env(name: str) -> Requirement:
     return Requirement("env", name)
 
 
-def data(default: str, *, setting: str = "", override: str = "") -> Requirement:
+def data(default: str, *, setting: str = "", override: str = "", pattern: str = "*") -> Requirement:
     """A file or directory the tool reads its rules or signatures from.
 
-    ``default`` is the path the tool reads when nothing names another,
-    ``setting`` the core setting whose value it is handed instead, and
-    ``override`` the server environment variable that replaces the default.
-    A path that is missing or holds nothing is named before a job
-    (``installed``) with what named it: a tool reading an empty corpus
-    answers nothing, and says so only once the run has paid for it.
+    ``default`` is the path the tool reads when nothing names another;
+    ``setting`` the core setting whose value a caller that reads it hands the
+    tool instead (a server running the tool with its own defaults does not),
+    ``override`` the server environment variable that replaces the default,
+    and ``pattern`` what a file of a directory must match to count. A path
+    that is missing or holds nothing is named before a job (``installed``)
+    with what named it: a tool reading an empty corpus answers nothing, and
+    says so only once the run has paid for it.
     """
-    return Requirement("data", default, setting=setting, override=override)
+    return Requirement("data", default, setting=setting, override=override, pattern=pattern)
 
 
 @dataclass(frozen=True)
@@ -293,11 +315,14 @@ def manifest(server: str, tools: list[ToolNeeds], *, version: str | None = None)
 
 
 def remedy_for(tool: ToolNeeds, missing: list[Requirement]) -> str:
-    """The remedy for ``missing``: each data path's own when only data is missing."""
-    if missing and all(req.kind == "data" for req in missing):
-        return "; ".join(dict.fromkeys(req.remedy for req in missing))
-    code = NOT_CONFIGURED if {req.kind for req in missing} == {"env"} else MISSING_DEPENDENCY
-    return tool.remediation or REMEDIATIONS[code]
+    """The remedy for ``missing``: the tool's for what is not data, each data path's own."""
+    remedies = []
+    other = {req.kind for req in missing if req.kind != "data"}
+    if other or not missing:
+        code = NOT_CONFIGURED if other == {"env"} else MISSING_DEPENDENCY
+        remedies.append(tool.remediation or REMEDIATIONS[code])
+    remedies.extend(req.remedy for req in missing if req.kind == "data")
+    return "; ".join(dict.fromkeys(remedies))
 
 
 @dataclass
