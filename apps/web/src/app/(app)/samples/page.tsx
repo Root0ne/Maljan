@@ -2,11 +2,12 @@
 
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Upload, X } from "lucide-react";
+import { ChevronRight, Upload, X } from "lucide-react";
 import { questionsFromText } from "./jobQuestions";
-import { canStartAnalysis } from "./submitGate";
+import { advancedChoices, canStartAnalysis } from "./submitGate";
 import { api } from "@/lib/api";
 import { fetchAllPages } from "@/lib/pages";
+import Button, { buttonClass } from "@/components/ui/Button";
 import ShowMoreRows from "@/components/ui/ShowMoreRows";
 import { ROWS_PER_STEP, visibleRows } from "@/lib/pagedRows";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
@@ -81,7 +82,12 @@ function SamplesPageContent() {
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const firstFieldRef = useRef<HTMLSelectElement>(null);
+  /* Providers, profile, questions and an attached report: every choice the
+   * dialog offers, folded under "Advanced" so the dialog reads as one
+   * action. Closed each time the dialog opens. */
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const startRef = useRef<HTMLButtonElement>(null);
+  const dropZoneRef = useRef<HTMLButtonElement>(null);
   /** What opened the dialog, so closing it can give the focus back. */
   const submitTriggerRef = useRef<HTMLElement | null>(null);
   /* M9 (final review): the target sample of the *in-flight* report upload,
@@ -100,6 +106,7 @@ function SamplesPageContent() {
     setReportError(null);
     setAcceptError(null);
     setSubmitError(null);
+    setAdvancedOpen(false);
   }, []);
 
   /** `trigger` is the control that opened the dialog, so closing it can put
@@ -218,6 +225,13 @@ function SamplesPageContent() {
       setSubmitting(false);
     }
   }
+  const advancedCount = advancedChoices({
+    staticProvider,
+    sandboxProvider,
+    profile,
+    questions: questionsFromText(questionsText),
+    attachedReport: attachedReport !== null,
+  });
   const searchParams = useSearchParams();
   const sampleParam = searchParams.get("sample");
 
@@ -266,16 +280,18 @@ function SamplesPageContent() {
     setUploading(true);
     setActionError(null);
     try {
-      await api.uploadSample(file);
+      const uploaded = await api.uploadSample(file);
       const res = await fetchAllPages((page, size) => api.getSamples(page, size));
       setSamples(res.items.map(mapSample));
       setToast(`Uploaded ${file.name}.`);
+      // One drop, one dialog: the file just added is the one to analyse.
+      openSubmitDialog(mapSample(uploaded), dropZoneRef.current);
     } catch (err) {
       setActionError(`Upload failed: ${getErrorMessage(err) || "Unknown error"}`);
     } finally {
       setUploading(false);
     }
-  }, []);
+  }, [openSubmitDialog]);
 
   /* Escape closes the detail modal (pattern copied from SearchPalette). */
   useEffect(() => {
@@ -289,10 +305,10 @@ function SamplesPageContent() {
     return () => window.removeEventListener("keydown", onKey);
   }, [detailSample]);
 
-  /* Escape closes the submit dialog, and focus lands on its first field. */
+  /* Escape closes the submit dialog, and focus lands on its one action. */
   useEffect(() => {
     if (!submitFor) return;
-    firstFieldRef.current?.focus();
+    startRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
@@ -357,6 +373,7 @@ function SamplesPageContent() {
           4.1.2). The input keeps its place in the tree and is hidden the way
           a visually-hidden control is hidden. */}
       <button
+        ref={dropZoneRef}
         type="button"
         onDragOver={(e) => {
           e.preventDefault();
@@ -372,13 +389,13 @@ function SamplesPageContent() {
         }`}
       >
         <Upload size={18} aria-hidden="true" className="mx-auto mb-2 text-text-muted" />
-        <span className="block text-sm text-text-secondary">
+        <span className="block text-sm text-text-primary">
           {uploading
             ? "Uploading..."
-            : "Drop a file here or choose one to upload"}
+            : "Drop a file here or choose one to analyse"}
         </span>
         <span className="block text-xs text-text-muted mt-1">
-          Executables, mobile apps, scripts, documents, archives
+          Executables, mobile apps, scripts, documents, archives. The file is uploaded and its analysis opens.
         </span>
       </button>
       <input
@@ -454,16 +471,18 @@ function SamplesPageContent() {
                               setActionError(getErrorMessage(err) || "Failed to load sample details.");
                             }
                           }}
-                          className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover"
+                          className={buttonClass("ghost", "sm")}
                         >
                           Details
                         </button>
+                        {/* Secondary on every row: the page's one primary
+                            action is the dialog's Start analysis. */}
                         <button
                           onClick={(e) => {
                             setActionError(null);
                             openSubmitDialog(s, e.currentTarget);
                           }}
-                          className="px-2.5 py-1 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
+                          className={buttonClass("secondary", "sm")}
                         >
                           Analyze
                         </button>
@@ -575,13 +594,34 @@ function SamplesPageContent() {
                 </div>
               )}
 
+              <p className="text-sm text-text-secondary">
+                {advancedCount === 0
+                  ? "The analysis runs with the platform's default providers and analyst team."
+                  : `The analysis runs with ${advancedCount === 1 ? "the choice" : `the ${advancedCount} choices`} made under Advanced.`}
+              </p>
+
+              <div>
+                <button
+                  type="button"
+                  aria-expanded={advancedOpen}
+                  aria-controls="submit-advanced"
+                  onClick={() => setAdvancedOpen((v) => !v)}
+                  className="flex items-center gap-1 text-xs font-medium text-text-primary hover:underline"
+                >
+                  <ChevronRight aria-hidden="true" className={`h-3.5 w-3.5 ${advancedOpen ? "rotate-90" : ""}`} />
+                  Advanced
+                  {advancedCount > 0 && <span className="font-normal text-text-muted">· {advancedCount} set</span>}
+                </button>
+                <p className="mt-0.5 pl-[18px] text-text-muted">Providers, analyst team, questions and a sandbox report.</p>
+              </div>
+
+              <div id="submit-advanced" hidden={!advancedOpen} className="space-y-4 border-l-2 border-border-light pl-3">
               <div>
                 <label htmlFor="static-provider" className="block text-text-muted uppercase tracking-wider mb-1">
                   Static provider
                 </label>
                 <select
                   id="static-provider"
-                  ref={firstFieldRef}
                   value={staticProvider}
                   onChange={(e) => setStaticProvider(e.target.value)}
                   className="w-full border border-border rounded px-2 py-1.5 bg-bg-surface text-text-primary"
@@ -717,20 +757,19 @@ function SamplesPageContent() {
                   ) : null;
                 })()}
               </div>
+              </div>
 
               <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={closeSubmitDialog}
-                  className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover"
-                >
+                <Button variant="secondary" size="sm" onClick={closeSubmitDialog}>
                   Cancel
-                </button>
+                </Button>
                 <button
+                  ref={startRef}
                   type="button"
+                  data-variant="primary"
                   disabled={!canStartAnalysis({ submitting, reportUploading })}
                   onClick={() => startAnalysis(submitFor.id)}
-                  className="px-2.5 py-1 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
+                  className={buttonClass("primary", "sm")}
                 >
                   Start analysis
                 </button>

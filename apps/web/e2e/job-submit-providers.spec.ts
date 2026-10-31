@@ -1,17 +1,70 @@
+import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
+import { MOCK_SAMPLE } from "./mocks";
 
 /**
- * The submit dialog on /samples: two optional provider selects and an
- * "Attach sandbox report" input. "Inherit from settings" is the default for
- * both selects and sends no key at all, so an operator who has configured the
- * providers once never sees the difference.
+ * The submit dialog on /samples: one action, "Start analysis", with every
+ * choice folded under "Advanced": two optional provider selects, the profile,
+ * the questions and an "Attach sandbox report" input. "Inherit from settings"
+ * is the default for every select and sends no key at all, so an operator who
+ * has configured the providers once never sees the difference.
  */
+
+/** Opens the dialog's "Advanced" section, where every choice of the run is. */
+async function openAdvanced(page: Page) {
+  const toggle = page.getByRole("dialog").getByRole("button", { name: /^Advanced/ });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
+
+test.describe("Submitting is one drop and one action", () => {
+  test("dropping a file opens its dialog with Start analysis as the one action", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/samples");
+    await page.getByLabel("Sample to upload").setInputFiles({
+      name: "invoice_scan.exe",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from("MZ"),
+    });
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText(`Analyze ${MOCK_SAMPLE.original_filename}`);
+    const start = dialog.getByRole("button", { name: "Start analysis" });
+    await expect(start).toBeFocused();
+    await expect(page.locator('[data-variant="primary"]')).toHaveCount(1);
+  });
+
+  test("the choices are folded under Advanced, which says when the run is not the default", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/samples");
+    await page.getByRole("button", { name: "Analyze" }).first().click();
+    const dialog = page.getByRole("dialog");
+    const toggle = dialog.getByRole("button", { name: /^Advanced/ });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(dialog.getByLabel("Static provider")).toBeHidden();
+    await expect(dialog.getByText("The analysis runs with the platform's default providers and analyst team.")).toBeVisible();
+
+    await openAdvanced(page);
+    await dialog.getByLabel("Static provider").selectOption("capa_yara");
+    await dialog.getByLabel("Questions for this run").fill("What is the C2 address?");
+    await expect(toggle).toContainText("2 set");
+    // Closed again, the section still says the run is not the default one,
+    // and every field keeps what was chosen.
+    await toggle.click();
+    await expect(dialog.getByText("The analysis runs with the 2 choices made under Advanced.")).toBeVisible();
+    await openAdvanced(page);
+    await expect(dialog.getByLabel("Static provider")).toHaveValue("capa_yara");
+  });
+});
+
 test.describe("Job submission with providers", () => {
   test("the provider selects come from the settings catalog, not from a constant", async ({
     authenticatedPage: page,
   }) => {
     await page.goto("/samples");
     await page.getByRole("button", { name: "Analyze" }).first().click();
+    await openAdvanced(page);
 
     // Each option is named, with its registry key after it — the key is what
     // the job config carries and what a log line says, so it stays on screen,
@@ -92,6 +145,7 @@ test.describe("Job submission with providers", () => {
 
     await page.goto("/samples");
     await page.getByRole("button", { name: "Analyze" }).first().click();
+    await openAdvanced(page);
     await page.getByLabel("Static provider").selectOption("capa_yara");
     await page.getByLabel("Sandbox provider").selectOption("triage");
     await page.getByRole("button", { name: "Start analysis" }).click();
@@ -127,6 +181,7 @@ test.describe("Job submission with providers", () => {
 
     await page.goto("/samples");
     await page.getByRole("button", { name: "Analyze" }).first().click();
+    await openAdvanced(page);
     await page.getByLabel("Attach sandbox report").setInputFiles({
       name: "report.json",
       mimeType: "application/json",
@@ -157,6 +212,7 @@ test.describe("Job submission with providers", () => {
 
     await page.goto("/samples");
     await page.getByRole("button", { name: "Analyze" }).first().click();
+    await openAdvanced(page);
     await page.getByLabel("Attach sandbox report").setInputFiles({
       name: "other.json",
       mimeType: "application/json",
@@ -208,6 +264,7 @@ test.describe("Job submission with providers", () => {
 
     await page.goto("/samples");
     await page.getByRole("button", { name: "Analyze" }).first().click();
+    await openAdvanced(page);
     await expect(page.getByRole("dialog")).toContainText("Analyze first.exe");
     await page.getByLabel("Attach sandbox report").setInputFiles({
       name: "report.json",
@@ -218,6 +275,7 @@ test.describe("Job submission with providers", () => {
     // dialog — the in-flight request for sample-a is still pending.
     await page.getByRole("button", { name: "Cancel" }).click();
     await page.getByRole("button", { name: "Analyze" }).nth(1).click();
+    await openAdvanced(page);
     await expect(page.getByRole("dialog")).toContainText("Analyze second.exe");
 
     // Give sample-a's delayed response time to resolve in the background.
@@ -239,6 +297,7 @@ test.describe("Job submission with providers", () => {
 
     await page.goto("/samples");
     await page.getByRole("button", { name: "Analyze" }).first().click();
+    await openAdvanced(page);
 
     const profile = page.locator("#agent-profile");
     // A team is keyed after what it is, so reading the key back is the whole
@@ -267,6 +326,7 @@ test.describe("Job submission with providers", () => {
 
     await page.goto("/samples");
     await page.getByRole("button", { name: "Analyze" }).first().click();
+    await openAdvanced(page);
     await page.getByLabel("Static provider").selectOption("capa_yara");
     await page.getByRole("button", { name: "Start analysis" }).click();
 

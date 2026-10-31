@@ -274,9 +274,10 @@ describe("evidenceViews with a stored run", () => {
     [finding("all_tools_qu1cksc0pe", "all_tools_qu1cksc0pe", 12)],
   );
 
-  it("keeps the records and the discussion first and appends an agent view after them", () => {
+  it("keeps the bundle, the records and the discussion first and appends an agent view after them", () => {
     const views = evidenceViews(stored, ROSTER);
-    expect(keys(views).slice(0, 2)).toEqual(["", "/conversation"]);
+    expect(keys(views).slice(0, 3)).toEqual(["", "/records", "/conversation"]);
+    expect(views.slice(0, 3).map((v) => v.kind)).toEqual(["bundle", "records", "conversation"]);
     expect(keys(views).slice(-1)).toEqual(["/agent/all_tools_qu1cksc0pe"]);
     expect(views.find((v) => v.key.startsWith("/agent"))?.kind).toBe("agent");
   });

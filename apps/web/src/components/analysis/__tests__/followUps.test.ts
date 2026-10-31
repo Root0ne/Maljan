@@ -86,7 +86,7 @@ describe("the follow-ups drawn", () => {
     // The answer's bracketed citation is a mark, not printed ids.
     expect(markup).toContain("It beacons to the address in");
     expect(markup).not.toContain("[ev_0007]");
-    expect(markup).toContain("/analysis/j1/evidence?evidence=ev_0007");
+    expect(markup).toContain("/analysis/j1/evidence/records?evidence=ev_0007");
     expect(markup).toContain("aaaaaaaaaaaa");
     expect(markup).toContain("recorded on the audit chain");
   });

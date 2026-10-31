@@ -31,7 +31,7 @@ test.beforeEach(async ({ authenticatedPage: page }) => {
 });
 
 test("the evidence lists one row per tool call", async ({ authenticatedPage: page }) => {
-  await page.goto(`/analysis/${JOB_ID}/evidence`);
+  await page.goto(`/analysis/${JOB_ID}/evidence/records`);
   await expect(page.getByRole("heading", { name: /Evidence records/i })).toBeVisible();
   for (const id of ["ev_0001", "ev_0002", "ev_0003", "ev_0004"]) {
     await expect(page.getByRole("button", { name: `Toggle ${id}` })).toBeVisible();
@@ -41,13 +41,13 @@ test("the evidence lists one row per tool call", async ({ authenticatedPage: pag
 });
 
 test("a failed call is marked as one", async ({ authenticatedPage: page }) => {
-  await page.goto(`/analysis/${JOB_ID}/evidence`);
+  await page.goto(`/analysis/${JOB_ID}/evidence/records`);
   const row = page.locator("tr", { has: page.getByRole("button", { name: "Toggle ev_0003" }) });
   await expect(row.getByText("error", { exact: true })).toBeVisible();
 });
 
 test("filtering by agent narrows the evidence", async ({ authenticatedPage: page }) => {
-  await page.goto(`/analysis/${JOB_ID}/evidence`);
+  await page.goto(`/analysis/${JOB_ID}/evidence/records`);
   await expect(page.getByRole("button", { name: "Toggle ev_0002" })).toBeVisible();
 
   await page.getByLabel("Filter by agent").selectOption("static");
@@ -60,7 +60,7 @@ test("filtering by agent narrows the evidence", async ({ authenticatedPage: page
 });
 
 test("filtering by stage narrows the evidence", async ({ authenticatedPage: page }) => {
-  await page.goto(`/analysis/${JOB_ID}/evidence`);
+  await page.goto(`/analysis/${JOB_ID}/evidence/records`);
   await page.getByLabel("Filter by stage").selectOption("verdict");
   await expect(page.getByRole("button", { name: "Toggle ev_0003" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Toggle ev_0001" })).toHaveCount(0);
@@ -69,7 +69,7 @@ test("filtering by stage narrows the evidence", async ({ authenticatedPage: page
 test("a row opens to the arguments, the output and the parsed result", async ({
   authenticatedPage: page,
 }) => {
-  await page.goto(`/analysis/${JOB_ID}/evidence`);
+  await page.goto(`/analysis/${JOB_ID}/evidence/records`);
   await page.getByRole("button", { name: "Toggle ev_0001" }).click();
   await expect(page.getByRole("heading", { name: "Output" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Structured" })).toBeVisible();
@@ -81,13 +81,15 @@ test("a row opens to the arguments, the output and the parsed result", async ({
 test("an entry that lost its output to the byte budget says so", async ({
   authenticatedPage: page,
 }) => {
-  await page.goto(`/analysis/${JOB_ID}/evidence`);
+  await page.goto(`/analysis/${JOB_ID}/evidence/records`);
   await page.getByRole("button", { name: "Toggle ev_0004" }).click();
   await expect(page.getByText(/dropped to keep this agent inside its byte budget/i)).toBeVisible();
 });
 
 test("the deep link opens the entry it names", async ({ authenticatedPage: page }) => {
   await page.goto(`/analysis/${JOB_ID}/evidence?evidence=ev_0003`);
+  // A link written before the bundle led the tab is passed on to Records.
+  await expect(page).toHaveURL(/\/evidence\/records\?evidence=ev_0003$/);
   await expect(page.getByRole("button", { name: "Toggle ev_0003" })).toHaveAttribute(
     "aria-expanded",
     "true"
@@ -106,7 +108,7 @@ test("a citation mark on a report section leads to its record", async ({
   await mark.click();
   const drawer = page.getByRole("dialog");
   await drawer.getByRole("link", { name: /ev_0001/ }).click();
-  await expect(page).toHaveURL(/\/evidence\?evidence=ev_0001$/);
+  await expect(page).toHaveURL(/\/evidence\/records\?evidence=ev_0001$/);
   await expect(page.getByRole("button", { name: "Toggle ev_0001" })).toHaveAttribute(
     "aria-expanded",
     "true"
@@ -116,7 +118,7 @@ test("a citation mark on a report section leads to its record", async ({
 test("a section no tab draws is shown beside the records", async ({
   authenticatedPage: page,
 }) => {
-  await page.goto(`/analysis/${JOB_ID}/evidence`);
+  await page.goto(`/analysis/${JOB_ID}/evidence/records`);
   await expect(page.getByRole("heading", { name: /Sections no tab draws/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /R2 analysis/i })).toBeVisible();
   await expect(page.getByText("fcn.00401000")).toBeVisible();

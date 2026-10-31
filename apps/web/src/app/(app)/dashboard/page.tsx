@@ -7,13 +7,15 @@ import Link from "next/link";
 import { FileText } from "lucide-react";
 import { api } from "@/lib/api";
 import type { DashboardStatsDTO, SystemStatusDTO, ToolUsageDTO } from "@/lib/api";
+import Section from "@/components/ui/Section";
 import { latestRunRows, type AnalysisRow } from "@/lib/analyses";
+import { useAuth } from "@/lib/auth";
 import { formatDuration, timeAgo } from "@/lib/report-utils";
 import { statusTone } from "@/lib/status";
 import { verdictBucket, verdictLabel, verdictTone } from "@/lib/verdict";
-import { enrichmentWorkerNotice } from "./enrichmentNotice";
-import { unavailableToolsNotice } from "./unavailableToolsNotice";
-import { mockModeNotice } from "./mockModeNotice";
+import { enrichmentWorkerNotice, type StatusNotice } from "./enrichmentNotice";
+import { unavailableToolsNotice, type UnavailableToolsNotice } from "./unavailableToolsNotice";
+import { mockModeNotice, type MockModeNotice } from "./mockModeNotice";
 import { toolBars } from "./toolBars";
 import {
   PieChart,
@@ -59,12 +61,10 @@ function StatCard({
   sub?: string;
 }) {
   return (
-    <div className="bg-bg-surface border border-border rounded p-4">
-      <p className="text-xs text-text-secondary uppercase tracking-wider mb-1">
-        {label}
-      </p>
-      <p className="text-2xl font-semibold text-text-primary">{value}</p>
-      {sub && <p className="text-xs text-text-muted mt-1">{sub}</p>}
+    <div className="rounded-md border border-border bg-bg-surface px-4 py-3">
+      <p className="text-2xl font-semibold leading-8 text-text-primary">{value}</p>
+      <p className="text-xs text-text-secondary">{label}</p>
+      {sub && <p className="text-xs text-text-muted mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -108,6 +108,8 @@ function mapApiStats(s: DashboardStatsDTO): DisplayStats {
 }
 
 export default function DashboardPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [stats, setStats] = useState<DisplayStats | null>(null);
   const [jobs, setJobs] = useState<AnalysisRow[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatusDTO | null>(null);
@@ -197,83 +199,32 @@ export default function DashboardPage() {
   const mockMode = mockModeNotice(systemStatus, statusError);
 
   return (
-    <div>
+    <div className="space-y-4">
       {/* The page's own name. Visually hidden because the rail already says
           where the reader is; an outline that starts at h2 does not. */}
       <h1 className="sr-only">Dashboard</h1>
 
-      {/* Mock-mode banner: operators
-          frequently miss the worker log line announcing mock mode. Red
-          banner makes the configuration impossible to overlook. */}
-      {mockMode?.kind === "unknown" && (
-        <div
-          role="alert"
-          className="mb-4 flex items-start gap-3 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
-        >
-          <span className="font-semibold text-status-orange">MOCK MODE UNKNOWN</span>
-          <span className="text-text-secondary">
-            The system status could not be read ({mockMode.reason}), so whether the
-            worker accepts mock runs is not known. Treat verdicts with care until
-            the status can be read.
-          </span>
-        </div>
+      {/* What only an operator can act on, said to the operator alone and in
+          plain words: the reader is told what is happening and what it means,
+          never the name of a variable or a setting key. */}
+      {isAdmin && (
+        <OperatorAlerts mockMode={mockMode} enrichment={enrichment} missingTools={missingTools} />
       )}
-      {mockMode?.kind === "allowed" && (
-        <div
-          role="alert"
-          className="mb-4 flex items-start gap-3 rounded border border-status-red/40 bg-status-red/10 p-3 text-sm"
-        >
-          <span className="font-semibold text-status-red">MOCK MODE ALLOWED</span>
-          <span className="text-text-secondary">
-            The worker accepts <code>MALJAN_MOCK_MODE=true</code> or per-job
-            <code> config.mock_mode=true</code> and may short-circuit the
-            real pipeline. Verdicts produced under this gate must not be
-            treated as production findings. Unset
-            <code> MOCK_MODE_ALLOWED</code> and restart the API to disable.
-          </span>
-        </div>
+      {/* Test mode can make a verdict meaningless, so every reader is told
+          that much; the remedy is the operator's, above. */}
+      {!isAdmin && mockMode?.kind === "allowed" && (
+        <p role="alert" className="rounded-md border border-status-red/40 bg-status-red/10 px-3 py-2 text-sm text-text-primary">
+          {TEST_MODE_LINE}
+        </p>
+      )}
+      {!isAdmin && mockMode?.kind === "unknown" && (
+        <p role="status" className="rounded-md border border-status-orange/40 bg-status-orange/10 px-3 py-2 text-sm text-text-primary">
+          {TEST_MODE_UNKNOWN_LINE}
+        </p>
       )}
 
-      {/* Enrichment queued for a worker that is not there. Said in words
-          rather than left to a colour, and only in the one state an operator
-          can do something about; the rest of what the field can say is the
-          system working. */}
-      {enrichment && (
-        <div
-          role="status"
-          className="mb-4 flex flex-wrap items-start gap-x-3 gap-y-1 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
-        >
-          <span className="font-semibold text-status-orange">{enrichment.label}</span>
-          <span className="text-text-secondary">{enrichment.detail}</span>
-          <span className="text-text-muted">
-            Setting: <code>{enrichment.setting}</code>
-          </span>
-        </div>
-      )}
-
-      {/* Tools the default team would call that this host cannot run: said
-          before a submit, with each tool's reason and remedy, rather than in a
-          paid run's degraded block afterwards. */}
-      {missingTools && (
-        <div
-          role="status"
-          className="mb-4 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
-        >
-          <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-            <span className="font-semibold text-status-orange">{missingTools.label}</span>
-            <span className="text-text-secondary">{missingTools.detail}</span>
-          </div>
-          <ul className="mt-2 list-disc pl-5 text-text-secondary">
-            {missingTools.lines.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Stats Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Total Analyses" value={stats?.total_jobs ?? 0} />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Total analyses" value={stats?.total_jobs ?? 0} />
         <StatCard
           label="Completed"
           value={stats?.completed ?? 0}
@@ -285,30 +236,24 @@ export default function DashboardPage() {
           sub={`${(((stats?.failed ?? 0) / Math.max(stats?.total_jobs ?? 1, 1)) * 100).toFixed(1)}% failure rate`}
         />
         <StatCard
-          label="Avg Duration"
+          label="Avg duration"
           value={formatDuration(stats?.avg_duration_seconds ?? null)}
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Recent Analyses */}
-        <div className="lg:col-span-2 bg-bg-surface border border-border rounded">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Latest runs
-            </h2>
-            <Link
-              href="/jobs"
-              className="text-xs text-accent-strong hover:underline"
-            >
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Section
+          title="Recent analyses"
+          className="lg:col-span-2"
+          actions={
+            <Link href="/jobs" className="text-xs text-accent-strong hover:underline">
               Every analysis
             </Link>
-          </div>
-          <div className="divide-y divide-border-light">
+          }
+        >
+          <div className="-mx-4 -my-3 divide-y divide-border-light">
             {jobs.length === 0 ? (
-              <div className="px-4 py-6 text-center text-xs text-text-muted">
-                Nothing has been analysed yet.
-              </div>
+              <p className="px-4 py-6 text-center text-xs text-text-muted">Not found: nothing has been analysed yet.</p>
             ) : (
               jobs.map((job) => (
                 <Link
@@ -342,9 +287,7 @@ export default function DashboardPage() {
                       </span>
                     )}
                     {(!job.verdict || job.status !== "completed") && (
-                      <span
-                        className={`text-xs font-medium uppercase tracking-wider ${statusTone(job.status).text}`}
-                      >
+                      <span className={`text-xs font-medium ${statusTone(job.status).text}`}>
                         {job.status}
                       </span>
                     )}
@@ -353,103 +296,77 @@ export default function DashboardPage() {
               ))
             )}
           </div>
-        </div>
+        </Section>
 
-        {/* Verdict Distribution */}
-        <div className="bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Verdict Distribution
-            </h2>
-          </div>
-          <div className="p-4">
-            {verdictData.length === 0 ? (
-              <div className="h-44 flex items-center justify-center text-xs text-text-muted">
-                No verdict data available.
-              </div>
-            ) : (
-              <>
-                {/* Recharts renders an unlabeled SVG; give the chart a text
-                    alternative so it isn't opaque to screen readers (the legend
-                    below repeats the same figures visually). */}
-                <div
-                  role="img"
-                  aria-label={`Verdict distribution: ${verdictData
-                    .map((d) => `${d.name} ${d.value}`)
-                    .join(", ")}`}
+        <Section title="Verdict mix" empty={verdictData.length === 0}>
+          {/* Recharts renders an unlabeled SVG; give the chart a text
+              alternative so it isn't opaque to screen readers (the legend
+              below repeats the same figures visually). */}
+          <div
+            role="img"
+            aria-label={`Verdict mix: ${verdictData
+              .map((d) => `${d.name} ${d.value}`)
+              .join(", ")}`}
+          >
+            <ResponsiveContainer width="100%" height={180}>
+              {/* The labelled wrapper above is the chart's one node in the
+                  accessibility tree; Recharts' own surface and pie would
+                  otherwise be two more tab stops with no name. */}
+              <PieChart accessibilityLayer={false} tabIndex={-1} role="presentation">
+                <Pie
+                  data={verdictData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={50}
+                  outerRadius={70}
+                  dataKey="value"
+                  strokeWidth={0}
+                  tabIndex={-1}
                 >
-                <ResponsiveContainer width="100%" height={180}>
-                  {/* The labelled wrapper above is the chart's one node in the
-                      accessibility tree; Recharts' own surface and pie would
-                      otherwise be two more tab stops with no name. */}
-                  <PieChart accessibilityLayer={false} tabIndex={-1} role="presentation">
-                    <Pie
-                      data={verdictData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={70}
-                      dataKey="value"
-                      strokeWidth={0}
-                      tabIndex={-1}
-                    >
-                      {verdictData.map((_, i) => (
-                        <Cell key={i} fill={verdictColors[i]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        background: "var(--bg-elevated)",
-                        border: "1px solid var(--border)",
-                        borderRadius: "4px",
-                        fontSize: "12px",
-                        color: "var(--text-primary)",
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-                </div>
-                <div className="flex justify-center gap-4 mt-2">
-                  {verdictData.map((d, i) => (
-                    <div key={d.name} className="flex items-center gap-1.5">
-                      <span
-                        className="w-2 h-2 rounded-full"
-                        style={{ background: verdictColors[i] }}
-                      />
-                      <span className="text-xs text-text-secondary">
-                        {d.name} ({d.value})
-                      </span>
-                    </div>
+                  {verdictData.map((_, i) => (
+                    <Cell key={i} fill={verdictColors[i]} />
                   ))}
-                </div>
-              </>
-            )}
+                </Pie>
+                <Tooltip
+                  contentStyle={{
+                    background: "var(--bg-elevated)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
           </div>
-        </div>
+          <ul className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
+            {verdictData.map((d, i) => (
+              <li key={d.name} className="flex items-center gap-1.5">
+                <span
+                  aria-hidden="true"
+                  className="w-2 h-2 rounded-full"
+                  style={{ background: verdictColors[i] }}
+                />
+                <span className="text-xs text-text-secondary">
+                  {d.name} ({d.value})
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Section>
       </div>
 
       {/* What recent runs leaned on, from each run's own ledger count. Drawn
           only when some run called something: a heading over no bars is the
           empty state in another shape. */}
       {bars && (
-        <section
-          aria-labelledby="tools-used-heading"
-          className="mt-4 bg-bg-surface border border-border rounded"
-        >
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-4 py-3 border-b border-border">
-            <h2
-              id="tools-used-heading"
-              className="text-xs font-medium text-text-primary uppercase tracking-wider"
-            >
-              Tools used
-            </h2>
-            <p className="text-xs text-text-muted">
-              Calls over the last {bars.window}
-              {bars.unrecorded > 0 &&
-                ` · ${bars.unrecorded} older ${bars.unrecorded === 1 ? "run read carries" : "runs read carry"} no per-tool record and ${bars.unrecorded === 1 ? "is" : "are"} not counted`}
-            </p>
-          </div>
-          <ul className="p-4 space-y-2">
+        <Section title="Tools used">
+          <p className="mb-3 text-xs text-text-muted">
+            Calls over the last {bars.window}
+            {bars.unrecorded > 0 &&
+              ` · ${bars.unrecorded} older ${bars.unrecorded === 1 ? "run read carries" : "runs read carry"} no per-tool record and ${bars.unrecorded === 1 ? "is" : "are"} not counted`}
+          </p>
+          <ul className="space-y-2">
             {bars.rows.map((row) => (
               <li key={row.tool} className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] items-center gap-3 text-xs">
                 {/* The name is cut by CSS alone and whole in the tooltip; a
@@ -476,12 +393,89 @@ export default function DashboardPage() {
             ))}
           </ul>
           {bars.more > 0 && (
-            <p className="px-4 pb-3 text-xs text-text-muted">
+            <p className="pt-3 text-xs text-text-muted">
               and {bars.more} more {bars.more === 1 ? "tool" : "tools"}, not drawn
             </p>
           )}
-        </section>
+        </Section>
       )}
     </div>
+  );
+}
+
+/** What every reader is told while test mode is allowed. */
+const TEST_MODE_LINE = "Test mode is on: results may be simulated.";
+/** What every reader is told while the platform's status cannot be read. */
+const TEST_MODE_UNKNOWN_LINE = "Whether results may be simulated is not known right now.";
+
+/**
+ * The alerts an operator acts on, each a sentence a reader without the
+ * platform's internals understands. Test mode is the one that can make a
+ * verdict meaningless, so it is an alert; the rest are statuses.
+ */
+function OperatorAlerts({
+  mockMode,
+  enrichment,
+  missingTools,
+}: {
+  mockMode: MockModeNotice;
+  enrichment: StatusNotice | null;
+  missingTools: UnavailableToolsNotice | null;
+}) {
+  if (!mockMode && !enrichment && !missingTools) return null;
+  return (
+    <section aria-label="Operator alerts" className="space-y-2">
+      {mockMode?.kind === "unknown" && (
+        <div role="alert" className="flex flex-wrap items-start gap-x-3 gap-y-1 rounded-md border border-status-orange/40 bg-status-orange/10 p-3 text-sm">
+          <span className="font-semibold text-status-orange">Test mode not known</span>
+          <span className="text-text-secondary">
+            The platform&apos;s status could not be read ({mockMode.reason}), so it is not known whether analyses
+            may return simulated results. Treat verdicts with care until the status can be read.
+          </span>
+        </div>
+      )}
+      {mockMode?.kind === "allowed" && (
+        <div role="alert" className="flex flex-wrap items-start gap-x-3 gap-y-1 rounded-md border border-status-red/40 bg-status-red/10 p-3 text-sm">
+          <span className="font-semibold text-status-red">{TEST_MODE_LINE}</span>
+          <span className="text-text-secondary">
+            Analyses on this platform may return simulated results instead of running the real analysis. Do not
+            treat their verdicts as findings. Turn test mode off on the server that runs the platform and restart
+            it.
+          </span>
+        </div>
+      )}
+      {/* Enrichment queued for a worker that is not there. Said in words
+          rather than left to a colour, and only in the one state an operator
+          can do something about; the rest of what the field can say is the
+          system working. */}
+      {enrichment && (
+        <div role="status" className="flex flex-wrap items-start gap-x-3 gap-y-1 rounded-md border border-status-orange/40 bg-status-orange/10 p-3 text-sm">
+          <span className="font-semibold text-status-orange">{enrichment.label}</span>
+          <span className="text-text-secondary">{enrichment.detail}</span>
+          <Link
+            href={`/settings/configuration/search?q=${encodeURIComponent(enrichment.setting)}`}
+            className="text-accent-strong hover:underline"
+          >
+            Open the setting
+          </Link>
+        </div>
+      )}
+      {/* Tools the default team would call that this host cannot run: said
+          before a submit, with each tool's reason and remedy, rather than in a
+          paid run's degraded block afterwards. */}
+      {missingTools && (
+        <div role="status" className="rounded-md border border-status-orange/40 bg-status-orange/10 p-3 text-sm">
+          <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
+            <span className="font-semibold text-status-orange">{missingTools.label}</span>
+            <span className="text-text-secondary">{missingTools.detail}</span>
+          </div>
+          <ul className="mt-2 list-disc pl-5 text-text-secondary">
+            {missingTools.lines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   );
 }

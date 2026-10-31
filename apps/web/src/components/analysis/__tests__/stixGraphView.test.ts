@@ -79,7 +79,7 @@ describe("the table view", () => {
   });
 
   it("links an edge's ledger ids into the evidence view", () => {
-    expect(html).toContain("evidence?evidence=ev_0002");
+    expect(html).toContain("evidence/records?evidence=ev_0002");
   });
 
   it("says a missing confidence is not stated, never a number", () => {

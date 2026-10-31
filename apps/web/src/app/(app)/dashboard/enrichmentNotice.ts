@@ -21,7 +21,7 @@ export interface StatusNotice {
   label: string;
   /** What is waiting, and what it is waiting for. */
   detail: string;
-  /** The setting this is about, drawn as the key it is. */
+  /** The setting this is about: the dashboard links to it, and never prints the key. */
   setting: string;
 }
 

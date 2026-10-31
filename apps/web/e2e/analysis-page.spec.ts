@@ -162,7 +162,7 @@ test.describe("Analysis page", () => {
     await expect(drawer).toContainText("WriteProcessMemory into pid 640");
     await expect(drawer.getByRole("link", { name: /Record 1/ })).toHaveAttribute(
       "href",
-      `/analysis/${JOB_ID}/evidence?evidence=ev_0002`,
+      `/analysis/${JOB_ID}/evidence/records?evidence=ev_0002`,
     );
     await expect(drawer.getByRole("button", { name: "Close details" })).toBeFocused();
 
@@ -178,7 +178,7 @@ test.describe("Analysis page", () => {
     const drawer = page.getByRole("dialog");
     await expect(drawer.getByRole("link", { name: /Record 1/ })).toHaveAttribute(
       "href",
-      `/analysis/${JOB_ID}/evidence?evidence=ev_0001`,
+      `/analysis/${JOB_ID}/evidence/records?evidence=ev_0001`,
     );
     await drawer.getByRole("button", { name: "Close details" }).click();
     await expect(drawer).toHaveCount(0);
@@ -194,11 +194,11 @@ test.describe("Analysis page", () => {
     const drawer = page.getByRole("dialog", { name: "Evidence for this statement" });
     await expect(drawer.getByRole("link", { name: /Record 1/ })).toHaveAttribute(
       "href",
-      `/analysis/${JOB_ID}/evidence?evidence=ev_0001`,
+      `/analysis/${JOB_ID}/evidence/records?evidence=ev_0001`,
     );
     await expect(drawer.getByRole("link", { name: /Record 2/ })).toHaveAttribute(
       "href",
-      `/analysis/${JOB_ID}/evidence?evidence=ev_0003`,
+      `/analysis/${JOB_ID}/evidence/records?evidence=ev_0003`,
     );
   });
 
@@ -285,7 +285,8 @@ test.describe("Analysis page", () => {
 
     await nav.getByRole("link", { name: /^Evidence/ }).click();
     await expect(page).toHaveURL(`${BASE}/evidence`);
-    await expect(page.getByRole("heading", { name: /Evidence records/ })).toBeVisible();
+    // The Evidence tab opens on the evidence bundle; the records are its second view.
+    await expect(page.getByRole("heading", { name: "About this bundle" })).toBeVisible();
   });
 
   test("every finished analysis offers the same six tabs, with a count where the report gives one", async ({
@@ -495,7 +496,7 @@ test.describe("Analysis page", () => {
     await page.goto(`${BASE}/evidence`);
     await expect(page.getByRole("navigation", { name: "Analysis sections" }).getByRole("link")).toHaveCount(6);
     const views = page.getByRole("navigation", { name: "Evidence views" });
-    await expect(views.getByRole("link")).toHaveText(["Records", "Analyst discussion", "Hunter", "Mystery Box"]);
+    await expect(views.getByRole("link")).toHaveText(["Evidence bundle", "Records", "Analyst discussion", "Hunter", "Mystery Box"]);
     await views.getByRole("link", { name: "Hunter" }).click();
     await expect(page).toHaveURL(`${BASE}/evidence/agent/hunter`);
     await expect(page.getByText("mutex held across reboots")).toBeVisible();

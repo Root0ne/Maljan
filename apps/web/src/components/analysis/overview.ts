@@ -60,6 +60,21 @@ export function analysisHref(jobId: string, key: AnalysisTabKey, anchor?: string
 }
 
 /**
+ * Where a record link written before the bundle led the Evidence tab
+ * (`/evidence?evidence=ev_0007`) is passed on to: the same query and
+ * fragment under Records, so nothing the link carried is dropped.
+ */
+export function recordsForwardHref(jobId: string, query: string, hash: string): string {
+  const search = query.replace(/^\?/, "");
+  return `${analysisHref(jobId, "evidence")}/records${search ? `?${search}` : ""}${hash}`;
+}
+
+/** Where one tool call's record opens, with its arguments and its output. */
+export function evidenceRecordHref(jobId: string, entryId: string): string {
+  return `${analysisHref(jobId, "evidence")}/records?evidence=${encodeURIComponent(entryId)}`;
+}
+
+/**
  * The block a URL's fragment names (`#persistence`), or null when it names
  * none. A fragment that does not decode (`#%E0%A4%A`) names none: it is
  * skipped rather than thrown on.

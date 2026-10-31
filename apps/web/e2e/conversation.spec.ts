@@ -307,7 +307,7 @@ test.describe("Conversation", () => {
     const chip = feed.getByRole("link", { name: "ev_0007" });
     await expect(chip).toBeVisible();
     await chip.click();
-    await page.waitForURL(`**/analysis/${JOB_ID}/evidence?evidence=ev_0007`);
+    await page.waitForURL(`**/analysis/${JOB_ID}/evidence/records?evidence=ev_0007`);
   });
 
   test("draws a correction, a question and a delegated pair as themselves", async ({
@@ -437,7 +437,8 @@ test.describe("Conversation", () => {
     await page.goto(`/analysis/${JOB_ID}/evidence/conversation`);
     await expect(stream(page)).toContainText("Final verdict: Malicious.");
     await expect(page.getByTestId("pipeline-strip")).toHaveCount(0);
-    await page.getByRole("link", { name: "Records" }).click();
+    // Run quality heads the Evidence tab's first view, the bundle.
+    await page.getByRole("link", { name: "Evidence bundle" }).click();
     await page.getByRole("button", { name: /Run quality/ }).click();
 
     const strip = page.getByTestId("pipeline-strip");

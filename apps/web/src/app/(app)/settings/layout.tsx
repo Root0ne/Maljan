@@ -1,10 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { KeyRound, ListChecks, SlidersHorizontal, User } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import Tabs, { activeTabKey } from "@/components/ui/Tabs";
 import { useAuth } from "@/lib/auth";
 import { SettingsProvider, useSettingsContext } from "./configuration/SettingsContext";
 import { llmLooksConfigured } from "./setup/status";
@@ -12,24 +10,21 @@ import { llmLooksConfigured } from "./setup/status";
 interface NavItem {
   href: string;
   label: string;
-  icon: LucideIcon;
 }
 
 /** What anyone signed in can change about themselves. */
 const ACCOUNT_ITEMS: NavItem[] = [
-  { href: "/settings/profile", label: "Profile", icon: User },
-  { href: "/settings/api-keys", label: "API keys", icon: KeyRound },
+  { href: "/settings/profile", label: "Profile" },
+  { href: "/settings/api-keys", label: "API keys" },
 ];
 
 const SETUP_ITEM: NavItem = {
   href: "/settings/setup",
   label: "Setup guides",
-  icon: ListChecks,
 };
 const CONSOLE_ITEM: NavItem = {
   href: "/settings/configuration",
   label: "Configuration",
-  icon: SlidersHorizontal,
 };
 
 /** The two admin areas: the guide hub and the settings console. They share
@@ -39,29 +34,13 @@ function isAdminArea(pathname: string): boolean {
   return pathname.startsWith("/settings/setup") || pathname.startsWith("/settings/configuration");
 }
 
+/** The settings' sections as the console's tab row (`ui/Tabs`), each its own URL. */
 function Nav({ items, pathname }: { items: NavItem[]; pathname: string }) {
+  const tabs = items.map((item) => ({ key: item.href, label: item.label, href: item.href }));
   return (
-    <nav aria-label="Settings sections" className="flex border-b border-border mb-6">
-      {items.map((item) => {
-        const active = pathname.startsWith(item.href);
-        const Icon = item.icon;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? "page" : undefined}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium uppercase tracking-wider border-b-2 ${
-              active
-                ? "border-accent text-accent"
-                : "border-transparent text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            <Icon size={16} aria-hidden="true" />
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
+    <div className="mb-6">
+      <Tabs tabs={tabs} active={activeTabKey(tabs, pathname)} label="Settings sections" />
+    </div>
   );
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { buttonClass } from "@/components/ui/Button";
 import { Bot, Brain, Database, FlaskConical, Radar, Server, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -66,7 +67,7 @@ export default function SetupHubPage() {
               </p>
               <Link
                 href={`/settings/setup/${guide.id}`}
-                className="inline-block mt-3 px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
+                className={`mt-3 ${buttonClass("primary", "sm")}`}
               >
                 Start
               </Link>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { buttonClass } from "@/components/ui/Button";
 import type { PasswordAsk } from "./useSettings";
 
 /** Asks for the admin's current password before a save or a reset that
@@ -55,7 +56,7 @@ export default function CurrentPasswordDialog({ ask }: { ask: PasswordAsk }) {
           <button
             type="submit"
             disabled={password === ""}
-            className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
+            className={buttonClass("primary", "sm")}
           >
             Confirm
           </button>

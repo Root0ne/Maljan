@@ -14,6 +14,7 @@ import Link from "next/link";
 import { CircleCheck, CircleX, Loader, Wrench } from "lucide-react";
 
 import type { ConversationItem } from "@/lib/conversation";
+import { evidenceRecordHref } from "@/components/analysis/overview";
 import { agentColor } from "./agentIdentity";
 
 function duration(ms: number): string {
@@ -70,7 +71,7 @@ export default function ToolCallRow({
         {took && <span className="font-mono text-text-muted">{took}</span>}
         {tool.evidenceId && (
           <Link
-            href={`/analysis/${jobId}/evidence?evidence=${encodeURIComponent(tool.evidenceId)}`}
+            href={evidenceRecordHref(jobId, tool.evidenceId)}
             className="rounded bg-accent/15 px-1.5 font-mono text-accent-strong hover:underline"
             title="Open this call in the evidence"
           >

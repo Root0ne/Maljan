@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { buttonClass } from "@/components/ui/Button";
 import { X } from "lucide-react";
 import { api } from "@/lib/api";
 import { fetchAllPages } from "@/lib/pages";
@@ -119,8 +120,8 @@ export default function SettingsApiKeysPage() {
   return (
     <div className="space-y-4 max-w-3xl">
       {/* Create new key */}
-      <div className="bg-bg-surface border border-border rounded p-4">
-        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider mb-3">
+      <div className="rounded-md border border-border bg-bg-surface p-4">
+        <h2 className="text-sm font-semibold text-text-primary mb-3">
           Create API Key
         </h2>
         <form onSubmit={handleCreateKey} className="flex items-end gap-2">
@@ -157,7 +158,7 @@ export default function SettingsApiKeysPage() {
           <button
             type="submit"
             disabled={!newKeyName.trim() || !keyPassword}
-            className="h-9 px-4 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
+            className={buttonClass("primary", "md")}
           >
             Create
           </button>
@@ -218,7 +219,7 @@ export default function SettingsApiKeysPage() {
       )}
 
       {/* Key list */}
-      <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+      <h2 className="text-sm font-semibold text-text-primary">
         Issued keys
       </h2>
       {apiKeysLoading ? (
@@ -235,7 +236,7 @@ export default function SettingsApiKeysPage() {
       ) : (
         <div className="space-y-3">
           {visibleRows(apiKeys, shown).visible.map((key) => (
-            <div key={key.id} className="bg-bg-surface border border-border rounded">
+            <div key={key.id} className="rounded-md border border-border bg-bg-surface">
               <div className="flex items-center justify-between p-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
