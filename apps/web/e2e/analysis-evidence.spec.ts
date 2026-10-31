@@ -155,7 +155,7 @@ test("run quality draws the run as its stages", async ({ authenticatedPage: page
   // A fact about the run, not the sample: in the collapsed run quality
   // section under Evidence, and nowhere on the findings.
   await page.goto(`/analysis/${JOB_ID}`);
-  await expect(page.getByRole("heading", { name: /Top findings/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Behaviour and techniques/ })).toBeVisible();
   await expect(page.getByTestId("pipeline-strip")).toHaveCount(0);
   await page.goto(`/analysis/${JOB_ID}/evidence`);
   await page.getByRole("button", { name: /Run quality/ }).click();

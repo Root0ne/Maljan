@@ -74,15 +74,18 @@ test.describe("Analysis page", () => {
     await page.goto(BASE);
 
     const header = page.getByRole("region", { name: "Analysis summary" });
-    await expect(header.getByRole("heading", { level: 1, name: "invoice_scan.exe" })).toBeVisible();
-    await expect(header.getByText("Malicious", { exact: true })).toBeVisible();
-    // The ring is the verdict's confidence, never a derived score.
-    const ring = header.getByRole("img", { name: "Malicious, confidence 91 percent" });
-    await expect(ring).toBeVisible();
-    await expect(ring).toContainText("91%");
-    await expect(ring).toContainText("Confidence");
-    await expect(header.getByTestId("confidence-why")).toHaveText("How sure the analysis is of this verdict");
-    await expect(header.getByText("AgentTesla")).toBeVisible();
+    // The family is the heading; the file's name sits in the identity line.
+    await expect(header.getByRole("heading", { level: 1, name: "AgentTesla" })).toBeVisible();
+    await expect(header.getByText("invoice_scan.exe", { exact: true })).toBeVisible();
+    await expect(header.getByTestId("verdict-word")).toHaveText("Malicious");
+    // The meter is the verdict's confidence on the report's five rungs, never a derived score.
+    const meter = header.getByRole("img", { name: "Malicious, confidence 91 percent" });
+    await expect(meter).toBeVisible();
+    await expect(meter).toContainText("High confidence, 91%");
+    await expect(meter).toHaveAttribute("title", "How sure the analysis is of this verdict");
+    // No box, no ring and one confidence label.
+    await expect(header.getByText(/confidence/i)).toHaveCount(1);
+    await expect(header.getByText("Trojan targeting Windows.")).toBeVisible();
     await expect(header.getByRole("button", { name: /^Copy SHA-256 of invoice_scan\.exe$/ })).toBeVisible();
     await header.getByRole("button", { name: "All hashes" }).click();
     await expect(header.getByText("5d41402abc4b2a76b9719d911017c592")).toBeVisible();
@@ -98,13 +101,21 @@ test.describe("Analysis page", () => {
     ]);
     await expect(nav.getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
 
-    await expect(page.getByRole("heading", { name: /Top findings/ })).toBeVisible();
-    const table = page.getByRole("table");
-    await expect(table.getByRole("row").nth(1)).toContainText("High 4/5");
-    await expect(table.getByRole("row").nth(2)).toContainText("Unrated");
-    await expect(table.getByRole("row").nth(2)).toContainText("Read from the code, not observed running");
-    await expect(table.getByRole("row").nth(2)).not.toContainText("Observed when the sample ran");
-    await expect(page.getByText("Files written").locator("..")).toContainText("Not found");
+    // Every behaviour and technique, split by whether the sandbox saw it: a
+    // signature is seen, a technique the report bases on code alone is not,
+    // whichever analyst named it.
+    const behaviours = page.getByRole("region", { name: /Behaviour and techniques/ });
+    await expect(behaviours).toBeVisible();
+    const seen = behaviours.getByRole("group", { name: "Seen in sandbox", exact: true });
+    await expect(seen.getByRole("button").first()).toContainText("High 4/5");
+    const notSeen = behaviours.getByRole("group", { name: "Not seen in sandbox" });
+    await expect(notSeen.getByRole("button", { name: "Show evidence: Process Injection" })).toHaveAttribute(
+      "title",
+      "Read from the code, not observed running",
+    );
+    await expect(seen.getByRole("button", { name: "Show evidence: Process Injection" })).toHaveCount(0);
+    const counts = page.getByRole("region", { name: "Counts" });
+    await expect(counts.getByText("Files written").locator("xpath=following-sibling::dd[1]")).toHaveText("Not found");
     await expect(page.getByText("cdn.example-update.net").first()).toBeVisible();
     await expect(page.getByText("Hunt for WriteProcessMemory into non-child processes.")).toBeVisible();
 
@@ -133,19 +144,19 @@ test.describe("Analysis page", () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await serve(page, previewReport());
     await page.goto(BASE);
-    await expect(page.getByRole("heading", { name: /Top findings/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Behaviour and techniques/ })).toBeVisible();
     // The app's own navigation, the header and the tabs are not counted: only
     // what Overview itself puts in the first screen.
     const above = await page.getByTestId("analysis-content").evaluate((root) => {
       const fold = window.innerHeight;
-      return Array.from(root.querySelectorAll<HTMLElement>("a, button, input, select, textarea, [tabindex]")).filter(
-        (el) => {
+      return Array.from(root.querySelectorAll<HTMLElement>("a, button, input, select, textarea, [tabindex]"))
+        .filter((el) => {
           const box = el.getBoundingClientRect();
           return box.width > 0 && box.height > 0 && box.top < fold;
-        },
-      ).length;
+        })
+        .map((el) => el.getAttribute("aria-label") || el.textContent?.trim() || el.tagName);
     });
-    expect(above).toBeLessThanOrEqual(10);
+    expect(above.length, above.join(" | ")).toBeLessThanOrEqual(10);
   });
 
   test("a finding's caret opens its evidence in the side panel and gives focus back", async ({
@@ -187,7 +198,7 @@ test.describe("Analysis page", () => {
   test("ids cited in the summary prose become one evidence link, never printed", async ({ sessionPage: page }) => {
     await serve(page, previewReport());
     await page.goto(BASE);
-    const summary = page.getByRole("region", { name: "Summary", exact: true });
+    const summary = page.getByRole("region", { name: "Bottom line", exact: true });
     await expect(summary).toContainText("injects into a running process and beacons");
     await expect(summary).not.toContainText("ev_");
     await summary.getByRole("button", { name: "Evidence for this statement, 2 records" }).click();
@@ -219,32 +230,47 @@ test.describe("Analysis page", () => {
     await expect(header).not.toContainText(/No verdict|No report|Unnamed sample|Family not identified/);
     await expect(page.getByRole("navigation", { name: "Analysis sections" })).toHaveCount(0);
     release();
-    await expect(header.getByRole("heading", { level: 1, name: "invoice_scan.exe" })).toBeVisible();
+    await expect(header.getByRole("heading", { level: 1, name: "AgentTesla" })).toBeVisible();
     await expect(header).not.toHaveAttribute("aria-busy", "true");
   });
 
-  test("on a phone the header folds to one short row once the page scrolls", async ({ sessionPage: page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await serve(page, previewReport());
-    await page.goto(BASE);
-    const header = page.getByRole("region", { name: "Analysis summary" });
-    await expect(page.getByRole("heading", { name: /Top findings/ })).toBeVisible();
-    await page.evaluate(() => document.getElementById("main-content")!.scrollTo(0, 400));
-    await expect(header).toHaveAttribute("data-folded", "true");
-    const box = await header.boundingBox();
-    expect(box!.height).toBeLessThanOrEqual(72);
-    // Verdict, confidence, Export and Ask stay; chips, hashes and the why-line go.
-    await expect(header.getByText("Malicious", { exact: true })).toBeVisible();
-    await expect(header.getByRole("img", { name: "Malicious, confidence 91 percent" })).toBeVisible();
-    await expect(header.getByRole("button", { name: "Export" })).toBeVisible();
-    await expect(header.getByRole("button", { name: "Ask" })).toBeVisible();
-    await expect(header.getByText("trojan")).toHaveCount(0);
-    await expect(header.getByRole("button", { name: "All hashes" })).toHaveCount(0);
-    await expect(header.getByTestId("confidence-why")).toHaveCount(0);
-    // Back at the top it opens again.
-    await page.evaluate(() => document.getElementById("main-content")!.scrollTo(0, 0));
-    await expect(header.getByTestId("confidence-why")).toBeVisible();
-  });
+  for (const [width, height] of [
+    [390, 844],
+    [1440, 900],
+  ] as const) {
+    test(`at ${width} px the sticky bar takes the verdict once the header scrolls away, and nothing above the content moves`, async ({
+      sessionPage: page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await serve(page, previewReport());
+      await page.goto(BASE);
+      const bar = page.getByTestId("analysis-bar");
+      await expect(page.getByRole("heading", { name: /Behaviour and techniques/ })).toBeVisible();
+      await expect(bar.getByTestId("compact-verdict")).toHaveCount(0);
+      const layout = () =>
+        page.evaluate(() => {
+          const main = document.getElementById("main-content")!;
+          const content = document.querySelector<HTMLElement>('[data-testid="analysis-content"]')!;
+          return {
+            bar: document.querySelector<HTMLElement>('[data-testid="analysis-bar"]')!.offsetHeight,
+            contentTop: Math.round(content.getBoundingClientRect().top + main.scrollTop),
+          };
+        });
+      const before = await layout();
+      // Every position on the way down, the one the old fold flickered at included.
+      for (const y of [40, 72, 80, 160, 400]) {
+        await page.evaluate((to) => document.getElementById("main-content")!.scrollTo(0, to), y);
+        expect(await layout()).toEqual(before);
+      }
+      await expect(bar.getByTestId("compact-verdict")).toContainText("Malicious");
+      if (width >= 768) await expect(bar.getByRole("img", { name: "Malicious, confidence 91 percent" })).toBeVisible();
+      await expect(bar.getByRole("button", { name: "Chat about this analysis" })).toBeVisible();
+      // Back at the top the header holds the verdict again.
+      await page.evaluate(() => document.getElementById("main-content")!.scrollTo(0, 0));
+      await expect(bar.getByTestId("compact-verdict")).toHaveCount(0);
+      expect(await layout()).toEqual(before);
+    });
+  }
 
   test("one Export menu, grouped Quick, Deep and Data, saves through the existing downloads", async ({
     sessionPage: page,
@@ -509,7 +535,7 @@ test.describe("Analysis page", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await serve(page, previewReport());
     await page.goto(BASE);
-    await expect(page.getByRole("heading", { name: /Top findings/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Behaviour and techniques/ })).toBeVisible();
     const overflow = await page.evaluate(() => {
       const main = document.getElementById("main-content")!;
       return {

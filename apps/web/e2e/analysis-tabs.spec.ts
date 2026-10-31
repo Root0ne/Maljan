@@ -37,7 +37,7 @@ const BLOCKS: Block[] = [
     was: "summary",
     path: "",
     expect: async (page) => {
-      await expect(page.getByRole("heading", { name: "Summary", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Key findings", exact: false })).toBeVisible();
       await expect(page.getByText("Registers itself for execution at user logon.")).toBeVisible();
     },
   },

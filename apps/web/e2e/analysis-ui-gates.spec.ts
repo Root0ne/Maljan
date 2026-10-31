@@ -169,7 +169,7 @@ test("Overview logs no console error", async ({ sessionPage: page }) => {
   page.on("pageerror", (err) => errors.push(err.message));
   await serve(page);
   await page.goto(BASE);
-  await expect(page.getByRole("heading", { name: /Top findings/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Behaviour and techniques/ })).toBeVisible();
   await page.waitForLoadState("networkidle");
   expect(errors).toEqual([]);
 });
@@ -181,11 +181,11 @@ test("no console error when the analysis is reached by client-side navigation", 
   });
   await serve(page);
   await page.goto(BASE);
-  await expect(page.getByRole("heading", { name: /Top findings/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Behaviour and techniques/ })).toBeVisible();
   await page.getByRole("link", { name: "Dashboard" }).click();
   await expect(page).toHaveURL("/dashboard", { timeout: 30_000 });
   await page.goBack();
-  await expect(page.getByRole("heading", { name: /Top findings/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Behaviour and techniques/ })).toBeVisible();
   expect(errors.filter((e) => /script tag/i.test(e))).toEqual([]);
 });
 
