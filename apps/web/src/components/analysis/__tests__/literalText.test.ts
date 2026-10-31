@@ -16,10 +16,8 @@ import type { MalwareReport } from "@/types/malware-report";
 
 const LITERAL = String.raw`C:\Users\*\AppData\Roaming\__init__.py and \\server\share\*.docx`;
 
-/** What React escapes in markup, undone, so the literal can be compared. */
-function text(html: string): string {
-  return html.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#x27;/g, "'");
-}
+// The literal holds none of the characters React escapes (& < > " '), so a
+// literal drawn as written appears verbatim in the markup.
 
 describe("literal text", () => {
   it("keeps a step, an identifier's purpose and a command's description as written", () => {
@@ -31,7 +29,7 @@ describe("literal text", () => {
       },
     } as unknown as MalwareReport;
     const html = renderToStaticMarkup(createElement(TechnicalAnalysisPanel, { report }));
-    expect(text(html).split(LITERAL)).toHaveLength(4);
+    expect(html.split(LITERAL)).toHaveLength(4);
     expect(html).not.toContain("<strong>init</strong>");
     expect(html).not.toContain("<em>");
   });
@@ -40,6 +38,6 @@ describe("literal text", () => {
     const html = renderToStaticMarkup(
       createElement(ArtifactSections, { sections: [{ ...STRINGS_SECTION, kind: "text", rows: [], items: [], text: LITERAL }] }),
     );
-    expect(text(html)).toContain(LITERAL);
+    expect(html).toContain(LITERAL);
   });
 });
