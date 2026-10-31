@@ -9,6 +9,7 @@
  */
 
 import type { EvidenceEntry, EvidenceQuery } from "@/types/evidence";
+import { MAX_STRUCTURED_DEPTH, nestingDepth } from "@/components/analysis/structuredValue";
 
 /** One page of the ledger. Large enough that most runs fit on one or two. */
 export const EVIDENCE_PAGE_SIZE = 50;
@@ -137,24 +138,59 @@ export const EMPTY_OPTIONS: Record<keyof EvidenceFilters, string[]> = {
   tool: [],
 };
 
-/** Above this many characters an output is shown as its text, never parsed. */
-export const MAX_PARSED_OUTPUT_CHARS = 500_000;
+/** Above this many characters an output is shown as its text, a page at a
+ *  time, never parsed and laid out. */
+export const MAX_PARSED_OUTPUT_CHARS = 50_000;
+
+/** A run of digits a JavaScript number cannot hold exactly. */
+const LONG_NUMBER = /-?\d{16,}/;
+
+/** JSON text with the whitespace between its tokens removed, strings untouched. */
+function minifiedJson(text: string): string {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      out += c;
+      if (c === "\\") out += text[++i] ?? "";
+      else if (c === '"') inString = false;
+    } else if (c === '"') {
+      inString = true;
+      out += c;
+    } else if (!/\s/.test(c)) out += c;
+  }
+  return out;
+}
 
 /**
  * A tool output that is a JSON object or list, parsed, so it can be laid out
- * as fields and tables; null for text, for a scalar, for anything that does
- * not parse, and for an output too large to lay out, all of which are shown
- * as the text they are.
+ * as fields and tables; null for anything shown as the text it is instead:
+ * text, a scalar, a document that does not parse, one too large to lay out
+ * (`MAX_PARSED_OUTPUT_CHARS`), one nested deeper than the layout goes
+ * (`MAX_STRUCTURED_DEPTH`), and one that parsing would change. That last is a
+ * long integer a number cannot hold, a key written twice, or any other
+ * spelling the parsed value does not print back to: the evidence is shown
+ * exactly as the tool returned it or not laid out at all.
  */
 export function structuredOutput(output: string | null | undefined): unknown {
   const body = (output ?? "").trim();
   if (!body || body.length > MAX_PARSED_OUTPUT_CHARS || !/^[[{]/.test(body)) return null;
+  if (LONG_NUMBER.test(body.replace(/"(?:\\.|[^"\\])*"/g, '""'))) return null;
+  let value: unknown;
   try {
-    const value: unknown = JSON.parse(body);
-    return typeof value === "object" && value !== null ? value : null;
+    value = JSON.parse(body);
   } catch {
     return null;
   }
+  if (typeof value !== "object" || value === null) return null;
+  if (nestingDepth(value) > MAX_STRUCTURED_DEPTH) return null;
+  try {
+    if (JSON.stringify(value) !== minifiedJson(body)) return null;
+  } catch {
+    return null;
+  }
+  return value;
 }
 
 /** How much of a tool's output an unexpanded disclosure shows. */

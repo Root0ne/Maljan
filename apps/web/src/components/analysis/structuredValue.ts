@@ -69,13 +69,53 @@ export function keyLabel(key: string): string {
 export function scalarText(v: unknown): string {
   if (typeof v === "string") return v;
   if (v === undefined) return "";
-  return JSON.stringify(v) ?? String(v);
+  return safeStringify(v);
+}
+
+/** What is printed for a value that cannot be printed at all. */
+export const UNPRINTABLE = "(a value nested too deeply to print)";
+
+/** `JSON.stringify` that never throws: a value it cannot print (a cycle, a
+ *  nesting deeper than the engine's stack) is printed as `String(value)`,
+ *  and where even that recurses too deeply, as `UNPRINTABLE`. */
+function safeStringify(v: unknown, indent?: number): string {
+  try {
+    return JSON.stringify(v, null, indent) ?? String(v);
+  } catch {
+    try {
+      return String(v);
+    } catch {
+      return UNPRINTABLE;
+    }
+  }
 }
 
 /** A value past the drawn depth, as one line of JSON, cut at `max` characters. */
 export function compactJson(v: unknown, max = 160): string {
-  const text = typeof v === "string" ? v : (JSON.stringify(v) ?? String(v));
+  const text = typeof v === "string" ? v : safeStringify(v);
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** The deepest a parsed value is laid out at all; anything deeper is shown as its text. */
+export const MAX_STRUCTURED_DEPTH = 64;
+
+/**
+ * How deeply `value` nests objects and lists, counted without recursion and
+ * no further than `limit + 1`: a document nested thousands deep parses, but
+ * printing or drawing it recursively would exhaust the stack.
+ */
+export function nestingDepth(value: unknown, limit = MAX_STRUCTURED_DEPTH): number {
+  let deepest = 0;
+  const stack: [unknown, number][] = [[value, 0]];
+  while (stack.length > 0) {
+    const [node, depth] = stack.pop()!;
+    if (typeof node !== "object" || node === null) continue;
+    const here = depth + 1;
+    if (here > deepest) deepest = here;
+    if (deepest > limit) return deepest;
+    for (const child of Array.isArray(node) ? node : Object.values(node)) stack.push([child, here]);
+  }
+  return deepest;
 }
 
 export type JsonTokenKind = "key" | "string" | "number" | "boolean" | "null" | "punct" | "space";
@@ -93,7 +133,16 @@ const JSON_TOKEN =
  * tokens joined are the printed text, character for character.
  */
 export function jsonTokens(value: unknown): JsonToken[] {
-  const text = JSON.stringify(value, null, 2) ?? String(value);
+  return jsonTextTokens(safeStringify(value, 2));
+}
+
+/**
+ * JSON text exactly as it was written, split into tokens for colouring: the
+ * raw view of a tool's output prints the output itself, never a re-printing
+ * of what it parsed to (which would round a large integer or fold a repeated
+ * key). The tokens joined are `text`, character for character.
+ */
+export function jsonTextTokens(text: string): JsonToken[] {
   const out: JsonToken[] = [];
   let at = 0;
   for (const m of text.matchAll(JSON_TOKEN)) {

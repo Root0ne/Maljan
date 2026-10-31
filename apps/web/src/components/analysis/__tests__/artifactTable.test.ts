@@ -60,8 +60,7 @@ describe("a section of every shape at once (T-341)", () => {
     expect(html).toContain("pe");
     expect(html).toContain("first answer as a list");
     expect(html).toContain("and a third as prose, ");
-    // The prose is markdown; its id is the page's one citation mark.
-    expect(html).toContain('title="ev_0007"');
+    expect(html).toContain("evidence=ev_0007");
   });
 
   it("still draws a plain table, list and paragraph as before", () => {

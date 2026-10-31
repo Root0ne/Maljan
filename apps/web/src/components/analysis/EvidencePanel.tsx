@@ -332,7 +332,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                             <div>
                               <h3 className={DETAIL_HEADING}>Output</h3>
                               {entry.output && parsedOutput !== null ? (
-                                <StructuredValue value={parsedOutput} name={`Output of ${entry.entry_id}`} />
+                                <StructuredValue value={parsedOutput} source={entry.output} name={`Output of ${entry.entry_id}`} />
                               ) : entry.output ? (
                                 <>
                                   {/* Text, not data: shown as written, a page at a time. */}

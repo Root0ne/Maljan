@@ -7,6 +7,7 @@ import {
   EVIDENCE_PAGE_SIZE,
   NO_FILTERS,
   structuredOutput,
+  MAX_PARSED_OUTPUT_CHARS,
   argsSummary,
   deepLinkView,
   emptyOutputNote,
@@ -132,6 +133,28 @@ describe("the output disclosure", () => {
       expect(structuredOutput(text)).toBeNull();
     }
     expect(structuredOutput(`[${"1,".repeat(300_000)}1]`)).toBeNull();
+  });
+
+  it("shows an output as its text wherever laying it out would change it", () => {
+    // An integer past 2^53 would lose digits.
+    expect(structuredOutput('{"handle": 18446744073709551615}')).toBeNull();
+    // A key written twice would fold into one.
+    expect(structuredOutput('{"a": 1, "a": 2}')).toBeNull();
+    // A long digit run inside a string is a string, and changes nothing.
+    expect(structuredOutput('{"sha256": "123456789012345678901234"}')).toEqual({ sha256: "123456789012345678901234" });
+    // Spacing is not a change.
+    expect(structuredOutput('{\n  "a" : [ 1, 2 ]\n}')).toEqual({ a: [1, 2] });
+  });
+
+  it("shows a document nested deeper than the layout goes as its text, without throwing", () => {
+    const deep = `${"[".repeat(5_000)}1${"]".repeat(5_000)}`;
+    expect(() => structuredOutput(deep)).not.toThrow();
+    expect(structuredOutput(deep)).toBeNull();
+    expect(structuredOutput(`${"[".repeat(10)}1${"]".repeat(10)}`)).not.toBeNull();
+  });
+
+  it("shows an output above the size it lays out as its text", () => {
+    expect(structuredOutput(`{"a": "${"x".repeat(MAX_PARSED_OUTPUT_CHARS)}"}`)).toBeNull();
   });
 
   it("shows a short output whole and offers nothing more", () => {
