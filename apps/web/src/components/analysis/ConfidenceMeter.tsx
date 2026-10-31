@@ -15,12 +15,15 @@ import { CONFIDENCE_WHY, type VerdictConfidence } from "./overview";
 export default function ConfidenceMeter({
   confidence,
   compact = false,
+  title = CONFIDENCE_WHY,
 }: {
   confidence: VerdictConfidence;
   compact?: boolean;
+  /** What the confidence is about; the verdict's by default. */
+  title?: string;
 }) {
   return (
-    <span role="img" aria-label={confidence.label} title={CONFIDENCE_WHY} className="inline-flex items-center gap-2">
+    <span role="img" aria-label={confidence.label} title={title} className="inline-flex items-center gap-2">
       <span aria-hidden="true" className="flex items-center gap-[3px]">
         {[1, 2, 3, 4, 5].map((i) => (
           <span

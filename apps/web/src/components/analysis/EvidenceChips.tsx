@@ -5,7 +5,8 @@ import { useParams } from "next/navigation";
 
 import { useReport } from "./AnalysisContext";
 import { CiteMark } from "./CitedProse";
-import { citationParts, isEvidenceId } from "./citations";
+import { FileSearch } from "lucide-react";
+import { citationParts, citedRecords, isEvidenceId } from "./citations";
 import { evidenceRecordHref } from "./overview";
 
 /**
@@ -127,6 +128,55 @@ function CitationProse({ text, jobId }: { text: string; jobId: string }) {
  * the evidence drawer. Everything that is not an id is printed exactly as
  * written.
  */
+/**
+ * A citation sentence as the records it names (`citedRecords`): each record
+ * one quiet chip, the evidence icon and what the citation says of it, that
+ * opens the evidence drawer on it, or links to it outside an analysis page.
+ * No bracket or separator of the source is printed; the id and the full
+ * words are the chip's name and its tooltip.
+ */
+export function CitedRecords({ text, jobId: jobIdProp }: { text: string; jobId?: string }) {
+  const params = useParams();
+  const { showEvidence } = useReport();
+  const jobId = jobIdProp ?? (typeof params?.id === "string" ? params.id : "");
+  const { lead, records } = citedRecords(text);
+  const chip =
+    "inline-flex max-w-full items-center gap-1 rounded border border-border-light bg-bg-elevated px-1.5 py-px text-[11px] leading-4 text-text-secondary hover:border-text-muted hover:text-text-primary";
+  return (
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
+      {lead && <span>{lead}</span>}
+      {records.map((r, i) => {
+        const name = r.label ? `Evidence ${r.id}: ${r.label}` : `Evidence ${r.id}`;
+        const body = (
+          <>
+            <FileSearch aria-hidden="true" className="h-3 w-3 shrink-0 text-accent-strong" />
+            <span className={`truncate ${r.label ? "max-w-[18rem]" : "font-mono"}`}>{r.label || r.id}</span>
+          </>
+        );
+        return showEvidence ? (
+          <button
+            key={`${r.id}-${i}`}
+            type="button"
+            data-citation=""
+            title={name}
+            aria-label={name}
+            onClick={(e) =>
+              showEvidence({ title: "Evidence for this claim", details: [], techniques: [], evidenceIds: [r.id] }, e.currentTarget)
+            }
+            className={chip}
+          >
+            {body}
+          </button>
+        ) : (
+          <Link key={`${r.id}-${i}`} href={evidenceRecordHref(jobId, r.id)} title={name} aria-label={name} className={chip}>
+            {body}
+          </Link>
+        );
+      })}
+    </span>
+  );
+}
+
 export function CitedText({ text, jobId: jobIdProp }: { text: string; jobId?: string }) {
   const params = useParams();
   const { showEvidence } = useReport();

@@ -19,6 +19,39 @@ export function isEvidenceId(value: string): boolean {
   return /^ev_\d+$/.test(value.trim());
 }
 
+export interface CitedRecord {
+  id: string;
+  /** What the citation says of this record, its brackets and separators
+   *  dropped; empty when it says nothing beyond the id. */
+  label: string;
+}
+
+/**
+ * A citation read as the records it names, each with the words written
+ * after it: "[ev_0001] pe windows, 60,928 bytes. [ev_0003] dll" reads as
+ * ev_0001 "pe windows, 60,928 bytes" and ev_0003 "dll". Words before the
+ * first id are returned apart, as `lead`; a citation with no id at all is
+ * all lead.
+ */
+export function citedRecords(text: string): { lead: string; records: CitedRecord[] } {
+  const parts = citationParts(text ?? "");
+  const clean = (s: string) =>
+    s
+      .replace(/[[\]()]/g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/^[\s,;:.–—-]+|[\s,;:–—-]+$/g, "")
+      .replace(/\.$/, "")
+      .trim();
+  let lead = "";
+  const records: CitedRecord[] = [];
+  for (const part of parts) {
+    if (part.kind === "id") records.push({ id: part.id, label: "" });
+    else if (records.length === 0) lead += part.text;
+    else records[records.length - 1].label += part.text;
+  }
+  return { lead: clean(lead), records: records.map((r) => ({ id: r.id, label: clean(r.label) })) };
+}
+
 /** The ids and the prose of one citation, in the order they were written. */
 export function citationParts(text: string): CitationPart[] {
   const parts: CitationPart[] = [];
