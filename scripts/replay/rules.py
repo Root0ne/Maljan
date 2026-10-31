@@ -274,18 +274,11 @@ def _timestamp(value: Any) -> datetime | None:
 
 
 def _read_ledger(run: _Run) -> None:
-    from maljan.schemas.evidence import LedgerEntry
+    # The follow-up's reader: a database export's null column reads as absent.
+    from maljan.reporting.follow_up import stored_ledger
 
-    fields = set(LedgerEntry.model_fields)
-    unread = 0
-    for item in run.stored.evidence:
-        row = {k: v for k, v in item.items() if k in fields}
-        row["id"] = item.get("entry_id") or item.get("id")
-        try:
-            run.ledger.append(LedgerEntry.model_validate(row))
-        except Exception:  # noqa: BLE001 — counted and named below
-            unread += 1
-    run.ledger.sort(key=lambda entry: entry.seq)
+    ledger, unread = stored_ledger(run.stored.evidence)
+    run.ledger.extend(ledger)
     for entry in run.ledger:
         run.by_agent.setdefault(str(entry.agent or ""), []).append(entry)
     if unread:

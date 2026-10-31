@@ -302,7 +302,14 @@ class StoredRun:
 
 
 def stored_ledger(rows: Iterable[Mapping[str, Any]]) -> tuple[list[Any], int]:
-    """The stored ledger rows as ``LedgerEntry``, in ``seq`` order, and how many did not read."""
+    """The stored ledger rows as ``LedgerEntry``, in ``seq`` order, and how many did not read.
+
+    A column the row holds as null reads as absent: a database row keeps
+    NULL where the entry carried nothing and on every row older than the
+    column (``app.models.evidence``), and the entry's default stands for
+    that. Every field that admits null defaults to it, so a row that read
+    before reads the same.
+    """
     from maljan.schemas.evidence import LedgerEntry
 
     fields = set(LedgerEntry.model_fields)
@@ -312,7 +319,7 @@ def stored_ledger(rows: Iterable[Mapping[str, Any]]) -> tuple[list[Any], int]:
         if not isinstance(row, Mapping):
             unread += 1
             continue
-        kept = {k: v for k, v in row.items() if k in fields}
+        kept = {k: v for k, v in row.items() if k in fields and v is not None}
         kept["id"] = row.get("entry_id") or row.get("id")
         try:
             ledger.append(LedgerEntry.model_validate(kept))

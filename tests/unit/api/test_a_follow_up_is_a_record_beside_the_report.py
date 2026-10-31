@@ -396,6 +396,88 @@ class TestThePreparation:
         assert prepared.mock is False
 
     @pytest.mark.asyncio
+    async def test_every_ledger_row_the_database_returns_reaches_the_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import json
+
+        from tests.unit.reporting.test_a_follow_up_is_answered_from_the_stored_run import (
+            _findings,
+            _payload,
+        )
+
+        from app.models.evidence import EvidenceEntry
+        from app.services import settings_service
+        from maljan.core.container import ServiceContainer
+        from maljan.reporting.narrative_agent import NarrativeAgent
+
+        async def _overrides(db: Any) -> dict[str, Any]:
+            return {}
+
+        # Each row as the database returns it: every column of the table, and
+        # NULL in each one that admits it.
+        filled = {"entry_id": "", "stage": "analysis", "agent": "static", "tool": "strings",
+                  "ok": True, "output": "beacons to example.test", "seq": 0, "duration_ms": 0,
+                  "waited_ms": 0, "args_repaired": False, "truncated": False,
+                  "chars_dropped": 0}  # fmt: skip
+        columns = EvidenceEntry.__table__.columns
+        rows = [
+            {
+                **{c.name: None for c in columns if c.nullable},
+                **filled,
+                "id": str(uuid.uuid4()),
+                "entry_id": f"ev_000{seq}",
+                "seq": seq,
+            }
+            for seq in (1, 2, 3)
+        ]
+        required = {c.name for c in columns if not c.nullable}
+        assert required <= {*filled, "id", "job_id", "created_at", "updated_at"}
+        answer = {
+            "answers": [
+                {"question": 1, "outcome": "established", "answer": "Yes [ev_0003].",
+                 "evidence_ids": ["ev_0003"]}
+            ]
+        }  # fmt: skip
+        built: list[NarrativeAgent] = []
+        packed: list[list[str]] = []
+
+        def _reporter(self: ServiceContainer) -> NarrativeAgent:
+            agent = NarrativeAgent(
+                llm=_Reply(json.dumps(answer)),  # type: ignore[arg-type]
+                token_ledger=self._token_ledger,
+                model_label="openai gpt-test",
+            )
+            built.append(agent)
+            return agent
+
+        async def _close(self: ServiceContainer) -> None:
+            return None
+
+        def _pack(state: Any, *args: Any, **kwargs: Any) -> str:
+            packed.append([str(e.id) for e in state["evidence_ledger"]])
+            return "PACK"
+
+        monkeypatch.setattr(settings_service, "load_core_overrides", _overrides)
+        monkeypatch.setattr(ServiceContainer, "get_narrative_agent", _reporter)
+        monkeypatch.setattr(ServiceContainer, "aclose", _close)
+        monkeypatch.setattr(follow_up, "_learn_reporter_windows", lambda settings: None)
+        monkeypatch.setattr("maljan.pipeline.nodes.pack_text", _pack)
+        job = type("Job", (), {"id": uuid.uuid4(), "status": "completed", "config": {}})()
+        report = _sealed_report()
+        report.malware_report = ledger_chain.with_seal(_payload(), report.ledger_seal)
+
+        prepared = await follow_up.prepare(_Session(None, report, rows, _findings()), job)
+        done = await follow_up.answer(prepared, "Does it beacon?")
+
+        ids = ["ev_0001", "ev_0002", "ev_0003"]
+        assert [e.id for e in prepared.run.ledger] == ids
+        assert packed == [ids]
+        assert len(built[0].ledger_reads) == len(ids)
+        assert done.answer.outcome == "established"
+        assert not any("ledger row" in note for note in done.notes)
+
+    @pytest.mark.asyncio
     async def test_a_refused_stored_setting_is_a_422_that_names_no_key(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
