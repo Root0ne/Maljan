@@ -192,7 +192,12 @@ class TestTheShapeRules:
         assert wire.refused == []
         assert wire.dropped == []
         later = wire.bodies[1]
-        assert later["messages"][0]["content"] == [{"type": "text", "text": EVIDENCE}]
+        # Neither string turn can carry a breakpoint, so the one goes on the
+        # first turn, whose entry the retry wrote: a read, and nothing written.
+        assert later["messages"][0]["content"] == [
+            {"type": "text", "text": EVIDENCE, "cache_control": MARK}
+        ]
+        assert _marked(later) == [0]
         assert later["messages"][2]["content"] == RETRY_QUESTION, (
             "sent as a string when the block was written, it stays one"
         )
