@@ -96,7 +96,7 @@ describe("a link is made only where the report makes one", () => {
 describe("a tag in the report's text stays text", () => {
   it("keeps markup as characters, escaped", () => {
     const markup = html('<script>alert("x")</script>\n\n<img src=x onerror=alert(1)>\n\nA <b>bold</b> word');
-    expect(markup).not.toMatch(/<script|<img|<b>/);
+    expect(markup).not.toMatch(/<script|<img|<b>/i);
     expect(markup).toContain("&lt;script&gt;");
     expect(markup).toContain("&lt;img src=x onerror=alert(1)&gt;");
   });
@@ -206,12 +206,16 @@ const ADVERSARIAL: [string, (size: number) => string][] = [
 /** Parses and draws `markdown`, failing on a throw; returns the parse time. */
 function timed(markdown: string): number {
   let markup = "";
-  const start = performance.now();
-  expect(() => {
-    parseMarkdown(markdown);
-    subsectionTitles(markdown);
-  }).not.toThrow();
-  const parsed = performance.now() - start;
+  // Best of three, so one stall on a shared runner does not read as slow input.
+  let parsed = Infinity;
+  for (let run = 0; run < 3; run += 1) {
+    const start = performance.now();
+    expect(() => {
+      parseMarkdown(markdown);
+      subsectionTitles(markdown);
+    }).not.toThrow();
+    parsed = Math.min(parsed, performance.now() - start);
+  }
   expect(() => {
     markup = html(markdown);
   }).not.toThrow();
