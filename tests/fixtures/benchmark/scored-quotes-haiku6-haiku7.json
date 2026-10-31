@@ -1,0 +1,2141 @@
+{
+ "source": "the scored quotes of the stored haiku6 and haiku7 runs score.md (item tables and the detection block), each split at its ellipses, kept where the single-file report re-rendered from the run prints it in sections 1 to 12, written in the form passages are compared in (tests/unit/reporting/_report_inventory.py, plain: no Markdown marks, no evidence ids)",
+ "quotes": [
+  {
+   "run": "haiku6",
+   "item": "K2.5 register, then loop",
+   "quote": "Routine 0x5750 calls 0x7fa8 when DAT10588 is zero"
+  },
+  {
+   "run": "haiku6",
+   "item": "K2.5 register, then loop",
+   "quote": "When the counter is zero, the result of 0x7fa8 is appended with 0xb984"
+  },
+  {
+   "run": "haiku6",
+   "item": "K3.5 PEB walk + CRC-32",
+   "quote": "Routine 0x869c walks the export names of a loaded module, hashes each name with the CRC-32 routine 0x6aa4"
+  },
+  {
+   "run": "haiku6",
+   "item": "K3.5 PEB walk + CRC-32",
+   "quote": "The PEB is read through a GS-segment access at 0x8690"
+  },
+  {
+   "run": "haiku6",
+   "item": "K5.2 task `Updater`, COM, logon",
+   "quote": "0x33ac passes the Updater value as argument 4"
+  },
+  {
+   "run": "haiku6",
+   "item": "K5.2 task `Updater`, COM, logon",
+   "quote": "to routine 0x3728"
+  },
+  {
+   "run": "haiku6",
+   "item": "K5.2 task `Updater`, COM, logon",
+   "quote": "0xb344 initialises COM through CoInitializeEx and CoCreateInstance"
+  },
+  {
+   "run": "haiku6",
+   "item": "K5.2 task `Updater`, COM, logon",
+   "quote": "Updater, as the task path to a vtable slot at +0x88 with the flag value 6"
+  },
+  {
+   "run": "haiku6",
+   "item": "K5.2 task `Updater`, COM, logon",
+   "quote": "in the shape of ITaskFolder::RegisterTaskDefinition"
+  },
+  {
+   "run": "haiku6",
+   "item": "K5.2 task `Updater`, COM, logon",
+   "quote": "0xc2c4 calls a vtable slot at +0x50 with the value 9"
+  },
+  {
+   "run": "haiku6",
+   "item": "K5.2 task `Updater`, COM, logon",
+   "quote": "Updater"
+  },
+  {
+   "run": "haiku6",
+   "item": "K6.3 RC4 then base64",
+   "quote": "The buffer is then passed through 0xcbe0 (key schedule) and 0xc964, which runs the 0xcaac keystream routine, using the key from blob 0xfd30 decoded to 12345"
+  },
+  {
+   "run": "haiku6",
+   "item": "K6.3 RC4 then base64",
+   "quote": "Capa names 0xcaac as RC4 PRGA"
+  },
+  {
+   "run": "haiku6",
+   "item": "K6.3 RC4 then base64",
+   "quote": "The output is base64-encoded by 0x6634 and passed as the optional body of HttpSendRequestA"
+  },
+  {
+   "run": "haiku6",
+   "item": "K6.4 beacon interval",
+   "quote": "((tick % 150) + 450) x 1000 ms, i.e. 450 to 599 s"
+  },
+  {
+   "run": "haiku6",
+   "item": "K6.4 beacon interval",
+   "quote": "1500 to 2099 s, used when the flag set by command 0x13 is nonzero"
+  },
+  {
+   "run": "haiku6",
+   "item": "K6.4 beacon interval",
+   "quote": "The sleep constants are not established"
+  },
+  {
+   "run": "haiku6",
+   "item": "K6.5 beacon format at registration",
+   "quote": "When the counter is zero, the result of 0x7fa8 is appended"
+  },
+  {
+   "run": "haiku6",
+   "item": "K6.5 beacon format at registration",
+   "quote": "&mac=, %02x, :%02x, &computername=%s and &domain=%s"
+  },
+  {
+   "run": "haiku6",
+   "item": "K6.6 beacon types 1–5",
+   "quote": "the process list from 0x1c38 (type 4, &proclist=[), the file search from 0x1a08 (type 5)"
+  },
+  {
+   "run": "haiku6",
+   "item": "K9 task `Updater`",
+   "quote": "Security EventID 4698"
+  },
+  {
+   "run": "haiku6",
+   "item": "K9 task `Updater`",
+   "quote": "with TaskName Updater"
+  },
+  {
+   "run": "haiku6",
+   "item": "K9 task `Updater`",
+   "quote": "review existing tasks named Updater"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.3 process list",
+   "quote": "Case 0x3 calls routine 0x1c38"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.4 sysinfo",
+   "quote": "start cmd.exe runner"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.4 sysinfo",
+   "quote": "Case 0x4 calls 0x2118, which starts thread routine 0x2200"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.4 sysinfo",
+   "quote": "decoded cmd.exe /c command lines"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.12 download + run EXE",
+   "quote": "fetch and run .exe"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.12 download + run EXE",
+   "quote": "Case 0xc calls routine 0x6e04 with the run flag set"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.12 download + run EXE",
+   "quote": "fetches the payload through routine 0x6f48, and starts it with CreateProcessW via routine 0xb400"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.13 DLL via rundll32",
+   "quote": "Case 0xd calls routine 0x6c2c with the run flag set"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.14 shellcode",
+   "quote": "Case 0xe calls routine 0x7170"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.14 shellcode",
+   "quote": "VirtualAlloc, and starts it on a new thread at routine 0xb398"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.14 shellcode",
+   "quote": "protection 0x40 (PAGEEXECUTEREADWRITE)"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.14 shellcode",
+   "quote": "0xb398 calls the first pointer of its argument block"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.19 longer interval",
+   "quote": "Case 0x13 sets DAT1058c"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.19 longer interval",
+   "quote": "sleep interval from the ((tick % 600) + 1500) s branch"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.20 reset counter",
+   "quote": "Case 0x14 sets DAT10590. On the next pass the main loop in routine 0x5750 clears DAT10588 and DAT10590"
+  },
+  {
+   "run": "haiku6",
+   "item": "K1.4 x64 DLL; arch check",
+   "quote": "pe, x86-64, DLL"
+  },
+  {
+   "run": "haiku6",
+   "item": "K3.2 process count 75 / 50",
+   "quote": "We assess the early exit is an environment-dependent gate, probably an OS-version and process-count check. The evidence does not establish what the values measure"
+  },
+  {
+   "run": "haiku6",
+   "item": "K2.3 mutex",
+   "quote": "Slot 0x10c60 is filled with CreateMutexW (hash 0x2d789102), and routine 0x3868 calls it, then checks GetLastError for 0xb7"
+  },
+  {
+   "run": "haiku6",
+   "item": "K2.3 mutex",
+   "quote": "the slot target is not established"
+  },
+  {
+   "run": "haiku6",
+   "item": "K2.3 mutex",
+   "quote": "runnung"
+  },
+  {
+   "run": "haiku6",
+   "item": "K9 mutex `runnung`",
+   "quote": "Candidate mutex name"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.18 `bp.dat`",
+   "quote": "the evidence shows no call that writes to them"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.18 `bp.dat`",
+   "quote": "bp.dat"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.18 `bp.dat`",
+   "quote": "files/bp.dat"
+  },
+  {
+   "run": "haiku6",
+   "item": "K3.1 PEB BeingDebugged",
+   "quote": "That function returns the PEB pointer and nothing else. We assess the read supports PE-export API resolution"
+  },
+  {
+   "run": "haiku6",
+   "item": "K5.1 `Custom_update\\Update_%x.dll`",
+   "quote": "Customupdate"
+  },
+  {
+   "run": "haiku6",
+   "item": "K5.1 `Custom_update\\Update_%x.dll`",
+   "quote": "Update%x"
+  },
+  {
+   "run": "haiku6",
+   "item": "K7.2 desktop links",
+   "quote": "&desklinks=["
+  },
+  {
+   "run": "haiku6",
+   "item": "K1.2 IcedID link",
+   "quote": "some engines label the file IcedID"
+  },
+  {
+   "run": "haiku6",
+   "item": "K1.5 four exports, one address",
+   "quote": "All 4 exports share one address, 0x3ce4"
+  },
+  {
+   "run": "haiku6",
+   "item": "K2.2 abort on failed check",
+   "quote": "0x3868 returns -1 before starting the thread when its version and value comparisons (0x8560, 0x8820) fail, or when 0x6988 fails"
+  },
+  {
+   "run": "haiku6",
+   "item": "K3.6 string encryption",
+   "quote": "takes its length from the seed's low 16 bits XORed with the length word"
+  },
+  {
+   "run": "haiku6",
+   "item": "K4.4 two encrypted C2s",
+   "quote": "Routine 0x6988 decodes each through 0xae78 and stores both in a two-entry table"
+  },
+  {
+   "run": "haiku6",
+   "item": "K5.3 `update_data.dat` holds C2s",
+   "quote": "updatedata.dat"
+  },
+  {
+   "run": "haiku6",
+   "item": "K6.1 HTTPS POST `/live/`",
+   "quote": "The only caller passes 1, so the code path selects POST"
+  },
+  {
+   "run": "haiku6",
+   "item": "K6.1 HTTPS POST `/live/`",
+   "quote": "/live/"
+  },
+  {
+   "run": "haiku6",
+   "item": "K11",
+   "quote": "Littlehw"
+  },
+  {
+   "run": "haiku6",
+   "item": "K11",
+   "quote": "&stiller="
+  },
+  {
+   "run": "haiku6",
+   "item": "K11",
+   "quote": "0 of 4 strings found"
+  },
+  {
+   "run": "haiku7",
+   "item": "K1.4 x64 DLL + arch check",
+   "quote": "pe, x86-64, DLL"
+  },
+  {
+   "run": "haiku7",
+   "item": "K1.4 x64 DLL + arch check",
+   "quote": "We assess that the slot holds IsWow64Process and that the gate refuses to continue under WOW64"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.3 mutex",
+   "quote": "a mutex test exits when CreateMutexW returns null or GetLastError is 0xb7"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.3 mutex",
+   "quote": "argument 3 (lpName) of CreateMutexW at 0x3962"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.3 mutex",
+   "quote": "loaded at 0x3935 in the function at 0x3868"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.3 mutex",
+   "quote": "the mutex name is not established"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.3 mutex",
+   "quote": "runnung"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.4 install, then persist",
+   "quote": "CustomupdateUpdate<hex>.<ext>"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.4 install, then persist",
+   "quote": "Updater"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.4 install, then persist",
+   "quote": "wtfbbq"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.6 `update_data.dat` read first",
+   "quote": "Stored file read by routine 0xcf14 and RC4-decrypted"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.6 `update_data.dat` read first",
+   "quote": "0xcf14 reads updatedata.dat (path from 0xcea4), RC4-decrypts it"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.6 `update_data.dat` read first",
+   "quote": "parses URLS lines into the list at 0x109a0"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.6 `update_data.dat` read first",
+   "quote": "updatedata.dat"
+  },
+  {
+   "run": "haiku7",
+   "item": "K3.2 process count 75 / 50",
+   "quote": "exits if the count is below 75 with OS code above 5, or below 50 with OS code below 6"
+  },
+  {
+   "run": "haiku7",
+   "item": "K3.2 process count 75 / 50",
+   "quote": "a system-wide Toolhelp snapshot"
+  },
+  {
+   "run": "haiku7",
+   "item": "K3.4 MAC check",
+   "quote": "the adapter check 0x68e8 exits when any adapter record's field at offset 0x194 exceeds 6"
+  },
+  {
+   "run": "haiku7",
+   "item": "K4.2 group → FNV",
+   "quote": "The group value is an FNV hash: 0x463c stores the result of 0xc99c applied to the decoded Littlehw in DAT10464"
+  },
+  {
+   "run": "haiku7",
+   "item": "K4.2 group → FNV",
+   "quote": "group as the FNV hash of Littlehw computed by 0xc99c"
+  },
+  {
+   "run": "haiku7",
+   "item": "K5.1 install path",
+   "quote": "built under the AppData folder as Customupdate, an Update<hex> name, and a .exe or .dll extension chosen by flag DAT10488"
+  },
+  {
+   "run": "haiku7",
+   "item": "K5.3 `update_data.dat` holds C2s",
+   "quote": "parses URLS lines into the list"
+  },
+  {
+   "run": "haiku7",
+   "item": "K6.7 reply verbs",
+   "quote": "CLEARURL leads to 0xce20 (clear), URLS to 0xccbc (append), COMMAND to 0x3cf4, and ERROR to nothing"
+  },
+  {
+   "run": "haiku7",
+   "item": "K6.7 reply verbs",
+   "quote": "splits reply lines on CRLF and fields on the bar"
+  },
+  {
+   "run": "haiku7",
+   "item": "K9 `Custom_update\\`",
+   "quote": "Install folder under %AppData%"
+  },
+  {
+   "run": "haiku7",
+   "item": "K9 `Custom_update\\`",
+   "quote": "Customupdate"
+  },
+  {
+   "run": "haiku7",
+   "item": "K7.2 desktop links",
+   "quote": "Dispatcher case 2 calls 0x1a08"
+  },
+  {
+   "run": "haiku7",
+   "item": "K7.15 update",
+   "quote": "download, self-delete and run"
+  },
+  {
+   "run": "haiku7",
+   "item": "K7.18 `bp.dat`",
+   "quote": "fetch DLL and data, then rundll32"
+  },
+  {
+   "run": "haiku7",
+   "item": "K7.18 `bp.dat`",
+   "quote": "stages a DLL and a data file (files/bp.dat"
+  },
+  {
+   "run": "haiku7",
+   "item": "K7.18 `bp.dat`",
+   "quote": "calls 0xb4cc with the init string"
+  },
+  {
+   "run": "haiku7",
+   "item": "K7.18 `bp.dat`",
+   "quote": "bp.dat"
+  },
+  {
+   "run": "haiku7",
+   "item": "K11",
+   "quote": "treat as capa-only"
+  },
+  {
+   "run": "haiku7",
+   "item": "K11",
+   "quote": "No anti-debugging is established in this sample"
+  },
+  {
+   "run": "haiku7",
+   "item": "K1.1a family",
+   "quote": "malware"
+  },
+  {
+   "run": "haiku7",
+   "item": "K1.1a family",
+   "quote": "Latrodectus"
+  },
+  {
+   "run": "haiku7",
+   "item": "K1.1b loader",
+   "quote": "loader / backdoor"
+  },
+  {
+   "run": "haiku7",
+   "item": "K1.2 IcedID link",
+   "quote": "labels that span Latrodectus, IcedID, Ulise"
+  },
+  {
+   "run": "haiku7",
+   "item": "K1.5 four exports, one address",
+   "quote": "All 4 exports share one address, 0x3ce4"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.2 abort on failed check",
+   "quote": "returns -1 on any failure"
+  },
+  {
+   "run": "haiku7",
+   "item": "K2.5 register, then loop",
+   "quote": "On the first check-in, routine 0x7fa8 collects host data"
+  },
+  {
+   "run": "haiku7",
+   "item": "K3.5 PEB walk + CRC-32",
+   "quote": "Export walker 0x869c"
+  },
+  {
+   "run": "haiku7",
+   "item": "K3.5 PEB walk + CRC-32",
+   "quote": "computes the CRC-32 of each export name with routine 0x6aa4"
+  },
+  {
+   "run": "haiku7",
+   "item": "K4.4 two encrypted C2s",
+   "quote": "Routine 0x6988 stores both in a two-entry table"
+  },
+  {
+   "run": "haiku7",
+   "item": "K5.2 task `Updater`, COM, logon",
+   "quote": "LogonTrigger"
+  },
+  {
+   "run": "haiku7",
+   "item": "K6.1 HTTPS POST `/live/`",
+   "quote": "0x5030 takes the POST branch for a nonzero second argument"
+  },
+  {
+   "run": "haiku7",
+   "item": "K6.1 HTTPS POST `/live/`",
+   "quote": "calls 0x5030 with the constant 1"
+  },
+  {
+   "run": "haiku7",
+   "item": "K6.1 HTTPS POST `/live/`",
+   "quote": "/live/"
+  },
+  {
+   "run": "haiku7",
+   "item": "K9 task `Updater`",
+   "quote": "Name given to the logon-triggered scheduled task"
+  },
+  {
+   "run": "haiku7",
+   "item": "K9 task `Updater`",
+   "quote": "Event ID 4698 with TaskName Updater"
+  },
+  {
+   "run": "haiku7",
+   "item": "K7.12 EXE",
+   "quote": "0xb400 calls CreateProcessW"
+  },
+  {
+   "run": "haiku7",
+   "item": "K7.14 shellcode",
+   "quote": "0xb398 calls the buffer directly"
+  },
+  {
+   "run": "haiku7",
+   "item": "K11",
+   "quote": "0 of 5 strings found"
+  }
+ ],
+ "left_out": [
+  {
+   "run": "haiku7",
+   "item": "K9 UA",
+   "quote": "begins as the common browsers' user agents do",
+   "why": "the publish rule's reason beside an exported value, which the analyst report does not print; the bundle's indicator table prints it"
+  }
+ ],
+ "beyond_human": [
+  {
+   "run": "haiku6",
+   "fact": 2,
+   "token": "UpdaterTag.dll"
+  },
+  {
+   "run": "haiku6",
+   "fact": 3,
+   "token": "text"
+  },
+  {
+   "run": "haiku6",
+   "fact": 3,
+   "token": "rdata"
+  },
+  {
+   "run": "haiku6",
+   "fact": 3,
+   "token": "data"
+  },
+  {
+   "run": "haiku6",
+   "fact": 3,
+   "token": "pdata"
+  },
+  {
+   "run": "haiku6",
+   "fact": 3,
+   "token": "reloc"
+  },
+  {
+   "run": "haiku6",
+   "fact": 6,
+   "token": "0x33629d40"
+  },
+  {
+   "run": "haiku6",
+   "fact": 6,
+   "token": "0x41"
+  },
+  {
+   "run": "haiku6",
+   "fact": 6,
+   "token": "0xae78"
+  },
+  {
+   "run": "haiku6",
+   "fact": 7,
+   "token": "0x9484"
+  },
+  {
+   "run": "haiku6",
+   "fact": 7,
+   "token": "0x904c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 7,
+   "token": "0xa59c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 7,
+   "token": "0xac50"
+  },
+  {
+   "run": "haiku6",
+   "fact": 8,
+   "token": "0x10c60"
+  },
+  {
+   "run": "haiku6",
+   "fact": 8,
+   "token": "0x2d789102"
+  },
+  {
+   "run": "haiku6",
+   "fact": 8,
+   "token": "0x3868"
+  },
+  {
+   "run": "haiku6",
+   "fact": 9,
+   "token": "0x6aa4"
+  },
+  {
+   "run": "haiku6",
+   "fact": 9,
+   "token": "0xc99c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 10,
+   "token": "0x3868"
+  },
+  {
+   "run": "haiku6",
+   "fact": 10,
+   "token": "0x8560"
+  },
+  {
+   "run": "haiku6",
+   "fact": 10,
+   "token": "0x8820"
+  },
+  {
+   "run": "haiku6",
+   "fact": 10,
+   "token": "0x6988"
+  },
+  {
+   "run": "haiku6",
+   "fact": 10,
+   "token": "0x6250"
+  },
+  {
+   "run": "haiku6",
+   "fact": 11,
+   "token": "0x10250"
+  },
+  {
+   "run": "haiku6",
+   "fact": 11,
+   "token": "0x10278"
+  },
+  {
+   "run": "haiku6",
+   "fact": 11,
+   "token": "0x6988"
+  },
+  {
+   "run": "haiku6",
+   "fact": 12,
+   "token": "[rsp+0x40]"
+  },
+  {
+   "run": "haiku6",
+   "fact": 12,
+   "token": "0xbc1c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 12,
+   "token": "0x69e2"
+  },
+  {
+   "run": "haiku6",
+   "fact": 12,
+   "token": "0x6a4e"
+  },
+  {
+   "run": "haiku6",
+   "fact": 13,
+   "token": "0x5030"
+  },
+  {
+   "run": "haiku6",
+   "fact": 13,
+   "token": "0xfba0"
+  },
+  {
+   "run": "haiku6",
+   "fact": 13,
+   "token": "0xfbb0"
+  },
+  {
+   "run": "haiku6",
+   "fact": 13,
+   "token": "0x4d20"
+  },
+  {
+   "run": "haiku6",
+   "fact": 14,
+   "token": "Content-Type: application/x-www-form-urlencoded"
+  },
+  {
+   "run": "haiku6",
+   "fact": 14,
+   "token": "0xfb68"
+  },
+  {
+   "run": "haiku6",
+   "fact": 15,
+   "token": "0x10160"
+  },
+  {
+   "run": "haiku6",
+   "fact": 15,
+   "token": "0x6864"
+  },
+  {
+   "run": "haiku6",
+   "fact": 16,
+   "token": "URLS|%d|%s"
+  },
+  {
+   "run": "haiku6",
+   "fact": 16,
+   "token": "0xfcf0"
+  },
+  {
+   "run": "haiku6",
+   "fact": 16,
+   "token": "0xfd00"
+  },
+  {
+   "run": "haiku6",
+   "fact": 16,
+   "token": "0xfd10"
+  },
+  {
+   "run": "haiku6",
+   "fact": 16,
+   "token": "0x541c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 16,
+   "token": "0x10400"
+  },
+  {
+   "run": "haiku6",
+   "fact": 16,
+   "token": "0xd1c8"
+  },
+  {
+   "run": "haiku6",
+   "fact": 17,
+   "token": "0x2200"
+  },
+  {
+   "run": "haiku6",
+   "fact": 17,
+   "token": "0x2118"
+  },
+  {
+   "run": "haiku6",
+   "fact": 17,
+   "token": "0x1030"
+  },
+  {
+   "run": "haiku6",
+   "fact": 18,
+   "token": "LogonTrigger"
+  },
+  {
+   "run": "haiku6",
+   "fact": 18,
+   "token": "0x10030"
+  },
+  {
+   "run": "haiku6",
+   "fact": 18,
+   "token": "0xc3a4"
+  },
+  {
+   "run": "haiku6",
+   "fact": 18,
+   "token": "0xc2c4"
+  },
+  {
+   "run": "haiku6",
+   "fact": 19,
+   "token": "Updater"
+  },
+  {
+   "run": "haiku6",
+   "fact": 19,
+   "token": "rundll32.exe"
+  },
+  {
+   "run": "haiku6",
+   "fact": 19,
+   "token": "0x33ac"
+  },
+  {
+   "run": "haiku6",
+   "fact": 19,
+   "token": "0xf988"
+  },
+  {
+   "run": "haiku6",
+   "fact": 19,
+   "token": "0xf9b8"
+  },
+  {
+   "run": "haiku6",
+   "fact": 19,
+   "token": "0x3728"
+  },
+  {
+   "run": "haiku6",
+   "fact": 19,
+   "token": "0x3659"
+  },
+  {
+   "run": "haiku6",
+   "fact": 20,
+   "token": "Startup"
+  },
+  {
+   "run": "haiku6",
+   "fact": 20,
+   "token": "Desktop"
+  },
+  {
+   "run": "haiku6",
+   "fact": 20,
+   "token": "AppData"
+  },
+  {
+   "run": "haiku6",
+   "fact": 20,
+   "token": "Personal"
+  },
+  {
+   "run": "haiku6",
+   "fact": 20,
+   "token": "Local AppData"
+  },
+  {
+   "run": "haiku6",
+   "fact": 20,
+   "token": "0x10330"
+  },
+  {
+   "run": "haiku6",
+   "fact": 20,
+   "token": "0x7b98"
+  },
+  {
+   "run": "haiku6",
+   "fact": 21,
+   "token": "C:WINDOWSSYSTEM32rundll32.exe %s,%s"
+  },
+  {
+   "run": "haiku6",
+   "fact": 21,
+   "token": "rundll32.exe %s"
+  },
+  {
+   "run": "haiku6",
+   "fact": 21,
+   "token": "0xb4cc"
+  },
+  {
+   "run": "haiku6",
+   "fact": 21,
+   "token": "0xfe90"
+  },
+  {
+   "run": "haiku6",
+   "fact": 21,
+   "token": "0xfef0"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "%s%d.exe"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "%s%d.dll"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "files/bp.dat"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "%d.dat"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "/files/"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "<html>"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "<!DOCTYPE"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "0x10018"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "0x6e04"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "0xfa70"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "0x6c2c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "0xfa58"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "0xfa90"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "0xfb00"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "0x8d90"
+  },
+  {
+   "run": "haiku6",
+   "fact": 22,
+   "token": "0x6f48"
+  },
+  {
+   "run": "haiku6",
+   "fact": 23,
+   "token": "RegistryMachine"
+  },
+  {
+   "run": "haiku6",
+   "fact": 23,
+   "token": "0xb0c4"
+  },
+  {
+   "run": "haiku6",
+   "fact": 23,
+   "token": "0xb1d4"
+  },
+  {
+   "run": "haiku6",
+   "fact": 23,
+   "token": "0x88f8"
+  },
+  {
+   "run": "haiku6",
+   "fact": 24,
+   "token": "&mac="
+  },
+  {
+   "run": "haiku6",
+   "fact": 24,
+   "token": "&computername=%s"
+  },
+  {
+   "run": "haiku6",
+   "fact": 24,
+   "token": "&domain=%s"
+  },
+  {
+   "run": "haiku6",
+   "fact": 24,
+   "token": "0x7fa8"
+  },
+  {
+   "run": "haiku6",
+   "fact": 24,
+   "token": "0x8ae0"
+  },
+  {
+   "run": "haiku6",
+   "fact": 25,
+   "token": "&proclist=["
+  },
+  {
+   "run": "haiku6",
+   "fact": 25,
+   "token": "0x1c38"
+  },
+  {
+   "run": "haiku6",
+   "fact": 25,
+   "token": "0x8820"
+  },
+  {
+   "run": "haiku6",
+   "fact": 26,
+   "token": "0x463c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 28,
+   "token": "svchost.exe -k GPSvcGroup"
+  },
+  {
+   "run": "haiku6",
+   "fact": 29,
+   "token": "0xff40"
+  },
+  {
+   "run": "haiku6",
+   "fact": 29,
+   "token": "0x6f48"
+  },
+  {
+   "run": "haiku6",
+   "fact": 30,
+   "token": "0x72c8"
+  },
+  {
+   "run": "haiku6",
+   "fact": 30,
+   "token": "0xb670"
+  },
+  {
+   "run": "haiku6",
+   "fact": 31,
+   "token": "0x9484"
+  },
+  {
+   "run": "haiku6",
+   "fact": 32,
+   "token": "0xa350"
+  },
+  {
+   "run": "haiku6",
+   "fact": 33,
+   "token": "0xc934"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0x3cf4"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0x1a08"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0x1c38"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0x2118"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0x6e04"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0xb400"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0x6c2c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0xb4cc"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0x7170"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0xb398"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0x72c8"
+  },
+  {
+   "run": "haiku6",
+   "fact": 34,
+   "token": "0xb670"
+  },
+  {
+   "run": "haiku6",
+   "fact": 35,
+   "token": "0x708"
+  },
+  {
+   "run": "haiku6",
+   "fact": 36,
+   "token": "0xfd40"
+  },
+  {
+   "run": "haiku6",
+   "fact": 36,
+   "token": "0xfdb0"
+  },
+  {
+   "run": "haiku6",
+   "fact": 36,
+   "token": "0xfe20"
+  },
+  {
+   "run": "haiku6",
+   "fact": 36,
+   "token": "0x10df0"
+  },
+  {
+   "run": "haiku6",
+   "fact": 36,
+   "token": "0xb984"
+  },
+  {
+   "run": "haiku6",
+   "fact": 36,
+   "token": "0xcbe0"
+  },
+  {
+   "run": "haiku6",
+   "fact": 36,
+   "token": "0xc964"
+  },
+  {
+   "run": "haiku6",
+   "fact": 36,
+   "token": "0xcaac"
+  },
+  {
+   "run": "haiku6",
+   "fact": 36,
+   "token": "0xfd30"
+  },
+  {
+   "run": "haiku6",
+   "fact": 36,
+   "token": "0x6634"
+  },
+  {
+   "run": "haiku6",
+   "fact": 37,
+   "token": "0x6370"
+  },
+  {
+   "run": "haiku6",
+   "fact": 37,
+   "token": "0x541c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 38,
+   "token": "0x10de8"
+  },
+  {
+   "run": "haiku6",
+   "fact": 38,
+   "token": "0x10df0"
+  },
+  {
+   "run": "haiku6",
+   "fact": 38,
+   "token": "0x904c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 38,
+   "token": "0x10e10"
+  },
+  {
+   "run": "haiku6",
+   "fact": 38,
+   "token": "0x10e18"
+  },
+  {
+   "run": "haiku6",
+   "fact": 38,
+   "token": "0x10e28"
+  },
+  {
+   "run": "haiku6",
+   "fact": 39,
+   "token": "data"
+  },
+  {
+   "run": "haiku6",
+   "fact": 39,
+   "token": "0x869c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 39,
+   "token": "0x6aa4"
+  },
+  {
+   "run": "haiku6",
+   "fact": 40,
+   "token": "Updater"
+  },
+  {
+   "run": "haiku6",
+   "fact": 40,
+   "token": "LogonTrigger"
+  },
+  {
+   "run": "haiku6",
+   "fact": 40,
+   "token": "0x3728"
+  },
+  {
+   "run": "haiku6",
+   "fact": 40,
+   "token": "0xb344"
+  },
+  {
+   "run": "haiku6",
+   "fact": 40,
+   "token": "0xc42c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 40,
+   "token": "0xc2c4"
+  },
+  {
+   "run": "haiku6",
+   "fact": 40,
+   "token": "0xc19c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 40,
+   "token": "0xc7b4"
+  },
+  {
+   "run": "haiku6",
+   "fact": 41,
+   "token": "0xa59c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 41,
+   "token": "0x904c"
+  },
+  {
+   "run": "haiku6",
+   "fact": 42,
+   "token": "0x7694"
+  },
+  {
+   "run": "haiku6",
+   "fact": 43,
+   "token": "0x5750"
+  },
+  {
+   "run": "haiku6",
+   "fact": 43,
+   "token": "0x6250"
+  },
+  {
+   "run": "haiku6",
+   "fact": 43,
+   "token": "0x3868"
+  },
+  {
+   "run": "haiku7",
+   "fact": 2,
+   "token": "UpdaterTag.dll"
+  },
+  {
+   "run": "haiku7",
+   "fact": 3,
+   "token": "text"
+  },
+  {
+   "run": "haiku7",
+   "fact": 3,
+   "token": "rdata"
+  },
+  {
+   "run": "haiku7",
+   "fact": 3,
+   "token": "data"
+  },
+  {
+   "run": "haiku7",
+   "fact": 3,
+   "token": "pdata"
+  },
+  {
+   "run": "haiku7",
+   "fact": 3,
+   "token": "reloc"
+  },
+  {
+   "run": "haiku7",
+   "fact": 6,
+   "token": "0x33629d40"
+  },
+  {
+   "run": "haiku7",
+   "fact": 6,
+   "token": "0x41"
+  },
+  {
+   "run": "haiku7",
+   "fact": 6,
+   "token": "0x9040"
+  },
+  {
+   "run": "haiku7",
+   "fact": 6,
+   "token": "0xae78"
+  },
+  {
+   "run": "haiku7",
+   "fact": 7,
+   "token": "0x6328"
+  },
+  {
+   "run": "haiku7",
+   "fact": 7,
+   "token": "0x84e4"
+  },
+  {
+   "run": "haiku7",
+   "fact": 7,
+   "token": "0xabd4"
+  },
+  {
+   "run": "haiku7",
+   "fact": 7,
+   "token": "0xa59c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 7,
+   "token": "0x9484"
+  },
+  {
+   "run": "haiku7",
+   "fact": 7,
+   "token": "0xa47c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 7,
+   "token": "0x904c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 7,
+   "token": "0xac50"
+  },
+  {
+   "run": "haiku7",
+   "fact": 8,
+   "token": "0x10c60"
+  },
+  {
+   "run": "haiku7",
+   "fact": 8,
+   "token": "0x3868"
+  },
+  {
+   "run": "haiku7",
+   "fact": 9,
+   "token": "0x6aa4"
+  },
+  {
+   "run": "haiku7",
+   "fact": 9,
+   "token": "0xc99c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 10,
+   "token": "0x3868"
+  },
+  {
+   "run": "haiku7",
+   "fact": 10,
+   "token": "0x6328"
+  },
+  {
+   "run": "haiku7",
+   "fact": 10,
+   "token": "0x3074"
+  },
+  {
+   "run": "haiku7",
+   "fact": 10,
+   "token": "0x8560"
+  },
+  {
+   "run": "haiku7",
+   "fact": 10,
+   "token": "0x8820"
+  },
+  {
+   "run": "haiku7",
+   "fact": 10,
+   "token": "0x68e8"
+  },
+  {
+   "run": "haiku7",
+   "fact": 10,
+   "token": "0x463c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 10,
+   "token": "0x6988"
+  },
+  {
+   "run": "haiku7",
+   "fact": 10,
+   "token": "0x6864"
+  },
+  {
+   "run": "haiku7",
+   "fact": 10,
+   "token": "0x6250"
+  },
+  {
+   "run": "haiku7",
+   "fact": 11,
+   "token": "0x10250"
+  },
+  {
+   "run": "haiku7",
+   "fact": 11,
+   "token": "0x10278"
+  },
+  {
+   "run": "haiku7",
+   "fact": 11,
+   "token": "0x6988"
+  },
+  {
+   "run": "haiku7",
+   "fact": 12,
+   "token": "[rsp+0x40]"
+  },
+  {
+   "run": "haiku7",
+   "fact": 12,
+   "token": "0xbc1c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 12,
+   "token": "0x69e2"
+  },
+  {
+   "run": "haiku7",
+   "fact": 12,
+   "token": "0x6a4e"
+  },
+  {
+   "run": "haiku7",
+   "fact": 13,
+   "token": "0x5030"
+  },
+  {
+   "run": "haiku7",
+   "fact": 13,
+   "token": "0xfba0"
+  },
+  {
+   "run": "haiku7",
+   "fact": 13,
+   "token": "0xfbb0"
+  },
+  {
+   "run": "haiku7",
+   "fact": 13,
+   "token": "0x4d20"
+  },
+  {
+   "run": "haiku7",
+   "fact": 13,
+   "token": "0x4883000"
+  },
+  {
+   "run": "haiku7",
+   "fact": 13,
+   "token": "0x4380"
+  },
+  {
+   "run": "haiku7",
+   "fact": 14,
+   "token": "Content-Type: application/x-www-form-urlencoded"
+  },
+  {
+   "run": "haiku7",
+   "fact": 14,
+   "token": "0xfb68"
+  },
+  {
+   "run": "haiku7",
+   "fact": 15,
+   "token": "0x10160"
+  },
+  {
+   "run": "haiku7",
+   "fact": 15,
+   "token": "0x6864"
+  },
+  {
+   "run": "haiku7",
+   "fact": 16,
+   "token": "0x2200"
+  },
+  {
+   "run": "haiku7",
+   "fact": 16,
+   "token": "0x2118"
+  },
+  {
+   "run": "haiku7",
+   "fact": 16,
+   "token": "0x1030"
+  },
+  {
+   "run": "haiku7",
+   "fact": 17,
+   "token": "LogonTrigger"
+  },
+  {
+   "run": "haiku7",
+   "fact": 17,
+   "token": "0xc2c4"
+  },
+  {
+   "run": "haiku7",
+   "fact": 18,
+   "token": "Updater"
+  },
+  {
+   "run": "haiku7",
+   "fact": 18,
+   "token": "rundll32.exe"
+  },
+  {
+   "run": "haiku7",
+   "fact": 18,
+   "token": "0x33ac"
+  },
+  {
+   "run": "haiku7",
+   "fact": 18,
+   "token": "0x3728"
+  },
+  {
+   "run": "haiku7",
+   "fact": 19,
+   "token": "0x7b98"
+  },
+  {
+   "run": "haiku7",
+   "fact": 20,
+   "token": "C:WINDOWSSYSTEM32rundll32.exe %s,%s"
+  },
+  {
+   "run": "haiku7",
+   "fact": 20,
+   "token": "0xb4cc"
+  },
+  {
+   "run": "haiku7",
+   "fact": 20,
+   "token": "0xfe90"
+  },
+  {
+   "run": "haiku7",
+   "fact": 20,
+   "token": "0xfef0"
+  },
+  {
+   "run": "haiku7",
+   "fact": 21,
+   "token": "%s%d.exe"
+  },
+  {
+   "run": "haiku7",
+   "fact": 21,
+   "token": "%s%d.dll"
+  },
+  {
+   "run": "haiku7",
+   "fact": 21,
+   "token": "files/bp.dat"
+  },
+  {
+   "run": "haiku7",
+   "fact": 21,
+   "token": "%d.dat"
+  },
+  {
+   "run": "haiku7",
+   "fact": 21,
+   "token": "/files/"
+  },
+  {
+   "run": "haiku7",
+   "fact": 21,
+   "token": "<html>"
+  },
+  {
+   "run": "haiku7",
+   "fact": 21,
+   "token": "<!DOCTYPE"
+  },
+  {
+   "run": "haiku7",
+   "fact": 21,
+   "token": "0x8d90"
+  },
+  {
+   "run": "haiku7",
+   "fact": 21,
+   "token": "0x6f48"
+  },
+  {
+   "run": "haiku7",
+   "fact": 22,
+   "token": "0xb154"
+  },
+  {
+   "run": "haiku7",
+   "fact": 22,
+   "token": "0x88f8"
+  },
+  {
+   "run": "haiku7",
+   "fact": 23,
+   "token": "&mac="
+  },
+  {
+   "run": "haiku7",
+   "fact": 23,
+   "token": "&computername=%s"
+  },
+  {
+   "run": "haiku7",
+   "fact": 23,
+   "token": "&domain=%s"
+  },
+  {
+   "run": "haiku7",
+   "fact": 23,
+   "token": "0x7fa8"
+  },
+  {
+   "run": "haiku7",
+   "fact": 23,
+   "token": "0x8ae0"
+  },
+  {
+   "run": "haiku7",
+   "fact": 24,
+   "token": "&proclist=["
+  },
+  {
+   "run": "haiku7",
+   "fact": 24,
+   "token": "\"proc\""
+  },
+  {
+   "run": "haiku7",
+   "fact": 24,
+   "token": "\"subproc\""
+  },
+  {
+   "run": "haiku7",
+   "fact": 24,
+   "token": "0x1c38"
+  },
+  {
+   "run": "haiku7",
+   "fact": 24,
+   "token": "0x14d8"
+  },
+  {
+   "run": "haiku7",
+   "fact": 24,
+   "token": "0x8820"
+  },
+  {
+   "run": "haiku7",
+   "fact": 25,
+   "token": "0x463c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 27,
+   "token": "rundll32.exe <sample>.dll,#1"
+  },
+  {
+   "run": "haiku7",
+   "fact": 27,
+   "token": "svchost.exe -k GPSvcGroup"
+  },
+  {
+   "run": "haiku7",
+   "fact": 28,
+   "token": "0xff40"
+  },
+  {
+   "run": "haiku7",
+   "fact": 28,
+   "token": "0x6f48"
+  },
+  {
+   "run": "haiku7",
+   "fact": 29,
+   "token": "12345"
+  },
+  {
+   "run": "haiku7",
+   "fact": 29,
+   "token": "0x72c8"
+  },
+  {
+   "run": "haiku7",
+   "fact": 29,
+   "token": "0xb670"
+  },
+  {
+   "run": "haiku7",
+   "fact": 29,
+   "token": "0xfff8"
+  },
+  {
+   "run": "haiku7",
+   "fact": 30,
+   "token": "0x9484"
+  },
+  {
+   "run": "haiku7",
+   "fact": 30,
+   "token": "0xa59c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 31,
+   "token": "0xa350"
+  },
+  {
+   "run": "haiku7",
+   "fact": 31,
+   "token": "0x8a94"
+  },
+  {
+   "run": "haiku7",
+   "fact": 32,
+   "token": "0xc934"
+  },
+  {
+   "run": "haiku7",
+   "fact": 33,
+   "token": "0x3cf4"
+  },
+  {
+   "run": "haiku7",
+   "fact": 33,
+   "token": "0x1a08"
+  },
+  {
+   "run": "haiku7",
+   "fact": 33,
+   "token": "0x1c38"
+  },
+  {
+   "run": "haiku7",
+   "fact": 33,
+   "token": "0x2118"
+  },
+  {
+   "run": "haiku7",
+   "fact": 33,
+   "token": "0x6e04"
+  },
+  {
+   "run": "haiku7",
+   "fact": 33,
+   "token": "0x6c2c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 33,
+   "token": "0x7170"
+  },
+  {
+   "run": "haiku7",
+   "fact": 33,
+   "token": "0x4110"
+  },
+  {
+   "run": "haiku7",
+   "fact": 33,
+   "token": "0x72c8"
+  },
+  {
+   "run": "haiku7",
+   "fact": 34,
+   "token": "0x708"
+  },
+  {
+   "run": "haiku7",
+   "fact": 35,
+   "token": "0xfd40"
+  },
+  {
+   "run": "haiku7",
+   "fact": 35,
+   "token": "0xfdb0"
+  },
+  {
+   "run": "haiku7",
+   "fact": 35,
+   "token": "0xfd30"
+  },
+  {
+   "run": "haiku7",
+   "fact": 35,
+   "token": "0xcbe0"
+  },
+  {
+   "run": "haiku7",
+   "fact": 35,
+   "token": "0xc964"
+  },
+  {
+   "run": "haiku7",
+   "fact": 35,
+   "token": "0xcaac"
+  },
+  {
+   "run": "haiku7",
+   "fact": 35,
+   "token": "0x6634"
+  },
+  {
+   "run": "haiku7",
+   "fact": 35,
+   "token": "0x4d20"
+  },
+  {
+   "run": "haiku7",
+   "fact": 36,
+   "token": "0x4f58"
+  },
+  {
+   "run": "haiku7",
+   "fact": 36,
+   "token": "0x6370"
+  },
+  {
+   "run": "haiku7",
+   "fact": 36,
+   "token": "0x541c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 37,
+   "token": "0x869c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 37,
+   "token": "0x6aa4"
+  },
+  {
+   "run": "haiku7",
+   "fact": 38,
+   "token": "0x3728"
+  },
+  {
+   "run": "haiku7",
+   "fact": 38,
+   "token": "0xb344"
+  },
+  {
+   "run": "haiku7",
+   "fact": 38,
+   "token": "0xc5e8"
+  },
+  {
+   "run": "haiku7",
+   "fact": 38,
+   "token": "0xc2c4"
+  },
+  {
+   "run": "haiku7",
+   "fact": 40,
+   "token": "0x7694"
+  },
+  {
+   "run": "haiku7",
+   "fact": 40,
+   "token": "0x7504"
+  },
+  {
+   "run": "haiku7",
+   "fact": 41,
+   "token": "0x5750"
+  },
+  {
+   "run": "haiku7",
+   "fact": 41,
+   "token": "0x6250"
+  },
+  {
+   "run": "haiku7",
+   "fact": 41,
+   "token": "0x3868"
+  },
+  {
+   "run": "haiku7",
+   "fact": 42,
+   "token": "0x8560"
+  },
+  {
+   "run": "haiku7",
+   "fact": 43,
+   "token": "0x3868"
+  },
+  {
+   "run": "haiku7",
+   "fact": 43,
+   "token": "0x33ac"
+  },
+  {
+   "run": "haiku7",
+   "fact": 43,
+   "token": "0x378c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 44,
+   "token": "0x7504"
+  },
+  {
+   "run": "haiku7",
+   "fact": 44,
+   "token": "0x79c8"
+  },
+  {
+   "run": "haiku7",
+   "fact": 44,
+   "token": "0x7acc"
+  },
+  {
+   "run": "haiku7",
+   "fact": 45,
+   "token": "0xf968"
+  },
+  {
+   "run": "haiku7",
+   "fact": 45,
+   "token": "0xf978"
+  },
+  {
+   "run": "haiku7",
+   "fact": 45,
+   "token": "0x463c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 46,
+   "token": "0x841c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 46,
+   "token": "0x463c"
+  },
+  {
+   "run": "haiku7",
+   "fact": 47,
+   "token": "0xb400"
+  },
+  {
+   "run": "haiku7",
+   "fact": 47,
+   "token": "0x8000000"
+  },
+  {
+   "run": "haiku7",
+   "fact": 48,
+   "token": "0x6e04"
+  },
+  {
+   "run": "haiku7",
+   "fact": 48,
+   "token": "0x7e90"
+  },
+  {
+   "run": "haiku7",
+   "fact": 48,
+   "token": "0x4110"
+  },
+  {
+   "run": "haiku7",
+   "fact": 49,
+   "token": "0x88a4"
+  },
+  {
+   "run": "haiku7",
+   "fact": 50,
+   "token": "0x3ce4"
+  },
+  {
+   "run": "haiku7",
+   "fact": 50,
+   "token": "0x3cb4"
+  },
+  {
+   "run": "haiku7",
+   "fact": 50,
+   "token": "0x3868"
+  },
+  {
+   "run": "haiku7",
+   "fact": 51,
+   "token": "data"
+  },
+  {
+   "run": "haiku7",
+   "fact": 51,
+   "token": "0xf000"
+  },
+  {
+   "run": "haiku7",
+   "fact": 51,
+   "token": "0x10400"
+  }
+ ],
+ "beyond_human_source": "the value tokens (code spans, bold values, addresses of 3+ hex digits) of each beyond-human fact in the haiku6 (section 6) and haiku7 (section 5) score.md, kept where the single-file report re-rendered from the run prints them in sections 1 to 12, in the comparison form of plain()"
+}

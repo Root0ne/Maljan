@@ -223,6 +223,41 @@ def _print_run_summary_inline(run_summary_dict: dict) -> None:
             )
 
 
+def _write_report_products(result: dict, report_path: Path) -> bool:
+    """The report and its evidence bundle, rendered from the result's report document.
+
+    ``False`` when the result holds no report document that validates, or a
+    file could not be written; the caller then writes what the pipeline left.
+    """
+    document = result.get("malware_report")
+    if not isinstance(document, dict):
+        return False
+    from maljan.reporting.models import MalwareReport, key_ordered
+    from maljan.reporting.renderers import HtmlRenderer, MarkdownRenderer
+    from maljan.reporting.renderers.bundle import bundle_json
+    from maljan.reporting.renderers.layout import BUNDLE, BUNDLE_HTML, BUNDLE_JSON, report_layout
+
+    try:
+        report = MalwareReport.model_validate(key_ordered(document))
+        written = {
+            report_path: MarkdownRenderer(layout=report_layout()).render(report),
+            report_path.parent / BUNDLE_HTML: HtmlRenderer(layout=BUNDLE).render(report),
+            report_path.parent / BUNDLE_JSON: bundle_json(report),
+        }
+        for path, text in written.items():
+            if path != report_path and path.exists():
+                typer.echo(f"Overwriting the existing {path}.", err=True)
+            path.write_text(text, encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 — the pipeline's own Markdown is written instead
+        logger.warning(f"Failed to write the report and its evidence bundle: {exc}")
+        return False
+    typer.echo(
+        f"\nMalwareReport markdown written to: {report_path} "
+        f"(evidence bundle beside it: {BUNDLE_HTML}, {BUNDLE_JSON})"
+    )
+    return True
+
+
 def _write_markdown_report(result: dict, report_path: str) -> None:
     """Write the Markdown report to disk.
 
@@ -230,10 +265,17 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
     ``report`` pipeline node leaves in ``result["malware_report_markdown"]``
     (added by the reporting refactor).
 
+    Where the report document is in the result, the Markdown is rendered from
+    it in the layout the served report prints (``reporting.full_report_in_one_file``),
+    and the evidence bundle the analyst report links to is written beside it
+    (``evidence-bundle.html``, ``evidence-bundle.json``).
+
     Falls back to the legacy ``RunSummary.to_markdown()`` when the new
     payload is absent — happens when ``MALJAN_REPORTING__ENABLED=false``
     flips the pipeline back to the legacy ``judge → END`` edge.
     """
+    if _write_report_products(result, Path(report_path)):
+        return
     new_markdown = result.get("malware_report_markdown")
     if isinstance(new_markdown, str) and new_markdown.strip():
         try:

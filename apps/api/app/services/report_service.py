@@ -529,7 +529,7 @@ class ReportService:
             return None
         from maljan.reporting.renderers import MarkdownRenderer
 
-        return str(MarkdownRenderer().render(loaded))
+        return str(MarkdownRenderer(layout=await self.report_layout()).render(loaded))
 
     async def get_malware_report_html(
         self,
@@ -548,17 +548,89 @@ class ReportService:
             return None
         from maljan.reporting.renderers import HtmlRenderer
 
+        layout = await self.report_layout()
         return RenderedReport(
-            content=HtmlRenderer().render(loaded, nonce=nonce).encode("utf-8"),
+            content=HtmlRenderer(layout=layout).render(loaded, nonce=nonce).encode("utf-8"),
             filename=_export_filename(loaded, "html"),
         )
+
+    async def get_evidence_bundle_html(
+        self,
+        report_id: uuid.UUID,
+        user: User,
+        *,
+        nonce: str | None = None,
+    ) -> RenderedReport | None:
+        """Render the evidence bundle behind the analyst report as one HTML document.
+
+        Every section the single-file report prints, the analyst report's
+        citation notes, and an anchor for each evidence id, note and section
+        the analyst report links to (``renderers/bundle.py``).
+        """
+        loaded = await self._load_malware_report(report_id, user, "evidence bundle")
+        if loaded is None:
+            return None
+        from maljan.reporting.renderers import HtmlRenderer
+        from maljan.reporting.renderers.layout import BUNDLE, BUNDLE_HTML
+
+        return RenderedReport(
+            content=HtmlRenderer(layout=BUNDLE).render(loaded, nonce=nonce).encode("utf-8"),
+            # Saved under the name the analyst report links to, so its links
+            # resolve beside a downloaded report.
+            filename=BUNDLE_HTML,
+        )
+
+    async def get_evidence_bundle_json(
+        self,
+        report_id: uuid.UUID,
+        user: User,
+    ) -> RenderedReport | None:
+        """The evidence bundle as JSON: the notes, the evidence index and every section."""
+        loaded = await self._load_malware_report(report_id, user, "evidence bundle")
+        if loaded is None:
+            return None
+        from maljan.reporting.renderers.bundle import bundle_json
+        from maljan.reporting.renderers.layout import BUNDLE_JSON
+
+        return RenderedReport(
+            content=bundle_json(loaded).encode("utf-8"),
+            filename=BUNDLE_JSON,
+        )
+
+    async def report_layout(self) -> str:
+        """The layout the served report prints, by ``reporting.full_report_in_one_file``.
+
+        Read from the store as it stands now (``effective_core_settings``). A
+        store that cannot be read prints the layout the process's own settings
+        name, and the log says why.
+        """
+        from maljan.reporting.renderers.layout import report_layout
+
+        from app.services.settings_service import effective_core_settings
+
+        try:
+            return report_layout(await effective_core_settings(self.db))
+        except Exception as exc:  # noqa: BLE001 — the export answers, in the process's layout
+            logger.warning(
+                "the stored settings could not be read; the report renders in the layout the "
+                "process's own settings name (%s: %s)",
+                type(exc).__name__,
+                log_safe(exc),
+            )
+            return report_layout()
 
     async def get_malware_report_pdf(
         self,
         report_id: uuid.UUID,
         user: User,
+        *,
+        bundle_location: str | None = None,
     ) -> RenderedReport | None:
         """Render the comprehensive report as PDF.
+
+        The analyst report's PDF reads alone: it ends with its notes and their
+        evidence ids, and names the bundle's API path ``bundle_location`` as text:
+        no setting names the address a reader reaches the API at, so no link is built.
 
         Raises:
             PdfUnavailableError: WeasyPrint is not loadable on this host; the
@@ -570,7 +642,9 @@ class ReportService:
             return None
         from maljan.reporting.renderers import HtmlRenderer, PdfRenderer
 
-        html_doc = HtmlRenderer().render(loaded)
+        html_doc = HtmlRenderer(
+            layout=await self.report_layout(), self_contained=True, bundle_location=bundle_location
+        ).render(loaded)
         # WeasyPrint is synchronous and CPU-bound (roughly a second on a
         # figure-heavy report), so it must not run on the event loop — a single
         # export would otherwise stall every other request on this worker.

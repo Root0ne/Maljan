@@ -130,7 +130,10 @@ export default function ExportMenu({
           role="menu"
           aria-label={label}
           onKeyDown={onMenuKey}
-          className="absolute right-0 z-40 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-bg-surface py-1 shadow-lg"
+          // The menu opens from the sticky header, which the page does not
+          // scroll: a menu taller than the window scrolls itself, so its last
+          // items stay reachable.
+          className="absolute right-0 z-40 mt-1 max-h-[calc(100vh-8rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-md border border-border bg-bg-surface py-1 shadow-lg"
         >
           {groups.map((group) => (
             <div key={group.key} role="group" aria-labelledby={`${menuId}-${group.key}`} className="py-1">

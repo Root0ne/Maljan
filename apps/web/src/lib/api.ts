@@ -1211,6 +1211,22 @@ class ApiClient {
     return this.textRequest(`/api/v1/reports/${encodeURIComponent(reportId)}/html`);
   }
 
+  /** The evidence bundle behind the analyst report, as one standalone HTML
+   *  document: every section, table and tool output the report links to. */
+  getReportEvidenceBundleHtml(reportId: string) {
+    return this.textRequest(
+      `/api/v1/reports/${encodeURIComponent(reportId)}/evidence-bundle.html`
+    );
+  }
+
+  /** The same evidence bundle as JSON: the report's notes, the evidence index
+   *  and every section's Markdown under its anchor. */
+  getReportEvidenceBundleJson(reportId: string) {
+    return this.textRequest(
+      `/api/v1/reports/${encodeURIComponent(reportId)}/evidence-bundle.json`
+    );
+  }
+
   /** Print-ready PDF of the same document. 503 when the host lacks WeasyPrint. */
   getReportPdf(reportId: string) {
     return this.blobRequest(`/api/v1/reports/${encodeURIComponent(reportId)}/pdf`);

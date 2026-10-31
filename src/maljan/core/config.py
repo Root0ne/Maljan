@@ -4690,6 +4690,13 @@ class ReportingConfig(BaseModel):
     )
     # Server-side HTML→PDF export.
     html_export_enabled: bool = True
+    # The served report is the analyst report — the findings in a fixed order,
+    # each citation a note linking into the evidence bundle served beside it,
+    # which prints every section the single-file report printed. On, the
+    # served Markdown, HTML and PDF print the single-file report as before the
+    # split; the bundle is still served. A render-time choice: nothing stored
+    # changes.
+    full_report_in_one_file: bool = False
 
     # How many bytes of tool output one agent may keep in the evidence ledger.
     # Past it an entry still records the call — tool, arguments, outcome,

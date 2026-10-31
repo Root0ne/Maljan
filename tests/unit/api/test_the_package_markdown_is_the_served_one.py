@@ -28,6 +28,18 @@ from maljan.reporting.models import (
 JOB = {"completed_at": "2026-10-25T08:30:00+00:00"}
 
 
+@pytest.fixture(autouse=True)
+def _stored_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The store as a fresh deployment holds it: the settings' defaults, read with no database."""
+    from app.services import settings_service
+    from maljan.core.config import get_settings
+
+    async def _effective(db: Any) -> Any:
+        return get_settings()
+
+    monkeypatch.setattr(settings_service, "effective_core_settings", _effective)
+
+
 def _document() -> dict[str, Any]:
     return MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="ab" * 32, md5="cd" * 16)),
@@ -55,16 +67,30 @@ async def _served(document: dict[str, Any]) -> str | None:
     return await service.get_malware_report_markdown(uuid.uuid4(), MagicMock())
 
 
+async def _served_bundle(document: dict[str, Any]) -> bytes | None:
+    service = ReportService(db=AsyncMock())
+    service.get_malware_report = AsyncMock(return_value=document)  # type: ignore[method-assign]
+    rendered = await service.get_evidence_bundle_json(uuid.uuid4(), MagicMock())
+    return rendered.content if rendered is not None else None
+
+
 @pytest.mark.asyncio
 async def test_the_package_and_the_served_markdown_agree_across_stores() -> None:
     document = _document()
     packaged, why = job_package._markdown(key_ordered(document), JOB)
     assert why is None and packaged is not None
-    assert "filesystem ×2 (35.6%), network ×2 (14.4%)" in packaged
+    # The import profile is a static property: the evidence bundle prints it,
+    # in the order the mapping is read in, beside the analyst report.
+    bundle, why = job_package._bundle(key_ordered(document), JOB)
+    assert why is None and bundle is not None
+    assert "filesystem ×2 (35.6%), network ×2 (14.4%)" in bundle[0]
+    assert "filesystem ×2 (35.6%), network ×2 (14.4%)" in bundle[1]
 
     for stored in (document, _jsonb_order(document), key_ordered(document)):
         assert await _served(stored) == packaged
         assert job_package._markdown(stored, JOB)[0] == packaged
+        assert job_package._bundle(stored, JOB)[0] == bundle
+        assert await _served_bundle(stored) == bundle[1].encode("utf-8")
 
 
 def test_key_order_is_sorted_at_every_depth_and_lists_keep_theirs() -> None:

@@ -756,13 +756,16 @@ async def get_job_package(
     import tempfile
 
     from app.services import job_package
+    from app.services.report_service import ReportService
 
     job = await svc.get_job(job_id, user)
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    # The Markdown it holds is the one the report route serves.
+    layout = await ReportService(db).report_layout()
     spool = tempfile.TemporaryFile()  # noqa: SIM115 — closed by the stream it feeds
     try:
-        manifest = await job_package.build_for_job(db.bind, job_id, spool)
+        manifest = await job_package.build_for_job(db.bind, job_id, spool, layout=layout)
     except job_package.PackageError as exc:
         spool.close()
         raise HTTPException(

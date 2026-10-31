@@ -32,6 +32,14 @@ from markdown_it import MarkdownIt
 
 from maljan.reporting.defang import ProseDefanger
 from maljan.reporting.models import Figure, MalwareReport
+from maljan.reporting.renderers.layout import (
+    ANALYST,
+    BUNDLE,
+    BUNDLE_FILES,
+    BUNDLE_HTML,
+    FULL,
+    checked,
+)
 from maljan.reporting.renderers.markdown import (
     ABSENCE_PREFIXES,
     MarkdownRenderer,
@@ -178,6 +186,13 @@ figcaption b { color: var(--ink); }
 """
 
 
+# The analyst report's citation notes: a number linking into the evidence bundle.
+_CITE_STYLE = (
+    "sup.cite { font-size: 0.72em; line-height: 0; margin-left: 1px; }\n"
+    "ol.notes { list-style: none; padding-left: 0; font-size: 8.5pt; }\n"
+)
+
+
 # The link targets the HTML report makes anchors of: the web's and mail's own
 # schemes, and a place in the page or beside it.
 _LINKED_SCHEMES = ("http:", "https:", "mailto:")
@@ -186,10 +201,12 @@ _LINKED_SCHEMES = ("http:", "https:", "mailto:")
 def _report_link(url: str) -> bool:
     """Whether a Markdown link's target becomes an anchor in the HTML report.
 
-    An http, https or mailto target, or a place in the page (``#…``); nothing
-    else. A path relative to the page names a file no reader of an exported
-    report has, and a protocol-relative target (``//host/…``) a host no reader
-    can vouch for.
+    An http, https or mailto target, a place in the page (``#…``), or a place
+    in one of the evidence bundle's two files, which are written and served
+    beside the report under those names; nothing else. Any other path
+    relative to the page names a file no reader of an exported report has,
+    and a protocol-relative target (``//host/…``) a host no reader can vouch
+    for.
     """
     target = str(url or "").strip()
     # The Markdown escapes the "&" of every character reference it holds, so
@@ -197,6 +214,8 @@ def _report_link(url: str) -> bool:
     # ("https&#58;//…") is no link the report makes.
     if "&" in target:
         return False
+    if target.split("#", 1)[0] in BUNDLE_FILES:
+        return True
     return target.lower().startswith(_LINKED_SCHEMES) or target.startswith("#")
 
 
@@ -219,7 +238,31 @@ CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; img-sr
 
 
 class HtmlRenderer:
-    """Render a complete ``MalwareReport`` as one self-contained HTML document."""
+    """Render a complete ``MalwareReport`` as one self-contained HTML document.
+
+    ``layout`` is the Markdown renderer's (``renderers/layout.py``). The
+    analyst report draws only the figures whose section it prints and prints
+    each citation note as a superscript link into the evidence bundle; the
+    bundle gives every subsection, evidence id and note an anchor those links
+    land on.
+    """
+
+    def __init__(
+        self,
+        *,
+        layout: str = FULL,
+        self_contained: bool = False,
+        bundle_location: str | None = None,
+    ) -> None:
+        """``self_contained`` (the analyst report's PDF): each note marker links to a
+        "Notes" list the document ends with, which names each note's evidence ids;
+        every other link into the bundle is printed as text, and the Notes say where
+        the bundle is, ``bundle_location`` (the API path) among it, in words. A file
+        printed alone has no bundle beside it for a relative link to reach."""
+        self._layout = checked(layout)
+        self._self_contained = self_contained and self._layout == ANALYST
+        self._bundle_location = bundle_location
+        self._notes: list[Any] = []
 
     def render(
         self, report: MalwareReport, *, embed_figures: bool = True, nonce: str | None = None
@@ -234,6 +277,11 @@ class HtmlRenderer:
         """
         body_html = self._body_html(report)
         figures = list(report.figures or []) if embed_figures else []
+        if self._layout == ANALYST:
+            # The bundle draws the others, beside the sections they illustrate.
+            from maljan.reporting.renderers.analyst import FIGURE_KINDS
+
+            figures = [fig for fig in figures if fig.kind in FIGURE_KINDS]
         if figures:
             # A stored report's figures were drawn when it was built, perhaps
             # before their text was defanged: each is read again here, with
@@ -242,12 +290,16 @@ class HtmlRenderer:
             run_values = ProseDefanger(run_network_values(report))
             figures = [_figure_read(fig, run_values) for fig in figures]
         preamble, sections, leftover = self._place_figures(body_html, figures)
+        if self._layout == BUNDLE:
+            sections = _bundle_anchors(sections)
         toc = self._toc(sections)
         appendix = self._figure_appendix(
             leftover, start_index=_numbered(figures) - _numbered(leftover) + 1
         )
         title = self._title(report)
         sha = report.identity.hashes.sha256 or "unknown"
+        # The analyst report's notes are superscripts; the other layouts print none.
+        style = _CITE_STYLE if self._layout == ANALYST else ""
         style_open = f'<style nonce="{escape(nonce)}">' if nonce else "<style>"
         # Order matters: title block, then the contents page, then the body. The
         # TOC carries ``break-after: page`` so the report opens on its own cover.
@@ -259,7 +311,7 @@ class HtmlRenderer:
             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
             f"<title>{escape(title)}</title>\n"
             '<meta name="generator" content="Maljan">\n'
-            f"{style_open}{_STYLESHEET}</style>\n"
+            f"{style_open}{_STYLESHEET}{style}</style>\n"
             "</head>\n<body>\n"
             f"<span style=\"string-set: doc-sha 'sha256 {escape(sha[:16])}…'\"></span>\n"
             f"{preamble}{toc}{''.join(sections)}{appendix}"
@@ -276,7 +328,9 @@ class HtmlRenderer:
 
     def _body_html(self, report: MalwareReport) -> str:
         marker = secrets.token_hex(_MARKER_BYTES)
-        markdown = MarkdownRenderer(failed_marker=marker).render(report)
+        markdown, self._notes = MarkdownRenderer(
+            failed_marker=marker, layout=self._layout
+        ).render_with_notes(report)
         failed = re.compile(_SECTION_FAILED.format(marker=re.escape(marker)))
         markdown = failed.sub(
             lambda m: (
@@ -286,7 +340,12 @@ class HtmlRenderer:
             ),
             markdown,
         )
-        return self._markdown_to_html(markdown)
+        html = self._markdown_to_html(markdown)
+        if self._layout == ANALYST:
+            html = _cited_superscripts(html)
+        if self._self_contained:
+            html = _notes_in_the_document(html, self._notes, self._bundle_location)
+        return html
 
     @staticmethod
     def _markdown_to_html(markdown: str) -> str:
@@ -401,6 +460,116 @@ class HtmlRenderer:
         if not entries:
             return ""
         return '<nav class="toc"><h2>Contents</h2><ol>' + "".join(entries) + "</ol></nav>\n"
+
+
+# A note marker of the analyst report as the Markdown converter draws it, and
+# what the bundle's anchors are given to.
+_CITE_LINK = re.compile(r'<a href="' + re.escape(BUNDLE_HTML) + r'#cite-(\d+)">\[\1\]</a>')
+_EVIDENCE_ROW = re.compile(r"<tr>(\s*<td>)(ev_\d+)(</td>)")
+_INDEX_ANCHOR = "sec-evidence-index"
+_NOTES_ANCHOR = "sec-notes-cited-by-the-analyst-report"
+_NOTE_ITEM = re.compile(r"<li><strong>(Note (\d+)|(ev_\d+))</strong>")
+
+
+def _cited_superscripts(html: str) -> str:
+    """Each note marker of the analyst report as a superscript note number."""
+    return _CITE_LINK.sub(
+        lambda m: (
+            f'<sup class="cite"><a href="{BUNDLE_HTML}#cite-{m.group(1)}">{m.group(1)}</a></sup>'
+        ),
+        html,
+    )
+
+
+# A link of the analyst report into the bundle, as the Markdown converter draws it.
+_BUNDLE_LINK = re.compile(r'<a href="' + re.escape(BUNDLE_HTML) + r'#([^"]*)">(.*?)</a>', re.S)
+_BUNDLE_FILE_LINK = re.compile(
+    r'<a href="(' + "|".join(map(re.escape, BUNDLE_FILES)) + r')">(.*?)</a>', re.S
+)
+
+
+def _notes_in_the_document(html: str, notes: list[Any], bundle_location: str | None) -> str:
+    """The analyst report's body, readable alone: its notes listed in it, no link out of it.
+
+    Each note marker links to its entry in a "Notes" section the body ends
+    with, naming the evidence ids; every other link into the bundle (a
+    section, an id) is printed as its text. Where the bundle is is said in
+    words: beside a downloaded report as ``evidence-bundle.html``, and at
+    ``bundle_location`` (the API path, which serves it to a signed-in user)
+    where the caller names one. No link is built to it: no setting names
+    the address a reader reaches the API at.
+    """
+
+    def link(found: re.Match[str]) -> str:
+        target, text = found.group(1), found.group(2)
+        if target.startswith("cite-"):
+            return f'<a href="#note-{target[5:]}">{text}</a>'
+        return text
+
+    html = _BUNDLE_FILE_LINK.sub(lambda m: m.group(2), _BUNDLE_LINK.sub(link, html))
+    items = "".join(
+        f'<li id="note-{note.number}">{note.number}. '
+        + ", ".join(escape(i) for i in note.evidence_ids)
+        + "</li>"
+        for note in notes
+    )
+    where = f"the evidence bundle, downloaded beside this report as <code>{BUNDLE_HTML}</code>"
+    if bundle_location:
+        where += f" or served at <code>{escape(bundle_location)}</code> (the API requires sign-in),"
+    return (
+        html
+        + "<h2>Notes</h2>\n"
+        + f"<p>Each numbered note and the evidence entries it rests on, which {where} "
+        + "lists with every tool's output.</p>\n"
+        + (f'<ol class="notes">{items}</ol>\n' if items else "")
+    )
+
+
+def _bundle_anchors(sections: list[str]) -> list[str]:
+    """The bundle's sections with an anchor on each subsection, evidence id and note.
+
+    A subsection's id is its title's, as a section's is (:func:`_slug`); a
+    title used twice keeps the first place, the body's, and the later one is
+    numbered. An evidence id's anchor is its row in the evidence index.
+    Given after the figures are placed, which find a subsection by its bare
+    heading.
+    """
+    from maljan.reporting.renderers.analyst import bundle_anchor, unique_anchor
+
+    taken: set[str] = set()
+
+    def section(found: re.Match[str]) -> str:
+        # Numbered by the counter the bundle's JSON numbers its sections by.
+        return f'<h2 id="{unique_anchor(found.group(1), taken)}">'
+
+    sections = [re.sub(r'^<h2 id="([^"]+)">', section, chunk) for chunk in sections]
+
+    def heading(found: re.Match[str]) -> str:
+        anchor = unique_anchor(bundle_anchor(_heading_key(found.group(1))), taken)
+        return f'<h3 id="{anchor}">{found.group(1)}</h3>'
+
+    def row(found: re.Match[str]) -> str:
+        if found.group(2) in taken:
+            return found.group(0)
+        taken.add(found.group(2))
+        return f'<tr id="{found.group(2)}">{found.group(1)}{found.group(2)}{found.group(3)}'
+
+    def note(found: re.Match[str]) -> str:
+        anchor = f"cite-{found.group(2)}" if found.group(2) else str(found.group(3))
+        if anchor in taken:
+            return found.group(0)
+        taken.add(anchor)
+        return f'<li id="{anchor}"><strong>{found.group(1)}</strong>'
+
+    out: list[str] = []
+    for chunk in sections:
+        chunk = _H3_RE.sub(heading, chunk)
+        if chunk.startswith(f'<h2 id="{_INDEX_ANCHOR}"'):
+            chunk = _EVIDENCE_ROW.sub(row, chunk)
+        elif chunk.startswith(f'<h2 id="{_NOTES_ANCHOR}"'):
+            chunk = _NOTE_ITEM.sub(note, chunk)
+        out.append(chunk)
+    return out
 
 
 def _only_an_absence(chunk: str, after_heading: int) -> bool:

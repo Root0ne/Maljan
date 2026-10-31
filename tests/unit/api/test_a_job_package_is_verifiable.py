@@ -432,7 +432,11 @@ async def test_the_route_is_owner_only_and_streams_the_package(tmp_path: Path, m
 
     called: list[Any] = []
 
-    async def _build_for_job(db: Any, job_id: Any, out: Any) -> dict[str, Any]:
+    async def _build_for_job(
+        db: Any, job_id: Any, out: Any, *, layout: str | None = None
+    ) -> dict[str, Any]:
+        # The package's Markdown is in the layout the report route serves.
+        assert layout in ("analyst", "full")
         called.append(job_id)
         out.write(b"package bytes")
         return {"seal": {"status": "verified"}, "signature": {"key_id": SIGNER.key_id}}

@@ -402,6 +402,8 @@ test.describe("Analysis page", () => {
       /^Report \(Markdown\)/,
       /^Indicator list/,
       /^STIX 2\.1 bundle/,
+      /^Evidence bundle \(HTML\)/,
+      /^Evidence bundle \(JSON\)/,
       /^MISP attributes/,
       /^ATT&CK Navigator layer/,
       /^YARA rules/,
@@ -411,7 +413,22 @@ test.describe("Analysis page", () => {
     ]) {
       await expect(menu.getByRole("menuitem", { name })).toHaveCount(1);
     }
+    // The report's HTML says the bundle downloads beside it, so its links resolve.
+    await expect(menu.getByRole("menuitem", { name: /^Report \(HTML\)/ })).toContainText(
+      "save the evidence bundle (HTML) beside it",
+    );
     await page.keyboard.press("Escape");
+
+    // The bundle saves under exactly the names the analyst report links to.
+    for (const [name, file] of [
+      [/^Evidence bundle \(HTML\)/, "evidence-bundle.html"],
+      [/^Evidence bundle \(JSON\)/, "evidence-bundle.json"],
+    ] as const) {
+      await page.getByRole("button", { name: "Export" }).click();
+      const download = page.waitForEvent("download");
+      await page.getByRole("menuitem", { name }).click();
+      expect((await download).suggestedFilename()).toBe(file);
+    }
 
     // The detection block exports nothing a second time: the bundle, the
     // Navigator layer and one file per rule kind are the menu's. A rule

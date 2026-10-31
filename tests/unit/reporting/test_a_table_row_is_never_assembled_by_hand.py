@@ -30,6 +30,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 RENDERER = (
     Path(__file__).resolve().parents[3]
     / "src"
@@ -124,6 +126,21 @@ class TestTheRendererCannotWriteARowByHand:
         ]
         assert not offenders, "\n".join(
             f"markdown.py:{lineno} in {where}: {text!r} — build the row with _row()"
+            for lineno, where, text in offenders
+        )
+
+    @pytest.mark.parametrize("module", ["analyst.py", "bundle.py"])
+    def test_the_analyst_report_and_its_bundle_write_no_row_by_hand(self, module: str) -> None:
+        """The two layouts beside the renderer build every row with its ``_row``."""
+        tree = ast.parse((RENDERER.parent / module).read_text(encoding="utf-8"))
+        owner = _enclosing_functions(tree)
+        offenders = [
+            (lineno, owner.get(lineno, "<module>"), text)
+            for lineno, text in _string_constants(tree)
+            if "|" in text
+        ]
+        assert not offenders, "\n".join(
+            f"{module}:{lineno} in {where}: {text!r} — build the row with _row()"
             for lineno, where, text in offenders
         )
 

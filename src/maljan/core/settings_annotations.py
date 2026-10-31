@@ -1582,6 +1582,19 @@ ANNOTATIONS: dict[str, Annotation] = {
         "subgroup": "Report content",
         "advanced": True,
     },
+    "reporting.full_report_in_one_file": {
+        "title": "Full report in one file",
+        "description": (
+            "Off: the served report (Markdown, HTML, PDF) is the analyst report, with the "
+            "findings in a fixed order and each citation a numbered note that links into the "
+            "evidence bundle served beside it (evidence-bundle.html and evidence-bundle.json), "
+            "which holds every section, table and tool output the single-file report printed. "
+            "On: the served report prints everything in one file, as before the split. "
+            "Nothing stored changes either way."
+        ),
+        "subgroup": "Report content",
+        "applies": "live",
+    },
     "reporting.html_export_enabled": {
         "title": "HTML export enabled",
         "description": ("Enables server-side HTML-to-PDF export of the generated report."),
