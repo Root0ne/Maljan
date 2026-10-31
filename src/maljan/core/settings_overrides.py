@@ -333,7 +333,8 @@ def unknown_reference_refusals(
     and before the save. Refused: a key of ``llm.agents`` or of a
     ``react_agent_*_overrides`` map that names no agent definition and no
     model-calling role (nothing would read it), and a ``capability`` tool
-    reference no server declares a tool of (it would resolve to no server).
+    reference no server declares (it would resolve to no server), once every
+    enabled built-in server has been listed.
     Each is named, with what is available. What is already stored, sent back
     as stored, is never refused, so stored settings stay readable and no
     unrelated save is blocked; where the merged values do not build, the model
@@ -341,7 +342,7 @@ def unknown_reference_refusals(
     """
     from pydantic import ValidationError
 
-    from maljan.agents.composition import servers_of_capability
+    from maljan.agents.composition import capability_undecided, servers_of_capability
     from maljan.core.config import ROLE_ENTRY_KEYS
 
     try:
@@ -368,6 +369,9 @@ def unknown_reference_refusals(
     stored_defs = current.get(DEFINITIONS_PATH)
     stored_defs = stored_defs if isinstance(stored_defs, Mapping) else {}
     problems: list[str] = []
+    # A server never listed yet may serve any capability: nothing is refused
+    # for want of a server until every enabled built-in has been listed.
+    undecided = bool(capability_undecided(built.mcp.servers))
     for key, definition in built.agents.definitions.items():
         stored_refs = stored_defs.get(key)
         stored_refs = stored_refs.get("tools") if isinstance(stored_refs, Mapping) else None
@@ -381,6 +385,7 @@ def unknown_reference_refusals(
             if (
                 ref.kind == "capability"
                 and capability not in stored_caps
+                and not undecided
                 and not servers_of_capability(built.mcp.servers, capability)
             ):
                 problems.append(
@@ -390,6 +395,40 @@ def unknown_reference_refusals(
     if problems:
         refused[f"{CORE_NS}.{DEFINITIONS_PATH}"] = "; ".join(problems)
     return refused
+
+
+def unresolved_capability_warnings(settings: Any) -> dict[str, str]:
+    """The advisory a save is answered with for a capability reference no server serves yet.
+
+    While an enabled built-in server has not been listed,
+    :func:`unknown_reference_refusals` refuses no capability reference, since
+    that server may serve it once listed; each one that resolves to no server
+    now is said here instead, with the servers still unlisted, so a mistyped
+    capability is not kept in silence. Keyed by the definitions' dotted path,
+    as the refusal is.
+    """
+    from maljan.agents.composition import capability_undecided, servers_of_capability
+
+    unlisted = capability_undecided(settings.mcp.servers)
+    if not unlisted:
+        return {}
+    problems = [
+        f"{key!r} references capability {ref.capability!r}, which resolves to no server "
+        "yet, so the agent runs without it"
+        for key, definition in settings.agents.definitions.items()
+        for ref in definition.tools
+        if ref.kind == "capability"
+        and ref.capability
+        and not servers_of_capability(settings.mcp.servers, str(ref.capability))
+    ]
+    if not problems:
+        return {}
+    return {
+        f"{CORE_NS}.{DEFINITIONS_PATH}": (
+            f"{'; '.join(problems)}. Not refused while these servers have not been "
+            f"listed: {', '.join(unlisted)}"
+        )
+    }
 
 
 def pack_step_refusals(merged: Mapping[str, Any], current: Mapping[str, Any]) -> dict[str, str]:

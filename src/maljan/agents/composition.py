@@ -267,6 +267,8 @@ def reads_static_provider(definition: AgentDefinition | None) -> bool:
 
 
 NOT_MIRRORED_REASON = "sample not mirrored for {provider}"
+# A capability reference no server serves (``unresolved_capability_reasons``).
+UNRESOLVED_CAPABILITY_REASON = "capability '{capability}' resolves to no server"
 
 
 def pin_provider_sample(agent: Any, mirrored: Mapping[str, str] | None) -> None:
@@ -772,17 +774,19 @@ def _withheld_servers(settings: Settings, key: str) -> set[str]:
 def capability_servers(settings: Settings, capability: str) -> list[str]:
     """The servers a ``ToolRef(kind="capability")`` stands for, in their configured order.
 
-    A capability reference never reaches more than a definition could reach
-    before it: it stands for the built-in servers whose shipped seed declares
-    a tool of kind ``capability`` and leaves its binding to the definitions
-    (an empty ``agents`` list in the seed), which is the set the built-in
-    definitions named by key. Each is then referenced exactly as a
-    ``kind="mcp"`` reference to it by key was: a disabled server gives
-    nothing, its tick list and allow-list narrow what it gives, and its stored
-    ``agents`` list binds it to further agents as it always did, never taking
-    it away from a definition. A server an operator adds is never reached
-    through a capability; it is bound by its own ``agents`` list or a
-    reference to it by key, as every server of its own is.
+    It stands for every built-in server that says it serves ``capability``:
+    its block names it among its ``roles``, or a tool it declares (its
+    block's, or what it served when last listed) is of the capability's kind.
+    Whether agents are bound to the server by its own ``agents`` list does
+    not matter: a server bound to the judge serves a capability reference of
+    the static analyst as well. The role is read from the block, so a server
+    whose tools were never listed yet (a fresh or cloned database keeps
+    nothing) still counts. Each is then referenced exactly as a
+    ``kind="mcp"`` reference to it by key is: a disabled server gives
+    nothing, and its tick list and allow-list narrow what it gives. A server
+    an operator adds is never reached through a capability; it is bound by
+    its own ``agents`` list or a reference to it by key, as every server of
+    its own is.
     """
     return servers_of_capability(settings.mcp.servers, capability)
 
@@ -790,23 +794,51 @@ def capability_servers(settings: Settings, capability: str) -> list[str]:
 def servers_of_capability(server_keys: Iterable[str], capability: str) -> list[str]:
     """``capability_servers`` over a list of server keys, in their order.
 
-    The settings API serves it on the agent definitions' catalogue entry, so
-    the console draws which servers a capability reference stands for
-    without a rule of its own.
+    ``server_keys`` may be the settings' server blocks by key, whose roles are
+    then read; for a bare key the block the settings in force hold is read,
+    else the one it ships with. The settings API serves it on the agent
+    definitions' catalogue entry, so the console draws which servers a
+    capability reference stands for without a rule of its own.
     """
     from maljan.core.config import _builtin_servers
-    from maljan.core.declared_reading import builtin_tools
+    from maljan.core.declared_reading import _block_in_force, builtin_tools
     from maljan.core.reputation import kinds_of_capability
 
     kinds = kinds_of_capability(capability)
     seeds = _builtin_servers()
+    blocks = server_keys if isinstance(server_keys, Mapping) else {}
     out: list[str] = []
     for name in server_keys:
         seed = seeds.get(str(name))
-        if seed is None or list(seed.agents or []):
+        if seed is None:
             continue
-        # As the server ships: its block's, and what it declares of itself.
-        if any(facts.kind in kinds for facts in builtin_tools(str(name)).values()):
+        block = blocks.get(name) or _block_in_force(str(name)) or seed
+        if capability in (getattr(block, "roles", None) or []) or any(
+            facts.kind in kinds for facts in builtin_tools(str(name)).values()
+        ):
+            out.append(str(name))
+    return out
+
+
+def capability_undecided(server_keys: Iterable[str]) -> list[str]:
+    """The enabled built-in servers among ``server_keys`` whose tools are not known yet.
+
+    A server never listed (nothing kept of it, as on a fresh or cloned
+    database) may serve a capability its block does not name; until it is
+    listed, no capability reference is refused for want of a server.
+    """
+    from maljan.core.config import _builtin_servers
+    from maljan.core.declared_reading import _block_in_force, builtin_tools
+
+    seeds = _builtin_servers()
+    blocks = server_keys if isinstance(server_keys, Mapping) else {}
+    out: list[str] = []
+    for name in server_keys:
+        seed = seeds.get(str(name))
+        if seed is None:
+            continue
+        block = blocks.get(name) or _block_in_force(str(name)) or seed
+        if getattr(block, "enabled", False) and not builtin_tools(str(name)):
             out.append(str(name))
     return out
 
@@ -830,6 +862,43 @@ def _server_refs(settings: Settings, definition: AgentDefinition) -> list[ToolRe
                     whole.add(server)
                     out.append(ToolRef(kind="mcp", server=server))
     return out
+
+
+def unresolved_capability_reasons(settings: Settings, key: str) -> list[str]:
+    """One reason per capability agent ``key``'s definition references that names no server.
+
+    A save does not refuse such a reference while a built-in server is not
+    listed yet (``capability_undecided``), so a mistyped capability is said
+    here instead, beside an unservable reference's reason, rather than
+    resolving to nothing in silence. Nothing is said under a profile that
+    withholds every server.
+    """
+    from maljan.core.config import ALL_SERVERS
+
+    if not isinstance(settings, Settings):
+        return []
+    definition = _definition_of(settings, key)
+    if definition is None or ALL_SERVERS in _withheld_servers(settings, key):
+        return []
+    capabilities = dict.fromkeys(
+        str(ref.capability)
+        for ref in definition.tools
+        if ref.kind == "capability" and ref.capability
+    )
+    return [
+        UNRESOLVED_CAPABILITY_REASON.format(capability=capability)
+        for capability in capabilities
+        if not capability_servers(settings, capability)
+    ]
+
+
+def note_unresolved_capabilities(registry: Any, settings: Settings, key: str) -> list[str]:
+    """``unresolved_capability_reasons``, also put where the run summary reads the registry's."""
+    reasons = unresolved_capability_reasons(settings, key)
+    held = getattr(registry, "degradation_reasons", None)
+    if isinstance(held, list):
+        held.extend(reason for reason in reasons if reason not in held)
+    return reasons
 
 
 def _mcp_refs(settings: Settings, definition: AgentDefinition, key: str) -> list[ToolRef]:
@@ -1283,6 +1352,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     )
     tools.extend(served)
     reasons.extend(served_reasons)
+    reasons.extend(note_unresolved_capabilities(registry, settings, key))
 
     # The notes after each description, settled over the whole list: the
     # provider's tools as the agent is offered them, beside the servers'.
@@ -1363,6 +1433,7 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     )
     tools.extend(served)
     reasons.extend(served_reasons)
+    reasons.extend(note_unresolved_capabilities(registry, settings, key))
 
     # The notes after each description, settled over the whole list: the
     # provider's tools as the agent is offered them, beside the servers'.

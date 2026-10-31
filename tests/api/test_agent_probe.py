@@ -92,10 +92,11 @@ async def test_a_built_in_agent_resolves_to_its_prompt_and_its_tools():
     assert result.details["llm"]["provider"] == "openai"
     # The role-bound half first, then the definition's own references: the
     # network analyst is bound to ``network`` by role and names ``knowledge``
-    # by reference.
+    # by reference, and both reputation servers by capability.
     assert [s["key"] for s in result.details["servers"]] == [
         "network",
         "knowledge",
+        "threatintel",
         "virustotal",
     ]
     assert {s["status"] for s in result.details["servers"]} == {"ok"}

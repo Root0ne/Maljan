@@ -2890,20 +2890,25 @@ another definition.
 {"kind": "capability", "capability": "reputation"}
 ```
 
-A `capability` reference never reaches more than a definition reached
-before. It stands for the built-in servers whose shipped declaration has a tool
-of that kind and whose seed leaves their binding to the definitions (for
-`reputation`, VirusTotal's own server; the threat-intel sidecar's seed binds it
-to the judge by its `agents` list), each referenced exactly as an `mcp`
-reference by key was: a disabled server gives nothing, its tick list and
-allow-list narrow what it gives, and its `agents` list binds it to further
-agents as it always did. A server you add is never reached through a
+A `capability` reference stands for every built-in server that says it serves
+that capability: its block's `roles` name it, or a tool it declares (its
+block's, or what it served when last listed) is of that kind. Whether its own
+`agents` list binds it to some agent does not matter, and because the role is
+read from the block, a server whose tools were never listed (a fresh or cloned
+database keeps nothing) still counts. Each is referenced exactly as an `mcp`
+reference by key: a disabled server gives nothing, and its tick list and
+allow-list narrow what it gives. A server you add is never reached through a
 capability: bind it by its own `agents` list or by an `mcp` reference. The
 built-in agents that look the sample's hash up (`static`, `network`, the judge,
 `triage`, `android_static`, `reverser`) reach reputation this way: with the
-shipped servers that is VirusTotal's own server, which they named by key
-before, so the default team resolves to the same servers; a built-in row stored
-with that earlier list loads as the seed. An `agent` reference:
+shipped servers that is the threat-intel sidecar and VirusTotal's own server; a
+built-in row stored with the earlier list that named VirusTotal by key loads as
+the seed. A save is never refused for a capability reference while an enabled
+built-in server has not been listed yet, since it may serve it once listed: the
+save is answered with a warning naming each capability that resolves to no
+server yet and the servers still unlisted, and a run records "capability '…'
+resolves to no server" among the agent's degradation reasons. An `agent`
+reference:
 
 ```json
 {"kind": "agent", "agent": "static"}
@@ -4018,8 +4023,8 @@ reputation source, whatever the tool is called and however it answers:
   (`triage.reputation_failed`, read to the judge as one sentence);
 - an agent reaches a reputation server you add the way it reaches any server
   of yours: by the server's `agents` list or an `mcp` reference to it (the
-  built-in agents' capability reference reaches only the shipped VirusTotal
-  server, as their reference by key did; see Delegation).
+  built-in agents' capability reference reaches the shipped servers whose
+  role is reputation; see Delegation).
 
 A tool named like a built-in lookup that declares another kind, or nothing,
 gets none of this. A report stored before the records is read the way it

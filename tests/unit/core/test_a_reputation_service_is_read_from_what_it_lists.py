@@ -926,7 +926,8 @@ def test_a_fresh_deployment_reads_no_lookup_of_the_service_until_it_is_listed() 
     held = declared.source("mcp:virustotal")
     assert held is not None and dict(held.tools) == {}
     assert [x.server for x in pack_lookups(servers, declared)] == ["threatintel"]
-    assert "virustotal" not in capability_servers(settings, "reputation")
+    # Its block's role still names reputation, so the agents reach it.
+    assert "virustotal" in capability_servers(settings, "reputation")
     # Once listed, it is read as every later run reads it.
     block = settings.mcp.servers["virustotal"]
     sd.register_served(

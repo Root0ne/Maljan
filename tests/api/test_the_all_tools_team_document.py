@@ -290,7 +290,7 @@ class TestTheDocument:
 class TestEveryAgentResolves:
     def test_the_static_analyst_reads_the_sidecars(self, container: _Container) -> None:
         resolved = _resolve(container, "static")
-        assert _servers(resolved) == {"analysis", "knowledge", "virustotal"}
+        assert _servers(resolved) == {"analysis", "knowledge", "threatintel", "virustotal"}
         assert resolved.static_provider_id == "none"
         assert resolved.degradation_reasons == ()
 
@@ -339,8 +339,8 @@ class TestEveryAgentResolves:
     @pytest.mark.parametrize(
         ("key", "servers"),
         [
-            ("triage", {"analysis", "knowledge", "virustotal"}),
-            ("network", {"network", "knowledge", "virustotal"}),
+            ("triage", {"analysis", "knowledge", "threatintel", "virustotal"}),
+            ("network", {"network", "knowledge", "threatintel", "virustotal"}),
             ("dynamic", {"sandbox", "knowledge"}),
             # The judge's sandbox report tools and its asks of the reverser
             # and the static analyst (T-415d).

@@ -331,7 +331,9 @@ def _readers() -> dict[str, Callable[[Settings], Any]]:
             x.server for x in pack_lookups(s.mcp.servers, ToolDeclarations.from_settings(s))
         ],
         "routed formats": lambda s: sorted(routed_formats_of("mcp:analysis", "pe_info")),
-        "capability": lambda s: servers_of_capability(s.mcp.servers, "strings"),
+        # A kind no block's roles name: ``strings`` is one of the analysis
+        # server's roles, which counts before any listing.
+        "capability": lambda s: servers_of_capability(s.mcp.servers, "function_index"),
         "known names": lambda s: "die_scan" in known_tool_names(s),
         "matchers": lambda s: "yara-x" in shipped_matcher_names(),
         "step kind": die_step_kind,

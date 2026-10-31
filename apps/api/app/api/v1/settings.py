@@ -427,7 +427,7 @@ async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
     this runs, so a failure here must cost the operator an advisory note, not
     turn a saved change into a 500 that says it was not saved.
     """
-    from maljan.core.settings_overrides import build_settings
+    from maljan.core.settings_overrides import build_settings, unresolved_capability_warnings
 
     from app.services.agent_map import (
         effective_definitions,
@@ -446,7 +446,12 @@ async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
         )
         # An agent's own prompt that names a tool it no longer holds: the
         # same advisory shape, never a refusal.
-        found.update(prompt_tool_warnings(build_settings(await load_core_overrides(db))))
+        built = build_settings(await load_core_overrides(db))
+        found.update(prompt_tool_warnings(built))
+        # A capability reference no server serves yet, which a save does not
+        # refuse while a built-in server is unlisted: said, never refused.
+        for key, text in unresolved_capability_warnings(built).items():
+            found[key] = f"{found[key]}; {text}" if key in found else text
         return found
     except Exception as exc:  # noqa: BLE001 — advisory, and the write is done
         logger.debug("Could not compute settings warnings (%s); continuing.", log_safe(str(exc)))

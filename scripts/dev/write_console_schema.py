@@ -7,9 +7,8 @@ fails when it no longer matches what the API serves. The deployment is one
 whose built-in reputation service, Ghidra and radare2 were listed once, as
 every test starts (``tests/conftest.py``): what is read of the reputation
 service's listing (``tests/fixtures/virustotal_listing.json``,
-``core.derived_declarations``) is what binds it to the agents' reputation
-capability, and what is read of Ghidra's and radare2's vendored listings
-(``core.program_reading``) is their tools. Run from the
+``core.derived_declarations``) is its tools, and what is read of Ghidra's and
+radare2's vendored listings (``core.program_reading``) is theirs. Run from the
 repository root with the API on the path:
 
     PYTHONPATH=src:apps/api python scripts/dev/write_console_schema.py

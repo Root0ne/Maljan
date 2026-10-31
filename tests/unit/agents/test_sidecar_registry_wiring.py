@@ -73,6 +73,7 @@ def test_the_network_analyst_takes_both_halves_from_the_registry(monkeypatch):
         "extract_dns",
         "network_tool",
         "knowledge_tool",
+        "threatintel_tool",
         "virustotal_tool",
     ]
 
@@ -106,6 +107,9 @@ async def test_the_judge_takes_its_tools_from_the_registry(monkeypatch):
     assert [t.name for t in judge.tools if not t.name.startswith(("sandbox_", "ask_"))] == [
         "check_ip_reputation",
         "knowledge_tool",
+        # The reputation capability names the role-bound sidecar too; the real
+        # registry merges a server bound and named into one copy.
+        "threatintel_tool",
         "virustotal_tool",
     ]
     await judge.aclose()
