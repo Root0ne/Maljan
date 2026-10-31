@@ -600,6 +600,132 @@ def test_a_backslashed_name_that_is_no_token_registers_nothing(account):
     assert configured_secret_values_of(account) == set()
 
 
+# A path earlier in the same word, with no backslash before the password: the
+# password goes from the separator after the path, and a drive's colon is no
+# user name's. A path whose later name holds a colon is masked with it.
+_PASSWORDS_AFTER_A_PATH = [
+    ("'C:\\x','u:{pw}@h:8080'", "'C:\\x','***@h:8080'"),
+    ("f(C:\\x,u:{pw}@h:8080)", "f(C:\\x,***@h:8080)"),
+    ("C:\\x;u:{pw}@h:8080", "C:\\x;***@h:8080"),
+    ("C:\\x,u:{pw}@h", "C:\\x,***@h"),
+    ("C:\\x,D:\\y,u:{pw}@h:8080", "C:\\x,D:\\y,***@h:8080"),
+    ("C:\\x,u:p,{pw}@h:8080", "C:\\x,***@h:8080"),
+    ("C:\\a,b:{pw}@h:8080", "C:\\a,***@h:8080"),
+    ("C:\\x,a:/{pw}@h:8080", "C:\\x,***@h:8080"),
+    ("%ProgramFiles(x86)%\\x,u:{pw}@h:8080", "%ProgramFiles(x86)%\\x,***@h:8080"),
+    ("\\\\srv\\share,u:{pw}@h/v1", "\\\\srv\\share,***@h/v1"),
+    ("('C:\\x','{pw}@h:8080')", "('C:\\x','***@h:8080')"),
+    # Inside a JSON object, whose member key holds a colon, and behind an
+    # escaped quote.
+    ('{"a":"C:\\\\x,u:{pw}@h:8080"}', '{"a":"C:\\\\x,***@h:8080"}'),
+    ('{"a":"\\\\\\\\srv\\\\share,u:{pw}@h/v1"}', '{"a":"\\\\\\\\srv\\\\share,***@h/v1"}'),
+    ('{"a":"C:\\\\x,\\\'{pw}@h:8080\\\'"}', '{"a":"C:\\\\x,\\\'***@h:8080\\\'"}'),
+]
+
+
+@pytest.mark.parametrize(("written", "masked"), _PASSWORDS_AFTER_A_PATH)
+def test_a_path_before_a_password_in_the_same_word_does_not_shield_it(written, masked):
+    from maljan.core.settings_masking import masked_text
+
+    secret = _credential_shaped_token()
+    text = written.replace("{pw}", secret)
+
+    assert masked_text(text) == masked
+    assert masked_text(f"Error: cannot connect to {text}") == f"Error: cannot connect to {masked}"
+    assert any(secret in found for found in configured_secret_values_of(text))
+
+
+# Words a reading after a path masks, each with what is left: a backslash in
+# the password after the separator, colons and openers before it, and an
+# escaped opener with a backslash run after the separator. Each reading only
+# adds masking, so a later one never drops a row.
+_WORDS_A_READING_AFTER_A_PATH_MASKS = [
+    ("/a,u:{pw}\\s@h:8080", "/a,***@h:8080"),
+    ('@443srv@SSL/,u:@1..\\@1{pw})@h:8080"', '@443srv@SSL/,***@h:8080"'),
+    ("/\\\\\\\"@SSL$,/,a:/\\\\{pw}\\h@1@h:8080'", "/\\\\\\\"@SSL$,/,***@h:8080'"),
+    ("/;u:,D:\\y@1\\\\\\\\\\{pw}u:%P(x86)%\\@h:5432)", "/;***@h:5432)"),
+    ('/srv@SSL;$;a:/{pw}\\\\\\""@h:8080\')', "/srv@SSL;$;***@h:8080')"),
+    ('/(",{"a":"{"a":"\\\\x,{pw}@h:8080', '/(",{"***@h:8080'),
+    ("C:\\x,\\'\\\\{pw}@h:8080", "C:\\x,\\'***@h:8080"),
+    ('{"a":"C:\\\\x,\\\'{pw}\\\\q@h:8080\\\'"}', '{"a":"C:\\\\x,\\\'***@h:8080\\\'"}'),
+]
+
+
+@pytest.mark.parametrize(("written", "masked"), _WORDS_A_READING_AFTER_A_PATH_MASKS)
+def test_every_reading_after_a_path_masks_its_words(written, masked):
+    from maljan.core.settings_masking import masked_text
+
+    secret = _credential_shaped_token()
+    text = written.replace("{pw}", secret)
+
+    assert masked_text(text) == masked
+    assert secret not in masked_text(f"Error: {text}")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "\\\\srv@SSL\\DavWWWRoot\\x@h/y",
+        "\\\\srv@ssl@443\\DavWWWRoot\\x@h:8080",
+        "\\\\srv@8080\\share\\x@h/y",
+        "\\\\srv$\\x@h/y",
+        "\\\\\\\\srv@SSL\\\\DavWWWRoot\\\\x@h/y",
+        '{"unc":"\\\\\\\\srv$\\\\x@h/y"}',
+    ],
+)
+def test_a_webdav_or_hidden_unc_share_is_kept_and_registers_nothing(path):
+    from maljan.core.settings_masking import masked_text
+
+    assert masked_text(path) == path
+    assert masked_text(f"opened {path}") == f"opened {path}"
+    assert configured_secret_values_of(path) == set()
+
+
+# A server name with any other "@" or "$", or with no backslash after it, is
+# no share's: what stands before the last "@" stays userinfo.
+@pytest.mark.parametrize(
+    "written",
+    [
+        "\\\\{pw}@h:8080",
+        "\\\\\\\\{pw}@h:8080",
+        "\\\\{pw}@SSL@h:8080",
+        "\\\\u@{pw}@h:8080",
+        "\\\\{pw}$@h:8080",
+        "\\\\s@x{pw}\\x@h:8080",
+        "\\\\s$x{pw}\\x@h:8080",
+    ],
+)
+def test_a_unc_shaped_password_is_still_masked(written):
+    from maljan.core.settings_masking import masked_text
+
+    secret = _credential_shaped_token()
+    text = written.replace("{pw}", secret)
+
+    assert masked_text(text) == "***@" + text.rpartition("@")[2]
+    assert secret not in masked_text(f"Error: {text}")
+
+
+# The accepted residual: a password written as a WebDAV or hidden share's
+# server is kept, as one written as any share's server is (``\\pw\x@h``);
+# without the backslash after it, it is still masked.
+@pytest.mark.parametrize(
+    ("written", "kept"),
+    [
+        ("\\\\{pw}@SSL\\x@h:8080", True),
+        ("\\\\{pw}@1234\\x@h", True),
+        ("\\\\{pw}$\\x@h/y", True),
+        ("\\\\{pw}@SSL@h:8080", False),
+        ("\\\\{pw}$@h:8080", False),
+    ],
+)
+def test_a_password_written_as_a_webdav_or_hidden_share_is_the_named_residual(written, kept):
+    from maljan.core.settings_masking import masked_text
+
+    text = written.replace("{pw}", _credential_shaped_token())
+
+    assert masked_text(text) == (text if kept else "***@" + text.rpartition("@")[2])
+
+
 def test_masking_backslashed_words_costs_time_linear_in_the_text():
     from tests.linear_cost import assert_scales
 
@@ -623,6 +749,17 @@ def test_masking_backslashed_words_costs_time_linear_in_the_text():
         lambda size: "u:p@h:8080" + '\\"}' * size,
         lambda size: "u:" + ",'.\\:" * size + "x@h:8080",
         lambda size: "C:\\" + "('" * size + "t\\@h:8080",
+        # A path, then separators, drives and colons before the password, and
+        # a WebDAV server name left open.
+        lambda size: "C:\\x" + ",D:\\y" * size + ",u:p@h:8080",
+        lambda size: "('" + "C:\\x'," * size + "'u:p@h:8080')",
+        lambda size: "C:\\x" + ",;" * size + "u:p@h:8080",
+        lambda size: "f(C:\\x" + ",a:/" * size + "@h:8080",
+        lambda size: "=\\\\a@SSL" + "@1" * size + "\\x@h/y",
+        lambda size: "\\\\a" + "@SSL$" * size + "\\x@h/y",
+        # Escaped openers and backslash runs after the separator.
+        lambda size: "C:\\x," + "\\" * size + "@h:8080",
+        lambda size: "C:\\x," + "\\'" * size + "\\" * size + "@h:8080",
     ):
         assert_scales(build, 2_000, masking)
 
@@ -674,7 +811,13 @@ def _bare_secrets_before(address: str) -> list[str]:
     return found
 
 
-_FUZZ_HEAD = string.ascii_letters + string.digits + "\"'([{<:/=,.%-_@\\"
+# Characters, and the pieces a Windows path or a WebDAV share begins with.
+_FUZZ_HEAD = [
+    *(string.ascii_letters + string.digits + "\"'([{<:/=,.%-_@\\$;"),
+    "@SSL",
+    "\\\\srv",
+    "C:\\",
+]
 _FUZZ_TAILS = [
     "h",
     "h:8080",
@@ -740,6 +883,12 @@ def test_masking_is_never_weaker_than_before_on_fuzzed_words():
             if "\\" in word[now:].rpartition("@")[0]:
                 # A JSON escape is read only before a port or a path.
                 assert names_a_port_or_a_path(word[now:]), word
+                assert bare_userinfo(word[now:]) is not None, word
+            elif "\\" in word[:now] and word[:now].rstrip(TOKEN_OPENERS + "\\")[-1:] in (",", ";"):
+                # Or a user name and a password, or a quoted token alone,
+                # after a separator that ends a backslashed value before them
+                # in the same word.
+                assert ":" in word[now:].rpartition("@")[0] or word[now - 1] in TOKEN_OPENERS, word
                 assert bare_userinfo(word[now:]) is not None, word
             else:
                 # Otherwise a new reading only where the token's own opener

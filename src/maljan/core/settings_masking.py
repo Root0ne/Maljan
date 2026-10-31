@@ -121,14 +121,31 @@ _NO_PATH_CHARS = '"<>|'
 # environment variable (``%ProgramFiles(x86)%\``, ``$env:APPDATA\``), at the
 # start of what may be a path or after a character that opens a value
 # (``--out=C:\``, ``('C:\``); a drive written with a slash and a name after it
-# (``C:/Users``) only at the start. Possessive, so each start costs time
+# (``C:/Users``) only at the start. The server's name may end as a WebDAV
+# share's does, in ``@SSL``, a port or both (``\\srv@SSL@443\``), or in the
+# ``$`` of a hidden name (``\\srv$\``); no other ``@`` or ``$`` stands in it,
+# so ``\\pw@h:8080`` stays userinfo. A known residual: a password written as
+# such a share is (``\\pw@SSL\x@h:8080``, ``\\pw@1234\x@h``, ``\\pw$\x@h/y``)
+# is kept, as ``\\pw\x@h:8080`` is. Possessive, so each start costs time
 # linear in what it reads.
 _PATH_START = re.compile(
     r"\A[A-Za-z]:/(?=[\w.~$-])"
     r"|(?:\A|(?<=['(\[{=,;]))"
-    r"(?:[A-Za-z]:\\|\\\\(?:\\\\)?[?.](?:\\\\)?\\|\\\\(?:\\\\)?[\w.-]++\\|\.{1,2}\\"
+    r"(?:[A-Za-z]:\\|\\\\(?:\\\\)?[?.](?:\\\\)?\\"
+    r"|\\\\(?:\\\\)?[\w.-]++(?:@[Ss][Ss][Ll])?+(?:@\d{1,5}+)?+\$?+\\|\.{1,2}\\"
     r"|%[A-Za-z_][A-Za-z0-9_() ]*+%\\|\$env:[A-Za-z_]\w*+\\)"
 )
+# A drive's colon at the start of a path (``C:\``, after an opener or a
+# separator too; ``C:/`` only at the start, as in :data:`_PATH_START`), or any
+# other colon.
+_DRIVE_OR_COLON = re.compile(r"\A[A-Za-z]:[\\/]|(?<=[\"'(<\[{=,;])[A-Za-z]:\\|:")
+# What ends a path's value before an address after it in the same word.
+_VALUE_SEPARATORS = ",;"
+# What may open the value a path stands in (``{"a":"C:\x``, ``--out=C:\x``).
+_PATH_VALUE_OPENERS = "\"'([{=,;"
+# Openers, each behind any run of backslashes that escapes it, that open a
+# value after a separator (``,'tok``, ``,\'tok``). Possessive, so linear.
+_ESCAPED_OPENERS = re.compile(r"(?:\\*+[\"'(<\[{])*+")
 # A backslash with the character it escapes, or a quote it leaves unescaped.
 _ESCAPE_OR_QUOTE = re.compile(r"\\.|[\"']", re.DOTALL)
 # What may stand right before a single quote that opens a value.
@@ -187,6 +204,75 @@ def _reads_as_a_windows_path(head: str) -> bool:
     return False
 
 
+def _user_colon(text: str) -> int:
+    """Where the first ``:`` in ``text`` that is no drive's (``C:\\``, ``C:/``) stands, or -1.
+
+    Read only in a word already refused as a path, so a drive's colon there
+    opens the path rather than a password. Linear in ``text``.
+    """
+    for found in _DRIVE_OR_COLON.finditer(text):
+        if found.group() == ":":
+            return found.start()
+    return -1
+
+
+def _after_a_path(word: str, start: int, last_at: int) -> int | None:
+    """Where an address after a path in the same word begins, or ``None`` for none.
+
+    A path ends at a separator (:data:`_VALUE_SEPARATORS`), so a user name
+    and password after it (``C:\\x,u:pw@h:8080``, ``'C:\\x','u:pw@h:8080'``)
+    are read from the last separator before the first colon that is no
+    drive's (:func:`_user_colon`), and a token alone from the last separator
+    before the ``@`` where an opener follows it (``('C:\\x','tok@h:8080')``);
+    the path before it is kept. What follows the separator goes even where
+    it could be a later name of the path (``C:\\a,b:c@h:8080`` keeps only
+    ``C:\\a,``): no Windows name holds a colon, and where a path and a
+    password read alike, the password goes. The colons are read from the
+    value the path stands in, so a JSON member's key before it names no user
+    (``{"a":"C:\\\\x,u:pw@h:8080"}``), and the opener after a separator may be
+    escaped (``{"a":"C:\\\\x,\\'tok@h:8080\\'"}``). Each reading only adds
+    masking, so the earliest of them is taken: from the value the path stands
+    in and from ``start``, each with an opener escaped or as written. Linear
+    in the word.
+    """
+    starts = [start]
+    backslash = word.find("\\", start, last_at)
+    if backslash >= 0:
+        opened = max(word.rfind(c, start, backslash) for c in _PATH_VALUE_OPENERS)
+        if opened >= start:
+            starts.append(opened + 1)
+    found = [
+        begin
+        for value in starts
+        for escaped in (True, False)
+        if (begin := _after_a_path_from(word, value, last_at, escaped)) is not None
+    ]
+    return min(found, default=None)
+
+
+def _after_a_path_from(word: str, start: int, last_at: int, escaped: bool) -> int | None:
+    """One reading of :func:`_after_a_path`: its colons read from ``start``.
+
+    With ``escaped``, the opener after the separator may stand behind
+    backslashes (:data:`_ESCAPED_OPENERS`); otherwise only openers as written
+    are passed over. Linear in the word.
+    """
+    colon = _user_colon(word[start:last_at])
+    end = start + colon if colon >= 0 else last_at
+    cut = max(word.rfind(sep, start, end) for sep in _VALUE_SEPARATORS)
+    if cut < start:
+        return None
+    if escaped:
+        opening = _ESCAPED_OPENERS.match(word, cut + 1, last_at)
+        begin = cut + 1 if opening is None else opening.end()
+    else:
+        rest = word[cut + 1 : last_at]
+        begin = cut + 1 + len(rest) - len(rest.lstrip(TOKEN_OPENERS))
+    if colon < 0 and begin == cut + 1:
+        return None
+    return begin if bare_userinfo(word[begin:]) is not None else None
+
+
 def _value_starts(head: str) -> list[int]:
     """Where each value an unescaped quote opens in ``head`` begins, in order.
 
@@ -221,7 +307,11 @@ def bare_userinfo(token: str) -> tuple[str, str] | None:
     so a password JSON text escapes (``{"password":"p\\"ss@h:8080"}``,
     ``{"password":"p\\\\ss@h:8080"}``) is masked and ``C:\\Users\\bob@h:8080``
     is kept; before a mail address's host (``{"to":"\\"bob\\"@corp.com"}``)
-    any backslash refuses it.
+    any backslash refuses it. A known residual: a one-letter user name whose
+    password begins with ``/`` and holds a backslash (``u:/p\\x@h``, with or
+    without a port) is written as a drive and a path are (``C:/Users\\x``)
+    and is kept; so is any password holding a backslash before a host with no
+    port or path (``u:p\\x@h``), which reads as such a mail address does.
     """
     head, at, tail = token.rpartition("@")
     if not at or not head or not tail:
@@ -316,7 +406,9 @@ def _address_in(word: str) -> int | None:
     (:func:`_opener_is_its_own`). A closed opener is read as quoting the
     address (``func("user@host:22")``, ``url="tok@h:8080"``), so a token whose
     own opener is followed by its closer after the ``@`` (``p"ss@h:8080",``)
-    keeps what stands before that opener.
+    keeps what stands before that opener. Where a path refuses the reading,
+    an address after a separator that ends the path is still read
+    (:func:`_after_a_path`).
     """
     last_at = word.rfind("@")
     if last_at < 0:
@@ -339,9 +431,12 @@ def _address_in(word: str) -> int | None:
         and "\\" in word[start:last_at]
         and _path_start_holds(word, lead, start, last_at)
     ):
-        # A path whose start holds an opener (``%ProgramFiles(x86)%\x@h:8080``).
-        return None
-    return start if bare_userinfo(word[start:]) is not None else None
+        # A path whose start holds an opener (``%ProgramFiles(x86)%\x@h:8080``),
+        # and what may follow it (``%ProgramFiles(x86)%\x,u:pw@h:8080``).
+        return _after_a_path(word, lead, last_at)
+    if bare_userinfo(word[start:]) is not None:
+        return start
+    return _after_a_path(word, start, last_at) if "\\" in word[start:last_at] else None
 
 
 def bare_addresses(text: str) -> list[str]:
