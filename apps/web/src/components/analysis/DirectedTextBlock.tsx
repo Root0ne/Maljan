@@ -61,7 +61,10 @@ export default function DirectedTextBlock({ rows }: { rows: readonly DirectedTex
                     )}
                   </td>
                   <td className="max-w-[28rem] px-4 py-2 align-top font-mono text-xs whitespace-pre-wrap break-all text-text-primary">
-                    {row.text}
+                    {/* The sample's own text, quoted: never read as anything said here. */}
+                    <q className="before:content-['“'] after:content-['”']">
+                      <code>{row.text}</code>
+                    </q>
                   </td>
                   <td className="px-4 py-2 align-top text-xs text-text-secondary tabular-nums">{row.count ?? 1}</td>
                   <td className="px-4 py-2 align-top text-xs text-text-secondary break-words">{row.where || "-"}</td>

@@ -287,7 +287,7 @@ export function remarks(report: ReportDetailDTO | null | undefined, job?: JobDTO
   }
   const notAssessed = report.malware_report?.verdict_not_assessed?.trim();
   if (notAssessed) out.push({ text: REMARK_TEXT.notAssessed, detail: notAssessed });
-  const rs =report.malware_report?.run_summary ?? report.run_summary;
+  const rs = report.malware_report?.run_summary ?? report.run_summary;
   const failed = rs?.failed_analysts ?? [];
   if (failed.length > 0) {
     out.push({ text: REMARK_TEXT.stageFailed, detail: failed.join(", ") });
