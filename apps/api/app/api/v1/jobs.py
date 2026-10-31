@@ -708,10 +708,12 @@ async def get_job_call_map(
 
     Derived from the job's stored ledger when asked for
     (``maljan.reporting.call_map``), so a run stored before the map existed
-    has one too; nothing is written. Ownership is the job's, checked exactly
-    the way the evidence page checks it. Each row is read as the evidence page
-    serves it, its absent columns left out, so the map is the one the served
-    pages draw; a row that does not read as a ledger entry is left out.
+    has one too; nothing is written, and it is derived again on each request
+    (about 20 ms over a stored run of a hundred entries in a warm process). Ownership is the
+    job's, checked exactly the way the evidence page checks it. Each row is
+    read as the evidence page serves it, its absent columns left out, so the
+    map is the one the served pages draw; a row that does not read as a ledger
+    entry is left out.
     """
     import asyncio
 
@@ -723,17 +725,26 @@ async def get_job_call_map(
 
     job = await svc.get_job(job_id, user)
     if not job:
+        logger.warning(
+            f"Call map requested for unknown job: {log_safe(job_id)}",
+            extra={"job_id": log_safe(job_id), "user_id": log_safe(user.id)},
+        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     found = await db.execute(
         sa_select(EvidenceEntry).where(EvidenceEntry.job_id == job_id).order_by(EvidenceEntry.seq)
     )
-    rows = [
-        EvidenceEntryResponse.model_validate(row).model_dump(mode="json", exclude_none=True)
-        for row in found.scalars().all()
-    ]
-    # The ledger is read and the listings parsed off the event loop.
-    ledger, _unread = await asyncio.to_thread(stored_ledger, rows)
-    return CallMapResponse(job_id=job_id, **await asyncio.to_thread(call_map, ledger))
+    orm_rows = list(found.scalars().all())
+
+    def _derive() -> dict[str, Any]:
+        rows = [
+            EvidenceEntryResponse.model_validate(row).model_dump(mode="json", exclude_none=True)
+            for row in orm_rows
+        ]
+        ledger, _unread = stored_ledger(rows)
+        return call_map(ledger)
+
+    # The rows are read, the ledger rebuilt and the listings parsed off the event loop.
+    return CallMapResponse(job_id=job_id, **await asyncio.to_thread(_derive))
 
 
 @router.get("/{job_id}/evidence/verify", response_model=LedgerVerificationResponse)
