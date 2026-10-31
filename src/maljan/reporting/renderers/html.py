@@ -26,9 +26,14 @@ from __future__ import annotations
 import re
 import secrets
 from html import escape, unescape
+from types import SimpleNamespace
 from typing import Any
 
-from markdown_it import MarkdownIt
+from markdown_it import MarkdownIt, helpers
+from markdown_it.common.utils import UNESCAPE_ALL_RE
+from markdown_it.rules_core.normalize import NEWLINES_RE as _NEWLINES
+from markdown_it.rules_core.normalize import NULL_RE as _NULL
+from markdown_it.token import Token
 
 from maljan.reporting.defang import ProseDefanger
 from maljan.reporting.models import Figure, MalwareReport
@@ -308,9 +313,9 @@ def _report_link(url: str) -> bool:
     for.
     """
     target = str(url or "").strip()
-    # The Markdown escapes the "&" of every character reference it holds, so
-    # an "&" here is one the source held: a target spelled with a reference
-    # ("https&#58;//…") is no link the report makes.
+    # A target spelled with a character reference ("https&#58;//…") never gets
+    # here (``_link_destination``); an "&" here is one the source held, or the
+    # one a reference the writer escaped ("\&#58;") leaves, and no link.
     if "&" in target:
         return False
     if target.split("#", 1)[0] in BUNDLE_FILES:
@@ -327,6 +332,83 @@ def _no_image(renderer: Any, tokens: Any, idx: int, options: Any, env: Any) -> s
     """
     alt = "".join(str(child.content or "") for child in (tokens[idx].children or []))
     return escape(alt)
+
+
+def _link_destination(string: str, pos: int, maximum: int) -> Any:
+    """A link's or an image's target as markdown-it reads it, refused when written with a reference.
+
+    markdown-it decodes the character references of a target before it asks
+    ``validateLink``, so ``[a](https&#58;//x)`` would reach :func:`_report_link`
+    as ``https://x``. This looks at the target as the source wrote it: one that
+    holds a reference ("&#58;", "&colon;") is no target, and the link stays its
+    text. A reference the writer escaped (``\\&#58;``) is the escape it is, and
+    the "&" it leaves is refused by :func:`_report_link`. Every link, image and
+    reference definition reads its target here.
+    """
+    result = helpers.parseLinkDestination(string, pos, maximum)
+    if result.ok and any(m.group(2) for m in UNESCAPE_ALL_RE.finditer(string[pos : result.pos])):
+        result.ok = False
+    return result
+
+
+# What the HTML report's Markdown reader uses to read a link: markdown-it's
+# own, with the target read by ``_link_destination``.
+_LINK_HELPERS = SimpleNamespace(
+    parseLinkDestination=_link_destination,
+    parseLinkLabel=helpers.parseLinkLabel,
+    parseLinkTitle=helpers.parseLinkTitle,
+)
+
+
+def _raw_block(renderer: Any, tokens: Any, idx: int, options: Any, env: Any) -> str:
+    """A block past markdown-it's nesting bound, drawn as the Markdown it was written as."""
+    return f"<pre>{escape(tokens[idx].content)}</pre>\n"
+
+
+def _cut_at_nesting_bound(tokens: list[Token], bound: int) -> list[bool]:
+    """For each token, whether markdown-it stopped reading inside it at its nesting bound.
+
+    A block opened at the deepest level has its lines skipped, not read: it is
+    closed with nothing between. A leaf block (a paragraph, a heading, a table
+    cell) always holds its inline token, so only a container cut there matches.
+    """
+    return [
+        token.nesting == 1 and token.level >= bound and following.nesting == -1
+        for token, following in zip(tokens, tokens[1:], strict=False)
+    ]
+
+
+def _within_nesting_bound(md: MarkdownIt, tokens: list[Token], source: str) -> list[Token]:
+    """The document's blocks, each one cut at the nesting bound replaced by its source.
+
+    At ``maxNesting`` markdown-it stops reading the container it is in, and
+    every line after that point is dropped: a quote 25 deep loses its text. A
+    top-level block cut there is shown as its lines, escaped in a ``<pre>``, as
+    the console's ``SafeMarkdown`` shows such a document, so nothing in it is
+    lost; every other block is as it was.
+    """
+    cut = _cut_at_nesting_bound(tokens, int(md.options["maxNesting"]) - 1)
+    if not any(cut):
+        return tokens
+    lines = _NULL.sub("�", _NEWLINES.sub("\n", source)).split("\n")
+    out: list[Token] = []
+    start = 0
+    while start < len(tokens):
+        end = start
+        if tokens[start].nesting == 1:
+            # The block runs to the close at its own level.
+            while not (tokens[end].nesting == -1 and tokens[end].level == tokens[start].level):
+                end += 1
+        block = tokens[start : end + 1]
+        span = tokens[start].map
+        if span and any(cut[start:end]):
+            raw = Token("raw_block", "pre", 0, block=True, map=list(span))
+            raw.content = "\n".join(lines[span[0] : span[1]])
+            out.append(raw)
+        else:
+            out.extend(block)
+        start = end + 1
+    return out
 
 
 # The document's own policy, a second guard behind the renderer: nothing is
@@ -474,8 +556,12 @@ class HtmlRenderer:
         """
         md = MarkdownIt("commonmark", {"html": False}).enable("table").enable("strikethrough")
         md.validateLink = _report_link  # type: ignore[method-assign]
+        md.helpers = _LINK_HELPERS  # type: ignore[assignment]
         md.add_render_rule("image", _no_image)
-        return str(md.render(markdown))
+        md.add_render_rule("raw_block", _raw_block)
+        env: dict[str, Any] = {}
+        tokens = _within_nesting_bound(md, md.parse(markdown, env), markdown)
+        return str(md.renderer.render(tokens, md.options, env))
 
     # ------------------------------------------------------------------
     # Figure placement
