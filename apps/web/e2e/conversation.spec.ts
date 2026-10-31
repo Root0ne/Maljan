@@ -294,13 +294,17 @@ test.describe("Conversation", () => {
     await expect(table).toContainText("stage analysis");
   });
 
-  test("draws a tool call as one line that opens the ledger row", async ({
+  test("folds tool calls into a strip that opens to each call and its ledger row", async ({
     sessionPage: page,
   }) => {
     await mockRun(page);
     await page.goto(`/analysis/${JOB_ID}/evidence/conversation`);
 
     const feed = stream(page);
+    const strip = feed.getByRole("button", { name: /1 tool · 812 ms/ });
+    await expect(feed).not.toContainText("radare2.afl");
+    await strip.click();
+    await expect(strip).toHaveAttribute("aria-expanded", "true");
     await expect(feed).toContainText("radare2.afl");
     await expect(feed).toContainText("41 functions, 3 imports of interest");
 
