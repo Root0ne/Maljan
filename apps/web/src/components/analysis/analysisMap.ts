@@ -14,8 +14,7 @@
  * and `export:timeline` one the "Discussion timeline" download is built from;
  * neither was drawn before the page had six tabs either. `none` is a part of
  * the report record no surface of the console carries: the two ids the page
- * uses for its own addresses, and the raw per-agent reports (drawing those
- * is tracked as T-469). The completeness test pins that list.
+ * uses for its own addresses. The completeness test pins that list.
  */
 
 import type { AgentFindingDTO, ReportDetailDTO } from "@/lib/api";
@@ -62,7 +61,7 @@ export const REPORT_FIELD_PLACES: Record<keyof MalwareReport, readonly Place[]> 
   sections: ["evidence"],
   reputation: ["static#identity"],
   enrichment_not_asked: ["export"],
-  negotiation_summary: ["export"],
+  negotiation_summary: ["evidence#debate"],
   stix_bundle_extended: ["indicators#stix"],
   judge_indicators: ["indicators#iocs"],
   consolidated_iocs: ["indicators#iocs"],
@@ -86,8 +85,8 @@ export const REPORT_DTO_PLACES: Record<keyof ReportDetailDTO, readonly Place[]> 
   malware_category: ["header"],
   stix_bundle: ["indicators#stix"],
   mitre_techniques: ["behaviour#attack"],
-  agent_reports: ["none"],
-  negotiation_log: ["export:timeline"],
+  agent_reports: ["evidence#debate"],
+  negotiation_log: ["evidence#debate", "export:timeline"],
   run_summary: ["evidence#run-quality"],
   agent_findings: ["evidence#conversation", "behaviour#behaviours", "indicators#rule-matches"],
   transcript: ["evidence#conversation"],

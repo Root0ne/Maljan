@@ -230,15 +230,17 @@ export interface EvidenceView {
   /** The path suffix under the Evidence tab; empty for the tab's first view. */
   key: string;
   label: string;
-  kind: "bundle" | "records" | "conversation" | ExtraTabKind;
+  kind: "bundle" | "records" | "conversation" | "debate" | ExtraTabKind;
 }
 
 /** The views every analysis with a report has under Evidence: the evidence
- *  bundle first, then every tool call's record, then the discussion. */
+ *  bundle first, then every tool call's record, then the discussion in the
+ *  order it was said, then the debate by the points that were argued. */
 export const EVIDENCE_VIEWS: readonly EvidenceView[] = [
   { key: "", label: "Evidence bundle", kind: "bundle" },
   { key: "/records", label: "Records", kind: "records" },
   { key: "/conversation", label: "Analyst discussion", kind: "conversation" },
+  { key: "/debate", label: "Debate", kind: "debate" },
 ];
 
 /** Before a report exists there is no bundle: the records lead, as they fill
@@ -250,7 +252,7 @@ export const RUNNING_EVIDENCE_VIEWS: readonly EvidenceView[] = [
 
 /**
  * The views under the Evidence tab: the evidence bundle, the records, the
- * analysts' discussion, then one per agent and server of the run's own that
+ * analysts' discussion, the debate, then one per agent and server of the run's own that
  * has something to draw (`extraTabs`), in that order. An agent or a server
  * never gets a top-level tab of its own.
  */
