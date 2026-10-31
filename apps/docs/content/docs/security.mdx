@@ -177,6 +177,22 @@ appears. The fingerprint's per-server digests are taken over the masked
 fields. A summary stored before this is read as stored and is not scrubbed
 again: its ledger seal covers it.
 
+Beside these rules, which find a credential by where it stands, every secret
+value the platform holds is masked by value wherever it stands in shown text:
+the snapshot, the fingerprint, the console's read and the export, and the
+error texts of tool servers, sample staging, the system checks and the
+provider readiness. The values are the settings' credential fields, every
+tool server's `env` value, a source's own credential, every value of an
+encrypted settings row, the password and credential query values of every
+stored address and its `user:password` userinfo whole; each is found as
+written, URL-encoded, JSON-escaped (once and twice) and base64-encoded
+(standard and URL-safe, padded or not, at any offset inside longer base64).
+A value shorter than eight characters is masked only by the rules above: by
+value it would take ordinary words out of every message. The values are read
+again wherever settings are read in force (an app or a worker starting, a
+job, the store read or saved, the console's cached settings rebuilt), and
+found in one pass linear in the text.
+
 ## What an export leaves out
 
 A JSON export is a file on an operator's disk, so it carries no credential at
