@@ -118,6 +118,16 @@ export default function ChatDrawer({
     };
   }, [open, docked]);
 
+  /* The width of the page scroller's scrollbar, read whenever its box changes. */
+  const [gutter, setGutter] = useState(0);
+  useEffect(() => {
+    const main = document.getElementById("main-content");
+    if (!main || typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(() => setGutter(Math.max(0, main.offsetWidth - main.clientWidth)));
+    observer.observe(main);
+    return () => observer.disconnect();
+  }, []);
+
   /* The newest turn is in view. */
   useEffect(() => {
     const box = thread.current;
@@ -172,6 +182,9 @@ export default function ChatDrawer({
         aria-labelledby={titleId}
         onKeyDown={onKeyDown}
         data-testid="chat-drawer"
+        /* Beside the page it stops at the page scroller's scrollbar, which
+         * stays visible and usable; over the page it takes the full width. */
+        style={docked ? { right: gutter } : undefined}
         /* Displayed at once on opening, so focus can land in it, and slid in
          * from its starting style; taken out of the layout only once the
          * slide out has finished, so a closed panel widens nothing. */

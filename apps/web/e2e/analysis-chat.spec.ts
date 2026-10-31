@@ -74,11 +74,16 @@ test.describe("Chat", () => {
     await expect(drawer).toBeVisible();
     await expect(open).toHaveAttribute("aria-expanded", "true");
     await expect(drawer.getByRole("textbox", { name: "Your question about this analysis" })).toBeFocused();
-    // 420 px wide, the full height under the app header, at the right edge.
+    // 420 px wide, the full height under the app header, at the right edge
+    // and short of the page's scrollbar, which stays uncovered.
     const box = (await drawer.boundingBox())!;
     expect(Math.round(box.width)).toBe(420);
     expect(Math.round(box.y)).toBe(48);
-    expect(Math.round(box.x + box.width)).toBe(1440);
+    const scrollbarLeft = await page.evaluate(() => {
+      const main = document.getElementById("main-content")!;
+      return main.getBoundingClientRect().left + main.clientWidth;
+    });
+    expect(Math.round(box.x + box.width)).toBe(Math.round(scrollbarLeft));
 
     const log = drawer.getByRole("log", { name: "Questions and answers" });
     await expect(log).toContainText("Which address does it beacon to?");
