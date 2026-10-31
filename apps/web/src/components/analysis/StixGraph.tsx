@@ -1,5 +1,6 @@
 "use client";
 
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import EvidenceChips from "@/components/analysis/EvidenceChips";
@@ -253,7 +254,7 @@ function GraphTable({
   const td = "px-2 py-1 align-top";
   return (
     <div className="space-y-5 text-xs">
-      <div className="overflow-x-auto">
+      <div {...scrollRegion("STIX objects")} className={`overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
         <table className="w-full border-collapse">
           <caption className="text-left text-xs font-semibold text-text-primary pb-1.5">
             Objects ({graph.nodes.length})
@@ -299,7 +300,7 @@ function GraphTable({
         </table>
       </div>
 
-      <div className="overflow-x-auto">
+      <div {...scrollRegion("STIX relationships")} className={`overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
         <table className="w-full border-collapse">
           <caption className="text-left text-xs font-semibold text-text-primary pb-1.5">
             Relationships ({graph.edges.length})
@@ -357,7 +358,7 @@ function GraphTable({
       </div>
 
       {graph.notDrawn.length > 0 && (
-        <div className="overflow-x-auto">
+        <div {...scrollRegion("STIX objects not drawn")} className={`overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
           <table className="w-full border-collapse">
             <caption className="text-left text-xs font-semibold text-text-primary pb-1.5">
               In the bundle, not drawn ({graph.notDrawn.length})

@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, Fragment, useMemo, type ReactNode } from "react";
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { MAX_MARKDOWN_CHARS, parseMarkdown, type MdNode } from "./safeMarkdown";
 
 /**
@@ -62,11 +63,11 @@ function MarkdownBody({
   if (tooLong) return <RawText markdown={markdown} />;
   const first = nodes[0];
   const shown = skipFirstHeading && first?.t === "el" && /^h[1-6]$/.test(first.tag) ? nodes.slice(1) : nodes;
-  const ids = { next: 0, list: subsectionIds };
+  const ids = { next: 0, tables: 0, list: subsectionIds };
   return <div className="space-y-3 text-sm leading-6 text-text-primary">{renderNodes(shown, ids)}</div>;
 }
 
-type IdCursor = { next: number; list: readonly string[] };
+type IdCursor = { next: number; tables: number; list: readonly string[] };
 
 const HEADING_CLASS: Record<string, string> = {
   h1: "text-base font-semibold",
@@ -168,7 +169,11 @@ function renderElement(node: Extract<MdNode, { t: "el" }>, key: number, ids: IdC
       );
     case "table":
       return (
-        <div key={key} className="max-w-full overflow-x-auto rounded border border-border-light">
+        <div
+          key={key}
+          {...scrollRegion(`Table ${++ids.tables}`)}
+          className={`max-w-full overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}
+        >
           <table className="w-full text-xs">{children}</table>
         </div>
       );
@@ -211,11 +216,11 @@ function renderElement(node: Extract<MdNode, { t: "el" }>, key: number, ids: IdC
     case "a":
       if (!node.href) return <Fragment key={key}>{children}</Fragment>;
       return node.href.startsWith("#") ? (
-        <a key={key} href={node.href} className="text-accent-strong hover:underline">
+        <a key={key} href={node.href} className="text-accent-strong underline hover:no-underline">
           {children}
         </a>
       ) : (
-        <a key={key} href={node.href} target="_blank" rel="noopener noreferrer nofollow" className="text-accent-strong hover:underline [overflow-wrap:anywhere]">
+        <a key={key} href={node.href} target="_blank" rel="noopener noreferrer nofollow" className="text-accent-strong underline hover:no-underline [overflow-wrap:anywhere]">
           {children}
         </a>
       );

@@ -1,5 +1,6 @@
 "use client";
 
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useMemo, useState } from "react";
 
 import CopyButton from "@/components/ui/CopyButton";
@@ -19,6 +20,7 @@ import {
   iocFacets,
   iocRows,
   relatedFindings,
+  sortedForReading,
   type ExportState,
   type IocRow,
   type PublicationFilter,
@@ -35,8 +37,9 @@ const STATES: ExportState[] = ["published", "withheld", "unanswered", "not-in-ta
  * verdict names it, and what else the report says about it.
  */
 export default function IocBrowser({ mr }: { mr: MalwareReport | null | undefined }) {
-  const rows = useMemo(() => iocRows(mr), [mr]);
-  const facets = useMemo(() => iocFacets(rows), [rows]);
+  const tableRows = useMemo(() => iocRows(mr), [mr]);
+  const facets = useMemo(() => iocFacets(tableRows), [tableRows]);
+  const rows = useMemo(() => sortedForReading(tableRows), [tableRows]);
   const [type, setType] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [publication, setPublication] = useState<PublicationFilter>("all");
@@ -104,7 +107,7 @@ export default function IocBrowser({ mr }: { mr: MalwareReport | null | undefine
         {filtered.length === 0 ? (
           <p className="text-xs text-text-muted">No indicator matches.</p>
         ) : (
-          <div className="-mx-4 overflow-x-auto">
+          <div {...scrollRegion("Indicators")} className={`-mx-4 overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
             <table className="w-full">
               <thead>
                 <tr className="border-y border-border-light">
