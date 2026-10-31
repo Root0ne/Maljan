@@ -9,6 +9,7 @@
  */
 
 import type { EvidenceEntry, EvidenceQuery } from "@/types/evidence";
+import { MAX_STRUCTURED_DEPTH, losslessJson, nestingDepth } from "@/components/analysis/structuredValue";
 
 /** One page of the ledger. Large enough that most runs fit on one or two. */
 export const EVIDENCE_PAGE_SIZE = 50;
@@ -106,16 +107,6 @@ export function argsSummary(
   return { text: `${full.slice(0, limit)}…`, truncated: true };
 }
 
-/** The full argument object, indented, for an expanded row. */
-export function argsDetail(args: Record<string, unknown> | null | undefined): string {
-  if (!args) return "";
-  try {
-    return JSON.stringify(args, null, 2);
-  } catch {
-    return String(args);
-  }
-}
-
 /**
  * The values each filter offers, accumulated across the pages seen so far.
  *
@@ -146,6 +137,37 @@ export const EMPTY_OPTIONS: Record<keyof EvidenceFilters, string[]> = {
   agent: [],
   tool: [],
 };
+
+/** Above this many characters an output is shown as its text, a page at a
+ *  time, never parsed and laid out. */
+export const MAX_PARSED_OUTPUT_CHARS = 50_000;
+
+/**
+ * A tool output that is a JSON object or list, parsed, so it can be laid out
+ * as fields and tables; null for anything shown as the text it is instead:
+ * text, a scalar, a document that does not parse, one too large to lay out
+ * (`MAX_PARSED_OUTPUT_CHARS`), and one that laying out would lose something
+ * of (`losslessJson`, read off the output's own tokens): a number past what a
+ * number holds exactly, a key written twice, a nesting deeper than
+ * `MAX_STRUCTURED_DEPTH`. How the output spells a string or spaces its tokens
+ * is not a loss, and the raw view prints the output as written.
+ */
+export function structuredOutput(output: string | null | undefined): unknown {
+  const body = (output ?? "").trim();
+  if (!body || body.length > MAX_PARSED_OUTPUT_CHARS || !/^[[{]/.test(body)) return null;
+  if (!losslessJson(body)) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null) return null;
+  // The token walk counted depth already; the value's own count is the guard
+  // for a text the walk read differently.
+  if (nestingDepth(value) > MAX_STRUCTURED_DEPTH) return null;
+  return value;
+}
 
 /** How much of a tool's output an unexpanded disclosure shows. */
 export const OUTPUT_PREVIEW_CHARS = 2_000;

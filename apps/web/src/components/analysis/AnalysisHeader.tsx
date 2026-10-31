@@ -1,7 +1,7 @@
 "use client";
 
-import { useId, useMemo, useState, useSyncExternalStore } from "react";
-import { Moon, Sun } from "lucide-react";
+import { forwardRef, useId, useMemo, useState } from "react";
+import { MessageSquare, Moon, Sun } from "lucide-react";
 import type { JobDTO, ReportDetailDTO } from "@/lib/api";
 import CopyButton from "@/components/ui/CopyButton";
 import ExportMenu from "@/components/ui/ExportMenu";
@@ -11,115 +11,116 @@ import { reportExportGroups } from "@/components/ui/exportActions";
 import { formatBytes, formatDateTime, formatDuration, truncateMiddle } from "@/lib/report-utils";
 import { jobFinished } from "@/lib/runFailure";
 import { statusTone } from "@/lib/status";
-import { verdictBucket, verdictLabel, verdictTone } from "@/lib/verdict";
-import AskMenu from "./AskMenu";
+import { verdictLabel, verdictTone } from "@/lib/verdict";
 import { canAskFollowUp } from "./followUps";
-import ConfidenceGauge from "./ConfidenceGauge";
+import ConfidenceMeter from "./ConfidenceMeter";
 import {
-  CONFIDENCE_WHY,
   capChips,
-  classificationChips,
   exportBaseName,
+  fileKind,
   fileName,
+  headerTags,
   otherHashes,
   verdictConfidence,
+  verdictSentence,
+  type VerdictConfidence,
 } from "./overview";
 import type { UiTheme } from "./theme";
 
 /**
- * The analysis header: what the sample is and what the analysis concluded,
- * in the first glance, on every tab.
+ * The analysis header: what the analysis concluded and what the file is, in
+ * the first glance, on every tab.
  *
- * Left to right: the verdict as a coloured strip with its word, the
- * verdict's confidence as a ring (no score: the report has none), the file and its family
- * with up to five classification chips (the rest behind "+N"). Under it the
- * file facts and the SHA-256 with copy; the other hashes open on demand.
- * On the right the page's actions: Export and Ask. Once the page scrolls the
- * second row folds away; on a narrow screen the whole header folds to one
- * row (verdict, confidence, file name, Export, Ask) so the content keeps the
- * screen. Until the job and its report have loaded it draws a neutral
+ * One bold element, the verdict line: the verdict's word in its colour and
+ * the five-step confidence meter. Under it the family as the page's heading
+ * (the file's name when no family was identified), one plain sentence of
+ * what the sample is, and a quiet line of file identity: the SHA-256 with
+ * copy and the other hashes on demand, type and size, how the run ended and
+ * when. At most three classification tags, the rest behind "more". The
+ * page's actions (Chat, Export, theme) sit on the verdict line's right.
+ *
+ * The header scrolls away with the page; the sticky bar under it takes the
+ * verdict in short (`CompactVerdict`) so the page never changes height under
+ * the reader. Until the job and its report have loaded it draws a neutral
  * placeholder, never "no verdict" or a fallback name that would read as a
  * result.
  */
 
-const NARROW = "(max-width: 639px)";
+const MAX_TAGS = 3;
 
-function subscribeNarrow(onChange: () => void): () => void {
-  if (typeof window.matchMedia !== "function") return () => {};
-  const media = window.matchMedia(NARROW);
-  media.addEventListener("change", onChange);
-  return () => media.removeEventListener("change", onChange);
+export interface HeaderFacts {
+  verdict: string | null;
+  verdictWord: string;
+  confidence: VerdictConfidence;
+  family: string | null;
+  name: string;
+  askable: boolean;
 }
 
-/** Whether the viewport is phone-narrow (below Tailwind's `sm`). */
-function useNarrow(): boolean {
-  return useSyncExternalStore(
-    subscribeNarrow,
-    () => typeof window.matchMedia === "function" && window.matchMedia(NARROW).matches,
-    () => false,
-  );
+/** What the header and the compact bar both say. */
+export function headerFacts(report: ReportDetailDTO | null, job: JobDTO | null): HeaderFacts {
+  const mr = report?.malware_report ?? null;
+  const verdict = report?.verdict ?? mr?.verdict ?? null;
+  return {
+    verdict,
+    verdictWord: report
+      ? verdictLabel(verdict)
+      : job && !jobFinished(job.status)
+        ? "Analysis running"
+        : "No report stored",
+    /* The confidence the API publishes with the verdict. A verdict it
+     * published without one (a fallback reading) is "not assessed", never the
+     * structured report's own number. */
+    confidence: verdictConfidence(
+      verdict,
+      report && report.overall_confidence !== undefined ? report.overall_confidence : mr?.overall_confidence,
+    ),
+    family: mr?.attribution?.family ?? null,
+    name: fileName(report, job),
+    /* A question is answered from what a finished run stored. */
+    askable: Boolean(report) && canAskFollowUp(job?.status ?? ""),
+  };
 }
-
-const STRIP: Record<string, string> = {
-  malicious: "bg-status-red/15 border-status-red",
-  suspicious: "bg-status-orange/15 border-status-orange",
-  benign: "bg-status-green/15 border-status-green",
-  unknown: "bg-bg-active border-text-muted",
-};
 
 export default function AnalysisHeader({
   jobId,
   job,
   report,
   loading,
-  compact,
   theme,
   onTheme,
+  chat,
 }: {
   jobId: string;
   job: JobDTO | null;
   report: ReportDetailDTO | null;
   /** True until the job, and the report of a finished job, have been read. */
   loading: boolean;
-  compact: boolean;
   theme: UiTheme;
   onTheme: (t: UiTheme) => void;
+  /** The Chat button, drawn by the frame that owns the drawer. */
+  chat?: React.ReactNode;
 }) {
   const mr = report?.malware_report ?? null;
-  const verdict = report?.verdict ?? mr?.verdict ?? null;
-  const bucket = verdictBucket(verdict);
-  const tone = verdictTone(verdict);
-  /* The confidence the API publishes with the verdict. A verdict it
-   * published without one (a fallback reading) is "not assessed", never the
-   * structured report's own number. */
-  const confidence = verdictConfidence(
-    verdict,
-    report && report.overall_confidence !== undefined ? report.overall_confidence : mr?.overall_confidence,
-  );
-  const chips = classificationChips(mr, report?.malware_category);
-  const [allChips, setAllChips] = useState(false);
+  const facts = headerFacts(report, job);
+  const tone = verdictTone(facts.verdict);
+  const [allTags, setAllTags] = useState(false);
   const [hashesOpen, setHashesOpen] = useState(false);
   const hashesId = useId();
   const hashes = otherHashes(mr);
-  const { shown, more } = capChips(chips, 5);
-  const visibleChips = allChips ? chips : shown;
-  const family = mr?.attribution?.family ?? null;
-  const name = fileName(report, job);
+  const sentence = verdictSentence(mr, report?.malware_category);
+  const tags = headerTags(mr, report?.malware_category);
+  const { shown, more } = capChips(tags, MAX_TAGS);
+  const visibleTags = allTags ? tags : shown;
   const sha256 = mr?.identity?.hashes?.sha256 || job?.sample_sha256 || "";
   const status = job?.status ?? "";
   const groups = useMemo(
     () => (report ? reportExportGroups(report.id, mr, exportBaseName(sha256, jobId), report.stix_bundle) : []),
     [report, mr, sha256, jobId],
   );
-  const narrow = useNarrow();
-  /* A question is answered from what a finished run stored. */
-  const askable = Boolean(report) && canAskFollowUp(status);
   const analyzedIso = report?.created_at ?? job?.created_at;
-  const verdictWord = report
-    ? verdictLabel(verdict)
-    : job && !jobFinished(job.status)
-      ? "Analysis running"
-      : "No report stored";
+  /* A name made of the hash says nothing the hash beside it does not. */
+  const nameAddsNothing = Boolean(sha256) && facts.name.toLowerCase().startsWith(sha256.toLowerCase());
   const themeButton = (
     <button
       type="button"
@@ -133,124 +134,165 @@ export default function AnalysisHeader({
 
   if (loading) {
     return (
-      <section className="px-4 pb-3 pt-3 sm:px-6" aria-label="Analysis summary" aria-busy="true">
+      <section className="px-4 pb-4 pt-4 sm:px-6" aria-label="Analysis summary" aria-busy="true">
         <div className="flex items-center gap-4">
-          <div aria-hidden="true" className="h-10 w-28 rounded bg-bg-active" />
-          <div aria-hidden="true" className="h-10 w-10 rounded-full bg-bg-active" />
           <div className="min-w-0 flex-1 space-y-2">
             <p className="text-sm text-text-muted">Loading the analysis…</p>
-            <div aria-hidden="true" className="h-3 w-48 max-w-full rounded bg-bg-active" />
+            <div aria-hidden="true" className="h-6 w-56 max-w-full rounded bg-bg-active" />
+            <div aria-hidden="true" className="h-3 w-80 max-w-full rounded bg-bg-active" />
           </div>
           {themeButton}
-        </div>
-      </section>
-    );
-  }
-
-  if (compact && narrow) {
-    return (
-      <section className="px-4 py-2" aria-label="Analysis summary" data-folded="true">
-        <div className="flex items-center gap-2">
-          <span className={`shrink-0 border-l-4 px-2 py-1 text-sm font-semibold ${STRIP[bucket]} ${tone.text}`}>
-            {verdictWord}
-          </span>
-          {report && <ConfidenceGauge confidence={confidence} verdict={verdict} size="sm" />}
-          <span className="min-w-0 flex-1 truncate text-sm text-text-primary" title={name}>
-            {name}
-          </span>
-          {report && <ExportMenu groups={groups} />}
-          {askable && <AskMenu jobId={jobId} />}
         </div>
       </section>
     );
   }
 
   return (
-    <section className="px-4 pt-3 sm:px-6" aria-label="Analysis summary">
-      <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-        <div className={`flex items-center self-stretch border-l-4 px-3 ${STRIP[bucket]}`}>
-          <span className={`text-base font-semibold ${tone.text}`}>{verdictWord}</span>
+    <section className="px-4 pb-4 pt-4 sm:px-6" aria-label="Analysis summary">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:gap-x-5">
+        <p className={`flex items-center gap-2 text-base font-semibold ${tone.text}`} data-testid="verdict-word">
+          <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ background: tone.fill }} />
+          {facts.verdictWord}
+        </p>
+        {/* On a phone the meter takes the line under the verdict, so the
+            verdict and the actions share the first. */}
+        {report && (
+          <span className="order-last w-full sm:order-none sm:w-auto">
+            <ConfidenceMeter confidence={facts.confidence} />
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          {facts.askable && chat}
+          {report && <ExportMenu groups={groups} />}
+          {themeButton}
         </div>
-        {report && <ConfidenceGauge confidence={confidence} verdict={verdict} />}
-        <div className="min-w-0 flex-1 basis-64">
-          <h1 className="truncate text-lg font-semibold text-text-primary" title={name}>
-            {name}
-          </h1>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <span className="text-sm text-text-secondary">{family ?? "Family not identified"}</span>
-            {visibleChips.map((c) => (
+      </div>
+
+      <h1 className="mt-2 break-words text-2xl font-semibold text-text-primary" title={facts.family ? undefined : facts.name}>
+        {facts.family ?? (nameAddsNothing ? "Family not identified" : facts.name)}
+      </h1>
+      {(sentence || (!facts.family && !nameAddsNothing)) && (
+        <p className="mt-1 max-w-[72ch] text-sm text-text-secondary">
+          {sentence || "Family not identified."}
+        </p>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-text-secondary">
+        {!nameAddsNothing && facts.family && (
+          <span className="max-w-full truncate" title={facts.name}>
+            {facts.name}
+          </span>
+        )}
+        {sha256 && (
+          <span className="inline-flex flex-wrap items-center gap-1.5">
+            <span className="sr-only">SHA-256</span>
+            <code className="whitespace-nowrap font-mono text-text-primary" title={sha256}>
+              {truncateMiddle(sha256, 20)}
+            </code>
+            <CopyButton value={sha256} what={`SHA-256 of ${facts.name}`} label="copy" />
+            {hashes.length > 0 && (
+              <button
+                type="button"
+                aria-expanded={hashesOpen}
+                aria-controls={hashesOpen ? hashesId : undefined}
+                onClick={() => setHashesOpen((v) => !v)}
+                className="whitespace-nowrap rounded px-1 text-[11px] text-accent-strong hover:underline"
+              >
+                {hashesOpen ? "Hide hashes" : "All hashes"}
+              </button>
+            )}
+          </span>
+        )}
+        {mr?.identity && (
+          <span>
+            {fileKind(mr.identity)}
+            {mr.identity.file_size_bytes > 0 && <>, {formatBytes(mr.identity.file_size_bytes)}</>}
+          </span>
+        )}
+        {status && (
+          <span>
+            <span className={statusTone(status).text}>{status.charAt(0).toUpperCase() + status.slice(1)}</span>
+            {job?.duration_seconds != null && <> in {formatDuration(job.duration_seconds)}</>}
+          </span>
+        )}
+        {analyzedIso && <span>Analyzed {formatDateTime(analyzedIso)}</span>}
+        {visibleTags.length > 0 && (
+          <span className="inline-flex flex-wrap items-center gap-1.5">
+            <span className="sr-only">Classified as</span>
+            {visibleTags.map((c) => (
               <Tag key={c}>{c}</Tag>
             ))}
             {more > 0 && (
               <button
                 type="button"
-                aria-expanded={allChips}
-                onClick={() => setAllChips((v) => !v)}
+                aria-expanded={allTags}
+                onClick={() => setAllTags((v) => !v)}
                 className="rounded px-1 text-[11px] text-accent-strong hover:underline"
               >
-                {allChips ? "Show fewer" : `+${more}`}
-                {!allChips && <span className="sr-only"> more classifications</span>}
+                {allTags ? "Fewer" : `${more} more`}
+                {!allTags && <span className="sr-only"> classifications</span>}
               </button>
             )}
-          </div>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          {report && <ExportMenu groups={groups} />}
-          {askable && <AskMenu jobId={jobId} />}
-          {themeButton}
-        </div>
+          </span>
+        )}
       </div>
-
-      {!compact && (
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 pb-2 text-xs text-text-secondary">
-          {report && <span data-testid="confidence-why">{CONFIDENCE_WHY}</span>}
-          {mr?.identity && (
-            <span>
-              {mr.identity.file_type}
-              {mr.identity.file_size_bytes > 0 && <>, {formatBytes(mr.identity.file_size_bytes)}</>}
-            </span>
-          )}
-          {sha256 && (
-            <span className="inline-flex flex-wrap items-center gap-1.5">
-              <span className="whitespace-nowrap text-text-muted">SHA-256</span>
-              <code className="whitespace-nowrap font-mono text-text-primary" title={sha256}>
-                {truncateMiddle(sha256, 24)}
-              </code>
-              <CopyButton value={sha256} what={`SHA-256 of ${name}`} label="copy" />
-              {hashes.length > 0 && (
-                <button
-                  type="button"
-                  aria-expanded={hashesOpen}
-                  aria-controls={hashesOpen ? hashesId : undefined}
-                  onClick={() => setHashesOpen((v) => !v)}
-                  className="whitespace-nowrap rounded px-1 text-[11px] text-accent-strong hover:underline"
-                >
-                  {hashesOpen ? "Hide hashes" : "All hashes"}
-                </button>
-              )}
-            </span>
-          )}
-          {status && (
-            <span className={statusTone(status).text}>
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-              {job?.duration_seconds != null && <span className="text-text-secondary">, {formatDuration(job.duration_seconds)}</span>}
-            </span>
-          )}
-          {analyzedIso && <span>Analyzed {formatDateTime(analyzedIso)}</span>}
-        </div>
-      )}
-      {!compact && hashesOpen && (
-        <dl id={hashesId} className="mb-2 grid gap-1.5 rounded-md border border-border-light bg-bg-deep p-3 text-xs">
+      {hashesOpen && (
+        <dl id={hashesId} className="mt-3 grid max-w-3xl gap-1.5 rounded-md border border-border-light bg-bg-deep p-3 text-xs">
           {hashes.map((r) => (
             <div key={r.label} className="flex items-start gap-2">
               <dt className="w-20 shrink-0 text-text-muted">{r.label}</dt>
               <dd className="min-w-0 flex-1 break-all font-mono text-text-primary">{r.value}</dd>
-              <CopyButton value={r.value} what={`${r.label} of ${name}`} label="copy" />
+              <CopyButton value={r.value} what={`${r.label} of ${facts.name}`} label="copy" />
             </div>
           ))}
         </dl>
       )}
-      {compact && <div className="pb-2" />}
     </section>
   );
 }
+
+/**
+ * The verdict in short, for the sticky bar once the header has scrolled
+ * away: the verdict's word in its colour, the meter's steps, the family.
+ */
+export function CompactVerdict({ facts }: { facts: HeaderFacts }) {
+  const tone = verdictTone(facts.verdict);
+  return (
+    <span className="flex min-w-0 items-center gap-2 text-sm" data-testid="compact-verdict">
+      <span className={`flex shrink-0 items-center gap-1.5 font-semibold ${tone.text}`}>
+        <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: tone.fill }} />
+        {facts.verdictWord}
+      </span>
+      <span className="hidden shrink-0 md:inline-flex">
+        <ConfidenceMeter confidence={facts.confidence} compact />
+      </span>
+      <span className="hidden min-w-0 truncate text-text-primary lg:inline" title={facts.family ?? facts.name}>
+        {facts.family ?? facts.name}
+      </span>
+    </span>
+  );
+}
+
+/** The button that opens the chat drawer. */
+export const ChatButton = forwardRef<
+  HTMLButtonElement,
+  { open: boolean; onClick: (opener: HTMLElement) => void; controls: string; iconOnly?: boolean }
+>(function ChatButton({ open, onClick, controls, iconOnly = false }, ref) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      data-variant="secondary"
+      aria-expanded={open}
+      aria-controls={controls}
+      aria-label={iconOnly ? "Chat about this analysis" : undefined}
+      onClick={(e) => onClick(e.currentTarget)}
+      className={buttonClass("secondary", "sm")}
+    >
+      <MessageSquare aria-hidden="true" className="h-3.5 w-3.5" />
+      {/* On a phone the word is the button's name only, so the verdict and
+          the actions keep one line. */}
+      {!iconOnly && <span className="sr-only sm:not-sr-only">Chat</span>}
+    </button>
+  );
+});

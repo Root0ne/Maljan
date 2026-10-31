@@ -6,7 +6,8 @@ import {
   EMPTY_OPTIONS,
   EVIDENCE_PAGE_SIZE,
   NO_FILTERS,
-  argsDetail,
+  structuredOutput,
+  MAX_PARSED_OUTPUT_CHARS,
   argsSummary,
   deepLinkView,
   emptyOutputNote,
@@ -121,12 +122,59 @@ describe("the arguments cell", () => {
     expect(summary.text).toHaveLength(ARGS_SUMMARY_CHARS + 1);
   });
 
-  it("indents the whole object for the expanded row", () => {
-    expect(argsDetail({ a: 1 })).toBe('{\n  "a": 1\n}');
-  });
 });
 
 describe("the output disclosure", () => {
+  it("lays out an output that is a JSON object or list, and leaves text as text", () => {
+    expect(structuredOutput('{"pid": 4, "rows": [{"a": 1}]}')).toEqual({ pid: 4, rows: [{ a: 1 }] });
+    expect(structuredOutput("  [1, 2]\n")).toEqual([1, 2]);
+    // A scalar, prose, a broken document and an empty output are text.
+    for (const text of ["42", '"a"', "found 3 strings", "{not json", "", null]) {
+      expect(structuredOutput(text)).toBeNull();
+    }
+    expect(structuredOutput(`[${"1,".repeat(300_000)}1]`)).toBeNull();
+  });
+
+  it("shows an output as its text wherever laying it out would change it", () => {
+    // An integer past 2^53 would lose digits.
+    expect(structuredOutput('{"handle": 18446744073709551615}')).toBeNull();
+    // A key written twice would fold into one.
+    expect(structuredOutput('{"a": 1, "a": 2}')).toBeNull();
+    // A long digit run inside a string is a string, and changes nothing.
+    expect(structuredOutput('{"sha256": "123456789012345678901234"}')).toEqual({ sha256: "123456789012345678901234" });
+    // Spacing is not a change.
+    expect(structuredOutput('{\n  "a" : [ 1, 2 ]\n}')).toEqual({ a: [1, 2] });
+  });
+
+  it("lays out an ordinary output however it spells its numbers and strings", () => {
+    // 1.0 and 1e2 read back as the numbers they wrote.
+    expect(structuredOutput('{"ratio": 1.0, "count": 1e2}')).toEqual({ ratio: 1, count: 100 });
+    // An escaped é and an escaped slash are spellings, not losses.
+    expect(structuredOutput('{"name": "caf\\u00e9", "path": "a\\/b"}')).toEqual({ name: "café", path: "a/b" });
+    // The same key in two different objects is not a repeat.
+    expect(structuredOutput('[{"a": 1}, {"a": 2}]')).toEqual([{ a: 1 }, { a: 2 }]);
+  });
+
+  it("shows as text an output whose number a JavaScript number cannot hold, or whose object repeats a key", () => {
+    expect(structuredOutput('{"base": 18446744071562067968}')).toBeNull();
+    expect(structuredOutput('{"tiny": 1e-400}')).toBeNull();
+    expect(structuredOutput('{"huge": 1e400}')).toBeNull();
+    expect(structuredOutput('{"outer": {"k": 1, "k": 1}}')).toBeNull();
+    // A key repeated through an escape is still the same key.
+    expect(structuredOutput('{"k": 1, "\\u006b": 2}')).toBeNull();
+  });
+
+  it("shows a document nested deeper than the layout goes as its text, without throwing", () => {
+    const deep = `${"[".repeat(5_000)}1${"]".repeat(5_000)}`;
+    expect(() => structuredOutput(deep)).not.toThrow();
+    expect(structuredOutput(deep)).toBeNull();
+    expect(structuredOutput(`${"[".repeat(10)}1${"]".repeat(10)}`)).not.toBeNull();
+  });
+
+  it("shows an output above the size it lays out as its text", () => {
+    expect(structuredOutput(`{"a": "${"x".repeat(MAX_PARSED_OUTPUT_CHARS)}"}`)).toBeNull();
+  });
+
   it("shows a short output whole and offers nothing more", () => {
     expect(outputPreview("hello", false)).toEqual({ text: "hello", hidden: 0 });
   });

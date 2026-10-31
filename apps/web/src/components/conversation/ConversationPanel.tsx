@@ -54,6 +54,11 @@ const CONNECTION_LABEL: Record<RunConnection, string> = {
 /** How far from the bottom still counts as following the conversation. */
 const TAIL_SLACK_PX = 64;
 
+/** The page's one scroller, which the conversation scrolls with. */
+function scroller(): HTMLElement | null {
+  return typeof document === "undefined" ? null : document.getElementById("main-content");
+}
+
 export default function ConversationPanel({
   jobId,
   events,
@@ -114,24 +119,34 @@ export default function ConversationPanel({
   /* Follow the tail only while the run is talking. A finished run is opened to
    * be read from the start, and a replay that lands on its own last line hides
    * the argument that produced it. */
+  /* The conversation scrolls with the page, never in a box of its own: a
+   * nested scroller trapped the wheel at its ends and gave the page two
+   * scrollbars. Following the tail therefore reads and moves the page's one
+   * scroller, and only once the stream's own end is what is in view. */
   useEffect(() => {
     if (!live || !pinned) return;
+    const page = scroller();
     const stream = streamRef.current;
-    if (stream) stream.scrollTop = stream.scrollHeight;
+    if (page && stream) page.scrollTop = page.scrollHeight;
   }, [tail, pinned, live]);
 
-  function onScroll() {
-    const stream = streamRef.current;
-    if (!stream) return;
-    const atTail =
-      stream.scrollHeight - stream.scrollTop - stream.clientHeight <= TAIL_SLACK_PX;
-    setPinned(atTail);
-  }
+  useEffect(() => {
+    const page = scroller();
+    if (!page) return;
+    const onScroll = () => {
+      const stream = streamRef.current;
+      if (!stream) return;
+      const end = stream.getBoundingClientRect().bottom;
+      setPinned(end - page.getBoundingClientRect().bottom <= TAIL_SLACK_PX);
+    };
+    page.addEventListener("scroll", onScroll, { passive: true });
+    return () => page.removeEventListener("scroll", onScroll);
+  }, []);
 
   function jumpToLatest() {
-    const stream = streamRef.current;
-    if (!stream) return;
-    stream.scrollTop = stream.scrollHeight;
+    const page = scroller();
+    if (!page) return;
+    page.scrollTop = page.scrollHeight;
     setPinned(true);
   }
 
@@ -216,7 +231,6 @@ export default function ConversationPanel({
       <div className="relative">
         <div
           ref={streamRef}
-          onScroll={onScroll}
           data-testid="conversation-stream"
           /* A log rather than a region, while there is something to follow:
            * a screen reader following a live run is told about the lines that
@@ -227,10 +241,7 @@ export default function ConversationPanel({
           aria-live={live ? "polite" : undefined}
           aria-relevant={live ? "additions text" : undefined}
           aria-label="Conversation"
-          /* A scrollable region has to be reachable by keyboard, or the only
-           * way through a long run is a pointer. */
-          tabIndex={0}
-          className="h-[62vh] min-h-80 space-y-3 overflow-y-auto rounded border border-border bg-bg-deep p-3"
+          className="min-h-80 space-y-3 rounded border border-border bg-bg-deep p-3"
         >
           {shown === 0 ? (
             <p className="p-6 text-center text-xs text-text-muted">
@@ -254,7 +265,7 @@ export default function ConversationPanel({
                 {stage.rounds.map((round, index) => (
                   <div key={`${stage.key}-${round.round}-${index}`} className="space-y-2">
                     {stage.rounds.length > 1 && (
-                      <p className="text-center text-[11px] uppercase tracking-wider text-text-tertiary">
+                      <p className="text-center text-[11px] text-text-tertiary">
                         {round.round === 0 ? "Opening" : `Round ${round.round}`}
                       </p>
                     )}
@@ -294,15 +305,18 @@ export default function ConversationPanel({
           )}
         </div>
 
-        {!pinned && shown > 0 && (
-          <button
-            type="button"
-            onClick={jumpToLatest}
-            className="absolute bottom-4 right-4 flex items-center gap-1.5 rounded border border-accent bg-bg-elevated px-2.5 py-1 text-[11px] text-accent"
-          >
-            <ArrowDown size={12} aria-hidden="true" />
-            Jump to latest
-          </button>
+        {/* Held at the bottom of the window while a live run talks below it. */}
+        {live && !pinned && shown > 0 && (
+          <div className="pointer-events-none sticky bottom-4 flex justify-end pr-4">
+            <button
+              type="button"
+              onClick={jumpToLatest}
+              className="pointer-events-auto flex items-center gap-1.5 rounded border border-accent bg-bg-elevated px-2.5 py-1 text-[11px] text-accent"
+            >
+              <ArrowDown size={12} aria-hidden="true" />
+              Jump to latest
+            </button>
+          </div>
         )}
       </div>
     </section>

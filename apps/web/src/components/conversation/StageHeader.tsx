@@ -53,7 +53,7 @@ export default function StageHeader({
         <span className="text-xs font-medium text-text-primary">{label}</span>
       </span>
       {kind && <span className="font-mono text-[11px] text-text-muted">{kind}</span>}
-      <span className={`text-[11px] uppercase tracking-wider ${STATE_TEXT[state]}`}>{state}</span>
+      <span className={`text-[11px] ${STATE_TEXT[state]}`}>{state}</span>
       {duration && <span className="font-mono text-[11px] text-text-muted">{duration}</span>}
       {state === "skipped" && reason && (
         <span className="truncate text-[11px] text-text-muted">{reason}</span>

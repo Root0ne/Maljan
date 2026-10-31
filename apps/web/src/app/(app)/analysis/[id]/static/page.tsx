@@ -20,14 +20,14 @@ export default function StaticPage() {
       {(report) => (
         <>
           {tabHasContent("/identity", report, job?.roster) ? (
-            <div id="identity" className="scroll-mt-40">
+            <div id="identity" className="scroll-mt-16">
               <IdentityContent />
             </div>
           ) : (
             <TabBlock id="identity" title="Identity and metadata" empty />
           )}
           {tabHasContent("/static", report, job?.roster) ? (
-            <div id="static" className="scroll-mt-40">
+            <div id="static" className="scroll-mt-16">
               <StaticContent report={report} />
             </div>
           ) : (

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import AnalystFindings from "../AnalystFindings";
 import EvidenceChips from "../EvidenceChips";
-import { citationParts, isEvidenceId } from "../citations";
+import { citationParts, citedRecords, isEvidenceId } from "../citations";
 import { UNDISCUSSED } from "./storedRunShapes";
 
 const JOB = "job-1";
@@ -92,6 +92,36 @@ describe("an analyst's claim card (T-332)", () => {
       }),
     );
     expect(links(html).map((href) => href.split("evidence=")[1])).toEqual(["ev_0004", "ev_0020"]);
-    expect(html).toContain(" (encoded blobs in the data sections).");
+    // Each record is one chip with its own words, no bracket or separator printed.
+    expect(html).toContain('aria-label="Evidence ev_0020: encoded blobs in the data sections"');
+    expect(html).not.toContain("(encoded");
+    // The analyst's name is a heading; the confidence is the quiet meter, not coloured text.
+    expect(html).toContain(">Triage</h4>");
+    expect(html).toContain('aria-label="Claim confidence 80 percent"');
+    expect(html).toContain("80% confidence");
+  });
+});
+
+describe("a citation read as the records it names", () => {
+  it("keeps each record's words and drops the brackets and separators", () => {
+    expect(citedRecords("[ev_0001] pe windows, 60,928 bytes. [ev_0003] dll, 5 sections. [ev_0004]")).toEqual({
+      lead: "",
+      records: [
+        { id: "ev_0001", label: "pe windows, 60,928 bytes" },
+        { id: "ev_0003", label: "dll, 5 sections" },
+        { id: "ev_0004", label: "" },
+      ],
+    });
+  });
+
+  it("keeps the words before the first id apart, and a reference with no id as words", () => {
+    expect(citedRecords("see ev_0007 (row 0x3868); ev_0019.")).toEqual({
+      lead: "see",
+      records: [
+        { id: "ev_0007", label: "row 0x3868" },
+        { id: "ev_0019", label: "" },
+      ],
+    });
+    expect(citedRecords("the analyst's own reading")).toEqual({ lead: "the analyst's own reading", records: [] });
   });
 });

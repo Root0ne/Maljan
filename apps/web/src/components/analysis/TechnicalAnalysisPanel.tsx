@@ -4,8 +4,10 @@ import Link from "next/link";
 
 import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useReport } from "./AnalysisContext";
+import BasisMark from "./BasisMark";
 import CitedProse from "./CitedProse";
 import EvidenceChips from "./EvidenceChips";
+import SafeMarkdown from "./SafeMarkdown";
 import {
   REPORT_MODEL_VOICE,
   c2Channels,
@@ -61,18 +63,28 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
             <h3 className="text-xs text-text-muted mb-1.5">
               Execution flow
             </h3>
-            <ol className="space-y-1.5">
+            {/* A sequence, so numbered; each step a row with its prose at a
+                reading width and how it is known beside it, as Overview's
+                key findings are. */}
+            <ol className="border-t border-border-light @container">
               {steps.map((step, i) => (
-                <li key={`${step.order}-${i}`} className="text-sm text-text-secondary">
-                  <span className="text-text-muted mr-2 font-mono">{i + 1}.</span>
+                <li
+                  key={`${step.order}-${i}`}
+                  className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-2 gap-y-1 border-b border-border-light py-2.5 text-sm text-text-secondary @[48rem]:grid-cols-[2rem_minmax(0,80ch)_12rem]"
+                >
+                  <span className="font-mono text-text-muted">{i + 1}.</span>
                   <span className="break-words [overflow-wrap:anywhere]">
-                    <CitedProse text={step.action} />
+                    <span className="whitespace-pre-wrap"><CitedProse text={step.action} /></span>
+                    <Cited ids={step.evidence_refs} />
+                    <Unresolved note={flowNote(report, step)} />
                   </span>
-                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted">
-                    {flowMark(step)}
+                  <span className="col-start-2 @[48rem]:col-start-auto">
+                    <BasisMark
+                      basis={step.voice === "observed" ? "seen" : "not-seen"}
+                      label={step.voice === "observed" ? "Seen in sandbox" : "Assessed, not seen"}
+                      detail={flowMark(step)}
+                    />
                   </span>
-                  <Cited ids={step.evidence_refs} />
-                  <Unresolved note={flowNote(report, step)} />
                 </li>
               ))}
             </ol>
@@ -112,7 +124,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                     <td className="py-1 pr-3 font-mono break-all text-text-secondary">
                       {item.value}
                     </td>
-                    <td className="py-1 pr-3 break-words text-text-muted [overflow-wrap:anywhere]">{item.purpose?.trim() ? <CitedProse text={item.purpose.trim()} /> : "not stated"}</td>
+                    <td className="py-1 pr-3 break-words text-text-muted [overflow-wrap:anywhere]">{item.purpose?.trim() ? <span className="whitespace-pre-wrap"><CitedProse text={item.purpose.trim()} /></span> : "not stated"}</td>
                     <td className="py-1">
                       <Cited ids={item.evidence_refs} />
                       <Unresolved
@@ -156,7 +168,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                   <tr key={`${cmd.name}-${i}`} className="border-t border-border align-top">
                     <td className="py-1 pr-3 font-mono text-text-muted">{cmd.id ?? "-"}</td>
                     <td className="py-1 pr-3 font-mono break-all text-text-primary">{cmd.name}</td>
-                    <td className="py-1 pr-3 break-words text-text-secondary [overflow-wrap:anywhere]">{cmd.description ? <CitedProse text={cmd.description} /> : "-"}</td>
+                    <td className="py-1 pr-3 break-words text-text-secondary [overflow-wrap:anywhere]">{cmd.description ? <span className="whitespace-pre-wrap"><CitedProse text={cmd.description} /></span> : "-"}</td>
                     <td className="py-1">
                       <Cited ids={cmd.evidence_refs} />
                     </td>
@@ -204,9 +216,12 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
               {block.title}
             </h3>
             {block.body && (
-              <p className="text-sm text-text-secondary whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                <CitedProse text={block.body} />
-              </p>
+              <SafeMarkdown
+                markdown={block.body}
+                cite
+                regionName={block.title}
+                className="max-w-[75ch] space-y-2 text-sm leading-6 text-text-secondary break-words [overflow-wrap:anywhere]"
+              />
             )}
             {block.facts.length > 0 && (
               <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">

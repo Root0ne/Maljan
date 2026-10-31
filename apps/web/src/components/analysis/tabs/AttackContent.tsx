@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { useReport } from "@/components/analysis/AnalysisContext";
+import BasisMark from "@/components/analysis/BasisMark";
+import { VOICE_BASIS, VOICE_TEXT, techniqueVoices, type Voice } from "@/components/analysis/overview";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import Drawer from "@/components/ui/Drawer";
@@ -45,6 +47,8 @@ const SEARCH_FROM = 10;
  */
 export default function AttackContent({ view = "all", empty }: { view?: BehaviourView; empty: boolean }) {
   const { report } = useReport();
+  /* How each technique is known, the marker every claim on the page carries. */
+  const voices = techniqueVoices(report?.malware_report);
   const [search, setSearch] = useState("");
   const [layout, setLayout] = useState<"list" | "matrix">("list");
   const [detail, setDetail] = useState<{ tech: Technique; tactic: string; opener: HTMLElement } | null>(null);
@@ -194,7 +198,7 @@ export default function AttackContent({ view = "all", empty }: { view?: Behaviou
                         className="border border-border bg-bg-elevated px-3 py-2.5 hover:bg-bg-active"
                       >
                         <p className="mb-1 text-xs font-medium leading-tight text-text-primary">{tech.name}</p>
-                        <TechniqueFacts tech={tech} corroboration={corroboration} />
+                        <TechniqueFacts tech={tech} corroboration={corroboration} voice={voices.get(tech.id)} />
                       </div>
                     ))}
                   </div>
@@ -213,7 +217,7 @@ export default function AttackContent({ view = "all", empty }: { view?: Behaviou
         {detail && (
           <div className="space-y-3 text-sm">
             <p className="text-text-secondary">Tactic: {detail.tactic}</p>
-            <TechniqueFacts tech={detail.tech} corroboration={corroboration} open />
+            <TechniqueFacts tech={detail.tech} corroboration={corroboration} voice={voices.get(detail.tech.id)} open />
           </div>
         )}
       </Drawer>
@@ -233,14 +237,22 @@ function TechniqueFacts({
   tech,
   corroboration,
   open = false,
+  voice,
 }: {
   tech: Technique;
   corroboration: Corroboration;
   open?: boolean;
+  /** How the report knows this technique; absent when it does not map it. */
+  voice?: Voice;
 }) {
   const lists = corroborationLists(corroboration, tech.id);
   return (
     <>
+      {voice && (
+        <div className="mb-1">
+          <BasisMark basis={VOICE_BASIS[voice].basis} label={VOICE_BASIS[voice].label} detail={VOICE_TEXT[voice]} />
+        </div>
+      )}
       {!tech.valid && (
         <span
           className="mb-1 inline-block rounded border border-dashed border-status-orange px-1.5 py-0.5 text-[10px] text-status-orange"

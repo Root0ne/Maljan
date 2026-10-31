@@ -38,7 +38,7 @@ export default function NetworkPage() {
               <EnrichButton reportId={report.id} />
             </div>
             {tabHasContent("/network", report, job?.roster) ? (
-              <div id="network" className="scroll-mt-40">
+              <div id="network" className="scroll-mt-16">
                 <NetworkContent report={report} />
               </div>
             ) : (

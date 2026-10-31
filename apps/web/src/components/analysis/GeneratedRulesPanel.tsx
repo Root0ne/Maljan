@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useReport } from "@/components/analysis/AnalysisContext";
 import { downloadBlob } from "@/lib/report-utils";
 import CopyButton from "@/components/ui/CopyButton";
+import CodeBlock from "@/components/ui/CodeBlock";
 import Drawer from "@/components/ui/Drawer";
 import ShowMoreRows from "@/components/ui/ShowMoreRows";
 import type { DetectionKind, DetectionRule } from "@/types/malware-report";
@@ -169,11 +170,8 @@ function RuleBody({ rule }: { rule: DetectionRule }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <KindTag kind={rule.kind} />
-        <CopyButton value={rule.body} what={`${rule.kind} rule ${rule.name}`} />
       </div>
-      <pre className="overflow-x-auto rounded border border-border-light bg-bg-deep p-3 font-mono text-[11px] leading-relaxed text-text-secondary">
-        {rule.body}
-      </pre>
+      <CodeBlock code={rule.body} label="Rule source" name={`${rule.kind} rule ${rule.name}`} />
       {rule.compile_error && (
         <p className="rounded bg-status-red/5 px-2 py-1.5 text-[11px] text-status-red">{rule.compile_error}</p>
       )}

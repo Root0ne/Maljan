@@ -26,11 +26,11 @@ export default function DetectionContent() {
 
   return (
     <div className="space-y-4">
-      <div id="iocs" className="scroll-mt-40">
+      <div id="iocs" className="scroll-mt-16">
         <IocBrowser mr={mr} />
       </div>
 
-      <div id="rule-matches" className="scroll-mt-40">
+      <div id="rule-matches" className="scroll-mt-16">
         <Section title="Rules that fired" empty={!matched}>
           <div className="space-y-3">
             <p className="text-xs text-text-muted">
@@ -42,7 +42,7 @@ export default function DetectionContent() {
         </Section>
       </div>
 
-      <div id="generated-rules" className="scroll-mt-40">
+      <div id="generated-rules" className="scroll-mt-16">
         <Section title="Generated detection rules" count={generated.length || null} empty={generated.length === 0}>
           <div className="space-y-3">
             <p className="text-xs text-text-muted">
@@ -54,7 +54,7 @@ export default function DetectionContent() {
         </Section>
       </div>
 
-      <div id="stix" className="scroll-mt-40">
+      <div id="stix" className="scroll-mt-16">
         <Section title="STIX 2.1 objects" empty={!stix} collapsible defaultOpen={false}>
           <div className="space-y-3">
             <p className="text-xs text-text-muted">

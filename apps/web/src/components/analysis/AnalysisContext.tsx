@@ -24,6 +24,8 @@ export interface AnalysisCtx {
    *  which gets focus back when the drawer closes. Null outside an analysis
    *  page, where a citation falls back to a plain link. */
   showEvidence: ((subject: EvidenceSubject, opener?: HTMLElement | null) => void) | null;
+  /** Open the chat drawer; null where there is none, or the job cannot be asked yet. */
+  openChat?: ((opener?: HTMLElement | null) => void) | null;
 }
 
 export const AnalysisContext = createContext<AnalysisCtx>({

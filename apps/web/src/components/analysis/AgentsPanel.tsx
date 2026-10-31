@@ -1,6 +1,7 @@
 "use client";
 
 import { CONFIDENCE_BAR_COLOR, confidencePercent } from "./agentConfidence";
+import SafeMarkdown from "./SafeMarkdown";
 import { useReport } from "@/components/analysis/AnalysisContext";
 import { rosterNames } from "@/lib/rosterNames";
 import { statusTone } from "@/lib/status";
@@ -141,7 +142,7 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        <h2 className="text-xs font-medium text-text-primary">
           Agent Detection Results
         </h2>
         <span className="text-xs text-text-muted">
@@ -166,11 +167,11 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
         <table className="w-full">
           <thead>
             <tr className="border-b border-border">
-              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-44">Agent</th>
-              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-28">Signal</th>
-              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Confidence</th>
-              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-16">Rounds</th>
-              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Key Finding</th>
+              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 w-44">Agent</th>
+              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 w-28">Signal</th>
+              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 w-24">Confidence</th>
+              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 w-16">Rounds</th>
+              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2">Key Finding</th>
             </tr>
           </thead>
           {groups.map((group) => (
@@ -178,7 +179,7 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
             {group.stage && (
               <tr className="bg-bg-deep">
                 <td colSpan={5} className="px-4 py-1.5">
-                  <span className="text-[10px] uppercase tracking-wider text-text-muted">
+                  <span className="text-[10px] text-text-muted">
                     stage {names.stage(group.stage)}
                   </span>
                 </td>
@@ -205,7 +206,7 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
                       // emits a status outside the known union, which would
                       // otherwise read `.bg` off `undefined`.
                       <span
-                        className={`text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded font-mono ${(STATUS_STYLES[agent.status] ?? STATUS_STYLES.no_data).bg} ${(STATUS_STYLES[agent.status] ?? STATUS_STYLES.no_data).text}`}
+                        className={`text-[11px] px-1.5 py-0.5 rounded font-mono ${(STATUS_STYLES[agent.status] ?? STATUS_STYLES.no_data).bg} ${(STATUS_STYLES[agent.status] ?? STATUS_STYLES.no_data).text}`}
                       >
                         {(STATUS_STYLES[agent.status] ?? STATUS_STYLES.no_data).label}
                       </span>
@@ -236,11 +237,17 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
                     <span className="text-xs text-text-muted font-mono">{agent.revision_rounds}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-xs text-text-secondary" title={agent.key_finding}>
-                      {agent.key_finding.length > 120
-                        ? agent.key_finding.slice(0, 117) + "..."
-                        : agent.key_finding}
-                    </span>
+                    {/* The whole finding is in the cell, as markdown, clamped
+                        to two lines; the title holds it for a pointer. */}
+                    <div className="line-clamp-2 text-xs text-text-secondary" title={agent.key_finding}>
+                      <SafeMarkdown
+                        markdown={agent.key_finding}
+                        cite
+                        inline
+                        regionName={`${agent.name} key finding`}
+                        className=""
+                      />
+                    </div>
                   </td>
                 </tr>
               );

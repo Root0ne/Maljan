@@ -1,5 +1,6 @@
 import type { MalwareReport } from "@/types/malware-report";
 import EvidenceChips from "./EvidenceChips";
+import SafeMarkdown from "./SafeMarkdown";
 import {
   claimTechniques,
   claimsNotDiscussed,
@@ -23,14 +24,14 @@ export default function ReportChecks({ mr }: { mr: MalwareReport }) {
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border">
-        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        <h2 className="text-xs font-medium text-text-primary">
           What the report&apos;s checks left standing
         </h2>
       </div>
       <div className="p-4 space-y-4">
         {flagged.length > 0 && (
           <section>
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            <h3 className="text-[11px] text-text-muted mb-1.5">
               Flagged statements
             </h3>
             <ul className="space-y-1.5">
@@ -47,7 +48,7 @@ export default function ReportChecks({ mr }: { mr: MalwareReport }) {
         )}
         {undiscussed.length > 0 && (
           <section>
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            <h3 className="text-[11px] text-text-muted mb-1.5">
               Claims the report does not discuss
             </h3>
             <ul className="space-y-1.5">
@@ -64,7 +65,13 @@ export default function ReportChecks({ mr }: { mr: MalwareReport }) {
                     {techniques && (
                       <span className="text-[11px] text-text-muted">({techniques}) </span>
                     )}
-                    {claim.claim}
+                    <SafeMarkdown
+                      markdown={claim.claim}
+                      cite
+                      inline
+                      regionName={`${claim.agent} claim ${claim.claim_number}`}
+                      className=""
+                    />
                     {(claim.missing ?? []).length > 0 && (
                       <span className="ml-2 text-[11px] text-text-muted">
                         not named in the body: {(claim.missing ?? []).join(", ")}

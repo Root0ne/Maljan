@@ -142,12 +142,16 @@ describe("the detail pane", () => {
     ).toBe(2);
   });
 
-  it("wraps the raw JSON block's long string values", () => {
+  it("lays the object out as fields, wraps its long values, and keeps the raw JSON one toggle away", () => {
     const html = renderToStaticMarkup(
       createElement(Detail, { graph, selection: { kind: "node", id: FILE }, onSelect: () => {} }),
     );
-    const jsonBlock = html.slice(html.indexOf("<div class=\"p-3"));
-    expect(jsonBlock).toContain("font-mono text-[11px] leading-relaxed break-all overflow-x-auto");
-    expect(jsonBlock).toContain(HASH);
+    const block = html.slice(html.indexOf("<dl"));
+    // Fields, not a JSON dump: the object's keys are terms, its values wrap.
+    expect(block).toContain("<dt");
+    expect(block).toContain(HASH);
+    expect(block).toContain("[overflow-wrap:anywhere]");
+    expect(html).not.toContain(`"${HASH}"`);
+    expect(html).toContain("View raw");
   });
 });

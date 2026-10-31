@@ -24,6 +24,7 @@ import Section from "@/components/ui/Section";
 import { useReport } from "@/components/analysis/AnalysisContext";
 import PipelineStrip from "@/components/analysis/PipelineStrip";
 import ReportChecks from "@/components/analysis/ReportChecks";
+import { StructuredCell } from "@/components/analysis/StructuredValue";
 import { formatStageDuration, stageTiming } from "@/components/analysis/stageTimeline";
 import { jobStopNote } from "@/lib/runFailure";
 import { correctionLine } from "./correctionLine";
@@ -82,7 +83,7 @@ export default function RunQuality() {
     <Section title="Run quality" collapsible defaultOpen={false}>
       <div className="flex flex-col gap-4" data-testid="run-quality">
         <div>
-          <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">Stages</h3>
+          <h3 className="text-[11px] text-text-muted mb-1.5">Stages</h3>
           {/* Which analyst line-up produced the report: a `lean` run (network
               only) reads as a full one otherwise, the deterministic static
               layers being present either way. The default line-up and a
@@ -103,7 +104,7 @@ export default function RunQuality() {
 
         {report && (
           <div className="text-xs text-text-secondary space-y-1" data-testid="verdict-notes">
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">Verdict</h3>
+            <h3 className="text-[11px] text-text-muted mb-1.5">Verdict</h3>
             <p className={headline.conflict ? "text-status-orange" : undefined}>{headline.text}</p>
             {headline.conflict && <p className="text-status-orange">{VERDICT_CONFLICT_NOTE}</p>}
             {readingNote && <p className="text-status-orange">{readingNote}</p>}
@@ -215,7 +216,7 @@ export default function RunQuality() {
         {evidence && (
           <div className="bg-bg-surface border border-border rounded">
             <div className="px-4 py-3 border-b border-border flex items-center gap-3">
-              <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              <h2 className="text-xs font-medium text-text-primary">
                 Evidence
               </h2>
             </div>
@@ -287,7 +288,7 @@ function StageTimingCard({
       <div className="px-4 py-3 border-b border-border flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h2
           id="stage-timing-heading"
-          className="text-xs font-medium text-text-primary uppercase tracking-wider"
+          className="text-xs font-medium text-text-primary"
         >
           Time per stage
         </h2>
@@ -328,11 +329,6 @@ function StageTimingCard({
   );
 }
 
-/** A job-config value as one line: a string as itself, anything else as JSON. */
-function configValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  return JSON.stringify(value);
-}
 
 /**
  * What this run was told to do, and what it spent doing it.
@@ -370,25 +366,27 @@ function RunRecord({
 
   return (
     <details className="bg-bg-surface border border-border rounded">
-      <summary className="px-4 py-3 cursor-pointer select-none text-xs font-medium text-text-primary uppercase tracking-wider">
+      <summary className="px-4 py-3 cursor-pointer select-none text-xs font-medium text-text-primary">
         Run record
       </summary>
       <div className="px-4 pb-4 grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-text-secondary">
         <div>
-          <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+          <h3 className="text-[11px] text-text-muted mb-1.5">
             Configuration
           </h3>
           {configRows.length === 0 ? (
             <p className="text-text-muted">Submitted with the stored settings, unchanged.</p>
           ) : (
-            <ul className="space-y-1">
+            <dl className="grid grid-cols-[minmax(6rem,max-content)_minmax(0,1fr)] gap-x-3 gap-y-1 text-[11px]">
               {configRows.map(([key, value]) => (
-                <li key={key} className="font-mono text-[11px]">
-                  <span className="text-text-muted">{key}: </span>
-                  {configValue(value)}
-                </li>
+                <div key={key} className="contents">
+                  <dt className="font-mono text-text-muted">{key}</dt>
+                  <dd className="min-w-0 font-mono text-text-secondary">
+                    <StructuredCell value={value} name={`Configuration ${key}`} />
+                  </dd>
+                </div>
               ))}
-            </ul>
+            </dl>
           )}
           {/* What the configuration left out (a key never set, a server
               switched off, a tool a shared server withholds by policy). It
@@ -396,7 +394,7 @@ function RunRecord({
               here and never in the DEGRADED RUN banner. */}
           {operatorChoices.length > 0 && (
             <>
-              <h3 className="text-[11px] uppercase tracking-wider text-text-muted mt-3 mb-1.5">
+              <h3 className="text-[11px] text-text-muted mt-3 mb-1.5">
                 Not configured or withheld by choice
               </h3>
               <ul className="space-y-1" data-testid="operator-choices">
@@ -410,7 +408,7 @@ function RunRecord({
           )}
         </div>
         <div>
-          <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+          <h3 className="text-[11px] text-text-muted mb-1.5">
             What the run spent
           </h3>
           <ul className="space-y-1">
@@ -493,7 +491,7 @@ function Stat({
   return (
     <div>
       <div className={`text-2xl font-mono ${accent ?? "text-text-primary"}`}>{value}</div>
-      <div className="text-[11px] text-text-muted uppercase tracking-wider">{label}</div>
+      <div className="text-[11px] text-text-muted">{label}</div>
     </div>
   );
 }

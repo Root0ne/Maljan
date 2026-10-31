@@ -182,7 +182,7 @@ export default function EvidenceBundleView({ jobId, reportId }: { jobId: string;
         </label>
         <nav
           aria-label="Bundle sections"
-          className="hidden lg:sticky lg:top-44 lg:block lg:max-h-[calc(100vh-12rem)] lg:overflow-y-auto"
+          className="hidden lg:sticky lg:top-10 lg:block lg:max-h-[calc(100vh-8.5rem)] lg:overflow-y-auto"
         >
           <ol className="space-y-0.5 border-l border-border text-sm">
             {entries.map((e) => {
@@ -210,7 +210,7 @@ export default function EvidenceBundleView({ jobId, reportId }: { jobId: string;
 
       <section aria-labelledby={entry.anchor} className="min-w-0 rounded-md border border-border bg-bg-surface">
         <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border-light px-4 py-2.5">
-          <h2 id={entry.anchor} className="scroll-mt-40 text-sm font-semibold text-text-primary">
+          <h2 id={entry.anchor} className="scroll-mt-16 text-sm font-semibold text-text-primary">
             {entry.title}
           </h2>
           <span className="text-[11px] text-text-muted">
@@ -380,7 +380,7 @@ function BundleIndex({
                   <tr
                     key={row.id}
                     id={row.id}
-                    className={`scroll-mt-40 border-b border-border-light align-top last:border-b-0 ${
+                    className={`scroll-mt-16 border-b border-border-light align-top last:border-b-0 ${
                       focus === row.id ? "bg-accent/10" : ""
                     }`}
                   >
@@ -465,7 +465,7 @@ function BundleNotes({
           <li
             key={note.anchor}
             id={note.anchor}
-            className={`scroll-mt-40 rounded px-2 py-1 ${focus === note.anchor ? "bg-accent/10" : ""}`}
+            className={`scroll-mt-16 rounded px-2 py-1 ${focus === note.anchor ? "bg-accent/10" : ""}`}
           >
             <span className="font-medium text-text-primary">Note {note.number}</span>
             {note.section && <span className="text-text-muted"> ({note.section})</span>}

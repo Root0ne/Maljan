@@ -45,7 +45,7 @@ export default function EvidenceRecords() {
       </Suspense>
       {unclaimed.length > 0 && (
         <div className="space-y-4">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          <h2 className="text-xs font-medium text-text-primary">
             Sections no tab draws
           </h2>
           <p className="text-[11px] text-text-muted">

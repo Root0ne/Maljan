@@ -86,7 +86,7 @@ export default function MessageBubble({
               </span>
             )}
             {badge && (
-              <span className={`rounded border px-1.5 text-[11px] uppercase tracking-wider ${badge.cls}`}>
+              <span className={`rounded border px-1.5 text-[11px] ${badge.cls}`}>
                 {badge.label}
               </span>
             )}
@@ -108,18 +108,22 @@ export default function MessageBubble({
           style={verdict ? undefined : { borderLeftColor: color, borderLeftWidth: 2 }}
         >
           {verdict && (
-            <span className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-accent-strong">
+            <span className="mb-1 flex items-center gap-1.5 text-[11px] text-accent-strong">
               <Gavel size={12} aria-hidden="true" />
               Verdict
             </span>
           )}
           {item.kind === "judge_question" && (
-            <span className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-status-purple">
+            <span className="mb-1 flex items-center gap-1.5 text-[11px] text-status-purple">
               <CircleHelp size={12} aria-hidden="true" />
               Question
             </span>
           )}
-          <p className="whitespace-pre-wrap text-xs leading-relaxed text-text-primary">
+          {/* What the agent said, as it said it: messages quote command lines
+              and Windows paths, so every backslash, asterisk and underscore
+              stays literal. A turn still arriving is drawn as far as it has
+              come, with the cursor after it. */}
+          <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-text-primary">
             {item.text}
             {item.streaming && (
               <span className="ml-1 inline-block h-3 w-1.5 align-middle bg-text-muted animate-pulse" aria-hidden="true" />
@@ -181,10 +185,14 @@ export default function MessageBubble({
           )}
 
           {openReport && item.report && (
-            <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap border-t border-border-light pt-2 font-sans text-[11px] leading-relaxed text-text-secondary">
-              {item.report}
-              {item.reportTruncated ? "\n\n[The producer cut this report at its size limit.]" : ""}
-            </pre>
+            <div className="mt-2 border-t border-border-light pt-2">
+              {/* Literal, like the message: a report quotes paths and commands.
+                  It scrolls with the page, never in a box of its own. */}
+              <p className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-text-secondary">{item.report}</p>
+              {item.reportTruncated && (
+                <p className="mt-2 text-[11px] italic text-text-muted">The producer cut this report at its size limit.</p>
+              )}
+            </div>
           )}
         </div>
       </div>

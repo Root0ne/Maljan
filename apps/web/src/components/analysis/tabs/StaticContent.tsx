@@ -118,7 +118,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
         </p>
       )}
 
-      <div id="structure" className="scroll-mt-40">
+      <div id="structure" className="scroll-mt-16">
         <Section title={structureTitle} empty={structureEmpty}>
           <div className="flex flex-col gap-3 sm:flex-row">
             <VerticalTabs
@@ -369,7 +369,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
         </Section>
       </div>
 
-      <div id="strings" className="scroll-mt-40">
+      <div id="strings" className="scroll-mt-16">
         <Section title="Strings" count={strings.length || null} empty={strings.length === 0 && slots.strings.length === 0}>
           <div className="space-y-3">
             {strings.length > 0 && (
@@ -437,7 +437,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
         </Section>
       </div>
 
-      <div id="decoded" className="scroll-mt-40">
+      <div id="decoded" className="scroll-mt-16">
         <Section title="Decoded strings and configuration" count={config.length || null} empty={config.length === 0}>
           <div {...scrollRegion("Decoded strings and configuration")} className={`-mx-4 -my-3 overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
             <table className="w-full">
@@ -480,7 +480,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
         </Section>
       </div>
 
-      <div id="functions" className="scroll-mt-40">
+      <div id="functions" className="scroll-mt-16">
         <Section title="Functions examined" empty={slots.functions.length === 0}>
           <div className="space-y-3">
             <ArtifactSections sections={slots.functions} />
@@ -489,7 +489,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
       </div>
 
       {slots.other.length > 0 && (
-        <div id="static-other" className="scroll-mt-40 space-y-3">
+        <div id="static-other" className="scroll-mt-16 space-y-3">
           <h2 className="text-sm font-semibold text-text-primary">Other static findings</h2>
           <ArtifactSections sections={slots.other} />
         </div>

@@ -141,7 +141,7 @@ function pushText(out: MdNode[], text: string, inLink: boolean): void {
  * starts an element, its close ends it, and an inline token's children are
  * read the same way into the element it stands in.
  */
-function buildTree(tokens: readonly Token[]): MdNode[] {
+function buildTree(tokens: readonly Token[], linkIds = true): MdNode[] {
   const root: MdNode[] = [];
   const stack: { node: Extract<MdNode, { t: "el" }> | null; c: MdNode[]; link: boolean }[] = [
     { node: null, c: root, link: false },
@@ -184,7 +184,7 @@ function buildTree(tokens: readonly Token[]): MdNode[] {
       } else if (token.type === "inline") {
         walk(token.children ?? [], true);
       } else if (token.type === "text") {
-        pushText(top().c, token.content, top().link);
+        pushText(top().c, token.content, top().link || !linkIds);
       } else if (token.type === "code_inline") {
         top().c.push({ t: "code", v: token.content });
       } else if (token.type === "softbreak") {
@@ -207,15 +207,22 @@ function buildTree(tokens: readonly Token[]): MdNode[] {
   return root;
 }
 
-/** A Markdown document, as a tree of strings and elements. */
-export function parseMarkdown(markdown: string): MdNode[] {
+/**
+ * A Markdown document, as a tree of strings and elements.
+ *
+ * `linkIds: false` leaves a bare evidence id in the text as text: report
+ * prose outside the bundle draws its citations as marks that open the
+ * evidence drawer (`CitedProse`), not as anchors into a bundle that is not
+ * on the page.
+ */
+export function parseMarkdown(markdown: string, { linkIds = true }: { linkIds?: boolean } = {}): MdNode[] {
   if (markdown.length > MAX_MARKDOWN_CHARS) return [{ t: "pre", v: markdown }];
   const tokens = md.parse(markdown, {});
   // At its nesting bound markdown-it stops reading the container it is in,
   // and every line after that point is dropped. A document that reached it
   // is shown as its raw text, so nothing in it is lost.
   if (reachedNestingBound(tokens)) return [{ t: "pre", v: markdown }];
-  return buildTree(tokens);
+  return buildTree(tokens, linkIds);
 }
 
 /** Whether a block token stands at the deepest level markdown-it reads. */

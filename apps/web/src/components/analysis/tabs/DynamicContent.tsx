@@ -21,6 +21,7 @@ import {
   type BehaviourView,
   type SignatureRow,
 } from "@/components/analysis/behaviourView";
+import { StructuredCell } from "@/components/analysis/StructuredValue";
 import ProcessTree from "./ProcessTree";
 import PersistenceList from "./PersistenceContent";
 import type { JobRoster } from "@/types";
@@ -308,11 +309,11 @@ export function BehavioursBlock({
   );
 }
 
-/** A cell's words: a plain value as it is, anything else as compact JSON. */
-function cellText(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "-";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
-  return JSON.stringify(value);
+/** A cell: a plain value as it is, a nested one laid out (`StructuredCell`), an empty one as a dash. */
+function Cell({ value, name }: { value: unknown; name: string }) {
+  if (value === null || value === undefined || value === "") return <>-</>;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return <>{String(value)}</>;
+  return <StructuredCell value={value} name={name} />;
 }
 
 /**
@@ -354,7 +355,7 @@ function RecordTable({
               <tr key={i} className="hover:bg-bg-hover">
                 {columns.map((c) => (
                   <td key={c} className="px-4 py-2 align-top text-xs font-mono text-text-secondary break-all">
-                    {cellText(row?.[c])}
+                    <Cell value={row?.[c]} name={`${title}, row ${i + 1}, ${c}`} />
                   </td>
                 ))}
               </tr>

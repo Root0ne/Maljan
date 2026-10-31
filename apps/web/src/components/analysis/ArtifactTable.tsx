@@ -135,8 +135,11 @@ function SectionBody({ section, rows }: { section: EvidenceSection; rows: string
         </ul>
       )}
       {hasText && (
+        /* A tool server's text, not the report model's Markdown: shown as it
+           was written, every backslash, asterisk and underscore literal. No
+           section declares a Markdown body, so none is parsed as one. */
         <p
-          className={`p-4 text-xs text-text-secondary leading-relaxed whitespace-pre-wrap break-words ${
+          className={`max-w-[80ch] whitespace-pre-wrap break-words p-4 text-xs leading-relaxed text-text-secondary ${
             drawsTable || items.length > 0 ? "border-t border-border-light" : ""
           }`}
         >

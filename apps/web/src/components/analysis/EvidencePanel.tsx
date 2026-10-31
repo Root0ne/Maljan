@@ -8,11 +8,11 @@ import { getErrorMessage } from "@/lib/errors";
 import { humaniseKey } from "@/lib/humanise";
 import { downloadObject } from "@/lib/report-utils";
 import type { EvidenceEntry, EvidenceObjectRef } from "@/types/evidence";
+import StructuredValue from "./StructuredValue";
 import {
   EMPTY_OPTIONS,
   EVIDENCE_PAGE_SIZE,
   NO_FILTERS,
-  argsDetail,
   argsSummary,
   deepLinkView,
   emptyOutputNote,
@@ -24,9 +24,13 @@ import {
   mergeOptions,
   outputPreview,
   pageCount,
+  structuredOutput,
   withFilter,
   type EvidenceFilters,
 } from "./evidenceRows";
+
+/** The heading over each part of an open row: a label, in sentence case. */
+const DETAIL_HEADING = "mb-1 text-xs font-medium text-text-secondary";
 
 /**
  * The evidence ledger: one row per tool call the run made.
@@ -134,7 +138,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
     <div className="space-y-3">
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-3">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          <h2 className="text-xs font-medium text-text-primary">
             Evidence records
           </h2>
           <span className="text-[11px] text-text-muted">
@@ -144,7 +148,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {(["stage", "agent", "tool"] as const).map((field) => (
               <label key={field} className="flex items-center gap-1 text-[11px]">
-                <span className="text-text-muted uppercase tracking-wider">{field}</span>
+                <span className="text-text-muted">{field}</span>
                 <select
                   aria-label={`Filter by ${field}`}
                   className="bg-bg-deep border border-border rounded px-2 py-1 text-xs text-text-primary focus:outline-none focus:border-accent"
@@ -181,11 +185,15 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
           </p>
         )}
 
+        {/* On a phone the ledger is not a table that scrolls sideways: each
+            call stacks (id, tool and result on one line, then stage, agent
+            and duration, then the arguments), and an open row takes the
+            screen's width, so nothing in it is clipped. */}
         {!error && (
           <div {...scrollRegion("Evidence records")} className={`overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wider text-text-muted border-b border-border">
+            <table className="w-full text-xs max-sm:block">
+              <thead className="max-sm:hidden">
+                <tr className="text-left text-[10px] text-text-muted border-b border-border">
                   <th scope="col" className="px-3 py-2 font-medium">ID</th>
                   <th scope="col" className="px-3 py-2 font-medium">Stage</th>
                   {/* Agent and Server were two columns saying "pipeline" on
@@ -199,12 +207,14 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                   <th scope="col" className="px-3 py-2 font-medium">Result</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="max-sm:block">
                 {entries.map((entry) => {
                   const expanded = open.has(entry.entry_id);
                   const summary = argsSummary(entry.args);
                   const showAllArgs = fullArgs.has(entry.entry_id);
                   const preview = outputPreview(entry.output, fullOutput.has(entry.entry_id));
+                  /* Parsed only for an open row: a JSON output is laid out, text stays text. */
+                  const parsedOutput = expanded ? structuredOutput(entry.output) : null;
                   const cited = deepLink === entry.entry_id;
                   const notes = entryNotes(entry);
                   return (
@@ -213,12 +223,12 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                         ref={(node) => {
                           rowRefs.current[entry.entry_id] = node;
                         }}
-                        className={`border-b border-border-light cursor-pointer hover:bg-bg-hover ${
+                        className={`border-b border-border-light cursor-pointer hover:bg-bg-hover max-sm:flex max-sm:flex-wrap max-sm:items-baseline max-sm:gap-x-3 max-sm:gap-y-1 max-sm:px-3 max-sm:py-2.5 ${
                           cited ? "bg-accent/5" : ""
                         }`}
                         onClick={() => toggle(setOpen, entry.entry_id)}
                       >
-                        <td className="px-3 py-2">
+                        <td className="max-sm:p-0 px-3 py-2">
                           <button
                             type="button"
                             aria-expanded={expanded}
@@ -234,26 +244,26 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                         </td>
                         {/* The stage strip two hundred pixels above says
                             "Triage pack"; this used to say `triage_pack`. */}
-                        <td className="px-3 py-2 text-text-secondary">
+                        <td className="max-sm:p-0 px-3 py-2 text-text-secondary">
                           {humaniseKey(entry.stage ?? "")}
                         </td>
-                        <td className="px-3 py-2 text-text-primary">
+                        <td className="max-sm:p-0 px-3 py-2 text-text-primary">
                           {entry.agent}
                           {entry.server && entry.server !== entry.agent && (
                             <span className="ml-1.5 text-text-muted">{entry.server}</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 font-mono text-text-primary break-all">
+                        <td className="max-sm:p-0 px-3 py-2 font-mono text-text-primary break-all">
                           {entry.tool}
                         </td>
-                        <td className="px-3 py-2 font-mono text-text-muted break-all">
+                        <td className="max-sm:order-last max-sm:basis-full max-sm:truncate max-sm:p-0 px-3 py-2 font-mono text-text-muted break-all">
                           {summary.text || "\u2014"}
                         </td>
-                        <td className="px-3 py-2 text-right text-text-secondary tabular-nums">
+                        <td className="max-sm:p-0 px-3 py-2 text-right text-text-secondary tabular-nums">
                           {formatCallDuration(entry.duration_ms)}
                         </td>
                         <td
-                          className={`px-3 py-2 text-[10px] uppercase tracking-wider ${
+                          className={`max-sm:p-0 px-3 py-2 text-[10px] ${
                             entry.ok ? "text-status-green" : "text-status-red"
                           }`}
                         >
@@ -261,8 +271,8 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                         </td>
                       </tr>
                       {!entry.ok && (entry.error || entry.remediation) && (
-                        <tr className="border-b border-border-light bg-status-red/5">
-                          <td colSpan={7} className="px-3 py-1.5 text-[11px]">
+                        <tr className="max-sm:block border-b border-border-light bg-status-red/5">
+                          <td colSpan={7} className="max-sm:block px-3 py-1.5 text-[11px]">
                             <span className="text-status-red">{entry.error ?? "failed"}</span>
                             {entry.remediation && (
                               <span className="text-text-secondary"> — {entry.remediation}</span>
@@ -271,15 +281,15 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                         </tr>
                       )}
                       {notes.length > 0 && (
-                        <tr className="border-b border-border-light bg-status-orange/5">
-                          <td colSpan={7} className="px-3 py-1.5 text-[11px] text-status-orange">
+                        <tr className="max-sm:block border-b border-border-light bg-status-orange/5">
+                          <td colSpan={7} className="max-sm:block px-3 py-1.5 text-[11px] text-status-orange">
                             {notes.join(" ")}
                           </td>
                         </tr>
                       )}
                       {expanded && (
-                        <tr className="border-b border-border-light bg-bg-deep">
-                          <td colSpan={7} className="px-3 pb-3 pt-1 space-y-3">
+                        <tr className="max-sm:block border-b border-border-light bg-bg-deep">
+                          <td colSpan={7} className="max-sm:block px-3 pb-3 pt-1 space-y-3">
                             {summary.truncated && (
                               <button
                                 type="button"
@@ -291,10 +301,9 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                             )}
                             {entry.args_repaired && entry.args_raw && (
                               <div>
-                                <h3 className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
-                                  Arguments as the model wrote them
-                                </h3>
-                                <pre className="text-[11px] text-text-secondary overflow-auto max-h-64 whitespace-pre-wrap break-all">
+                                <h3 className={DETAIL_HEADING}>Arguments as the model wrote them</h3>
+                                {/* The literal text, kept raw on purpose: it is what was repaired. */}
+                                <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded border border-border-light bg-bg-surface px-3 py-2 font-mono text-[11px] leading-5 text-text-secondary">
                                   {entry.args_raw}
                                 </pre>
                               </div>
@@ -315,21 +324,19 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                             )}
                             {(showAllArgs || !summary.truncated) && entry.args && (
                               <div>
-                                <h3 className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
-                                  Arguments
-                                </h3>
-                                <pre className="text-[11px] text-text-secondary overflow-auto max-h-64 whitespace-pre-wrap break-all">
-                                  {argsDetail(entry.args)}
-                                </pre>
+                                <h3 className={DETAIL_HEADING}>Arguments</h3>
+                                {/* Laid out as fields; "View raw" prints them as JSON. */}
+                                <StructuredValue value={entry.args} name={`Arguments of ${entry.entry_id}`} />
                               </div>
                             )}
                             <div>
-                              <h3 className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
-                                Output
-                              </h3>
-                              {entry.output ? (
+                              <h3 className={DETAIL_HEADING}>Output</h3>
+                              {entry.output && parsedOutput !== null ? (
+                                <StructuredValue value={parsedOutput} source={entry.output} name={`Output of ${entry.entry_id}`} />
+                              ) : entry.output ? (
                                 <>
-                                  <pre className="text-[11px] text-text-secondary overflow-auto max-h-96 whitespace-pre-wrap break-all">
+                                  {/* Text, not data: shown as written, a page at a time. */}
+                                  <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded border border-border-light bg-bg-surface px-3 py-2 font-mono text-[11px] leading-5 text-text-secondary">
                                     {preview.text}
                                   </pre>
                                   {preview.hidden > 0 && (
@@ -359,12 +366,11 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                             </div>
                             {entry.structured != null && (
                               <div>
-                                <h3 className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
-                                  Structured
-                                </h3>
-                                <pre className="text-[11px] text-text-secondary overflow-auto max-h-96 whitespace-pre-wrap break-all">
-                                  {JSON.stringify(entry.structured, null, 2)}
-                                </pre>
+                                <h3 className={DETAIL_HEADING}>Structured</h3>
+                                <StructuredValue
+                                  value={entry.structured}
+                                  name={`Structured output of ${entry.entry_id}`}
+                                />
                               </div>
                             )}
                           </td>
@@ -375,7 +381,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                 })}
                 {entries.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-3 py-6 text-center text-text-muted">
+                    <td colSpan={7} className="max-sm:block px-3 py-6 text-center text-text-muted">
                       {loading
                         ? "Reading the evidence\u2026"
                         : filtered

@@ -2,6 +2,7 @@
 
 import { Component, Fragment, useMemo, type ReactNode } from "react";
 import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
+import CitedProse from "./CitedProse";
 import { MAX_MARKDOWN_CHARS, parseMarkdown, type MdNode } from "./safeMarkdown";
 
 /**
@@ -16,14 +17,27 @@ import { MAX_MARKDOWN_CHARS, parseMarkdown, type MdNode } from "./safeMarkdown";
  * A document above `MAX_MARKDOWN_CHARS` is shown as its raw text, and so is
  * one whose drawing fails: the section stays readable and the page around
  * it stands.
+ *
+ * Every model-written text on the analysis page is drawn here. `cite` draws
+ * the report's evidence citations as the page's one citation mark
+ * (`CitedProse`) instead of anchors into the bundle; `inline` drops the
+ * paragraph box around a one-paragraph text so it sits in a row or a line;
+ * `regionName` names its wide tables apart from every other block's
+ * ("Bottom line 1 table"), so no two scroll regions share a name.
  */
-export default function SafeMarkdown(props: {
+export interface SafeMarkdownProps {
   markdown: string;
   subsectionIds?: readonly string[];
   skipFirstHeading?: boolean;
-}) {
+  cite?: boolean;
+  inline?: boolean;
+  regionName?: string;
+  className?: string;
+}
+
+export default function SafeMarkdown(props: SafeMarkdownProps) {
   return (
-    <MarkdownBoundary key={props.markdown} markdown={props.markdown}>
+    <MarkdownBoundary markdown={props.markdown}>
       <MarkdownBody {...props} />
     </MarkdownBoundary>
   );
@@ -44,6 +58,12 @@ class MarkdownBoundary extends Component<{ markdown: string; children: ReactNode
     return { failed: true };
   }
 
+  /* A new text gets a fresh try. The boundary is not keyed by the text, so a
+   * streamed answer growing a chunk at a time is not remounted for each one. */
+  componentDidUpdate(prev: { markdown: string }) {
+    if (this.state.failed && prev.markdown !== this.props.markdown) this.setState({ failed: false });
+  }
+
   render() {
     return this.state.failed ? <RawText markdown={this.props.markdown} /> : this.props.children;
   }
@@ -53,21 +73,33 @@ function MarkdownBody({
   markdown,
   subsectionIds = [],
   skipFirstHeading = false,
-}: {
-  markdown: string;
-  subsectionIds?: readonly string[];
-  skipFirstHeading?: boolean;
-}) {
+  cite = false,
+  inline = false,
+  regionName,
+  className = "space-y-3 text-sm leading-6 text-text-primary",
+}: SafeMarkdownProps) {
   const tooLong = markdown.length > MAX_MARKDOWN_CHARS;
-  const nodes = useMemo(() => (tooLong ? [] : parseMarkdown(markdown)), [markdown, tooLong]);
+  const nodes = useMemo(
+    () => (tooLong ? [] : parseMarkdown(markdown, { linkIds: !cite })),
+    [markdown, tooLong, cite],
+  );
   if (tooLong) return <RawText markdown={markdown} />;
   const first = nodes[0];
   const shown = skipFirstHeading && first?.t === "el" && /^h[1-6]$/.test(first.tag) ? nodes.slice(1) : nodes;
-  const ids = { next: 0, tables: 0, list: subsectionIds };
-  return <div className="space-y-3 text-sm leading-6 text-text-primary">{renderNodes(shown, ids)}</div>;
+  const ids: IdCursor = { next: 0, tables: 0, list: subsectionIds, cite, regionName };
+  const lone = inline && shown.length === 1 && shown[0].t === "el" && shown[0].tag === "p" ? shown[0] : null;
+  if (lone && lone.t === "el") return <span className={className}>{renderNodes(lone.c, ids)}</span>;
+  return <div className={className}>{renderNodes(shown, ids)}</div>;
 }
 
-type IdCursor = { next: number; tables: number; list: readonly string[] };
+type IdCursor = {
+  next: number;
+  tables: number;
+  list: readonly string[];
+  /** Draw text through `CitedProse`. */
+  cite?: boolean;
+  regionName?: string;
+};
 
 const HEADING_CLASS: Record<string, string> = {
   h1: "text-base font-semibold",
@@ -95,7 +127,7 @@ function renderNodes(nodes: readonly MdNode[], ids: IdCursor): ReactNode[] {
 function renderNode(node: MdNode, key: number, ids: IdCursor): ReactNode {
   switch (node.t) {
     case "text":
-      return <Fragment key={key}>{node.v}</Fragment>;
+      return ids.cite ? <CitedProse key={key} text={node.v} /> : <Fragment key={key}>{node.v}</Fragment>;
     case "br":
       return <br key={key} />;
     case "hr":
@@ -132,7 +164,7 @@ function renderElement(node: Extract<MdNode, { t: "el" }>, key: number, ids: IdC
       const Tag = HEADING_TAG[node.tag];
       const id = node.sub ? ids.list[ids.next++] : undefined;
       return (
-        <Tag key={key} id={id} className={`${HEADING_CLASS[node.tag]} scroll-mt-40 text-text-primary`}>
+        <Tag key={key} id={id} className={`${HEADING_CLASS[node.tag]} scroll-mt-16 text-text-primary`}>
           {children}
         </Tag>
       );
@@ -171,7 +203,7 @@ function renderElement(node: Extract<MdNode, { t: "el" }>, key: number, ids: IdC
       return (
         <div
           key={key}
-          {...scrollRegion(`Table ${++ids.tables}`)}
+          {...scrollRegion(ids.regionName ? `${ids.regionName} ${++ids.tables}` : `Table ${++ids.tables}`)}
           className={`max-w-full overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}
         >
           <table className="w-full text-xs">{children}</table>
