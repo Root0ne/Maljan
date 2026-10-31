@@ -6,6 +6,7 @@ import CopyButton from "@/components/ui/CopyButton";
 import { kpiState } from "@/components/ui/KpiTile";
 import { SeverityPill } from "@/components/ui/Pill";
 import { api } from "@/lib/api";
+import { getErrorMessage } from "@/lib/errors";
 import { countLabel, formatBytes, formatDateTime, truncateMiddle } from "@/lib/report-utils";
 import { useRun } from "@/lib/useRun";
 import { PRIORITY_STYLES, type DefensiveCategory, type FollowUp, type MalwareReport } from "@/types/malware-report";
@@ -614,6 +615,7 @@ function FileFacts({ mr }: { mr: MalwareReport }) {
 function FollowUpsLine({ jobId, status }: { jobId: string; status: string | null | undefined }) {
   const { openChat } = useReport();
   const [rows, setRows] = useState<FollowUp[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const askable = canAskFollowUp(status);
 
   useEffect(() => {
@@ -624,8 +626,8 @@ function FollowUpsLine({ jobId, status }: { jobId: string; status: string | null
       .then((res) => {
         if (live) setRows(followUpRows(res.follow_ups));
       })
-      .catch(() => {
-        if (live) setRows(null);
+      .catch((err) => {
+        if (live) setError(`Could not read the follow-up questions: ${getErrorMessage(err)}`);
       });
     const onAnswer = (e: Event) => {
       const row = (e as CustomEvent<FollowUp>).detail;
@@ -642,6 +644,11 @@ function FollowUpsLine({ jobId, status }: { jobId: string; status: string | null
   const n = rows?.length ?? 0;
   return (
     <Fact title="Follow-up questions">
+      {error && (
+        <p role="alert" className="mb-1.5 text-xs text-status-red">
+          {error}
+        </p>
+      )}
       <p className="text-xs text-text-secondary">
         {rows === null
           ? "Ask about anything in this analysis; answers come from what it stored."

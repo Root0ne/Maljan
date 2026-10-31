@@ -1,3 +1,5 @@
+import { useId } from "react";
+
 import { CONFIDENCE_WHY, type VerdictConfidence } from "./overview";
 
 /**
@@ -22,24 +24,32 @@ export default function ConfidenceMeter({
   /** What the confidence is about; the verdict's by default. */
   title?: string;
 }) {
+  /* What the meter is about reaches every reader, not only a pointer that
+   * hovers: the image is described by a sentence a screen reader reads. */
+  const whyId = useId();
   return (
-    <span role="img" aria-label={confidence.label} title={title} className="inline-flex items-center gap-2">
-      <span aria-hidden="true" className="flex items-center gap-[3px]">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <span
-            key={i}
-            className={`${compact ? "h-3 w-1" : "h-3.5 w-1.5"} rounded-[1px] ${
-              i <= confidence.step ? "bg-text-secondary" : "bg-border"
-            }`}
-          />
-        ))}
+    <span className="inline-flex items-center">
+      <span id={whyId} className="sr-only">
+        {title}
       </span>
-      {!compact && (
-        <span aria-hidden="true" className="text-sm text-text-secondary">
-          {confidence.word}
-          {confidence.percent !== null && <span className="tabular-nums">, {confidence.percent}%</span>}
+      <span role="img" aria-label={confidence.label} aria-describedby={whyId} title={title} className="inline-flex items-center gap-2">
+        <span aria-hidden="true" className="flex items-center gap-[3px]">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <span
+              key={i}
+              className={`${compact ? "h-3 w-1" : "h-3.5 w-1.5"} rounded-[1px] ${
+                i <= confidence.step ? "bg-text-secondary" : "bg-border"
+              }`}
+            />
+          ))}
         </span>
-      )}
+        {!compact && (
+          <span aria-hidden="true" className="text-sm text-text-secondary">
+            {confidence.word}
+            {confidence.percent !== null && <span className="tabular-nums">, {confidence.percent}%</span>}
+          </span>
+        )}
+      </span>
     </span>
   );
 }

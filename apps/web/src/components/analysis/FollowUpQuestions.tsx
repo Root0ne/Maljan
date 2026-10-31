@@ -37,7 +37,7 @@ export function FollowUpAnswer({ row, jobId }: { row: FollowUp; jobId: string })
           <SafeMarkdown
             markdown={row.answer.answer}
             cite
-            regionName={`Answer to “${row.question.slice(0, 40)}”`}
+            regionName={`Answer ${row.id}`}
             className="space-y-2 text-sm leading-6 text-text-primary"
           />
           <p className="text-xs text-text-muted">

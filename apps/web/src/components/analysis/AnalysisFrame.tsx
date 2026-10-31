@@ -241,6 +241,8 @@ export default function AnalysisFrame({ id, children }: { id: string; children: 
     const observer = new IntersectionObserver(([entry]) => setCompact(!entry.isIntersecting), {
       root: main,
       threshold: 0,
+      // The bar is 44 px tall: the short verdict appears as the header goes under it.
+      rootMargin: "-44px 0px 0px 0px",
     });
     observer.observe(header);
     return () => observer.disconnect();

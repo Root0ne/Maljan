@@ -37,7 +37,7 @@ export interface SafeMarkdownProps {
 
 export default function SafeMarkdown(props: SafeMarkdownProps) {
   return (
-    <MarkdownBoundary key={props.markdown} markdown={props.markdown}>
+    <MarkdownBoundary markdown={props.markdown}>
       <MarkdownBody {...props} />
     </MarkdownBoundary>
   );
@@ -56,6 +56,12 @@ class MarkdownBoundary extends Component<{ markdown: string; children: ReactNode
 
   static getDerivedStateFromError(): { failed: boolean } {
     return { failed: true };
+  }
+
+  /* A new text gets a fresh try. The boundary is not keyed by the text, so a
+   * streamed answer growing a chunk at a time is not remounted for each one. */
+  componentDidUpdate(prev: { markdown: string }) {
+    if (this.state.failed && prev.markdown !== this.props.markdown) this.setState({ failed: false });
   }
 
   render() {
