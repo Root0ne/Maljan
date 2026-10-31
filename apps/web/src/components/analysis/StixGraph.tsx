@@ -254,13 +254,15 @@ function GraphTable({
     degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
     if (e.target !== e.source) degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
   }
-  const th = "px-2 py-1.5 text-left font-medium text-text-secondary";
-  const td = "px-2 py-1 align-top";
+  /* The same table every structured block on the page draws: a quiet head
+   * on the deep surface, a hairline between rows, inside a bordered region. */
+  const th = "bg-bg-deep px-2 py-1.5 text-left font-medium text-text-muted";
+  const td = "border-t border-border-light px-2 py-1.5 align-top";
   return (
     <div className="space-y-5 text-xs">
-      <div {...scrollRegion("STIX objects")} className={`overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
+      <div {...scrollRegion("STIX objects")} className={`overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}>
         <table className="w-full border-collapse">
-          <caption className="text-left text-xs font-semibold text-text-primary pb-1.5">
+          <caption className="px-2 py-2 text-left text-sm font-semibold text-text-primary">
             Objects ({graph.nodes.length})
           </caption>
           <thead>
@@ -304,9 +306,9 @@ function GraphTable({
         </table>
       </div>
 
-      <div {...scrollRegion("STIX relationships")} className={`overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
+      <div {...scrollRegion("STIX relationships")} className={`overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}>
         <table className="w-full border-collapse">
-          <caption className="text-left text-xs font-semibold text-text-primary pb-1.5">
+          <caption className="px-2 py-2 text-left text-sm font-semibold text-text-primary">
             Relationships ({graph.edges.length})
           </caption>
           <thead>
@@ -362,9 +364,9 @@ function GraphTable({
       </div>
 
       {graph.notDrawn.length > 0 && (
-        <div {...scrollRegion("STIX objects not drawn")} className={`overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
+        <div {...scrollRegion("STIX objects not drawn")} className={`overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}>
           <table className="w-full border-collapse">
-            <caption className="text-left text-xs font-semibold text-text-primary pb-1.5">
+            <caption className="px-2 py-2 text-left text-sm font-semibold text-text-primary">
               In the bundle, not drawn ({graph.notDrawn.length})
             </caption>
             <thead>

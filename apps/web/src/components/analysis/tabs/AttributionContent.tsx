@@ -10,6 +10,7 @@ import { copyToClipboard, truncateMiddle } from "@/lib/report-utils";
 import Field from "@/components/ui/Field";
 import { attributionSaysSomething } from "@/components/analysis/analysisTabs";
 import EvidenceChips from "@/components/analysis/EvidenceChips";
+import SafeMarkdown from "@/components/analysis/SafeMarkdown";
 import type { FamilyAttribution } from "@/types/malware-report";
 
 type SimilarSample = {
@@ -337,9 +338,12 @@ function SimilarSampleCard({ sample }: { sample: SimilarSample }) {
         </div>
       )}
       {sample.summary && (
-        <p className="mt-2 text-sm text-text-secondary leading-relaxed">
-          {sample.summary}
-        </p>
+        <SafeMarkdown
+          markdown={sample.summary}
+          cite
+          regionName={`Similar sample ${(sample.sample_id ?? "").slice(0, 12)}`}
+          className="mt-2 max-w-[80ch] space-y-2 text-sm leading-relaxed text-text-secondary break-words [overflow-wrap:anywhere]"
+        />
       )}
     </div>
   );
