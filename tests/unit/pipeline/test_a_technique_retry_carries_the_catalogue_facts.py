@@ -88,3 +88,21 @@ class TestWhatTheyHold:
             [_asked(UNGROUNDED_TECHNIQUE_CODE)], [_claim("T1005"), _claim("T1057")], _Failing()
         )
         assert note.splitlines()[1:] == ["- T1057 Process Discovery; tactics: discovery"]
+
+    def test_a_retired_id_says_its_release_and_successor_once(self) -> None:
+        class _Retired:
+            @staticmethod
+            def attck_lookup(tid: str) -> dict[str, Any]:
+                return {
+                    "valid": False,
+                    "reason": "retired in ATT&CK v12 and revoked by T1574.002",
+                    "retired_in": "v12",
+                    "revoked_by": "T1574.002",
+                }
+
+        note = technique_facts_note(
+            [_asked(UNGROUNDED_TECHNIQUE_CODE)], [_claim("T1038")], _Retired()
+        )
+        line = note.splitlines()[1]
+        assert line.count("v12") == 1 and line.count("T1574.002") == 1
+        assert "revoked by T1574.002" in line

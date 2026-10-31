@@ -8482,12 +8482,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         (``_question_base``). ``None``, and the question is asked over
         ``turns``, when there is none, when the question carries no tools, when
         ``turns`` do not start with ``rebuilt`` as it was built (a question
-        written into its last turn), when the base's cache entry is past the
-        lifetime the model states (``anthropic_history.prompt_cache_seconds``,
-        less :data:`KEPT_CONVERSATION_MARGIN_S`), or when the turns and an
-        answer of ``cap`` tokens do not fit the window. A base asked over is
-        read at that moment, so its entry lives from then.
+        written into its last turn), when the model states no cache lifetime
+        (``anthropic_history.prompt_cache_seconds``: a model this platform
+        places no breakpoint for, whose cache it cannot reason about) or the
+        base's entry is past it less :data:`KEPT_CONVERSATION_MARGIN_S`, or
+        when the turns, framed as they are sent, and an answer of ``cap``
+        tokens do not fit the window. A base asked over is read at that
+        moment, so its entry lives from then.
         """
+        from langchain_core.messages import HumanMessage
+
         from maljan.llm.anthropic_history import prompt_cache_seconds
 
         base = getattr(self, "_question_base", None)
@@ -8498,12 +8502,22 @@ class BaseAnalyst(BudgetMeter, ABC):
             return None
         lifetime = prompt_cache_seconds(getattr(self, "llm", None))
         now = time.monotonic()
-        if lifetime is not None and now - base.sent_at >= float(lifetime) - (
-            KEPT_CONVERSATION_MARGIN_S
-        ):
+        if lifetime is None or now - base.sent_at >= float(lifetime) - KEPT_CONVERSATION_MARGIN_S:
             return None
         continued = [*base.messages, *turns[size:]]
-        if not BaseAnalyst._fits_the_window(self, continued, int(cap)):  # type: ignore[arg-type]
+        # Measured as it is sent: the pack and the run-state block in their
+        # places, and where the provider sends the earlier turns' blocks
+        # again (``replays_earlier_blocks``), one more block per user turn.
+        state = current_run_state(self)
+        framed = frame_messages(
+            continued,
+            facts_block=str(getattr(self, "facts_block", "") or ""),
+            run_state=state,
+        )
+        if state and replays_earlier_blocks(getattr(self, "llm", None)):
+            turned = sum(1 for m in continued[:-1] if getattr(m, "type", "") in ("human", "tool"))
+            framed = [*framed, HumanMessage(content=state * turned)] if turned else framed
+        if not BaseAnalyst._fits_the_window(self, framed, int(cap)):  # type: ignore[arg-type]
             return None
         self._question_base: KeptConversation | None = KeptConversation(base.messages, now)
         return continued
@@ -10168,21 +10182,40 @@ class BaseAnalyst(BudgetMeter, ABC):
             # and the turn that carried it before is sent as it was written.
             plain = frame_messages(turns, run_state=current_run_state(self))
             # Over the loop's own conversation where the answer is the one it
-            # ended on (:meth:`_continued_question`): the tool answers the
-            # answer cites are in view there, so the question is the findings
-            # and the closing without the entries shown beside them.
+            # ended on (:meth:`_continued_question`): the entries the answer
+            # cites are fitted again against that conversation, which holds
+            # the tool answers its own calls returned; an entry it does not
+            # hold (an earlier round's, the brief's, one its answer was cut
+            # from) is still shown.
+            base = getattr(self, "_question_base", None)
             if (
                 len(turns) == len(messages) + 2
                 and isinstance(turns[-2], AIMessage)
                 and isinstance(turns[-1], HumanMessage)
                 and round_asked
-                and isinstance(getattr(self, "_question_base", None), KeptConversation)
+                and isinstance(base, KeptConversation)
             ):
+                asked_now = round_asked[0]
+                prior = turns[-2]
+
+                def _continued_turns(text: str) -> list[Any]:
+                    return [
+                        *base.messages,
+                        prior,
+                        HumanMessage(content=feedback_text(asked_now, closing=text, cards=cards)),
+                    ]
+
+                held = BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
+                    self,
+                    isr,
+                    list(base.messages),
+                    bare_closing,
+                    _continued_turns,
+                    max(widest, int(self.output_cap_tokens() or 0)),
+                )
                 turns = [
                     *turns[:-1],
-                    HumanMessage(
-                        content=feedback_text(round_asked[0], closing=bare_closing, cards=cards)
-                    ),
+                    HumanMessage(content=feedback_text(asked_now, closing=held, cards=cards)),
                 ]
             continued = BaseAnalyst._continued_question(  # type: ignore[arg-type]
                 self,

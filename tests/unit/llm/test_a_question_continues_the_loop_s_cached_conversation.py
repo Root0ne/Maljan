@@ -33,6 +33,7 @@ import pytest
 from maljan.agents.base_agent import BaseAnalyst, KeptConversation
 from maljan.llm import anthropic_history
 from maljan.pipeline.validation import ANALYST_TOOLS_ATTACHED, TECHNIQUE_FACTS_LEAD, Violation
+from maljan.schemas.isr_models import ClaimEvidence
 
 from .anthropic_wire import Wire, _as_blocks, _unmarked, install, message
 from .test_a_replayed_thinking_block_stays_valid import (
@@ -131,8 +132,18 @@ class _Cache:
         return read, written
 
 
-def _run(monkeypatch: pytest.MonkeyPatch, retry_calls: int, *, aged: bool = False) -> Any:
+EARLIER = "EARLIER ROUND BODY: 0x309c reads the PEB BeingDebugged flag"
+
+
+def _run(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_calls: int,
+    *,
+    aged: bool = False,
+    earlier: bool = False,
+) -> Any:
     from maljan.agents import base_agent
+    from maljan.schemas.evidence import LedgerEntry
 
     wire = Wire(_answers(retry_calls))
     install(monkeypatch, wire)
@@ -143,6 +154,19 @@ def _run(monkeypatch: pytest.MonkeyPatch, retry_calls: int, *, aged: bool = Fals
     text = agent.execute_tool_loop([("system", SYSTEM), ("human", "Analyse.")])
     loop = list(wire.bodies)
     isr = agent._text_to_isr(text, revision_round=0)
+    if earlier:
+        # An entry of an earlier round, in the ledger and in no turn of this loop.
+        agent._evidence_entries.append(
+            LedgerEntry(id="ev_0099", agent="static", tool="batch_decompile", output=EARLIER)
+        )
+        isr.claims.append(
+            ClaimEvidence(
+                claim="it checks a debugger",
+                evidence_ref="ev_0099",
+                confidence=0.6,
+                technique_id=None,
+            )
+        )
     if aged:
         kept = agent._kept_conversation
         assert kept is not None
@@ -228,7 +252,12 @@ class TestTheRebuiltConversationStands:
         base = agent._question_base_of(f"  {REPORT}\n", tools=True)
         assert base is not None and base.messages == (task,), "the loop without its answer"
 
-    def test_only_turns_that_start_with_the_rebuilt_ones_are_continued(self) -> None:
+    def test_only_turns_that_start_with_the_rebuilt_ones_are_continued(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "maljan.llm.anthropic_history.prompt_cache_seconds", lambda *_a, **_k: 300
+        )
         agent = _Analyst(llm=cast(Any, None), name="static")
         task = _human("Analyse.")
         agent._question_base = KeptConversation((task,), time.monotonic())
@@ -273,6 +302,80 @@ class TestTheRebuiltConversationStands:
         assert sent == [plain]
 
 
+class TestWhatIsNotContinued:
+    def test_an_entry_the_loop_never_held_is_still_shown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        wire, _loop, questions = _run(monkeypatch, 0, earlier=True)
+        assert wire.refused == []
+        body = json.dumps(questions[0]["messages"], ensure_ascii=False)
+        assert "the raw data" not in body, "continued"
+        question = json.dumps(questions[0]["messages"][-1]["content"], ensure_ascii=False)
+        assert "PEB BeingDebugged" in question
+        assert "answer for 0" not in question, "an answer the loop holds is not shown again"
+
+    def test_a_model_that_states_no_cache_lifetime_is_asked_the_rebuilt_turns(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "maljan.llm.anthropic_history.prompt_cache_seconds", lambda *_a, **_k: None
+        )
+        wire, _loop, questions = _run(monkeypatch, 0)
+        assert wire.refused == []
+        assert "the raw data" in json.dumps(questions[0]["messages"][0])
+
+    def test_a_conversation_past_the_window_is_asked_the_rebuilt_turns(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real = BaseAnalyst._fits_the_window
+
+        def fits(agent: Any, messages: list[Any], cap: int) -> bool:
+            # The loop's own conversation carries its task, "Analyse.".
+            if any("Analyse." in str(getattr(m, "content", "")) for m in messages):
+                return False
+            return real(agent, messages, cap)
+
+        monkeypatch.setattr(BaseAnalyst, "_fits_the_window", fits)
+        _wire, _loop, questions = _run(monkeypatch, 0)
+        assert "the raw data" in json.dumps(questions[0]["messages"][0])
+
+    def test_a_loop_that_offered_read_evidence_keeps_no_conversation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.agents import base_agent
+
+        wire = Wire(_answers(0))
+        install(monkeypatch, wire)
+        monkeypatch.setattr(base_agent, "loop_limits", lambda *_a, **_k: (None, 40))
+        agent = _Analyst(llm=_model(), name="static")
+        agent.tools = [_lookup()]
+        real = base_agent.BaseAnalyst._record_budget
+
+        def offered(self: Any, *args: Any, **kwargs: Any) -> Any:
+            # As a loop that cleared old answers and offered the tool does.
+            self._offered_after_clear = [object()]
+            return real(self, *args, **kwargs)
+
+        monkeypatch.setattr(base_agent.BaseAnalyst, "_record_budget", offered)
+        agent.execute_tool_loop([("system", SYSTEM), ("human", "Analyse.")])
+        assert agent._kept_conversation is None
+
+    @pytest.mark.parametrize(
+        "sent",
+        [
+            "a nudged or salvaged answer the loop never wrote",
+            "CLAIM: it reads a file",  # an answer shown only up to its first repeat
+            "CLAIM 1: merged from two chunks\n---\nCLAIM 2: the other chunk",
+        ],
+    )
+    def test_an_answer_the_loop_did_not_end_on_has_no_base(self, sent: str) -> None:
+        agent = _Analyst(llm=cast(Any, None), name="static")
+        agent._kept_conversation = KeptConversation(
+            (_human("Analyse."), _ai(REPORT)), time.monotonic()
+        )
+        assert agent._question_base_of(sent, tools=True) is None
+
+
 class TestTheBreakpointRule:
     def test_a_string_turn_s_breakpoint_reads_the_loop_s_entry(self) -> None:
         memory = anthropic_history.Memory()
@@ -306,6 +409,34 @@ class TestTheBreakpointRule:
             and any(isinstance(b, dict) and "cache_control" in b for b in turn["content"])
         ]
         assert marked == [2], "the loop's last entry, read; nothing new written"
+
+    def test_an_entry_past_its_lifetime_is_not_read(self) -> None:
+        memory = anthropic_history.Memory()
+        mark = {"type": "ephemeral"}
+        result = {"type": "tool_result", "tool_use_id": "t1", "content": "answer"}
+        call = {"type": "tool_use", "id": "t1", "name": "lookup", "input": {}}
+        loop_turns = [
+            {"role": "user", "content": "Analyse."},
+            {"role": "assistant", "content": [_thinking(1), call]},
+            {"role": "user", "content": [result]},
+        ]
+        anthropic_history.prepared(
+            {"messages": loop_turns}, memory, bound=True, cache_marker=mark, loop=True
+        )
+        memory.marked = {key: at - 301.0 for key, at in memory.marked.items()}
+        answer = {"role": "assistant", "content": [_thinking(2), {"type": "text", "text": REPORT}]}
+        retried = {"role": "assistant", "content": [_thinking(3), {"type": "text", "text": "x"}]}
+        whole = [
+            *loop_turns,
+            answer,
+            {"role": "user", "content": "the retry's question"},
+            retried,
+            {"role": "user", "content": "the whole-answer question"},
+        ]
+        sent = anthropic_history.prepared(
+            {"messages": whole}, memory, bound=True, cache_marker=mark, loop=True
+        )
+        assert "cache_control" not in json.dumps(sent["messages"]), "no entry left to read"
 
     def test_with_no_entry_before_it_no_breakpoint_is_placed(self) -> None:
         memory = anthropic_history.Memory()

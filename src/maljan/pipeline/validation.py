@@ -450,11 +450,16 @@ def _technique_fact(attck: Any, tid: str) -> str:
             said += f": a sub-technique of {parent}{f' {parent_name}' if parent_name else ''}"
         tactics = ", ".join(str(t) for t in row.get("tactics") or [])
         return f"{said}; tactics: {tactics}" if tactics else said
-    reasons = [str(row.get("reason") or "the catalogue has no technique with this id")]
-    if row.get("retired_in"):
-        reasons.append(f"retired in {row['retired_in']}")
-    if row.get("revoked_by"):
-        reasons.append(f"revoked by {row['revoked_by']}")
+    reason = str(row.get("reason") or "the catalogue has no technique with this id")
+    reasons = [reason]
+    # The catalogue's reason already says the release and the successor where
+    # it knows them; each is added only where it does not.
+    retired = str(row.get("retired_in") or "")
+    if retired and retired not in reason:
+        reasons.append(f"retired in {retired}")
+    successor = str(row.get("revoked_by") or "")
+    if successor and successor not in reason:
+        reasons.append(f"revoked by {successor}")
     checked = getattr(attck, "attck_validate", None)
     nearest: list[str] = []
     if callable(checked):

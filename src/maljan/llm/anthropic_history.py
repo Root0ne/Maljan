@@ -82,6 +82,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import time
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -133,9 +134,10 @@ class Memory:
         self.listed_turns: set[str] = set()
         # signature digests of blocks the API was asked to drop.
         self.stale: set[str] = set()
-        # digests of the request prefixes a breakpoint was placed at, through
-        # the marked turn: the cache entries this model's requests wrote.
-        self.marked: set[str] = set()
+        # digest of a request prefix a breakpoint was placed at, through the
+        # marked turn -> when (``time.monotonic``): the cache entries this
+        # model's requests wrote or read, and when each last lived again.
+        self.marked: dict[str, float] = {}
 
     def clear(self) -> None:
         with self.lock:
@@ -673,14 +675,18 @@ def _cache_breakpoints(
     turn, or where a breakpoint placed after that turn reads it already, it is
     left out. A question asked at the end of a loop's conversation so reads
     the prefix the loop wrote, and a question asked once writes nothing. Every
-    prefix marked is remembered (``Memory.marked``).
+    prefix marked is remembered with when (``Memory.marked``), and only one
+    marked within the marker's lifetime (five minutes, or an hour where it
+    asks one) counts as an entry still written.
     """
     roles = [m.get("role") if isinstance(m, dict) else None for m in messages]
     marks = _breakpoint_turns(roles, loop, last)
     if memory is not None and marks:
         digests = _prefix_digests(payload or {}, messages)
         with memory.lock:
-            written = set(memory.marked)
+            now = time.monotonic()
+            lifetime = _ONE_HOUR if marker.get("ttl") == "1h" else _FIVE_MINUTES
+            written = {key for key, at in memory.marked.items() if now - at < lifetime}
         placed = {index for index in marks if _markable(messages[index])}
         for index in sorted(marks - placed):
             earlier = next(
@@ -696,7 +702,7 @@ def _cache_breakpoints(
                 placed.add(earlier)
         marks = placed
         with memory.lock:
-            memory.marked.update(digests[i] for i in marks)
+            memory.marked.update((digests[i], now) for i in marks)
     return [_marked(m, marker) if i in marks else m for i, m in enumerate(messages)]
 
 
