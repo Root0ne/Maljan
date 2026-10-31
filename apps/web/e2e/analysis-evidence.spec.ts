@@ -92,7 +92,8 @@ test("an open row lays out its arguments and parsed result as fields, with the r
   await expect(row.locator("dd", { hasText: "/samples/evil.exe" }).first()).toBeVisible();
   await expect(row).not.toContainText('"path"');
   await args.click();
-  await expect(row.getByRole("region", { name: "Arguments of ev_0001 raw JSON table, scrolls sideways" })).toContainText(
+  // The toggle renames itself, so the raw block is found on the page.
+  await expect(page.getByRole("region", { name: "Arguments of ev_0001 raw JSON table, scrolls sideways" })).toContainText(
     '"path": "/samples/evil.exe"',
   );
   // An open row widens nothing: the page never scrolls sideways.
