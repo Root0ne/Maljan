@@ -522,7 +522,7 @@ test.describe("Analysis page", () => {
     await page.goto(`${BASE}/evidence`);
     await expect(page.getByRole("navigation", { name: "Analysis sections" }).getByRole("link")).toHaveCount(6);
     const views = page.getByRole("navigation", { name: "Evidence views" });
-    await expect(views.getByRole("link")).toHaveText(["Evidence bundle", "Records", "Analyst discussion", "Hunter", "Mystery Box"]);
+    await expect(views.getByRole("link")).toHaveText(["Evidence bundle", "Records", "Analyst discussion", "Debate", "Hunter", "Mystery Box"]);
     await views.getByRole("link", { name: "Hunter" }).click();
     await expect(page).toHaveURL(`${BASE}/evidence/agent/hunter`);
     await expect(page.getByText("mutex held across reboots")).toBeVisible();
