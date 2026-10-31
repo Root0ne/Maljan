@@ -89,7 +89,11 @@ class TestTheDefaultProfileDeliversTheReferencedServers:
 
         agent._try_initialize_mcp()
 
-        assert sorted(t.name for t in agent.tools) == ["attck_lookup", "pe_info"]
+        assert sorted(t.name for t in agent.tools) == [
+            "attck_lookup",
+            "check_ip_reputation",
+            "pe_info",
+        ]
 
     def test_the_network_analyst_gets_the_role_bound_half_as_well(
         self, monkeypatch: pytest.MonkeyPatch
@@ -103,7 +107,12 @@ class TestTheDefaultProfileDeliversTheReferencedServers:
         agent._try_initialize_mcp()
 
         names = [t.name for t in agent.tools]
-        assert sorted(names) == ["attck_lookup", "extract_dns", "sandbox_items"]
+        assert sorted(names) == [
+            "attck_lookup",
+            "check_ip_reputation",
+            "extract_dns",
+            "sandbox_items",
+        ]
         assert len(names) == len(set(names)), "a server bound and referenced yields one copy"
 
     def test_a_reference_the_registry_cannot_serve_is_a_degradation(

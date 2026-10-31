@@ -555,13 +555,13 @@ def test_the_built_in_definitions_name_the_servers_their_role_reads():
     def _servers(key: str) -> list[str]:
         return [str(r.server) for r in mcp_refs_for(settings, key)]
 
-    # Reputation is reached by capability: the shipped server that declares a
-    # reputation lookup and that its seed does not bind by its own agents list.
-    assert _servers("static") == ["analysis", "knowledge", "virustotal"]
-    assert _servers("network") == ["network", "knowledge", "virustotal"]
+    # Reputation is reached by capability: every shipped server whose role is
+    # reputation, whether or not its seed binds it by its own agents list.
+    assert _servers("static") == ["analysis", "knowledge", "threatintel", "virustotal"]
+    assert _servers("network") == ["network", "knowledge", "threatintel", "virustotal"]
     # The judge reaches for reputation on dissent; VirusTotal's own server is
     # seeded disabled, so the reference costs nothing until it is registered.
-    assert _servers("judge") == ["knowledge", "virustotal"]
+    assert _servers("judge") == ["knowledge", "threatintel", "virustotal"]
     # The dynamic analyst's report is already in this process, so its first
     # reference is the in-process kind rather than a server.
     assert [r.kind for r in definitions["dynamic"].tools] == ["sandbox", "mcp"]

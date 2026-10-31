@@ -49,8 +49,8 @@ function definition(tools: ToolRefEntry[]): AgentDefinitionEntry {
 }
 
 describe("the served capability reach", () => {
-  it("is the server the built-ins named by key before", () => {
-    expect(servedReach()).toEqual({ reputation: ["virustotal"] });
+  it("is every server whose role is reputation", () => {
+    expect(servedReach()).toEqual({ reputation: ["threatintel", "virustotal"] });
   });
 });
 
@@ -61,7 +61,8 @@ describe("a built-in agent's tool boxes", () => {
     expect(holdsServer(STATIC_TOOLS, "virustotal", reach)).toBe(true);
     expect(capabilitiesReaching(STATIC_TOOLS, "virustotal", reach)).toEqual(["reputation"]);
     expect(holdsServer(STATIC_TOOLS, "analysis", reach)).toBe(true);
-    expect(holdsServer(STATIC_TOOLS, "threatintel", reach)).toBe(false);
+    expect(holdsServer(STATIC_TOOLS, "threatintel", reach)).toBe(true);
+    expect(holdsServer(STATIC_TOOLS, "network", reach)).toBe(false);
   });
 
   it("draw one capability row, ticked", () => {

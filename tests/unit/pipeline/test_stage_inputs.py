@@ -211,6 +211,7 @@ class TestBuiltinToolsOnAStage:
         assert [r.server for r in mcp_refs_for(settings, "static")] == [
             "analysis",
             "knowledge",
+            "threatintel",
             "virustotal",
         ]
 
@@ -245,6 +246,7 @@ class TestBuiltinToolsOnAStage:
         assert [r.server for r in mcp_refs_for(settings, "network")] == [
             "network",
             "knowledge",
+            "threatintel",
             "virustotal",
         ]
 

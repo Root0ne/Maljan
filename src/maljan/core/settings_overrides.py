@@ -333,7 +333,8 @@ def unknown_reference_refusals(
     and before the save. Refused: a key of ``llm.agents`` or of a
     ``react_agent_*_overrides`` map that names no agent definition and no
     model-calling role (nothing would read it), and a ``capability`` tool
-    reference no server declares a tool of (it would resolve to no server).
+    reference no server declares (it would resolve to no server), once every
+    enabled built-in server has been listed.
     Each is named, with what is available. What is already stored, sent back
     as stored, is never refused, so stored settings stay readable and no
     unrelated save is blocked; where the merged values do not build, the model
@@ -341,7 +342,7 @@ def unknown_reference_refusals(
     """
     from pydantic import ValidationError
 
-    from maljan.agents.composition import servers_of_capability
+    from maljan.agents.composition import capability_undecided, servers_of_capability
     from maljan.core.config import ROLE_ENTRY_KEYS
 
     try:
@@ -368,6 +369,9 @@ def unknown_reference_refusals(
     stored_defs = current.get(DEFINITIONS_PATH)
     stored_defs = stored_defs if isinstance(stored_defs, Mapping) else {}
     problems: list[str] = []
+    # A server never listed yet may serve any capability: nothing is refused
+    # for want of a server until every enabled built-in has been listed.
+    undecided = bool(capability_undecided(built.mcp.servers))
     for key, definition in built.agents.definitions.items():
         stored_refs = stored_defs.get(key)
         stored_refs = stored_refs.get("tools") if isinstance(stored_refs, Mapping) else None
@@ -381,6 +385,7 @@ def unknown_reference_refusals(
             if (
                 ref.kind == "capability"
                 and capability not in stored_caps
+                and not undecided
                 and not servers_of_capability(built.mcp.servers, capability)
             ):
                 problems.append(

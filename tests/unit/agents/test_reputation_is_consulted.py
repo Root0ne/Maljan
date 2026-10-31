@@ -44,14 +44,14 @@ class TestEveryAnalystThatReadsTheFileCarriesTheReference:
             assert _REPUTATION in definitions[key].tools, key
             assert ToolRef(kind="mcp", server=SERVER_KEY) not in definitions[key].tools, key
 
-    def test_the_capability_resolves_to_the_server_the_seeds_named_before(self) -> None:
+    def test_the_capability_resolves_to_every_reputation_server(self) -> None:
         from maljan.agents.composition import mcp_refs_for
 
         settings = Settings(_env_file=None)
         for key in ("static", "network", "judge", "triage", "android_static", "reverser"):
             refs = mcp_refs_for(settings, key)
             assert ToolRef(kind="mcp", server=SERVER_KEY) in refs, key
-            assert ToolRef(kind="mcp", server="threatintel") not in refs, key
+            assert ToolRef(kind="mcp", server="threatintel") in refs, key
 
     def test_the_dynamic_analyst_does_not(self) -> None:
         """Its evidence is a detonation report, and the hash was already asked
