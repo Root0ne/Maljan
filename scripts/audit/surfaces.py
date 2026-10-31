@@ -13,7 +13,8 @@ declared mapping table in ``surface_map.json`` (finding kind x surface, each
 row with the code it was read from): the job detail, the report
 row, the full report JSON, the Markdown and the HTML, the STIX export and the
 judge's bundle, ``/mitre``, ``/iocs`` with and without ``include=all``, the
-evidence ledger, the event log, the run summary, the usage, the follow-ups,
+evidence ledger and its call map, the event log, the run summary, the usage, the
+follow-ups,
 the ATT&CK layer, the rule downloads and the job package, and the web
 console's tabs by the field map in ``web_fields.json``.
 
@@ -31,7 +32,7 @@ whole, and a cut of it is a defect.
 ``report-byjob.json``, ``report.json``, ``report.md``, ``report.html``,
 ``stix-bundle.json``, ``stix-judge.json``, ``mitre.json``, ``iocs.json``
 (``include=all``), ``evidence.json``, ``events.json``, ``run-summary.json``,
-``usage.json``, and ``follow-ups.json``, ``iocs-default.json``,
+``usage.json``, and ``follow-ups.json``, ``call-map.json``, ``iocs-default.json``,
 ``attack-layer.json`` where present, and ``evidence-bundle.json`` and
 ``evidence-bundle.html`` beside an analyst-layout ``report.md``, read with it as
 one Markdown and one HTML surface). A surface whose file is absent is listed
@@ -219,6 +220,7 @@ def load_live(api: str, job_id: str, token: str | None) -> dict[str, Any]:
         "attack_layer": f"/reports/{rid}/attack-layer",
         "usage": f"/jobs/{job_id}/usage",
         "follow_ups": f"/jobs/{job_id}/follow-ups",
+        "call_map": f"/jobs/{job_id}/evidence/call-map",
     }
     for name, path in simple.items():
         out[name] = get(path)
@@ -1779,6 +1781,7 @@ def web_view(surfaces: dict[str, Any], spec: dict[str, Any], out: Report) -> str
         "evidence": {"entries": _list(_dict(surfaces.get("evidence")).get("items"))},
         "events": {"events": _events(surfaces.get("events"))},
         "follow_ups": surfaces.get("follow_ups"),
+        "call_map": surfaces.get("call_map"),
     }
     sections = [s for s in _list(mr.get("sections")) if isinstance(s, dict)]
     with_content = {

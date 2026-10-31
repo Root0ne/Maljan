@@ -18,6 +18,7 @@ from app.logging_config import get_logger
 from app.logsafe import log_safe
 from app.models.user import User
 from app.schemas.evidence import (
+    CallMapResponse,
     EvidenceEntryResponse,
     EvidenceListResponse,
     LedgerVerificationResponse,
@@ -694,6 +695,45 @@ async def get_job_evidence(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/{job_id}/evidence/call-map", response_model=CallMapResponse)
+async def get_job_call_map(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """The functions the run's code reading touched, what each calls and what calls it.
+
+    Derived from the job's stored ledger when asked for
+    (``maljan.reporting.call_map``), so a run stored before the map existed
+    has one too; nothing is written. Ownership is the job's, checked exactly
+    the way the evidence page checks it. Each row is read as the evidence page
+    serves it, its absent columns left out, so the map is the one the served
+    pages draw; a row that does not read as a ledger entry is left out.
+    """
+    import asyncio
+
+    from maljan.reporting.call_map import call_map
+    from maljan.reporting.follow_up import stored_ledger
+    from sqlalchemy import select as sa_select
+
+    from app.models.evidence import EvidenceEntry
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    found = await db.execute(
+        sa_select(EvidenceEntry).where(EvidenceEntry.job_id == job_id).order_by(EvidenceEntry.seq)
+    )
+    rows = [
+        EvidenceEntryResponse.model_validate(row).model_dump(mode="json", exclude_none=True)
+        for row in found.scalars().all()
+    ]
+    # The ledger is read and the listings parsed off the event loop.
+    ledger, _unread = await asyncio.to_thread(stored_ledger, rows)
+    return CallMapResponse(job_id=job_id, **await asyncio.to_thread(call_map, ledger))
 
 
 @router.get("/{job_id}/evidence/verify", response_model=LedgerVerificationResponse)

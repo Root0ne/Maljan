@@ -13,6 +13,7 @@
   "iocs_default": {"endpoint": "GET /api/v1/reports/{report_id}/iocs", "file": "iocs-default.json", "ref": "apps/api/app/services/report_service.py:793"},
   "attack_layer": {"endpoint": "GET /api/v1/reports/{report_id}/attack-layer", "file": "attack-layer.json", "ref": "apps/api/app/api/v1/reports.py:246"},
   "evidence": {"endpoint": "GET /api/v1/jobs/{job_id}/evidence (every page)", "file": "evidence.json", "ref": "apps/api/app/api/v1/jobs.py:587"},
+  "call_map": {"endpoint": "GET /api/v1/jobs/{job_id}/evidence/call-map", "file": "call-map.json", "ref": "apps/api/app/api/v1/jobs.py:700"},
   "events": {"endpoint": "GET /api/v1/jobs/{job_id}/events", "file": "events.json", "ref": "apps/api/app/api/v1/jobs.py:475"},
   "run_summary": {"endpoint": "report row's run_summary", "file": "run-summary.json", "ref": "apps/api/app/api/v1/reports.py:96"},
   "usage": {"endpoint": "GET /api/v1/jobs/{job_id}/usage", "file": "usage.json", "ref": "apps/api/app/api/v1/jobs.py:539"},
