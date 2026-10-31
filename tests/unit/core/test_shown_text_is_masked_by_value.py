@@ -253,39 +253,89 @@ def test_reading_the_values_never_raises_and_never_names_one(monkeypatch, caplog
 
 
 def test_the_values_come_from_the_settings_and_the_store_by_kind_never_by_name():
-    env_value, token, api_key, row = _secret(1), _secret(2), _secret(3), _secret(4)
+    env_token, token, api_key, row, plain = (_secret(n) for n in range(1, 6))
     settings = ov.build_settings({})
     settings.mcp.servers["any"] = MCPServerConfig(
-        command="tool", env={"PLAIN_NAME": env_value}, auth_token=token
+        command="tool", env={"UPSTREAM_TOKEN": env_token, "HOME_DIR": plain}, auth_token=token
     )
     stored = {
-        "core.mcp.servers": {"other": {"env": {"MODE": env_value + "x"}}},
+        "core.mcp.servers": {"other": {"env": {"DB_PASSWORD": env_token + "x", "MODE": plain}}},
         "api.enrichment_sources": {"some_source": {"api_key": api_key, "url": "https://x"}},
         "secret": [row],
     }
 
     held = shown_secret_values(settings, stored)
 
-    assert {env_value, token, api_key, row, env_value + "x"} <= held
+    assert {env_token, token, api_key, row, env_token + "x"} <= held
+    # An env entry whose name names no credential is no secret by value; the
+    # snapshot and the console still hide it where it stands.
+    assert plain not in held
+    assert sm.masked_server({"env": {"HOME_DIR": plain}}) == {"env": {"HOME_DIR": MASK}}
     # A number or a switch is a setting whatever its key says.
-    assert not {"true", "8080"} & shown_secret_values({"env": {"A": "true", "B": "8080"}})
+    assert not {"true", "8080"} & shown_secret_values({"env": {"A_KEY": "true", "B_KEY": "8080"}})
 
 
-def test_the_run_snapshot_masks_a_servers_env_value_wherever_it_stands():
-    value = _secret()
-    settings = ov.build_settings({})
-    settings.mcp.servers["any"] = MCPServerConfig(
-        command="tool",
-        env={"UPSTREAM": value},
-        args=["--name", value, f"--path=/srv/{value}/x"],
-        label=f"reads {quote(value)}",
+# The reviewer's input: a server whose env holds a bind address and a home
+# directory that its arguments and the model address repeat.
+def _bind_and_home_settings():
+    settings = ov.build_settings({"llm.openai.base_url": "http://127.0.0.1:8080/v1"})
+    settings.mcp.servers["mytool"] = MCPServerConfig(
+        command="mytool",
+        env={"BIND": "127.0.0.1", "MYTOOL_HOME": "/opt/mytool"},
+        args=["--home", "/opt/mytool", "--host", "127.0.0.1"],
+    )
+    return settings
+
+
+def _records(settings):
+    from maljan.analysis import efficiency as ef
+    from maljan.analysis.disclosure import settings_hosts
+
+    return {
+        "snapshot": ov.public_snapshot(settings, ()),
+        "hosts": settings_hosts(settings),
+        "servers": {k: ef.declared_server(v) for k, v in sorted(settings.mcp.servers.items())},
+        "sections": ef._settings_sections(settings),
+    }
+
+
+def test_a_record_reads_the_same_whatever_values_the_process_holds():
+    settings = _bind_and_home_settings()
+    empty = _records(settings)
+    sm.remember_settings_values(settings, scope="store")
+    _remember("127.0.0.1", "/opt/mytool", _secret())
+
+    assert _records(settings) == empty
+    snap = empty["snapshot"]
+    # As origin/dev wrote it: the env values masked where they stand, nowhere else.
+    assert snap["mcp.servers.mytool.args"] == ["--home", "/opt/mytool", "--host", "127.0.0.1"]
+    assert snap["llm.openai.base_url"] == "http://127.0.0.1:8080/v1"
+    assert snap["mcp.servers.mytool.env.BIND"] == MASK
+    assert snap["mcp.servers.mytool.env.MYTOOL_HOME"] == MASK
+    assert "127.0.0.1" in empty["hosts"]
+    # origin/dev's digest of this server's identity.
+    assert empty["servers"]["mytool"]["identity"] == (
+        "92a673e36ed28496a69a864f1dde67203c7bf5a175e086499590cab8a5aa95ba"
     )
 
-    snap = ov.public_snapshot(settings, ())
 
-    assert value not in json.dumps(snap)
-    assert quote(value) not in json.dumps(snap)
-    assert snap["mcp.servers.any.args"] == ["--name", MASK, f"--path=/srv/{MASK}/x"]
+def test_a_short_configured_secret_and_a_longer_value_holding_it_are_one_run():
+    # A short API key, a credential-named env value ending in its first
+    # letters, and an argument holding both: neither leaves a part shown.
+    settings = ov.build_settings({"llm.openai.api_key": "Kp7xQ2"})
+    settings.mcp.servers["s"] = MCPServerConfig(
+        command="t", env={"DATA_TOKEN": "/srv/dataKp7"}, args=["/srv/dataKp7xQ2"]
+    )
+
+    assert ov.public_snapshot(settings, ())["mcp.servers.s.args"] == [MASK]
+
+    from maljan.enrichment.declared import masked
+
+    _remember("/srv/dataKp7")
+    assert masked("failed: GET /srv/dataKp7xQ2 refused", "Kp7xQ2") == f"failed: GET {MASK} refused"
+    # Without the held value, the credential alone, as before.
+    sm.forget_values()
+    assert masked("failed: GET /srv/dataKp7xQ2", "Kp7xQ2") == f"failed: GET /srv/data{MASK}"
 
 
 def test_a_tool_server_argument_and_a_console_value_are_masked_by_a_held_value():
@@ -295,6 +345,9 @@ def test_a_tool_server_argument_and_a_console_value_are_masked_by_a_held_value()
     assert sm.masked_args(["--name", value, value]) == ["--name", MASK, MASK]
     assert sm.masked_value({"note": f"x{value}y"}) == {"note": f"x{MASK}y"}
     assert sm.masked_server({"cwd": f"/srv/{value}"}) == {"cwd": f"/srv/{MASK}"}
+    # A record takes the structural rules alone.
+    assert sm.masked_server({"cwd": f"/srv/{value}"}, by_value=False) == {"cwd": f"/srv/{value}"}
+    assert sm.masked_text(f"x {value}", by_value=False) == f"x {value}"
 
 
 # --- never weaker: a differential over the masking corpus -------------------
@@ -349,3 +402,22 @@ def test_masking_is_never_weaker_than_the_structural_rules_on_the_corpus():
         if not _reveals_no_more(now, before) or secret in now or other in now:
             weaker.append(written)
     assert weaker == []
+
+
+def test_a_record_of_any_corpus_settings_reads_the_same_whatever_is_held():
+    secret = _secret()
+    for written in _corpus_texts()[::60]:
+        text = written.replace("{pw}", secret)
+        settings = ov.build_settings({})
+        settings.mcp.servers["s"] = MCPServerConfig(
+            command="t",
+            env={"API_TOKEN": secret, "HOME_DIR": text},
+            args=["--x", text, text],
+            cwd=text,
+            label=text,
+        )
+        sm.forget_values()
+        empty = _records(settings)
+        sm.remember_settings_values(settings, scope="store")
+        _remember(secret, text)
+        assert _records(settings) == empty, written

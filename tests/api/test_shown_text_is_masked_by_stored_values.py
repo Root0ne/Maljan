@@ -10,6 +10,7 @@ console, an error text or a log line carries it, whatever its shape.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections.abc import Iterator
@@ -23,7 +24,8 @@ from fastapi.testclient import TestClient
 
 from app.models import RuntimeSetting
 from app.services import settings_service as svc
-from app.services.server_map import TOKEN_MASK
+from app.services.server_map import TOKEN_MASK, server_env_key
+from app.services.settings_catalog_api import catalog_index
 from maljan.core import settings_masking as sm
 from maljan.core.config import MCPServerConfig
 from maljan.core.settings_overrides import build_settings
@@ -60,15 +62,21 @@ def _db(*row_sets: list[RuntimeSetting]) -> MagicMock:
     return db
 
 
-def _server(env_value: str) -> dict[str, Any]:
-    return {
+def _rows(token: str, plain: str) -> list[RuntimeSetting]:
+    """A server stored as a save stores it: its map row without ``env``, and the
+    ``env`` map in the server's own encrypted row (``server_map.server_env_key``)."""
+    server = {
         "enabled": False,
         "transport": "stdio",
         "command": "tool",
-        "args": ["--name", env_value],
-        "env": {"MODE": env_value},
+        "args": ["--key-file", token, "--home", plain],
         "tools": [],
     }
+    env = {"UPSTREAM_TOKEN": token, "TOOL_HOME": plain}
+    return [
+        RuntimeSetting(key=SERVERS, value={"custom": server}, is_secret=False),
+        RuntimeSetting(key=server_env_key("custom"), value=json.dumps(env), is_secret=True),
+    ]
 
 
 @pytest.fixture(autouse=True)
@@ -81,16 +89,19 @@ def _quiet(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 @pytest.mark.asyncio
-async def test_reading_the_store_registers_its_secrets_and_every_encrypted_row():
-    env_value, row_value = _value(1), _value(2)
+async def test_reading_the_store_registers_its_secrets_and_every_encrypted_credential_row():
+    token, plain, row_value = _value(1), "/opt/tool-home", _value(2)
     rows = [
-        RuntimeSetting(key=SERVERS, value={"custom": _server(env_value)}, is_secret=False),
+        *_rows(token, plain),
         RuntimeSetting(key="core.some.unnamed_field", value=row_value, is_secret=True),
     ]
 
     await svc.SettingsService(_db(rows)).load_overrides()
 
-    assert {env_value, row_value} <= sm.held_values()
+    # The env row is read entry by entry: only the credential-named one is held.
+    assert {token, row_value} <= sm.held_values()
+    assert plain not in sm.held_values()
+    assert not any(plain in held for held in sm.held_values())
     assert sm.masked_text(f"failed with {row_value}") == "failed with ***"
 
 
@@ -119,9 +130,7 @@ async def test_a_failed_read_after_a_write_never_fails_the_write():
         await service._remember_stored_values()
 
 
-def test_the_console_read_masks_a_stored_secret_wherever_it_stands():
-    env_value = _value(3)
-    rows = [RuntimeSetting(key=SERVERS, value={"custom": _server(env_value)}, is_secret=False)]
+def _console_read(rows: list[RuntimeSetting]) -> Any:
     from app.api.v1.settings import router
     from app.database import get_db
     from app.deps import require_admin
@@ -133,17 +142,40 @@ def test_the_console_read_masks_a_stored_secret_wherever_it_stands():
     app.dependency_overrides[get_db] = lambda: db
     with patch("app.api.v1.settings._agent_warnings", AsyncMock(return_value={})):
         answer = TestClient(app, raise_server_exceptions=False).get("/api/v1/settings")
-
     assert answer.status_code == 200, answer.text[:300]
-    assert env_value not in answer.text
+    return answer
+
+
+def test_the_console_read_masks_a_stored_secret_wherever_it_stands():
+    token, plain = _value(3), "/opt/tool-home"
+
+    answer = _console_read(_rows(token, plain))
+
+    assert token not in answer.text
     server = answer.json()["values"][SERVERS]["value"]["custom"]
-    assert server["args"] == ["--name", TOKEN_MASK]
+    assert server["args"] == ["--key-file", TOKEN_MASK, "--home", plain]
+    assert server["env"] == {"TOOL_HOME": TOKEN_MASK, "UPSTREAM_TOKEN": TOKEN_MASK}
+
+
+def test_a_save_after_the_console_read_keeps_an_argument_shown_masked():
+    token, plain = _value(4), "/opt/tool-home"
+    rows = _rows(token, plain)
+    shown = _console_read(rows).json()["values"][SERVERS]["value"]
+    stored = {SERVERS: {"custom": {**rows[0].value["custom"], "env": json.loads(rows[1].value)}}}
+    edited = {"custom": {**shown["custom"], "label": "renamed"}}
+
+    restored = svc.unmasked_changes({SERVERS: edited}, stored, catalog_index())
+
+    entry = restored[SERVERS]["custom"]
+    assert entry["args"] == ["--key-file", token, "--home", plain]
+    assert entry["env"] == {"UPSTREAM_TOKEN": token, "TOOL_HOME": plain}
+    assert entry["label"] == "renamed"
 
 
 @pytest.mark.asyncio
 async def test_each_rebuild_of_the_cached_core_settings_registers_its_values(monkeypatch):
     first, second = _value(4), _value(5)
-    stored = {"mcp.servers": {"any": {"command": "tool", "env": {"A": first}}}}
+    stored = {"mcp.servers": {"any": {"command": "tool", "env": {"A_TOKEN": first}}}}
 
     async def overrides(_db: Any) -> dict[str, Any]:
         return stored
@@ -153,7 +185,7 @@ async def test_each_rebuild_of_the_cached_core_settings_registers_its_values(mon
     await cache.get(MagicMock())
     assert first in sm.held_values()
 
-    stored = {"mcp.servers": {"any": {"command": "tool", "env": {"A": second}}}}
+    stored = {"mcp.servers": {"any": {"command": "tool", "env": {"A_TOKEN": second}}}}
     cache.invalidate()
     await cache.get(MagicMock())
 
@@ -166,9 +198,9 @@ def test_a_worker_and_a_job_register_their_values():
 
     process, job = _value(6), _value(7)
     settings = build_settings({})
-    settings.mcp.servers["any"] = MCPServerConfig(command="tool", env={"A": process})
+    settings.mcp.servers["any"] = MCPServerConfig(command="tool", env={"A_TOKEN": process})
     remember_process_secrets(settings)
-    settings.mcp.servers["any"] = MCPServerConfig(command="tool", env={"A": job})
+    settings.mcp.servers["any"] = MCPServerConfig(command="tool", env={"A_TOKEN": job})
     remember_configured_secrets(settings)
 
     assert {process, job} <= sm.held_values()
@@ -179,7 +211,7 @@ def test_an_app_registers_the_values_of_its_settings():
 
     value = _value(8)
     settings = build_settings({})
-    settings.mcp.servers["any"] = MCPServerConfig(command="tool", env={"A": value})
+    settings.mcp.servers["any"] = MCPServerConfig(command="tool", env={"A_TOKEN": value})
 
     _remember_the_secrets_of(settings)
 
