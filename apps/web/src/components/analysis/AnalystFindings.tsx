@@ -4,6 +4,7 @@ import { retryAddedLabel } from "@/lib/conversation";
 import { confidenceClass } from "@/lib/report-utils";
 import type { AnalystClaims } from "./dynamicClaims";
 import { CitedText } from "./EvidenceChips";
+import SafeMarkdown from "./SafeMarkdown";
 
 /** What each analyst concluded, claim by claim, with its confidence and evidence. */
 export default function AnalystFindings({
@@ -38,9 +39,12 @@ export default function AnalystFindings({
                     key={i}
                     className="border border-border-light rounded p-3"
                   >
-                    <p className="text-sm text-text-primary leading-relaxed">
-                      {c.claim || c.description || "(no text)"}
-                    </p>
+                    <SafeMarkdown
+                      markdown={c.claim || c.description || "(no text)"}
+                      cite
+                      regionName={`${f.agent} claim ${i + 1}`}
+                      className="space-y-2 text-sm leading-relaxed text-text-primary"
+                    />
                     <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-text-muted">
                       {conf !== null && (
                         <span className={`font-mono ${confidenceClass(conf)}`}>

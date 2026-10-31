@@ -62,6 +62,14 @@ export default function StructuredValue({ value, name }: { value: unknown; name:
   );
 }
 
+/**
+ * One value in a table cell or a definition: a plain value inline, a nested
+ * one laid out a level deep and then as one line of JSON, never a dump.
+ */
+export function StructuredCell({ value, name }: { value: unknown; name: string }) {
+  return <ValueView value={value} name={name} depth={1} />;
+}
+
 /** The whole value as pretty-printed JSON, coloured by token. */
 export function RawJson({ value, name }: { value: unknown; name: string }) {
   return (

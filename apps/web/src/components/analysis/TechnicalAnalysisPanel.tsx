@@ -4,8 +4,10 @@ import Link from "next/link";
 
 import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useReport } from "./AnalysisContext";
+import BasisMark from "./BasisMark";
 import CitedProse from "./CitedProse";
 import EvidenceChips from "./EvidenceChips";
+import SafeMarkdown from "./SafeMarkdown";
 import {
   REPORT_MODEL_VOICE,
   c2Channels,
@@ -65,11 +67,19 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
               {steps.map((step, i) => (
                 <li key={`${step.order}-${i}`} className="text-sm text-text-secondary">
                   <span className="text-text-muted mr-2 font-mono">{i + 1}.</span>
-                  <span className="break-words [overflow-wrap:anywhere]">
-                    <CitedProse text={step.action} />
-                  </span>
-                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted">
-                    {flowMark(step)}
+                  <SafeMarkdown
+                    markdown={step.action}
+                    cite
+                    inline
+                    regionName={`Execution step ${i + 1}`}
+                    className="break-words [overflow-wrap:anywhere]"
+                  />
+                  <span className="ml-2 inline-flex align-middle">
+                    <BasisMark
+                      basis={step.voice === "observed" ? "seen" : "not-seen"}
+                      label={step.voice === "observed" ? "Seen in sandbox" : "Assessed, not seen"}
+                      detail={flowMark(step)}
+                    />
                   </span>
                   <Cited ids={step.evidence_refs} />
                   <Unresolved note={flowNote(report, step)} />
@@ -112,7 +122,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                     <td className="py-1 pr-3 font-mono break-all text-text-secondary">
                       {item.value}
                     </td>
-                    <td className="py-1 pr-3 break-words text-text-muted [overflow-wrap:anywhere]">{item.purpose?.trim() ? <CitedProse text={item.purpose.trim()} /> : "not stated"}</td>
+                    <td className="py-1 pr-3 break-words text-text-muted [overflow-wrap:anywhere]">{item.purpose?.trim() ? <SafeMarkdown markdown={item.purpose.trim()} cite inline regionName={`Identifier ${i + 1} purpose`} className="" /> : "not stated"}</td>
                     <td className="py-1">
                       <Cited ids={item.evidence_refs} />
                       <Unresolved
@@ -156,7 +166,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                   <tr key={`${cmd.name}-${i}`} className="border-t border-border align-top">
                     <td className="py-1 pr-3 font-mono text-text-muted">{cmd.id ?? "-"}</td>
                     <td className="py-1 pr-3 font-mono break-all text-text-primary">{cmd.name}</td>
-                    <td className="py-1 pr-3 break-words text-text-secondary [overflow-wrap:anywhere]">{cmd.description ? <CitedProse text={cmd.description} /> : "-"}</td>
+                    <td className="py-1 pr-3 break-words text-text-secondary [overflow-wrap:anywhere]">{cmd.description ? <SafeMarkdown markdown={cmd.description} cite inline regionName={`Command ${i + 1} description`} className="" /> : "-"}</td>
                     <td className="py-1">
                       <Cited ids={cmd.evidence_refs} />
                     </td>
@@ -204,9 +214,12 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
               {block.title}
             </h3>
             {block.body && (
-              <p className="text-sm text-text-secondary whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                <CitedProse text={block.body} />
-              </p>
+              <SafeMarkdown
+                markdown={block.body}
+                cite
+                regionName={block.title}
+                className="max-w-[75ch] space-y-2 text-sm leading-6 text-text-secondary break-words [overflow-wrap:anywhere]"
+              />
             )}
             {block.facts.length > 0 && (
               <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">

@@ -32,7 +32,7 @@ export default function TabBlock({
   }
   return (
     <section id={id} aria-labelledby={`${id}-heading`} className="scroll-mt-16 space-y-3">
-      <h2 id={`${id}-heading`} className="text-sm font-semibold text-text-primary">
+      <h2 id={`${id}-heading`} className="text-base font-semibold text-text-primary">
         {title}
       </h2>
       {children}
