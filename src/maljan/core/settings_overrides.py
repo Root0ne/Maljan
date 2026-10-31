@@ -742,20 +742,24 @@ def public_snapshot(settings: Settings, secret_keys: Iterable[str] = ()) -> dict
       (``settings_masking.masked_value``);
     * every value the settings hold as a secret by the event scrub's rules
       (``settings_catalog.configured_secret_values``) is masked wherever it
-      still appears.
+      still appears, and every value a reader may not see
+      (``settings_catalog.shown_secret_values``: a server's ``env`` values
+      too) in each of its encoded forms (``settings_masking.masked_values``),
+      read from ``settings`` itself, whatever this process has registered.
     """
-    from maljan.core.settings_catalog import configured_secret_values
-    from maljan.core.settings_masking import SNAPSHOT_MASK
+    from maljan.core.settings_catalog import configured_secret_values, shown_secret_values
+    from maljan.core.settings_masking import SNAPSHOT_MASK, masked_values_in
 
     tree, typed = masked_settings_tree(settings)
     secrets = set(secret_keys) | set(typed)
     values = sorted(configured_secret_values(settings), key=len, reverse=True)
+    shown = frozenset(shown_secret_values(settings))
     snap: dict[str, Any] = {}
     for key, value in flatten(tree).items():
         if key in secrets:
             snap[key] = SNAPSHOT_MASK if value else None
         else:
-            snap[key] = _scrubbed(value, values)
+            snap[key] = _scrubbed(masked_values_in(value, SNAPSHOT_MASK, shown), values)
     return snap
 
 
@@ -864,9 +868,11 @@ def redact_url(text: str) -> str:
     Applied to free text (a driver's error message, a config value echoed
     back), not only to values known to be URLs. An address written with no
     scheme (``user:pass@host:8080``) has its userinfo masked too
-    (``settings_masking.masked_bare_userinfo``).
+    (``settings_masking.masked_bare_userinfo``), and every secret value this
+    process holds is masked in each of its encoded forms
+    (``settings_masking.masked_values``).
     """
-    from maljan.core.settings_masking import masked_bare_userinfo
+    from maljan.core.settings_masking import masked_bare_userinfo, masked_values
 
     redacted = _URL_SPAN.sub(_mask_secret_params, _CREDENTIAL_IN_URL.sub(r"\1***@", text))
-    return masked_bare_userinfo(redacted)
+    return masked_values(masked_bare_userinfo(redacted))

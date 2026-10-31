@@ -16,7 +16,12 @@ them masks with these functions, so what one hides the others hide too:
   (``settings_catalog.names_a_credential_value``: ``api_token``,
   ``Authorization``), at any depth;
 * a tool server's ``env`` map: every value, whatever its name (the names stay,
-  sorted).
+  sorted);
+* and, after all of these, every secret value the process holds
+  (:func:`masked_values`), wherever it stands and in each of its encoded
+  forms: the rules above guess a credential by where it stands, a value the
+  settings hold is masked wherever it appears. The values are registered by
+  scope where settings are read in force (:func:`remember_settings_values`).
 
 ``mask`` is the placeholder the reader uses: ``***`` in a run record, the
 console's ``TOKEN_MASK`` where a value comes back on a save. ``unmasked``
@@ -25,10 +30,17 @@ reads a value sent back with masks in it against what is stored.
 
 from __future__ import annotations
 
+import base64
+import json
+import logging
 import re
 import string
 from collections.abc import Mapping
+from functools import lru_cache
 from typing import Any
+from urllib.parse import quote, quote_plus
+
+logger = logging.getLogger(__name__)
 
 SNAPSHOT_MASK = "***"
 
@@ -311,7 +323,9 @@ def bare_userinfo(token: str) -> tuple[str, str] | None:
     password begins with ``/`` and holds a backslash (``u:/p\\x@h``, with or
     without a port) is written as a drive and a path are (``C:/Users\\x``)
     and is kept; so is any password holding a backslash before a host with no
-    port or path (``u:p\\x@h``), which reads as such a mail address does.
+    port or path (``u:p\\x@h``), which reads as such a mail address does. A
+    password the platform holds is masked in each of them by value
+    (:func:`masked_values`).
     """
     head, at, tail = token.rpartition("@")
     if not at or not head or not tail:
@@ -492,19 +506,322 @@ def masked_text(text: str, mask: str = SNAPSHOT_MASK) -> str:
     """``text`` with every URL in it masked: userinfo, query values and fragment.
 
     An address written with no scheme has its userinfo masked too
-    (:func:`masked_bare_userinfo`).
+    (:func:`masked_bare_userinfo`), and then every secret value this process
+    holds, in each of its encoded forms (:func:`masked_values`): the
+    structural rules run first, so what they mask is masked as before, and
+    the values only add masks.
     """
     text = masked_bare_userinfo(text, mask)
-    if "://" not in text:
+    if "://" in text:
+        out: list[str] = []
+        last = 0
+        for start, end in url_spans(text):
+            out.append(text[last:start])
+            out.append(_masked_one_url(text[start:end], mask))
+            last = end
+        out.append(text[last:])
+        text = "".join(out)
+    return masked_values(text, mask)
+
+
+# Masking by value (T-482). The structural rules above guess a credential by
+# where it stands; a value the platform holds is masked wherever it stands.
+#
+# A value shorter than this is not masked by value: masked in free text, a
+# short one would take every ordinary word it spells out of every message
+# ("server", "python3"). Eight is the event scrub's own floor
+# (``pipeline.events.CONFIGURED_SECRET_FLOOR``), so a value one reader hides
+# by value the other hides too, and the shortest password a common policy
+# accepts. A shorter value is still masked by the structural rules (its key's
+# name, its flag, its place in a URL or an env map).
+VALUE_FLOOR = 8
+# The values to mask, by the scope that registered them (``app``, ``process``,
+# ``job``, ``store``, ``core``): a scope registered again replaces what it
+# held, so a secret no longer configured stops being masked.
+_VALUE_SCOPES: dict[str, frozenset[str]] = {}
+# Their union, kept as one set so each masking call hashes nothing new: the
+# compiled pattern is cached by it (:func:`_value_pattern`).
+_HELD: frozenset[str] = frozenset()
+
+
+def _union_changed() -> None:
+    global _HELD
+    held = frozenset().union(*_VALUE_SCOPES.values())
+    if held != _HELD:
+        _HELD = held
+
+
+def remember_values(values: Any, *, scope: str) -> None:
+    """Set the values shown text is masked by under ``scope``; only a count is ever logged."""
+    texts = frozenset(text for text in (str(item or "") for item in values) if text.strip())
+    _VALUE_SCOPES[scope] = texts
+    _union_changed()
+    logger.debug("Shown text is masked by %d value(s) under %s.", len(texts), scope)
+
+
+def remember_settings_values(*sources: Any, scope: str) -> None:
+    """Register every secret value ``sources`` hold (``settings_catalog.shown_secret_values``).
+
+    Called where settings are read in force: an app built, a worker started,
+    a job's settings, the store read or saved, the console's cached core
+    settings rebuilt. Never raises and never names a value: a failure leaves
+    the scope as it was, and the structural rules still run.
+    """
+    try:
+        from maljan.core.settings_catalog import shown_secret_values
+
+        remember_values(shown_secret_values(*sources), scope=scope)
+    except Exception as exc:  # noqa: BLE001 — the structural rules still run
+        logger.warning("The values to mask under %s were not read (%s).", scope, type(exc).__name__)
+
+
+def forget_values(scope: str | None = None) -> None:
+    """Forget the values of ``scope``, or of every scope."""
+    if scope is None:
+        _VALUE_SCOPES.clear()
+    else:
+        _VALUE_SCOPES.pop(scope, None)
+    _union_changed()
+
+
+def held_values() -> frozenset[str]:
+    """Every value registered under any scope."""
+    return _HELD
+
+
+def _base64_cores(raw: bytes, altchars: bytes | None) -> list[str]:
+    """``raw`` as base64 encodes it at each of the three offsets it may start at in longer data.
+
+    Only the characters ``raw`` alone decides are kept: the first one or two
+    of an offset share bits with the bytes before it, the last one with the
+    bytes after it. So ``Basic <base64 of user:pw>`` is found from ``pw``
+    alone. At offset 0 the whole encoding, with and without its padding, too.
+    """
+    whole = base64.b64encode(raw, altchars).decode("ascii")
+    cores = [whole, whole.rstrip("=")]
+    for offset, skip in ((0, 0), (1, 2), (2, 3)):
+        encoded = base64.b64encode(b"\0" * offset + raw, altchars).decode("ascii").rstrip("=")
+        end = len(encoded) - (1 if (offset + len(raw)) % 3 else 0)
+        cores.append(encoded[skip:end])
+    return cores
+
+
+def encoded_forms(value: str) -> frozenset[str]:
+    """``value`` as shown text may carry it, each form at least :data:`VALUE_FLOOR` long.
+
+    As written; URL-encoded (``quote`` with and without ``/`` kept,
+    ``quote_plus``, each with upper- and lower-case escapes); JSON-escaped,
+    once and twice (JSON text inside a JSON string), with non-ASCII escaped
+    or kept; base64, standard and URL-safe, with and without padding, at each
+    offset it may start at in longer data (:func:`_base64_cores`).
+    """
+    forms = {value}
+    for encoded in (quote(value, safe=""), quote(value), quote_plus(value)):
+        forms.add(encoded)
+        forms.add(re.sub(r"%[0-9A-F]{2}", lambda escape: escape.group().lower(), encoded))
+    for ascii_only in (True, False):
+        once = json.dumps(value, ensure_ascii=ascii_only)[1:-1]
+        forms.add(once)
+        forms.add(json.dumps(once, ensure_ascii=ascii_only)[1:-1])
+    raw = value.encode("utf-8")
+    for altchars in (None, b"-_"):
+        forms.update(_base64_cores(raw, altchars))
+    return frozenset(form for form in forms if len(form) >= VALUE_FLOOR)
+
+
+# How deep the trie pattern may nest its groups: the regex compiler recurses
+# once per level, and a set nested deeper is read by :class:`_Automaton`.
+_MAX_NESTING = 150
+
+
+class _TooDeep(Exception):
+    """The trie pattern would nest deeper than :data:`_MAX_NESTING`."""
+
+
+def _trie_pattern(literals: list[str]) -> str:
+    """One pattern matching each of ``literals``, the longest one where several start alike.
+
+    At each position the regex engine follows one branch per character (the
+    branches of a node begin with distinct characters), so a match costs
+    time bounded by the longest literal, however many there are; a node that
+    ends a literal makes the rest optional, greedy, so the longest literal
+    starting there wins. Runs of single children are one escaped literal, so
+    the nesting is only as deep as the branch points along a literal; deeper
+    than :data:`_MAX_NESTING` raises :class:`_TooDeep`.
+    """
+    end = object()
+    root: dict[Any, Any] = {}
+    for literal in literals:
+        node = root
+        for char in literal:
+            node = node.setdefault(char, {})
+        node[end] = True
+
+    def emit(node: dict[Any, Any], depth: int) -> str:
+        if depth > _MAX_NESTING:
+            raise _TooDeep
+        parts = []
+        for char in sorted(key for key in node if key is not end):
+            run, child = char, node[char]
+            while end not in child and len(child) == 1:
+                (following,) = child
+                run, child = run + following, child[following]
+            parts.append(re.escape(run) + emit(child, depth + 1))
+        if not parts:
+            return ""
+        body = parts[0] if len(parts) == 1 else "(?:" + "|".join(parts) + ")"
+        return f"(?:{body})?" if end in node else body
+
+    return emit(root, 0)
+
+
+class _Automaton:
+    """Every literal of a set found in one pass over a text, however the set nests.
+
+    The classic automaton of a trie with failure links: each character of the
+    text moves it once, and each failure link it follows was paid for by a
+    character before, so a text costs time linear in its length whatever the
+    set. Each state keeps the length of the longest literal ending there.
+    """
+
+    def __init__(self, literals: list[str]) -> None:
+        self._goto: list[dict[str, int]] = [{}]
+        longest = [0]
+        for literal in literals:
+            state = 0
+            for char in literal:
+                following = self._goto[state].get(char)
+                if following is None:
+                    following = len(self._goto)
+                    self._goto[state][char] = following
+                    self._goto.append({})
+                    longest.append(0)
+                state = following
+            longest[state] = max(longest[state], len(literal))
+        self._fail = [0] * len(self._goto)
+        queue = list(self._goto[0].values())
+        for state in queue:  # breadth first: a state's failure is settled before its children
+            for char, following in self._goto[state].items():
+                back = self._fail[state]
+                while back and char not in self._goto[back]:
+                    back = self._fail[back]
+                target = self._goto[back].get(char, 0)
+                self._fail[following] = target if target != following else 0
+                longest[following] = max(longest[following], longest[self._fail[following]])
+                queue.append(following)
+        self._longest = longest
+
+    def ends(self, text: str) -> list[tuple[int, int]]:
+        """``(start, end)`` of the longest literal ending at each position where one ends."""
+        goto, fail, longest = self._goto, self._fail, self._longest
+        found = []
+        state = 0
+        for index, char in enumerate(text):
+            while state and char not in goto[state]:
+                state = fail[state]
+            state = goto[state].get(char, 0)
+            if longest[state]:
+                found.append((index + 1 - longest[state], index + 1))
+        return found
+
+
+@lru_cache(maxsize=16)
+def _value_matcher(values: frozenset[str]) -> re.Pattern[str] | _Automaton | None:
+    """What finds every encoded form of ``values`` at least :data:`VALUE_FLOOR` long.
+
+    A trie pattern (:func:`_trie_pattern`), the regex engine's own speed; a
+    set nested deeper than it compiles (hundreds of values each one longer
+    than the last) is read by :class:`_Automaton`, one pass in Python. Cached
+    by the set, so a scope registered again with the same values builds
+    nothing.
+    """
+    forms = sorted(
+        {form for value in values if len(value) >= VALUE_FLOOR for form in encoded_forms(value)},
+        key=lambda form: (-len(form), form),
+    )
+    if not forms:
+        return None
+    try:
+        return re.compile(_trie_pattern(forms))
+    except (_TooDeep, RecursionError, re.error, OverflowError):
+        return _Automaton(forms)
+
+
+def _merged(spans: list[tuple[int, int]]) -> list[list[int]]:
+    """``spans`` (ordered by start or by end) merged where they overlap or touch."""
+    out: list[list[int]] = []
+    for start, stop in spans:
+        while out and start <= out[-1][1] and stop >= out[-1][0]:
+            held = out.pop()
+            start, stop = min(start, held[0]), max(stop, held[1])
+        out.append([start, stop])
+    return out
+
+
+def _value_spans(matcher: re.Pattern[str] | _Automaton, text: str) -> list[list[int]]:
+    """Every run of ``text`` an encoded form covers, overlapping ones merged, in order."""
+    if isinstance(matcher, _Automaton):
+        return _merged(matcher.ends(text))
+    found_spans = []
+    found = matcher.search(text)
+    while found is not None:
+        found_spans.append(found.span())
+        found = matcher.search(text, found.start() + 1)
+    return _merged(found_spans)
+
+
+def masked_values(text: str, mask: str = SNAPSHOT_MASK, values: Any = None) -> str:
+    """``text`` with every occurrence of each secret value, in each encoded form, masked.
+
+    ``values`` defaults to what this process holds (:func:`held_values`).
+    A value shorter than :data:`VALUE_FLOOR` is not masked by value.
+    Overlapping occurrences are masked as one run from the first start to
+    the last end, so no part of a value another overlaps is left, and each
+    run is replaced by one mask. Each position of ``text`` is tried as a
+    start once, at a cost bounded by the longest form (or, for a deeply
+    nested set, each character read once): linear in ``text``.
+    """
+    matcher = _value_matcher(held_values() if values is None else frozenset(values))
+    if matcher is None or not text:
+        return text
+    spans = _value_spans(matcher, text)
+    if not spans:
         return text
     out: list[str] = []
     last = 0
-    for start, end in url_spans(text):
+    for start, stop in spans:
         out.append(text[last:start])
-        out.append(_masked_one_url(text[start:end], mask))
-        last = end
+        out.append(mask)
+        last = stop
     out.append(text[last:])
     return "".join(out)
+
+
+def masked_values_in(value: Any, mask: str = SNAPSHOT_MASK, values: Any = None) -> Any:
+    """``value`` copied with :func:`masked_values` applied to every string in it, at any depth."""
+    held = held_values() if values is None else frozenset(values)
+    if isinstance(value, str):
+        return masked_values(value, mask, held)
+    if not isinstance(value, _NESTED):
+        return value
+    holder: list[Any] = [None]
+    stack: list[tuple[Any, Any, Any]] = [(value, holder, 0)]
+    while stack:
+        source, target, slot = stack.pop()
+        if isinstance(source, Mapping):
+            out: Any = {}
+            items: Any = source.items()
+        else:
+            out = [None] * len(source)
+            items = enumerate(source)
+        target[slot] = out
+        for key, item in items:
+            if isinstance(item, _NESTED):
+                out[key] = None
+                stack.append((item, out, key))
+            else:
+                out[key] = masked_values(item, mask, held) if isinstance(item, str) else item
+    return holder[0]
 
 
 def _flag_name(arg: str) -> str:
