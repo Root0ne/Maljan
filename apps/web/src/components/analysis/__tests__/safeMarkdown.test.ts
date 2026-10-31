@@ -5,6 +5,7 @@ import SafeMarkdown from "../SafeMarkdown";
 import {
   MAX_MARKDOWN_CHARS,
   inlineText,
+  keepBackslashes,
   parseMarkdown,
   plainText,
   safeHref,
@@ -255,5 +256,24 @@ describe("no input exhausts the stack or the clock", () => {
     expect(markup.startsWith("<pre")).toBe(true);
     expect(markup).not.toContain("<strong");
     expect(subsectionTitles(markdown)).toEqual([]);
+  });
+});
+
+describe("a model's backslashes", () => {
+  const draw = (markdown: string) => plainText(parseMarkdown(keepBackslashes(markdown)));
+
+  it("survive the Markdown reading in prose: a format string, a UNC path, a path with a star", () => {
+    const literal = String.raw`init -zzzz="%s\%s" from \\server\share and C:\Users\*\AppData`;
+    expect(draw(literal)).toContain(literal);
+  });
+
+  it("are left alone in a code span and a fenced block, which keep them already", () => {
+    expect(keepBackslashes(String.raw`a \% b ` + "`c \\% d`")).toBe(String.raw`a \\\% b ` + "`c \\% d`");
+    const fenced = ["```", String.raw`x\%y`, "```", String.raw`p\%q`].join("\n");
+    expect(keepBackslashes(fenced)).toBe(["```", String.raw`x\%y`, "```", String.raw`p\\\%q`].join("\n"));
+  });
+
+  it("do not touch Markdown that has none", () => {
+    expect(keepBackslashes("- **bold** and _em_")).toBe("- **bold** and _em_");
   });
 });

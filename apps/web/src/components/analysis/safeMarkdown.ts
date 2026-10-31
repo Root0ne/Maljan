@@ -254,3 +254,43 @@ export function subsectionTitles(markdown: string): string[] {
   }
   return titles;
 }
+
+/** A backslash, and the ASCII punctuation after it that CommonMark would read
+ *  as escaped: a run of `_` or `*` whole (`\__init__`), else one character. */
+const BACKSLASH = /\\(_+|\*+|[!-/:-@[-`{-~])?/g;
+
+/**
+ * A model's Markdown with every backslash it wrote kept as a backslash.
+ *
+ * An analyst quotes Windows paths and format strings (`%s\%s`,
+ * `\\server\share`, `C:\Users\*\AppData`) in prose it otherwise writes as
+ * Markdown, and CommonMark reads a backslash before punctuation as an escape
+ * and drops it. Outside a code span or a fenced block each backslash is
+ * written as an escaped backslash, and the punctuation after it stays
+ * escaped, so the path reads as written and its `*` or `_` opens no
+ * emphasis. The cost is the rare escape a model meant (`\*`), which then
+ * shows its backslash.
+ */
+export function keepBackslashes(markdown: string): string {
+  let fence: string | null = null;
+  return markdown
+    .split("\n")
+    .map((line) => {
+      const opened = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+      if (opened) {
+        if (fence === null) fence = opened[1][0];
+        else if (opened[1][0] === fence) fence = null;
+        return line;
+      }
+      if (fence !== null) return line;
+      return line
+        .split(/(`+[^`]*`+)/)
+        .map((part, i) =>
+          i % 2 === 1
+            ? part
+            : part.replace(BACKSLASH, (_, after?: string) => `\\\\${(after ?? "").replace(/./g, "\\$&")}`),
+        )
+        .join("");
+    })
+    .join("\n");
+}
