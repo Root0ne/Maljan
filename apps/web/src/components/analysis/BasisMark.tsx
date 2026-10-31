@@ -9,13 +9,17 @@ import type { Basis } from "./overview";
  */
 const GLYPH: Record<Basis, string> = {
   seen: "bg-status-blue border-status-blue",
-  partly: "border-status-blue bg-[linear-gradient(90deg,var(--status-blue)_50%,transparent_50%)]",
+  partly: "border-status-blue bg-transparent",
   "not-seen": "border-text-muted bg-transparent",
   unstated: "border-dashed border-text-muted bg-transparent",
 };
 
 export function BasisGlyph({ basis }: { basis: Basis }) {
-  return <span aria-hidden="true" className={`inline-block h-2 w-2 shrink-0 rounded-full border ${GLYPH[basis]}`} />;
+  return (
+    <span aria-hidden="true" className={`relative inline-block h-2 w-2 shrink-0 overflow-hidden rounded-full border ${GLYPH[basis]}`}>
+      {basis === "partly" && <span className="absolute inset-y-0 left-0 w-1/2 bg-status-blue" />}
+    </span>
+  );
 }
 
 export default function BasisMark({
