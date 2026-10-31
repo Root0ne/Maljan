@@ -1,12 +1,14 @@
 "use client";
 
+import Link from "next/link";
+
+import { useReport } from "./AnalysisContext";
 import EvidenceChips from "./EvidenceChips";
 import {
   REPORT_MODEL_VOICE,
   c2Channels,
   channelEvidence,
   commands,
-  configFindings,
   configuration,
   defangEndpoint,
   executionFlow,
@@ -20,24 +22,25 @@ import {
 import type { MalwareReport } from "@/types/malware-report";
 
 /**
- * The report model's technical analysis: the execution flow, the
- * configuration it recovered, the host identifiers it read, the commands the
- * sample accepts and its C2 channels — the exported report's §4, §5.3, the
- * model's table in §9, §5.6 and §5.7, in that order.
+ * The report model's technical analysis: the execution flow, the host
+ * identifiers it read, the commands the sample accepts and its C2 channels —
+ * the exported report's §4, the model's table in §9, §5.6 and §5.7, in that
+ * order. The configuration it recovered (§5.3) is drawn once, under Static &
+ * code, and this panel links there.
  *
  * Every block is labelled with its voice. The words are the report model's and
  * are printed as written; a step's mark (observed or assessed) is the model's
  * own; a row that cites nothing says so. The platform's unresolved finding on
- * a step or a configuration item is printed beside it, as the exported report
- * prints it, and a channel's endpoints are defanged as they are there.
+ * a step is printed beside it, as the exported report prints it, and a
+ * channel's endpoints are defanged as they are there.
  */
 export default function TechnicalAnalysisPanel({ report }: { report: MalwareReport }) {
+  const { jobId } = useReport();
   if (!hasTechnicalAnalysis(report)) return null;
   const steps = executionFlow(report);
   const config = configuration(report);
   const cmds = commands(report);
   const channels = c2Channels(report);
-  const uncitedConfig = configFindings(report);
   const identifiers = hostIdentifiers(report);
   const uncitedIdentifiers = identifierFindings(report);
   const blocks = technicalSubsections(report);
@@ -45,7 +48,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border flex items-baseline gap-3">
-        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        <h2 className="text-sm font-semibold text-text-primary">
           Technical analysis
         </h2>
         <span className="text-[11px] italic text-text-muted">{REPORT_MODEL_VOICE}</span>
@@ -53,7 +56,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
       <div className="p-4 space-y-5">
         {steps.length > 0 && (
           <section>
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            <h3 className="text-xs text-text-muted mb-1.5">
               Execution flow
             </h3>
             <ol className="space-y-1.5">
@@ -72,48 +75,20 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
           </section>
         )}
 
+        {/* Each fact once: the configuration's table is Static & code's, where
+            each value has a copy; this says where it is. */}
         {config.length > 0 && (
-          <section>
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
-              Configuration
-            </h3>
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-text-muted">
-                  <th className="py-1 pr-3 font-medium">Key</th>
-                  <th className="py-1 pr-3 font-medium">Value</th>
-                  <th className="py-1 pr-3 font-medium">How obtained</th>
-                  <th className="py-1 font-medium">Evidence</th>
-                </tr>
-              </thead>
-              <tbody>
-                {config.map((item, i) => (
-                  <tr key={`${item.key}-${i}`} className="border-t border-border align-top">
-                    <td className="py-1 pr-3 text-text-primary">{item.key}</td>
-                    <td className="py-1 pr-3 font-mono break-all text-text-secondary">
-                      {item.value}
-                    </td>
-                    <td className="py-1 pr-3 text-text-muted">
-                      {item.how_obtained}
-                      <Unresolved
-                        note={
-                          uncitedConfig.has(i + 1) ? "unresolved: report.configuration_uncited" : ""
-                        }
-                      />
-                    </td>
-                    <td className="py-1">
-                      <Cited ids={item.evidence_refs} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
+          <p className="text-xs text-text-secondary">
+            Configuration: see{" "}
+            <Link href={`/analysis/${jobId}/static#decoded`} className="text-accent-strong hover:underline">
+              Static &amp; code › Decoded strings and configuration
+            </Link>
+          </p>
         )}
 
         {identifiers.length > 0 && (
           <section>
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            <h3 className="text-xs text-text-muted mb-1.5">
               Host identifiers
             </h3>
             <table className="w-full text-xs">
@@ -157,7 +132,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
 
         {cmds.length > 0 && (
           <section>
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            <h3 className="text-xs text-text-muted mb-1.5">
               Commands
             </h3>
             <table className="w-full text-xs">
@@ -187,7 +162,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
 
         {channels.length > 0 && (
           <section>
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            <h3 className="text-xs text-text-muted mb-1.5">
               C2 channels
             </h3>
             <ul className="space-y-2">
@@ -217,7 +192,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
             shadow-copy commands, the encryption scheme and the ransom note. */}
         {blocks.map((block) => (
           <section key={block.key}>
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            <h3 className="text-xs text-text-muted mb-1.5">
               {block.title}
             </h3>
             {block.body && (

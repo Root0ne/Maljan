@@ -3,14 +3,14 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 
-import { useReport } from "@/components/analysis/AnalysisContext";
+import CopyButton from "@/components/ui/CopyButton";
+import Section from "@/components/ui/Section";
 import ShowMoreRows from "@/components/ui/ShowMoreRows";
-import { ROWS_PER_STEP, visibleRows } from "@/lib/pagedRows";
-import ReportAbsent from "@/components/analysis/ReportAbsent";
-import { reportAbsence } from "@/components/analysis/reportAbsence";
-import { entropyClass, formatBytes } from "@/lib/report-utils";
 import Th from "@/components/ui/Th";
+import VerticalTabs from "@/components/ui/VerticalTabs";
+import { entropyClass, formatBytes } from "@/lib/report-utils";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
+import EvidenceChips from "@/components/analysis/EvidenceChips";
 import {
   binarySectionKeys,
   importContainerLabel,
@@ -19,535 +19,486 @@ import {
   sectionsForTab,
 } from "@/components/analysis/reportSections";
 import { SIGMA_SECTION, YARA_SECTION } from "@/components/analysis/ruleMatches";
+import {
+  STATIC_ROWS_STEP,
+  STRUCTURE_TABS,
+  filterStrings,
+  staticSlots,
+  stringFacets,
+  type StructureTab,
+} from "@/components/analysis/staticView";
+import { configFindings } from "@/components/analysis/reportProse";
 import { fileTypeLabel } from "@/types/malware-report";
-import type { StringIOC, StringIOCKind } from "@/types/malware-report";
+import type { ReportDetailDTO } from "@/lib/api";
+import type { StringIOCKind } from "@/types/malware-report";
 
-/* Ordered by what an analyst reaches for first, not alphabetically. `secret`
- * and `crypto_wallet` sit high because a leaked credential is the one finding
- * that changes what someone does in the next five minutes. */
-const STRING_KINDS: (StringIOCKind | "all")[] = [
-  "all",
-  "secret",
-  "crypto_wallet",
-  "url",
-  "domain",
-  "ip",
-  "registry",
-  "path",
-  "mutex",
-  "email",
-  "command",
-  "other",
-];
-
-export default function StaticTab() {
-  const { report, job, loading, reportError } = useReport();
+/**
+ * What reading the file without running it showed: its structure (sections,
+ * imports, exports and resources, one at a time), the strings it carries,
+ * the configuration recovered from it, and the functions the analysis
+ * examined. The sections a tool wrote lead each place; the extractor's typed
+ * table draws where no section already says the same thing.
+ */
+export default function StaticContent({ report }: { report: ReportDetailDTO }) {
+  const [tab, setTab] = useState<StructureTab>("sections");
   const [stringKind, setStringKind] = useState<StringIOCKind | "all">("all");
-  /* How many rows each long table draws; every row stays reachable
-   * (`lib/pagedRows`). */
+  const [query, setQuery] = useState("");
+  /* How many rows each table draws; every row stays reachable. */
   const [shown, setShown] = useState<Record<string, number>>({});
-  const shownOf = (table: string) => shown[table] ?? ROWS_PER_STEP;
-  const show = (table: string) => (count: number) =>
-    setShown((current) => ({ ...current, [table]: count }));
+  const shownOf = (t: string) => shown[t] ?? STATIC_ROWS_STEP;
+  const show = (t: string) => (n: number) => setShown((s) => ({ ...s, [t]: n }));
 
-  const staticData = report?.malware_report?.static;
-  const fileType = report?.malware_report?.identity?.file_type;
-  const sectionsLabel = fileType ? `${fileTypeLabel(fileType)} Sections` : "Sections";
-  // The sections the tools produced lead the page; the extractor's typed
-  // tables draw underneath them, and only where a section has not already
-  // said the same thing.
-  const reportSections = report?.malware_report?.sections;
-  const evidenceSections = sectionsForTab(reportSections, "static", report?.section_tabs);
-  /* The YARA and Sigma rules that fired are DETECTION's, where each Sigma
-   * rule's level sits on the severity ladder. This page points there rather
-   * than drawing the same table a second time. */
-  const rulesFired =
-    hasSection(reportSections, YARA_SECTION) || hasSection(reportSections, SIGMA_SECTION);
-  const rulesLink = rulesFired && report?.job_id ? (
-    <p className="text-xs text-text-secondary" data-rules-moved>
-      The YARA and Sigma rules that fired on this sample are on{" "}
-      <Link href={`/analysis/${report.job_id}/indicators#detection`} className="text-accent-strong hover:underline">
-        Indicators &amp; detection
-      </Link>
-      .
-    </p>
-  ) : null;
-  const showsExtractedSections = !isCoveredBySection(
-    reportSections,
-    binarySectionKeys("sections")
-  );
+  const mr = report.malware_report;
+  const staticData = mr?.static ?? null;
+  const fileType = mr?.identity?.file_type;
+  const reportSections = mr?.sections;
+  const slots = staticSlots(sectionsForTab(reportSections, "static", report.section_tabs));
+  /* The YARA and Sigma rules that fired are on Indicators & detection, where
+   * each Sigma rule's level sits on the severity ladder. This page points
+   * there rather than drawing the same table a second time. */
+  const rulesFired = hasSection(reportSections, YARA_SECTION) || hasSection(reportSections, SIGMA_SECTION);
+  const showsExtractedSections = !isCoveredBySection(reportSections, binarySectionKeys("sections"));
   const showsImports = !isCoveredBySection(reportSections, binarySectionKeys("imports"));
   const showsExports = !isCoveredBySection(reportSections, binarySectionKeys("exports"));
-  const showsStrings = !isCoveredBySection(reportSections, ["strings"]);
   const importContainer = importContainerLabel(fileType);
 
-  const imports = useMemo(() => staticData?.imports ?? [], [staticData]);
-
-  const carvedPayloads = useMemo(
-    () => (staticData?.embedded_resources ?? []).filter((r) => r.carved),
-    [staticData],
-  );
-  const packerMatches = useMemo(() => staticData?.packer_matches ?? [], [staticData]);
+  const strings = useMemo(() => staticData?.interesting_strings ?? [], [staticData]);
+  const filteredStrings = useMemo(() => filterStrings(strings, stringKind, query), [strings, stringKind, query]);
+  const facets = useMemo(() => stringFacets(strings), [strings]);
+  const resources = staticData?.embedded_resources ?? [];
+  const carved = resources.filter((r) => r.carved);
   const techniqueHits = useMemo(
-    () =>
-      [...(staticData?.api_technique_hits ?? [])].sort(
-        (a, b) => (b.confidence ?? 0) - (a.confidence ?? 0),
-      ),
+    () => [...(staticData?.api_technique_hits ?? [])].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0)),
     [staticData],
   );
   // A row is a rule, and two rules can name one technique by two mechanisms —
   // so the heading counts techniques and the table draws the rule that tells
-  // the two rows apart. Counting rows called two mechanisms two techniques.
-  const techniqueCount = useMemo(
-    () => new Set(techniqueHits.map((h) => h.technique_id ?? "")).size,
-    [techniqueHits],
-  );
-  const capabilityProfile = useMemo(
-    () =>
-      Object.entries(staticData?.api_capabilities ?? {}).sort((a, b) => b[1] - a[1]),
-    [staticData],
-  );
+  // the two rows apart.
+  const techniqueCount = new Set(techniqueHits.map((h) => h.technique_id ?? "")).size;
+  const capabilityProfile = Object.entries(staticData?.api_capabilities ?? {}).sort((a, b) => b[1] - a[1]);
+  const exportRows = staticData?.export_rows ?? [];
+  const exportTotal = exportRows.length || (staticData?.exports.length ?? 0);
+  const config = mr?.technical_analysis?.configuration ?? [];
+  const uncitedConfig = configFindings(mr);
 
-  const filteredStrings: StringIOC[] = useMemo(() => {
-    if (!staticData) return [];
-    return stringKind === "all"
-      ? staticData.interesting_strings
-      : staticData.interesting_strings.filter((s) => s.kind === stringKind);
-  }, [staticData, stringKind]);
-
-  if (loading) {
-    return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
-  }
-
-  /* No report is not an empty report: say which absence this is rather than
-   * drawing this tab's negative (`reportAbsence`). */
-  const absent = reportAbsence({ report, job, reportError });
-  if (absent) return <ReportAbsent absence={absent} />;
-
-  if (!staticData) {
-    return (
-      <div className="space-y-4">
-        {rulesLink}
-        <ArtifactSections sections={evidenceSections} />
-        <div className="p-8 text-center text-sm text-text-secondary">
-          No format-aware extractor produced a typed static block for this{" "}
-          {fileType ? <code>{fileTypeLabel(fileType)}</code> : "sample"}.{" "}
-          {evidenceSections.length > 0
-            ? "What the tools returned is above."
-            : "No static tool returned anything either."}
-        </div>
-      </div>
-    );
-  }
+  const typedCount: Record<StructureTab, number> = {
+    sections: showsExtractedSections ? (staticData?.sections.length ?? 0) : 0,
+    imports: showsImports ? (staticData?.imports.length ?? 0) : 0,
+    exports: showsExports ? exportTotal : 0,
+    resources: resources.length,
+  };
+  const sectionRows = (t: StructureTab) =>
+    t === "resources" ? 0 : slots.structure[t].reduce((n, s) => n + (s.rows?.length || s.items?.length || 0), 0);
+  const tabCount = (t: StructureTab) => typedCount[t] + sectionRows(t);
+  const structureEmpty = STRUCTURE_TABS.every((t) => tabCount(t.key) === 0) && techniqueHits.length === 0;
+  const structureTitle = fileType ? `${fileTypeLabel(fileType)} details` : "File structure";
 
   return (
     <div className="space-y-4">
-      {rulesLink}
-      <ArtifactSections sections={evidenceSections} />
-
-      {/* Carved payloads lead the page. A nested executable inside a dropper
-        * is the actual malware, and it was invisible here — `embedded_resources`
-        * was in the type and rendered nowhere. */}
-      {carvedPayloads.length > 0 && (
-        <div className="bg-bg-surface border border-status-red/40 rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-status-red uppercase tracking-wider">
-              Carved payloads ({carvedPayloads.length})
-            </h2>
-            <p className="text-[11px] text-text-muted mt-1">
-              Executables found inside the sample — appended past the last section, or
-              embedded in a resource. Scanned by the signature layer separately.
-            </p>
-          </div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <Th>Type</Th>
-                <Th>Location</Th>
-                <Th>Size</Th>
-                <Th>Entropy</Th>
-                <Th>SHA-256</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-light">
-              {carvedPayloads.map((p, i) => (
-                <tr key={i} className="hover:bg-bg-hover">
-                  <td className="px-4 py-2 text-xs font-mono text-status-red">{p.type ?? "-"}</td>
-                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
-                    {p.id ?? "-"}
-                    {p.source && <span className="text-text-muted"> ({p.source})</span>}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-text-secondary">
-                    {typeof p.size === "number" ? formatBytes(p.size) : "-"}
-                  </td>
-                  <td
-                    className={`px-4 py-2 text-xs font-mono ${
-                      typeof p.entropy === "number" ? entropyClass(p.entropy) : "text-text-muted"
-                    }`}
-                  >
-                    {typeof p.entropy === "number" ? p.entropy.toFixed(2) : "-"}
-                  </td>
-                  <td
-                    className="px-4 py-2 text-xs font-mono text-text-muted truncate max-w-[16rem]"
-                    title={p.sha256 ?? ""}
-                  >
-                    {p.sha256 ? `${p.sha256.slice(0, 24)}…` : "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {rulesFired && report.job_id && (
+        <p className="text-xs text-text-secondary" data-rules-moved>
+          The YARA and Sigma rules that fired on this sample are on{" "}
+          <Link href={`/analysis/${report.job_id}/indicators#detection`} className="text-accent-strong hover:underline">
+            Indicators &amp; detection
+          </Link>
+          .
+        </p>
       )}
 
-      {techniqueHits.length > 0 && (
-        <div className="bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              ATT&amp;CK from imports ({techniqueCount})
-            </h2>
-            <p className="text-[11px] text-text-muted mt-1">
-              Derived from the import table alone — no sandbox, no model. This is the
-              audit trail behind the capability matrix. A row is an association, not a
-              finding: the last column is how much ordinary software the same rule
-              fires on, measured over the corpus it names, and it says nothing about
-              how likely this sample is to be benign.
-            </p>
-          </div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <Th>Technique</Th>
-                <Th>Name</Th>
-                <Th>Rule</Th>
-                <Th>Confidence</Th>
-                <Th>Imports</Th>
-                <Th>Benign rate</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-light">
-              {techniqueHits.map((h, i) => (
-                <tr key={i} className="hover:bg-bg-hover">
-                  <td className="px-4 py-2 text-xs font-mono text-accent">
-                    {h.technique_id ?? "-"}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-text-primary">{h.name ?? "-"}</td>
-                  {/* What distinguishes two rules for one technique. A
-                      producer with no rules of its own leaves the cell bare. */}
-                  <td className="px-4 py-2 text-xs text-text-secondary">{h.rule || "-"}</td>
-                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
-                    {typeof h.confidence === "number" ? h.confidence.toFixed(2) : "-"}
-                  </td>
-                  <td className="px-4 py-2 text-xs font-mono text-text-muted">
-                    {(h.matched_apis ?? []).slice(0, 4).join(", ")}
-                    {(h.matched_apis ?? []).length > 4 &&
-                      ` +${(h.matched_apis ?? []).length - 4}`}
-                  </td>
-                  {/* An unmeasured rule says so. A blank cell here would read
-                      as a rule that never fires on anything benign, which is
-                      the opposite of what an absent measurement means. */}
-                  <td className="px-4 py-2 text-xs text-text-secondary">
-                    {h.benign_rate || "not measured"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {/* Carved payloads lead the tab: a nested executable inside a dropper is
+        * the actual malware. The rows are under Resources. */}
+      {carved.length > 0 && (
+        <p className="rounded border border-status-red/40 bg-status-red/5 px-3 py-2 text-xs text-text-primary" role="note">
+          {carved.length} executable{carved.length === 1 ? " was" : "s were"} carved out of the sample — appended past
+          the last section, or embedded in a resource.{" "}
+          <button type="button" onClick={() => setTab("resources")} className="text-accent-strong hover:underline">
+            Show under Resources
+          </button>
+        </p>
       )}
 
-      {(staticData.packer_hint ||
-        staticData.obfuscation_indicators.length > 0 ||
-        packerMatches.length > 0 ||
-        capabilityProfile.length > 0) && (
-        <div className="bg-bg-surface border border-border rounded p-4">
-          <div className="text-[11px] text-text-muted uppercase tracking-wider mb-2">
-            Packer / Obfuscation
-          </div>
-          {/* Ranked matches beat the bare hint: a reader needs to know whether
-            * the detector saw a section name or just a string. */}
-          {packerMatches.length > 0 ? (
-            <div className="space-y-1 mb-2">
-              {packerMatches.map((pm, i) => (
-                <div key={i} className="text-sm text-text-primary">
-                  {pm.name}
-                  {pm.kind && <span className="text-text-muted"> ({pm.kind})</span>}
-                  <span className="text-text-muted text-xs ml-2 font-mono">
-                    {typeof pm.confidence === "number" ? pm.confidence.toFixed(2) : "-"}
-                    {pm.method ? ` · ${pm.method}` : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            staticData.packer_hint && (
-              <div className="text-sm text-text-primary mb-1">
-                <span className="text-text-muted">Packer hint:</span> {staticData.packer_hint}
-              </div>
-            )
-          )}
-          {staticData.pdb_path && (
-            <div className="text-sm text-text-primary mt-1">
-              <span className="text-text-muted">Debug PDB:</span>{" "}
-              <span className="font-mono text-xs break-all">{staticData.pdb_path}</span>
-            </div>
-          )}
-          {capabilityProfile.length > 0 && (
-            <>
-              <div className="flex flex-wrap gap-1.5 mt-2 items-center">
-                {capabilityProfile.map(([cat, count]) => {
-                  const share = (staticData.api_capability_rates ?? {})[cat];
-                  return (
-                    <span
-                      key={cat}
-                      className="text-[11px] px-1.5 py-0.5 rounded bg-bg-hover text-text-secondary font-mono"
-                    >
-                      {cat} ×{count}
-                      {typeof share === "number" && ` (${share.toFixed(1)}%)`}
-                    </span>
-                  );
-                })}
-                {(staticData.api_capabilities_evidence_ids ?? []).length > 0 && (
-                  <span className="text-[11px] text-text-muted font-mono">
-                    from {(staticData.api_capabilities_evidence_ids ?? []).join(", ")}
-                  </span>
-                )}
-              </div>
-              {/* Said once rather than on every chip. A count of imports in a
-                * group is not a fact about the sample until a reader knows how
-                * much ordinary software is in the same group. */}
-              {staticData.api_capability_corpus && (
-                <div className="text-[11px] text-text-muted mt-1.5">
-                  The bracketed share is how much of {staticData.api_capability_corpus} the
-                  category appears on; it says nothing about how likely this sample is to be
-                  benign.
+      <div id="structure" className="scroll-mt-40">
+        <Section title={structureTitle} empty={structureEmpty}>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <VerticalTabs
+              items={STRUCTURE_TABS.map((t) => ({ ...t, count: tabCount(t.key) }))}
+              selected={tab}
+              onSelect={setTab}
+              label={structureTitle}
+              panelId="structure-panel"
+              idPrefix="structure-tab"
+            />
+            <div
+              role="tabpanel"
+              id="structure-panel"
+              aria-labelledby={`structure-tab-${tab}`}
+              className="min-w-0 flex-1 space-y-3"
+            >
+              {tab === "sections" && (
+                <>
+                  <ArtifactSections sections={slots.structure.sections} />
+                  {showsExtractedSections && staticData && staticData.sections.length > 0 && (
+                    <div className="overflow-x-auto rounded border border-border-light">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-border">
+                            <Th>Name</Th>
+                            <Th>VA</Th>
+                            <Th>Virtual size</Th>
+                            <Th>Raw size</Th>
+                            {/* PointerToRawData. A carved payload reports a file
+                                offset; without this column there is nothing to
+                                match it against. */}
+                            <Th>Raw offset</Th>
+                            <Th>Entropy</Th>
+                            <Th>Characteristics</Th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border-light">
+                          {staticData.sections.slice(0, shownOf("sections")).map((s, i) => (
+                            <tr key={`${s.name}-${i}`} className="hover:bg-bg-hover">
+                              <td className="px-4 py-2 text-xs font-mono text-text-primary">
+                                {s.name}
+                                {s.is_suspicious && (
+                                  <span className="ml-2 rounded bg-status-red/10 px-1.5 py-0.5 text-[11px] text-status-red">suspicious</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2 text-xs font-mono text-text-secondary">{s.virtual_address}</td>
+                              <td className="px-4 py-2 text-xs text-text-secondary">{formatBytes(s.virtual_size)}</td>
+                              <td className="px-4 py-2 text-xs text-text-secondary">{formatBytes(s.raw_size)}</td>
+                              <td className="px-4 py-2 text-xs font-mono text-text-secondary">
+                                {typeof s.raw_offset === "number" ? `0x${s.raw_offset.toString(16)}` : "-"}
+                              </td>
+                              <td className={`px-4 py-2 text-xs font-mono ${entropyClass(s.entropy)}`}>{s.entropy.toFixed(3)}</td>
+                              <td className="truncate px-4 py-2 text-xs font-mono text-text-muted" title={s.characteristics}>
+                                {s.characteristics || "-"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <ShowMoreRows shown={Math.min(shownOf("sections"), staticData.sections.length)} total={staticData.sections.length} onShow={show("sections")} step={STATIC_ROWS_STEP} />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {tab === "imports" && (
+                <>
+                  <ArtifactSections sections={slots.structure.imports} />
+                  {showsImports && staticData && staticData.imports.length > 0 && (
+                    <div className="overflow-x-auto rounded border border-border-light">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-border">
+                            <Th>{importContainer}</Th>
+                            <Th>Function</Th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border-light">
+                          {staticData.imports.slice(0, shownOf("imports")).map((row, i) => (
+                            <tr key={i} className="hover:bg-bg-hover">
+                              <td className="px-4 py-2 text-xs font-mono text-text-secondary">{row.dll}</td>
+                              <td className="px-4 py-2 text-xs font-mono text-text-primary">{row.function}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <ShowMoreRows shown={Math.min(shownOf("imports"), staticData.imports.length)} total={staticData.imports.length} onShow={show("imports")} step={STATIC_ROWS_STEP} />
+                    </div>
+                  )}
+                  {techniqueHits.length > 0 && (
+                    <div className="space-y-2">
+                      <h3 className="text-xs font-semibold text-text-secondary">ATT&amp;CK from imports ({techniqueCount})</h3>
+                      <p className="text-[11px] text-text-muted">
+                        Derived from the import table alone — no sandbox, no model. A row is an association, not a
+                        finding: the last column is how much ordinary software the same rule fires on, measured over
+                        the corpus it names, and it says nothing about how likely this sample is to be benign.
+                      </p>
+                      <div className="overflow-x-auto rounded border border-border-light">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-border">
+                              <Th>Technique</Th>
+                              <Th>Name</Th>
+                              <Th>Rule</Th>
+                              <Th>Confidence</Th>
+                              <Th>Imports</Th>
+                              <Th>Benign rate</Th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border-light">
+                            {techniqueHits.slice(0, shownOf("hits")).map((h, i) => (
+                              <tr key={i} className="hover:bg-bg-hover">
+                                <td className="px-4 py-2 text-xs font-mono text-accent">{h.technique_id ?? "-"}</td>
+                                <td className="px-4 py-2 text-xs text-text-primary">{h.name ?? "-"}</td>
+                                <td className="px-4 py-2 text-xs text-text-secondary">{h.rule || "-"}</td>
+                                <td className="px-4 py-2 text-xs font-mono text-text-secondary">
+                                  {typeof h.confidence === "number" ? h.confidence.toFixed(2) : "-"}
+                                </td>
+                                <td className="px-4 py-2 text-xs font-mono text-text-muted">
+                                  {(h.matched_apis ?? []).slice(0, 4).join(", ")}
+                                  {(h.matched_apis ?? []).length > 4 && ` +${(h.matched_apis ?? []).length - 4}`}
+                                </td>
+                                {/* An unmeasured rule says so: a blank cell would read
+                                    as a rule that never fires on anything benign. */}
+                                <td className="px-4 py-2 text-xs text-text-secondary">{h.benign_rate || "not measured"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <ShowMoreRows shown={Math.min(shownOf("hits"), techniqueHits.length)} total={techniqueHits.length} onShow={show("hits")} step={STATIC_ROWS_STEP} />
+                      </div>
+                    </div>
+                  )}
+                  {capabilityProfile.length > 0 && staticData && (
+                    <div className="space-y-1.5">
+                      <h3 className="text-xs font-semibold text-text-secondary">What the imports can do</h3>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {capabilityProfile.map(([cat, count]) => {
+                          const share = (staticData.api_capability_rates ?? {})[cat];
+                          return (
+                            <span key={cat} className="rounded bg-bg-hover px-1.5 py-0.5 font-mono text-[11px] text-text-secondary">
+                              {cat} ×{count}
+                              {typeof share === "number" && ` (${share.toFixed(1)}%)`}
+                            </span>
+                          );
+                        })}
+                        <EvidenceChips ids={staticData.api_capabilities_evidence_ids ?? []} />
+                      </div>
+                      {/* Said once rather than on every chip. */}
+                      {staticData.api_capability_corpus && (
+                        <p className="text-[11px] text-text-muted">
+                          The bracketed share is how much of {staticData.api_capability_corpus} the category appears on;
+                          it says nothing about how likely this sample is to be benign.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {tab === "exports" && (
+                <>
+                  <ArtifactSections sections={slots.structure.exports} />
+                  {showsExports && staticData && exportTotal > 0 && (
+                    <div className="overflow-x-auto rounded border border-border-light">
+                      {/* With the ordinal and the address when the format tool
+                          reported them: several exports sharing one address is
+                          a fact the names alone hide. */}
+                      {exportRows.length > 0 ? (
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-border">
+                              <Th>Name</Th>
+                              <Th>Ordinal</Th>
+                              <Th>RVA</Th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border-light">
+                            {exportRows.slice(0, shownOf("exports")).map((row, i) => (
+                              <tr key={`${row.name}-${i}`} className="hover:bg-bg-hover">
+                                <td className="px-4 py-2 font-mono text-xs text-text-secondary">{row.name || "(unnamed)"}</td>
+                                <td className="px-4 py-2 font-mono text-xs text-text-muted">{row.ordinal ?? "-"}</td>
+                                <td className="px-4 py-2 font-mono text-xs text-text-muted">{row.rva ?? "-"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <div className="flex flex-wrap gap-1 p-3">
+                          {/* Two exports can share a name (forwarders, ordinals):
+                              the key is the position, so neither is dropped. */}
+                          {staticData.exports.slice(0, shownOf("exports")).map((e, i) => (
+                            <span key={`${e}-${i}`} className="rounded bg-bg-active px-1.5 py-0.5 font-mono text-[11px] text-text-secondary">
+                              {e}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <ShowMoreRows shown={Math.min(shownOf("exports"), exportTotal)} total={exportTotal} onShow={show("exports")} step={STATIC_ROWS_STEP} />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {tab === "resources" && resources.length > 0 && (
+                <div className="overflow-x-auto rounded border border-border-light">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <Th>Type</Th>
+                        <Th>Location</Th>
+                        <Th>Size</Th>
+                        <Th>Entropy</Th>
+                        <Th>SHA-256</Th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border-light">
+                      {resources.slice(0, shownOf("resources")).map((p, i) => (
+                        <tr key={i} className="hover:bg-bg-hover">
+                          <td className={`px-4 py-2 text-xs font-mono ${p.carved ? "text-status-red" : "text-text-secondary"}`}>
+                            {p.type ?? "-"}
+                            {p.carved && <span className="ml-2 rounded bg-status-red/10 px-1.5 py-0.5 font-sans text-[11px]">carved</span>}
+                          </td>
+                          <td className="px-4 py-2 text-xs font-mono text-text-secondary">
+                            {p.id ?? (typeof p.offset === "number" ? `0x${p.offset.toString(16)}` : "-")}
+                            {p.source && <span className="text-text-muted"> ({p.source})</span>}
+                          </td>
+                          <td className="px-4 py-2 text-xs text-text-secondary">{typeof p.size === "number" ? formatBytes(p.size) : "-"}</td>
+                          <td className={`px-4 py-2 text-xs font-mono ${typeof p.entropy === "number" ? entropyClass(p.entropy) : "text-text-muted"}`}>
+                            {typeof p.entropy === "number" ? p.entropy.toFixed(2) : "-"}
+                          </td>
+                          <td className="max-w-[16rem] truncate px-4 py-2 text-xs font-mono text-text-muted" title={p.sha256 ?? ""}>
+                            {p.sha256 ? `${p.sha256.slice(0, 24)}…` : "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <ShowMoreRows shown={Math.min(shownOf("resources"), resources.length)} total={resources.length} onShow={show("resources")} step={STATIC_ROWS_STEP} />
                 </div>
               )}
-            </>
-          )}
-          {staticData.obfuscation_indicators.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-1">
-              {staticData.obfuscation_indicators.map((ind, i) => (
-                <span
-                  key={`${ind}-${i}`}
-                  className="text-[11px] px-1.5 py-0.5 rounded bg-status-orange/10 text-status-orange"
-                >
-                  {ind}
-                </span>
-              ))}
+
+              {tabCount(tab) === 0 && !(tab === "imports" && (techniqueHits.length > 0 || capabilityProfile.length > 0)) && (
+                <p className="text-xs text-text-muted">Not found</p>
+              )}
             </div>
-          )}
-        </div>
-      )}
-
-      {showsExtractedSections && staticData.sections.length > 0 && (
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            {sectionsLabel} ({staticData.sections.length})
-          </h2>
-        </div>
-        <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <Th>Name</Th>
-                <Th>VA</Th>
-                <Th>Virtual Size</Th>
-                <Th>Raw Size</Th>
-                {/* PointerToRawData. The carved-payload table above reports a
-                    file offset; without this column there is nothing on the
-                    page to match it against. */}
-                <Th>Raw Offset</Th>
-                <Th>Entropy</Th>
-                <Th>Characteristics</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-light">
-              {visibleRows(staticData.sections, shownOf("sections")).visible.map((s, i) => (
-                <tr key={`${s.name}-${i}`} className="hover:bg-bg-hover">
-                  <td className="px-4 py-2 text-xs font-mono text-text-primary">
-                    {s.name}
-                    {s.is_suspicious && (
-                      <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded bg-status-red/10 text-status-red">
-                        SUSP
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
-                    {s.virtual_address}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-text-secondary">
-                    {formatBytes(s.virtual_size)}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-text-secondary">
-                    {formatBytes(s.raw_size)}
-                  </td>
-                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">
-                    {typeof s.raw_offset === "number"
-                      ? `0x${s.raw_offset.toString(16)}`
-                      : "-"}
-                  </td>
-                  <td className={`px-4 py-2 text-xs font-mono ${entropyClass(s.entropy)}`}>
-                    {s.entropy.toFixed(3)}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-text-muted font-mono truncate" title={s.characteristics}>
-                    {s.characteristics || "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        <ShowMoreRows
-          shown={Math.min(shownOf("sections"), staticData.sections.length)}
-          total={staticData.sections.length}
-          onShow={show("sections")}
-        />
-      </div>
-      )}
-
-      {showsImports && imports.length > 0 && (
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Imports ({imports.length})
-          </h2>
-        </div>
-        <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <Th>{importContainer}</Th>
-                <Th>Function</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-light">
-              {visibleRows(imports, shownOf("imports")).visible.map((row, i) => (
-                <tr key={i} className="hover:bg-bg-hover">
-                  <td className="px-4 py-2 text-xs font-mono text-text-secondary">{row.dll}</td>
-                  <td className="px-4 py-2 text-xs font-mono text-text-primary">{row.function}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        <ShowMoreRows
-          shown={Math.min(shownOf("imports"), imports.length)}
-          total={imports.length}
-          onShow={show("imports")}
-        />
-      </div>
-      )}
-
-      {showsStrings && staticData.interesting_strings.length > 0 && (
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Interesting Strings ({filteredStrings.length})
-          </h2>
-          <div className="flex flex-wrap gap-1">
-            {STRING_KINDS.map((k) => (
-              <button
-                key={k}
-                onClick={() => setStringKind(k)}
-                className={`text-[11px] uppercase tracking-wider px-2 py-0.5 rounded border ${
-                  stringKind === k
-                    ? "border-accent text-accent"
-                    : "border-border text-text-secondary hover:text-text-primary"
-                }`}
-              >
-                {k}
-              </button>
-            ))}
           </div>
-        </div>
-        {filteredStrings.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">
-            No string of this kind was extracted.
-          </div>
-        ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <Th>Kind</Th>
-                <Th>Value</Th>
-                <Th>Notes</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-light">
-              {visibleRows(filteredStrings, shownOf("strings")).visible.map((s, i) => (
-                <tr key={i} className="hover:bg-bg-hover">
-                  <td className="px-4 py-2 text-[11px] uppercase tracking-wider text-text-muted">
-                    {s.kind}
-                  </td>
-                  <td className="px-4 py-2 text-xs font-mono text-status-blue break-all">
-                    {s.value}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-text-muted">{s.notes || "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        <ShowMoreRows
-          shown={Math.min(shownOf("strings"), filteredStrings.length)}
-          total={filteredStrings.length}
-          onShow={show("strings")}
-        />
+        </Section>
       </div>
-      )}
 
-      {showsExports && staticData.exports.length > 0 && (
-        <div className="bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Exports ({staticData.exports.length})
-            </h2>
+      <div id="strings" className="scroll-mt-40">
+        <Section title="Strings" count={strings.length || null} empty={strings.length === 0 && slots.strings.length === 0}>
+          <div className="space-y-3">
+            {strings.length > 0 && (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="search"
+                    aria-label="Search strings"
+                    placeholder="Search strings"
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      show("strings")(STATIC_ROWS_STEP);
+                    }}
+                    className="h-7 w-56 max-w-full rounded border border-border bg-bg-deep px-2.5 text-xs text-text-primary placeholder:text-text-tertiary focus:border-accent focus:outline-none"
+                  />
+                  <div role="group" aria-label="String kind" className="flex flex-wrap gap-1">
+                    {[{ kind: "all" as const, count: strings.length }, ...facets].map((f) => (
+                      <button
+                        key={f.kind}
+                        type="button"
+                        aria-pressed={stringKind === f.kind}
+                        onClick={() => {
+                          setStringKind(f.kind);
+                          show("strings")(STATIC_ROWS_STEP);
+                        }}
+                        className={`rounded border px-2 py-0.5 text-[11px] ${
+                          stringKind === f.kind ? "border-accent text-accent-strong" : "border-border text-text-secondary hover:text-text-primary"
+                        }`}
+                      >
+                        {f.kind === "all" ? "All" : f.kind.replace(/_/g, " ")} {f.count}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {filteredStrings.length === 0 ? (
+                  <p className="text-xs text-text-muted">No string matches.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded border border-border-light">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <Th>Kind</Th>
+                          <Th>Value</Th>
+                          <Th>Notes</Th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border-light">
+                        {filteredStrings.slice(0, shownOf("strings")).map((s, i) => (
+                          <tr key={i} className="hover:bg-bg-hover">
+                            <td className="whitespace-nowrap px-4 py-2 text-xs text-text-muted">{s.kind.replace(/_/g, " ")}</td>
+                            <td className="px-4 py-2 text-xs font-mono text-status-blue break-all">{s.value}</td>
+                            <td className="px-4 py-2 text-xs text-text-muted">{s.notes || "-"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <ShowMoreRows shown={Math.min(shownOf("strings"), filteredStrings.length)} total={filteredStrings.length} onShow={show("strings")} step={STATIC_ROWS_STEP} />
+                  </div>
+                )}
+              </>
+            )}
+            <ArtifactSections sections={slots.strings} />
           </div>
-          {/* With the ordinal and the address when the format tool reported
-              them: several exports sharing one address is a fact the names
-              alone hide. */}
-          {(staticData.export_rows ?? []).length > 0 ? (
-            <table className="w-full text-xs">
+        </Section>
+      </div>
+
+      <div id="decoded" className="scroll-mt-40">
+        <Section title="Decoded strings and configuration" count={config.length || null} empty={config.length === 0}>
+          <div className="-mx-4 -my-3 overflow-x-auto">
+            <table className="w-full">
               <thead>
-                <tr className="text-left text-text-muted">
-                  <th className="px-4 py-1.5 font-medium">Name</th>
-                  <th className="px-4 py-1.5 font-medium">Ordinal</th>
-                  <th className="px-4 py-1.5 font-medium">RVA</th>
+                <tr className="border-b border-border-light">
+                  <Th>Key</Th>
+                  <Th>Value</Th>
+                  <Th>How it was obtained</Th>
                 </tr>
               </thead>
-              <tbody>
-                {visibleRows(staticData.export_rows ?? [], shownOf("exports")).visible.map((row, i) => (
-                  <tr key={`${row.name}-${i}`} className="border-t border-border">
-                    <td className="px-4 py-1 font-mono text-text-secondary">
-                      {row.name || "(unnamed)"}
+              <tbody className="divide-y divide-border-light">
+                {config.map((item, i) => (
+                  <tr key={`${item.key}-${i}`} className="align-top hover:bg-bg-hover">
+                    <td className="px-4 py-2 text-xs text-text-primary">{item.key}</td>
+                    <td className="px-4 py-2">
+                      <span className="flex items-start gap-2">
+                        <code className="min-w-0 break-all font-mono text-xs text-text-secondary">{item.value}</code>
+                        <CopyButton value={item.value} what={`configuration value ${item.key}`} />
+                      </span>
                     </td>
-                    <td className="px-4 py-1 font-mono text-text-muted">{row.ordinal ?? "-"}</td>
-                    <td className="px-4 py-1 font-mono text-text-muted">{row.rva ?? "-"}</td>
+                    <td className="px-4 py-2 text-xs text-text-muted">
+                      {item.how_obtained}
+                      {item.evidence_refs.length > 0 ? (
+                        <EvidenceChips ids={item.evidence_refs} className="ml-1" />
+                      ) : (
+                        <span className="ml-2 text-[10px] italic">no evidence cited</span>
+                      )}
+                      {/* The report's own check, in the reader's words. */}
+                      {uncitedConfig.has(i + 1) && (
+                        <span className="ml-2 text-[10px] italic text-status-orange">
+                          (the report&apos;s check found no evidence for this item)
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          ) : (
-            <div className="p-4 flex flex-wrap gap-1">
-              {/* Two exports can share a name (forwarders, ordinals): the key
-                  is the position, so neither is dropped by React. */}
-              {visibleRows(staticData.exports, shownOf("exports")).visible.map((e, i) => (
-                <span
-                  key={`${e}-${i}`}
-                  className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-bg-active text-text-secondary"
-                >
-                  {e}
-                </span>
-              ))}
-            </div>
-          )}
-          <ShowMoreRows
-            shown={Math.min(
-              shownOf("exports"),
-              (staticData.export_rows ?? []).length || staticData.exports.length,
-            )}
-            total={(staticData.export_rows ?? []).length || staticData.exports.length}
-            onShow={show("exports")}
-          />
+          </div>
+        </Section>
+      </div>
+
+      <div id="functions" className="scroll-mt-40">
+        <Section title="Functions examined" empty={slots.functions.length === 0}>
+          <div className="space-y-3">
+            <ArtifactSections sections={slots.functions} />
+          </div>
+        </Section>
+      </div>
+
+      {slots.other.length > 0 && (
+        <div id="static-other" className="scroll-mt-40 space-y-3">
+          <h2 className="text-sm font-semibold text-text-primary">Other static findings</h2>
+          <ArtifactSections sections={slots.other} />
         </div>
+      )}
+
+      {!staticData && (
+        <p className="text-xs text-text-muted">
+          No format-aware extractor produced a typed static block for this{" "}
+          {fileType ? <code>{fileTypeLabel(fileType)}</code> : "sample"}.
+        </p>
       )}
     </div>
   );

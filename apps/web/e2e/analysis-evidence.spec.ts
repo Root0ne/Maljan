@@ -130,7 +130,9 @@ test("file identity draws the sections routed to it", async ({
   await expect(page.getByText("0x14c")).toBeVisible();
   // The typed identity block stands down where a header section covers it,
   // and the hashes stay, because no section carries them.
-  await expect(page.getByRole("heading", { name: /Sample Identification/i })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /Identity and metadata/i })).toHaveCount(0);
+  // The section is titled, never labelled with the key it was built under.
+  await expect(page.getByTestId("analysis-content").getByText("pe_header", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: /File Hashes/i })).toBeVisible();
 });
 
@@ -138,11 +140,13 @@ test("a section covering a typed panel replaces it rather than repeating it", as
   authenticatedPage: page,
 }) => {
   await page.goto(`/analysis/${JOB_ID}/static`);
-  // The section is drawn...
+  await page.getByRole("tab", { name: /^Imports/ }).click();
+  // The section is drawn in the Imports sub-tab...
   await expect(page.getByRole("heading", { name: /PE imports/i })).toBeVisible();
-  // ...and the extractor's own Imports table is not, because it would be the
+  await expect(page.getByText("WriteProcessMemory")).toBeVisible();
+  // ...and the extractor's own imports table is not, because it would be the
   // same import list a second time.
-  await expect(page.getByRole("heading", { name: /^Imports \(/ })).toHaveCount(0);
+  await expect(page.getByText("VirtualAllocEx")).toHaveCount(0);
 });
 
 test("run quality draws the run as its stages", async ({ authenticatedPage: page }) => {

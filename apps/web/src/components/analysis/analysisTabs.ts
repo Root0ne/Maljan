@@ -78,7 +78,14 @@ export function tabHasContent(
       // whichever binary-info tool ran.
       return Boolean(mr?.identity) || sectionsForTab(sections, "identity", placed).length > 0;
     case "/static":
-      return Boolean(mr?.static) || sectionsForTab(sections, "static", placed).length > 0;
+      // The typed block, what a static tool returned, or the configuration
+      // the analysis recovered, which is drawn on this tab and nowhere else
+      // in full: a run with no static block still has it to show.
+      return (
+        Boolean(mr?.static) ||
+        sectionsForTab(sections, "static", placed).length > 0 ||
+        (mr?.technical_analysis?.configuration?.length ?? 0) > 0
+      );
     case "/dynamic":
       // A sandbox report, what the ledger's sandbox tools returned, or the
       // dynamic analyst's own conclusion about a detonation that produced

@@ -51,7 +51,7 @@ export default function EvidenceRecords() {
           <p className="text-[11px] text-text-muted">
             Built from these records by tools the other tabs were not written against.
           </p>
-          <ArtifactSections sections={unclaimed} />
+          <ArtifactSections sections={unclaimed} showKey />
         </div>
       )}
     </div>

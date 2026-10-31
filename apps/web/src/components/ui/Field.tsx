@@ -16,7 +16,7 @@ export default function Field({
 }) {
   return (
     <div>
-      <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1">
+      <div className="text-xs text-text-muted mb-1">
         {label}
       </div>
       <div

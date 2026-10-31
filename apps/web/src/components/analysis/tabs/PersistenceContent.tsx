@@ -1,12 +1,8 @@
 "use client";
 
-import { useReport } from "@/components/analysis/AnalysisContext";
-import ReportAbsent from "@/components/analysis/ReportAbsent";
-import { reportAbsence } from "@/components/analysis/reportAbsence";
-import type { PersistenceKind } from "@/types/malware-report";
+import type { EvidenceSection, PersistenceKind, PersistenceMechanism } from "@/types/malware-report";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import { CitedText } from "@/components/analysis/EvidenceChips";
-import { sectionsForTab } from "@/components/analysis/reportSections";
 
 const KIND_LABELS: Record<PersistenceKind, string> = {
   // Windows (PE)
@@ -85,73 +81,56 @@ const KIND_COLORS: Record<PersistenceKind, string> = {
   other: "text-text-secondary bg-bg-active",
 };
 
-export default function PersistenceTab() {
-  const { report, job, loading, reportError } = useReport();
-
-  if (loading) {
-    return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
-  }
-
-  /* No report is not an empty report: say which absence this is rather than
-   * drawing this tab's negative (`reportAbsence`). */
-  const absent = reportAbsence({ report, job, reportError });
-  if (absent) return <ReportAbsent absence={absent} />;
-
-  const items = report?.malware_report?.persistence;
-  const evidenceSections = sectionsForTab(
-    report?.malware_report?.sections,
-    "persistence",
-    report?.section_tabs,
-  );
-  if ((!items || items.length === 0) && evidenceSections.length === 0) {
-    return (
-      <div className="p-8 text-center text-sm text-text-secondary">
-        Nothing on this run established persistence.
-      </div>
-    );
-  }
-
+/**
+ * The persistence mechanisms the run found, and the sections the tools wrote
+ * about services and tasks. Drawn inside the Behaviour tab's behaviours, and
+ * alone in its persistence view.
+ */
+export default function PersistenceList({
+  items,
+  sections,
+}: {
+  items: PersistenceMechanism[];
+  sections: EvidenceSection[];
+}) {
   return (
-    <div className="space-y-3">
-      <ArtifactSections sections={evidenceSections} />
-      {(items ?? []).map((p, i) => (
-        <div
-          key={`${p.kind}-${i}`}
-          className="bg-bg-surface border border-border rounded p-4"
-        >
-          <div className="flex items-start gap-3 flex-wrap">
-            <span
-              className={`text-[11px] uppercase tracking-wider font-medium px-2 py-0.5 rounded shrink-0 ${KIND_COLORS[p.kind]}`}
-            >
-              {KIND_LABELS[p.kind]}
-            </span>
-            {p.technique_id && (
-              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-status-blue/10 text-status-blue">
-                {p.technique_id}
-              </span>
-            )}
-          </div>
-          <div className="mt-2 space-y-2">
-            <Row label="Target">
-              <code className="text-xs font-mono text-status-blue break-all">{p.target}</code>
-            </Row>
-            {p.payload && (
-              <Row label="Payload">
-                <code className="text-xs font-mono text-text-secondary break-all">
-                  {p.payload}
-                </code>
-              </Row>
-            )}
-            {p.evidence_ref && (
-              <Row label="Evidence">
-                <span className="text-xs text-text-muted break-all">
-                  <CitedText text={p.evidence_ref} />
+    <div className="space-y-2">
+      <ArtifactSections sections={sections} />
+      {items.length > 0 && (
+        <ul className="divide-y divide-border-light rounded border border-border-light">
+          {items.map((p, i) => (
+            <li key={`${p.kind}-${i}`} className="px-3 py-2">
+              <div className="flex flex-wrap items-start gap-2">
+                <span className={`shrink-0 rounded px-2 py-0.5 text-[11px] font-medium ${KIND_COLORS[p.kind] ?? KIND_COLORS.other}`}>
+                  {KIND_LABELS[p.kind] ?? KIND_LABELS.other}
                 </span>
-              </Row>
-            )}
-          </div>
-        </div>
-      ))}
+                {p.technique_id && (
+                  <span className="rounded bg-status-blue/10 px-1.5 py-0.5 font-mono text-[11px] text-status-blue">
+                    {p.technique_id}
+                  </span>
+                )}
+              </div>
+              <div className="mt-2 space-y-1.5">
+                <Row label="Target">
+                  <code className="text-xs font-mono text-status-blue break-all">{p.target}</code>
+                </Row>
+                {p.payload && (
+                  <Row label="Payload">
+                    <code className="text-xs font-mono text-text-secondary break-all">{p.payload}</code>
+                  </Row>
+                )}
+                {p.evidence_ref && (
+                  <Row label="Evidence">
+                    <span className="text-xs text-text-muted break-all">
+                      <CitedText text={p.evidence_ref} />
+                    </span>
+                  </Row>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -159,9 +138,7 @@ export default function PersistenceTab() {
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="text-[11px] uppercase tracking-wider text-text-muted w-16 shrink-0 mt-0.5">
-        {label}
-      </span>
+      <span className="w-16 shrink-0 text-xs text-text-muted">{label}</span>
       <div className="flex-1 min-w-0">{children}</div>
     </div>
   );

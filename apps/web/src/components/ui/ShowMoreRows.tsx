@@ -5,13 +5,16 @@ export default function ShowMoreRows({
   shown,
   total,
   onShow,
+  step = ROWS_PER_STEP,
 }: {
   shown: number;
   total: number;
   onShow: (count: number) => void;
+  /** How many rows one "show more" adds; a long table's step by default. */
+  step?: number;
 }) {
   if (shown >= total) return null;
-  const next = nextStep(shown, total);
+  const next = nextStep(shown, total, step);
   return (
     <div className="px-4 py-2 text-[11px] text-text-muted border-t border-border flex flex-wrap items-center gap-3">
       <span>
@@ -22,7 +25,7 @@ export default function ShowMoreRows({
         className="text-accent-strong hover:underline"
         onClick={() => onShow(next)}
       >
-        Show {Math.min(ROWS_PER_STEP, total - shown).toLocaleString("en-US")} more
+        Show {Math.min(step, total - shown).toLocaleString("en-US")} more
       </button>
       <button type="button" className="text-accent-strong hover:underline" onClick={() => onShow(total)}>
         Show all

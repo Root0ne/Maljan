@@ -8,6 +8,7 @@ import { reportAbsence } from "@/components/analysis/reportAbsence";
 import { formatBytes } from "@/lib/report-utils";
 import CopyButton from "@/components/ui/CopyButton";
 import Field from "@/components/ui/Field";
+import Section from "@/components/ui/Section";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import ReputationSection from "@/components/analysis/ReputationSection";
 import {
@@ -81,31 +82,26 @@ export default function IdentityTab() {
   })).filter((row) => saysSomething(row.value));
 
   const hashes = hashRows.length > 0 && (
-    <div className="bg-bg-surface border border-border rounded">
-      <div className="px-4 py-3 border-b border-border">
-        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-          File Hashes
-        </h2>
-      </div>
-      <div className="p-4 space-y-2">
+    <Section title="File hashes" count={hashRows.length}>
+      <div className="space-y-2">
         {hashRows.map((row) => (
           <HashRow key={row.field} label={row.label} value={row.value} />
         ))}
       </div>
-    </div>
+    </Section>
   );
+  const packing = <PackingAndBuild report={report} />;
 
   if (!identity) {
     return (
       <div className="space-y-4">
         <ArtifactSections sections={evidenceSections} />
+        {evidenceSections.length === 0 && !hashes && (
+          <Section title="Identity and metadata" empty emptyText="No identifying tool answered for this sample" />
+        )}
+        {packing}
         {hashes}
         <ReputationSection jobId={jobId} report={report?.malware_report} enabled={!loading} />
-        {evidenceSections.length === 0 && !hashes && (
-          <div className="p-8 text-center text-sm text-text-secondary">
-            No identifying tool answered for this sample.
-          </div>
-        )}
       </div>
     );
   }
@@ -118,29 +114,25 @@ export default function IdentityTab() {
       <ArtifactSections sections={evidenceSections} />
 
       {showsTypedIdentity && (
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Sample Identification
-          </h2>
-          {/* Stands down when the table above already says whether the
-              sample is signed. */}
-          {!sectionStatesSigning && (
-            <span
-              className={`text-[11px] uppercase tracking-wider font-medium px-2 py-0.5 rounded border ${sigState.cls}`}
-            >
-              {sigState.label}
-            </span>
-          )}
-          {/* The signing check's own entry, so the badge can be followed back
-              to the call that established it. */}
-          {!sectionStatesSigning && identity.signing.evidence_id && (
-            <EvidenceChips ids={[identity.signing.evidence_id]} />
-          )}
-        </div>
+      <Section
+        title="Identity and metadata"
+        actions={
+          /* Stands down when the table above already says whether the sample
+             is signed; the signing check's own entry follows the badge, so it
+             can be traced back to the call that established it. */
+          !sectionStatesSigning ? (
+            <>
+              <span className={`text-[11px] font-medium px-2 py-0.5 rounded border ${sigState.cls}`}>
+                {sigState.label}
+              </span>
+              {identity.signing.evidence_id && <EvidenceChips ids={[identity.signing.evidence_id]} />}
+            </>
+          ) : undefined
+        }
+      >
         {/* A row whose value is nothing is not a row. Seven labels above
             seven "(unknown)"s said only that the extractor has seven fields. */}
-        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {[
             { label: "File name", value: identity.file_name ?? "" },
             { label: "File type", value: identity.file_type ? fileTypeLabel(identity.file_type) : "" },
@@ -182,8 +174,10 @@ export default function IdentityTab() {
               <Field key={field.label} label={field.label} value={field.value} />
             ))}
         </div>
-      </div>
+      </Section>
       )}
+
+      {packing}
 
       {/* Every fingerprint the run computed, in the one place that holds them.
         * A hash no tool produced is absent rather than drawn as a dash: ssdeep
@@ -195,13 +189,8 @@ export default function IdentityTab() {
       <ReputationSection jobId={jobId} report={report?.malware_report} enabled={!loading} />
 
       {identity.signing.is_signed && (
-        <div className="bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Code Signing
-            </h2>
-          </div>
-          <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Section title="Code signing">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
               { label: "Signer subject", value: identity.signing.signer_subject ?? "" },
               { label: "Issuer", value: identity.signing.signer_issuer ?? "" },
@@ -220,9 +209,69 @@ export default function IdentityTab() {
                 <Field key={field.label} label={field.label} value={field.value} />
               ))}
           </div>
-        </div>
+        </Section>
       )}
     </div>
+  );
+}
+
+/**
+ * How the file was built and wrapped: the packer the detectors matched (with
+ * how sure each was and how it matched), the debug path the build left, and
+ * the obfuscation the static pass saw. Part of what the file is, so it sits
+ * with its identity.
+ */
+function PackingAndBuild({ report }: { report: ReturnType<typeof useReport>["report"] }) {
+  const staticData = report?.malware_report?.static;
+  if (!staticData) return null;
+  const packerMatches = staticData.packer_matches ?? [];
+  const has =
+    Boolean(staticData.packer_hint) ||
+    packerMatches.length > 0 ||
+    staticData.obfuscation_indicators.length > 0 ||
+    Boolean(staticData.pdb_path);
+  return (
+    <Section title="Packing and build" empty={!has}>
+      <div className="space-y-2 text-sm text-text-primary">
+        {/* Ranked matches beat the bare hint: a reader needs to know whether
+          * the detector saw a section name or just a string. */}
+        {packerMatches.length > 0 ? (
+          <div className="space-y-1">
+            {packerMatches.map((pm, i) => (
+              <div key={i}>
+                {pm.name}
+                {pm.kind && <span className="text-text-muted"> ({pm.kind})</span>}
+                <span className="ml-2 font-mono text-xs text-text-muted">
+                  {typeof pm.confidence === "number" ? pm.confidence.toFixed(2) : "-"}
+                  {pm.method ? ` · ${pm.method}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          staticData.packer_hint && (
+            <div>
+              <span className="text-text-muted">Packer hint:</span> {staticData.packer_hint}
+            </div>
+          )
+        )}
+        {staticData.pdb_path && (
+          <div>
+            <span className="text-text-muted">Debug PDB:</span>{" "}
+            <span className="break-all font-mono text-xs">{staticData.pdb_path}</span>
+          </div>
+        )}
+        {staticData.obfuscation_indicators.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {staticData.obfuscation_indicators.map((ind, i) => (
+              <span key={`${ind}-${i}`} className="rounded bg-status-orange/10 px-1.5 py-0.5 text-[11px] text-status-orange">
+                {ind}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -262,7 +311,7 @@ const HASH_ROWS: { field: HashField; label: string }[] = [
 function HashRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-3">
-      <span className="text-[11px] text-text-muted uppercase tracking-wider w-20 shrink-0">
+      <span className="text-xs text-text-muted w-20 shrink-0">
         {label}
       </span>
       {value ? (

@@ -100,7 +100,7 @@ export default function ReputationSection({
   return (
     <div className="bg-bg-surface border border-border rounded" data-testid="reputation-section">
       <div className="px-4 py-3 border-b border-border flex items-center gap-3 flex-wrap">
-        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        <h2 className="text-sm font-semibold text-text-primary">
           {reputation.service}
         </h2>
         <EvidenceChips ids={[reputation.entryId]} />
@@ -121,7 +121,7 @@ export default function ReputationSection({
         {engines !== null ? (
           <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
             <div>
-              <div className="text-[11px] text-text-muted uppercase tracking-wider">
+              <div className="text-xs text-text-muted">
                 Detections
               </div>
               <div className={`font-mono ${figure.known ? "text-2xl" : "text-sm"} ${detectionClass}`}>
@@ -133,7 +133,7 @@ export default function ReputationSection({
             </div>
             {suspicious !== null && suspicious > 0 && (
               <div>
-                <div className="text-[11px] text-text-muted uppercase tracking-wider">
+                <div className="text-xs text-text-muted">
                   Suspicious
                 </div>
                 <div className="text-2xl font-mono text-status-orange">{suspicious}</div>
@@ -141,7 +141,7 @@ export default function ReputationSection({
             )}
             {day(firstSeen) && (
               <div>
-                <div className="text-[11px] text-text-muted uppercase tracking-wider">
+                <div className="text-xs text-text-muted">
                   First seen
                 </div>
                 <div className="text-sm font-mono text-text-secondary">{day(firstSeen)}</div>
@@ -149,7 +149,7 @@ export default function ReputationSection({
             )}
             {day(lastSeen) && (
               <div>
-                <div className="text-[11px] text-text-muted uppercase tracking-wider">
+                <div className="text-xs text-text-muted">
                   Last seen
                 </div>
                 <div className="text-sm font-mono text-text-secondary">{day(lastSeen)}</div>
@@ -162,7 +162,7 @@ export default function ReputationSection({
 
         {labels.length > 0 && (
           <div>
-            <div className="text-[11px] text-text-muted uppercase tracking-wider mb-1.5">
+            <div className="text-xs text-text-muted mb-1.5">
               Labels
             </div>
             <div className="flex flex-wrap gap-1.5">
