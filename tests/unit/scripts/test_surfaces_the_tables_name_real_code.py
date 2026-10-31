@@ -15,7 +15,7 @@ from scripts.audit import surfaces
 
 ROOT = Path(__file__).resolve().parents[3]
 SPEC = json.loads(surfaces.WEB_FIELDS.read_text(encoding="utf-8"))
-ROOTS = {"report", "job", "stix", "evidence", "events", "follow_ups"}
+ROOTS = {"report", "job", "stix", "evidence", "events", "follow_ups", "call_map"}
 
 
 def _file(ref: str) -> Path:
