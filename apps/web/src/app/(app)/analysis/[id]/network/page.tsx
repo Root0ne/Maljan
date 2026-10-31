@@ -2,6 +2,7 @@
 
 import { useReport } from "@/components/analysis/AnalysisContext";
 import EnrichButton from "@/components/analysis/EnrichButton";
+import EnrichmentNotAsked from "@/components/analysis/EnrichmentNotAsked";
 import ReportGate from "@/components/analysis/ReportGate";
 import TabBlock from "@/components/analysis/TabBlock";
 import { tabHasContent } from "@/components/analysis/analysisTabs";
@@ -13,7 +14,7 @@ import KpiTile from "@/components/ui/KpiTile";
  * Network: the counts first, then the hosts the run saw with what each
  * received, the HTTP, DNS and TLS tables, and the endpoints read out of the
  * sample, with reputation beside each host, and the one action that asks the
- * threat-intel services about them.
+ * threat-intel services about them, with the values it left unasked under it.
  */
 export default function NetworkPage() {
   const { job } = useReport();
@@ -37,6 +38,7 @@ export default function NetworkPage() {
               )}
               <EnrichButton reportId={report.id} />
             </div>
+            <EnrichmentNotAsked rows={mr?.enrichment_not_asked} />
             {tabHasContent("/network", report, job?.roster) ? (
               <div id="network" className="scroll-mt-16">
                 <NetworkContent report={report} />

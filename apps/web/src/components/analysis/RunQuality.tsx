@@ -115,6 +115,13 @@ export default function RunQuality() {
                 {report.incomplete_reason}
               </p>
             )}
+            {/* Why no verdict was reached, in the run's words; the remark
+                under the header says only that none was. */}
+            {mr?.verdict_not_assessed && (
+              <p className="text-status-orange" data-testid="verdict-not-assessed">
+                No verdict was reached: {mr.verdict_not_assessed}
+              </p>
+            )}
             {stopNote && stopNote !== report.incomplete_reason && <p>{stopNote}</p>}
           </div>
         )}

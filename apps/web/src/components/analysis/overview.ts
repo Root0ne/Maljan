@@ -22,6 +22,7 @@ import {
   type SampleIdentity,
   type SeverityRating,
 } from "@/types/malware-report";
+import { safeHref } from "./safeMarkdown";
 
 /* ── Tabs ──────────────────────────────────────────────────────────── */
 
@@ -273,6 +274,7 @@ export const REMARK_TEXT = {
   conflict: "The verdict and the severity rating disagree; read the findings before quoting either.",
   inferred: "The analysis did not state this verdict outright; it was inferred, and no confidence is given for it.",
   stopped: "The analysis was stopped before it finished.",
+  notAssessed: "No verdict was reached; the verdict shown is the report's placeholder, not a finding.",
 } as const;
 
 export function remarks(report: ReportDetailDTO | null | undefined, job?: JobDTO | null): Remark[] {
@@ -283,7 +285,9 @@ export function remarks(report: ReportDetailDTO | null | undefined, job?: JobDTO
   if (report.incomplete_reason) {
     out.push({ text: REMARK_TEXT.incomplete, detail: report.incomplete_reason });
   }
-  const rs = report.malware_report?.run_summary ?? report.run_summary;
+  const notAssessed = report.malware_report?.verdict_not_assessed?.trim();
+  if (notAssessed) out.push({ text: REMARK_TEXT.notAssessed, detail: notAssessed });
+  const rs =report.malware_report?.run_summary ?? report.run_summary;
   const failed = rs?.failed_analysts ?? [];
   if (failed.length > 0) {
     out.push({ text: REMARK_TEXT.stageFailed, detail: failed.join(", ") });
@@ -360,6 +364,33 @@ export function publishedNetworkIndicators(mr: MalwareReport | null | undefined)
     if (network && decisionOf(row.published).publication === "published") values.add(row.value.trim().toLowerCase());
   }
   return values.size;
+}
+
+export interface ReferenceRow {
+  source: string;
+  url: string;
+  /** The address the page links, or null when it makes no link of it: only
+   *  an http or https address the Markdown links would also allow. */
+  href: string | null;
+  note: string;
+}
+
+/** The report's external references, each with the link the page may make. */
+export function referenceRows(mr: MalwareReport | null | undefined): ReferenceRow[] {
+  const rows = Array.isArray(mr?.references) ? mr.references : [];
+  return rows
+    .filter((r) => r && (typeof r.source === "string" || typeof r.url === "string"))
+    .map((r) => {
+      const url = typeof r.url === "string" ? r.url.trim() : "";
+      const safe = url ? safeHref(url) : null;
+      return {
+        source: (typeof r.source === "string" && r.source.trim()) || url,
+        url,
+        href: safe && /^https?:/i.test(safe) ? safe : null,
+        note: typeof r.note === "string" ? r.note.trim() : "",
+      };
+    })
+    .filter((r) => r.source);
 }
 
 /** The number row above the findings. `null` is a count the report does not hold. */
