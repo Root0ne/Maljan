@@ -306,6 +306,74 @@ class TestTheJudge:
         assert registry.asked_refs == []
 
 
+UNRESOLVED = "capability 'nosuchkind' resolves to no server"
+
+
+def _with_typo(container: Any, key: str) -> None:
+    """Agent ``key``'s definition, with a capability reference no server serves."""
+    from maljan.core.config import ToolRef
+
+    definitions = container.config.agents.definitions
+    held = definitions[key]
+    definitions[key] = held.model_copy(
+        update={"tools": [*held.tools, ToolRef(kind="capability", capability="nosuchkind")]}
+    )
+
+
+class TestACapabilityThatResolvesToNoServer:
+    """The real attach paths say it once, on the agent and on the registry (T-483)."""
+
+    def test_the_analyst_says_it_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        registry = FakeRegistry()
+        container = _container(registry=registry)
+        _with_typo(container, "static")
+        agent = _analyst(container, "static", monkeypatch)
+
+        agent._try_initialize_mcp()
+
+        assert list(agent.degradation_reasons).count(UNRESOLVED) == 1
+        assert registry.degradation_reasons.count(UNRESOLVED) == 1
+
+    def test_a_definition_without_one_says_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        registry = FakeRegistry()
+        container = _container(registry=registry)
+        agent = _analyst(container, "static", monkeypatch)
+
+        agent._try_initialize_mcp()
+
+        assert not any("resolves to no server" in r for r in agent.degradation_reasons)
+        assert not any("resolves to no server" in r for r in registry.degradation_reasons)
+
+    @pytest.mark.asyncio
+    async def test_the_judge_says_it_once(self) -> None:
+        from maljan.agents.judge_agent import JudgeAgent
+
+        registry = FakeRegistry()
+        container = _container(registry=registry)
+        _with_typo(container, "judge")
+        judge = JudgeAgent(llm=MagicMock(), config=container.config)
+        judge._container = container
+
+        await judge._initialize_mcp_client()
+
+        assert list(judge.degradation_reasons).count(UNRESOLVED) == 1
+        assert registry.degradation_reasons.count(UNRESOLVED) == 1
+
+    @pytest.mark.asyncio
+    async def test_the_judge_without_one_says_nothing(self) -> None:
+        from maljan.agents.judge_agent import JudgeAgent
+
+        registry = FakeRegistry()
+        container = _container(registry=registry)
+        judge = JudgeAgent(llm=MagicMock(), config=container.config)
+        judge._container = container
+
+        await judge._initialize_mcp_client()
+
+        assert not any("resolves to no server" in r for r in judge.degradation_reasons)
+        assert not any("resolves to no server" in r for r in registry.degradation_reasons)
+
+
 class TestAnAgentWithNoContainer:
     def test_the_reference_half_is_inert_rather_than_raising(self) -> None:
         """An analyst built bare — in a script, or in a test that wants no
