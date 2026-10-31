@@ -74,7 +74,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                 >
                   <span className="font-mono text-text-muted">{i + 1}.</span>
                   <span className="break-words [overflow-wrap:anywhere]">
-                    <SafeMarkdown markdown={step.action} cite inline regionName={`Execution step ${i + 1}`} className="" />
+                    <span className="whitespace-pre-wrap"><CitedProse text={step.action} /></span>
                     <Cited ids={step.evidence_refs} />
                     <Unresolved note={flowNote(report, step)} />
                   </span>
@@ -124,7 +124,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                     <td className="py-1 pr-3 font-mono break-all text-text-secondary">
                       {item.value}
                     </td>
-                    <td className="py-1 pr-3 break-words text-text-muted [overflow-wrap:anywhere]">{item.purpose?.trim() ? <SafeMarkdown markdown={item.purpose.trim()} cite inline regionName={`Identifier ${i + 1} purpose`} className="" /> : "not stated"}</td>
+                    <td className="py-1 pr-3 break-words text-text-muted [overflow-wrap:anywhere]">{item.purpose?.trim() ? <span className="whitespace-pre-wrap"><CitedProse text={item.purpose.trim()} /></span> : "not stated"}</td>
                     <td className="py-1">
                       <Cited ids={item.evidence_refs} />
                       <Unresolved
@@ -168,7 +168,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                   <tr key={`${cmd.name}-${i}`} className="border-t border-border align-top">
                     <td className="py-1 pr-3 font-mono text-text-muted">{cmd.id ?? "-"}</td>
                     <td className="py-1 pr-3 font-mono break-all text-text-primary">{cmd.name}</td>
-                    <td className="py-1 pr-3 break-words text-text-secondary [overflow-wrap:anywhere]">{cmd.description ? <SafeMarkdown markdown={cmd.description} cite inline regionName={`Command ${i + 1} description`} className="" /> : "-"}</td>
+                    <td className="py-1 pr-3 break-words text-text-secondary [overflow-wrap:anywhere]">{cmd.description ? <span className="whitespace-pre-wrap"><CitedProse text={cmd.description} /></span> : "-"}</td>
                     <td className="py-1">
                       <Cited ids={cmd.evidence_refs} />
                     </td>
