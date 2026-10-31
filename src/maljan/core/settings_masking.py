@@ -124,7 +124,9 @@ _NO_PATH_CHARS = '"<>|'
 # (``C:/Users``) only at the start. The server's name may end as a WebDAV
 # share's does, in ``@SSL``, a port or both (``\\srv@SSL@443\``), or in the
 # ``$`` of a hidden name (``\\srv$\``); no other ``@`` or ``$`` stands in it,
-# so ``\\pw@h:8080`` stays userinfo. Possessive, so each start costs time
+# so ``\\pw@h:8080`` stays userinfo. A known residual: a password written as
+# such a share is (``\\pw@SSL\x@h:8080``, ``\\pw@1234\x@h``, ``\\pw$\x@h/y``)
+# is kept, as ``\\pw\x@h:8080`` is. Possessive, so each start costs time
 # linear in what it reads.
 _PATH_START = re.compile(
     r"\A[A-Za-z]:/(?=[\w.~$-])"
@@ -139,6 +141,11 @@ _PATH_START = re.compile(
 _DRIVE_OR_COLON = re.compile(r"\A[A-Za-z]:[\\/]|(?<=[\"'(<\[{=,;])[A-Za-z]:\\|:")
 # What ends a path's value before an address after it in the same word.
 _VALUE_SEPARATORS = ",;"
+# What may open the value a path stands in (``{"a":"C:\x``, ``--out=C:\x``).
+_PATH_VALUE_OPENERS = "\"'([{=,;"
+# Openers, each behind any run of backslashes that escapes it, that open a
+# value after a separator (``,'tok``, ``,\'tok``). Possessive, so linear.
+_ESCAPED_OPENERS = re.compile(r"(?:\\*+[\"'(<\[{])*+")
 # A backslash with the character it escapes, or a quote it leaves unescaped.
 _ESCAPE_OR_QUOTE = re.compile(r"\\.|[\"']", re.DOTALL)
 # What may stand right before a single quote that opens a value.
@@ -220,15 +227,24 @@ def _after_a_path(word: str, start: int, last_at: int) -> int | None:
     the path before it is kept. What follows the separator goes even where
     it could be a later name of the path (``C:\\a,b:c@h:8080`` keeps only
     ``C:\\a,``): no Windows name holds a colon, and where a path and a
-    password read alike, the password goes. Linear in the word.
+    password read alike, the password goes. The colons are read from the
+    value the path stands in, so a JSON member's key before it names no user
+    (``{"a":"C:\\\\x,u:pw@h:8080"}``), and the opener after a separator may be
+    escaped (``{"a":"C:\\\\x,\\'tok@h:8080\\'"}``). Linear in the word.
     """
+    backslash = word.find("\\", start, last_at)
+    if backslash >= 0:
+        opened = max(word.rfind(c, start, backslash) for c in _PATH_VALUE_OPENERS)
+        start = max(start, opened + 1)
     colon = _user_colon(word[start:last_at])
     end = start + colon if colon >= 0 else last_at
     cut = max(word.rfind(sep, start, end) for sep in _VALUE_SEPARATORS)
-    if cut < start or (colon < 0 and not word.startswith(tuple(TOKEN_OPENERS), cut + 1)):
+    if cut < start:
         return None
-    begin = cut + 1
-    begin += len(word[begin:last_at]) - len(word[begin:last_at].lstrip(TOKEN_OPENERS))
+    opening = _ESCAPED_OPENERS.match(word, cut + 1, last_at)
+    if opening is None or (colon < 0 and opening.end() == cut + 1):
+        return None
+    begin = opening.end()
     return begin if bare_userinfo(word[begin:]) is not None else None
 
 

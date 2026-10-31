@@ -615,6 +615,11 @@ _PASSWORDS_AFTER_A_PATH = [
     ("%ProgramFiles(x86)%\\x,u:{pw}@h:8080", "%ProgramFiles(x86)%\\x,***@h:8080"),
     ("\\\\srv\\share,u:{pw}@h/v1", "\\\\srv\\share,***@h/v1"),
     ("('C:\\x','{pw}@h:8080')", "('C:\\x','***@h:8080')"),
+    # Inside a JSON object, whose member key holds a colon, and behind an
+    # escaped quote.
+    ('{"a":"C:\\\\x,u:{pw}@h:8080"}', '{"a":"C:\\\\x,***@h:8080"}'),
+    ('{"a":"\\\\\\\\srv\\\\share,u:{pw}@h/v1"}', '{"a":"\\\\\\\\srv\\\\share,***@h/v1"}'),
+    ('{"a":"C:\\\\x,\\\'{pw}@h:8080\\\'"}', '{"a":"C:\\\\x,\\\'***@h:8080\\\'"}'),
 ]
 
 
@@ -671,6 +676,27 @@ def test_a_unc_shaped_password_is_still_masked(written):
 
     assert masked_text(text) == "***@" + text.rpartition("@")[2]
     assert secret not in masked_text(f"Error: {text}")
+
+
+# The accepted residual: a password written as a WebDAV or hidden share's
+# server is kept, as one written as any share's server is (``\\pw\x@h``);
+# without the backslash after it, it is still masked.
+@pytest.mark.parametrize(
+    ("written", "kept"),
+    [
+        ("\\\\{pw}@SSL\\x@h:8080", True),
+        ("\\\\{pw}@1234\\x@h", True),
+        ("\\\\{pw}$\\x@h/y", True),
+        ("\\\\{pw}@SSL@h:8080", False),
+        ("\\\\{pw}$@h:8080", False),
+    ],
+)
+def test_a_password_written_as_a_webdav_or_hidden_share_is_the_named_residual(written, kept):
+    from maljan.core.settings_masking import masked_text
+
+    text = written.replace("{pw}", _credential_shaped_token())
+
+    assert masked_text(text) == (text if kept else "***@" + text.rpartition("@")[2])
 
 
 def test_masking_backslashed_words_costs_time_linear_in_the_text():
@@ -755,7 +781,13 @@ def _bare_secrets_before(address: str) -> list[str]:
     return found
 
 
-_FUZZ_HEAD = string.ascii_letters + string.digits + "\"'([{<:/=,.%-_@\\"
+# Characters, and the pieces a Windows path or a WebDAV share begins with.
+_FUZZ_HEAD = [
+    *(string.ascii_letters + string.digits + "\"'([{<:/=,.%-_@\\$;"),
+    "@SSL",
+    "\\\\srv",
+    "C:\\",
+]
 _FUZZ_TAILS = [
     "h",
     "h:8080",
@@ -822,7 +854,7 @@ def test_masking_is_never_weaker_than_before_on_fuzzed_words():
                 # A JSON escape is read only before a port or a path.
                 assert names_a_port_or_a_path(word[now:]), word
                 assert bare_userinfo(word[now:]) is not None, word
-            elif "\\" in word[:now] and word[:now].rstrip(TOKEN_OPENERS)[-1:] in (",", ";"):
+            elif "\\" in word[:now] and word[:now].rstrip(TOKEN_OPENERS + "\\")[-1:] in (",", ";"):
                 # Or a user name and a password, or a quoted token alone,
                 # after a separator that ends a backslashed value before them
                 # in the same word.
