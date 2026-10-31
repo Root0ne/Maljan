@@ -40,6 +40,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from maljan.analysis.technique_ids import is_technique_id
+from maljan.memory.attck_loader import TACTIC_ID_RE
 from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
     CHANNEL_BINDING_CODE,
@@ -888,7 +890,6 @@ _IDENTIFIER_VALUE = re.compile(
     r"(?<![\w])(?!ev_\d)(?=[A-Za-z0-9_]*[_\d])(?=[A-Za-z0-9_]*[A-Za-z])[A-Za-z_][A-Za-z0-9_]{3,}(?![\w])"
     r"|(?<![\w])[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*){2,}[A-Za-z0-9]*(?![\w])"
 )
-_ATTACK_ID = re.compile(r"(?i)^(?:T\d{4}(?:\.\d{3})?|TA\d{4})$")
 # A quoted ordinary word ('sample', "Marks") is no value.
 _ORDINARY_WORD = re.compile(r"^[A-Za-z][a-z]+$")
 # Algorithm, encoding and platform names that are no value of the sample's own.
@@ -1022,8 +1023,14 @@ def carried_values(text: str, reader: ValueReader | None = None) -> list[str]:
     return [
         value
         for value in dict.fromkeys(found)
-        if len(value) >= 2 and not _ATTACK_ID.match(value) and value.lower() not in _GENERIC_TOKENS
+        if len(value) >= 2 and not _is_attack_id(value) and value.lower() not in _GENERIC_TOKENS
     ]
+
+
+def _is_attack_id(value: str) -> bool:
+    """Whether ``value`` is an ATT&CK technique or tactic id, in either case: no value."""
+    upper = value.upper()
+    return is_technique_id(upper) or TACTIC_ID_RE.match(upper) is not None
 
 
 def carrying_form(text: str) -> str:
