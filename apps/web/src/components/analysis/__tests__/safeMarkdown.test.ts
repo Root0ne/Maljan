@@ -109,6 +109,15 @@ describe("what is drawn", () => {
     expect(hrefs([p])).toEqual(["#ev_0014", "#ev_0018"]);
   });
 
+  it("keeps a citation group whole as text when the page draws its own marks", () => {
+    const nodes = parseMarkdown("It beacons **twice** [ev_0014, ev_0018].", { linkIds: false });
+    expect(hrefs(nodes)).toEqual([]);
+    const texts = JSON.stringify(nodes);
+    expect(texts).toContain("[ev_0014, ev_0018]");
+    // The bracket is one text run, so the citation splitter sees the group.
+    expect(plainText(nodes)).toBe("It beacons twice [ev_0014, ev_0018].");
+  });
+
   it("leaves an underscore inside a word alone", () => {
     expect(inlineText("api_capability and get_file_report")).toBe("api_capability and get_file_report");
   });

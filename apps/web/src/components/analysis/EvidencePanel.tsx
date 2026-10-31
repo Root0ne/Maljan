@@ -8,6 +8,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { humaniseKey } from "@/lib/humanise";
 import { downloadObject } from "@/lib/report-utils";
 import type { EvidenceEntry, EvidenceObjectRef } from "@/types/evidence";
+import StructuredValue from "./StructuredValue";
 import {
   EMPTY_OPTIONS,
   EVIDENCE_PAGE_SIZE,
@@ -362,9 +363,10 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                                 <h3 className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
                                   Structured
                                 </h3>
-                                <pre className="text-[11px] text-text-secondary overflow-auto max-h-96 whitespace-pre-wrap break-all">
-                                  {JSON.stringify(entry.structured, null, 2)}
-                                </pre>
+                                <StructuredValue
+                                  value={entry.structured}
+                                  name={`Structured output of ${entry.entry_id}`}
+                                />
                               </div>
                             )}
                           </td>

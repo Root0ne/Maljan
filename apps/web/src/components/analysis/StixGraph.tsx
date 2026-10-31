@@ -4,7 +4,8 @@ import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion"
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import EvidenceChips from "@/components/analysis/EvidenceChips";
-import JsonNode from "@/components/analysis/JsonTree";
+import StructuredValue from "@/components/analysis/StructuredValue";
+import { isPlainObject } from "@/components/analysis/structuredValue";
 import { downloadBlob, downloadObject } from "@/lib/report-utils";
 import {
   colourForType,
@@ -224,10 +225,13 @@ function EvidenceLine({ ids }: { ids: string[] }) {
   );
 }
 
+/* The selected object's own fields, laid out for reading; "View raw" prints
+ * it as the bundle holds it. */
 function ObjectJson({ object }: { object: unknown }) {
+  const id = isPlainObject(object) && typeof object.id === "string" ? object.id : "Selected object";
   return (
-    <div className="p-3 rounded border border-border bg-bg-deep font-mono text-[11px] leading-relaxed break-all overflow-x-auto">
-      <JsonNode data={object} />
+    <div className="rounded border border-border bg-bg-deep p-3">
+      <StructuredValue value={object} name={`STIX ${id}`} />
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { copyToClipboard } from "@/lib/report-utils";
 import { getErrorMessage } from "@/lib/errors";
 import { useReport } from "@/components/analysis/AnalysisContext";
-import JsonNode from "@/components/analysis/JsonTree";
+import { RawJson } from "@/components/analysis/StructuredValue";
 import StixGraphView from "@/components/analysis/StixGraph";
 import {
   GRAPH_FIRST_LIMIT,
@@ -133,8 +133,8 @@ export default function StixPanel() {
         </div>
       )}
       {view === "json" ? (
-        <div className="p-4 font-mono text-xs leading-relaxed overflow-x-auto">
-          <JsonNode data={bundle} />
+        <div className="p-4">
+          <RawJson value={bundle} name="STIX bundle" />
         </div>
       ) : (
         <div className="p-4 space-y-3">
