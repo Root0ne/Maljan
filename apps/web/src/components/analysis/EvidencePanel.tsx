@@ -185,10 +185,14 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
           </p>
         )}
 
+        {/* On a phone the ledger is not a table that scrolls sideways: each
+            call stacks (id, tool and result on one line, then stage, agent
+            and duration, then the arguments), and an open row takes the
+            screen's width, so nothing in it is clipped. */}
         {!error && (
           <div {...scrollRegion("Evidence records")} className={`overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
-            <table className="w-full text-xs">
-              <thead>
+            <table className="w-full text-xs max-sm:block">
+              <thead className="max-sm:hidden">
                 <tr className="text-left text-[10px] text-text-muted border-b border-border">
                   <th scope="col" className="px-3 py-2 font-medium">ID</th>
                   <th scope="col" className="px-3 py-2 font-medium">Stage</th>
@@ -203,7 +207,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                   <th scope="col" className="px-3 py-2 font-medium">Result</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="max-sm:block">
                 {entries.map((entry) => {
                   const expanded = open.has(entry.entry_id);
                   const summary = argsSummary(entry.args);
@@ -219,12 +223,12 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                         ref={(node) => {
                           rowRefs.current[entry.entry_id] = node;
                         }}
-                        className={`border-b border-border-light cursor-pointer hover:bg-bg-hover ${
+                        className={`border-b border-border-light cursor-pointer hover:bg-bg-hover max-sm:flex max-sm:flex-wrap max-sm:items-baseline max-sm:gap-x-3 max-sm:gap-y-1 max-sm:px-3 max-sm:py-2.5 ${
                           cited ? "bg-accent/5" : ""
                         }`}
                         onClick={() => toggle(setOpen, entry.entry_id)}
                       >
-                        <td className="px-3 py-2">
+                        <td className="max-sm:p-0 px-3 py-2">
                           <button
                             type="button"
                             aria-expanded={expanded}
@@ -240,26 +244,26 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                         </td>
                         {/* The stage strip two hundred pixels above says
                             "Triage pack"; this used to say `triage_pack`. */}
-                        <td className="px-3 py-2 text-text-secondary">
+                        <td className="max-sm:p-0 px-3 py-2 text-text-secondary">
                           {humaniseKey(entry.stage ?? "")}
                         </td>
-                        <td className="px-3 py-2 text-text-primary">
+                        <td className="max-sm:p-0 px-3 py-2 text-text-primary">
                           {entry.agent}
                           {entry.server && entry.server !== entry.agent && (
                             <span className="ml-1.5 text-text-muted">{entry.server}</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 font-mono text-text-primary break-all">
+                        <td className="max-sm:p-0 px-3 py-2 font-mono text-text-primary break-all">
                           {entry.tool}
                         </td>
-                        <td className="px-3 py-2 font-mono text-text-muted break-all">
+                        <td className="max-sm:order-last max-sm:basis-full max-sm:truncate max-sm:p-0 px-3 py-2 font-mono text-text-muted break-all">
                           {summary.text || "\u2014"}
                         </td>
-                        <td className="px-3 py-2 text-right text-text-secondary tabular-nums">
+                        <td className="max-sm:p-0 px-3 py-2 text-right text-text-secondary tabular-nums">
                           {formatCallDuration(entry.duration_ms)}
                         </td>
                         <td
-                          className={`px-3 py-2 text-[10px] ${
+                          className={`max-sm:p-0 px-3 py-2 text-[10px] ${
                             entry.ok ? "text-status-green" : "text-status-red"
                           }`}
                         >
@@ -267,8 +271,8 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                         </td>
                       </tr>
                       {!entry.ok && (entry.error || entry.remediation) && (
-                        <tr className="border-b border-border-light bg-status-red/5">
-                          <td colSpan={7} className="px-3 py-1.5 text-[11px]">
+                        <tr className="max-sm:block border-b border-border-light bg-status-red/5">
+                          <td colSpan={7} className="max-sm:block px-3 py-1.5 text-[11px]">
                             <span className="text-status-red">{entry.error ?? "failed"}</span>
                             {entry.remediation && (
                               <span className="text-text-secondary"> — {entry.remediation}</span>
@@ -277,15 +281,15 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                         </tr>
                       )}
                       {notes.length > 0 && (
-                        <tr className="border-b border-border-light bg-status-orange/5">
-                          <td colSpan={7} className="px-3 py-1.5 text-[11px] text-status-orange">
+                        <tr className="max-sm:block border-b border-border-light bg-status-orange/5">
+                          <td colSpan={7} className="max-sm:block px-3 py-1.5 text-[11px] text-status-orange">
                             {notes.join(" ")}
                           </td>
                         </tr>
                       )}
                       {expanded && (
-                        <tr className="border-b border-border-light bg-bg-deep">
-                          <td colSpan={7} className="px-3 pb-3 pt-1 space-y-3">
+                        <tr className="max-sm:block border-b border-border-light bg-bg-deep">
+                          <td colSpan={7} className="max-sm:block px-3 pb-3 pt-1 space-y-3">
                             {summary.truncated && (
                               <button
                                 type="button"
@@ -377,7 +381,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                 })}
                 {entries.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-3 py-6 text-center text-text-muted">
+                    <td colSpan={7} className="max-sm:block px-3 py-6 text-center text-text-muted">
                       {loading
                         ? "Reading the evidence\u2026"
                         : filtered

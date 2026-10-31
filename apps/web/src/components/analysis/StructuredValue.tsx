@@ -155,7 +155,7 @@ function Rows({ rows, name, depth }: { rows: JsonObject[]; name: string; depth: 
         {...scrollRegion(name)}
         className={`max-w-full overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}
       >
-        <table className="w-full text-xs">
+        <table className="w-max min-w-full text-xs">
           <thead className="bg-bg-deep">
             <tr className="border-b border-border-light text-left">
               {columns.map((c) => (
