@@ -635,6 +635,33 @@ def test_a_path_before_a_password_in_the_same_word_does_not_shield_it(written, m
     assert any(secret in found for found in configured_secret_values_of(text))
 
 
+# Words a reading after a path masks, each with what is left: a backslash in
+# the password after the separator, colons and openers before it, and an
+# escaped opener with a backslash run after the separator. Each reading only
+# adds masking, so a later one never drops a row.
+_WORDS_A_READING_AFTER_A_PATH_MASKS = [
+    ("/a,u:{pw}\\s@h:8080", "/a,***@h:8080"),
+    ('@443srv@SSL/,u:@1..\\@1{pw})@h:8080"', '@443srv@SSL/,***@h:8080"'),
+    ("/\\\\\\\"@SSL$,/,a:/\\\\{pw}\\h@1@h:8080'", "/\\\\\\\"@SSL$,/,***@h:8080'"),
+    ("/;u:,D:\\y@1\\\\\\\\\\{pw}u:%P(x86)%\\@h:5432)", "/;***@h:5432)"),
+    ('/srv@SSL;$;a:/{pw}\\\\\\""@h:8080\')', "/srv@SSL;$;***@h:8080')"),
+    ('/(",{"a":"{"a":"\\\\x,{pw}@h:8080', '/(",{"***@h:8080'),
+    ("C:\\x,\\'\\\\{pw}@h:8080", "C:\\x,\\'***@h:8080"),
+    ('{"a":"C:\\\\x,\\\'{pw}\\\\q@h:8080\\\'"}', '{"a":"C:\\\\x,\\\'***@h:8080\\\'"}'),
+]
+
+
+@pytest.mark.parametrize(("written", "masked"), _WORDS_A_READING_AFTER_A_PATH_MASKS)
+def test_every_reading_after_a_path_masks_its_words(written, masked):
+    from maljan.core.settings_masking import masked_text
+
+    secret = _credential_shaped_token()
+    text = written.replace("{pw}", secret)
+
+    assert masked_text(text) == masked
+    assert secret not in masked_text(f"Error: {text}")
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -730,6 +757,9 @@ def test_masking_backslashed_words_costs_time_linear_in_the_text():
         lambda size: "f(C:\\x" + ",a:/" * size + "@h:8080",
         lambda size: "=\\\\a@SSL" + "@1" * size + "\\x@h/y",
         lambda size: "\\\\a" + "@SSL$" * size + "\\x@h/y",
+        # Escaped openers and backslash runs after the separator.
+        lambda size: "C:\\x," + "\\" * size + "@h:8080",
+        lambda size: "C:\\x," + "\\'" * size + "\\" * size + "@h:8080",
     ):
         assert_scales(build, 2_000, masking)
 

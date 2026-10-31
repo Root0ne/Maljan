@@ -230,21 +230,46 @@ def _after_a_path(word: str, start: int, last_at: int) -> int | None:
     password read alike, the password goes. The colons are read from the
     value the path stands in, so a JSON member's key before it names no user
     (``{"a":"C:\\\\x,u:pw@h:8080"}``), and the opener after a separator may be
-    escaped (``{"a":"C:\\\\x,\\'tok@h:8080\\'"}``). Linear in the word.
+    escaped (``{"a":"C:\\\\x,\\'tok@h:8080\\'"}``). Each reading only adds
+    masking, so the earliest of them is taken: from the value the path stands
+    in and from ``start``, each with an opener escaped or as written. Linear
+    in the word.
     """
+    starts = [start]
     backslash = word.find("\\", start, last_at)
     if backslash >= 0:
         opened = max(word.rfind(c, start, backslash) for c in _PATH_VALUE_OPENERS)
-        start = max(start, opened + 1)
+        if opened >= start:
+            starts.append(opened + 1)
+    found = [
+        begin
+        for value in starts
+        for escaped in (True, False)
+        if (begin := _after_a_path_from(word, value, last_at, escaped)) is not None
+    ]
+    return min(found, default=None)
+
+
+def _after_a_path_from(word: str, start: int, last_at: int, escaped: bool) -> int | None:
+    """One reading of :func:`_after_a_path`: its colons read from ``start``.
+
+    With ``escaped``, the opener after the separator may stand behind
+    backslashes (:data:`_ESCAPED_OPENERS`); otherwise only openers as written
+    are passed over. Linear in the word.
+    """
     colon = _user_colon(word[start:last_at])
     end = start + colon if colon >= 0 else last_at
     cut = max(word.rfind(sep, start, end) for sep in _VALUE_SEPARATORS)
     if cut < start:
         return None
-    opening = _ESCAPED_OPENERS.match(word, cut + 1, last_at)
-    if opening is None or (colon < 0 and opening.end() == cut + 1):
+    if escaped:
+        opening = _ESCAPED_OPENERS.match(word, cut + 1, last_at)
+        begin = cut + 1 if opening is None else opening.end()
+    else:
+        rest = word[cut + 1 : last_at]
+        begin = cut + 1 + len(rest) - len(rest.lstrip(TOKEN_OPENERS))
+    if colon < 0 and begin == cut + 1:
         return None
-    begin = opening.end()
     return begin if bare_userinfo(word[begin:]) is not None else None
 
 
