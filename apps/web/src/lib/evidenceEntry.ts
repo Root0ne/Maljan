@@ -21,12 +21,13 @@ function pageOf(jobId: string, page: number, fresh: boolean): Promise<EvidenceEn
   const key = `${jobId}:${page}`;
   const held = pages.get(key);
   if (held && !fresh) return held;
-  const request = api
+  const request: Promise<EvidenceEntry[]> = api
     .getJobEvidence(jobId, { page, pageSize: EVIDENCE_PAGE_SIZE })
     .then((response) => response.entries)
     .catch((err: unknown) => {
-      // A failed read is not remembered: the next open asks again.
-      pages.delete(key);
+      /* A failed read is not remembered: the next open asks again. Only this
+       * read is forgotten — a fresher one that replaced it meanwhile stays. */
+      if (pages.get(key) === request) pages.delete(key);
       throw err;
     });
   pages.set(key, request);
