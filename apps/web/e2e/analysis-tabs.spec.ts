@@ -109,9 +109,18 @@ const BLOCKS: Block[] = [
 /** Open the collapsed "Run quality" section under Evidence. */
 async function openRunQuality(page: import("@playwright/test").Page) {
   await page.goto(`/analysis/${JOB_ID}/evidence`);
-  await page.getByRole("button", { name: /Run quality/ }).click();
-  await expect(page.getByTestId("run-quality")).toBeVisible();
-  return page.getByTestId("run-quality");
+  const panel = page.getByTestId("run-quality");
+  /* The button is server-rendered before React attaches its handler, so a click
+   * on a loaded machine can land on a dead button; click again until the panel
+   * opens, and never once it is open (the button toggles). The first visit to a
+   * route also waits on its `next dev` compile. */
+  await expect(async () => {
+    if (!(await panel.isVisible())) {
+      await page.getByRole("button", { name: /Run quality/ }).click();
+    }
+    await expect(panel).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+  return panel;
 }
 
 test.describe("Analysis tabs", () => {
@@ -254,8 +263,11 @@ test.describe("Analysis tabs", () => {
       })
     );
 
+    /* The first visit to a route under `next dev` waits on its compile, which
+     * outlasts the suite's 10 s assertion default on a loaded machine; the rule
+     * rows are the page's data, so nothing below is read before they are drawn. */
     await page.goto(`/analysis/${JOB_ID}/indicators`);
-    await expect(page.getByText("Run key persistence")).toBeVisible();
+    await expect(page.getByText("Run key persistence")).toBeVisible({ timeout: 30_000 });
     // The rule's own level, in words, on the ladder.
     await expect(page.locator("[data-rule-level]").first()).toContainText("High");
     // Each row still leads to the evidence record it came from: its citation
@@ -274,7 +286,8 @@ test.describe("Analysis tabs", () => {
     const moved = page.locator("[data-rules-moved]");
     await expect(moved.getByRole("link", { name: "Indicators & detection" })).toHaveAttribute(
       "href",
-      `/analysis/${JOB_ID}/indicators#detection`
+      `/analysis/${JOB_ID}/indicators#detection`,
+      { timeout: 30_000 }
     );
     // Drawn once, under detection, and not repeated here.
     await expect(page.getByRole("heading", { name: /Sigma rule matches/i })).toHaveCount(0);
