@@ -9,7 +9,16 @@
  *
  * The palette is the console's own status ramp. Colour here is identity, not
  * meaning: none of these say "good" or "bad", which is what keeps an agent's
- * colour from being read as its verdict.
+ * colour from being read as its verdict — so red, the failure colour, is not
+ * in it, and the accent is kept for the room's moderators (the judge, the
+ * mediator), who are drawn apart from the team they moderate.
+ *
+ * Each tone is three values from one token: the token itself for rings and
+ * rules, a 15% wash of it for the avatar's fill, and an ink — the token mixed
+ * 70/30 with the theme's primary text — for initials and names. Mixing toward
+ * the primary text darkens the ink on the light theme and lightens it on the
+ * dark one, which keeps every ink at 5.4:1 or better on its own wash and on
+ * every surface the conversation draws, in both themes.
  */
 
 const PALETTE = [
@@ -17,9 +26,32 @@ const PALETTE = [
   "var(--status-green)",
   "var(--status-purple)",
   "var(--status-orange)",
-  "var(--accent-strong)",
   "var(--text-secondary)",
 ];
+
+const MODERATOR = "var(--accent-strong)";
+
+export interface AgentTone {
+  /** The token, for rings and rules. */
+  color: string;
+  /** The avatar's fill. */
+  wash: string;
+  /** Initials and names: AA on the wash and on every surface. */
+  ink: string;
+  moderator: boolean;
+}
+
+function tone(color: string, moderator: boolean): AgentTone {
+  return {
+    color,
+    wash: `color-mix(in srgb, ${color} 15%, transparent)`,
+    ink: `color-mix(in srgb, ${color} 70%, var(--text-primary))`,
+    moderator,
+  };
+}
+
+const UNKNOWN_TONE = tone("var(--text-muted)", false);
+export const MODERATOR_TONE = tone(MODERATOR, true);
 
 function hashIndex(key: string, buckets: number): number {
   let hash = 0;
@@ -29,11 +61,44 @@ function hashIndex(key: string, buckets: number): number {
   return Math.abs(hash) % buckets;
 }
 
-/** The colour that stands for this agent, wherever it appears. */
-export function agentColor(key: string): string {
-  const normalized = key.toLowerCase().trim();
-  if (!normalized) return "var(--text-muted)";
-  return PALETTE[hashIndex(normalized, PALETTE.length)];
+/**
+ * One tone per participant of this run.
+ *
+ * Each agent starts at the colour its key hashes to, so the same agent keeps
+ * its colour from run to run; where two agents of one run would share a
+ * colour, the later one in the sorted cast takes the next free one. Past five
+ * agents colours repeat, and the initials — unique within the run — still
+ * tell them apart. `moderators` are the keys drawn in the moderator's tone.
+ */
+export function agentTones(
+  keys: readonly string[],
+  moderators: ReadonlySet<string> = new Set(),
+): Record<string, AgentTone> {
+  const out: Record<string, AgentTone> = {};
+  const used = new Set<number>();
+  for (const key of [...new Set(keys)].sort()) {
+    const normalized = key.toLowerCase().trim();
+    if (!normalized) {
+      out[key] = UNKNOWN_TONE;
+      continue;
+    }
+    if (moderators.has(key)) {
+      out[key] = MODERATOR_TONE;
+      continue;
+    }
+    let index = hashIndex(normalized, PALETTE.length);
+    if (used.size < PALETTE.length) {
+      while (used.has(index)) index = (index + 1) % PALETTE.length;
+    }
+    used.add(index);
+    out[key] = tone(PALETTE[index], false);
+  }
+  return out;
+}
+
+/** The tone of a key no cast lists. */
+export function toneOf(tones: Record<string, AgentTone>, key: string): AgentTone {
+  return tones[key] ?? UNKNOWN_TONE;
 }
 
 /**
@@ -59,7 +124,10 @@ export function agentInitials(names: Record<string, string>): Record<string, str
     const rest = label.slice(1);
     const candidates = [(label.slice(0, 2).charAt(0).toUpperCase() + label.charAt(1)).slice(0, 2)];
     for (let i = 0; i < rest.length; i += 1) {
-      if (/[^a-z0-9]/i.test(rest[i]) && rest[i + 1]) candidates.push(head + rest[i + 1]);
+      // A letter or digit after a separator: "(scanner)" offers its "s", never its "(".
+      if (/[^a-z0-9]/i.test(rest[i]) && /[a-z0-9]/i.test(rest[i + 1] ?? "")) {
+        candidates.push(head + rest[i + 1]);
+      }
     }
     for (const ch of rest) if (/[a-z0-9]/i.test(ch)) candidates.push(head + ch);
     for (let n = 2; n <= 9; n += 1) candidates.push(head + String(n));

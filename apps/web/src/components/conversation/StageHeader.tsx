@@ -2,11 +2,13 @@
 
 /* Where one part of the run begins.
  *
- * A stage is the room the next few messages were said in, so it is drawn as a
- * full-width rule with the team's own label on it rather than as another
- * card. A stage that declined says so, and says why, in the same place a
- * stage that ran says how long it took — the reader never has to look
- * somewhere else to find out why a part of the conversation is empty.
+ * A stage is the room the next few messages were said in, so it is drawn the
+ * way a group thread draws a date: a small chip centred in the stream, with
+ * the team's own label on it, rather than another card. A stage that
+ * declined says so, and says why, in the same chip a stage that ran uses to
+ * say how long it took — the reader never has to look somewhere else to find
+ * out why a part of the conversation is empty. The label is a heading, so a
+ * screen reader can walk the run stage by stage.
  */
 
 import { CircleCheck, CircleDot, SkipForward } from "lucide-react";
@@ -47,18 +49,20 @@ export default function StageHeader({
   const Icon = STATE_ICON[state];
   const duration = formatStageDuration(durationMs);
   return (
-    <div className="flex items-center gap-3 pt-2">
-      <span className={`flex items-center gap-1.5 ${STATE_TEXT[state]}`}>
-        <Icon size={13} aria-hidden="true" />
-        <span className="text-xs font-medium text-text-primary">{label}</span>
-      </span>
-      {kind && <span className="font-mono text-[11px] text-text-muted">{kind}</span>}
-      <span className={`text-[11px] ${STATE_TEXT[state]}`}>{state}</span>
-      {duration && <span className="font-mono text-[11px] text-text-muted">{duration}</span>}
-      {state === "skipped" && reason && (
-        <span className="truncate text-[11px] text-text-muted">{reason}</span>
-      )}
-      <span aria-hidden="true" className="h-px flex-1 bg-border" />
+    <div className="flex justify-center pt-3">
+      <div className="flex max-w-full flex-wrap items-center justify-center gap-x-2 gap-y-0.5 rounded-full border border-border-light bg-bg-elevated px-3 py-1 text-[11px]">
+        <Icon size={12} aria-hidden="true" className={STATE_TEXT[state]} />
+        <h3 className="text-xs font-medium text-text-primary">{label}</h3>
+        {/* The kind, where the team's label does not already say it. */}
+        {kind && kind !== label.toLowerCase() && <span className="text-text-secondary">{kind}</span>}
+        {/* On the elevated chip muted text falls under 4.5:1, so a muted
+            state is written in the secondary colour there. */}
+        <span className={STATE_TEXT[state] === "text-text-muted" ? "text-text-secondary" : STATE_TEXT[state]}>
+          {state}
+        </span>
+        {duration && <span className="tabular-nums text-text-secondary">{duration}</span>}
+        {state === "skipped" && reason && <span className="text-text-secondary">{reason}</span>}
+      </div>
     </div>
   );
 }
