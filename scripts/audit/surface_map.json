@@ -43,7 +43,7 @@
   {"kind": "family", "surface": "markdown", "rule": "same", "ref": "src/maljan/reporting/renderers/markdown.py:656"},
   {"kind": "family", "surface": "html", "rule": "same", "ref": "src/maljan/reporting/renderers/html.py:434"},
   {"kind": "family", "surface": "stix", "rule": "same", "ref": "the export's malware object"},
-  {"kind": "family", "surface": "web", "rule": "same", "ref": "apps/web/src/components/analysis/tabs/AttributionContent.tsx:41"},
+  {"kind": "family", "surface": "web", "rule": "same", "ref": "apps/web/src/components/analysis/tabs/AttributionContent.tsx:42"},
   {"kind": "technique", "surface": "report_row", "rule": "published", "ref": "report row mitre_techniques"},
   {"kind": "technique", "surface": "report_full", "rule": "published", "ref": "src/maljan/reporting/models.py:1599"},
   {"kind": "technique", "surface": "mitre", "rule": "published", "ref": "apps/api/app/services/report_service.py:537"},
