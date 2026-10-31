@@ -1112,6 +1112,25 @@ class CommandRow(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class CapabilityBullet(BaseModel):
+    """One line of the analyst report's executive summary: a key capability, subject first."""
+
+    model_config = _STRICT_CONFIG
+
+    text: str
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
+class TechniqueProcedure(BaseModel):
+    """The one sentence saying how the sample carries out one published ATT&CK technique."""
+
+    model_config = _STRICT_CONFIG
+
+    technique_id: str
+    procedure: str
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
 class TechnicalAnalysis(BaseModel):
     """The report's technical-analysis spine (reference §8)."""
 
@@ -1139,6 +1158,22 @@ class TechnicalAnalysis(BaseModel):
     message_packet_structure: TechnicalSubsection | None = None
     evasion_antiforensics: TechnicalSubsection | None = None
     ransom_note: RansomNote | None = None
+    # The analyst report's own prose (``reporting.composer_pro``): the summary's
+    # capability bullets, the conclusion, the limitations paragraph and one
+    # procedure per published technique. Model-written, printed as written; left
+    # out of the dump while empty, so a report stored before them reads the same.
+    capability_summary: list[CapabilityBullet] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
+    analyst_conclusion: TechnicalSubsection | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    analyst_limitations: TechnicalSubsection | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    technique_procedures: list[TechniqueProcedure] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
 
 
 class C2Channel(BaseModel):
@@ -1424,6 +1459,7 @@ class Figure(BaseModel):
         "entropy_chart",
         "network_graph",
         "infection_chain",
+        "execution_flow",
         "code_listing",
         "not_drawn",
     ]

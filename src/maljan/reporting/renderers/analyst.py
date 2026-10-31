@@ -31,6 +31,12 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from maljan.reporting.composer_pro import (
+    ValueReader,
+    carrying_form,
+    sentences,
+    values_not_carried,
+)
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.defang import defang
 from maljan.reporting.judge_reasons import judge_reasons_shown
@@ -154,7 +160,9 @@ _BEHIND: dict[str, tuple[str, ...]] = {
 
 # The figures whose section this report prints; every other figure is drawn
 # in the bundle, beside the section it illustrates there.
-FIGURE_KINDS: frozenset[str] = frozenset({"infection_chain", "network_graph", "attack_matrix"})
+FIGURE_KINDS: frozenset[str] = frozenset(
+    {"execution_flow", "infection_chain", "network_graph", "attack_matrix"}
+)
 
 
 @dataclass(frozen=True)
@@ -255,7 +263,20 @@ def analyst_sections(
         layout.notes.section = key
         sections.append(renderer._safe_section(f"analyst_{key}", build))
         layout.written.append(sections[-1])
+    if layout.composed():
+        # The sections where composed prose replaces the platform's text are
+        # written again, now that the whole report is known: the replaced text
+        # that names a value printed nowhere else in it stays (``_keeps``).
+        layout.elsewhere = carrying_form("\n".join(sections))
+        for index, (key, build) in enumerate(plan):
+            if key in _REPLACING:
+                layout.notes.section = key
+                sections[index] = renderer._safe_section(f"analyst_{key}", build)
     return sections, list(layout.notes.notes)
+
+
+# The sections in which a composed section replaces the platform's own text.
+_REPLACING = frozenset({"summary", "conclusion", "attack"})
 
 
 def _heading(number: int, title: str) -> str:
@@ -291,6 +312,88 @@ def _confidence_words(value: float | None) -> str:
     return confidence_word(value) if value is not None else ""
 
 
+# How long a step's label in the execution-flow diagram may be, and from how
+# many steps the diagram is drawn: one step is no flow.
+_LABEL_CHARS = 72
+_DIAGRAM_STEPS = 2
+
+
+def flow_step_labels(report: MalwareReport) -> list[tuple[str, str]]:
+    """Each execution-flow step as the diagram labels it, in order, with its mark.
+
+    The step's first sentence, its citations out, cut with a mark at
+    :data:`_LABEL_CHARS`; ``observed`` or ``assessed`` as the step is marked.
+    Read by the Markdown's diagram and by the HTML's figure
+    (``figures.build_execution_flow``), so both draw the same boxes.
+    """
+    ta = report.technical_analysis
+    steps = sorted(ta.execution_flow, key=lambda s: s.order) if ta is not None else []
+    out: list[tuple[str, str]] = []
+    for index, step in enumerate(steps, start=1):
+        sentence = _first_sentence(_CITATION_RUN.sub("", str(step.action or "")))
+        if len(sentence) > _LABEL_CHARS:
+            sentence = sentence[: _LABEL_CHARS - 1].rstrip() + "\u2026"
+        out.append((f"{index}. {sentence}", "observed" if step.voice == "observed" else "assessed"))
+    return out if len(out) >= _DIAGRAM_STEPS else []
+
+
+def _mermaid_label(text: str) -> str:
+    """A label inside a Mermaid node's quotes: its quotes and entity marks written as entities."""
+    return text.replace("#", "#35;").replace('"', "#quot;")
+
+
+# The words a C2 message layout's field is annotated with, by the conversion
+# its recorded format string gives the field's value.
+_FORMAT_WORDS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"%[-+ 0#]*\d*[hlLqjztI0-9]*[xX]"), "a hexadecimal number"),
+    (re.compile(r"%[-+ 0#]*\d*[hlLqjztI0-9]*[diu]"), "a decimal number"),
+    (re.compile(r"%[-+ 0#]*\d*l?[sS]"), "a text"),
+    (re.compile(r"%[-+ 0#]*\d*c"), "a character"),
+    (re.compile(r"%[-+ 0#]*\d*(?:\.\d+)?[fg]"), "a decimal fraction"),
+)
+# A recorded message format: ``name=value`` fields joined by ``&``, at least two.
+_QUERY_FORMAT = re.compile(r"^[\w.\[\]-]+=[^&\s]*(?:&[\w.\[\]-]+=[^&\s]*)+$")
+
+
+def message_fields(fmt: str) -> list[tuple[str, str, str]]:
+    """The fields of a recorded ``name=value&...`` message format: name, value, annotation.
+
+    The annotation is the conversion's own meaning (``%d`` a decimal number,
+    ``%s`` a text); a value with no conversion is the value as recorded. A
+    format of any other shape has no fields here.
+    """
+    text = _CITATION_RUN.sub("", str(fmt or "")).strip()
+    if not _QUERY_FORMAT.match(text):
+        return []
+    out: list[tuple[str, str, str]] = []
+    for part in text.split("&"):
+        name, _, value = part.partition("=")
+        out.append((name, value, _value_words(value)))
+    return out
+
+
+# One conversion of a format string, any of :data:`_FORMAT_WORDS`.
+_CONVERSION = re.compile(_PIPE.join(f"(?:{pattern.pattern})" for pattern, _ in _FORMAT_WORDS))
+
+
+def _value_words(value: str) -> str:
+    """What a field's recorded value holds: each conversion in words, each literal quoted."""
+    if not value:
+        return "empty"
+    if not _CONVERSION.search(value):
+        return "the value as recorded" if "%" not in value else "as recorded"
+    said: list[str] = []
+    at = 0
+    for match in _CONVERSION.finditer(value):
+        if match.start() > at:
+            said.append(f'"{value[at : match.start()]}"')
+        said.append(next(w for pattern, w in _FORMAT_WORDS if pattern.fullmatch(match.group(0))))
+        at = match.end()
+    if at < len(value):
+        said.append(f'"{value[at:]}"')
+    return ", then ".join(said)
+
+
 class _Analyst:
     """The sections of one analyst report, over one render's context."""
 
@@ -299,6 +402,14 @@ class _Analyst:
         self.ctx = ctx
         self.notes = CitationNotes(ctx)
         self.ta = report.technical_analysis
+        # The composer's procedure of each published technique, by id (``attack``).
+        self._procedures: dict[str, Any] = {}
+        # Every section as first written, once known and in ``carrying_form``:
+        # what a replaced text's values are looked for in (``_keeps``). ``None``
+        # on the first writing.
+        self.elsewhere: str | None = None
+        # What counts as a value of the sample's own here (``composer_pro.ValueReader``).
+        self.values = ValueReader.of(report)
         # What the sections before the one being written printed.
         self.written: list[str] = []
 
@@ -329,6 +440,43 @@ class _Analyst:
             safe = _table_safe(_one_line(mark))
             text = f"{text[:end]} {self.ctx.keep(safe)}{text[end:]}"
         return text
+
+    def composed(self) -> bool:
+        """Whether the composer wrote any section that replaces the platform's text."""
+        ta = self.ta
+        return ta is not None and bool(
+            ta.capability_summary or ta.analyst_conclusion or ta.technique_procedures
+        )
+
+    def _keeps(self, text: str) -> bool:
+        """Whether replaced text stays: a check marked it, or it names a value printed
+        nowhere else in the report (``composer_pro.carried_values``)."""
+        if self._carries_a_mark(text):
+            return True
+        if self.elsewhere is None or not str(text or "").strip():
+            return False
+        return bool(values_not_carried(self.values(text), self.elsewhere, formed=True))
+
+    def _kept_sentences(self, text: str) -> list[str]:
+        """The sentences of replaced text that stay (:meth:`_keeps`), as written, in order."""
+        kept = list(self._marked_sentences(text))
+        for sentence in sentences(text):
+            if not any(sentence in k or k in sentence for k in kept) and self._keeps(sentence):
+                kept.append(sentence)
+        return sorted(kept, key=lambda k: text.find(k))
+
+    def _carries_a_mark(self, text: str) -> bool:
+        """Whether a sentence a check left standing, with its mark, is in ``text``."""
+        return bool(text) and any(sentence in text for sentence, _mark in self.ctx.flagged)
+
+    def _marked_sentences(self, text: str) -> list[str]:
+        """The sentences of ``text`` a check left a mark on, as written, in order."""
+        found: list[tuple[int, str]] = []
+        for sentence, _mark in self.ctx.flagged:
+            at = text.find(sentence) if sentence else -1
+            if at != -1 and not any(sentence in kept for _at, kept in found):
+                found.append((at, sentence))
+        return [sentence for _at, sentence in sorted(found)]
 
     def _prose(self, text: str, ids: Iterable[Any] = ()) -> str:
         """Model prose as a paragraph: marked, defanged, its citations moved to note markers."""
@@ -441,14 +589,25 @@ class _Analyst:
     def summary(self) -> str:
         report = self.report
         lines = [_heading(1, "Executive summary"), ""]
-        for finding in report.key_findings:
+        bullets = list(self.ta.capability_summary) if self.ta is not None else []
+        # The composer's capability bullets where it wrote them; the key
+        # findings and the summary paragraph are then the bundle's, but for a
+        # finding a check left a mark on, which stays where a reader sees it.
+        findings = list(report.key_findings)
+        if bullets:
+            findings = [f for f in findings if self._keeps(f.text)]
+        for bullet in bullets:
+            lines.append(_item(self._line(bullet.text, bullet.evidence_refs)))
+        for finding in findings:
             lines.append(_item(self._line(finding.text, finding.evidence_ids)))
         summary = report.executive_summary.strip()
+        if bullets:
+            summary = " ".join(self._kept_sentences(summary))
         if summary:
-            if report.key_findings:
+            if findings or bullets:
                 lines.append("")
             lines.append(self._prose(summary))
-        if not summary and not report.key_findings:
+        if not summary and not findings and not bullets:
             lines.append(
                 "No summary was written in this run; the findings below are the platform's "
                 "own record of what the run established."
@@ -612,6 +771,16 @@ class _Analyst:
         lines = [_heading(4, "Execution flow"), ""]
         if not steps:
             lines.append("The report model wrote no execution flow in this run.")
+        labels = flow_step_labels(self.report)
+        if labels:
+            # The steps as a diagram (the HTML draws it as a figure); its words
+            # are defanged as the steps' are.
+            nodes = [
+                f'    s{n}["{_mermaid_label(self.ctx.plain(label))} ({mark})"]'
+                for n, (label, mark) in enumerate(labels, 1)
+            ]
+            edges = [f"    s{n} --> s{n + 1}" for n in range(1, len(labels))]
+            lines.extend([*_fenced("\n".join(["flowchart TD", *nodes, *edges]), "mermaid"), ""])
         for index, step in enumerate(sorted(steps, key=lambda s: s.order), start=1):
             mark = "observed" if step.voice == "observed" else "assessed"
             # The platform's note beside a step, as the single-file report prints it.
@@ -769,7 +938,7 @@ class _Analyst:
         ctx, ta = self.ctx, self.ta
         blocks: list[str] = []
         prose = [ta.command_and_control, ta.message_packet_structure] if ta else []
-        protocol = self._channels() + self._requests()
+        protocol = self._channels() + self._message_examples() + self._requests()
         if any(sub is not None and sub.body.strip() for sub in prose) or protocol:
             blocks.extend(self._subsection("6.1", "Protocol and endpoints", prose, protocol))
         if ta is not None and ta.configuration:
@@ -847,6 +1016,49 @@ class _Analyst:
             )
         return [*lines, ""]
 
+    def _message_examples(self) -> list[str]:
+        """An annotated example of each message the recorded protocol facts lay out.
+
+        A channel whose recorded message format is ``name=value`` fields gets
+        each field on its line with what its conversion holds, and the value of
+        a configuration item of the same name. Nothing is added that the record
+        does not hold; with no such format there is no example. An observed
+        request is the requests table's row, printed once.
+        """
+        ctx = self.ctx
+        config = {
+            str(item.key).strip().lower(): item
+            for item in (self.ta.configuration if self.ta is not None else [])
+            if str(item.key).strip()
+        }
+        lines: list[str] = []
+        for ch in self.report.c2_channels:
+            for source in (ch.beacon_format, ch.packet_layout):
+                fields = message_fields(source or "")
+                if not fields:
+                    continue
+                width = max(len(f"{name}={value}") for name, value, _ in fields)
+                rows = []
+                for name, value, words in fields:
+                    said = words
+                    item = config.get(name.lower())
+                    if item is not None:
+                        said += (
+                            f"; a configuration item of the same name holds {_one_line(item.value)}"
+                        )
+                    rows.append(f"{name}={value}".ljust(width + 2) + said)
+                lines.extend(
+                    [
+                        f"Message example, {self._line(ch.name)}, as its recorded format lays it "
+                        "out:",
+                        "",
+                        *_fenced(ctx.plain("\n".join(rows)), "text"),
+                        "",
+                    ]
+                )
+                break
+        return lines
+
     def _requests(self) -> list[str]:
         net, ctx = self.report.network, self.ctx
         observed = [u for u in (net.urls if net else []) if u.source == "sandbox"]
@@ -888,6 +1100,39 @@ class _Analyst:
         if severity is not None:
             said += f", at {_one_line(severity.rating).lower()} severity"
         lines.append(_paragraph_line(said + "."))
+        composed = self.ta.analyst_conclusion if self.ta is not None else None
+        if composed is not None and composed.body.strip():
+            # The platform's verdict sentence, then the composer's paragraphs in
+            # place of the judge's words, which are the bundle's; the platform's
+            # findings on the verdict stay.
+            lines.append("")
+            paragraphs = [p for p in re.split(r"\n\s*\n", composed.body.strip()) if p.strip()]
+            for index, paragraph in enumerate(paragraphs):
+                last = index == len(paragraphs) - 1
+                lines.extend([self._prose(paragraph, composed.evidence_refs if last else ()), ""])
+            # A sentence of the words it replaces that a check left a mark on, or
+            # that names a value printed nowhere else.
+            severity, stored = report.severity, report.conclusion
+            replaced = " ".join(
+                text
+                for text in (
+                    severity.business_impact if severity is not None else "",
+                    stored.text if stored is not None else "",
+                )
+                if text and text.strip()
+            )
+            kept = self._kept_sentences(replaced)
+            if kept:
+                lines.extend([self._prose(" ".join(kept)), ""])
+            # The platform's own fields stay beside them.
+            if severity is not None and severity.likely_targets:
+                targets = ", ".join(_one_line(t) for t in severity.likely_targets)
+                lines.extend([f"Likely targets: {targets}.", ""])
+            if stored is not None and stored.sophistication_rating:
+                lines.extend([f"Sophistication: {_one_line(stored.sophistication_rating)}.", ""])
+            if self.ctx.verdict_findings:
+                lines.extend([*self._findings(self.ctx.verdict_findings), ""])
+            return "\n".join([*lines, _behind("conclusion")])
         if severity is not None and severity.business_impact.strip():
             lines.extend(["", self._prose(severity.business_impact)])
         if severity is not None and severity.likely_targets:
@@ -1087,6 +1332,12 @@ class _Analyst:
         report = self.report
         lines = [_heading(10, "MITRE ATT&CK mapping"), ""]
         mappings = {m.technique_id: m for m in report.ttp_mappings}
+        # The composer's one sentence per technique, where it wrote one.
+        self._procedures = {
+            p.technique_id.strip().upper(): p
+            for p in (self.ta.technique_procedures if self.ta is not None else [])
+            if p.procedure.strip()
+        }
         rows: list[str] = []
         seen: set[str] = set()
         held: list[str] = []
@@ -1104,7 +1355,11 @@ class _Analyst:
                     _one_line(tactic),
                     cell.technique_id,
                     _one_line(cell.technique_name),
-                    self._procedure(claim, _EV_RE.findall(" ".join(map(str, cell.evidence))))
+                    self._procedure(
+                        claim,
+                        _EV_RE.findall(" ".join(map(str, cell.evidence))),
+                        cell.technique_id,
+                    )
                     + self._status(cell.technique_id, cell.note),
                 )
             )
@@ -1118,7 +1373,7 @@ class _Analyst:
                     _one_line(mapping.tactic_name or mapping.tactic or "-"),
                     tid,
                     _one_line(mapping.technique_name),
-                    self._procedure(claim, _EV_RE.findall(" ".join(mapping.evidence_quotes)))
+                    self._procedure(claim, _EV_RE.findall(" ".join(mapping.evidence_quotes)), tid)
                     + self._status(tid, ""),
                 )
             )
@@ -1182,8 +1437,16 @@ class _Analyst:
             said.append("unresolved: " + ", ".join(dict.fromkeys(codes)))
         return f" _({'; '.join(said)})_" if said else ""
 
-    def _procedure(self, claim: str, ids: list[str]) -> str:
+    def _procedure(self, claim: str, ids: list[str], technique_id: str = "") -> str:
+        """The composer's procedure for the technique, else its first claim's first sentence."""
+        written = self._procedures.get(technique_id.strip().upper())
         sentence = _first_sentence(_CITATION_RUN.sub("", claim))
+        # A first sentence a check left a mark on stays, with its mark.
+        first = _first_sentence(claim)
+        # A first sentence a check marked, or naming a value printed nowhere
+        # else, stays in place of the written procedure.
+        if written is not None and not (self._keeps(sentence) or self._carries_a_mark(first)):
+            return self._line(written.procedure, written.evidence_refs)
         if not sentence:
             return "-" + self.notes.marker(ids)
         return self._line(sentence, ids)
@@ -1218,6 +1481,17 @@ class _Analyst:
                 f"{'are' if undiscussed != 1 else 'is'} not discussed in this report and "
                 f"{'are' if undiscussed != 1 else 'is'} printed whole in the bundle."
             )
+        composed = self.ta.analyst_limitations if self.ta is not None else None
+        if composed is not None and composed.body.strip():
+            # The composer's scoped paragraph, then every sentence of the
+            # platform's own: its caveats, its counts and what the report leaves
+            # to the bundle.
+            kept = said
+            paragraph = self._prose(" ".join(composed.body.split()), composed.evidence_refs)
+            if kept:
+                paragraph += " " + _paragraph_line(" ".join(kept))
+            lines = [_heading(11, "Limitations"), "", paragraph]
+            return "\n".join([*lines, "", _behind("limitations")])
         if not said:
             said.append("The run recorded no limitation.")
         lines = [_heading(11, "Limitations"), "", _paragraph_line(" ".join(said))]

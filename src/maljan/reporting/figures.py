@@ -336,6 +336,49 @@ def build_infection_chain(report: MalwareReport) -> Figure | None:
     )
 
 
+def build_execution_flow(report: MalwareReport) -> Figure | None:
+    """The report's execution-flow steps as a column of boxes, entry to steady state.
+
+    Drawn when the analyst report is rendered, from the steps the report holds
+    (``renderers.analyst.flow_step_labels``, the same labels its Markdown
+    diagram carries); ``None`` for fewer than two steps.
+    """
+    from maljan.reporting.renderers.analyst import flow_step_labels
+
+    labels = flow_step_labels(report)
+    if not labels:
+        return None
+    box_w, box_h, gap = 660, 30, 18
+    width = box_w + 24
+    height = len(labels) * (box_h + gap) - gap + 24
+    parts: list[str] = []
+    for i, (label, mark) in enumerate(labels):
+        y = 12 + i * (box_h + gap)
+        observed = mark == "observed"
+        parts.append(
+            _rect(12, y, box_w, box_h, fill="#f6f8fa", stroke=_ACCENT if observed else _LINE)
+        )
+        parts.append(_text(22, y + 19, _written(f"{label} ({mark})"), fill=_INK, size=11))
+        if i < len(labels) - 1:
+            x = 12 + box_w // 2
+            parts.append(
+                f'<line x1="{x}" y1="{y + box_h}" x2="{x}" y2="{y + box_h + gap}" '
+                f'stroke="{_MUTED}" marker-end="url(#flow-arrow)"/>'
+            )
+    defs = (
+        f'<defs><marker id="flow-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" '
+        f'orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="{_MUTED}"/></marker></defs>'
+    )
+    return Figure(
+        id="fig-execution-flow",
+        caption="Execution flow, entry point to steady state",
+        kind="execution_flow",
+        content=_svg(width, height, defs + "".join(parts)),
+        legend="A step a sandbox watched is outlined in blue; every other step is read from "
+        "the code. Each box holds its step's first sentence.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Decompiled code listings (text figures), from any decompiler
 # ---------------------------------------------------------------------------

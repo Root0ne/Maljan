@@ -230,6 +230,7 @@ WALKED: tuple[str, ...] = (
     "agents/judge_postprocess.py",
     "reporting/question_round.py",
     "reporting/section_agreement.py",
+    "reporting/composer_pro.py",
 )
 
 # The values this codebase owns, per place. A bare spelling vouched for a name
@@ -246,6 +247,8 @@ WALKED: tuple[str, ...] = (
 # module's top level is owned without being listed: it is this repository's own
 # source text.
 CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
+    # A bullet's place in the summary, counted from one.
+    ("reporting/composer_pro.py", "summary_shape_violations"): frozenset({"number"}),
     # The ATT&CK catalogue's own answers about a technique, and the router's
     # own answer about the sample. Neither quotes the producer.
     ("pipeline/validation.py", "platform_mismatch_message"): frozenset(

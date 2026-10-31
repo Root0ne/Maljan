@@ -105,6 +105,14 @@ COMPOSER_CHECKS: tuple[str, ...] = (
     "configuration_citation_violations",
     "identifier_citation_violations",
     "stated_value_violations",
+    "style_violations",
+    "channel_binding_violations",
+    "summary_shape_violations",
+    "conclusion_shape_violations",
+    "limitations_shape_violations",
+    "procedure_violations",
+    "summary_value_violations",
+    "procedure_value_violations",
 )
 COMPOSER_NOT_REPLAYED: dict[str, str] = {
     "section_cut_violation": _CUT_NOT_STORED,
@@ -152,6 +160,10 @@ COMPOSER_PLACES: dict[str, tuple[str, str | None]] = {
     "cli_flags": ("technical_analysis.cli_flags", "flags"),
     "ransom_note": ("technical_analysis.ransom_note", None),
     "communications": ("c2_channels", "channels"),
+    "summary": ("technical_analysis.capability_summary", "bullets"),
+    "conclusion": ("technical_analysis.analyst_conclusion", None),
+    "limitations": ("technical_analysis.analyst_limitations", None),
+    "attack_procedures": ("technical_analysis.technique_procedures", "procedures"),
 }
 
 _LOG = logging.getLogger("maljan.replay")
@@ -2262,6 +2274,7 @@ def _stored_at(report: Mapping[str, Any], place: str) -> Any:
 def _composer(run: _Run, built: _Built) -> dict[str, Any]:
     from maljan.pipeline import validation as v
     from maljan.reporting import composer as c
+    from maljan.reporting import composer_pro as pro
     from maljan.reporting.evidence_bundles import (
         sample_flow_fact,
         sandbox_entry_ids,
@@ -2283,6 +2296,7 @@ def _composer(run: _Run, built: _Built) -> dict[str, Any]:
         "ransom_note": RansomNote,
         "communications": c._C2Out,
         **dict.fromkeys(c._PROSE_SECTIONS, c._ProseOut),
+        **pro.ANALYST_SECTIONS,
     }
     items = built.items
     entries = built.entries
@@ -2295,7 +2309,24 @@ def _composer(run: _Run, built: _Built) -> dict[str, Any]:
     entry_tools = {row.id: str(row.tool or "") for row in report.evidence_index}
     flow_fact = sample_flow_fact(report)
     saw_no_persistence = sandbox_saw_no_persistence(report)
+    published_ids = list(pro.published_techniques(report))
+    names = pro.agent_names(report)
+    findings_text = "\n".join([report.executive_summary, *(f.text for f in report.key_findings)])
+    held = pro.held_text(report)
+    firsts = pro.first_claim_sentences(report)
+    reader = pro.ValueReader.of(report)
     extras: dict[str, list[Callable[[Any], list[Any]]]] = {
+        "communications": [lambda p: pro.channel_binding_violations(p, entries)],
+        "summary": [
+            lambda p: pro.summary_shape_violations(p),
+            lambda p: pro.summary_value_violations(p, findings_text, held, reader),
+        ],
+        "conclusion": [lambda p: pro.conclusion_shape_violations(p)],
+        "limitations": [lambda p: pro.limitations_shape_violations(p)],
+        "attack_procedures": [
+            lambda p: pro.procedure_violations(p, published_ids),
+            lambda p: pro.procedure_value_violations(p, firsts, reader),
+        ],
         "execution_flow": [
             lambda p: v.flow_voice_violations(
                 p,
@@ -2324,6 +2355,12 @@ def _composer(run: _Run, built: _Built) -> dict[str, Any]:
     }
     sections: dict[str, Any] = {}
     not_written: list[str] = []
+    run.name(
+        "composer style_violations",
+        "the tool outputs and code each section was shown are not in the stored record: a "
+        "phrasing they held, which the round reads as the evidence's own term, is asked about "
+        "here",
+    )
     for section in c.COMPOSED_SECTIONS:
         schema = schemas.get(section)
         if schema is None:
@@ -2337,7 +2374,7 @@ def _composer(run: _Run, built: _Built) -> dict[str, Any]:
         if not value:
             not_written.append(section)
             continue
-        if section in c._PROSE_SECTIONS:
+        if section in c._PROSE_SECTIONS or schema in (pro.ConclusionOut, pro.LimitationsOut):
             payload: Any = {
                 "body": str(value.get("body") or ""),
                 "evidence_refs": list(value.get("evidence_refs") or []),
@@ -2362,6 +2399,7 @@ def _composer(run: _Run, built: _Built) -> dict[str, Any]:
         ]
         for extra in extras.get(section, []):
             found.extend(extra(payload))
+        found.extend(pro.style_violations(payload, names))
         flags = [_flag(f, show_text=run.show_text) for f in found]
         sections[section] = {"codes": _tally(flags), "flags": flags}
     codes: Counter[str] = Counter()

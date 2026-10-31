@@ -28,6 +28,7 @@ from maljan.reporting.models import (
     NetworkDomain,
     NetworkIOCs,
     SampleIdentity,
+    TTPMapping,
 )
 from maljan.reporting.renderers.html import HtmlRenderer
 from maljan.reporting.renderers.markdown import MarkdownRenderer
@@ -57,6 +58,15 @@ def _report() -> MalwareReport:
         verdict="Malware",
         generated_at=datetime(2026, 1, 1, tzinfo=UTC),
         network=NetworkIOCs(domains=[NetworkDomain(fqdn="update.example.invalid")]),
+        # A published technique, so the analyst report's procedures have one to write.
+        ttp_mappings=[
+            TTPMapping(
+                technique_id="T1486",
+                technique_name="Data Encrypted for Impact",
+                tactic="TA0040",
+                evidence_quotes=["Encrypts files with AES"],
+            )
+        ],
         technical_evidence={
             "static": [
                 tool("list_strings", "RESTORE_FILES.example.txt --path update.example.invalid"),
@@ -111,6 +121,12 @@ _ANSWERS: dict[str, dict[str, Any]] = {
         "channels": [
             {"name": "Update", "protocol": "HTTP", "endpoints": ["update.example.invalid"]}
         ]
+    },
+    "summary": {"bullets": [{"text": "The sample encrypts files with AES."}]},
+    "conclusion": {"body": "A file encryptor.\n\nIts files are not restored without its key."},
+    "limitations": {"body": "In the analysed sample the key exchange was not recovered."},
+    "attack_procedures": {
+        "procedures": [{"technique_id": "T1486", "procedure": "Encrypts files with AES."}]
     },
 }
 
@@ -318,8 +334,11 @@ def test_the_head_note_rides_on_the_section_request(concurrent: bool) -> None:
                 report, _isr(), facts_block="FACTS", run_state="", concurrent=concurrent
             )
         )
+    from maljan.reporting.composer import _published_techniques
+
     heads = {str(m.content)[: m.response_metadata[SHARED_HEAD]] for m in seen}
-    assert heads == {"FACTS\n\n"}
+    # The head: the facts, then the techniques the report publishes.
+    assert heads == {f"FACTS\n\n{_published_techniques(report)}\n\n"}
 
 
 class TestTheLeadReleasesItsGroup:
@@ -510,7 +529,12 @@ class TestAgainstTheSequentialBase:
     command's branch value as its id (T-378): that sentence is the only change.
     The Markdown and HTML digests were re-pinned when the methodology came to
     say no table value of the body is cut (T-399): that sentence is the only
-    change, with the HTML print stylesheet's fixed table layout.
+    change, with the HTML print stylesheet's fixed table layout. Everything was
+    recaptured, written one after another, when the composer came to write the
+    analyst report's own four sections (T-472): the test report gained the
+    published technique they write a procedure for, every request the style and
+    ownership rules of the system text, and the requests are the four sections'
+    more; the retries and the findings are the base's, the technique named.
     """
 
     def test_the_requests_and_the_report_are_those_of_the_base(self) -> None:

@@ -15,6 +15,14 @@ Two uses, both with no model and no network:
       git archive cb04d3ad src data | tar -x -C /path/to/base
       PYTHONPATH=/path/to/base/src python scripts/goldens/capture_composer_requests.py --fixture F
 
+  It was recaptured from the tree of the T-472 commit (the composer's analyst
+  report sections), written one after another, with the test report's
+  published technique added; the report digest is then pinned as the test
+  computes it (without the ATT&CK defence fields)::
+
+      PYTHONPATH="$PWD:$PWD/src" python scripts/goldens/capture_composer_requests.py
+          --fixture tests/fixtures/composer_requests_before_concurrency.json
+
 * **Stored runs** (``--replay RUN_DIR ... --out DIR``). Each run's
   ``report.json`` is re-rendered, then its own section values are fed back as
   the answers on the report with those fields cleared; the request bodies,

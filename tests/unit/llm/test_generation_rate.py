@@ -465,6 +465,8 @@ class TestAComposerSectionOnItsOwnClock:
         with (
             patch("maljan.reporting.composer.is_empty", lambda _b: False),
             patch("maljan.reporting.composer.bundle_for", lambda *_a, **_k: {}),
+            # The conclusion is an analyst report section: its bundle is its own.
+            patch("maljan.reporting.composer.analyst_bundle", lambda *_a, **_k: {}),
             patch("maljan.reporting.composer._bundle_text", lambda *_a, **_k: ""),
         ):
             asyncio.run(
@@ -574,6 +576,8 @@ class TestAModelListSwitchSticksForTheReportStage:
         with (
             patch("maljan.reporting.composer.is_empty", lambda _b: False),
             patch("maljan.reporting.composer.bundle_for", lambda *_a, **_k: {}),
+            # The conclusion is an analyst report section: its bundle is its own.
+            patch("maljan.reporting.composer.analyst_bundle", lambda *_a, **_k: {}),
             patch("maljan.reporting.composer._bundle_text", lambda *_a, **_k: ""),
             patch(
                 "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False

@@ -5267,6 +5267,15 @@ FLOW_VOICE_CODE = "report.flow_voice"
 # registry and the files, recorded none: the report prints "no persistence
 # observed" under that same section. Asked once; the prose kept is recorded.
 PERSISTENCE_NOT_OBSERVED_CODE = "report.persistence_not_observed"
+# The analyst report's style and shape (``reporting.composer_pro``): a number
+# put on a confidence, a word of how the report was made, a section of the
+# wrong shape, and a channel row given a value its own code does not hold.
+NUMERIC_CONFIDENCE_CODE = "report.numeric_confidence"
+PROCESS_WORDS_CODE = "report.process_words"
+PROSE_SHAPE_CODE = "report.prose_shape"
+CHANNEL_BINDING_CODE = "report.channel_binding"
+# A value the text a composed section replaces names, which it does not carry.
+VALUE_NOT_CARRIED_CODE = "report.value_not_carried"
 UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
 # A report section answer the output cap ended. Its JSON is cut before it
 # closes, so the schema check could only say "not JSON at all" — and a model
@@ -6658,6 +6667,8 @@ MARKED_IN_PLACE: frozenset[str] = frozenset(
         RULE_MATCH_AS_ACTION_CODE,
         UNPUBLISHED_VALUE_CODE,
         CITATION_WRONG_ENTRY_CODE,
+        NUMERIC_CONFIDENCE_CODE,
+        PROCESS_WORDS_CODE,
     }
 )
 # The marked findings asked about by the value they name, not by the sentence:
@@ -6704,6 +6715,11 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         UNPUBLISHED_RECOMMENDATION_CODE,
         UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE,
         PERSISTENCE_NOT_OBSERVED_CODE,
+        NUMERIC_CONFIDENCE_CODE,
+        PROCESS_WORDS_CODE,
+        PROSE_SHAPE_CODE,
+        CHANNEL_BINDING_CODE,
+        VALUE_NOT_CARRIED_CODE,
         # A check that could not run says nothing about the answer.
         CHECK_FAILED_CODE,
     }

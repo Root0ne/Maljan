@@ -245,6 +245,25 @@ class TestWhatIsServedFromIt:
 
         assert result["malware_report_markdown"] == self._served(result)
 
+    @pytest.mark.parametrize("one_file", [False, True])
+    async def test_the_node_keeps_the_single_file_report_whatever_layout_is_served(
+        self, container: Any, one_file: bool
+    ) -> None:
+        """The node's copy is the single-file report: what reads it looks for its appendices.
+
+        The served layout is rendered on request from the stored report; the
+        copy the node keeps (the command line's fallback file, the rehearsal's
+        record, which reads Appendix A) is the whole report whatever is served.
+        """
+        from maljan.reporting.renderers.layout import ANALYST, FULL
+
+        container.config.reporting.full_report_in_one_file = one_file
+        result, _column = await _run(container)
+        report = MalwareReport.model_validate(result["malware_report"])
+
+        assert result["malware_report_markdown"] == MarkdownRenderer(layout=FULL).render(report)
+        assert result["malware_report_markdown"] != MarkdownRenderer(layout=ANALYST).render(report)
+
 
 @pytest.mark.asyncio
 class TestTheRunTotalIncludesTheReportStage:

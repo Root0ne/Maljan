@@ -249,12 +249,14 @@ from maljan.providers.static.ghidra import (
 from maljan.providers.static.ghidra.http_client import no_program_as_error
 from maljan.providers.static.null import NullStaticProvider
 from maljan.providers.static.r2 import r2_error_reply
+from maljan.reporting import composer_pro
 from maljan.reporting.composer import (
     _EXAMPLES,
     _INSTRUCTIONS,
     _PROSE_SECTIONS,
     _SYSTEM,
     ANALYST_CLAIMS_HEADING,
+    CODE_AROUND_FACT,
     COMPARED_VALUES_LEAD,
     PUBLISHED_TECHNIQUES_HEADING,
     RULE_ONLY_NOTE,
@@ -1340,6 +1342,19 @@ PROMPTS: dict[str, str] = {
     "composer section titles": " ".join(_PROSE_SECTIONS.values()),
     "composer published-techniques heading": PUBLISHED_TECHNIQUES_HEADING,
     "composer claim note": WHERE_QUOTED_LEAD,
+    "composer analyst-section labels": " ".join(
+        (
+            composer_pro.STATEMENT_LABEL,
+            composer_pro.FINDING_LABEL,
+            composer_pro.OVERVIEW_LABEL,
+            composer_pro.RATIONALE_LABEL,
+            CODE_AROUND_FACT,
+        )
+    ),
+    "composer style questions": " ".join(
+        v.message
+        for v in composer_pro.style_violations({"body": "The ledger says so. Confidence 0.5 here."})
+    ),
     "composer cut-at-cap question": section_cut_violation(8192).message,
     "composer question for an answer with no text": unreadable_answer_reason(""),
     "composer question for an answer that is not valid JSON": unreadable_answer_reason(
