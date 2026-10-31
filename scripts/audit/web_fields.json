@@ -6,7 +6,7 @@
    "route": "app/(app)/analysis/[id]/layout.tsx",
    "fields": [
     {"path": "report:verdict", "ref": "components/analysis/AnalysisHeader.tsx:63"},
-    {"path": "report:verdict_reading", "ref": "components/analysis/overview.ts:295"},
+    {"path": "report:verdict_reading", "ref": "components/analysis/overview.ts:305"},
     {"path": "report:malware_report.attribution.family", "ref": "components/analysis/AnalysisHeader.tsx:78"},
     {"path": "report:malware_category", "ref": "components/analysis/AnalysisHeader.tsx:111"},
     {"path": "report:malware_report.identity.file_name", "ref": "components/analysis/AnalysisHeader.tsx:79"},
@@ -115,9 +115,9 @@
     {"path": "report:malware_report.technical_analysis.configuration[].value", "ref": "components/analysis/tabs/StaticContent.tsx:456"},
     {"path": "report:malware_report.static.exports[]", "ref": "components/analysis/tabs/StaticContent.tsx:312", "hidden_if_section": ["pe_exports", "elf_exports", "macho_exports", "apk_exports"]},
     {"path": "report:malware_report.directed_text[].family", "ref": "components/analysis/DirectedTextBlock.tsx:55"},
-    {"path": "report:malware_report.directed_text[].text", "ref": "components/analysis/DirectedTextBlock.tsx:64"},
-    {"path": "report:malware_report.directed_text[].where", "ref": "components/analysis/DirectedTextBlock.tsx:67"},
-    {"path": "report:malware_report.directed_text[].evidence_id", "ref": "components/analysis/DirectedTextBlock.tsx:68", "note": "as a citation mark, the id in its name"}
+    {"path": "report:malware_report.directed_text[].text", "ref": "components/analysis/DirectedTextBlock.tsx:66", "note": "quoted as the sample's text"},
+    {"path": "report:malware_report.directed_text[].where", "ref": "components/analysis/DirectedTextBlock.tsx:70"},
+    {"path": "report:malware_report.directed_text[].evidence_id", "ref": "components/analysis/DirectedTextBlock.tsx:71", "note": "as a citation mark, the id in its name"}
    ]
   },
   "indicators": {
@@ -157,13 +157,13 @@
     {"path": "evidence:entries[].tool", "ref": "components/analysis/EvidencePanel.tsx:91"},
     {"path": "evidence:entries[].output", "ref": "components/analysis/EvidencePanel.tsx:159", "cut": 2000},
     {"path": "report:malware_report.verdict_not_assessed", "ref": "components/analysis/RunQuality.tsx:122"},
-    {"path": "report:malware_report.negotiation_summary.termination_reason", "ref": "components/analysis/DebateView.tsx:141", "note": "the Debate view (evidence/debate), said as a sentence (components/analysis/debate.ts)"},
-    {"path": "report:malware_report.negotiation_summary.confidence_history[]", "ref": "components/analysis/DebateView.tsx:129", "note": "the Debate view, as percentages"},
-    {"path": "report:malware_report.negotiation_summary.final_confidence", "ref": "components/analysis/DebateView.tsx:133", "note": "the Debate view, as a percentage"},
-    {"path": "report:malware_report.negotiation_summary.sycophancy_events", "ref": "components/analysis/DebateView.tsx:137", "note": "the Debate view"},
-    {"path": "report:negotiation_log.discussion_history[].argument", "ref": "components/analysis/DebateView.tsx:215", "note": "the Debate view: the mediator's words, then each listed line (DebateView.tsx:294) with its analysts and its blocking mark read apart (components/analysis/debate.ts)"},
-    {"path": "report:transcript[].dissent[]", "ref": "components/analysis/DebateView.tsx:346", "note": "the Debate view, under the revision that answered a round"},
-    {"path": "report:agent_reports", "ref": "components/analysis/DebateView.tsx:406", "note": "the Debate view: each agent's report by its key, its claims laid out and its prose as Markdown (components/analysis/AgentReport.tsx)"}
+    {"path": "report:malware_report.negotiation_summary.termination_reason", "ref": "components/analysis/DebateView.tsx:187", "note": "the Debate view (evidence/debate), said as a sentence (components/analysis/debate.ts)"},
+    {"path": "report:malware_report.negotiation_summary.confidence_history[]", "ref": "components/analysis/DebateView.tsx:170", "note": "the Debate view, as percentages"},
+    {"path": "report:malware_report.negotiation_summary.final_confidence", "ref": "components/analysis/DebateView.tsx:178", "note": "the Debate view, as the last mean claim confidence (the history's last value, said apart only where the history does not say it)"},
+    {"path": "report:malware_report.negotiation_summary.sycophancy_events", "ref": "components/analysis/DebateView.tsx:183", "note": "the Debate view"},
+    {"path": "report:negotiation_log.discussion_history[].argument", "ref": "components/analysis/DebateView.tsx:265", "note": "the Debate view: the mediator's words, then each listed line (DebateView.tsx:351) with its analysts and its blocking mark read apart (components/analysis/debate.ts)"},
+    {"path": "report:transcript[].dissent[]", "ref": "components/analysis/DebateView.tsx:402", "note": "the Debate view, under the revision that answered a round"},
+    {"path": "report:agent_reports", "ref": "components/analysis/DebateView.tsx:462", "note": "the Debate view: each agent's report by its key, its claims laid out, the lists its summary closes with as lists and its prose as Markdown (components/analysis/AgentReport.tsx)"}
    ]
   }
  },
