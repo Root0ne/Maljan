@@ -157,8 +157,29 @@ export function stripLabel(summary: StripSummary): string {
   return parts.join(" · ");
 }
 
+/** A line that reports something going wrong ("Mediator: [ERROR] … failed")
+ *  is the room failing, not the room asking. */
+function reportsFailure(item: ConversationItem): boolean {
+  if (isFailure(item)) return true;
+  const text = moderatorOf(item)?.text ?? item.text;
+  return /^\s*\[(?:error|failed|failure)\]/i.test(text);
+}
+
+/** Whether a line can be an answer at all: something a participant said, not
+ *  a moderator's own line, and not a verdict. */
+function canAnswer(item: ConversationItem): boolean {
+  return (
+    Boolean(item.speaker) &&
+    itemGroup(item) === "says" &&
+    !moderatorOf(item) &&
+    item.kind !== "verdict" &&
+    item.kind !== "judge_question"
+  );
+}
+
 /** Whether a line asks something of somebody, and of whom. */
 function asks(item: ConversationItem): { to: string } | { room: true } | null {
+  if (reportsFailure(item)) return null;
   if (item.kind === "judge_question" || item.kind === "delegation_ask") {
     return item.addressedTo ? { to: item.addressedTo } : null;
   }
@@ -171,29 +192,48 @@ function asks(item: ConversationItem): { to: string } | { room: true } | null {
  *
  * Read over the whole conversation rather than what a filter left, so an
  * answer keeps its reference while its question is filtered out.
+ *
+ * Several questions can be open to one participant at once (two agents ask
+ * the same specialist). An answer addressed to one of the askers takes that
+ * asker's question; otherwise the oldest open question is the one answered.
+ * Only the team answers a moderator speaking to the room: the judge, who
+ * gives the verdict and asks the judge's questions, never does.
  */
 export function replyTargets(
   stages: readonly ConversationStage[],
 ): Map<string, ConversationItem> {
   const replies = new Map<string, ConversationItem>();
+  const moderators = new Set<string>();
   for (const stage of stages) {
-    const directed = new Map<string, ConversationItem>();
+    for (const round of stage.rounds) {
+      for (const item of round.items) {
+        if (item.speaker && (item.kind === "verdict" || item.kind === "judge_question")) {
+          moderators.add(item.speaker);
+        }
+      }
+    }
+  }
+  for (const stage of stages) {
+    const directed = new Map<string, ConversationItem[]>();
     let roomQuestion: ConversationItem | null = null;
     const answeredRoom = new Set<string>();
     for (const round of stage.rounds) {
       for (const item of round.items) {
         const question = asks(item);
-        if (item.speaker && !question && itemGroup(item) === "says") {
-          const target = directed.get(item.speaker);
-          if (target) {
+        if (!question && canAnswer(item)) {
+          const open = directed.get(item.speaker) ?? [];
+          if (open.length > 0) {
+            const asker = item.addressedTo ? open.findIndex((q) => q.speaker === item.addressedTo) : -1;
+            const [target] = open.splice(asker >= 0 ? asker : 0, 1);
             replies.set(item.id, target);
-            directed.delete(item.speaker);
-          } else if (roomQuestion && !answeredRoom.has(item.speaker)) {
+          } else if (roomQuestion && !moderators.has(item.speaker) && !answeredRoom.has(item.speaker)) {
             replies.set(item.id, roomQuestion);
             answeredRoom.add(item.speaker);
           }
         }
-        if (question && "to" in question) directed.set(question.to, item);
+        if (question && "to" in question) {
+          directed.set(question.to, [...(directed.get(question.to) ?? []), item]);
+        }
         if (question && "room" in question) {
           roomQuestion = item;
           answeredRoom.clear();

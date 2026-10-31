@@ -153,6 +153,48 @@ describe("replies", () => {
     expect(replies.get(aThird.id)).toBe(second);
   });
 
+  it("keeps two questions open to one agent apart, by who asked", () => {
+    const fromA = line({ speaker: "a", kind: "delegation_ask", addressedTo: "s" });
+    const fromB = line({ speaker: "b", kind: "delegation_ask", addressedTo: "s" });
+    const toA = line({ speaker: "s", kind: "delegation_answer", addressedTo: "a" });
+    const next = line({ speaker: "s" });
+    const replies = replyTargets([stage([fromA, fromB, toA, next])]);
+    expect(replies.get(toA.id)).toBe(fromA);
+    // The answer that names nobody takes the question still open.
+    expect(replies.get(next.id)).toBe(fromB);
+  });
+
+  it("answers the oldest open question when the answer names no asker", () => {
+    const first = line({ speaker: "a", kind: "delegation_ask", addressedTo: "s" });
+    const second = line({ speaker: "b", kind: "delegation_ask", addressedTo: "s" });
+    const answer = line({ speaker: "s" });
+    expect(replyTargets([stage([first, second, answer])]).get(answer.id)).toBe(first);
+  });
+
+  it("never reads a moderator's error line as a question", () => {
+    const failed = line({
+      kind: "system",
+      speaker: "",
+      role: "negotiator",
+      text: "Mediator: [ERROR] the negotiation turn failed.",
+    });
+    const a = line({ speaker: "a" });
+    expect(replyTargets([stage([failed, a])]).has(a.id)).toBe(false);
+  });
+
+  it("lets only the team answer a moderator speaking to the room", () => {
+    const room = line({ kind: "system", speaker: "", role: "negotiator", text: "Mediator: two lines stay open." });
+    const again = line({ kind: "system", speaker: "", role: "negotiator", text: "Mediator: one line stays open." });
+    const verdict = line({ speaker: "judge", kind: "verdict", text: "Malicious." });
+    const judgeSays = line({ speaker: "judge", text: "Noted." });
+    const a = line({ speaker: "a" });
+    const replies = replyTargets([stage([room, again, verdict, judgeSays, a])]);
+    expect(replies.has(again.id)).toBe(false);
+    expect(replies.has(verdict.id)).toBe(false);
+    expect(replies.has(judgeSays.id)).toBe(false);
+    expect(replies.get(a.id)).toBe(again);
+  });
+
   it("links a delegated answer to its ask", () => {
     const ask = line({ speaker: "lead", kind: "delegation_ask", addressedTo: "ahmet" });
     const answer = line({ speaker: "ahmet", kind: "delegation_answer", addressedTo: "lead" });
