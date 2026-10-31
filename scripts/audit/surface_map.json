@@ -38,7 +38,7 @@
   {"kind": "severity", "surface": "markdown", "rule": "same", "ref": "src/maljan/reporting/renderers/markdown.py:635"},
   {"kind": "severity", "surface": "html", "rule": "same", "ref": "src/maljan/reporting/renderers/html.py:434"},
   {"kind": "severity", "surface": "stix", "rule": "same", "ref": "src/maljan/reporting/renderers/stix_renderer.py:1337"},
-  {"kind": "severity", "surface": "web", "rule": "same", "ref": "apps/web/src/components/analysis/OverviewTab.tsx:429"},
+  {"kind": "severity", "surface": "web", "rule": "same", "ref": "apps/web/src/components/analysis/OverviewTab.tsx:431"},
   {"kind": "family", "surface": "report_full", "rule": "same", "ref": "src/maljan/reporting/models.py:804"},
   {"kind": "family", "surface": "markdown", "rule": "same", "ref": "src/maljan/reporting/renderers/markdown.py:656"},
   {"kind": "family", "surface": "html", "rule": "same", "ref": "src/maljan/reporting/renderers/html.py:434"},
