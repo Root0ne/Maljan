@@ -205,7 +205,7 @@ test("every scroll region on a tab has its own name, and a cited id stays in the
   sessionPage: page,
 }) => {
   await serve(page);
-  for (const tab of ["", "/behaviour", "/network", "/static", "/indicators", "/evidence/conversation"]) {
+  for (const tab of ["", "/behaviour", "/network", "/static", "/indicators", "/evidence/conversation", "/evidence/debate"]) {
     await page.goto(`${BASE}${tab}`);
     await page.waitForLoadState("networkidle");
     const names = await page.evaluate(() =>

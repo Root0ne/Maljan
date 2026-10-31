@@ -9,6 +9,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import AgentReport from "../AgentReport";
 import { ArtifactSections } from "../ArtifactTable";
 import TechnicalAnalysisPanel from "../TechnicalAnalysisPanel";
 import { STRINGS_SECTION } from "./storedRunShapes";
@@ -32,6 +33,15 @@ describe("literal text", () => {
     expect(html.split(LITERAL)).toHaveLength(4);
     expect(html).not.toContain("<strong>init</strong>");
     expect(html).not.toContain("<em>");
+  });
+
+  it("keeps an analyst's claim as written, and its prose's backslashes through the Markdown", () => {
+    const report = `[STATIC ANALYST — round 1]\nDomain: static | Mean confidence: 0.70\n  Claim 1: ${LITERAL} | Evidence: ev_0001 | Confidence: 0.90\nWritten in this answer besides its claims:\nIt reads ${LITERAL}.`;
+    const html = renderToStaticMarkup(createElement(AgentReport, { report, name: "Report of static" }));
+    expect(html.split(LITERAL)).toHaveLength(3);
+    expect(html).not.toContain("<strong>init</strong>");
+    expect(html).toContain("(ev_0001)");
+    expect(html).toContain("90%");
   });
 
   it("keeps a tool section's prose as written", () => {

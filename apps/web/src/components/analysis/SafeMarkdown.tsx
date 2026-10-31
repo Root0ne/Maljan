@@ -32,6 +32,8 @@ export interface SafeMarkdownProps {
   cite?: boolean;
   inline?: boolean;
   regionName?: string;
+  /** Keep every backslash the text wrote (`parseMarkdown`'s `keepBackslashes`). */
+  keepBackslashes?: boolean;
   className?: string;
 }
 
@@ -76,12 +78,13 @@ function MarkdownBody({
   cite = false,
   inline = false,
   regionName,
+  keepBackslashes = false,
   className = "space-y-3 text-sm leading-6 text-text-primary",
 }: SafeMarkdownProps) {
   const tooLong = markdown.length > MAX_MARKDOWN_CHARS;
   const nodes = useMemo(
-    () => (tooLong ? [] : parseMarkdown(markdown, { linkIds: !cite })),
-    [markdown, tooLong, cite],
+    () => (tooLong ? [] : parseMarkdown(markdown, { linkIds: !cite, keepBackslashes })),
+    [markdown, tooLong, cite, keepBackslashes],
   );
   if (tooLong) return <RawText markdown={markdown} />;
   const first = nodes[0];

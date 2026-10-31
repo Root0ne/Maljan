@@ -33,6 +33,7 @@ import {
   howObtained,
   kpis,
   proseText,
+  referenceRows,
   sortedRecommendations,
   techniqueIdsIn,
   techniqueVoices,
@@ -50,8 +51,8 @@ import {
  * the report wrote one, and the configuration it extracted. The facts rail
  * beside it holds what a responder acts on and checks: what to do now, the
  * severity and why, the indicators to block, every behaviour and technique
- * split by whether the sandbox saw it, the counts, the file, and the
- * questions asked since. Below ~1000 px of content the rail stacks under the
+ * split by whether the sandbox saw it, the counts, the file, the external
+ * references, and the questions asked since. Below ~1000 px of content the rail stacks under the
  * column; on a very wide screen its blocks flow into two columns so the
  * width is used rather than left empty.
  */
@@ -101,6 +102,7 @@ export default function OverviewTab() {
         <Behaviours mr={mr} />
         <Counts mr={mr} />
         <FileFacts mr={mr} />
+        <References mr={mr} />
         <FollowUpsLine jobId={jobId} status={job?.status} />
       </aside>
       <ScrollToAnchor />
@@ -606,6 +608,41 @@ function FileFacts({ mr }: { mr: MalwareReport }) {
             </div>
           ))}
       </dl>
+    </Fact>
+  );
+}
+
+/* Where a reader goes next outside this console: the sample's pages on the
+ * services the report names and the knowledge bases it cites. An address the
+ * page would not link (`referenceRows`) stays text. */
+function References({ mr }: { mr: MalwareReport }) {
+  const rows = referenceRows(mr);
+  if (rows.length === 0) return null;
+  return (
+    <Fact title="References" id="references" count={rows.length}>
+      <ul className="space-y-2 text-xs">
+        {rows.map((row, i) => (
+          <li key={`${row.source}-${i}`} className="min-w-0 space-y-0.5">
+            {row.href ? (
+              <a
+                href={row.href}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="text-accent-strong hover:underline"
+                title={row.url}
+              >
+                {row.source}
+              </a>
+            ) : (
+              <span className="text-text-primary">
+                {row.source}
+                {row.url && <span className="ml-1 break-all text-text-muted">{row.url}</span>}
+              </span>
+            )}
+            {row.note && <p className="break-words leading-5 text-text-secondary">{row.note}</p>}
+          </li>
+        ))}
+      </ul>
     </Fact>
   );
 }

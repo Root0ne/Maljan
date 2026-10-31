@@ -169,19 +169,19 @@ describe("every field the report carries has a place", () => {
   });
 
   it("builds the discussion timeline download from the negotiation log", () => {
-    expect(REPORT_DTO_PLACES.negotiation_log).toEqual(["export:timeline"]);
+    expect(REPORT_DTO_PLACES.negotiation_log).toContain("export:timeline");
     const timeline = reportExportGroups("r1", STORED.malware_report, "maljan-x")
       .flatMap((g) => g.items)
       .find((i) => i.key === "timeline");
     expect(timeline?.unavailable).toBeUndefined();
   });
 
-  it("carries nowhere only the record's ids and the raw per-agent reports (T-469)", () => {
+  it("carries nowhere only the record's ids", () => {
     const nowhere = Object.entries(REPORT_DTO_PLACES)
       .filter(([, places]) => places.includes("none"))
       .map(([key]) => key)
       .sort();
-    expect(nowhere).toEqual(["agent_reports", "id", "job_id"]);
+    expect(nowhere).toEqual(["id", "job_id"]);
     expect(Object.values(REPORT_FIELD_PLACES).flat()).not.toContain("none");
   });
 });

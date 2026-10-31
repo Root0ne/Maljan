@@ -44,6 +44,7 @@ import {
   VOICE_TEXT,
   proseText,
   publishedNetworkIndicators,
+  referenceRows,
   splitCitations,
   techniqueVoice,
 } from "@/components/analysis/overview";
@@ -203,6 +204,17 @@ describe("the remarks", () => {
     expect(lines.map((l) => l.text).join(" ")).not.toMatch(/dynamic|network|analyst|sandbox|stage failed/);
   });
 
+  it("say a verdict no stage reached, with the run's reason as detail", () => {
+    const unassessed = {
+      ...REPORT,
+      malware_report: { ...MALWARE_REPORT, verdict_not_assessed: "the run stopped before its verdict stage" },
+    };
+    expect(remarks(unassessed)).toEqual([
+      { text: REMARK_TEXT.notAssessed, detail: "the run stopped before its verdict stage" },
+    ]);
+    expect(remarks({ ...REPORT, malware_report: { ...MALWARE_REPORT, verdict_not_assessed: "  " } })).toEqual([]);
+  });
+
   it("say degraded once even when no reason was stored", () => {
     const bare = {
       ...REPORT,
@@ -276,6 +288,27 @@ describe("how a key finding is known", () => {
     for (const row of findingRows(MALWARE_REPORT).filter((r) => r.id.startsWith("ttp-"))) {
       expect(voices.get(row.techniques[0])).toBe(row.voice);
     }
+  });
+});
+
+describe("the references", () => {
+  it("link only an http or https address, and keep every other one as text", () => {
+    const mr = {
+      ...MALWARE_REPORT,
+      references: [
+        { source: "VirusTotal", url: "https://www.virustotal.com/gui/file/abc", note: "VT detection summary" },
+        { source: "Script", url: "javascript:alert(1)", note: null },
+        { source: "Anchor", url: "#evidence", note: null },
+        { source: "", url: "https://bazaar.example/sample/abc", note: "  Sample lookup " },
+      ],
+    } as MalwareReport;
+    expect(referenceRows(mr)).toEqual([
+      { source: "VirusTotal", url: "https://www.virustotal.com/gui/file/abc", href: "https://www.virustotal.com/gui/file/abc", note: "VT detection summary" },
+      { source: "Script", url: "javascript:alert(1)", href: null, note: "" },
+      { source: "Anchor", url: "#evidence", href: null, note: "" },
+      { source: "https://bazaar.example/sample/abc", url: "https://bazaar.example/sample/abc", href: "https://bazaar.example/sample/abc", note: "Sample lookup" },
+    ]);
+    expect(referenceRows({ ...MALWARE_REPORT, references: null } as unknown as MalwareReport)).toEqual([]);
   });
 });
 

@@ -81,6 +81,39 @@ const md = new MarkdownIt("commonmark", { html: false, linkify: false }).enable(
 // markdown-it has normalised it; a target it refuses stays text.
 md.validateLink = (url: string) => safeHref(url) !== null;
 
+/**
+ * The same reading for a model's prose that quotes paths and format strings
+ * (`%s\%s`, `\\server\share`, `C:\Users\*\AppData`): every backslash escape
+ * the inline pass reads is kept as written, backslash included, instead of
+ * standing for the character after it. The escaped character is still
+ * consumed by the escape, so a `\*` or `\_` opens no emphasis. Only the
+ * escape rule's own tokens change: a code span, a link's target and an
+ * autolink never reach it, and a backslash before a line break is still a
+ * hard break. The cost is the rare escape a model meant (`\*`), which shows
+ * its backslash.
+ */
+const literal = new MarkdownIt("commonmark", { html: false, linkify: false }).enable(["table", "strikethrough"]);
+literal.validateLink = (url: string) => safeHref(url) !== null;
+// A backslash before a run of `_` or `*` (`\__init__`) keeps the whole run as
+// text, so the rest of the run opens no emphasis either.
+literal.inline.ruler.before("escape", "keep_escaped_run", (state, silent) => {
+  if (state.src.charCodeAt(state.pos) !== 0x5c) return false;
+  const mark = state.src[state.pos + 1];
+  if (mark !== "_" && mark !== "*") return false;
+  let end = state.pos + 1;
+  while (end < state.posMax && state.src[end] === mark) end++;
+  if (!silent) state.push("text", "", 0).content = state.src.slice(state.pos, end);
+  state.pos = end;
+  return true;
+});
+literal.core.ruler.before("text_join", "keep_backslashes", (state) => {
+  for (const block of state.tokens) {
+    for (const token of block.children ?? []) {
+      if (token.type === "text_special" && token.info === "escape") token.content = token.markup;
+    }
+  }
+});
+
 // The same reading without the inline pass: the block structure only, which
 // is all the subsections are found by, in linear time and whatever the size.
 const blocks = new MarkdownIt("commonmark", { html: false, linkify: false }).enable(["table", "strikethrough"]);
@@ -213,11 +246,15 @@ function buildTree(tokens: readonly Token[], linkIds = true): MdNode[] {
  * `linkIds: false` leaves a bare evidence id in the text as text: report
  * prose outside the bundle draws its citations as marks that open the
  * evidence drawer (`CitedProse`), not as anchors into a bundle that is not
- * on the page.
+ * on the page. `keepBackslashes` reads it with every backslash escape kept
+ * as written (`literal`).
  */
-export function parseMarkdown(markdown: string, { linkIds = true }: { linkIds?: boolean } = {}): MdNode[] {
+export function parseMarkdown(
+  markdown: string,
+  { linkIds = true, keepBackslashes = false }: { linkIds?: boolean; keepBackslashes?: boolean } = {},
+): MdNode[] {
   if (markdown.length > MAX_MARKDOWN_CHARS) return [{ t: "pre", v: markdown }];
-  const tokens = md.parse(markdown, {});
+  const tokens = (keepBackslashes ? literal : md).parse(markdown, {});
   // At its nesting bound markdown-it stops reading the container it is in,
   // and every line after that point is dropped. A document that reached it
   // is shown as its raw text, so nothing in it is lost.
