@@ -162,6 +162,7 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
           {report ? "No agent findings recorded for this analysis." : "Analysis has not completed yet."}
         </div>
       ) : (
+        <div role="region" tabIndex={0} aria-label="Agents table, scrolls sideways" className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         <table className="w-full">
           <thead>
             <tr className="border-b border-border">
@@ -247,6 +248,7 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
           </tbody>
           ))}
         </table>
+        </div>
       )}
     </div>
   );

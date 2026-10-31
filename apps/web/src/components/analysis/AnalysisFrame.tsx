@@ -298,7 +298,7 @@ export default function AnalysisFrame({ id, children }: { id: string; children: 
             {failure && <FailureNote failure={failure} className="mt-1" />}
           </section>
         )}
-        <div className="mx-auto max-w-[88rem] px-4 py-5 sm:px-6" data-testid="analysis-content">
+        <div className="mx-auto max-w-[88rem] break-words px-4 py-5 sm:px-6" data-testid="analysis-content">
           {pollBanner && !loading && (
             <div role="alert" className="mb-4 p-2.5 text-xs text-status-orange bg-status-orange/10 border border-status-orange/20 rounded">
               {pollBanner}

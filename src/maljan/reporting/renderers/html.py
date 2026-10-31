@@ -195,6 +195,102 @@ _CITE_STYLE = (
     "ol.notes { list-style: none; padding-left: 0; font-size: 8.5pt; }\n"
 )
 
+# The console's visual language on paper, for the analyst report and the
+# evidence bundle: the console's light tokens (print-friendly, every hue the
+# darker rung that clears AA on white), its type scale, one five-rung severity
+# scale, tables drawn as the console draws them, and a cover block with the
+# verdict, its confidence, the severity and the family. Appended after the
+# shared stylesheet, so the single-file layout prints byte for byte as it did.
+_CONSOLE_STYLE = """
+:root {
+  --ink: #1f2328; --muted: #57606a; --line: #d0d7de; --line-light: #e4e8ec;
+  --accent: #0969da; --surface: #f6f8fa; --danger: #cf222e; --warn: #bc4c00;
+  --sev-5: #cf222e; --sev-4: #bc4c00; --sev-3: #8250df; --sev-2: #0969da; --sev-1: #59636e;
+  --verdict: #59636e;
+}
+body {
+  font-family: "Inter", "Segoe UI", "Helvetica Neue", Helvetica, Arial, "DejaVu Sans", sans-serif;
+  font-size: 10pt; line-height: 1.5;
+}
+h1 {
+  font-size: 18pt; font-weight: 600; letter-spacing: -0.02em; border-bottom: 0; padding-bottom: 0;
+}
+h2 { font-size: 12.5pt; font-weight: 600; letter-spacing: -0.01em; }
+h3 { font-size: 10.5pt; font-weight: 600; color: var(--ink); }
+table { border: 1px solid var(--line); font-size: 9pt; }
+th, td { border: 0; border-bottom: 1px solid var(--line-light); }
+th { color: var(--muted); font-weight: 500; font-size: 8.5pt; }
+blockquote { border-left-color: var(--warn); background: #fff8f0; color: var(--ink); }
+header.cover {
+  margin: 0 0 18px; padding: 12px 16px; border: 1px solid var(--line);
+  border-left: 6px solid var(--verdict); border-radius: 6px; break-inside: avoid;
+}
+header.cover[data-verdict="malicious"] { --verdict: #cf222e; }
+header.cover[data-verdict="suspicious"] { --verdict: #bc4c00; }
+header.cover[data-verdict="benign"] { --verdict: #1a7f37; }
+header.cover h1 { margin-top: 6px; }
+.cover-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin: 0; }
+.cover-verdict { font-size: 15pt; font-weight: 700; color: var(--verdict); }
+.cover-fact { font-size: 9.5pt; color: var(--muted); }
+.cover-fact b { color: var(--ink); font-weight: 600; }
+.sev {
+  display: inline-block; padding: 0 6px; border: 1px solid currentColor; border-radius: 4px;
+  font-size: 9pt; font-weight: 600;
+}
+.sev-5 { color: var(--sev-5); } .sev-4 { color: var(--sev-4); } .sev-3 { color: var(--sev-3); }
+.sev-2 { color: var(--sev-2); } .sev-1 { color: var(--sev-1); }
+@media print {
+  body { font-size: 9.5pt; }
+}
+"""
+
+# The severity ladder the console draws, lowest rung first: a rating's rung is
+# its place here plus one ("High 4/5").
+_SEVERITY_RUNGS = ("Informational", "Low", "Medium", "High", "Critical")
+_VERDICT_BUCKETS = {
+    "malware": "malicious",
+    "malicious": "malicious",
+    "suspicious": "suspicious",
+    "benign": "benign",
+}
+_VERDICT_WORDS = {"malicious": "Malicious", "suspicious": "Suspicious", "benign": "Benign"}
+
+
+def _cover(report: MalwareReport, title_block: str) -> str:
+    """The title block inside a cover that leads with the verdict, as the console's header does.
+
+    The verdict word in its colour, the confidence the analysis put on it, the
+    severity on the console's five-rung scale and the family; every value is
+    escaped. A verdict nobody assessed says so and is drawn in the neutral tone.
+    """
+    verdict = str(report.verdict or "").strip().lower()
+    bucket = "unknown" if report.verdict_not_assessed else _VERDICT_BUCKETS.get(verdict, "unknown")
+    word = _VERDICT_WORDS.get(bucket, "No verdict")
+    if report.overall_confidence is None or report.verdict_not_assessed:
+        confidence = "not assessed"
+    else:
+        confidence = f"{round(min(1.0, max(0.0, report.overall_confidence)) * 100)}%"
+    facts = [
+        f'<span class="cover-verdict">{escape(word)}</span>',
+        f'<span class="cover-fact">Confidence <b>{escape(confidence)}</b></span>',
+    ]
+    rating = report.severity.rating if report.severity else None
+    if rating in _SEVERITY_RUNGS:
+        rung = _SEVERITY_RUNGS.index(rating) + 1
+        facts.append(f'<span class="sev sev-{rung}">{escape(rating)} {rung}/5</span>')
+    else:
+        facts.append('<span class="cover-fact">Severity <b>not assessed</b></span>')
+    family = str(report.attribution.family or "").strip()
+    if family and family.lower() != "unknown":
+        facts.append(f'<span class="cover-fact">Family <b>{escape(family)}</b></span>')
+    else:
+        facts.append('<span class="cover-fact">Family <b>not identified</b></span>')
+    return (
+        f'<header class="cover" data-verdict="{bucket}">\n'
+        f'<p class="cover-strip">{"".join(facts)}</p>\n'
+        f"{title_block}</header>\n"
+    )
+
 
 # The link targets the HTML report makes anchors of: the web's and mail's own
 # schemes, and a place in the page or beside it.
@@ -312,6 +408,13 @@ class HtmlRenderer:
         style_open = f'<style nonce="{escape(nonce)}">' if nonce else "<style>"
         # Order matters: title block, then the contents page, then the body. The
         # TOC carries ``break-after: page`` so the report opens on its own cover.
+        if self._layout != FULL:
+            style += _CONSOLE_STYLE
+            preamble = _cover(report, preamble)
+        # The analyst report opens as the console's Overview does: the cover,
+        # then the executive summary, then the contents.
+        lead = sections[:1] if self._layout == ANALYST else []
+        body = preamble + "".join(lead) + toc + "".join(sections[len(lead) :])
         return (
             "<!DOCTYPE html>\n"
             '<html lang="en">\n<head>\n'
@@ -323,7 +426,7 @@ class HtmlRenderer:
             f"{style_open}{_STYLESHEET}{style}</style>\n"
             "</head>\n<body>\n"
             f"<span style=\"string-set: doc-sha 'sha256 {escape(sha[:16])}…'\"></span>\n"
-            f"{preamble}{toc}{''.join(sections)}{appendix}"
+            f"{body}{appendix}"
             "</body>\n</html>\n"
         )
 

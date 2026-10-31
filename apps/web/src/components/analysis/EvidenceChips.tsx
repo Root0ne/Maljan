@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { useReport } from "./AnalysisContext";
 import { CiteMark } from "./CitedProse";
 import { citationParts, isEvidenceId } from "./citations";
+import { evidenceRecordHref } from "./overview";
 
 /**
  * The evidence records a section or a finding was built from, as links.
@@ -93,7 +94,7 @@ export default function EvidenceChips({
 function EvidenceChip({ id, jobId }: { id: string; jobId: string }) {
   return (
     <Link
-      href={`/analysis/${jobId}/evidence?evidence=${encodeURIComponent(id)}`}
+      href={evidenceRecordHref(jobId, id)}
       className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent/15 text-accent-strong hover:bg-accent/25"
       title="Open this record in the evidence"
     >
@@ -135,12 +136,12 @@ export function CitedText({ text, jobId: jobIdProp }: { text: string; jobId?: st
     <>
       {citationParts(text).map((part, i) =>
         part.kind === "id" && marks ? (
-          <CiteMark key={i} ids={[part.id]} />
+          <CiteMark key={i} ids={[part.id]} named />
         ) : part.kind === "id" ? (
           <Link
             key={i}
-            href={`/analysis/${jobId}/evidence?evidence=${encodeURIComponent(part.id)}`}
-            className="font-mono text-accent-strong hover:underline"
+            href={evidenceRecordHref(jobId, part.id)}
+            className="font-mono text-accent-strong underline hover:no-underline"
             title="Open this record in the evidence"
           >
             {part.id}

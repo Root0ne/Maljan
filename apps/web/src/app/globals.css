@@ -313,9 +313,9 @@ html[data-ui-theme="light"] {
   --text-muted: #59636e;
   --text-tertiary: #6e7781;
   --text-disabled: #8c959f;
-  --status-red: #cf222e;
-  --status-orange: #bc4c00;
-  --status-green: #1a7f37;
+  --status-red: #b3202b;
+  --status-orange: #a64600;
+  --status-green: #17702f;
   --status-blue: #0969da;
   --status-purple: #8250df;
   --accent: #0969da;

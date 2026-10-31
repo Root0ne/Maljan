@@ -50,7 +50,7 @@ describe("the configuration's citation state, in plain words", () => {
 
   it("cites a cited item's records instead, and gives every value a copy", () => {
     expect(html.match(/no evidence cited/g)).toHaveLength(1);
-    expect(html).toContain("evidence?evidence=ev_0004");
+    expect(html).toContain("evidence/records?evidence=ev_0004");
     expect(html).toContain("Copy configuration value C2 host");
     expect(html).toContain("Copy configuration value Mutex");
   });

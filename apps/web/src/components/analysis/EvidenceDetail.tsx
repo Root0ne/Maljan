@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { SeverityPill, Tag } from "@/components/ui/Pill";
 import type { SeverityRating } from "@/types/malware-report";
-import { VOICE_TEXT, type Voice } from "./overview";
+import { VOICE_TEXT, evidenceRecordHref, type Voice } from "./overview";
 
 /**
  * What the evidence drawer shows for one finding: what it is, how it is
@@ -52,7 +52,7 @@ export default function EvidenceDetail({ jobId, subject }: { jobId: string; subj
             {subject.evidenceIds.map((id, i) => (
               <li key={id}>
                 <Link
-                  href={`/analysis/${encodeURIComponent(jobId)}/evidence?evidence=${encodeURIComponent(id)}`}
+                  href={evidenceRecordHref(jobId, id)}
                   className="inline-flex items-center gap-1 text-accent-strong hover:underline"
                 >
                   Record {i + 1}

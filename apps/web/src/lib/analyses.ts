@@ -15,6 +15,7 @@
  */
 
 import type { JobDTO, ReportSummaryDTO } from "@/lib/api";
+import { verdictLabel } from "@/lib/verdict";
 
 export interface AnalysisRow {
   /** The job's id, which is also its route: `/analysis/{id}`. */
@@ -159,4 +160,20 @@ export function countByStatus(rows: AnalysisRow[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const row of rows) counts[row.status] = (counts[row.status] ?? 0) + 1;
   return counts;
+}
+
+/**
+ * The rows a search keeps: every word of `query` found in the row's file
+ * name, SHA-256, job id, verdict word or category, case aside. An empty
+ * query keeps every row.
+ */
+export function searchRows(rows: readonly AnalysisRow[], query: string): AnalysisRow[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [...rows];
+  return rows.filter((row) => {
+    const hay = [row.sample, row.sha256 ?? "", row.id, row.verdict ? verdictLabel(row.verdict) : "", row.malwareCategory ?? ""]
+      .join(" ")
+      .toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
 }

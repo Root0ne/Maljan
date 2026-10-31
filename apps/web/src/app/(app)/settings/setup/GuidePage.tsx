@@ -1,6 +1,7 @@
 "use client";
 
 import { probeDetail } from "@/lib/probeDetail";
+import { buttonClass } from "@/components/ui/Button";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -454,7 +455,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             <button
               type="button"
               disabled={ctx.saving || stagedCount === 0 || applied !== null}
-              className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
+              className={buttonClass("primary", "sm")}
               onClick={onApply}
             >
               {ctx.saving ? "Saving…" : "Apply"}
@@ -471,7 +472,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             <button
               type="button"
               disabled={blockedReason !== null || index >= steps.length - 1}
-              className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
+              className={buttonClass("primary", "sm")}
               onClick={() => {
                 const next = steps[index + 1];
                 if (next) goTo(next.id);

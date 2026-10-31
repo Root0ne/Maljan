@@ -10,17 +10,19 @@
  */
 
 import { getErrorMessage } from "@/lib/errors";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { FileText, X } from "lucide-react";
+import { FileText, MoreHorizontal, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { fetchAllPages } from "@/lib/pages";
+import { buttonClass } from "@/components/ui/Button";
 import ShowMoreRows from "@/components/ui/ShowMoreRows";
 import { ROWS_PER_STEP, visibleRows } from "@/lib/pagedRows";
 import {
   analysisRows,
   countByStatus,
+  searchRows,
   statusFilterFrom,
   STATUS_FILTERS,
   type AnalysisRow,
@@ -34,6 +36,81 @@ import CopyButton from "@/components/ui/CopyButton";
 const COPY_CLASS =
   "inline-flex min-h-6 items-center px-2 py-0.5 text-[11px] font-mono border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted";
 
+/**
+ * A row's one control besides its link: a button that opens what else can
+ * be done with the run. The two values an operator pastes elsewhere (into a
+ * lookup, into a log search), one press each with a name that says which
+ * row's, and Cancel while the run is still going. A disclosure rather than
+ * a menu, so each copy keeps its own announcement; Escape or a click outside
+ * closes it and gives the focus back.
+ */
+function RowActions({ row, onCancel }: { row: AnalysisRow; onCancel: () => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const canCancel = row.status === "pending" || row.status === "running";
+  const when = timeAgo(row.createdAt);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      button.current?.focus();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={root} className="relative shrink-0">
+      <button
+        ref={button}
+        type="button"
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        aria-label={`Actions for ${row.sample}, ${when}`}
+        onClick={() => setOpen((v) => !v)}
+        className={buttonClass("ghost", "sm")}
+      >
+        <MoreHorizontal aria-hidden="true" className="h-4 w-4" />
+      </button>
+      {open && (
+        <div
+          id={panelId}
+          role="group"
+          aria-label={`Actions for ${row.sample}`}
+          className="absolute right-0 z-20 mt-1 flex w-56 max-w-[calc(100vw-2rem)] flex-col items-stretch gap-1.5 rounded-md border border-border bg-bg-surface p-2 shadow-lg"
+        >
+          {row.sha256 && (
+            <CopyButton value={row.sha256} what={`SHA-256 of ${row.sample}, ${when}`} label="SHA-256" className={COPY_CLASS} />
+          )}
+          <CopyButton value={row.id} what={`job id of ${row.sample}, ${when}`} label="job id" className={COPY_CLASS} />
+          {canCancel && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onCancel();
+              }}
+              className="inline-flex min-h-6 items-center rounded border border-status-red/30 px-2 py-0.5 text-xs text-status-red hover:bg-status-red/10"
+            >
+              Cancel analysis
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function AnalysesList() {
   const router = useRouter();
@@ -43,6 +120,7 @@ function AnalysesList() {
   const [rows, setRows] = useState<AnalysisRow[]>([]);
   /* Every run is read; a long history is drawn a step at a time (`lib/pagedRows`). */
   const [shown, setShown] = useState(ROWS_PER_STEP);
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmJob, setConfirmJob] = useState<AnalysisRow | null>(null);
@@ -104,9 +182,9 @@ function AnalysesList() {
       await api.cancelJob(confirmJob.id);
       setConfirmJob(null);
       await refresh();
-      setToast(`Job ${idPrefix} cancelled.`);
+      setToast(`Analysis ${idPrefix} cancelled.`);
     } catch (err) {
-      setCancelError(getErrorMessage(err) || "Failed to cancel job.");
+      setCancelError(getErrorMessage(err) || "Failed to cancel the analysis.");
     } finally {
       setCancelling(false);
     }
@@ -139,7 +217,7 @@ function AnalysesList() {
     router.replace(next === "all" ? "/jobs" : `/jobs?status=${next}`);
 
   const counts = countByStatus(rows);
-  const filtered = filter === "all" ? rows : rows.filter((r) => r.status === filter);
+  const filtered = searchRows(filter === "all" ? rows : rows.filter((r) => r.status === filter), query);
 
   if (loading) {
     return (
@@ -181,174 +259,144 @@ function AnalysesList() {
           {refreshError}
         </div>
       )}
-      <div className="flex flex-col md:flex-row gap-6">
-        {/* Filter Sidebar */}
-        <div className="w-full md:w-48 shrink-0">
-          <div className="bg-bg-surface border border-border rounded p-3">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">Filters</h2>
-              {filter !== "all" && (
-                <button
-                  onClick={() => setFilter("all")}
-                  className="text-xs text-accent hover:underline"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-            <p className="text-xs text-text-muted mb-2 uppercase tracking-wider">Status</p>
-            <div className="space-y-1">
-              {STATUS_FILTERS.map((f) => {
-                const active = filter === f;
-                const count = f === "all" ? rows.length : counts[f] || 0;
-                return (
-                  <button
-                    key={f}
-                    onClick={() => setFilter(f)}
-                    aria-pressed={active}
-                    className={`w-full flex items-center justify-between px-2 py-1.5 rounded text-xs ${
-                      active
-                        ? "bg-bg-active text-text-primary"
-                        : "text-text-secondary hover:text-text-primary hover:bg-bg-hover"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      {f !== "all" && (
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${statusTone(f).dot}`}
-                        />
-                      )}
-                      <span className="capitalize">{f}</span>
-                    </div>
-                    <span className="text-text-muted">{count}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+      <section aria-label="Find an analysis" className="mb-4 flex flex-wrap items-end gap-3">
+        <label className="flex min-w-0 flex-1 basis-64 flex-col gap-1 text-xs text-text-secondary">
+          Search analyses
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setShown(ROWS_PER_STEP);
+            }}
+            placeholder="File name, SHA-256, job id or verdict"
+            className="w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-sm text-text-primary"
+          />
+        </label>
+        <div role="group" aria-label="Status" className="flex flex-wrap items-center gap-1">
+          {STATUS_FILTERS.map((f) => {
+            const active = filter === f;
+            const count = f === "all" ? rows.length : counts[f] || 0;
+            return (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setFilter(f)}
+                aria-pressed={active}
+                className={`inline-flex min-h-7 items-center gap-1.5 rounded border px-2 text-xs ${
+                  active
+                    ? "border-accent bg-bg-active text-text-primary"
+                    : "border-border text-text-secondary hover:border-text-muted hover:text-text-primary"
+                }`}
+              >
+                {f !== "all" && <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${statusTone(f).dot}`} />}
+                <span className="capitalize">{f}</span>
+                <span className="text-text-muted">{count}</span>
+              </button>
+            );
+          })}
+          {(filter !== "all" || query.trim() !== "") && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setFilter("all");
+              }}
+              className="px-1 text-xs text-accent-strong hover:underline"
+            >
+              Clear
+            </button>
+          )}
         </div>
+      </section>
 
-        {/* The list */}
-        <div className="flex-1 min-w-0 bg-bg-surface border border-border rounded">
-          <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
-            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Analyses &mdash; {countLabel(filtered.length, "result")}
-            </h2>
-            {/* The count, announced. An explicit role *replaces* an element's
-                native one, so putting `status` on the heading above would have
-                taken the heading away from the outline this page just gained.
-                A node of its own carries the liveness, which is what the
-                conversation filter already does. */}
-            <span role="status" className="sr-only">
-              {countLabel(filtered.length, "result")}
+      <div className="min-w-0 rounded-md border border-border bg-bg-surface">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-text-primary">
+            Analyses &mdash; {countLabel(filtered.length, "result")}
+          </h2>
+          {/* The count, announced. An explicit role *replaces* an element's
+              native one, so putting `status` on the heading above would have
+              taken the heading away from the outline this page just gained.
+              A node of its own carries the liveness, which is what the
+              conversation filter already does. */}
+          <span role="status" className="sr-only">
+            {countLabel(filtered.length, "result")}
+          </span>
+          {toast && (
+            <span className="text-xs text-status-green bg-status-green/10 border border-status-green/20 rounded px-2 py-0.5">
+              {toast}
             </span>
-            {toast && (
-              <span className="text-xs text-status-green bg-status-green/10 border border-status-green/20 rounded px-2 py-0.5">
-                {toast}
-              </span>
-            )}
-          </div>
-          <div className="divide-y divide-border-light">
-            {filtered.length === 0 ? (
-              <div className="px-4 py-8 text-center text-xs text-text-muted">
-                {filter === "all"
+          )}
+        </div>
+        <div className="divide-y divide-border-light">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-8 text-center text-xs text-text-muted">
+              {query.trim()
+                ? `Not found: no analysis matches "${query.trim()}".`
+                : filter === "all"
                   ? "Nothing has been analysed yet. Upload a sample to start a run."
                   : `No ${filter} analysis.`}
-              </div>
-            ) : (
-              visibleRows(filtered, shown).visible.map((row) => {
-                const badge = statusTone(row.status);
-                const canCancel = row.status === "pending" || row.status === "running";
-                const duration = formatDuration(row.durationSeconds);
-                return (
-                  <div
-                    key={row.id}
-                    className="flex items-center justify-between px-4 py-3 hover:bg-bg-hover"
-                  >
-                    {/* The verdict, the score and the status used to be
-                        siblings *outside* the link, so dozens of rows for one
-                        file were dozens of links all named the same thing.
-                        They are inside it now, which is also where a reader
-                        following one expects to find them. */}
-                    <Link
-                      href={`/analysis/${row.id}`}
-                      className="flex items-center gap-3 flex-1 min-w-0"
-                    >
+            </div>
+          ) : (
+            visibleRows(filtered, shown).visible.map((row) => {
+              const badge = statusTone(row.status);
+              const duration = formatDuration(row.durationSeconds);
+              return (
+                <div key={row.id} className="flex items-center gap-2 px-4 py-3 hover:bg-bg-hover">
+                  {/* The verdict, the confidence and the status sit inside
+                      the link, so dozens of rows for one file are not dozens
+                      of links all named the same thing; the row's one other
+                      control is its actions button beside it. */}
+                  <Link href={`/analysis/${row.id}`} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="flex min-w-0 flex-1 basis-48 items-center gap-3">
                       <FileText size={16} aria-hidden="true" className="text-text-secondary shrink-0" />
-                      <div className="min-w-0">
-                        <p className="text-sm text-text-primary truncate" title={row.sample}>
+                      <span className="min-w-0">
+                        <span className="block text-sm text-text-primary truncate" title={row.sample}>
                           {row.sample}
-                        </p>
-                        <p className="text-xs text-text-muted">
+                        </span>
+                        <span className="block text-xs text-text-muted">
                           {timeAgo(row.createdAt)}
                           {row.durationSeconds ? ` / ${duration}` : ""}
-                        </p>
+                        </span>
                         {/* A report kept from a run that failed after it was
                             built, marked as the analysis header marks it. */}
                         {row.incompleteReason && (
-                          <p className="text-xs text-status-orange">{row.incompleteReason}</p>
+                          <span className="block text-xs text-status-orange">{row.incompleteReason}</span>
                         )}
-                      </div>
-                      {row.verdict && (
-                        <span className={`ml-auto text-xs ${verdictTone(row.verdict).text}`}>
-                          {verdictLabel(row.verdict)}
-                          {/* A bare `0` beside a confident verdict said
-                              nothing about what the number was. */}
-                          {row.confidence !== null && (
-                            <span className="ml-1.5 font-mono text-text-muted">
-                              confidence {row.confidence.toFixed(2)}
-                            </span>
-                          )}
-                        </span>
-                      )}
-                    </Link>
-                    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 ml-3">
-                      {/* Outside the link, because a control inside a link is
-                          two targets in one. The two values an operator pastes
-                          elsewhere — into a lookup, into a log search — one
-                          press each, and the name says which row's. */}
-                      {row.sha256 && (
-                        <CopyButton
-                          value={row.sha256}
-                          what={`SHA-256 of ${row.sample}, ${timeAgo(row.createdAt)}`}
-                          label="SHA-256"
-                          className={COPY_CLASS}
-                        />
-                      )}
-                      <CopyButton
-                        value={row.id}
-                        what={`job id of ${row.sample}, ${timeAgo(row.createdAt)}`}
-                        label="job id"
-                        className={COPY_CLASS}
-                      />
-                      {canCancel && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCancelError(null);
-                            setConfirmJob(row);
-                          }}
-                          className="px-3 py-1 text-xs border border-status-red/30 text-status-red rounded hover:bg-status-red/10"
-                        >
-                          Cancel
-                        </button>
-                      )}
-                      <div className={`flex items-center gap-1.5 ${badge.text}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
-                        <span className="text-xs font-medium uppercase tracking-wider">
-                          {row.status}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-          <ShowMoreRows shown={Math.min(shown, filtered.length)} total={filtered.length} onShow={setShown} />
+                      </span>
+                    </span>
+                    {row.verdict && (
+                      <span className={`text-xs ${verdictTone(row.verdict).text}`}>
+                        {verdictLabel(row.verdict)}
+                        {/* A bare `0` beside a confident verdict said
+                            nothing about what the number was. */}
+                        {row.confidence !== null && (
+                          <span className="ml-1.5 font-mono text-text-muted">
+                            confidence {row.confidence.toFixed(2)}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                    <span className={`flex items-center gap-1.5 ${badge.text}`}>
+                      <span aria-hidden="true" className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
+                      <span className="text-xs font-medium">{row.status}</span>
+                    </span>
+                  </Link>
+                  <RowActions
+                    row={row}
+                    onCancel={() => {
+                      setCancelError(null);
+                      setConfirmJob(row);
+                    }}
+                  />
+                </div>
+              );
+            })
+          )}
         </div>
+        <ShowMoreRows shown={Math.min(shown, filtered.length)} total={filtered.length} onShow={setShown} />
       </div>
-
       {/* Cancel Confirmation Modal */}
       {confirmJob && (
         <div
@@ -363,7 +411,7 @@ function AnalysesList() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 id="cancel-job-title" className="text-sm font-semibold text-text-primary">Cancel Job</h3>
+              <h3 id="cancel-job-title" className="text-sm font-semibold text-text-primary">Cancel analysis</h3>
               <button
                 type="button"
                 aria-label="Close"
@@ -375,8 +423,8 @@ function AnalysesList() {
               </button>
             </div>
             <p className="text-sm text-text-secondary mb-4 leading-relaxed">
-              Cancelling job {confirmJob.id.slice(0, 8)} stops the analysis where it is and
-              marks the job cancelled. It cannot be undone.
+              Cancelling analysis {confirmJob.id.slice(0, 8)} stops it where it is and
+              marks it cancelled. It cannot be undone.
             </p>
             {cancelError && (
               <div role="alert" className="mb-3 text-xs text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5">
@@ -396,7 +444,7 @@ function AnalysesList() {
                 disabled={cancelling}
                 className="px-3 py-1 text-xs bg-status-red text-bg-deep rounded hover:bg-status-red/90 disabled:opacity-50"
               >
-                {cancelling ? "Cancelling..." : "Cancel job"}
+                {cancelling ? "Cancelling..." : "Cancel analysis"}
               </button>
             </div>
           </div>

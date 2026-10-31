@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useReport } from "./AnalysisContext";
+import CitedProse from "./CitedProse";
 import EvidenceChips from "./EvidenceChips";
 import {
   REPORT_MODEL_VOICE,
@@ -63,7 +65,9 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
               {steps.map((step, i) => (
                 <li key={`${step.order}-${i}`} className="text-sm text-text-secondary">
                   <span className="text-text-muted mr-2 font-mono">{i + 1}.</span>
-                  {step.action}
+                  <span className="break-words [overflow-wrap:anywhere]">
+                    <CitedProse text={step.action} />
+                  </span>
                   <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted">
                     {flowMark(step)}
                   </span>
@@ -80,7 +84,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
         {config.length > 0 && (
           <p className="text-xs text-text-secondary">
             Configuration: see{" "}
-            <Link href={`/analysis/${jobId}/static#decoded`} className="text-accent-strong hover:underline">
+            <Link href={`/analysis/${jobId}/static#decoded`} className="text-accent-strong underline hover:no-underline">
               Static &amp; code › Decoded strings and configuration
             </Link>
           </p>
@@ -91,6 +95,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
             <h3 className="text-xs text-text-muted mb-1.5">
               Host identifiers
             </h3>
+            <div {...scrollRegion("Host identifiers")} className={`max-w-full overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-text-muted">
@@ -107,7 +112,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                     <td className="py-1 pr-3 font-mono break-all text-text-secondary">
                       {item.value}
                     </td>
-                    <td className="py-1 pr-3 text-text-muted">{item.purpose?.trim() || "not stated"}</td>
+                    <td className="py-1 pr-3 break-words text-text-muted [overflow-wrap:anywhere]">{item.purpose?.trim() ? <CitedProse text={item.purpose.trim()} /> : "not stated"}</td>
                     <td className="py-1">
                       <Cited ids={item.evidence_refs} />
                       <Unresolved
@@ -122,6 +127,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                 ))}
               </tbody>
             </table>
+            </div>
             <p className="mt-1 text-[10px] italic text-text-muted">
               Read out of this run&apos;s evidence by the AI that wrote the report. This table publishes
               nothing itself: a value it lists is published only where the IOC table publishes
@@ -135,6 +141,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
             <h3 className="text-xs text-text-muted mb-1.5">
               Commands
             </h3>
+            <div {...scrollRegion("Commands")} className={`max-w-full overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-text-muted">
@@ -148,8 +155,8 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                 {cmds.map((cmd, i) => (
                   <tr key={`${cmd.name}-${i}`} className="border-t border-border align-top">
                     <td className="py-1 pr-3 font-mono text-text-muted">{cmd.id ?? "-"}</td>
-                    <td className="py-1 pr-3 font-mono text-text-primary">{cmd.name}</td>
-                    <td className="py-1 pr-3 text-text-secondary">{cmd.description || "-"}</td>
+                    <td className="py-1 pr-3 font-mono break-all text-text-primary">{cmd.name}</td>
+                    <td className="py-1 pr-3 break-words text-text-secondary [overflow-wrap:anywhere]">{cmd.description ? <CitedProse text={cmd.description} /> : "-"}</td>
                     <td className="py-1">
                       <Cited ids={cmd.evidence_refs} />
                     </td>
@@ -157,6 +164,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                 ))}
               </tbody>
             </table>
+            </div>
           </section>
         )}
 
@@ -196,8 +204,8 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
               {block.title}
             </h3>
             {block.body && (
-              <p className="text-sm text-text-secondary whitespace-pre-wrap break-words">
-                {block.body}
+              <p className="text-sm text-text-secondary whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                <CitedProse text={block.body} />
               </p>
             )}
             {block.facts.length > 0 && (
@@ -205,7 +213,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                 {block.facts.map(([label, value]) => (
                   <div key={label} className="contents">
                     <dt className="text-text-muted">{label}</dt>
-                    <dd className="font-mono break-all text-text-secondary">{value}</dd>
+                    <dd className="min-w-0 font-mono break-all text-text-secondary"><CitedProse text={value} /></dd>
                   </div>
                 ))}
               </dl>
@@ -214,7 +222,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
               <ul className="mt-1 space-y-0.5">
                 {block.items.map((item, i) => (
                   <li key={`${item}-${i}`} className="text-xs font-mono break-all text-text-secondary">
-                    {item}
+                    <CitedProse text={item} />
                   </li>
                 ))}
               </ul>

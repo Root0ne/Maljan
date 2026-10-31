@@ -1,5 +1,6 @@
 "use client";
 
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
@@ -38,10 +39,11 @@ import {
  * Overview: the page a reader lands on, and the same content as the first
  * pages of the report.
  *
- * Top to bottom: what the sample does (the summary and its key findings),
- * how much of each kind of evidence exists (the number row, with "Not found"
- * where none does), the answers to the questions the analysis was asked, the
- * findings table highest severity first with a caret that opens the evidence
+ * Top to bottom, in the order the report's cover and executive summary
+ * print the same content: what the sample does (the key findings, then the
+ * summary), the answers to the questions the analysis was asked, how much
+ * of each kind of evidence exists (the number row, with "Not found" where
+ * none does), the findings table highest severity first with a caret that opens the evidence
  * behind a row, the configuration the analysis extracted, what to do about
  * it, and the questions asked after it finished.
  */
@@ -112,14 +114,8 @@ export default function OverviewTab() {
               )}
             </p>
           )}
-          {mr.executive_summary?.trim() && (
-            <p className="whitespace-pre-wrap text-sm leading-6 text-text-primary">
-              <CitedProse text={mr.executive_summary} />
-            </p>
-          )}
-          {!mr.executive_summary?.trim() && findings.length === 0 && summaryAbsentBecause && (
-            <p className="text-sm text-text-muted">No summary was written: {summaryAbsentBecause}.</p>
-          )}
+          {/* The key findings, then the summary's prose: the order the
+              report's executive summary prints them in. */}
           {shownFindings.length > 0 && (
             <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-text-primary" aria-label="Key findings">
               {shownFindings.map((f, i) => (
@@ -157,6 +153,14 @@ export default function OverviewTab() {
                 : `Show ${findings.length - FIRST_KEY_FINDINGS} more key findings`}
             </button>
           )}
+          {mr.executive_summary?.trim() && (
+            <p className="whitespace-pre-wrap text-sm leading-6 text-text-primary">
+              <CitedProse text={mr.executive_summary} />
+            </p>
+          )}
+          {!mr.executive_summary?.trim() && findings.length === 0 && summaryAbsentBecause && (
+            <p className="text-sm text-text-muted">No summary was written: {summaryAbsentBecause}.</p>
+          )}
           {storedParagraphs.length > 0 && (
             <ol className="list-decimal space-y-2 pl-5 text-sm leading-6 text-text-secondary">
               {storedParagraphs.map((para, i) => (
@@ -169,6 +173,10 @@ export default function OverviewTab() {
         </div>
       </Section>
 
+      {/* The report answers the questions inside its executive summary, so
+          they follow the summary here too. */}
+      <QuestionAnswers mr={mr} />
+
       {/* Numbers, not links: the tab each one counts is named in the tab row
           right above, and the first screen keeps to ten controls. */}
       <section aria-label="Counts">
@@ -179,10 +187,8 @@ export default function OverviewTab() {
         </div>
       </section>
 
-      <QuestionAnswers mr={mr} />
-
       <Section title="Top findings" count={rows.length} empty={rows.length === 0}>
-        <div className="-mx-4 -my-3 overflow-x-auto">
+        <div {...scrollRegion("Top findings")} className={`-mx-4 -my-3 overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border-light text-left text-xs text-text-muted">
@@ -244,13 +250,15 @@ export default function OverviewTab() {
         >
           <dl className="space-y-2 text-sm">
             {config.map((item) => (
-              <div key={`${item.key}=${item.value}`} className="grid grid-cols-[minmax(6rem,10rem)_1fr_auto] items-start gap-2">
+              <div key={`${item.key}=${item.value}`} className="grid grid-cols-[minmax(6rem,10rem)_1fr] items-start gap-2">
                 <dt className="text-text-secondary">{item.key}</dt>
-                <dd className="min-w-0">
-                  <span className="break-all font-mono text-xs text-text-primary">{item.value}</span>
-                  <span className="block text-[11px] text-text-muted">{howObtained(item)}</span>
+                <dd className="flex min-w-0 items-start gap-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="break-all font-mono text-xs text-text-primary">{item.value}</span>
+                    <span className="block text-[11px] text-text-muted">{howObtained(item)}</span>
+                  </span>
+                  <CopyButton value={item.value} what={`configuration value ${item.key}`} label="copy" />
                 </dd>
-                <CopyButton value={item.value} what={`configuration value ${item.key}`} label="copy" />
               </div>
             ))}
           </dl>
@@ -340,7 +348,7 @@ function LegacyOverview() {
         {agentCount > 0 ? ` ${countLabel(agentCount, "analyst")} took part; what each one concluded is ` : ""}
         {agentCount > 0 && (
           <>
-            <Link href={`${analysisHref(jobId, "evidence")}/conversation`} className="text-accent-strong hover:underline">
+            <Link href={`${analysisHref(jobId, "evidence")}/conversation`} className="text-accent-strong underline hover:no-underline">
               beside their discussion
             </Link>
             .

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { buttonClass } from "@/components/ui/Button";
 import { buildReviewItems, ReviewErrorSummary, ReviewList } from "./ReviewList";
 import { useSettingsContext } from "./SettingsContext";
 import { keysNeedingPassword } from "./signInPolicy";
@@ -106,7 +107,7 @@ export default function ChangesBar() {
               <button
                 type="button"
                 disabled={saving || unread.length > 0 || passwordMissing}
-                className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
+                className={buttonClass("primary", "sm")}
                 onClick={onApply}
               >
                 {saving ? "Saving…" : "Confirm and apply"}
@@ -175,7 +176,7 @@ export default function ChangesBar() {
           <button
             type="button"
             disabled={unread.length > 0}
-            className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
+            className={buttonClass("primary", "sm")}
             onClick={() => setReviewing(true)}
           >
             Review
