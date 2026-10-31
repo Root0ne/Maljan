@@ -22,6 +22,8 @@
 import { memo, useState } from "react";
 import { ArrowRight, CircleHelp, CornerUpLeft, Gavel } from "lucide-react";
 
+import AgentReport from "@/components/analysis/AgentReport";
+import SafeMarkdown from "@/components/analysis/SafeMarkdown";
 import { retryAddedLabel, type ConversationItem } from "@/lib/conversation";
 import { statusTone } from "@/lib/status";
 import type { AgentTone } from "./agentIdentity";
@@ -154,19 +156,24 @@ function MessageBubble({
         </span>
       )}
 
-      {/* What the agent said, as it said it: messages quote command lines
-          and Windows paths, so every backslash, asterisk and underscore
-          stays literal. A turn still arriving is drawn as far as it has
-          come, with the cursor after it. */}
-      <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-text-primary">
-        {text}
-        {item.streaming && (
-          <span
-            className="ml-1 inline-block h-3 w-1.5 align-middle bg-text-muted motion-safe:animate-pulse"
-            aria-hidden="true"
-          />
-        )}
-      </p>
+      {/* What the agent said, as Markdown — the model writes it that way —
+          with every backslash it wrote kept, so a Windows path or a command
+          line reads as written (`keepBackslashes`, as in the Debate view),
+          and its evidence ids as the page's one citation mark. A turn still
+          arriving is drawn as far as it has come, with the cursor after it. */}
+      <SafeMarkdown
+        markdown={text}
+        keepBackslashes
+        cite
+        regionName={`Message ${item.id}`}
+        className="space-y-2 break-words text-xs leading-relaxed text-text-primary"
+      />
+      {item.streaming && (
+        <span
+          className="inline-block h-3 w-1.5 align-middle bg-text-muted motion-safe:animate-pulse"
+          aria-hidden="true"
+        />
+      )}
 
       {item.dissent.length > 0 && (
         <p className="mt-1.5 text-[11px] text-status-orange">Disputes: {item.dissent.join("; ")}</p>
@@ -198,16 +205,11 @@ function MessageBubble({
 
       {openReport && item.report && (
         <div className="mt-2 border-t border-border-light pt-2">
-          {/* Literal, like the message: a report quotes paths and commands.
-              It scrolls with the page, never in a box of its own. */}
-          <p className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-text-secondary">
-            {item.report}
-          </p>
-          {item.reportTruncated && (
-            <p className="mt-2 text-[11px] italic text-text-muted">
-              The producer cut this report at its size limit.
-            </p>
-          )}
+          {/* The analyst's report as the Debate view reads it: claims as rows,
+              its closing lists as lists, its prose as Markdown with every
+              backslash kept. It scrolls with the page, never in a box of its
+              own. */}
+          <AgentReport report={item.report} name={`report in message ${item.id}`} truncated={item.reportTruncated} />
         </div>
       )}
 
@@ -250,7 +252,10 @@ function MessageBubble({
   );
 }
 
-/* Memoised on the item, which the conversation builder keeps identical for a
- * line nothing has changed — so a three-thousand-line replay redraws the line
- * that just arrived rather than every line before it. */
+/* Memoised on its props, every one of which holds still while its line does:
+ * the item, which the conversation builder keeps identical for a line nothing
+ * has changed; the tone, one shared object per colour; the quote, held per
+ * question line; the jump handler, a stable callback; and plain strings. So a
+ * three-thousand-line replay redraws the line that just arrived rather than
+ * every line before it. */
 export default memo(MessageBubble);
