@@ -8,9 +8,11 @@ afterwards. This reads the same declarations without starting anything.
 Two places a job runs a tool on this host are checked, each against the
 declared needs of the repository's sidecar the tool belongs to
 (``tools.sidecar_needs``), with ``Requirement.installed``: a module looked up
-on the import path, an executable looked for where it would be looked for.
-Nothing is imported, started or run on a sample, so the check is cheap enough
-for every submit and every status read, and linear in the tools declared.
+on the import path, an executable looked for where it would be looked for, a
+declared data path (a rule corpus) read from the setting or environment that
+names it and looked at. Nothing is imported, started or run on a sample, so
+the check is cheap enough for every submit and every status read, and linear
+in the tools declared.
 
 * **The servers the job calls** (``composition.servers_a_job_calls``: its
   team's, the triage pack's, the static provider's) that are switched on and
@@ -177,34 +179,40 @@ def _missing(
     environ: Mapping[str, str] | None,
     answered: dict[Any, str | None],
     *,
+    settings: Any = None,
     modules: bool = True,
 ) -> Unavailable | None:
     """``need`` as unavailable when one of its requirements is absent, else ``None``.
 
     ``answered`` keeps each requirement's answer for ``environ``: an
-    executable is looked for in it, so another environment is asked again.
+    executable or a data path's override is looked for in it, so another
+    environment is asked again. ``settings`` names a data path a tool is
+    handed from them.
     """
     reasons = []
+    absent = []
     for req in need.requires:
         if req.kind == "module" and not modules:
             continue
         held = (req, id(environ))
         if held not in answered:
-            answered[held] = req.installed(environ)
+            answered[held] = req.installed(environ, settings)
         if answered[held]:
             reasons.append(str(answered[held]))
+            absent.append(req)
     if not reasons:
         return None
+    from maljan.tools.capabilities import remedy_for
     from maljan.tools.errors import MISSING_DEPENDENCY
 
     return Unavailable(
         server="",
         tool=need.name,
         reason="; ".join(reasons),
-        remediation=need.remediation or _general_remedy(),
+        remediation=remedy_for(need, absent),
         without=need.without,
-        # Only a module or an executable is checked here: a setting is the
-        # server's own to read (``Requirement.installed``).
+        # Only a module, an executable or data is checked here: a setting is
+        # the server's own to read (``Requirement.installed``).
         code=MISSING_DEPENDENCY,
     )
 
@@ -257,7 +265,7 @@ def unavailable_tools(
         for need in needs:
             if offered is not None and need.name not in offered:
                 continue
-            missing = _missing(need, environ, answered, modules=modules)
+            missing = _missing(need, environ, answered, settings=settings, modules=modules)
             if missing is not None:
                 missing.server = key
                 found.append(missing)
@@ -271,7 +279,7 @@ def unavailable_tools(
     for server, need, lent in readings:
         if (server, need.name) in named:
             continue
-        missing = _missing(need, lent, answered)
+        missing = _missing(need, lent, answered, settings=settings)
         if missing is not None:
             missing.server = server
             named.add((server, need.name))
@@ -283,12 +291,6 @@ def unavailable_tools(
             log_safe("; ".join(u.degradation_reason for u in found)),
         )
     return found
-
-
-def _general_remedy() -> str:
-    from maljan.tools.errors import MISSING_DEPENDENCY, REMEDIATIONS
-
-    return REMEDIATIONS[MISSING_DEPENDENCY]
 
 
 def as_rows(found: list[Unavailable]) -> list[dict[str, Any]]:

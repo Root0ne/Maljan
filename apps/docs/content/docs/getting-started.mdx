@@ -32,6 +32,10 @@ stack cannot build without it (a stack without Ghidra does not need it; see
 below). The same script fetches capa's rules and signatures into
 `data/capa-rules` and `data/capa-signatures` at the capa version `uv.lock`
 pins; the stack's API and worker read them through their `data/` mount.
+A new `git worktree` carries none of these either: run `make external` in it,
+or link the main checkout's `data/capa-rules` and `data/sigma_rules` into it.
+Until then `POST /jobs` and the system status name capa and the Sigma tools as
+unavailable, with the path each reads and the setting that names it.
 
 ## The two configuration files
 

@@ -17,15 +17,16 @@ import pytest
 
 from app.services.tool_availability import as_rows, unavailable_tools
 from maljan.core.config import Settings
-from maljan.tools import emulated_strings, sidecar_needs
+from maljan.tools import capabilities, emulated_strings, sidecar_needs
 from maljan.tools.capabilities import Requirement, ToolNeeds, binary, env, manifest, module
 
 
 def _without(monkeypatch: pytest.MonkeyPatch, *missing: str) -> list[str]:
-    """A host holding every declared library and the pinned FLOSS but ``missing``.
+    """A host holding every declared library and data path and the pinned FLOSS but ``missing``.
 
-    Whatever the test host has installed: the import path finds every module
-    but the ones named, and FLOSS is found. Answers the names looked up.
+    Whatever the test host has installed or fetched: the import path finds
+    every module but the ones named, every declared data path holds data, and
+    FLOSS is found. Answers the names looked up.
     """
     asked: list[str] = []
 
@@ -35,6 +36,7 @@ def _without(monkeypatch: pytest.MonkeyPatch, *missing: str) -> list[str]:
 
     monkeypatch.setattr(importlib.util, "find_spec", find_spec)
     monkeypatch.setattr(emulated_strings, "find_floss", lambda environ=None: ("floss", ""))
+    monkeypatch.setattr(capabilities, "data_held", lambda path: True)
     return asked
 
 

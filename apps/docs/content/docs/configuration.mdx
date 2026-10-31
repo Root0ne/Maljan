@@ -4943,6 +4943,20 @@ among the degradation reasons. Anything else is a loss, whatever its words say. 
 summary keeps what the degraded flag was decided on (`loss_facts`), and the header names
 the lost tools from it.
 
+**Data a tool reads.** A `ToolNeeds` entry may also declare a data path
+(`maljan.tools.capabilities.data`): the default path the tool reads, the core
+setting whose value it is handed instead, and the server environment variable
+that replaces the default. The built-in sidecars declare the corpora that are
+fetched rather than tracked: capa's rules (`static.capa.rules_dir`) and the Sigma
+corpus (`MALJAN_SIGMA_RULES_DIR`, else `data/sigma_rules`). `POST /jobs` and the
+system status look at each declared path where the tool would read it and name a
+tool whose path is missing, or is a directory holding no file, as unavailable: the
+reason gives the path and what named it
+(`data/capa-rules is missing or empty (named by static.capa.rules_dir)`), and the
+remedy says how to put it there. A server does not probe a data path in its
+manifest, since the path it is handed is the caller's setting. A tool that
+declares no data is checked as before.
+
 **Errors that name their remedy.** A tool that cannot answer returns, never
 raises:
 
