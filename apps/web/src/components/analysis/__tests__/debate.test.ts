@@ -3,7 +3,7 @@
  * lines with who must revise and whether each blocks, what the ledger states
  * for each, the revisions that answered the round, the outcome, and an
  * analyst's report read into claims and prose. The shapes are a stored run's
- * (benchmark haiku7), cut down.
+ * (a stored benchmark run), cut down.
  */
 
 import { describe, expect, it } from "vitest";
@@ -22,8 +22,8 @@ import {
 } from "../debate";
 
 const LINE_1 =
-  "[analysts: STATIC ANALYST, ALL_TOOLS_QU1CKSC0PE ANALYST] STATIC ANALYST claim 21 says routine 0x463c opens another process; " +
-  "ALL_TOOLS_REVERSER_GHIDRA claim 31 says it opens its own PID (ev_0068). [blocking: target process of OpenProcess in 0x463c is stated in incompatible ways]";
+  "[analysts: STATIC ANALYST, ALL_TOOLS_SCANNER ANALYST] STATIC ANALYST claim 21 says routine 0x463c opens another process; " +
+  "ALL_TOOLS_REVERSER claim 31 says it opens its own PID (ev_0068). [blocking: target process of OpenProcess in 0x463c is stated in incompatible ways]";
 const LINE_2 =
   "[analysts: NETWORK ANALYST] [carried: L5] Claim 42 rejects the 12-GET count; ev_0089 lists 12 GET requests. " +
   "[not blocking: the list is an incomplete summary]";
@@ -92,7 +92,7 @@ describe("a contested line", () => {
   });
 
   it("maps the written name to the roster key", () => {
-    expect(analystKey("ALL_TOOLS_QU1CKSC0PE ANALYST")).toBe("all_tools_qu1cksc0pe");
+    expect(analystKey("ALL_TOOLS_SCANNER ANALYST")).toBe("all_tools_scanner");
     expect(analystKey("STATIC ANALYST")).toBe("static");
   });
 });
@@ -197,7 +197,7 @@ describe("the outcome", () => {
 
 describe("an analyst's report", () => {
   const REPORT = [
-    "[ALL_TOOLS_STATIC_R2 ANALYST — round 2]",
+    "[ALL_TOOLS_DISASSEMBLER ANALYST — round 2]",
     "Domain: static | Mean confidence: 0.72",
     "  Claim 1: The file decodes `init -zzzz=\"%s\\%s\"` at run time. | Evidence: [ev_0019] 81 strings; [ev_0021] 101 | Confidence: 0.85",
     "  Claim 2 (identity): An x64 DLL. | Evidence: ev_0004 (dll) | Confidence: 0.95",
@@ -207,7 +207,7 @@ describe("an analyst's report", () => {
 
   it("reads the head, each claim with its evidence and confidence, and the prose after", () => {
     const parsed = parseAgentReport(REPORT);
-    expect(parsed).toMatchObject({ author: "ALL_TOOLS_STATIC_R2 ANALYST", round: 2, domain: "static", meanConfidence: 0.72 });
+    expect(parsed).toMatchObject({ author: "ALL_TOOLS_DISASSEMBLER ANALYST", round: 2, domain: "static", meanConfidence: 0.72 });
     expect(parsed.claims).toHaveLength(2);
     expect(parsed.claims[0]).toEqual({
       number: "1",

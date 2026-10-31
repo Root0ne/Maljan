@@ -203,7 +203,7 @@ export function factsByLine(rows: readonly string[], lines: readonly ContestedLi
   return out;
 }
 
-/** The roster key an analyst named in a line goes by: "ALL_TOOLS_R2 ANALYST" is `all_tools_r2`. */
+/** The roster key an analyst named in a line goes by: "ALL_TOOLS_DISASSEMBLER ANALYST" is `all_tools_disassembler`. */
 export function analystKey(named: string): string {
   return named
     .trim()
