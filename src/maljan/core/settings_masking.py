@@ -22,6 +22,9 @@ them masks with these functions, so what one hides the others hide too:
   forms: the rules above guess a credential by where it stands, a value the
   settings hold is masked wherever it appears. The values are registered by
   scope where settings are read in force (:func:`remember_settings_values`).
+  Only text that leaves for display takes this pass; a record (the run
+  snapshot, the fingerprint) passes ``by_value=False`` and reads the same on
+  every process.
 
 ``mask`` is the placeholder the reader uses: ``***`` in a run record, the
 console's ``TOKEN_MASK`` where a value comes back on a save. ``unmasked``
@@ -35,6 +38,7 @@ import json
 import logging
 import re
 import string
+import threading
 from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any
@@ -502,14 +506,17 @@ def masked_bare_userinfo(text: str, mask: str = SNAPSHOT_MASK) -> str:
     return "".join(out)
 
 
-def masked_text(text: str, mask: str = SNAPSHOT_MASK) -> str:
+def masked_text(text: str, mask: str = SNAPSHOT_MASK, *, by_value: bool = True) -> str:
     """``text`` with every URL in it masked: userinfo, query values and fragment.
 
     An address written with no scheme has its userinfo masked too
     (:func:`masked_bare_userinfo`), and then every secret value this process
     holds, in each of its encoded forms (:func:`masked_values`): the
     structural rules run first, so what they mask is masked as before, and
-    the values only add masks.
+    the values only add masks. A record (the run snapshot, the efficiency
+    fingerprint, the disclosure's hosts) passes ``by_value=False``: it is
+    masked by the structural rules alone, the same on every process whatever
+    values it holds; the value pass is for text that leaves for display.
     """
     text = masked_bare_userinfo(text, mask)
     if "://" in text:
@@ -521,7 +528,7 @@ def masked_text(text: str, mask: str = SNAPSHOT_MASK) -> str:
             last = end
         out.append(text[last:])
         text = "".join(out)
-    return masked_values(text, mask)
+    return masked_values(text, mask) if by_value else text
 
 
 # Masking by value (T-482). The structural rules above guess a credential by
@@ -537,16 +544,21 @@ def masked_text(text: str, mask: str = SNAPSHOT_MASK) -> str:
 VALUE_FLOOR = 8
 # The values to mask, by the scope that registered them (``app``, ``process``,
 # ``job``, ``store``, ``core``): a scope registered again replaces what it
-# held, so a secret no longer configured stops being masked.
+# held, so a secret no longer configured stops being masked. Replaced whole
+# under the lock, never changed in place, so a reader on another thread sees
+# one map or the next.
 _VALUE_SCOPES: dict[str, frozenset[str]] = {}
+_VALUE_LOCK = threading.Lock()
 # Their union, kept as one set so each masking call hashes nothing new: the
-# compiled pattern is cached by it (:func:`_value_pattern`).
+# compiled matcher is cached by it (:func:`_value_matcher`).
 _HELD: frozenset[str] = frozenset()
 
 
-def _union_changed() -> None:
-    global _HELD
-    held = frozenset().union(*_VALUE_SCOPES.values())
+def _set_scopes(scopes: dict[str, frozenset[str]]) -> None:
+    """Install ``scopes`` and their union; called under :data:`_VALUE_LOCK`."""
+    global _VALUE_SCOPES, _HELD
+    held = frozenset().union(*scopes.values())
+    _VALUE_SCOPES = scopes
     if held != _HELD:
         _HELD = held
 
@@ -554,8 +566,8 @@ def _union_changed() -> None:
 def remember_values(values: Any, *, scope: str) -> None:
     """Set the values shown text is masked by under ``scope``; only a count is ever logged."""
     texts = frozenset(text for text in (str(item or "") for item in values) if text.strip())
-    _VALUE_SCOPES[scope] = texts
-    _union_changed()
+    with _VALUE_LOCK:
+        _set_scopes({**_VALUE_SCOPES, scope: texts})
     logger.debug("Shown text is masked by %d value(s) under %s.", len(texts), scope)
 
 
@@ -577,11 +589,8 @@ def remember_settings_values(*sources: Any, scope: str) -> None:
 
 def forget_values(scope: str | None = None) -> None:
     """Forget the values of ``scope``, or of every scope."""
-    if scope is None:
-        _VALUE_SCOPES.clear()
-    else:
-        _VALUE_SCOPES.pop(scope, None)
-    _union_changed()
+    with _VALUE_LOCK:
+        _set_scopes({} if scope is None else {k: v for k, v in _VALUE_SCOPES.items() if k != scope})
 
 
 def held_values() -> frozenset[str]:
@@ -726,8 +735,11 @@ class _Automaton:
 
 
 @lru_cache(maxsize=16)
-def _value_matcher(values: frozenset[str]) -> re.Pattern[str] | _Automaton | None:
-    """What finds every encoded form of ``values`` at least :data:`VALUE_FLOOR` long.
+def _value_matcher(
+    values: frozenset[str], literals: frozenset[str] = frozenset()
+) -> re.Pattern[str] | _Automaton | None:
+    """What finds every encoded form of ``values`` at least :data:`VALUE_FLOOR` long,
+    and each of ``literals`` as written, whatever its length.
 
     A trie pattern (:func:`_trie_pattern`), the regex engine's own speed; a
     set nested deeper than it compiles (hundreds of values each one longer
@@ -736,7 +748,8 @@ def _value_matcher(values: frozenset[str]) -> re.Pattern[str] | _Automaton | Non
     nothing.
     """
     forms = sorted(
-        {form for value in values if len(value) >= VALUE_FLOOR for form in encoded_forms(value)},
+        {form for value in values if len(value) >= VALUE_FLOOR for form in encoded_forms(value)}
+        | {literal for literal in literals if literal},
         key=lambda form: (-len(form), form),
     )
     if not forms:
@@ -748,10 +761,14 @@ def _value_matcher(values: frozenset[str]) -> re.Pattern[str] | _Automaton | Non
 
 
 def _merged(spans: list[tuple[int, int]]) -> list[list[int]]:
-    """``spans`` (ordered by start or by end) merged where they overlap or touch."""
+    """``spans`` (ordered by start or by end) merged where they overlap.
+
+    Two that only touch stay two runs, each its own mask, as a replace of
+    each value in turn writes them.
+    """
     out: list[list[int]] = []
     for start, stop in spans:
-        while out and start <= out[-1][1] and stop >= out[-1][0]:
+        while out and start < out[-1][1] and stop > out[-1][0]:
             held = out.pop()
             start, stop = min(start, held[0]), max(stop, held[1])
         out.append([start, stop])
@@ -770,18 +787,25 @@ def _value_spans(matcher: re.Pattern[str] | _Automaton, text: str) -> list[list[
     return _merged(found_spans)
 
 
-def masked_values(text: str, mask: str = SNAPSHOT_MASK, values: Any = None) -> str:
+def masked_values(
+    text: str, mask: str = SNAPSHOT_MASK, values: Any = None, *, literals: Any = ()
+) -> str:
     """``text`` with every occurrence of each secret value, in each encoded form, masked.
 
     ``values`` defaults to what this process holds (:func:`held_values`).
     A value shorter than :data:`VALUE_FLOOR` is not masked by value.
+    ``literals`` are masked as written whatever their length, in the same
+    pass: a caller's own short credential and a held value that overlaps it
+    are one run, so neither leaves a part of the other.
     Overlapping occurrences are masked as one run from the first start to
     the last end, so no part of a value another overlaps is left, and each
     run is replaced by one mask. Each position of ``text`` is tried as a
     start once, at a cost bounded by the longest form (or, for a deeply
     nested set, each character read once): linear in ``text``.
     """
-    matcher = _value_matcher(held_values() if values is None else frozenset(values))
+    matcher = _value_matcher(
+        held_values() if values is None else frozenset(values), frozenset(literals)
+    )
     if matcher is None or not text:
         return text
     spans = _value_spans(matcher, text)
@@ -795,33 +819,6 @@ def masked_values(text: str, mask: str = SNAPSHOT_MASK, values: Any = None) -> s
         last = stop
     out.append(text[last:])
     return "".join(out)
-
-
-def masked_values_in(value: Any, mask: str = SNAPSHOT_MASK, values: Any = None) -> Any:
-    """``value`` copied with :func:`masked_values` applied to every string in it, at any depth."""
-    held = held_values() if values is None else frozenset(values)
-    if isinstance(value, str):
-        return masked_values(value, mask, held)
-    if not isinstance(value, _NESTED):
-        return value
-    holder: list[Any] = [None]
-    stack: list[tuple[Any, Any, Any]] = [(value, holder, 0)]
-    while stack:
-        source, target, slot = stack.pop()
-        if isinstance(source, Mapping):
-            out: Any = {}
-            items: Any = source.items()
-        else:
-            out = [None] * len(source)
-            items = enumerate(source)
-        target[slot] = out
-        for key, item in items:
-            if isinstance(item, _NESTED):
-                out[key] = None
-                stack.append((item, out, key))
-            else:
-                out[key] = masked_values(item, mask, held) if isinstance(item, str) else item
-    return holder[0]
 
 
 def _flag_name(arg: str) -> str:
@@ -865,7 +862,7 @@ def _masked_assignment(arg: str, mask: str) -> str | None:
     return None
 
 
-def masked_args(args: list[Any], mask: str = SNAPSHOT_MASK) -> list[Any]:
+def masked_args(args: list[Any], mask: str = SNAPSHOT_MASK, *, by_value: bool = True) -> list[Any]:
     """A command line with every credential in it masked, and every URL in it.
 
     The value after a flag whose name marks a credential (``--api-key T``,
@@ -907,7 +904,7 @@ def masked_args(args: list[Any], mask: str = SNAPSHOT_MASK) -> list[Any]:
             if whole is not None:
                 out.append(whole)
                 continue
-        out.append(masked_text(arg, mask))
+        out.append(masked_text(arg, mask, by_value=by_value))
     return out
 
 
@@ -924,11 +921,11 @@ def _masked_scalar(item: Any, mask: str) -> Any:
     return mask
 
 
-def _copy_masked(value: Any, mask: str, *, read_names: bool) -> Any:
+def _copy_masked(value: Any, mask: str, *, read_names: bool, by_value: bool = True) -> Any:
     """``value`` copied with every URL masked, and, with ``read_names``, every
     mapping entry whose key names a credential."""
     if not isinstance(value, _NESTED):
-        return masked_text(value, mask) if isinstance(value, str) else value
+        return masked_text(value, mask, by_value=by_value) if isinstance(value, str) else value
     holder: list[Any] = [None]
     stack: list[tuple[Any, Any, Any]] = [(value, holder, 0)]
     while stack:
@@ -948,25 +945,29 @@ def _copy_masked(value: Any, mask: str, *, read_names: bool) -> Any:
             elif named and _credential_name(str(key)):
                 out[key] = _masked_scalar(item, mask)
             else:
-                out[key] = masked_text(item, mask) if isinstance(item, str) else item
+                out[key] = (
+                    masked_text(item, mask, by_value=by_value) if isinstance(item, str) else item
+                )
     return holder[0]
 
 
-def masked_value(value: Any, mask: str = SNAPSHOT_MASK) -> Any:
+def masked_value(value: Any, mask: str = SNAPSHOT_MASK, *, by_value: bool = True) -> Any:
     """Every entry whose key names a credential masked, and every URL, at any depth."""
-    return _copy_masked(value, mask, read_names=True)
+    return _copy_masked(value, mask, read_names=True, by_value=by_value)
 
 
-def masked_strings(value: Any, mask: str = SNAPSHOT_MASK) -> Any:
+def masked_strings(value: Any, mask: str = SNAPSHOT_MASK, *, by_value: bool = True) -> Any:
     """Every URL in ``value``'s strings masked, at any depth; no key's name is read.
 
     For a composite whose keys are field names of a model (a stage's ``key``
     is no credential), not an open mapping.
     """
-    return _copy_masked(value, mask, read_names=False)
+    return _copy_masked(value, mask, read_names=False, by_value=by_value)
 
 
-def masked_server(entry: Mapping[str, Any], mask: str = SNAPSHOT_MASK) -> dict[str, Any]:
+def masked_server(
+    entry: Mapping[str, Any], mask: str = SNAPSHOT_MASK, *, by_value: bool = True
+) -> dict[str, Any]:
     """A tool server's settings (``MCPServerConfig`` as a mapping) as a reader may see them.
 
     Its ``env`` values all masked, names kept and sorted; its arguments by
@@ -978,23 +979,27 @@ def masked_server(entry: Mapping[str, Any], mask: str = SNAPSHOT_MASK) -> dict[s
         if key == "env" and isinstance(item, Mapping):
             out[key] = {name: mask for name in sorted(item, key=str)}
         elif key == "args" and isinstance(item, list | tuple):
-            out[key] = masked_args(list(item), mask)
+            out[key] = masked_args(list(item), mask, by_value=by_value)
         elif _credential_name(str(key)) and not isinstance(item, _NESTED):
             out[key] = _masked_scalar(item, mask)
         else:
-            out[key] = masked_strings(item, mask)
+            out[key] = masked_strings(item, mask, by_value=by_value)
     return out
 
 
-def masked_server_map(servers: Mapping[str, Any], mask: str = SNAPSHOT_MASK) -> dict[str, Any]:
+def masked_server_map(
+    servers: Mapping[str, Any], mask: str = SNAPSHOT_MASK, *, by_value: bool = True
+) -> dict[str, Any]:
     """Every entry of a tool-server map by :func:`masked_server`."""
     return {
-        name: masked_server(entry, mask) if isinstance(entry, Mapping) else entry
+        name: masked_server(entry, mask, by_value=by_value) if isinstance(entry, Mapping) else entry
         for name, entry in servers.items()
     }
 
 
-def masked_dump(instance: Any, dumped: Any, mask: str = SNAPSHOT_MASK) -> Any:
+def masked_dump(
+    instance: Any, dumped: Any, mask: str = SNAPSHOT_MASK, *, by_value: bool = True
+) -> Any:
     """``dumped`` (``instance.model_dump(mode="json")``) masked, read with its model.
 
     A tool-server block (``MCPServerConfig``) by :func:`masked_server`; a model's
@@ -1009,30 +1014,30 @@ def masked_dump(instance: Any, dumped: Any, mask: str = SNAPSHOT_MASK) -> Any:
     from maljan.core.config import MCPServerConfig
 
     if isinstance(instance, MCPServerConfig) and isinstance(dumped, Mapping):
-        return masked_server(dumped, mask)
+        return masked_server(dumped, mask, by_value=by_value)
     if isinstance(instance, BaseModel) and isinstance(dumped, Mapping):
         return {
-            key: masked_dump(getattr(instance, key, None), item, mask)
+            key: masked_dump(getattr(instance, key, None), item, mask, by_value=by_value)
             for key, item in dumped.items()
         }
     if isinstance(dumped, Mapping) and isinstance(instance, Mapping):
         return {
             key: (
-                masked_dump(instance.get(key), item, mask)
+                masked_dump(instance.get(key), item, mask, by_value=by_value)
                 if isinstance(instance.get(key), BaseModel)
-                else masked_value({key: item}, mask)[key]
+                else masked_value({key: item}, mask, by_value=by_value)[key]
             )
             for key, item in dumped.items()
         }
     if isinstance(dumped, list) and isinstance(instance, list | tuple):
         items = list(instance)
         return [
-            masked_dump(items[index], item, mask)
+            masked_dump(items[index], item, mask, by_value=by_value)
             if index < len(items) and isinstance(items[index], BaseModel)
-            else masked_value(item, mask)
+            else masked_value(item, mask, by_value=by_value)
             for index, item in enumerate(dumped)
         ]
-    return masked_value(dumped, mask)
+    return masked_value(dumped, mask, by_value=by_value)
 
 
 def unmasked(incoming: Any, stored: Any, shown: Any) -> tuple[Any, list[tuple[Any, ...]]]:

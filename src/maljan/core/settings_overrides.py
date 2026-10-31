@@ -692,15 +692,17 @@ def effective_source(*, overridden: bool) -> Source:
 
 
 def _scrubbed(value: Any, secrets: list[str]) -> Any:
-    """``value`` with no configured secret value left in it."""
-    from maljan.core.settings_masking import SNAPSHOT_MASK
+    """``value`` with no configured secret value left in it.
+
+    Every secret, of any length, is found in one pass and overlapping ones
+    are masked as one run (``settings_masking.masked_values`` with the
+    secrets as literals and no held value), so a short secret inside a
+    longer one never leaves a part of the longer one shown.
+    """
+    from maljan.core.settings_masking import SNAPSHOT_MASK, masked_values
 
     if isinstance(value, str):
-        if value in secrets:
-            return SNAPSHOT_MASK
-        for secret in secrets:
-            value = value.replace(secret, SNAPSHOT_MASK)
-        return value
+        return masked_values(value, SNAPSHOT_MASK, (), literals=secrets)
     if isinstance(value, list):
         return [_scrubbed(item, secrets) for item in value]
     if isinstance(value, dict):
@@ -715,13 +717,14 @@ def masked_settings_tree(settings: Settings) -> tuple[dict[str, Any], list[str]]
     and through it the efficiency fingerprint): ``settings_masking.masked_dump``
     (each tool-server block's env values with their names kept, credential
     flags in its arguments, every URL, every open-mapping entry whose key names
-    a credential).
+    a credential). By the structural rules alone (``by_value=False``): a
+    record reads the same on every process, whatever values it holds.
     """
     from maljan.core.settings_catalog import snapshot_hidden_paths
     from maljan.core.settings_masking import masked_dump
 
     typed, _servers = snapshot_hidden_paths(settings)
-    return masked_dump(settings, settings.model_dump(mode="json")), typed
+    return masked_dump(settings, settings.model_dump(mode="json"), by_value=False), typed
 
 
 def public_snapshot(settings: Settings, secret_keys: Iterable[str] = ()) -> dict[str, Any]:
@@ -742,24 +745,20 @@ def public_snapshot(settings: Settings, secret_keys: Iterable[str] = ()) -> dict
       (``settings_masking.masked_value``);
     * every value the settings hold as a secret by the event scrub's rules
       (``settings_catalog.configured_secret_values``) is masked wherever it
-      still appears, and every value a reader may not see
-      (``settings_catalog.shown_secret_values``: a server's ``env`` values
-      too) in each of its encoded forms (``settings_masking.masked_values``),
-      read from ``settings`` itself, whatever this process has registered.
+      still appears.
     """
-    from maljan.core.settings_catalog import configured_secret_values, shown_secret_values
-    from maljan.core.settings_masking import SNAPSHOT_MASK, masked_values_in
+    from maljan.core.settings_catalog import configured_secret_values
+    from maljan.core.settings_masking import SNAPSHOT_MASK
 
     tree, typed = masked_settings_tree(settings)
     secrets = set(secret_keys) | set(typed)
     values = sorted(configured_secret_values(settings), key=len, reverse=True)
-    shown = frozenset(shown_secret_values(settings))
     snap: dict[str, Any] = {}
     for key, value in flatten(tree).items():
         if key in secrets:
             snap[key] = SNAPSHOT_MASK if value else None
         else:
-            snap[key] = _scrubbed(masked_values_in(value, SNAPSHOT_MASK, shown), values)
+            snap[key] = _scrubbed(value, values)
     return snap
 
 
@@ -862,17 +861,20 @@ def _mask_secret_params(url: re.Match[str]) -> str:
     return _QUERY_PARAM.sub(_mask_param, url.group(0))
 
 
-def redact_url(text: str) -> str:
+def redact_url(text: str, *, by_value: bool = True, literals: Iterable[str] = ()) -> str:
     """Mask any ``scheme://user:pass@`` credential, and any secret-named query parameter.
 
     Applied to free text (a driver's error message, a config value echoed
     back), not only to values known to be URLs. An address written with no
     scheme (``user:pass@host:8080``) has its userinfo masked too
-    (``settings_masking.masked_bare_userinfo``), and every secret value this
-    process holds is masked in each of its encoded forms
-    (``settings_masking.masked_values``).
+    (``settings_masking.masked_bare_userinfo``). Last, every secret value
+    this process holds is masked in each of its encoded forms, and each of a
+    caller's ``literals`` as written, in one pass
+    (``settings_masking.masked_values``); ``by_value=False`` leaves that
+    pass out.
     """
     from maljan.core.settings_masking import masked_bare_userinfo, masked_values
 
     redacted = _URL_SPAN.sub(_mask_secret_params, _CREDENTIAL_IN_URL.sub(r"\1***@", text))
-    return masked_values(masked_bare_userinfo(redacted))
+    redacted = masked_bare_userinfo(redacted)
+    return masked_values(redacted, literals=literals) if by_value else redacted
