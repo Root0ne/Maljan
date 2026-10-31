@@ -177,6 +177,29 @@ appears. The fingerprint's per-server digests are taken over the masked
 fields. A summary stored before this is read as stored and is not scrubbed
 again: its ledger seal covers it.
 
+Beside these rules, which find a credential by where it stands, every secret
+value the platform holds is masked by value wherever it stands in text that
+leaves for display: the console's read and the export, and the error texts of
+tool servers (which the model reads too), sample staging, the system checks,
+the connection tests and the provider readiness. A record (the snapshot, the
+efficiency fingerprint, the disclosure's hosts) is masked by the rules above
+alone, so it reads the same on every process. The values are the settings'
+credential fields, a tool server's `env` entry whose name names a credential
+(`UPSTREAM_TOKEN`; a bind address or a home directory is no secret by value),
+a source's own credential, the value of every encrypted settings row other
+than a server's `env` row, the password and credential query values of every
+stored address and its `user:password` userinfo whole; each is found as
+written, URL-encoded, JSON-escaped (once and twice) and base64-encoded
+(standard and URL-safe, padded or not, at any offset inside longer base64).
+A value shorter than eight characters is masked only by the rules above: by
+value it would take ordinary words out of every message. The values are read
+again wherever settings are read in force (an app or a worker starting, a
+job, the store read or saved, the console's cached settings rebuilt), and
+found in one pass linear in the text. With several API or worker processes,
+a secret saved through one is masked by value in another from that process's
+next read of the store or rebuild of its cached settings; until then the
+rules above cover it where it stands as a credential.
+
 ## What an export leaves out
 
 A JSON export is a file on an operator's disk, so it carries no credential at

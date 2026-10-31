@@ -503,7 +503,8 @@ def declared_server(config: Any) -> dict[str, Any]:
     is kept, and what is hashed is each field masked as the settings snapshot
     masks it (``settings_masking.masked_server``: a credential a flag names,
     every URL's user name, password, query values and fragment), so no digest
-    is taken over a credential either.
+    is taken over a credential either. By the structural rules alone
+    (``by_value=False``), so the digest is the same on every process.
     """
     from maljan.core.settings_masking import masked_server
 
@@ -513,7 +514,10 @@ def declared_server(config: Any) -> dict[str, Any]:
         value = getattr(config, field, None)
         if value not in (None, "", []):
             raw[field] = list(value) if isinstance(value, tuple) else value
-    fields = {field: _without_host(value, held) for field, value in masked_server(raw).items()}
+    fields = {
+        field: _without_host(value, held)
+        for field, value in masked_server(raw, by_value=False).items()
+    }
     return {
         "not_attached": True,
         "identity": _hash(fields),

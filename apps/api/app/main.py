@@ -229,6 +229,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ── Startup ──────────────────────────────────────────────
     logger.info("Starting Maljan API server...")
 
+    # The API's own credentials (database, Redis, object store) mask shown
+    # text by value from the start (``maljan.core.settings_masking``).
+    from maljan.core.settings_masking import remember_settings_values
+
+    remember_settings_values(get_settings(), scope="process")
+
     # Create the Defender-excluded sample upload tmp dir before any request
     # can land: uploads routed to ``%LOCALAPPDATA%\Temp`` are quarantined
     # silently. See APISettings.upload_temp_dir.

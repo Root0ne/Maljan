@@ -914,21 +914,25 @@ def masked(text: str, credential: str) -> str:
 
     Raw (a header, a JSON body), percent-encoded as a path or query character
     run (``quote``, ``quote_plus``) and base64 (a basic-auth style header): an
-    error message that quotes the request shows it in one of these.
+    error message that quotes the request shows it in one of these. In one
+    pass with every secret value this process holds
+    (``settings_masking.masked_values``), the last step, so a short
+    credential and a held value that overlaps it are masked as one run.
     """
-    if not credential:
-        return text
-    forms = {
-        credential,
-        quote(credential, safe=""),
-        quote_plus(credential),
-        quote(credential),
-        base64.b64encode(credential.encode()).decode(),
-    }
-    for form in sorted(forms, key=len, reverse=True):
-        if form:
-            text = text.replace(form, "***")
-    return text
+    from maljan.core.settings_masking import masked_values
+
+    forms = (
+        {
+            credential,
+            quote(credential, safe=""),
+            quote_plus(credential),
+            quote(credential),
+            base64.b64encode(credential.encode()).decode(),
+        }
+        if credential
+        else set()
+    )
+    return masked_values(text, "***", literals=forms)
 
 
 async def probe_source(source: EnrichmentSource, credential: str) -> Any:
@@ -951,6 +955,8 @@ async def probe_source(source: EnrichmentSource, credential: str) -> Any:
         return ProviderProbe(False, f"timeout after {int(PROBE_TIMEOUT_SECONDS)} s", _ms())
     except httpx.HTTPError as exc:
         return ProviderProbe(
-            False, masked(redact_url(f"{type(exc).__name__}: {exc}"), credential), _ms()
+            False,
+            masked(redact_url(f"{type(exc).__name__}: {exc}", by_value=False), credential),
+            _ms(),
         )
     return ProviderProbe(answer.status_code < 400, f"HTTP {answer.status_code}", _ms())

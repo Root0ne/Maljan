@@ -658,3 +658,85 @@ def configured_secret_values(*sources: Any) -> set[str]:
     for source in sources:
         _walk(source, "", False)
     return found
+
+
+def _kept_as_a_secret(text: str) -> bool:
+    """Whether ``text`` is a value to mask, by ``configured_secret_values``'s own rules.
+
+    Blank, a number and a switch (``true``, ``off``) are settings whatever
+    their key says.
+    """
+    stripped = text.strip()
+    return bool(stripped) and not stripped.isdigit() and stripped.lower() not in _NOT_A_SECRET_VALUE
+
+
+def _userinfo_forms(text: str) -> list[str]:
+    """The ``user:password`` userinfo of each address ``text`` carries, as written and decoded.
+
+    A URL with a scheme and an address written with no scheme
+    (``settings_masking.bare_addresses``) alike; a user name alone is not
+    one (``configured_secret_values`` reads a token there by its shape).
+    """
+    from urllib.parse import unquote, urlsplit
+
+    from maljan.core.settings_masking import bare_addresses, bare_userinfo, url_spans
+
+    found: list[str] = []
+    for start, end in url_spans(text) if "://" in text else []:
+        try:
+            netloc = urlsplit(text[start:end]).netloc
+        except ValueError:
+            continue
+        userinfo = netloc.rpartition("@")[0]
+        if ":" in userinfo:
+            found.extend(dict.fromkeys((userinfo, unquote(userinfo))))
+    for address in bare_addresses(text):
+        parts = bare_userinfo(address)
+        if parts is not None and ":" in parts[0]:
+            found.extend(dict.fromkeys((parts[0], unquote(parts[0]))))
+    return found
+
+
+def shown_secret_values(*sources: Any) -> set[str]:
+    """Every value the given settings hold that no reader may see in shown text (T-482).
+
+    What the event scrub masks by value (:func:`configured_secret_values`:
+    every ``SecretStr``, a field named in ``_SECRET_NAMES``, a mapping entry
+    whose key names a credential, the password and credential-named query
+    values of every stored URL), and beside it the ``user:password`` userinfo
+    of every stored address as one value, so its encoded forms are found
+    whole. A tool server's ``env`` entry is one only where its name names a
+    credential (``UPSTREAM_TOKEN``): a bind address or a home directory there
+    is no secret by value, though the snapshot and the console still hide
+    every ``env`` value where it stands (``settings_masking.masked_server``).
+    ``sources`` are settings models or stored override maps
+    (``SettingsService.load_overrides``, where a source's ``api_key`` and a
+    server's ``env`` sit in plain maps);
+    nothing is read by a tool's or a source's name. The values are returned,
+    never logged. Without recursion, so a stored value nested at any depth is read.
+    """
+    found = configured_secret_values(*sources)
+    stack: list[Any] = list(sources)
+    while stack:
+        value = stack.pop()
+        if isinstance(value, SecretStr):
+            continue
+        if isinstance(value, BaseModel):
+            items: list[tuple[Any, Any]] = [
+                (key, getattr(value, key, None))
+                for key in type(value).model_fields
+                if key not in _FIELD_MAPS
+            ]
+            items.extend((getattr(value, "__pydantic_extra__", None) or {}).items())
+        elif isinstance(value, Mapping):
+            items = list(value.items())
+        elif isinstance(value, list | tuple | set | frozenset):
+            stack.extend(value)
+            continue
+        elif isinstance(value, str):
+            found.update(form for form in _userinfo_forms(value) if _kept_as_a_secret(form))
+            continue
+        else:
+            continue
+        stack.extend(item for _key, item in items)
+    return found

@@ -39,17 +39,20 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.fixture(autouse=True)
 def no_configured_secret_outlives_its_test() -> Iterator[None]:
-    """The values the scrub masks by value are registered per test and forgotten after it.
+    """What the scrub and shown text mask by value is registered per test and forgotten after it.
 
     The registry is module state, filled by whatever built a worker, an app or
     a job's settings; left behind, one test's defaults masked words in every
     later test's text.
     """
+    from maljan.core import settings_masking
     from maljan.pipeline import events
 
     events.forget_secret_values()
+    settings_masking.forget_values()
     yield
     events.forget_secret_values()
+    settings_masking.forget_values()
 
 
 @pytest.fixture(autouse=True)

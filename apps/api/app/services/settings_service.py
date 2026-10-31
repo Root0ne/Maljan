@@ -29,6 +29,7 @@ from maljan.core.settings_masking import (
     masked_server_map,
     masked_strings,
     masked_value,
+    remember_settings_values,
     unmasked,
     value_at,
 )
@@ -834,6 +835,7 @@ class SettingsService:
         """
         out: dict[str, Any] = {}
         undecryptable: dict[str, str] = {}
+        decrypted: list[str] = []
         for row in await self._rows():
             if row.key.startswith(MARKER_PREFIX):
                 # A record a start-up repair keeps of itself, never a setting.
@@ -841,6 +843,8 @@ class SettingsService:
             if row.is_secret:
                 try:
                     out[row.key] = box.decrypt(str(row.value))
+                    if not _is_server_env_row(row.key):
+                        decrypted.append(out[row.key])
                 except box.SecretsUnavailable:
                     if _refuse_undecryptable.get() and row.key.startswith("core."):
                         undecryptable[row.key.removeprefix("core.")] = (
@@ -865,11 +869,24 @@ class SettingsService:
         # provider id by when a check is handed none; it loads and withdraws
         # nothing (``maljan.core.plugins.load_allowed`` does, when told to).
         install_allow_list(merged.get(ALLOW_LIST_KEY))
+        # Every secret the store holds masks shown text in this process by
+        # value (``settings_masking.masked_values``): each encrypted row's
+        # value whatever its key (a catalogue secret, a server's token, a
+        # frontier arm's or a source's key: each a credential field), except a
+        # server's env row, whose map is read entry by entry in ``merged``,
+        # where only an entry whose name names a credential is one. Read again
+        # on every load, so a save or a reset replaces what the last registered.
+        remember_settings_values(merged, {"secret": decrypted}, scope="store")
         return merged
 
     async def values(self, extra: Iterable[Any] = ()) -> dict[str, ValueInfo]:
         """Every catalogue key's value, with its source; ``extra`` are catalogue entries
-        served beside the catalogue (a plugin block's stored rows, shown as stored)."""
+        served beside the catalogue (a plugin block's stored rows, shown as stored).
+
+        What the store holds now masks what is shown by value first
+        (``settings_masking.masked_values``), whatever this process read before.
+        """
+        await self._remember_stored_values()
         index = catalog_index()
         rows = {r.key: r for r in await self._rows()}
         core_defaults = build_settings({})
@@ -1474,6 +1491,7 @@ class SettingsService:
                 secrets, kept, prefix=f"{spec.key}.", suffix=spec.suffix, key_of=spec.row_key
             )
         await self.db.commit()
+        await self._remember_stored_values()
         details = {
             "changed": [*changes, *removed],
             "before": _audited(before, index),
@@ -1483,6 +1501,20 @@ class SettingsService:
         if ALLOW_LIST_KEY in changes:
             _say_the_allow_list_changed(user_id, before.get(ALLOW_LIST_KEY), after[ALLOW_LIST_KEY])
         return result
+
+    async def _remember_stored_values(self) -> None:
+        """Read the store, so shown text is masked by what it holds now.
+
+        ``load_overrides`` registers the values (``settings_masking``); after
+        a save a new secret is masked from then on, and a removed one is no
+        longer. Never fails the read or the write it stands beside.
+        """
+        try:
+            await self.load_overrides()
+        except Exception as exc:  # noqa: BLE001 — the write stands; the last values stay
+            logger.warning(
+                "The stored values were not read again for masking (%s).", type(exc).__name__
+            )
 
     async def _save_server_tokens(self, tokens: dict[str, str | None], kept: set[str]) -> None:
         """One encrypted row per server that has a token, and none for one that does not."""
@@ -1573,6 +1605,7 @@ class SettingsService:
                 await self.db.delete(rows[key])
                 removed.append(key)
         await self.db.commit()
+        await self._remember_stored_values()
         if removed:
             await _audit(user_id, "settings.reset", {"keys": removed}, ip)
         if ALLOW_LIST_KEY in removed:
@@ -1615,6 +1648,11 @@ async def load_core_overrides(db: AsyncSession) -> dict[str, Any]:
     return {split_key(k)[1]: v for k, v in overrides.items() if k.startswith("core.")}
 
 
+def _is_server_env_row(key: str) -> bool:
+    """Whether ``key`` is a server's encrypted ``env`` row (``server_map.server_env_key``)."""
+    return key.startswith(f"{SERVER_MAP_KEY}.") and key.endswith(SERVER_ENV_SUFFIX)
+
+
 class _CoreSettingsCache:
     """Short-TTL cache of ``build_settings(await load_core_overrides(db))``.
 
@@ -1646,6 +1684,9 @@ class _CoreSettingsCache:
         # key and the remedy; only the settings page reads past it.
         self._cached = settings_from_store(await load_core_overrides(db))
         self._loaded_at = now
+        # Each rebuild is a new version of the settings in force: its secret
+        # values (defaults and environment included) mask shown text.
+        remember_settings_values(self._cached, scope="core")
         return self._cached
 
     def invalidate(self) -> None:

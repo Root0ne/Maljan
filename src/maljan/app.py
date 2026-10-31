@@ -39,8 +39,13 @@ def _remember_the_secrets_of(config: Settings) -> None:
     """Register the secret values ``config`` holds with the scrub, under the ``app`` scope.
 
     Replaced each time an app is built, so a secret no longer configured is not
-    masked by the next one. Never raises: the shape rules still run without it.
+    masked by the next one. Shown text (``core.settings_masking``) is masked by
+    the same settings' values under the same scope. Never raises: the shape
+    rules still run without it.
     """
+    from maljan.core.settings_masking import remember_settings_values
+
+    remember_settings_values(config, scope="app")
     try:
         from maljan.core.settings_catalog import configured_secret_values
         from maljan.pipeline.events import remember_secret_values
