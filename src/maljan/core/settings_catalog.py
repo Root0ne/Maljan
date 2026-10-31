@@ -703,12 +703,15 @@ def shown_secret_values(*sources: Any) -> set[str]:
     What the event scrub masks by value (:func:`configured_secret_values`:
     every ``SecretStr``, a field named in ``_SECRET_NAMES``, a mapping entry
     whose key names a credential, the password and credential-named query
-    values of every stored URL), and beside it every value of a tool server's
-    ``env`` map whatever its name (``settings_masking.masked_server`` hides
-    each of them), and the ``user:password`` userinfo of every stored address
-    as one value, so its encoded forms are found whole. ``sources`` are
-    settings models or stored override maps (``SettingsService.load_overrides``,
-    where a source's ``api_key`` and a server's ``env`` sit in plain maps);
+    values of every stored URL), and beside it the ``user:password`` userinfo
+    of every stored address as one value, so its encoded forms are found
+    whole. A tool server's ``env`` entry is one only where its name names a
+    credential (``UPSTREAM_TOKEN``): a bind address or a home directory there
+    is no secret by value, though the snapshot and the console still hide
+    every ``env`` value where it stands (``settings_masking.masked_server``).
+    ``sources`` are settings models or stored override maps
+    (``SettingsService.load_overrides``, where a source's ``api_key`` and a
+    server's ``env`` sit in plain maps);
     nothing is read by a tool's or a source's name. The values are returned,
     never logged. Without recursion, so a stored value nested at any depth is read.
     """
@@ -735,14 +738,5 @@ def shown_secret_values(*sources: Any) -> set[str]:
             continue
         else:
             continue
-        for key, item in items:
-            if key == "env" and isinstance(item, Mapping):
-                # A tool server's environment: every value hidden, as the
-                # snapshot and the console hide each one.
-                found.update(
-                    text
-                    for text in item.values()
-                    if isinstance(text, str) and _kept_as_a_secret(text)
-                )
-            stack.append(item)
+        stack.extend(item for _key, item in items)
     return found

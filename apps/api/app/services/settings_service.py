@@ -843,7 +843,8 @@ class SettingsService:
             if row.is_secret:
                 try:
                     out[row.key] = box.decrypt(str(row.value))
-                    decrypted.append(out[row.key])
+                    if not _is_server_env_row(row.key):
+                        decrypted.append(out[row.key])
                 except box.SecretsUnavailable:
                     if _refuse_undecryptable.get() and row.key.startswith("core."):
                         undecryptable[row.key.removeprefix("core.")] = (
@@ -868,10 +869,13 @@ class SettingsService:
         # provider id by when a check is handed none; it loads and withdraws
         # nothing (``maljan.core.plugins.load_allowed`` does, when told to).
         install_allow_list(merged.get(ALLOW_LIST_KEY))
-        # Every secret the store holds, and every value of an encrypted row
-        # whatever its key, masks shown text in this process by value
-        # (``settings_masking.masked_values``); read again on every load, so a
-        # save or a reset replaces what the last one registered.
+        # Every secret the store holds masks shown text in this process by
+        # value (``settings_masking.masked_values``): each encrypted row's
+        # value whatever its key (a catalogue secret, a server's token, a
+        # frontier arm's or a source's key: each a credential field), except a
+        # server's env row, whose map is read entry by entry in ``merged``,
+        # where only an entry whose name names a credential is one. Read again
+        # on every load, so a save or a reset replaces what the last registered.
         remember_settings_values(merged, {"secret": decrypted}, scope="store")
         return merged
 
@@ -1642,6 +1646,11 @@ async def load_core_overrides(db: AsyncSession) -> dict[str, Any]:
     """For the worker: core paths without the namespace prefix."""
     overrides = await SettingsService(db).load_overrides()
     return {split_key(k)[1]: v for k, v in overrides.items() if k.startswith("core.")}
+
+
+def _is_server_env_row(key: str) -> bool:
+    """Whether ``key`` is a server's encrypted ``env`` row (``server_map.server_env_key``)."""
+    return key.startswith(f"{SERVER_MAP_KEY}.") and key.endswith(SERVER_ENV_SUFFIX)
 
 
 class _CoreSettingsCache:
