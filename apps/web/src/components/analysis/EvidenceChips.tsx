@@ -136,7 +136,7 @@ export function CitedText({ text, jobId: jobIdProp }: { text: string; jobId?: st
     <>
       {citationParts(text).map((part, i) =>
         part.kind === "id" && marks ? (
-          <CiteMark key={i} ids={[part.id]} />
+          <CiteMark key={i} ids={[part.id]} named />
         ) : part.kind === "id" ? (
           <Link
             key={i}

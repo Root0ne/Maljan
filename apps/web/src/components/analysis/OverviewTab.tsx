@@ -1,5 +1,6 @@
 "use client";
 
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
@@ -187,7 +188,7 @@ export default function OverviewTab() {
       </section>
 
       <Section title="Top findings" count={rows.length} empty={rows.length === 0}>
-        <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 -my-3 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+        <div {...scrollRegion("Top findings")} className={`-mx-4 -my-3 overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border-light text-left text-xs text-text-muted">

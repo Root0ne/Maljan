@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, Fragment, useMemo, type ReactNode } from "react";
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { MAX_MARKDOWN_CHARS, parseMarkdown, type MdNode } from "./safeMarkdown";
 
 /**
@@ -62,11 +63,11 @@ function MarkdownBody({
   if (tooLong) return <RawText markdown={markdown} />;
   const first = nodes[0];
   const shown = skipFirstHeading && first?.t === "el" && /^h[1-6]$/.test(first.tag) ? nodes.slice(1) : nodes;
-  const ids = { next: 0, list: subsectionIds };
+  const ids = { next: 0, tables: 0, list: subsectionIds };
   return <div className="space-y-3 text-sm leading-6 text-text-primary">{renderNodes(shown, ids)}</div>;
 }
 
-type IdCursor = { next: number; list: readonly string[] };
+type IdCursor = { next: number; tables: number; list: readonly string[] };
 
 const HEADING_CLASS: Record<string, string> = {
   h1: "text-base font-semibold",
@@ -170,10 +171,8 @@ function renderElement(node: Extract<MdNode, { t: "el" }>, key: number, ids: IdC
       return (
         <div
           key={key}
-          role="region"
-          tabIndex={0}
-          aria-label="Table, scrolls sideways"
-          className="max-w-full overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+          {...scrollRegion(`Table ${++ids.tables}`)}
+          className={`max-w-full overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}
         >
           <table className="w-full text-xs">{children}</table>
         </div>

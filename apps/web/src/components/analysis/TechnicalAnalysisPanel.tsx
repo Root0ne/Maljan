@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useReport } from "./AnalysisContext";
 import CitedProse from "./CitedProse";
 import EvidenceChips from "./EvidenceChips";
@@ -94,7 +95,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
             <h3 className="text-xs text-text-muted mb-1.5">
               Host identifiers
             </h3>
-            <div {...scrollRegion("Host identifiers")}>
+            <div {...scrollRegion("Host identifiers")} className={`max-w-full overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-text-muted">
@@ -140,7 +141,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
             <h3 className="text-xs text-text-muted mb-1.5">
               Commands
             </h3>
-            <div {...scrollRegion("Commands")}>
+            <div {...scrollRegion("Commands")} className={`max-w-full overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-text-muted">
@@ -246,15 +247,4 @@ function Cited({ ids }: { ids: string[] | undefined }) {
     return <span className="ml-2 text-[10px] italic text-text-muted">no evidence cited</span>;
   }
   return <EvidenceChips ids={ids} className="ml-2" />;
-}
-
-/** A table wider than the page scrolls inside its own named, focusable box. */
-function scrollRegion(name: string) {
-  return {
-    role: "region" as const,
-    tabIndex: 0,
-    "aria-label": `${name} table, scrolls sideways`,
-    className:
-      "max-w-full overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
-  };
 }

@@ -16,13 +16,13 @@ describe("the order the Indicators list opens in", () => {
     ],
   } as unknown as MalwareReport;
 
-  it("puts published rows first, then orders by type", () => {
+  it("puts published rows first and keeps the table order inside each state", () => {
     const sorted = sortedForReading(iocRows(mr));
-    expect(sorted.map((r) => r.value)).toEqual(["z.test", "a.test", "ab", "b.test", "Global\\M", "http://a.test"]);
+    expect(sorted.map((r) => r.value)).toEqual(["z.test", "ab", "a.test", "http://a.test", "Global\\M", "b.test"]);
     expect(sorted.slice(0, 3).every((r) => exportState(r) === "published")).toBe(true);
   });
 
-  it("is stable inside one state and type, and leaves its input alone", () => {
+  it("leaves its input alone", () => {
     const rows = iocRows(mr);
     const before = rows.map((r) => r.key);
     const sorted = sortedForReading(rows);

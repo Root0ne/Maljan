@@ -1,5 +1,6 @@
 "use client";
 
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useMemo, useState } from "react";
 
 import CopyButton from "@/components/ui/CopyButton";
@@ -106,7 +107,7 @@ export default function IocBrowser({ mr }: { mr: MalwareReport | null | undefine
         {filtered.length === 0 ? (
           <p className="text-xs text-text-muted">No indicator matches.</p>
         ) : (
-          <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+          <div {...scrollRegion("Indicators")} className={`-mx-4 overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
             <table className="w-full">
               <thead>
                 <tr className="border-y border-border-light">

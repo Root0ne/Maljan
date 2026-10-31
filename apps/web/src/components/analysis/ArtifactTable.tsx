@@ -1,6 +1,7 @@
 "use client";
 
 import type { EvidenceSection } from "@/types/malware-report";
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { humaniseKey } from "@/lib/humanise";
 import EvidenceChips, { CitedText } from "./EvidenceChips";
 import { saysSomething } from "./reportSections";
@@ -182,10 +183,8 @@ function SectionTable({ section, rows }: { section: EvidenceSection; rows: strin
         </p>
       )}
       <div
-        role="region"
-        tabIndex={0}
-        aria-label={`${sectionTitle(section)} table, scrolls sideways`}
-        className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        {...scrollRegion(sectionTitle(section))}
+        className={`overflow-x-auto ${SCROLL_REGION_FOCUS}`}
       >
         <table className="w-full">
           <thead>

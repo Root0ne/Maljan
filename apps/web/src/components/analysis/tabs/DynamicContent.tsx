@@ -1,5 +1,6 @@
 "use client";
 
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useState } from "react";
 
 import { useReport } from "@/components/analysis/AnalysisContext";
@@ -250,7 +251,7 @@ export function BehavioursBlock({
             <h3 className="text-xs font-semibold text-text-secondary">
               Registry modifications ({dyn.registry_mods.length})
             </h3>
-            <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+            <div {...scrollRegion("Registry modifications")} className={`overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}>
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border">
@@ -339,7 +340,7 @@ function RecordTable({
       <h3 className="text-xs font-semibold text-text-secondary">
         {title} ({rows.length})
       </h3>
-      <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+      <div {...scrollRegion(title)} className={`overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}>
         <table className="w-full">
           <thead>
             <tr className="border-b border-border">

@@ -27,7 +27,7 @@ function BareIds({ text }: { text: string }) {
   return (
     <span>
       {citationParts(text).map((part, i) =>
-        part.kind === "id" ? <CiteMark key={i} ids={[part.id]} /> : part.text,
+        part.kind === "id" ? <CiteMark key={i} ids={[part.id]} named /> : part.text,
       )}
     </span>
   );
@@ -38,7 +38,17 @@ function BareIds({ text }: { text: string }) {
  * superscript mark that opens the evidence drawer on the records it names.
  * `title` heads the drawer.
  */
-export function CiteMark({ ids, title = "Evidence for this statement" }: { ids: readonly string[]; title?: string }) {
+export function CiteMark({
+  ids,
+  title = "Evidence for this statement",
+  named = false,
+}: {
+  ids: readonly string[];
+  title?: string;
+  /** The id was written in the text: say it in the mark's name too, so the
+   *  reader loses nothing the plain text gave. */
+  named?: boolean;
+}) {
   const { showEvidence } = useReport();
   if (ids.length === 0) return null;
   return (
@@ -49,7 +59,8 @@ export function CiteMark({ ids, title = "Evidence for this statement" }: { ids: 
         onClick={(e) =>
           showEvidence?.({ title, details: [], techniques: [], evidenceIds: [...ids] }, e.currentTarget)
         }
-        aria-label={`${title}, ${ids.length} record${ids.length === 1 ? "" : "s"}`}
+        title={ids.join(", ")}
+        aria-label={`${title}, ${ids.length} record${ids.length === 1 ? "" : "s"}${named ? ` (${ids.join(", ")})` : ""}`}
         className="inline-flex h-4 min-w-4 items-center justify-center rounded px-0.5 leading-none text-accent-strong hover:bg-bg-active"
       >
         <FileSearch aria-hidden="true" className="h-3 w-3" />

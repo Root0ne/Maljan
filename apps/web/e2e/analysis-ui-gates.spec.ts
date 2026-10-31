@@ -201,6 +201,22 @@ test("Behaviour shows evidence ids as marks that open the drawer, never as text"
   await expect(page.getByRole("dialog")).toBeVisible();
 });
 
+test("every scroll region on a tab has its own name, and a cited id stays in the mark's name", async ({
+  sessionPage: page,
+}) => {
+  await serve(page);
+  for (const tab of ["", "/behaviour", "/network", "/static", "/indicators", "/evidence/conversation"]) {
+    await page.goto(`${BASE}${tab}`);
+    await page.waitForLoadState("networkidle");
+    const names = await page.evaluate(() =>
+      [...document.querySelectorAll('[role="region"][aria-label$="scrolls sideways"]')].map((e) => e.getAttribute("aria-label")),
+    );
+    expect(new Set(names).size, `${tab}: ${names.join(" | ")}`).toBe(names.length);
+  }
+  await page.goto(`${BASE}/behaviour`);
+  await expect(page.getByRole("button", { name: /Evidence for this statement, 1 record \(ev_0002\)/ }).first()).toBeVisible();
+});
+
 test("Network shows the constant Evidence column as a mark, not as ev_0006", async ({ sessionPage: page }) => {
   await serve(page);
   await page.goto(`${BASE}/network`);

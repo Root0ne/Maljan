@@ -1,5 +1,6 @@
 "use client";
 
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -138,7 +139,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
                 <>
                   <ArtifactSections sections={slots.structure.sections} />
                   {showsExtractedSections && staticData && staticData.sections.length > 0 && (
-                    <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                    <div {...scrollRegion("Sections")} className={`overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}>
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-border">
@@ -187,7 +188,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
                 <>
                   <ArtifactSections sections={slots.structure.imports} />
                   {showsImports && staticData && staticData.imports.length > 0 && (
-                    <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                    <div {...scrollRegion("Imports")} className={`overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}>
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-border">
@@ -215,7 +216,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
                         finding: the last column is how much ordinary software the same rule fires on, measured over
                         the corpus it names, and it says nothing about how likely this sample is to be benign.
                       </p>
-                      <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                      <div {...scrollRegion("ATT&CK from imports")} className={`overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}>
                         <table className="w-full">
                           <thead>
                             <tr className="border-b border-border">
@@ -282,7 +283,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
                 <>
                   <ArtifactSections sections={slots.structure.exports} />
                   {showsExports && staticData && exportTotal > 0 && (
-                    <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                    <div {...scrollRegion("Exports")} className={`overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}>
                       {/* With the ordinal and the address when the format tool
                           reported them: several exports sharing one address is
                           a fact the names alone hide. */}
@@ -323,7 +324,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
               )}
 
               {tab === "resources" && resources.length > 0 && (
-                <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                <div {...scrollRegion("Resources")} className={`overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}>
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-border">
@@ -407,7 +408,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
                 {filteredStrings.length === 0 ? (
                   <p className="text-xs text-text-muted">No string matches.</p>
                 ) : (
-                  <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                  <div {...scrollRegion("Strings")} className={`overflow-x-auto rounded border border-border-light ${SCROLL_REGION_FOCUS}`}>
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-border">
@@ -438,7 +439,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
 
       <div id="decoded" className="scroll-mt-40">
         <Section title="Decoded strings and configuration" count={config.length || null} empty={config.length === 0}>
-          <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 -my-3 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+          <div {...scrollRegion("Decoded strings and configuration")} className={`-mx-4 -my-3 overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border-light">

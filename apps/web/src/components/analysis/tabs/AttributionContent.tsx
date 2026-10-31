@@ -1,5 +1,6 @@
 "use client";
 
+import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion";
 import { useState } from "react";
 
 import { useReport } from "@/components/analysis/AnalysisContext";
@@ -249,7 +250,7 @@ function EvidenceTable({
         </h2>
         <p className="mt-1 text-[11px] text-text-muted">{note}</p>
       </div>
-      <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+      <div {...scrollRegion(title)} className={`overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
         <table className="w-full text-xs">
           <thead>
             <tr className="text-left text-text-muted border-b border-border-light">
