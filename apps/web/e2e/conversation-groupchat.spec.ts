@@ -22,7 +22,7 @@ const LEDGER = EVIDENCE as Entry[];
 
 async function mockRun(
   page: import("@playwright/test").Page,
-  options: { events?: FeedEvent[]; status?: string; evidence?: "ok" | "fail" } = {},
+  options: { events?: FeedEvent[]; status?: string; evidence?: "ok" | "fail"; ledger?: Entry[] } = {},
 ) {
   const events = options.events ?? FEED;
   await page.route(`**/api/v1/jobs/${JOB_ID}/events**`, (route) =>
@@ -56,7 +56,7 @@ async function mockRun(
       contentType: "application/json",
       body: JSON.stringify({
         job_id: JOB_ID,
-        entries: LEDGER.slice((pageNo - 1) * size, pageNo * size),
+        entries: (options.ledger ?? LEDGER).slice((pageNo - 1) * size, pageNo * size),
         total: LEDGER.length,
         page: pageNo,
         page_size: size,
@@ -103,6 +103,52 @@ test.describe("Conversation as a group chat", () => {
     await expect(quote).toBeVisible();
     await quote.click();
     await expect(mediator).toBeFocused();
+  });
+
+  test("a quote whose question a filter hid clears the filter and leads to it", async ({
+    sessionPage: page,
+  }) => {
+    await mockRun(page);
+    await page.goto(URL_PATH);
+    const feed = stream(page);
+
+    // Narrowed to one analyst, the mediator it answers is not drawn.
+    await page.getByRole("button", { name: /^Dynamic analyst/ }).click();
+    await expect(feed.getByRole("article", { name: /^Mediator/ })).toHaveCount(0);
+
+    await feed.getByRole("button", { name: /^Replying to Mediator/ }).first().click();
+    await expect(page.getByRole("button", { name: "Clear filters" })).toHaveCount(0);
+    await expect(feed.getByRole("article", { name: /^Mediator/ }).first()).toBeFocused();
+  });
+
+  test("a large record with spilled parts opens with what was cut said", async ({ sessionPage: page }) => {
+    const big = "rx_bytes 108299 tx_bytes 2521\n".repeat(400);
+    const ledger = LEDGER.map((entry) =>
+      entry.entry_id === "ev_0086"
+        ? {
+            ...entry,
+            output: big,
+            structured: null,
+            truncated: true,
+            chars_dropped: 48_000,
+            spilled: [{ part: "output", key: "jobs/x/ev_0086/output", bytes: 60_000 }],
+          }
+        : entry,
+    );
+    await mockRun(page, { ledger });
+    await page.goto(URL_PATH);
+    const feed = stream(page);
+
+    await page.getByRole("button", { name: "Tool calls" }).click();
+    const row = feed.locator("li").filter({ has: page.getByRole("link", { name: "ev_0086" }) });
+    await row.getByRole("button", { name: /sandbox_network$/ }).click();
+    await expect(row).toContainText("The tool-output guardrail cut 48,000 characters");
+    await expect(row).toContainText("The full output (60,000 bytes) is kept whole in object storage.");
+    // Long text opens a page at a time.
+    const more = row.getByRole("button", { name: /^Show more \(\d+ more characters\)$/ });
+    await expect(more).toBeVisible();
+    await more.click();
+    await expect(row.getByRole("button", { name: "Show less" })).toBeVisible();
   });
 
   test("opens a call to its full result, read from the evidence", async ({ sessionPage: page }) => {
