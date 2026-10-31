@@ -210,7 +210,13 @@ export function fileKind(identity: SampleIdentity | null | undefined): string {
 /** The classification tags the sentence above does not already say. */
 export function headerTags(mr: MalwareReport | null | undefined, category?: string | null): string[] {
   const said = verdictSentence(mr, category).toLowerCase();
-  return classificationChips(mr, category).filter((c) => !said.includes(c.toLowerCase()));
+  // Said as a whole phrase, never as part of a word: "loader" is not said by
+  // "Downloader".
+  const says = (tag: string) => {
+    const escaped = tag.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, "u").test(said);
+  };
+  return classificationChips(mr, category).filter((c) => !says(c));
 }
 
 function platformWord(p: string): string {
@@ -461,17 +467,20 @@ export interface ClaimBasis {
  * gets no marker rather than a guess.
  */
 export function claimBasis(techniques: readonly string[], voices: ReadonlyMap<string, Voice>): ClaimBasis | null {
-  const known = techniques
+  const named = [...new Set(techniques)];
+  const known = named
     .map((t) => voices.get(t))
     .filter((v): v is Voice => v !== undefined && v !== "unstated");
   if (known.length === 0) return null;
   const seen = known.filter((v) => v === "observed").length;
-  if (seen === known.length) return { basis: "seen", label: VOICE_BASIS.observed.label, detail: VOICE_TEXT.observed };
+  // Seen only when every technique it names was seen: one the report does
+  // not map, or maps with no stated basis, is not evidence of having run.
+  if (seen === named.length) return { basis: "seen", label: VOICE_BASIS.observed.label, detail: VOICE_TEXT.observed };
   if (seen > 0) {
     return {
       basis: "partly",
       label: "Partly seen",
-      detail: `${seen} of the ${known.length} techniques it names were observed when the sample ran`,
+      detail: `${seen} of the ${named.length} techniques it names were observed when the sample ran`,
     };
   }
   const kinds = [...new Set(known)];

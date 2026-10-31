@@ -142,6 +142,18 @@ describe("the header", () => {
     expect(verdictSentence(null)).toBe("");
   });
 
+  it("drops a tag only when the sentence says it as a whole phrase", () => {
+    const mr = {
+      ...MALWARE_REPORT,
+      malware_category: "Downloader",
+      ttp_mappings: [{ ...MALWARE_REPORT.ttp_mappings[0], tactic_name: "loader" }],
+      capability_matrix: [],
+      severity: { ...MALWARE_REPORT.severity, affected_platforms: [] },
+    } as MalwareReport;
+    expect(headerTags(mr)).toEqual(["loader"]);
+    expect(headerTags({ ...mr, malware_category: "loader / backdoor" })).toEqual([]);
+  });
+
   it("names the file's kind from its architecture and format", () => {
     expect(fileKind({ ...MALWARE_REPORT.identity, architecture: "x86-64", is_dll: true })).toBe("x86-64 DLL");
     expect(fileKind({ ...MALWARE_REPORT.identity, architecture: null, is_dll: false, file_type: "pe" })).toBe("PE");
@@ -248,6 +260,14 @@ describe("how a key finding is known", () => {
     expect(claimBasis(["T1", "T2"], voices)).toMatchObject({ basis: "partly", label: "Partly seen" });
     // A technique the report states no basis for, or does not map, says nothing.
     expect(claimBasis(["T4", "T9"], voices)).toBeNull();
+    // Seen only when every technique it names was seen: one unmapped or
+    // unstated beside a seen one makes it partly seen, counted over all named.
+    expect(claimBasis(["T1", "T9"], voices)).toMatchObject({
+      basis: "partly",
+      detail: "1 of the 2 techniques it names were observed when the sample ran",
+    });
+    expect(claimBasis(["T1", "T4"], voices)).toMatchObject({ basis: "partly" });
+    expect(claimBasis(["T1", "T1"], voices)).toMatchObject({ basis: "seen" });
     expect(claimBasis([], voices)).toBeNull();
   });
 
