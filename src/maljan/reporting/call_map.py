@@ -44,8 +44,12 @@ class _Function:
     called_by: set[int] = field(default_factory=set)
 
 
-def _own_names(names: Iterable[str], address: int | None) -> list[str]:
-    """The names a function was given, the decompiler's own name for its address aside."""
+def _own_names(names: Iterable[str], address: int | None, bases: tuple[int, ...]) -> list[str]:
+    """The names a function was given, the decompiler's own name for its address aside.
+
+    The own name may spell the address as an offset or as a virtual address;
+    either is the decompiler's name for it (``function_map.one_spelling``).
+    """
     generic = generic_function_name()
     out: list[str] = []
     for name in names:
@@ -53,7 +57,11 @@ def _own_names(names: Iterable[str], address: int | None) -> list[str]:
         named = generic.fullmatch(name)
         if not name or name in out:
             continue
-        if named is not None and address is not None and int(named.group(1), 16) == address:
+        if (
+            named is not None
+            and address is not None
+            and one_spelling(int(named.group(1), 16), bases) == address
+        ):
             continue
         out.append(name)
     return out
@@ -90,7 +98,8 @@ def call_map(entries: Iterable[Any]) -> dict[str, Any]:
     was given beyond the decompiler's own, whether it was ``read``, the
     entries its listing is held in (``listed_in``), the agents whose calls
     those were (``read_by``), and the addresses it ``calls`` and is
-    ``called_by``. A function listed under a name alone has no address and no
+    ``called_by``. A function listed under a name alone joins the row at an
+    address that carries the same name; with none, it has no address and no
     calls. ``roots`` are where the tree starts (see the module).
     """
     entries = list(entries)
@@ -126,6 +135,18 @@ def call_map(entries: Iterable[Any]) -> dict[str, Any]:
                 continue
             _at(caller).calls.add(one_spelling(callee, bases))
             _at(callee).called_by.add(one_spelling(caller, bases))
+    # A function listed under a name alone is the function at an address
+    # that carries the same name, where one does: its listing joins that row.
+    named_at: dict[str, _Function] = {}
+    for address in sorted(by_address):
+        for name in by_address[address].names:
+            named_at.setdefault(name, by_address[address])
+    for name in list(by_name):
+        held = named_at.get(name)
+        if held is not None:
+            alone = by_name.pop(name)
+            held.names.extend(n for n in alone.names if n not in held.names)
+            _listed(held, alone.listed_in)
 
     base = bases[0] if len(bases) == 1 else None
     rows: list[dict[str, Any]] = []
@@ -137,7 +158,7 @@ def call_map(entries: Iterable[Any]) -> dict[str, Any]:
                 "offset": (
                     hex(at - base) if at is not None and base is not None and at >= base else None
                 ),
-                "names": _own_names(function.names, at),
+                "names": _own_names(function.names, at, bases),
                 "read": bool(function.listed_in),
                 "listed_in": list(function.listed_in),
                 "read_by": sorted({agents[i] for i in function.listed_in if agents.get(i)}),

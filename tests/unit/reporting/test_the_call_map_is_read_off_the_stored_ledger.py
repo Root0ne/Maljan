@@ -106,6 +106,49 @@ def test_a_cycle_is_entered_once_at_its_lowest_address() -> None:
     assert _by_address(found)[hex(two)]["calls"] == [hex(one)]
 
 
+def test_the_decompiler_s_own_name_by_offset_is_not_a_given_name() -> None:
+    # Read by its offset under an index's base: the own name spells the offset.
+    gate = 0x5A10
+    found = call_map(
+        [
+            _table("ev_0020", {"image_base": hex(BASE), "rows": []}),
+            _lifted("ev_0031", gate, "  return a;"),
+        ]
+    )
+    assert _by_address(found)[hex(BASE + gate)]["names"] == []
+
+
+def test_a_function_listed_by_name_alone_joins_the_row_of_that_name() -> None:
+    start = BASE + 0x3C7C
+    # Decompiled by its name alone: no address, and its call is kept.
+    by_name = LedgerEntry(
+        id="ev_0040",
+        tool="lift_routine",
+        agent="reader_two",
+        args={"name": "entry"},
+        output="int entry(int a)\n{\n  return a;\n}\n",
+        facts=_DECOMPILE,
+    )
+    # Listed as instructions at an address under the same name.
+    at_address = LedgerEntry(
+        id="ev_0041",
+        tool="list_routine",
+        agent="reader_one",
+        args={"address": hex(start), "name": "entry"},
+        output=f"{start:x}: push rbp\n",
+        facts={"v": 1, "kind": "function_disassembly", "reader": "listing"},
+    )
+    caller = _lifted("ev_0001", BASE + 0x1000, f"  FUN_{start:x}(a);")
+    found = call_map([caller, by_name, at_address])
+
+    rows = _by_address(found)
+    assert None not in rows
+    assert rows[hex(start)]["names"] == ["entry"]
+    assert rows[hex(start)]["listed_in"] == ["ev_0041", "ev_0040"]
+    assert rows[hex(start)]["read_by"] == ["reader_one", "reader_two"]
+    assert rows[hex(start)]["called_by"] == [hex(BASE + 0x1000)]
+
+
 def test_a_given_name_is_kept_and_the_decompiler_s_own_name_is_not() -> None:
     start = BASE + 0x3C7C
     found = call_map([_lifted("ev_0001", start, name="entry")])
