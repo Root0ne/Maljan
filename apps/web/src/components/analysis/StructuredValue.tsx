@@ -43,14 +43,16 @@ export default function StructuredValue({ value, name }: { value: unknown; name:
   const [raw, setRaw] = useState(false);
   const shape = shapeOf(value);
   return (
-    <div className="min-w-0 space-y-2">
+    <div className="@container min-w-0 space-y-2">
       {shape !== "scalar" && shape !== "empty" && (
         <div className="flex justify-end">
           <button
             type="button"
             aria-pressed={raw}
             onClick={() => setRaw((v) => !v)}
-            className="rounded px-1 text-[11px] text-accent-strong hover:underline"
+            /* `relative`, so the screen-reader words stay inside the box that
+             * scrolls; placed against a far ancestor they widened the page. */
+            className="relative rounded px-1 text-[11px] text-accent-strong hover:underline"
           >
             {raw ? "View as fields" : "View raw"}
             <span className="sr-only"> of {name}</span>
@@ -128,7 +130,7 @@ function Scalar({ value }: { value: unknown }) {
 
 function Fields({ value, name, depth }: { value: JsonObject; name: string; depth: number }) {
   return (
-    <dl className="grid grid-cols-[minmax(7rem,max-content)_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-xs">
+    <dl className="grid grid-cols-1 gap-x-4 gap-y-1.5 text-xs @md:grid-cols-[minmax(7rem,max-content)_minmax(0,1fr)]">
       {Object.entries(value).map(([key, v]) => (
         <div key={key} className="contents">
           <dt className="text-text-muted [overflow-wrap:anywhere]" title={key}>
@@ -172,7 +174,7 @@ function Rows({ rows, name, depth }: { rows: JsonObject[]; name: string; depth: 
             {shown.map((row, i) => (
               <tr key={i} className="border-b border-border-light align-top last:border-b-0">
                 {columns.map((c) => (
-                  <td key={c} className="max-w-[28rem] px-2 py-1.5 text-text-primary [overflow-wrap:anywhere]">
+                  <td key={c} className="min-w-[7rem] max-w-[28rem] px-2 py-1.5 text-text-primary [overflow-wrap:anywhere]">
                     {c in row ? (
                       <ValueView value={row[c]} name={`${name}, row ${i + 1}, ${keyLabel(c)}`} depth={depth + 2} />
                     ) : null}

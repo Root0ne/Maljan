@@ -63,26 +63,28 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
             <h3 className="text-xs text-text-muted mb-1.5">
               Execution flow
             </h3>
-            <ol className="space-y-1.5">
+            {/* A sequence, so numbered; each step a row with its prose at a
+                reading width and how it is known beside it, as Overview's
+                key findings are. */}
+            <ol className="border-t border-border-light @container">
               {steps.map((step, i) => (
-                <li key={`${step.order}-${i}`} className="text-sm text-text-secondary">
-                  <span className="text-text-muted mr-2 font-mono">{i + 1}.</span>
-                  <SafeMarkdown
-                    markdown={step.action}
-                    cite
-                    inline
-                    regionName={`Execution step ${i + 1}`}
-                    className="break-words [overflow-wrap:anywhere]"
-                  />
-                  <span className="ml-2 inline-flex align-middle">
+                <li
+                  key={`${step.order}-${i}`}
+                  className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-2 gap-y-1 border-b border-border-light py-2.5 text-sm text-text-secondary @[48rem]:grid-cols-[2rem_minmax(0,80ch)_12rem]"
+                >
+                  <span className="font-mono text-text-muted">{i + 1}.</span>
+                  <span className="break-words [overflow-wrap:anywhere]">
+                    <SafeMarkdown markdown={step.action} cite inline regionName={`Execution step ${i + 1}`} className="" />
+                    <Cited ids={step.evidence_refs} />
+                    <Unresolved note={flowNote(report, step)} />
+                  </span>
+                  <span className="col-start-2 @[48rem]:col-start-auto">
                     <BasisMark
                       basis={step.voice === "observed" ? "seen" : "not-seen"}
                       label={step.voice === "observed" ? "Seen in sandbox" : "Assessed, not seen"}
                       detail={flowMark(step)}
                     />
                   </span>
-                  <Cited ids={step.evidence_refs} />
-                  <Unresolved note={flowNote(report, step)} />
                 </li>
               ))}
             </ol>

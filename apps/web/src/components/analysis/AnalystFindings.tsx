@@ -43,7 +43,7 @@ export default function AnalystFindings({
                       markdown={c.claim || c.description || "(no text)"}
                       cite
                       regionName={`${f.agent} claim ${i + 1}`}
-                      className="space-y-2 text-sm leading-relaxed text-text-primary"
+                      className="max-w-[80ch] space-y-2 text-sm leading-relaxed text-text-primary"
                     />
                     <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-text-muted">
                       {conf !== null && (
@@ -55,7 +55,7 @@ export default function AnalystFindings({
                         <span>{retryAddedLabel(Number(c.added_by_retry_in_round))}</span>
                       )}
                       {evidence && (
-                        <span>
+                        <span className="min-w-0 [overflow-wrap:anywhere]">
                           <span className="text-text-secondary">
                             Evidence:{" "}
                           </span>

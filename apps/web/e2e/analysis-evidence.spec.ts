@@ -78,6 +78,28 @@ test("a row opens to the arguments, the output and the parsed result", async ({
   await expect(page.getByRole("button", { name: /Show more \(\d+ more characters\)/ })).toBeVisible();
 });
 
+test("an open row lays out its arguments and parsed result as fields, with the raw JSON one toggle away", async ({
+  authenticatedPage: page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/analysis/${JOB_ID}/evidence/records`);
+  await page.getByRole("button", { name: "Toggle ev_0001" }).click();
+  const args = page.getByRole("button", { name: "View raw of Arguments of ev_0001" });
+  await expect(args).toBeVisible();
+  // Fields, not a JSON dump: the key is a term, the value beside it.
+  const row = page.locator("tr", { has: args });
+  await expect(row.locator("dt", { hasText: "Path" }).first()).toBeVisible();
+  await expect(row.locator("dd", { hasText: "/samples/evil.exe" }).first()).toBeVisible();
+  await expect(row).not.toContainText('"path"');
+  await args.click();
+  await expect(row.getByRole("region", { name: "Arguments of ev_0001 raw JSON table, scrolls sideways" })).toContainText(
+    '"path": "/samples/evil.exe"',
+  );
+  // An open row widens nothing: the page never scrolls sideways.
+  const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(wide).toBe(0);
+});
+
 test("an entry that lost its output to the byte budget says so", async ({
   authenticatedPage: page,
 }) => {
