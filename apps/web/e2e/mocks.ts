@@ -302,6 +302,41 @@ export const MOCK_EVIDENCE = [
   },
 ];
 
+/**
+ * The call map the API derives from the ledger above: two roots, a call back
+ * up the tree (0x10001200 calls the function that called it), a function a
+ * call names that nobody read, and one listed under a given name.
+ */
+const callFn = (
+  address: string,
+  calls: string[],
+  calledBy: string[],
+  listedIn: string[],
+  names: string[] = [],
+) => ({
+  address,
+  offset: `0x${(parseInt(address, 16) - 0x10000000).toString(16)}`,
+  names,
+  read: listedIn.length > 0,
+  listed_in: listedIn,
+  read_by: listedIn.length > 0 ? ["static"] : [],
+  calls,
+  called_by: calledBy,
+});
+export const MOCK_CALL_MAP = {
+  job_id: "",
+  image_base: "0x10000000",
+  functions: [
+    callFn("0x10001000", ["0x10001200", "0x10001400"], ["0x10001200"], ["ev_0002"], ["entry"]),
+    callFn("0x10001200", ["0x10001000", "0x10001800"], ["0x10001000"], ["ev_0002"]),
+    callFn("0x10001400", [], ["0x10001000", "0x10003000"], []),
+    callFn("0x10001800", ["0x10002000"], ["0x10001200"], ["ev_0001", "ev_0002"], ["decrypt_config"]),
+    callFn("0x10002000", [], ["0x10001800"], []),
+    callFn("0x10003000", ["0x10001400"], [], ["ev_0002"], ["run"]),
+  ],
+  roots: ["0x10003000", "0x10001000"],
+};
+
 export const MOCK_DASHBOARD_STATS = {
   total_jobs: 42,
   total_samples: 15,
@@ -1711,6 +1746,11 @@ export async function installApiMocks(
       page_size: pageSize,
     });
   });
+  // The call map: registered after the ledger, whose `evidence**` would match
+  // it too, so this one answers (the later route wins).
+  await page.route("**/api/v1/jobs/*/evidence/call-map", (route) =>
+    json(route, { ...MOCK_CALL_MAP, job_id: MOCK_JOB_DETAIL.id })
+  );
   await page.route("**/api/v1/jobs/*", (route) => {
     const id = new URL(route.request().url()).pathname.split("/").pop() ?? "";
     return json(route, { ...MOCK_JOB_DETAIL, id });

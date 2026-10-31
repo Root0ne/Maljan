@@ -225,6 +225,85 @@ test.describe("Static & code", () => {
   });
 });
 
+test.describe("Call map", () => {
+  test("the tree opens from the roots by keyboard, marks read functions and a call back up the tree", async ({
+    sessionPage: page,
+  }) => {
+    await serve(page);
+    await page.goto(`${BASE}/static#call-map`);
+    const block = page.locator("#call-map");
+    await expect(block).toContainText("4 read");
+    await expect(block).toContainText("2 named in a call, not read");
+    const tree = block.getByRole("tree");
+    const items = tree.getByRole("treeitem");
+    await expect(items).toHaveCount(2);
+
+    // The first root takes the one tab stop; arrows move and open.
+    const first = items.first();
+    await expect(first).toHaveAttribute("tabindex", "0");
+    await first.focus();
+    await page.keyboard.press("ArrowDown");
+    const entry = tree.getByRole("treeitem", { name: /^0x10001000 entry, read, calls 2/ });
+    await expect(entry).toBeFocused();
+    await expect(entry).toHaveAttribute("aria-expanded", "false");
+    await page.keyboard.press("ArrowRight");
+    await expect(entry).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("ArrowRight");
+    const callee = tree.getByRole("treeitem", { name: /^0x10001200, read, calls 2/ });
+    await expect(callee).toBeFocused();
+    await expect(callee).toHaveAttribute("aria-level", "2");
+    await page.keyboard.press("Enter");
+    // 0x10001200 calls the function above it: drawn once, as a marker, never opened.
+    const back = tree.getByRole("treeitem", { name: /^Calls back to 0x10001000 \(entry\)/ });
+    await expect(back).toBeVisible();
+    await expect(back).not.toHaveAttribute("aria-expanded");
+    await expect(tree.getByRole("treeitem", { name: /^0x10001400, named in a call, not read/ })).toBeVisible();
+    await page.keyboard.press("ArrowLeft");
+    await expect(callee).toHaveAttribute("aria-expanded", "false");
+    await page.keyboard.press("ArrowLeft");
+    await expect(entry).toBeFocused();
+    // Keys pressed without a pause each land on the row the last one moved to.
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await expect(callee).toHaveAttribute("aria-expanded", "true");
+  });
+
+  test("the list searches by address or name and links each listing to its evidence record", async ({
+    sessionPage: page,
+  }) => {
+    await serve(page);
+    await page.goto(`${BASE}/static#call-map`);
+    const block = page.locator("#call-map");
+    await block.getByRole("button", { name: "List", exact: true }).click();
+    await expect(block.getByRole("row")).toHaveCount(7);
+    await block.getByRole("searchbox", { name: "Search functions" }).fill("decrypt");
+    await expect(block.getByRole("row")).toHaveCount(2);
+    const record = block.getByRole("link", { name: "ev_0001" });
+    await expect(record).toHaveAttribute("href", `${BASE}/evidence/records?evidence=ev_0001`);
+    // A callee opens its own row.
+    await block.getByRole("button", { name: "0x10002000", exact: true }).click();
+    await expect(block.getByRole("searchbox", { name: "Search functions" })).toHaveValue("0x10002000");
+    await expect(block.getByRole("cell", { name: /not read/ })).toBeVisible();
+    await block.getByRole("searchbox", { name: "Search functions" }).fill("");
+    await block.getByRole("button", { name: /^Not read 2$/ }).click();
+    await expect(block.getByRole("row")).toHaveCount(3);
+  });
+
+  test("a run that read no code says so in the block's place", async ({ sessionPage: page }) => {
+    await serve(page);
+    await page.route("**/api/v1/jobs/*/evidence/call-map", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ job_id: JOB_ID, image_base: null, functions: [], roots: [] }),
+      }),
+    );
+    await page.goto(`${BASE}/static`);
+    await expect(page.locator("#call-map")).toContainText("No code was read");
+    await expect(page.locator("#call-map").getByRole("tree")).toHaveCount(0);
+  });
+});
+
 test.describe("Indicators & detection", () => {
   test("the indicator browser narrows by type, search and export decision, and opens a value with its reason", async ({
     sessionPage: page,
