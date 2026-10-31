@@ -1,3 +1,5 @@
+import type { Page } from "@playwright/test";
+
 import { test, expect } from "./fixtures";
 import { COMPLETED_JOB, JOB_ID, REPORT } from "./report-fixture";
 
@@ -26,17 +28,35 @@ import { COMPLETED_JOB, JOB_ID, REPORT } from "./report-fixture";
 
 const PHONE = { width: 375, height: 812 };
 
-async function widestOverflow(page: import("@playwright/test").Page): Promise<number> {
-  return page.evaluate(() => {
+/**
+ * How far past the viewport's right edge the widest element reaches.
+ *
+ * With `inScrollers`, an element inside a box that scrolls sideways itself (a
+ * table in its own `overflow-x: auto` wrapper) is reachable and so not
+ * counted; the wrapper is still measured, so the page itself may not be wider.
+ */
+async function widestOverflow(
+  page: Page,
+  { inScrollers = false }: { inScrollers?: boolean } = {},
+): Promise<number> {
+  return page.evaluate((skipScrolled) => {
     const limit = document.documentElement.clientWidth;
+    const scrolled = (node: Element) => {
+      for (let up = node.parentElement; up && up !== document.body; up = up.parentElement) {
+        const x = getComputedStyle(up).overflowX;
+        if (x === "auto" || x === "scroll") return true;
+      }
+      return false;
+    };
     let worst = 0;
     for (const node of Array.from(document.querySelectorAll("body *"))) {
       const box = (node as HTMLElement).getBoundingClientRect();
       if (box.width === 0 && box.height === 0) continue;
+      if (skipScrolled && scrolled(node)) continue;
       worst = Math.max(worst, Math.round(box.right - limit));
     }
     return worst;
-  });
+  }, inScrollers);
 }
 
 test.describe("nothing is cut off", () => {
@@ -82,11 +102,22 @@ test.describe("at 375 px", () => {
     expect(await widestOverflow(page)).toBeLessThanOrEqual(1);
   });
 
-  for (const path of ["/samples", "/jobs", "/settings/profile"] as const) {
+  /* `main` is on screen while the page still shows its loading skeleton, and
+   * the skeleton is narrower than the page it becomes: measured then, a sample
+   * table 355 px wide inside its scroller passes when the fetch is slow and
+   * fails when it is fast. Each page is measured once its own data is drawn. */
+  const loaded = {
+    "/samples": (page: Page) => page.getByText(/^Samples\s—\s\d+ files?$/),
+    "/jobs": (page: Page) => page.getByRole("region", { name: "Find an analysis" }),
+    "/settings/profile": (page: Page) => page.getByLabel("Full Name"),
+  } as const;
+
+  for (const path of Object.keys(loaded) as (keyof typeof loaded)[]) {
     test(`${path} stays inside the viewport`, async ({ authenticatedPage: page }) => {
       await page.goto(path);
       await expect(page.locator("main")).toBeVisible();
-      expect(await widestOverflow(page)).toBeLessThanOrEqual(1);
+      await expect(loaded[path](page)).toBeVisible();
+      expect(await widestOverflow(page, { inScrollers: true })).toBeLessThanOrEqual(1);
     });
   }
 
