@@ -48,13 +48,13 @@ const MAP: CallMapResponse = {
 
 let mount: HTMLDivElement;
 let root: Root;
-let showEvidence: ReturnType<typeof vi.fn>;
+let showEvidence: ReturnType<typeof vi.fn<NonNullable<AnalysisCtx["showEvidence"]>>>;
 
 beforeEach(() => {
   mount = document.createElement("div");
   document.body.append(mount);
   root = createRoot(mount);
-  showEvidence = vi.fn();
+  showEvidence = vi.fn<NonNullable<AnalysisCtx["showEvidence"]>>();
 });
 
 afterEach(() => {
