@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -21,6 +22,7 @@ from maljan.enrichment.declared import (
     validate_sources,
 )
 from maljan.enrichment.orchestrator import enrich_malware_report
+from tests.linear_cost import assert_scales
 
 
 def _key(*parts: str) -> str:
@@ -559,11 +561,8 @@ def test_reading_an_answer_is_linear_in_its_size() -> None:
     def answer(n: int) -> dict[str, Any]:
         return {"result": {"rows": [{"label": "x" * 8, "more": [{"k": i}]} for i in range(n)]}}
 
-    def timed(n: int) -> float:
+    def read(n: int) -> Callable[[], Any]:
         doc = answer(n)
-        t0 = time.perf_counter()
-        read_record("domainrep", source, doc)
-        return time.perf_counter() - t0
+        return lambda: read_record("domainrep", source, doc)
 
-    small, large = timed(2_000), timed(20_000)
-    assert large < max(small, 0.001) * 40
+    assert_scales(read, 2_000, factor=10)

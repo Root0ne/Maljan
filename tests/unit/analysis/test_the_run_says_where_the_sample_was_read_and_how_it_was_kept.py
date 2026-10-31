@@ -335,19 +335,21 @@ def test_a_descendant_whose_environment_cannot_be_read_is_unknown_and_fails(
 
 def test_environ_names_keeps_names_only(tmp_path: Path) -> None:
     child = subprocess.Popen(
-        [sys.executable, "-I", "-c", "import time; time.sleep(30)"],
+        [sys.executable, "-I", "-c", "import time; print('up', flush=True); time.sleep(30)"],
         env={"PATH": os.environ.get("PATH", ""), "X2_NAME_ONLY": "value-not-kept"},
+        stdout=subprocess.PIPE,
     )
     try:
-        # Read once the child has exec'd: before that its environment reads empty.
-        deadline = time.monotonic() + 10
+        # The child prints once it runs its own program: until it has exec'd,
+        # /proc/<pid>/environ is the parent's, not the one it was started with.
+        assert child.stdout is not None
+        assert child.stdout.readline() == b"up\n"
         names = isolation.environ_names(child.pid)
-        while not names and time.monotonic() < deadline:
-            time.sleep(0.05)
-            names = isolation.environ_names(child.pid)
     finally:
         child.kill()
         child.wait()
+        if child.stdout is not None:
+            child.stdout.close()
     assert names is not None and "X2_NAME_ONLY" in names
     assert not any("value-not-kept" in name for name in names)
     assert isolation.environ_names(2**22 + 12345) is None
