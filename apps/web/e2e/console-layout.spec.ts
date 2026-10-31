@@ -41,10 +41,20 @@ async function widestOverflow(
 ): Promise<number> {
   return page.evaluate((skipScrolled) => {
     const limit = document.documentElement.clientWidth;
+    /* The walk stops at `main`: its `overflow-y: auto` computes its overflow-x
+     * to `auto` too, so counting it would excuse everything on the page. Only a
+     * scroller strictly inside `main` counts, and only one that itself fits the
+     * viewport, so a wide wrapper cannot excuse its own contents. */
     const scrolled = (node: Element) => {
-      for (let up = node.parentElement; up && up !== document.body; up = up.parentElement) {
+      for (
+        let up = node.parentElement;
+        up && up !== document.body && up.tagName !== "MAIN";
+        up = up.parentElement
+      ) {
         const x = getComputedStyle(up).overflowX;
-        if (x === "auto" || x === "scroll") return true;
+        if ((x === "auto" || x === "scroll") && up.getBoundingClientRect().right <= limit) {
+          return true;
+        }
       }
       return false;
     };
@@ -120,6 +130,35 @@ test.describe("at 375 px", () => {
       expect(await widestOverflow(page, { inScrollers: true })).toBeLessThanOrEqual(1);
     });
   }
+
+  test("the scroller allowance still catches a wide element outside a scroller", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/samples");
+    await expect(loaded["/samples"](page)).toBeVisible();
+    expect(await widestOverflow(page, { inScrollers: true })).toBeLessThanOrEqual(1);
+
+    // Wide and directly in main: the page really is wider, so it must count.
+    await page.evaluate(() => {
+      const box = document.createElement("div");
+      box.id = "probe-wide";
+      box.style.cssText = "width:900px;height:10px";
+      document.querySelector("main")!.prepend(box);
+    });
+    expect(await widestOverflow(page, { inScrollers: true })).toBeGreaterThan(1);
+    expect(await widestOverflow(page)).toBeGreaterThan(1);
+
+    // The same width inside its own horizontal scroller is reachable.
+    await page.evaluate(() => {
+      const wrap = document.getElementById("probe-wide")!;
+      wrap.style.cssText = "width:100%;height:10px;overflow-x:auto";
+      const inner = document.createElement("div");
+      inner.style.cssText = "width:900px;height:10px";
+      wrap.append(inner);
+    });
+    expect(await widestOverflow(page, { inScrollers: true })).toBeLessThanOrEqual(1);
+    expect(await widestOverflow(page)).toBeGreaterThan(1);
+  });
 
   test("the analysis header and its tab strip fit", async ({ authenticatedPage: page }) => {
     await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
