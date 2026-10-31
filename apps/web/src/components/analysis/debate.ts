@@ -446,7 +446,8 @@ function claimOf(match: RegExpExecArray, more: readonly string[]): ReportClaim {
  * the lists the summary closes with (`  Open questions (...):`,
  * `  Disputes:`, `  Findings:`, each item `    - <text>`) and its signals;
  * then, under `Written in this answer besides its claims:`, the analyst's own
- * prose. A report without the head is all prose.
+ * prose. A report stored before that line existed starts its prose after a
+ * blank line that closes the lists. A report without the head is all prose.
  */
 export function parseAgentReport(report: string): ParsedAgentReport {
   const lines = report.replace(/\r\n/g, "\n").split("\n");
@@ -511,6 +512,15 @@ export function parseAgentReport(report: string): ParsedAgentReport {
     if (list && item) {
       list.items.push(item[1]);
       continue;
+    }
+    // A report stored before the prose had its heading line closes its lists
+    // with a blank line and goes on unindented: the prose begins there.
+    if (list && line.trim() === "") {
+      const next = lines.slice(i + 1).find((l) => l.trim() !== "");
+      if (next !== undefined && !/^\s/.test(next)) {
+        i += 1;
+        break;
+      }
     }
     // Any other line runs on: the item it follows, else the claim.
     if (list) {

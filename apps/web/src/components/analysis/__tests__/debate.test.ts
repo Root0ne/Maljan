@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { TranscriptRow } from "@/lib/conversation";
+import { parseMarkdown, plainText } from "../safeMarkdown";
 import {
   analystKey,
   asFraction,
@@ -299,6 +300,43 @@ describe("an analyst's report", () => {
       { title: "Findings", items: ["Gated init: the export loops resident only on success."] },
     ]);
     expect(parsed.prose).toBe("# DYNAMIC ANALYST, round 1 (revised)\n\n- **Citation scope.** I re-read ev_0064.");
+  });
+
+  it("ends a list at a blank line before unindented text in a report stored before the prose had its heading", () => {
+    // A stored run's report from before that line existed (benchmark
+    // haiku7-attempt1), cut down, with prose after its list as such a report
+    // carries it.
+    const OLD = [
+      "[NETWORK ANALYST — round 0]",
+      "Domain: network | Mean confidence: 0.66",
+      "  Claim 1: The configured C2 hosts were not contacted in this run. | Evidence: [ev_0088] dns names | Confidence: 0.80",
+      "  Open questions (unknowns, not absences):",
+      "    - Does the beacon thread (0x5750, started by 0x6250) activate in the sandbox run? | Why open: needs_sandbox_run | Detail: The capture is 577 s.",
+      "    - Which process owns each of the 13 external conversations? | Why open: tool_failed",
+      "",
+      "    - What do the C2 reply records do? | Why open: obfuscated",
+      "",
+      "Notes from this round:",
+      "",
+      String.raw`- **Base64** is applied to the body built from "%s\%s".`,
+    ].join("\n");
+    const parsed = parseAgentReport(OLD);
+    expect(parsed.claims).toHaveLength(1);
+    expect(parsed.lists).toEqual([
+      {
+        title: "Open questions (unknowns, not absences)",
+        items: [
+          "Does the beacon thread (0x5750, started by 0x6250) activate in the sandbox run? | Why open: needs_sandbox_run | Detail: The capture is 577 s.",
+          "Which process owns each of the 13 external conversations? | Why open: tool_failed",
+          "What do the C2 reply records do? | Why open: obfuscated",
+        ],
+      },
+    ]);
+    expect(parsed.prose).toBe(`Notes from this round:\n\n${String.raw`- **Base64** is applied to the body built from "%s\%s".`}`);
+    // The prose is read as Markdown, its backslash kept.
+    const prose = parseMarkdown(parsed.prose, { linkIds: false, keepBackslashes: true });
+    expect(prose.map((n) => (n.t === "el" ? n.tag : n.t))).toEqual(["p", "ul"]);
+    expect(plainText(prose)).toContain(String.raw`"%s\%s"`);
   });
 
   it("reads the convergence signal as a note, not a list", () => {
