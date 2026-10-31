@@ -6,6 +6,7 @@ import {
   countByStatus,
   latestRunRows,
   sampleLabel,
+  searchRows,
   statusFilterFrom,
 } from "@/lib/analyses";
 
@@ -164,5 +165,26 @@ describe("the status filter, which is where /reports went", () => {
       [],
     );
     expect(countByStatus(rows)).toEqual({ completed: 1, failed: 2 });
+  });
+});
+
+describe("the search over the list", () => {
+  const rows = analysisRows(
+    [
+      job(),
+      job({ id: "job-2", sample_filename: "loader.dll", sample_sha256: "b".repeat(64), status: "running" }),
+    ],
+    [report()],
+  );
+
+  it("finds a run by its file name, its hash, its job id or its verdict word", () => {
+    expect(searchRows(rows, "LOADER").map((r) => r.id)).toEqual(["job-2"]);
+    expect(searchRows(rows, "bbbb").map((r) => r.id)).toEqual(["job-2"]);
+    expect(searchRows(rows, "job-1").map((r) => r.id)).toEqual(["job-1"]);
+    expect(searchRows(rows, "malicious invoice").map((r) => r.id)).toEqual(["job-1"]);
+  });
+
+  it("keeps every row for an empty search", () => {
+    expect(searchRows(rows, "  ")).toHaveLength(2);
   });
 });

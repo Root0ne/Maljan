@@ -11,9 +11,10 @@ import Tabs, { activeTabKey, type TabItem } from "@/components/ui/Tabs";
 
 /**
  * Evidence: everything the report stands on, as views under one tab
- * (`evidenceViews`). The records every citation resolves into come first;
- * then the analysts' discussion with what each one concluded; then one view
- * per agent or tool server of the run's own whose output no other tab draws.
+ * (`evidenceViews`). The evidence bundle comes first; then the records every
+ * citation resolves into; then the analysts' discussion with what each one
+ * concluded; then one view per agent or tool server of the run's own whose
+ * output no other tab draws.
  */
 export default function EvidenceLayout({ children }: { children: React.ReactNode }) {
   const { jobId, report, job } = useReport();
@@ -23,7 +24,7 @@ export default function EvidenceLayout({ children }: { children: React.ReactNode
   const views = useMemo<TabItem[]>(
     () =>
       evidenceViews(report, job?.roster).map((v) => ({
-        key: v.key || "records",
+        key: v.key || "first",
         label: v.label,
         href: `${base}${v.key}`,
       })),

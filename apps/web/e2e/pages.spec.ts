@@ -35,7 +35,10 @@ test.describe("Analyses", () => {
      * The outline used to begin at the second one. */
     await expect(page.getByRole("heading", { name: "Analyses", exact: true })).toBeAttached();
     await expect(page.getByRole("heading", { name: /^Analyses — / })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Filters" })).toBeVisible();
+    // The filter sidebar became one row above the list: a search and the
+    // status buttons.
+    await expect(page.getByRole("searchbox", { name: "Search analyses" })).toBeVisible();
+    await expect(page.getByRole("group", { name: "Status" })).toBeVisible();
     await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
     // The verdict the Reports page used to carry, on the row it belongs to.
     // The backend's raw "Malware" is owed to the reader as "Malicious".
@@ -73,6 +76,8 @@ test.describe("Analyses", () => {
       });
     });
     await page.goto("/jobs");
+    // The copies are behind the row's one actions button.
+    await page.getByRole("button", { name: /^Actions for invoice_scan\.exe/ }).click();
 
     const sha = page.getByRole("button", { name: /^Copy SHA-256 of invoice_scan\.exe/ });
     await sha.focus();
@@ -103,6 +108,53 @@ test.describe("Analyses", () => {
 
     await page.getByRole("button", { name: /^completed/ }).click();
     await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
+  });
+
+  test("a search narrows the list, and a search nothing matches says so", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/jobs");
+    const search = page.getByRole("searchbox", { name: "Search analyses" });
+    await search.fill("invoice");
+    await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
+    await search.fill("no-such-sample");
+    await expect(page.getByText('Not found: no analysis matches "no-such-sample".')).toBeVisible();
+    await page.getByRole("button", { name: "Clear" }).click();
+    await expect(search).toHaveValue("");
+    await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
+  });
+
+  test("a running analysis is cancelled from its row's actions", async ({ sessionPage: page }) => {
+    await page.route("**/api/v1/jobs?**", (route) =>
+      route.fulfill({
+        json: {
+          items: [{ id: "job-1", sample_id: "sample-1", sample_filename: "invoice_scan.exe", sample_sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", status: "running", created_at: "2026-07-26T10:00:00Z", completed_at: null, duration_seconds: null }],
+          total: 1, page: 1, page_size: 50,
+        },
+      })
+    );
+    const deletes: string[] = [];
+    await page.route("**/api/v1/jobs/job-1", (route) => {
+      if (route.request().method() === "DELETE") {
+        deletes.push(route.request().url());
+        return route.fulfill({ status: 204, body: "" });
+      }
+      return route.fallback();
+    });
+    await page.goto("/jobs");
+    await page.getByRole("button", { name: /^Actions for invoice_scan\.exe/ }).click();
+    await page.getByRole("button", { name: "Cancel analysis" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Cancel analysis" })).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel analysis" }).click();
+    await expect.poll(() => deletes.length).toBe(1);
+  });
+
+  test("every row has one control besides its link", async ({ authenticatedPage: page }) => {
+    await page.goto("/jobs");
+    const row = page.getByRole("link", { name: /invoice_scan\.exe/ }).locator("..");
+    await expect(row.getByRole("button")).toHaveCount(1);
+    await expect(row.getByRole("button")).toHaveAccessibleName(/^Actions for invoice_scan\.exe/);
   });
 });
 

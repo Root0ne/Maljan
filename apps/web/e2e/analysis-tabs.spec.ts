@@ -267,7 +267,7 @@ test.describe("Analysis tabs", () => {
       .click();
     await expect(
       page.getByRole("dialog").getByRole("link", { name: /Record 1/ })
-    ).toHaveAttribute("href", `/analysis/${JOB_ID}/evidence?evidence=ev_0001`);
+    ).toHaveAttribute("href", `/analysis/${JOB_ID}/evidence/records?evidence=ev_0001`);
     await page.keyboard.press("Escape");
 
     await page.goto(`/analysis/${JOB_ID}/static`);
@@ -500,7 +500,7 @@ test.describe("Analysis tabs", () => {
     await section.getByRole("button", { name: /^Evidence for this statement/ }).click();
     await expect(page.getByRole("dialog").getByRole("link", { name: /Record 1/ })).toHaveAttribute(
       "href",
-      `/analysis/${JOB_ID}/evidence?evidence=ev_0042`,
+      `/analysis/${JOB_ID}/evidence/records?evidence=ev_0042`,
     );
     await expect(alerts(page)).toHaveCount(0);
   });

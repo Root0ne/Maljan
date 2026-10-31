@@ -38,8 +38,8 @@ describe("the chips of an analyst's evidence reference (T-332)", () => {
   it("draws one link per id, each to its own entry", () => {
     const html = chips([UNDISCUSSED[0].evidence_ref!]);
     expect(links(html)).toEqual([
-      `/analysis/${JOB}/evidence?evidence=ev_0024`,
-      `/analysis/${JOB}/evidence?evidence=ev_0019`,
+      `/analysis/${JOB}/evidence/records?evidence=ev_0024`,
+      `/analysis/${JOB}/evidence/records?evidence=ev_0019`,
     ]);
     expect(html).toContain(" (row 0x3868), ");
     // Inline, so the prose keeps the spaces it was written with.

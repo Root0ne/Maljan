@@ -227,29 +227,38 @@ export function extraTabs(
 }
 
 export interface EvidenceView {
-  /** The path suffix under the Evidence tab; empty for the records. */
+  /** The path suffix under the Evidence tab; empty for the tab's first view. */
   key: string;
   label: string;
-  kind: "records" | "conversation" | ExtraTabKind;
+  kind: "bundle" | "records" | "conversation" | ExtraTabKind;
 }
 
-/** The two views every analysis has under Evidence. */
+/** The views every analysis with a report has under Evidence: the evidence
+ *  bundle first, then every tool call's record, then the discussion. */
 export const EVIDENCE_VIEWS: readonly EvidenceView[] = [
+  { key: "", label: "Evidence bundle", kind: "bundle" },
+  { key: "/records", label: "Records", kind: "records" },
+  { key: "/conversation", label: "Analyst discussion", kind: "conversation" },
+];
+
+/** Before a report exists there is no bundle: the records lead, as they fill
+ *  while the run works. */
+export const RUNNING_EVIDENCE_VIEWS: readonly EvidenceView[] = [
   { key: "", label: "Records", kind: "records" },
   { key: "/conversation", label: "Analyst discussion", kind: "conversation" },
 ];
 
 /**
- * The views under the Evidence tab: the records, the analysts' discussion,
- * then one per agent and server of the run's own that has something to draw
- * (`extraTabs`), in that order. An agent or a server never gets a top-level
- * tab of its own.
+ * The views under the Evidence tab: the evidence bundle, the records, the
+ * analysts' discussion, then one per agent and server of the run's own that
+ * has something to draw (`extraTabs`), in that order. An agent or a server
+ * never gets a top-level tab of its own.
  */
 export function evidenceViews(
   report: ReportDetailDTO | null | undefined,
   roster?: JobRoster | null,
 ): EvidenceView[] {
-  if (!report) return [...EVIDENCE_VIEWS];
+  if (!report) return [...RUNNING_EVIDENCE_VIEWS];
   const extra = disambiguate(
     extraTabs(report.malware_report?.sections, report.section_tabs, report.agent_findings, roster),
     EVIDENCE_VIEWS.map((v) => v.label),

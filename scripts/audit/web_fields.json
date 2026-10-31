@@ -6,7 +6,7 @@
    "route": "app/(app)/analysis/[id]/layout.tsx",
    "fields": [
     {"path": "report:verdict", "ref": "components/analysis/AnalysisHeader.tsx:118"},
-    {"path": "report:verdict_reading", "ref": "components/analysis/overview.ts:217"},
+    {"path": "report:verdict_reading", "ref": "components/analysis/overview.ts:222"},
     {"path": "report:malware_report.attribution.family", "ref": "components/analysis/AnalysisHeader.tsx:106"},
     {"path": "report:malware_category", "ref": "components/analysis/AnalysisHeader.tsx:99"},
     {"path": "report:malware_report.identity.file_name", "ref": "components/analysis/AnalysisHeader.tsx:107"},
@@ -19,20 +19,20 @@
   "overview": {
    "route": "app/(app)/analysis/[id]/page.tsx",
    "fields": [
-    {"path": "report:malware_report.severity.rating", "ref": "components/analysis/OverviewTab.tsx:107"},
-    {"path": "report:malware_report.severity.business_impact", "ref": "components/analysis/OverviewTab.tsx:110"},
+    {"path": "report:malware_report.severity.rating", "ref": "components/analysis/OverviewTab.tsx:108"},
+    {"path": "report:malware_report.severity.business_impact", "ref": "components/analysis/OverviewTab.tsx:111"},
     {"path": "report:malware_report.key_findings[].text", "ref": "components/analysis/reportProse.ts:32"},
-    {"path": "report:malware_report.key_findings[].evidence_ids[]", "ref": "components/analysis/OverviewTab.tsx:125"},
-    {"path": "report:malware_report.executive_summary", "ref": "components/analysis/OverviewTab.tsx:117"},
-    {"path": "report:malware_report.capabilities_narrative[]", "ref": "components/analysis/OverviewTab.tsx:162"},
+    {"path": "report:malware_report.key_findings[].evidence_ids[]", "ref": "components/analysis/OverviewTab.tsx:120"},
+    {"path": "report:malware_report.executive_summary", "ref": "components/analysis/OverviewTab.tsx:157"},
+    {"path": "report:malware_report.capabilities_narrative[]", "ref": "components/analysis/OverviewTab.tsx:165"},
     {"path": "report:malware_report.question_answers[].question", "ref": "components/analysis/reportProse.ts:324"},
-    {"path": "report:malware_report.question_answers[].answer", "ref": "components/analysis/OverviewTab.tsx:376"},
-    {"path": "report:malware_report.question_answers[].evidence_ids[]", "ref": "components/analysis/OverviewTab.tsx:377"},
+    {"path": "report:malware_report.question_answers[].answer", "ref": "components/analysis/OverviewTab.tsx:381"},
+    {"path": "report:malware_report.question_answers[].evidence_ids[]", "ref": "components/analysis/OverviewTab.tsx:382"},
     {"path": "follow_ups:follow_ups[].question", "ref": "components/analysis/FollowUpQuestions.tsx:30"},
     {"path": "follow_ups:follow_ups[].answer.answer", "ref": "components/analysis/FollowUpQuestions.tsx:40"},
     {"path": "follow_ups:follow_ups[].answer.evidence_ids[]", "ref": "components/analysis/FollowUpQuestions.tsx:41"},
-    {"path": "report:malware_report.defensive_recommendations[].action", "ref": "components/analysis/OverviewTab.tsx:274"},
-    {"path": "report:malware_report.defensive_recommendations[].technique_id", "ref": "components/analysis/OverviewTab.tsx:278"}
+    {"path": "report:malware_report.defensive_recommendations[].action", "ref": "components/analysis/OverviewTab.tsx:279"},
+    {"path": "report:malware_report.defensive_recommendations[].technique_id", "ref": "components/analysis/OverviewTab.tsx:283"}
    ]
   },
   "behaviour": {

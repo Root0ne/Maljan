@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { buttonClass } from "@/components/ui/Button";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import {
@@ -89,9 +90,9 @@ export default function SettingsProfilePage() {
 
   return (
     <div className="space-y-4 max-w-2xl">
-      <div className="bg-bg-surface border border-border rounded">
+      <div className="rounded-md border border-border bg-bg-surface">
         <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          <h2 className="text-sm font-semibold text-text-primary">
             User Profile
           </h2>
         </div>
@@ -128,7 +129,7 @@ export default function SettingsProfilePage() {
               </div>
 
               <div className="pt-2 border-t border-border">
-                <h3 className="text-xs font-medium text-text-primary uppercase tracking-wider mb-3">
+                <h3 className="text-sm font-semibold text-text-primary mb-3">
                   Change password (optional)
                 </h3>
                 <p id="settings-password-revokes" className="mb-3 text-xs text-text-muted">
@@ -216,7 +217,7 @@ export default function SettingsProfilePage() {
                 <button
                   type="submit"
                   disabled={!canSave}
-                  className="h-9 px-4 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                  className={buttonClass("primary", "md")}
                 >
                   {saving ? "Saving..." : "Save changes"}
                 </button>

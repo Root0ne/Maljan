@@ -49,7 +49,7 @@ test.describe("nothing is cut off", () => {
     );
   });
 
-  for (const tab of ["/indicators", "/evidence/conversation", "/evidence"] as const) {
+  for (const tab of ["/indicators", "/evidence/conversation", "/evidence", "/evidence/records"] as const) {
     test(`${tab} scrolls its own wide content at 1280 px`, async ({
       authenticatedPage: page,
     }) => {
@@ -75,7 +75,7 @@ test.describe("at 375 px", () => {
     authenticatedPage: page,
   }) => {
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: "Latest runs" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Recent analyses" })).toBeVisible();
 
     await expect(page.getByText("Total Analyses")).toBeVisible();
     await expect(page.getByText("Avg Duration")).toBeVisible();

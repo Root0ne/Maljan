@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { buttonClass } from "@/components/ui/Button";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
@@ -228,7 +229,7 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
             <div className="flex gap-3 mt-4 pt-3 border-t border-border">
               <button
                 type="button"
-                className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
+                className={buttonClass("primary", "sm")}
                 onClick={onClose}
               >
                 Close
@@ -330,7 +331,7 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   disabled={!canImport || submitting}
-                  className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
+                  className={buttonClass("primary", "sm")}
                   onClick={onImport}
                 >
                   {submitting

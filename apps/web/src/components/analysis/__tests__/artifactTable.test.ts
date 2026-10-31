@@ -32,8 +32,8 @@ describe("a section with rows and a note (T-341)", () => {
   });
 
   it("links each ledger id the note names, and only the id", () => {
-    expect(html).toContain('href="/analysis/J1/evidence?evidence=ev_0005"');
-    expect(html).toContain('href="/analysis/J1/evidence?evidence=ev_0098"');
+    expect(html).toContain('href="/analysis/J1/evidence/records?evidence=ev_0005"');
+    expect(html).toContain('href="/analysis/J1/evidence/records?evidence=ev_0098"');
     expect(html).not.toMatch(/evidence=18%20more/);
   });
 });

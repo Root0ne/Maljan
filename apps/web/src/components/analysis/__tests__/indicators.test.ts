@@ -89,7 +89,7 @@ describe("the consolidated indicator table (T-346)", () => {
     expect(html).toContain("the sandbox report does not say which process made the flows to it");
     expect(html).toContain("the publish rule recorded no answer");
     // A reason or a recovery that cites an entry links it.
-    expect(html).toContain('evidence?evidence=ev_0018"');
+    expect(html).toContain('evidence/records?evidence=ev_0018"');
   });
 
   it("draws the judge's indicators beside the table's decision for each", () => {
