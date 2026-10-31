@@ -102,3 +102,21 @@ def test_a_quote_within_the_nesting_bound_renders_as_it_did(depth: int) -> None:
     assert "<pre>" not in html
     assert html.count("<blockquote>") == depth
     assert "<p>inner text</p>" in html
+
+
+def test_the_first_depth_past_the_bound_is_shown_as_its_source() -> None:
+    assert "<pre>" in _html(_quote(20, "t"))
+
+
+def test_the_target_check_belongs_to_the_report_reader_alone() -> None:
+    from markdown_it import MarkdownIt
+
+    # A plain reader still decodes and links: the check is not patched in globally.
+    assert "href" in MarkdownIt().render("[a](https&#58;//x)")
+
+
+def test_the_reader_internals_the_renderer_leans_on_are_importable() -> None:
+    from markdown_it.common.utils import UNESCAPE_ALL_RE
+    from markdown_it.rules_core.normalize import NEWLINES_RE, NULL_RE
+
+    assert UNESCAPE_ALL_RE.search("&#58;") and NEWLINES_RE.search("\r\n") and NULL_RE.search("\0")
