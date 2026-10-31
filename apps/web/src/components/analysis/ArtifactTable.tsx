@@ -6,6 +6,7 @@ import { humaniseKey } from "@/lib/humanise";
 import EvidenceChips, { CitedText } from "./EvidenceChips";
 import { saysSomething } from "./reportSections";
 import { headedTable, withoutConstantColumns } from "./tableColumns";
+import SafeMarkdown from "./SafeMarkdown";
 
 /**
  * One report section, drawn from its own declared shape.
@@ -135,13 +136,14 @@ function SectionBody({ section, rows }: { section: EvidenceSection; rows: string
         </ul>
       )}
       {hasText && (
-        <p
-          className={`p-4 text-xs text-text-secondary leading-relaxed whitespace-pre-wrap break-words ${
-            drawsTable || items.length > 0 ? "border-t border-border-light" : ""
-          }`}
-        >
-          <CitedText text={text} />
-        </p>
+        <div className={`p-4 ${drawsTable || items.length > 0 ? "border-t border-border-light" : ""}`}>
+          <SafeMarkdown
+            markdown={text}
+            cite
+            regionName={section.title || "Section"}
+            className="max-w-[80ch] space-y-2 text-xs leading-relaxed text-text-secondary break-words"
+          />
+        </div>
       )}
     </>
   );
