@@ -17,8 +17,11 @@
  * rules, a 15% wash of it for the avatar's fill, and an ink — the token mixed
  * 70/30 with the theme's primary text — for initials and names. Mixing toward
  * the primary text darkens the ink on the light theme and lightens it on the
- * dark one, which keeps every ink at 5.4:1 or better on its own wash and on
- * every surface the conversation draws, in both themes.
+ * dark one. Measured on its own wash and bare, over each of the four
+ * surfaces (deep, surface, elevated, active), the lowest ink is 5.13:1 on the
+ * light theme (purple on its wash over the active surface; blue is 5.21:1
+ * there) and 5.86:1 on the dark one (the moderator's accent on its wash over
+ * the active surface) — AA for small text everywhere.
  */
 
 const PALETTE = [
@@ -41,13 +44,23 @@ export interface AgentTone {
   moderator: boolean;
 }
 
+/* One object per tone for the life of the page. A bubble is memoised on the
+ * tone it is drawn in, and a tone rebuilt on every event would redraw every
+ * bubble of a long run each time somebody spoke. */
+const TONES = new Map<string, AgentTone>();
+
 function tone(color: string, moderator: boolean): AgentTone {
-  return {
+  const key = `${color}|${moderator}`;
+  const held = TONES.get(key);
+  if (held) return held;
+  const made: AgentTone = {
     color,
     wash: `color-mix(in srgb, ${color} 15%, transparent)`,
     ink: `color-mix(in srgb, ${color} 70%, var(--text-primary))`,
     moderator,
   };
+  TONES.set(key, made);
+  return made;
 }
 
 const UNKNOWN_TONE = tone("var(--text-muted)", false);

@@ -15,7 +15,7 @@
  */
 
 import Link from "next/link";
-import { useEffect, useId, useState } from "react";
+import { memo, useEffect, useId, useState } from "react";
 import { ChevronRight, CircleCheck, CircleX, Loader, Wrench } from "lucide-react";
 
 import StructuredValue from "@/components/analysis/StructuredValue";
@@ -36,7 +36,7 @@ import type { AgentTone } from "./agentIdentity";
 
 const HEADING = "mb-1 text-[11px] font-medium text-text-secondary";
 
-export default function ToolStrip({
+function ToolStrip({
   calls,
   jobId,
   tone,
@@ -61,13 +61,13 @@ export default function ToolStrip({
   const shownNames = names.slice(0, 3).join(", ") + (names.length > 3 ? `, +${names.length - 3}` : "");
 
   return (
-    <div className="max-w-[min(72ch,100%)]">
+    <div>
       <button
         type="button"
         aria-expanded={open}
         aria-controls={listId}
         onClick={() => setOpen((value) => !value)}
-        className="flex max-w-full items-center gap-1.5 rounded-full border border-border-light bg-bg-surface px-2.5 py-0.5 text-[11px] text-text-secondary hover:border-border hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        className="flex max-w-[min(72ch,100%)] items-center gap-1.5 rounded-full border border-border-light bg-bg-surface px-2.5 py-0.5 text-[11px] text-text-secondary hover:border-border hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
       >
         <ChevronRight
           size={12}
@@ -93,6 +93,22 @@ export default function ToolStrip({
     </div>
   );
 }
+
+type ToolStripProps = Parameters<typeof ToolStrip>[0];
+
+/* The layout hands the strip a new array on every event; it is the same
+ * strip while it holds the same calls. */
+function sameStrip(a: ToolStripProps, b: ToolStripProps): boolean {
+  return (
+    a.jobId === b.jobId &&
+    a.tone === b.tone &&
+    a.defaultOpen === b.defaultOpen &&
+    a.calls.length === b.calls.length &&
+    a.calls.every((call, i) => call === b.calls[i])
+  );
+}
+
+export default memo(ToolStrip, sameStrip);
 
 function StatusMark({ ok }: { ok: boolean | null }) {
   if (ok === null) {

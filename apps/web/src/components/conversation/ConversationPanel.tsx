@@ -20,7 +20,7 @@
  * somebody reading it is worse than making them press a button to come back.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ListFilter, Radio } from "lucide-react";
 
 import {
@@ -84,6 +84,26 @@ function reducedMotion(): boolean {
 function speakerKeyOf(item: ConversationItem): string {
   const moderator = moderatorOf(item);
   return moderator ? `moderator:${moderator.name}` : item.speaker;
+}
+
+/* The quote an answer opens with, held per question line. The builder keeps a
+ * line's object while nothing about it changes and tones are shared objects,
+ * so an answer's quote stays the same object from event to event and its
+ * memoised bubble is not redrawn because somebody else spoke. */
+const replyRefs = new WeakMap<ConversationItem, ReplyRef>();
+
+function replyRef(question: ConversationItem, tone: AgentTone): ReplyRef {
+  const held = replyRefs.get(question);
+  if (held && held.tone === tone) return held;
+  const moderator = moderatorOf(question);
+  const made: ReplyRef = {
+    item: question,
+    author: moderator?.name ?? question.displayName,
+    text: moderator?.text ?? question.text,
+    tone,
+  };
+  replyRefs.set(question, made);
+  return made;
 }
 
 /** "A is writing…", "A and B are writing…", "A, B and 2 others are writing…". */
@@ -186,13 +206,7 @@ export default function ConversationPanel({
   const replies = useMemo(() => {
     const out = new Map<string, ReplyRef>();
     for (const [answer, question] of replyTargets(conversation.stages)) {
-      const moderator = moderatorOf(question);
-      out.set(answer, {
-        item: question,
-        author: moderator?.name ?? question.displayName,
-        text: moderator?.text ?? question.text,
-        tone: toneOf(cast.tones, speakerKeyOf(question)),
-      });
+      out.set(answer, replyRef(question, toneOf(cast.tones, speakerKeyOf(question))));
     }
     return out;
   }, [conversation.stages, cast.tones]);
@@ -519,7 +533,10 @@ function Block({
     <SpeakerBlock
       group={block}
       jobId={jobId}
-      cast={cast}
+      tone={toneOf(cast.tones, block.speaker)}
+      name={block.displayName || cast.names[block.speaker] || "Unknown"}
+      role={cast.roles[block.speaker]}
+      initials={cast.initials[block.speaker] ?? "?"}
       replies={replies}
       toolsOpen={toolsOpen}
       onJump={onJump}
@@ -527,32 +544,69 @@ function Block({
   );
 }
 
-/** One speaker's consecutive lines and calls, under one avatar and name. */
-function SpeakerBlock({
-  group,
-  jobId,
-  cast,
-  replies,
-  toolsOpen,
-  onJump,
-}: {
+interface SpeakerBlockProps {
   group: SpeakerGroup;
   jobId: string;
-  cast: Cast;
+  tone: AgentTone;
+  name: string;
+  role: string | undefined;
+  initials: string;
   replies: Map<string, ReplyRef>;
   toolsOpen: boolean;
   onJump: (id: string) => void;
-}) {
-  const tone = toneOf(cast.tones, group.speaker);
-  const name = group.displayName || cast.names[group.speaker] || "Unknown";
-  const role = cast.roles[group.speaker];
+}
+
+/* The layout is rebuilt on every event, so a group is a new object each
+ * time; it is the same group when it holds the same lines and calls. */
+function sameEntries(a: SpeakerGroup, b: SpeakerGroup): boolean {
+  if (a.entries.length !== b.entries.length) return false;
+  return a.entries.every((entry, i) => {
+    const other = b.entries[i];
+    if (entry.type === "message") return other.type === "message" && other.item === entry.item;
+    return other.type === "tools" && sameCalls(entry.calls, other.calls);
+  });
+}
+
+function sameCalls(a: readonly ConversationItem[], b: readonly ConversationItem[]): boolean {
+  return a.length === b.length && a.every((call, i) => call === b[i]);
+}
+
+function sameSpeakerBlock(a: SpeakerBlockProps, b: SpeakerBlockProps): boolean {
+  return (
+    a.jobId === b.jobId &&
+    a.tone === b.tone &&
+    a.name === b.name &&
+    a.role === b.role &&
+    a.initials === b.initials &&
+    a.toolsOpen === b.toolsOpen &&
+    a.onJump === b.onJump &&
+    a.group.speaker === b.group.speaker &&
+    sameEntries(a.group, b.group) &&
+    a.group.entries.every(
+      (e) => e.type !== "message" || a.replies.get(e.item.id) === b.replies.get(e.item.id),
+    )
+  );
+}
+
+/** One speaker's consecutive lines and calls, under one avatar and name. */
+const SpeakerBlock = memo(function SpeakerBlock({
+  group,
+  jobId,
+  tone,
+  name,
+  role,
+  initials,
+  replies,
+  toolsOpen,
+  onJump,
+}: SpeakerBlockProps) {
   const firstMessage = group.entries.find((e) => e.type === "message");
   const addressee = firstMessage?.type === "message" ? firstMessage.item.addressedToName : undefined;
   const isQuestion = firstMessage?.type === "message" && firstMessage.item.kind === "judge_question";
 
   return (
     <div className="flex gap-2.5 pt-2.5">
-      <Avatar initials={cast.initials[group.speaker] ?? "?"} tone={tone} />
+      <Avatar initials={initials} tone={tone} />
       <div className="min-w-0 flex-1 space-y-1">
         <p className="flex flex-wrap items-baseline gap-x-2 text-xs">
           <span className="font-semibold" style={{ color: tone.ink }}>
@@ -587,4 +641,4 @@ function SpeakerBlock({
       </div>
     </div>
   );
-}
+}, sameSpeakerBlock);

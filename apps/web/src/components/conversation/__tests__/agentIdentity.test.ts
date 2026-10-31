@@ -28,6 +28,13 @@ describe("agent tones", () => {
     expect(Object.entries(tones).filter(([key, t]) => key !== "judge" && t.moderator)).toEqual([]);
   });
 
+  it("hands back the same tone object for the same agent on every call", () => {
+    const first = agentTones(["static", "judge"], new Set(["judge"]));
+    const again = agentTones(["static", "judge", "dynamic"], new Set(["judge"]));
+    expect(again.static).toBe(first.static);
+    expect(again.judge).toBe(first.judge);
+  });
+
   it("derives the wash and the ink from the one token", () => {
     const tone = agentTones(["static"]).static;
     expect(tone.wash).toBe(`color-mix(in srgb, ${tone.color} 15%, transparent)`);
