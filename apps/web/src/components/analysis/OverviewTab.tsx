@@ -187,7 +187,7 @@ export default function OverviewTab() {
       </section>
 
       <Section title="Top findings" count={rows.length} empty={rows.length === 0}>
-        <div className="-mx-4 -my-3 overflow-x-auto">
+        <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 -my-3 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border-light text-left text-xs text-text-muted">
@@ -249,13 +249,15 @@ export default function OverviewTab() {
         >
           <dl className="space-y-2 text-sm">
             {config.map((item) => (
-              <div key={`${item.key}=${item.value}`} className="grid grid-cols-[minmax(6rem,10rem)_1fr_auto] items-start gap-2">
+              <div key={`${item.key}=${item.value}`} className="grid grid-cols-[minmax(6rem,10rem)_1fr] items-start gap-2">
                 <dt className="text-text-secondary">{item.key}</dt>
-                <dd className="min-w-0">
-                  <span className="break-all font-mono text-xs text-text-primary">{item.value}</span>
-                  <span className="block text-[11px] text-text-muted">{howObtained(item)}</span>
+                <dd className="flex min-w-0 items-start gap-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="break-all font-mono text-xs text-text-primary">{item.value}</span>
+                    <span className="block text-[11px] text-text-muted">{howObtained(item)}</span>
+                  </span>
+                  <CopyButton value={item.value} what={`configuration value ${item.key}`} label="copy" />
                 </dd>
-                <CopyButton value={item.value} what={`configuration value ${item.key}`} label="copy" />
               </div>
             ))}
           </dl>
@@ -345,7 +347,7 @@ function LegacyOverview() {
         {agentCount > 0 ? ` ${countLabel(agentCount, "analyst")} took part; what each one concluded is ` : ""}
         {agentCount > 0 && (
           <>
-            <Link href={`${analysisHref(jobId, "evidence")}/conversation`} className="text-accent-strong hover:underline">
+            <Link href={`${analysisHref(jobId, "evidence")}/conversation`} className="text-accent-strong underline hover:no-underline">
               beside their discussion
             </Link>
             .

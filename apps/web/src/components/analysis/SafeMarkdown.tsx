@@ -168,7 +168,13 @@ function renderElement(node: Extract<MdNode, { t: "el" }>, key: number, ids: IdC
       );
     case "table":
       return (
-        <div key={key} className="max-w-full overflow-x-auto rounded border border-border-light">
+        <div
+          key={key}
+          role="region"
+          tabIndex={0}
+          aria-label="Table, scrolls sideways"
+          className="max-w-full overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        >
           <table className="w-full text-xs">{children}</table>
         </div>
       );
@@ -211,11 +217,11 @@ function renderElement(node: Extract<MdNode, { t: "el" }>, key: number, ids: IdC
     case "a":
       if (!node.href) return <Fragment key={key}>{children}</Fragment>;
       return node.href.startsWith("#") ? (
-        <a key={key} href={node.href} className="text-accent-strong hover:underline">
+        <a key={key} href={node.href} className="text-accent-strong underline hover:no-underline">
           {children}
         </a>
       ) : (
-        <a key={key} href={node.href} target="_blank" rel="noopener noreferrer nofollow" className="text-accent-strong hover:underline [overflow-wrap:anywhere]">
+        <a key={key} href={node.href} target="_blank" rel="noopener noreferrer nofollow" className="text-accent-strong underline hover:no-underline [overflow-wrap:anywhere]">
           {children}
         </a>
       );

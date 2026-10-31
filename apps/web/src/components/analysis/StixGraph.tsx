@@ -253,7 +253,7 @@ function GraphTable({
   const td = "px-2 py-1 align-top";
   return (
     <div className="space-y-5 text-xs">
-      <div className="overflow-x-auto">
+      <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         <table className="w-full border-collapse">
           <caption className="text-left text-xs font-semibold text-text-primary pb-1.5">
             Objects ({graph.nodes.length})
@@ -299,7 +299,7 @@ function GraphTable({
         </table>
       </div>
 
-      <div className="overflow-x-auto">
+      <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         <table className="w-full border-collapse">
           <caption className="text-left text-xs font-semibold text-text-primary pb-1.5">
             Relationships ({graph.edges.length})
@@ -357,7 +357,7 @@ function GraphTable({
       </div>
 
       {graph.notDrawn.length > 0 && (
-        <div className="overflow-x-auto">
+        <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
           <table className="w-full border-collapse">
             <caption className="text-left text-xs font-semibold text-text-primary pb-1.5">
               In the bundle, not drawn ({graph.notDrawn.length})

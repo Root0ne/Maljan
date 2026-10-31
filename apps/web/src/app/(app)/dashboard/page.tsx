@@ -312,7 +312,7 @@ export default function DashboardPage() {
               {/* The labelled wrapper above is the chart's one node in the
                   accessibility tree; Recharts' own surface and pie would
                   otherwise be two more tab stops with no name. */}
-              <PieChart accessibilityLayer={false} tabIndex={-1} role="presentation">
+              <PieChart accessibilityLayer={false} aria-hidden="true">
                 <Pie
                   data={verdictData}
                   cx="50%"

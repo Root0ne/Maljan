@@ -40,7 +40,7 @@ export default function ProcessTree({ roots, mr }: { roots: ProcessNode[]; mr: M
             <li
               key={row.key}
               data-on-path={row.onPath ? "true" : undefined}
-              className={`flex items-start gap-2 rounded py-0.5 pr-1 ${row.flagged ? "bg-status-red/5" : ""}`}
+              className={`flex flex-wrap items-start gap-x-2 rounded py-0.5 pr-1 ${row.flagged ? "bg-status-red/5" : ""}`}
               style={{ paddingLeft: row.depth * 16 + 4 }}
             >
               {row.hasChildren ? (
@@ -67,7 +67,7 @@ export default function ProcessTree({ roots, mr }: { roots: ProcessNode[]; mr: M
                 {row.node.name || "(unknown)"}
               </button>
               {row.node.command_line && (
-                <span className="min-w-0 truncate text-text-secondary" title={row.node.command_line}>
+                <span className="min-w-0 max-w-full break-all text-text-secondary sm:flex-1 sm:truncate" title={row.node.command_line}>
                   {row.node.command_line}
                 </span>
               )}

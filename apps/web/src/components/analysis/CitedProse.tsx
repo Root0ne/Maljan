@@ -2,6 +2,7 @@
 
 import { FileSearch } from "lucide-react";
 import { useReport } from "./AnalysisContext";
+import { citationParts } from "./citations";
 import { splitCitations } from "./overview";
 
 /**
@@ -9,15 +10,26 @@ import { splitCitations } from "./overview";
  *
  * Each bracketed group of ids (`splitCitations`) is drawn as one small
  * superscript mark that opens the evidence drawer on those records; the ids
- * themselves are never printed in the prose.
+ * themselves are never printed in the prose. A bare id (`ev_0006`, outside
+ * any bracket) is marked the same way.
  */
 export default function CitedProse({ text }: { text: string }) {
   return (
     <>
       {splitCitations(text).map((part, i) =>
-        part.kind === "text" ? <span key={i}>{part.text}</span> : <CiteMark key={i} ids={part.ids} />,
+        part.kind === "text" ? <BareIds key={i} text={part.text} /> : <CiteMark key={i} ids={part.ids} />,
       )}
     </>
+  );
+}
+
+function BareIds({ text }: { text: string }) {
+  return (
+    <span>
+      {citationParts(text).map((part, i) =>
+        part.kind === "id" ? <CiteMark key={i} ids={[part.id]} /> : part.text,
+      )}
+    </span>
   );
 }
 

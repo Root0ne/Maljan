@@ -345,7 +345,7 @@ test.describe("Analysis page", () => {
     const response = await page.goto(BASE);
     // The server's own HTML carries the boot script, so no React effect is
     // needed for the first paint (its logic is pinned in overview.test.ts).
-    expect(await response!.text()).toMatch(/<script>\(function\(\)\{[^<]*setAttribute\("data-ui-theme"/);
+    expect(await response!.text()).toMatch(/<script[^>]*>\(function\(\)\{[^<]*setAttribute\("data-ui-theme"/);
     const atParse = await page.evaluate(() => (window as unknown as { __themeAtParse: string | null }).__themeAtParse);
     expect(atParse).toBe("light");
   });

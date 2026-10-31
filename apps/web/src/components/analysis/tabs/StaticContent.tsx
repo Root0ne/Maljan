@@ -138,7 +138,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
                 <>
                   <ArtifactSections sections={slots.structure.sections} />
                   {showsExtractedSections && staticData && staticData.sections.length > 0 && (
-                    <div className="overflow-x-auto rounded border border-border-light">
+                    <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-border">
@@ -187,7 +187,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
                 <>
                   <ArtifactSections sections={slots.structure.imports} />
                   {showsImports && staticData && staticData.imports.length > 0 && (
-                    <div className="overflow-x-auto rounded border border-border-light">
+                    <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
                       <table className="w-full">
                         <thead>
                           <tr className="border-b border-border">
@@ -215,7 +215,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
                         finding: the last column is how much ordinary software the same rule fires on, measured over
                         the corpus it names, and it says nothing about how likely this sample is to be benign.
                       </p>
-                      <div className="overflow-x-auto rounded border border-border-light">
+                      <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
                         <table className="w-full">
                           <thead>
                             <tr className="border-b border-border">
@@ -282,7 +282,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
                 <>
                   <ArtifactSections sections={slots.structure.exports} />
                   {showsExports && staticData && exportTotal > 0 && (
-                    <div className="overflow-x-auto rounded border border-border-light">
+                    <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
                       {/* With the ordinal and the address when the format tool
                           reported them: several exports sharing one address is
                           a fact the names alone hide. */}
@@ -323,7 +323,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
               )}
 
               {tab === "resources" && resources.length > 0 && (
-                <div className="overflow-x-auto rounded border border-border-light">
+                <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-border">
@@ -407,7 +407,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
                 {filteredStrings.length === 0 ? (
                   <p className="text-xs text-text-muted">No string matches.</p>
                 ) : (
-                  <div className="overflow-x-auto rounded border border-border-light">
+                  <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto rounded border border-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-border">
@@ -438,7 +438,7 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
 
       <div id="decoded" className="scroll-mt-40">
         <Section title="Decoded strings and configuration" count={config.length || null} empty={config.length === 0}>
-          <div className="-mx-4 -my-3 overflow-x-auto">
+          <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 -my-3 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border-light">

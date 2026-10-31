@@ -342,6 +342,7 @@ describe("the switches", () => {
     ] as const) {
       const attrs: Record<string, string> = {};
       const sandbox = {
+        location: { pathname: "/analysis/job-1/behaviour" },
         localStorage: { getItem: () => stored },
         window: { matchMedia: () => ({ matches: prefersLight }) },
         document: { documentElement: { setAttribute: (k: string, v: string) => (attrs[k] = v) } },
@@ -350,6 +351,18 @@ describe("the switches", () => {
       expect(attrs["data-ui-theme"]).toBe(want);
       expect(resolveTheme(stored, prefersLight)).toBe(want);
     }
+  });
+
+  it("leave every page outside the analysis alone", () => {
+    const attrs: Record<string, string> = {};
+    const sandbox = {
+      location: { pathname: "/dashboard" },
+      localStorage: { getItem: () => "light" },
+      window: { matchMedia: () => ({ matches: true }) },
+      document: { documentElement: { setAttribute: (k: string, v: string) => (attrs[k] = v) } },
+    };
+    runInNewContext(THEME_BOOT_SCRIPT, sandbox);
+    expect(attrs).toEqual({});
   });
 
   it("let the reader's theme choice win over the OS", () => {

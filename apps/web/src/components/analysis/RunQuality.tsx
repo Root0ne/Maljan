@@ -127,7 +127,7 @@ export default function RunQuality() {
             <span className="font-semibold text-status-orange shrink-0">
               DEGRADED RUN
             </span>
-            <div className="text-text-secondary space-y-1">
+            <div className="min-w-0 space-y-1 break-words text-text-secondary [overflow-wrap:anywhere]">
               <p>{degradedBannerText(report?.verdict_reading, report?.overall_confidence)}</p>
               {degradationReasons.length > 0 && (
                 <ul className="list-disc list-inside text-xs">
@@ -168,7 +168,7 @@ export default function RunQuality() {
                 </span>
               </span>
             </summary>
-            <ul className="mt-2 space-y-2 text-text-secondary">
+            <ul className="mt-2 space-y-2 break-words text-text-secondary [overflow-wrap:anywhere]">
               {fpWarnings.map((w, i) => (
                 <li key={i} className="space-y-0.5">
                   {/* The field is named in the sentence rather than repeated
@@ -199,7 +199,7 @@ export default function RunQuality() {
             ) : (
               <ul className="mt-2 space-y-1">
                 {explanations.map((text, i) => (
-                  <li key={i} className="text-[11px] text-text-muted">
+                  <li key={i} className="break-words text-[11px] text-text-muted">
                     {text}
                   </li>
                 ))}

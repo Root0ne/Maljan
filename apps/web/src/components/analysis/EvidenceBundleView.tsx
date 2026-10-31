@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { getErrorMessage } from "@/lib/errors";
+import { ApiError, getErrorMessage } from "@/lib/errors";
 import { formatCallDuration } from "./evidenceRows";
 import { analysisHref } from "./overview";
 import SafeMarkdown from "./SafeMarkdown";
@@ -54,7 +54,28 @@ function useHash(): string {
   return useSyncExternalStore(subscribeHash, () => window.location.hash, () => "");
 }
 
-type Loaded = { bundle: EvidenceBundle } | { problem: string } | null;
+type Loaded = { bundle: EvidenceBundle } | { problem: string } | { absent: true } | null;
+
+/* One request per report: a remount (strict mode, the report refetching under
+ * the view) joins the one in flight, and a server that answered "no such
+ * endpoint" is not asked again while the page stays open. */
+const inFlight = new Map<string, Promise<string>>();
+const absentFor = new Set<string>();
+
+function fetchBundle(reportId: string): Promise<string> {
+  if (absentFor.has(reportId)) return Promise.reject(new ApiError("not available", 404));
+  let pending = inFlight.get(reportId);
+  if (!pending) {
+    pending = api.getReportEvidenceBundleJson(reportId).catch((err: unknown) => {
+      if (err instanceof ApiError && err.status === 404) absentFor.add(reportId);
+      throw err;
+    });
+    inFlight.set(reportId, pending);
+    const forget = () => inFlight.delete(reportId);
+    pending.then(forget, forget);
+  }
+  return pending;
+}
 
 export default function EvidenceBundleView({ jobId, reportId }: { jobId: string; reportId: string }) {
   const [loaded, setLoaded] = useState<Loaded>(null);
@@ -63,13 +84,14 @@ export default function EvidenceBundleView({ jobId, reportId }: { jobId: string;
 
   useEffect(() => {
     let live = true;
-    api
-      .getReportEvidenceBundleJson(reportId)
+    fetchBundle(reportId)
       .then((body) => {
         if (live) setLoaded(readBundle(body));
       })
       .catch((err: unknown) => {
-        if (live) setLoaded({ problem: getErrorMessage(err) || "the server did not answer" });
+        if (!live) return;
+        if (err instanceof ApiError && err.status === 404) setLoaded({ absent: true });
+        else setLoaded({ problem: getErrorMessage(err) || "the server did not answer" });
       })
       .finally(() => {
         if (live) setLoadedFor(reportId);
@@ -103,12 +125,25 @@ export default function EvidenceBundleView({ jobId, reportId }: { jobId: string;
     return <p className="text-sm text-text-secondary">Reading the evidence bundle&hellip;</p>;
   }
   if (!bundle) {
+    const absent = "absent" in loaded;
     return (
-      <div role="alert" className="rounded-md border border-status-red/30 bg-status-red/5 px-4 py-3 text-sm">
-        <p className="text-status-red">The evidence bundle could not be read: {"problem" in loaded ? loaded.problem : ""}.</p>
+      <div
+        role={absent ? "status" : "alert"}
+        data-testid={absent ? "evidence-bundle-absent" : undefined}
+        className={
+          absent
+            ? "rounded-md border border-border bg-bg-surface px-4 py-3 text-sm"
+            : "rounded-md border border-status-red/30 bg-status-red/5 px-4 py-3 text-sm"
+        }
+      >
+        {absent ? (
+          <p className="text-text-primary">The evidence bundle is not available from this server.</p>
+        ) : (
+          <p className="text-status-red">The evidence bundle could not be read: {"problem" in loaded ? loaded.problem : ""}.</p>
+        )}
         <p className="mt-1 text-text-secondary">
           Every tool call is still listed under{" "}
-          <Link href={recordsHref} className="text-accent-strong hover:underline">
+          <Link href={recordsHref} className="text-accent-strong underline">
             Records
           </Link>
           .

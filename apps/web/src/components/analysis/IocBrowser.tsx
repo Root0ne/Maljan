@@ -19,6 +19,7 @@ import {
   iocFacets,
   iocRows,
   relatedFindings,
+  sortedForReading,
   type ExportState,
   type IocRow,
   type PublicationFilter,
@@ -35,8 +36,9 @@ const STATES: ExportState[] = ["published", "withheld", "unanswered", "not-in-ta
  * verdict names it, and what else the report says about it.
  */
 export default function IocBrowser({ mr }: { mr: MalwareReport | null | undefined }) {
-  const rows = useMemo(() => iocRows(mr), [mr]);
-  const facets = useMemo(() => iocFacets(rows), [rows]);
+  const tableRows = useMemo(() => iocRows(mr), [mr]);
+  const facets = useMemo(() => iocFacets(tableRows), [tableRows]);
+  const rows = useMemo(() => sortedForReading(tableRows), [tableRows]);
   const [type, setType] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [publication, setPublication] = useState<PublicationFilter>("all");
@@ -104,7 +106,7 @@ export default function IocBrowser({ mr }: { mr: MalwareReport | null | undefine
         {filtered.length === 0 ? (
           <p className="text-xs text-text-muted">No indicator matches.</p>
         ) : (
-          <div className="-mx-4 overflow-x-auto">
+          <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
             <table className="w-full">
               <thead>
                 <tr className="border-y border-border-light">

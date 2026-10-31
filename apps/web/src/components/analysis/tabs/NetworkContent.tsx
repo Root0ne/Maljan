@@ -66,7 +66,7 @@ export default function NetworkContent({ report }: { report: ReportDetailDTO }) 
   return (
     <div className="space-y-4">
       <Section title="Hosts" count={hosts.length || null} empty={hosts.length === 0}>
-        <div className="-mx-4 -my-3 overflow-x-auto">
+        <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 -my-3 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border-light">
@@ -120,7 +120,7 @@ export default function NetworkContent({ report }: { report: ReportDetailDTO }) 
       </Section>
 
       <Section title="HTTP requests" count={urls.length || null} empty={urls.length === 0}>
-        <div className="-mx-4 -my-3 overflow-x-auto">
+        <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 -my-3 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
           <RequestTable
             urls={urls.slice(0, shownOf("http"))}
             onOpen={(url, opener) => setDetail({ kind: "request", url, opener })}
@@ -130,7 +130,7 @@ export default function NetworkContent({ report }: { report: ReportDetailDTO }) 
       </Section>
 
       <Section title="DNS" count={domains.length || null} empty={domains.length === 0}>
-        <div className="-mx-4 -my-3 overflow-x-auto">
+        <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 -my-3 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border-light">
@@ -163,7 +163,7 @@ export default function NetworkContent({ report }: { report: ReportDetailDTO }) 
       </Section>
 
       <Section title="TLS and client fingerprints" count={tls.length + agents.length || null} empty={tls.length + agents.length === 0}>
-        <div className="-mx-4 -my-3 overflow-x-auto">
+        <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 -my-3 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border-light">
@@ -202,7 +202,7 @@ export default function NetworkContent({ report }: { report: ReportDetailDTO }) 
             observed on the wire during analysis.
           </p>
           {showsStaticIocs ? (
-            <div className="-mx-4 overflow-x-auto">
+            <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
               <table className="w-full">
                 <thead>
                   <tr className="border-y border-border-light">
@@ -365,7 +365,7 @@ function HostDetail({ row }: { row: HostRow }) {
         {row.requests.length === 0 ? (
           <p className="text-xs text-text-muted">Not found</p>
         ) : (
-          <div className="-mx-4 overflow-x-auto">
+          <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="-mx-4 overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
             <RequestTable urls={row.requests} />
           </div>
         )}

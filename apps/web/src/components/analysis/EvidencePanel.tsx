@@ -181,7 +181,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
         )}
 
         {!error && (
-          <div className="overflow-x-auto">
+          <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-[10px] uppercase tracking-wider text-text-muted border-b border-border">

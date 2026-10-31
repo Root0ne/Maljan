@@ -130,6 +130,16 @@ export function iocRows(mr: MalwareReport | null | undefined): IocRow[] {
   return rows;
 }
 
+/**
+ * The order a reader meets the list in: the rows the export publishes first,
+ * so they stand before "show more", then by type. The sort is stable, so rows
+ * of one state and type keep the table's order.
+ */
+export function sortedForReading(rows: readonly IocRow[]): IocRow[] {
+  const rank = (row: IocRow) => (exportState(row) === "published" ? 0 : 1);
+  return [...rows].sort((a, b) => rank(a) - rank(b) || a.type.localeCompare(b.type));
+}
+
 /** The type facets, in the order the types first appear, with their counts. */
 export function iocFacets(rows: readonly IocRow[]): { type: string; count: number }[] {
   const counts = new Map<string, number>();

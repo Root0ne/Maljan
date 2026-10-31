@@ -169,15 +169,24 @@ function SectionTable({ section, rows }: { section: EvidenceSection; rows: strin
     <>
       {(narrowed.constants.length > 0 || narrowed.empty.length > 0) && (
         <p className="px-4 pt-3 text-[11px] text-text-muted">
-          {narrowed.constants.map((c) => `${c.column}: ${c.value}`).join(" · ")}
-          {narrowed.constants.length > 0 && narrowed.empty.length > 0 ? " · " : ""}
-          {narrowed.empty.length > 0
-            ? `${narrowed.empty.join(", ")}: nothing on any row`
-            : ""}
-          {" — the same on every row below."}
+          {/* A constant column can be the evidence one (`Evidence: ev_0006`):
+              cited as every other id is, never printed bare. */}
+          <CitedText
+            text={
+              narrowed.constants.map((c) => `${c.column}: ${c.value}`).join(" · ") +
+              (narrowed.constants.length > 0 && narrowed.empty.length > 0 ? " · " : "") +
+              (narrowed.empty.length > 0 ? `${narrowed.empty.join(", ")}: nothing on any row` : "") +
+              " — the same on every row below."
+            }
+          />
         </p>
       )}
-      <div className="overflow-x-auto">
+      <div
+        role="region"
+        tabIndex={0}
+        aria-label={`${sectionTitle(section)} table, scrolls sideways`}
+        className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+      >
         <table className="w-full">
           <thead>
             <tr className="border-b border-border">

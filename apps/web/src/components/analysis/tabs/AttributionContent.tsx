@@ -249,7 +249,7 @@ function EvidenceTable({
         </h2>
         <p className="mt-1 text-[11px] text-text-muted">{note}</p>
       </div>
-      <div className="overflow-x-auto">
+      <div role="region" tabIndex={0} aria-label="Table, scrolls sideways" className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         <table className="w-full text-xs">
           <thead>
             <tr className="text-left text-text-muted border-b border-border-light">

@@ -141,7 +141,7 @@ export function CitedText({ text, jobId: jobIdProp }: { text: string; jobId?: st
           <Link
             key={i}
             href={evidenceRecordHref(jobId, part.id)}
-            className="font-mono text-accent-strong hover:underline"
+            className="font-mono text-accent-strong underline hover:no-underline"
             title="Open this record in the evidence"
           >
             {part.id}
