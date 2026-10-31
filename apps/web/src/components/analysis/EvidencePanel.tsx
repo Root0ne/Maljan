@@ -138,7 +138,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
     <div className="space-y-3">
       <div className="bg-bg-surface border border-border rounded">
         <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-3">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+          <h2 className="text-xs font-medium text-text-primary">
             Evidence records
           </h2>
           <span className="text-[11px] text-text-muted">
@@ -148,7 +148,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {(["stage", "agent", "tool"] as const).map((field) => (
               <label key={field} className="flex items-center gap-1 text-[11px]">
-                <span className="text-text-muted uppercase tracking-wider">{field}</span>
+                <span className="text-text-muted">{field}</span>
                 <select
                   aria-label={`Filter by ${field}`}
                   className="bg-bg-deep border border-border rounded px-2 py-1 text-xs text-text-primary focus:outline-none focus:border-accent"
@@ -189,7 +189,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
           <div {...scrollRegion("Evidence records")} className={`overflow-x-auto ${SCROLL_REGION_FOCUS}`}>
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wider text-text-muted border-b border-border">
+                <tr className="text-left text-[10px] text-text-muted border-b border-border">
                   <th scope="col" className="px-3 py-2 font-medium">ID</th>
                   <th scope="col" className="px-3 py-2 font-medium">Stage</th>
                   {/* Agent and Server were two columns saying "pipeline" on
@@ -259,7 +259,7 @@ export default function EvidencePanel({ jobId }: { jobId: string }) {
                           {formatCallDuration(entry.duration_ms)}
                         </td>
                         <td
-                          className={`px-3 py-2 text-[10px] uppercase tracking-wider ${
+                          className={`px-3 py-2 text-[10px] ${
                             entry.ok ? "text-status-green" : "text-status-red"
                           }`}
                         >

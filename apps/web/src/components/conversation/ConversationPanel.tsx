@@ -265,7 +265,7 @@ export default function ConversationPanel({
                 {stage.rounds.map((round, index) => (
                   <div key={`${stage.key}-${round.round}-${index}`} className="space-y-2">
                     {stage.rounds.length > 1 && (
-                      <p className="text-center text-[11px] uppercase tracking-wider text-text-tertiary">
+                      <p className="text-center text-[11px] text-text-tertiary">
                         {round.round === 0 ? "Opening" : `Round ${round.round}`}
                       </p>
                     )}

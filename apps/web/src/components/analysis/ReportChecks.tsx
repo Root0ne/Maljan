@@ -24,14 +24,14 @@ export default function ReportChecks({ mr }: { mr: MalwareReport }) {
   return (
     <div className="bg-bg-surface border border-border rounded">
       <div className="px-4 py-3 border-b border-border">
-        <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        <h2 className="text-xs font-medium text-text-primary">
           What the report&apos;s checks left standing
         </h2>
       </div>
       <div className="p-4 space-y-4">
         {flagged.length > 0 && (
           <section>
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            <h3 className="text-[11px] text-text-muted mb-1.5">
               Flagged statements
             </h3>
             <ul className="space-y-1.5">
@@ -48,7 +48,7 @@ export default function ReportChecks({ mr }: { mr: MalwareReport }) {
         )}
         {undiscussed.length > 0 && (
           <section>
-            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+            <h3 className="text-[11px] text-text-muted mb-1.5">
               Claims the report does not discuss
             </h3>
             <ul className="space-y-1.5">

@@ -87,7 +87,7 @@ export default function MessageBubble({
               </span>
             )}
             {badge && (
-              <span className={`rounded border px-1.5 text-[11px] uppercase tracking-wider ${badge.cls}`}>
+              <span className={`rounded border px-1.5 text-[11px] ${badge.cls}`}>
                 {badge.label}
               </span>
             )}
@@ -109,13 +109,13 @@ export default function MessageBubble({
           style={verdict ? undefined : { borderLeftColor: color, borderLeftWidth: 2 }}
         >
           {verdict && (
-            <span className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-accent-strong">
+            <span className="mb-1 flex items-center gap-1.5 text-[11px] text-accent-strong">
               <Gavel size={12} aria-hidden="true" />
               Verdict
             </span>
           )}
           {item.kind === "judge_question" && (
-            <span className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-status-purple">
+            <span className="mb-1 flex items-center gap-1.5 text-[11px] text-status-purple">
               <CircleHelp size={12} aria-hidden="true" />
               Question
             </span>
