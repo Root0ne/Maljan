@@ -118,12 +118,12 @@
     {"path": "report:malware_report.directed_text[].text", "ref": "components/analysis/DirectedTextBlock.tsx:66", "note": "quoted as the sample's text"},
     {"path": "report:malware_report.directed_text[].where", "ref": "components/analysis/DirectedTextBlock.tsx:70"},
     {"path": "report:malware_report.directed_text[].evidence_id", "ref": "components/analysis/DirectedTextBlock.tsx:71", "note": "as a citation mark, the id in its name"},
-    {"path": "call_map:image_base", "ref": "components/analysis/CallMap.tsx:120"},
-    {"path": "call_map:functions[].address", "ref": "components/analysis/CallMap.tsx:401", "limit": 25, "note": "the call map's List view, 25 rows a step; the Tree view draws the roots and what a reader opens"},
-    {"path": "call_map:functions[].names[]", "ref": "components/analysis/CallMap.tsx:402", "limit": 25},
-    {"path": "call_map:functions[].offset", "ref": "components/analysis/CallMap.tsx:403", "limit": 25},
-    {"path": "call_map:functions[].read_by[]", "ref": "components/analysis/CallMap.tsx:410", "limit": 25},
-    {"path": "call_map:functions[].listed_in[]", "ref": "components/analysis/CallMap.tsx:430", "limit": 25, "note": "each a link to its evidence record"}
+    {"path": "call_map:image_base", "ref": "components/analysis/CallMap.tsx:121"},
+    {"path": "call_map:functions[].address", "ref": "components/analysis/CallMap.tsx:427", "limit": 25, "note": "the call map's List view, 25 rows a step; the Tree view draws the roots and what a reader opens"},
+    {"path": "call_map:functions[].names[]", "ref": "components/analysis/CallMap.tsx:428", "limit": 25},
+    {"path": "call_map:functions[].offset", "ref": "components/analysis/CallMap.tsx:429", "limit": 25},
+    {"path": "call_map:functions[].read_by[]", "ref": "components/analysis/CallMap.tsx:436", "limit": 25},
+    {"path": "call_map:functions[].listed_in[]", "ref": "components/analysis/CallMap.tsx:456", "limit": 25, "note": "each a link to its evidence record"}
    ]
   },
   "indicators": {

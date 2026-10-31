@@ -12,6 +12,7 @@ import { scrollRegion, SCROLL_REGION_FOCUS } from "@/components/ui/scrollRegion"
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import type { CallMapFunction, CallMapResponse } from "@/types/evidence";
+import { useReport } from "./AnalysisContext";
 import { CiteMark } from "./CitedProse";
 import {
   LIST_STEP,
@@ -144,7 +145,17 @@ function readWord(fn: CallMapFunction): string {
   return fn.read ? "read" : "named in a call, not read";
 }
 
-function CallTree({ map }: { map: CallMapResponse }) {
+/** The key that opens a focused function's listing records, announced on its row. */
+export const OPEN_LISTING_KEY = "o";
+
+/**
+ * The tree keeps one tab stop, as the tree pattern asks: the rows move with
+ * the arrows, Home and End, open with Right or Enter, close with Left, and a
+ * function's listing records open with O from its row. The citation mark on
+ * a row is for the pointer and takes no tab stop of its own.
+ */
+export function CallTree({ map }: { map: CallMapResponse }) {
+  const { showEvidence } = useReport();
   const index = useMemo(() => byAddress(map), [map]);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [whole, setWhole] = useState<ReadonlySet<string>>(new Set());
@@ -167,9 +178,10 @@ function CallTree({ map }: { map: CallMapResponse }) {
   const go = (key: string | undefined) => {
     if (!key) return;
     flushSync(() => setFocus(key));
+    // A key is hex addresses joined by ">", so a quoted attribute value holds it.
     document
       .getElementById(treeId)
-      ?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`)
+      ?.querySelector<HTMLElement>(`[data-key="${key.replace(/["\\]/g, "\\$&")}"]`)
       ?.focus();
   };
   const activate = (row: TreeRow) => {
@@ -183,8 +195,18 @@ function CallTree({ map }: { map: CallMapResponse }) {
   };
 
   const onKey = (e: KeyboardEvent<HTMLElement>, row: TreeRow, i: number) => {
+    // A key pressed on a control inside the row (a clicked citation) is that control's.
+    if (e.target !== e.currentTarget) return;
     const opened = row.kind === "function" && row.open;
     switch (e.key) {
+      case OPEN_LISTING_KEY:
+      case OPEN_LISTING_KEY.toUpperCase():
+        if (row.kind !== "function" || row.fn.listed_in.length === 0 || !showEvidence) return;
+        showEvidence(
+          { title: `Listing of ${row.fn.address}`, details: [], techniques: [], evidenceIds: [...row.fn.listed_in] },
+          e.currentTarget,
+        );
+        break;
       case "ArrowDown":
         go(rows[i + 1]?.key);
         break;
@@ -269,6 +291,7 @@ function CallTree({ map }: { map: CallMapResponse }) {
                 key={row.key}
                 {...common}
                 aria-expanded={row.callees > 0 ? row.open : undefined}
+                aria-keyshortcuts={fn.listed_in.length > 0 && showEvidence ? OPEN_LISTING_KEY.toUpperCase() : undefined}
                 aria-label={`${fn.address}${fn.names.length ? ` ${fn.names.join(", ")}` : ""}, ${readWord(fn)}, calls ${row.callees}`}
                 data-read={fn.read ? "true" : "false"}
               >
@@ -296,13 +319,16 @@ function CallTree({ map }: { map: CallMapResponse }) {
                     calls {row.callees.toLocaleString("en-US")}
                   </span>
                 )}
-                {fn.listed_in.length > 0 && <CiteMark ids={fn.listed_in} title={`Listing of ${fn.address}`} />}
+                {fn.listed_in.length > 0 && <CiteMark ids={fn.listed_in} title={`Listing of ${fn.address}`} tabIndex={-1} />}
               </li>
             );
           })}
         </ul>
       </div>
       <ShowMoreRows shown={roots.length} total={map.roots.length} onShow={setRootLimit} step={ROOTS_FIRST} />
+      <p className="border-t border-border-light px-3 py-1.5 text-[11px] text-text-muted">
+        Arrow keys move through the tree and open a function; O opens the records that hold its listing.
+      </p>
     </div>
   );
 }
