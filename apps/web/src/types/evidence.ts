@@ -109,6 +109,35 @@ export interface EvidenceListResponse {
   page_size: number;
 }
 
+/**
+ * One function the run's code reading touched (`GET /jobs/{id}/evidence/call-map`).
+ *
+ * Addresses are hex strings, one spelling per function: the virtual address
+ * where the run read one image base, with `offset` from it. `read` is whether
+ * an evidence entry holds its listing (`listed_in`); a function only named in
+ * a call or an index is not read. `address` is null for a function listed
+ * under a name alone, which has no calls.
+ */
+export interface CallMapFunction {
+  address: string | null;
+  offset: string | null;
+  names: string[];
+  read: boolean;
+  listed_in: string[];
+  read_by: string[];
+  calls: string[];
+  called_by: string[];
+}
+
+/** The job's call map, derived from its stored ledger when asked for. `roots`
+ *  are the functions nothing in the map calls, then one address per cycle. */
+export interface CallMapResponse {
+  job_id: string;
+  image_base: string | null;
+  functions: CallMapFunction[];
+  roots: string[];
+}
+
 /** Narrowing filters the evidence endpoint accepts. */
 export interface EvidenceQuery {
   agent?: string;
