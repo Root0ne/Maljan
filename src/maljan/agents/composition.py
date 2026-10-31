@@ -267,6 +267,8 @@ def reads_static_provider(definition: AgentDefinition | None) -> bool:
 
 
 NOT_MIRRORED_REASON = "sample not mirrored for {provider}"
+# A capability reference no server serves (``unresolved_capability_reasons``).
+UNRESOLVED_CAPABILITY_REASON = "capability '{capability}' resolves to no server"
 
 
 def pin_provider_sample(agent: Any, mirrored: Mapping[str, str] | None) -> None:
@@ -862,6 +864,43 @@ def _server_refs(settings: Settings, definition: AgentDefinition) -> list[ToolRe
     return out
 
 
+def unresolved_capability_reasons(settings: Settings, key: str) -> list[str]:
+    """One reason per capability agent ``key``'s definition references that names no server.
+
+    A save does not refuse such a reference while a built-in server is not
+    listed yet (``capability_undecided``), so a mistyped capability is said
+    here instead, beside an unservable reference's reason, rather than
+    resolving to nothing in silence. Nothing is said under a profile that
+    withholds every server.
+    """
+    from maljan.core.config import ALL_SERVERS
+
+    if not isinstance(settings, Settings):
+        return []
+    definition = _definition_of(settings, key)
+    if definition is None or ALL_SERVERS in _withheld_servers(settings, key):
+        return []
+    capabilities = dict.fromkeys(
+        str(ref.capability)
+        for ref in definition.tools
+        if ref.kind == "capability" and ref.capability
+    )
+    return [
+        UNRESOLVED_CAPABILITY_REASON.format(capability=capability)
+        for capability in capabilities
+        if not capability_servers(settings, capability)
+    ]
+
+
+def note_unresolved_capabilities(registry: Any, settings: Settings, key: str) -> list[str]:
+    """``unresolved_capability_reasons``, also put where the run summary reads the registry's."""
+    reasons = unresolved_capability_reasons(settings, key)
+    held = getattr(registry, "degradation_reasons", None)
+    if isinstance(held, list):
+        held.extend(reason for reason in reasons if reason not in held)
+    return reasons
+
+
 def _mcp_refs(settings: Settings, definition: AgentDefinition, key: str) -> list[ToolRef]:
     """The definition's server references, minus the ones the profile excludes."""
     from maljan.core.config import ALL_SERVERS
@@ -1313,6 +1352,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     )
     tools.extend(served)
     reasons.extend(served_reasons)
+    reasons.extend(note_unresolved_capabilities(registry, settings, key))
 
     # The notes after each description, settled over the whole list: the
     # provider's tools as the agent is offered them, beside the servers'.
@@ -1393,6 +1433,7 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     )
     tools.extend(served)
     reasons.extend(served_reasons)
+    reasons.extend(note_unresolved_capabilities(registry, settings, key))
 
     # The notes after each description, settled over the whole list: the
     # provider's tools as the agent is offered them, beside the servers'.

@@ -2594,6 +2594,11 @@ class JudgeAgent(BudgetMeter):
         from maljan.providers.servers import settle_tool_notes
 
         tools = settle_tool_notes([*tools, *served], getattr(self._container, "config", None))
+        config = getattr(self._container, "config", None)
+        if config is not None:
+            from maljan.agents.composition import note_unresolved_capabilities
+
+            reasons = [*reasons, *note_unresolved_capabilities(registry, config, "judge")]
         self.tools = tools
         self.degradation_reasons = reasons
         self.logger.info("Judge tool servers: %s", [t.name for t in self.tools])

@@ -2904,8 +2904,11 @@ built-in agents that look the sample's hash up (`static`, `network`, the judge,
 shipped servers that is the threat-intel sidecar and VirusTotal's own server; a
 built-in row stored with the earlier list that named VirusTotal by key loads as
 the seed. A save is never refused for a capability reference while an enabled
-built-in server has not been listed yet, since it may serve it once listed. An
-`agent` reference:
+built-in server has not been listed yet, since it may serve it once listed: the
+save is answered with a warning naming each capability that resolves to no
+server yet and the servers still unlisted, and a run records "capability '…'
+resolves to no server" among the agent's degradation reasons. An `agent`
+reference:
 
 ```json
 {"kind": "agent", "agent": "static"}

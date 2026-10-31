@@ -5971,6 +5971,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         tools, reasons = registry.agent_tools(
             role, self._job_key(), refs, exclude=withheld, seen=seen, **context
         )
+        container = getattr(self, "_container", None)
+        if container is not None:
+            from maljan.agents.composition import note_unresolved_capabilities
+
+            reasons = [
+                *reasons,
+                *note_unresolved_capabilities(registry, container.config, self.name),
+            ]
         if reasons:
             self.degradation_reasons = [*self.degradation_reasons, *reasons]
         return list(tools)
