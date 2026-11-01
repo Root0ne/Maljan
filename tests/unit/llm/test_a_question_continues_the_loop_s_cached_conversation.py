@@ -521,19 +521,30 @@ def _chain_bodies(
     room: float = ROOM_CHARS,
     task: str = "Analyse.",
     entry: str = LARGE,
+    peer: bool = False,
+    looked_up: str = "",
 ) -> list[dict[str, Any]]:
     """Every request of the whole chain, with an entry too large to show beside the turns.
 
     ``mode``: ``"dev"`` asks over the rebuilt conversation only (no loop base
     is kept, as on dev); ``"window"`` keeps the base but the loop's
     conversation does not fit the window; ``"aged"`` keeps it past the cache
-    lifetime; ``"kept"`` keeps it and asks over it.
+    lifetime; ``"kept"`` keeps it and asks over it. ``peer`` files the cited
+    entry under another agent, in the run's ledger the agent was briefed with;
+    ``looked_up`` is what the loop's first call asks for, its answer's text.
     """
     from maljan.agents import base_agent
     from maljan.pipeline.retry_merge import RetryMerge
     from maljan.schemas.evidence import LedgerEntry
 
-    wire = Wire(_chain_answer)
+    def answer(body: dict[str, Any]) -> dict[str, Any]:
+        out = _chain_answer(body)
+        for block in out["content"]:
+            if looked_up and block.get("type") == "tool_use" and block["id"] == "toolu_0":
+                block["input"] = {"what": looked_up}
+        return out
+
+    wire = Wire(answer)
     install(monkeypatch, wire)
     monkeypatch.setattr(base_agent, "loop_limits", lambda *_a, **_k: (None, 40))
     monkeypatch.setattr(
@@ -555,9 +566,13 @@ def _chain_bodies(
     agent.run_state_block = "sample: c"
     agent.tools = [_lookup()]
     text = agent.execute_tool_loop([("system", SYSTEM), ("human", task)])
-    agent._evidence_entries.append(
-        LedgerEntry(id="ev_0099", agent="static", tool="batch_decompile", output=entry)
-    )
+    if peer:
+        filed = LedgerEntry(id="ev_0099", agent="dynamic", tool="peer_tool", output=entry)
+        agent.run_state_source = {"evidence_ledger": [filed.model_dump()]}
+    else:
+        agent._evidence_entries.append(
+            LedgerEntry(id="ev_0099", agent="static", tool="batch_decompile", output=entry)
+        )
     if mode == "aged":
         kept = agent._kept_conversation
         assert kept is not None
@@ -656,8 +671,74 @@ class TestAContinuedQuestionShowsWhatTheRebuiltOneShows:
         for kind, body in asked.items():
             if body == built[kind]:
                 continue
-            if "MIDBODY" in _last_user_text(built[kind]):
+            if "MIDBODY" in json.dumps(built[kind]["messages"]):
                 assert "MIDBODY" in json.dumps(body["messages"]), (kind, room)
+
+
+def _entry_block(entry: str) -> str:
+    """The cited entry's block as a question shows it whole, as written in a request's JSON."""
+    from maljan.agents.tool_fence import fenced
+
+    block = f"[ev_0099] peer_tool:\n{fenced('ev_0099', entry)}"
+    return json.dumps(block, ensure_ascii=False)[1:-1]
+
+
+class TestAPeerEntryIsShownAsTheRebuiltQuestionShowsIt:
+    @pytest.mark.parametrize(
+        ("entry", "looked_up"),
+        [
+            # A line opening with the entry's id in a loop turn, the entry
+            # filed by another agent: a summary line, not its body.
+            ("PEER BODY: 0x309c reads the PEB BeingDebugged flag", "\n[ev_0099] a peer said so"),
+            # A body short enough to stand anywhere: "0" is in "answer for 0".
+            ("0", ""),
+        ],
+    )
+    def test_each_continued_question_shows_the_body_the_rebuilt_one_shows(
+        self, monkeypatch: pytest.MonkeyPatch, entry: str, looked_up: str
+    ) -> None:
+        with pytest.MonkeyPatch.context() as rebuilt_patch:
+            rebuilt = _chain_bodies(
+                rebuilt_patch, "dev", room=1e7, entry=entry, peer=True, looked_up=looked_up
+            )
+        kept = _chain_bodies(
+            monkeypatch, "kept", room=1e7, entry=entry, peer=True, looked_up=looked_up
+        )
+        built = {_kind(b): b for b in rebuilt if _kind(b) != "loop"}
+        asked = {_kind(b): b for b in kept if _kind(b) != "loop"}
+        assert set(asked) == set(built)
+        shown = _entry_block(entry)
+        assert any(shown in json.dumps(b["messages"], ensure_ascii=False) for b in built.values())
+        for kind, body in asked.items():
+            if body == built[kind]:
+                continue
+            if shown in json.dumps(built[kind]["messages"], ensure_ascii=False):
+                assert shown in json.dumps(body["messages"], ensure_ascii=False), kind
+
+
+class TestDropsAreContinuedWholeOrNotAtAll:
+    def test_one_part_that_cannot_be_continued_leaves_every_drops_request_rebuilt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        real = BaseAnalyst._retry_drop_parts
+
+        def one_part_names(agent: Any, drops: Any, *args: Any) -> Any:
+            parts = real(agent, drops, *args)
+            over_loop = any("Analyse." in str(getattr(m, "content", "")) for m in args[-1])
+            if not over_loop:
+                return parts
+            # Over the loop's conversation, the part names an entry it cannot show.
+            items, shown, unfit = parts[0]
+            return [(items, shown, [*unfit, "ev_0042"]), *parts[1:]]
+
+        with pytest.MonkeyPatch.context() as rebuilt_patch:
+            rebuilt = _chain_bodies(rebuilt_patch, "dev", room=1e7)
+        monkeypatch.setattr(BaseAnalyst, "_retry_drop_parts", one_part_names)
+        kept = _chain_bodies(monkeypatch, "kept", room=1e7)
+        marker = "no longer states these items"
+        asked = [b for b in kept if marker in _last_user_text(b)]
+        built = [b for b in rebuilt if marker in _last_user_text(b)]
+        assert asked and json.dumps(asked, sort_keys=True) == json.dumps(built, sort_keys=True)
 
 
 class TestTheBreakpointRule:
