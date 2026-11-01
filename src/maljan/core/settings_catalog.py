@@ -416,12 +416,16 @@ def core_catalog() -> list[CatalogEntry]:
 _SCHEME_PREFIX = ("bearer ", "basic ", "token ")
 # The last word of a mapping key that names a credential *value* — a tool
 # server's ``VT_API_KEY``, ``DB_PASSWORD``, ``GITLAB_PAT``, an ``Authorization``
-# header — optionally followed by ``value``. An allow-list on the last word: a
-# key that ends in anything else is a setting about the credential
-# (``TOKEN_TTL``, ``PASSWORD_POLICY``, ``SECRET_MANAGER``, ``AUTH_MODE``), not the
-# credential. A key such as ``SECRET_KEY_BASE`` is missed, which costs less than
-# masking a setting's word in every report. ``PWD`` is not on the list: in a tool
-# server's environment it is the shell's working directory.
+# header, a ``SESSION_COOKIE``, a ``JWT``, an ``AUTH`` — optionally followed by
+# ``value``. An allow-list on the last word: a key that ends in anything else is
+# a setting about the credential (``TOKEN_TTL``, ``PASSWORD_POLICY``,
+# ``SECRET_MANAGER``, ``AUTH_MODE``, ``COOKIE_SECURE``), not the credential. The
+# words are whole, so ``author``, ``authority`` and ``oauth`` are none of them.
+# A last word that ends in a password word is one too, its owner written run
+# together with it (``PGPASSWORD``, ``MYSQLPASSWD``). A key such as
+# ``SECRET_KEY_BASE`` is missed, which costs less than masking a setting's word
+# in every report. ``PWD`` is not on the list: in a tool server's environment it
+# is the shell's working directory.
 _CREDENTIAL_LAST_WORDS = frozenset(
     {
         "password",
@@ -437,10 +441,41 @@ _CREDENTIAL_LAST_WORDS = frozenset(
         "credentials",
         "authorization",
         "bearer",
+        "auth",
+        "cookie",
+        "cookies",
+        "jwt",
     }
 )
-# A value that is a number or a switch is a setting whatever its key says.
-_NOT_A_SECRET_VALUE = frozenset({"true", "false", "yes", "no", "on", "off", "none", "null"})
+# The password words a last word may end in, run together with its owner.
+_PASSWORD_ENDINGS = ("password", "passwd")
+# A value that is a number, a switch or the name of an authorization scheme is
+# a setting whatever its key says (``AUTH=basic``, ``AUTH=disabled``).
+_NOT_A_SECRET_VALUE = frozenset(
+    {
+        "true",
+        "false",
+        "yes",
+        "no",
+        "on",
+        "off",
+        "none",
+        "null",
+        "enabled",
+        "disabled",
+        "required",
+        "optional",
+        "anonymous",
+        "basic",
+        "bearer",
+        "digest",
+        "negotiate",
+        "ntlm",
+        "kerberos",
+        "oauth",
+        "oauth2",
+    }
+)
 # The generic REST sandbox's JSONPath maps: each value says where a response
 # keeps a field, not what the field holds. Never read for secrets. Its
 # ``submit_fields`` and ``extra_fields`` are form fields sent with every
@@ -456,7 +491,9 @@ def names_a_credential_value(key: str) -> bool:
     words = [word for word in re.split(r"[^a-z0-9]+", spaced.lower()) if word]
     if len(words) > 1 and words[-1] == "value":
         words = words[:-1]
-    return bool(words) and words[-1] in _CREDENTIAL_LAST_WORDS
+    return bool(words) and (
+        words[-1] in _CREDENTIAL_LAST_WORDS or words[-1].endswith(_PASSWORD_ENDINGS)
+    )
 
 
 # The query keys a service URL carries a credential under, beside every key
