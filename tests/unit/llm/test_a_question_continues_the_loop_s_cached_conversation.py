@@ -306,6 +306,35 @@ class TestTheRebuiltConversationStands:
         agent._answer_after_loop(turns, None, what="drops", tools=True, refuse_tools_free=True)
         assert time.monotonic() - agent._question_base.sent_at < 5.0
 
+    @pytest.mark.parametrize("failure", ["tools not bound", "a failed turn", "no answer"])
+    def test_a_loop_that_sent_nothing_keeps_the_base_s_time(
+        self, monkeypatch: pytest.MonkeyPatch, failure: str
+    ) -> None:
+        from maljan.agents.base_agent import ContinuationRefused, QuestionUnanswered, ToolsNotBound
+        from maljan.core.exceptions import AnalystError
+
+        raised = {
+            "tools not bound": ToolsNotBound("no binding"),
+            "a failed turn": AnalystError("the provider refused the request"),
+            "no answer": QuestionUnanswered("ended", "steps"),
+        }[failure]
+        agent = _Analyst(llm=cast(Any, None), name="static")
+        sent_at = time.monotonic() - 250.0
+        agent._question_base = KeptConversation((_human("Analyse."),), sent_at)
+
+        def failing(*_a: Any, **_k: Any) -> str:
+            raise raised
+
+        monkeypatch.setattr(agent, "execute_tool_loop", failing)
+        monkeypatch.setattr(BaseAnalyst, "_say_the_tools_were_not_bound", lambda *_a, **_k: None)
+        turns = [_human("Analyse."), _ai(REPORT), _human("q")]
+        with pytest.raises(ContinuationRefused):
+            agent._answer_after_loop(turns, None, what="drops", tools=True, refuse_tools_free=True)
+        if failure == "no answer":
+            assert time.monotonic() - agent._question_base.sent_at < 5.0, "its requests were sent"
+        else:
+            assert agent._question_base.sent_at == sent_at
+
     def test_a_tools_free_call_asks_over_the_rebuilt_turns(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -739,6 +768,163 @@ class TestDropsAreContinuedWholeOrNotAtAll:
         asked = [b for b in kept if marker in _last_user_text(b)]
         built = [b for b in rebuilt if marker in _last_user_text(b)]
         assert asked and json.dumps(asked, sort_keys=True) == json.dumps(built, sort_keys=True)
+
+
+class TestAMixedDropsAskIsTheRebuiltPartsItLeft:
+    def test_only_the_rebuilt_part_holding_the_refused_item_is_asked_again(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import sys
+
+        from maljan.agents.base_agent import ContinuationRefused, RetryDrops
+
+        module = sys.modules[__name__]
+        # The whole answer drops both claims of the first, and each drops
+        # part holds one item; every item is kept when asked.
+        whole_both = (
+            "CLAIM: it writes a log\nEVIDENCE: ev_0002\nCONFIDENCE: 0.6\nTECHNIQUE: NONE\n"
+            "---\nCLAIM: it opens a socket\nEVIDENCE: ev_0001\nCONFIDENCE: 0.6\n"
+            "TECHNIQUE: NONE\n"
+        )
+        real_answer = _chain_answer
+
+        def answer(body: dict[str, Any]) -> dict[str, Any]:
+            out = real_answer(body)
+            if "Your retry restated" in _last_user_text(body):
+                out["content"][-1]["text"] = "C1: KEEP, it stands"
+            return out
+
+        real_parts = BaseAnalyst._retry_drop_parts
+
+        def one_item_each(agent: Any, drops: Any, question: Any, *rest: Any) -> Any:
+            parts: list[Any] = []
+            for claim in drops.claims:
+                parts += real_parts(agent, RetryDrops(claims=(claim,)), question, *rest)
+            for finding in drops.findings:
+                parts += real_parts(agent, RetryDrops(findings=(finding,)), question, *rest)
+            return parts
+
+        real_ask = BaseAnalyst._answer_after_loop
+
+        def second_refused(agent: Any, messages: list[Any], *args: Any, **kwargs: Any) -> Any:
+            if kwargs.get("refuse_tools_free") and "0x309c" in str(messages[-1].content):
+                raise ContinuationRefused("its loop ended without an answer")
+            return real_ask(agent, messages, *args, **kwargs)
+
+        monkeypatch.setattr(module, "WHOLE", whole_both)
+        monkeypatch.setattr(module, "_chain_answer", answer)
+        monkeypatch.setattr(BaseAnalyst, "_retry_drop_parts", one_item_each)
+        with pytest.MonkeyPatch.context() as rebuilt_patch:
+            rebuilt = _chain_bodies(rebuilt_patch, "dev", room=1e7)
+        monkeypatch.setattr(BaseAnalyst, "_answer_after_loop", second_refused)
+        kept = _chain_bodies(monkeypatch, "kept", room=1e7)
+
+        # The whole answer restates none of the first answer's claims, so the
+        # question is the restated-few one, over the same drops path.
+        marker = "Your retry restated"
+        built = [b for b in rebuilt if marker in _last_user_text(b)]
+        asked = [b for b in kept if marker in _last_user_text(b)]
+        assert len(built) == 2, "two rebuilt parts, one item each"
+        first_built, second_built = (
+            next(b for b in built if ("0x309c" in _last_user_text(b)) is second)
+            for second in (False, True)
+        )
+        continued = [b for b in asked if "the raw data" not in json.dumps(b["messages"])]
+        again = [b for b in asked if "the raw data" in json.dumps(b["messages"])]
+        assert len(continued) == 1 and "0x309c" not in _last_user_text(continued[0])
+        # The run-state block counts the steps the loop has left, and the
+        # refused part here spent none before it was refused: every other
+        # byte is the rebuilt part's.
+        assert _without_budget(again) == _without_budget([second_built]), (
+            "only the part holding the refused item, as built"
+        )
+        assert first_built not in asked
+
+
+class TestABaseFitLogsNothing:
+    def test_only_the_rebuilt_fit_names_the_entries_it_cannot_show(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from maljan.schemas.evidence import LedgerEntry
+
+        agent = _Analyst(llm=cast(Any, None), name="static")
+        agent._evidence_entries = [
+            LedgerEntry(id="ev_0001", agent="static", tool="t", output="A" * 4000),
+            LedgerEntry(id="ev_0002", agent="static", tool="t", output="B" * 4000),
+        ]
+        monkeypatch.setattr(BaseAnalyst, "_window_room_chars", lambda *_a, **_k: 6000.0)
+        isr = AgentISR_with(["ev_0001", "ev_0002"])
+        turns = [_human("Analyse.")]
+        caplog.set_level("WARNING")
+        BaseAnalyst._with_cited_entries(
+            agent, isr, turns, "CLOSE", lambda text: [*turns, _human(text)], 0, quiet=True
+        )
+        assert "do not fit beside its" not in caplog.text
+        BaseAnalyst._with_cited_entries(
+            agent, isr, turns, "CLOSE", lambda text: [*turns, _human(text)], 0
+        )
+        assert "do not fit beside its" in caplog.text
+
+
+class TestAnEntryTheRebuiltConversationHolds:
+    def test_needs_its_view_in_the_loop_s_conversation_or_the_question(self) -> None:
+        import logging
+        from types import SimpleNamespace
+
+        from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+
+        from maljan.agents.tool_fence import fenced
+        from maljan.schemas.evidence import LedgerEntry
+
+        body = "PEER BODY: 0x309c reads PEB BeingDebugged " * 5
+        view = fenced("ev_0901", body)
+        agent = SimpleNamespace(
+            name="static",
+            _evidence_entries=[],
+            _live_map_entries=[],
+            run_state_source={
+                "evidence_ledger": [
+                    LedgerEntry(
+                        id="ev_0901", agent="dynamic", tool="peer", output=body
+                    ).model_dump()
+                ]
+            },
+            logger=logging.getLogger("t"),
+        )
+        # The rebuilt conversation holds the body, so the rebuilt question shows nothing of it.
+        rebuilt = [SystemMessage(content="sys"), _human(f"Analyse.\n{view}")]
+        loop = (
+            SystemMessage(content="sys"),
+            _human("Analyse."),
+            AIMessage(content="", tool_calls=[{"id": "t1", "name": "lookup", "args": {}}]),
+            ToolMessage(content="lookup result", tool_call_id="t1"),
+        )
+        base = KeptConversation(loop, 0.0)
+        guard = BaseAnalyst._shows_what_the_rebuilt_shows
+        assert not guard(agent, ["ev_0901"], rebuilt, "CLOSE", base, "CLOSE")  # type: ignore[arg-type]
+        assert guard(agent, ["ev_0901"], rebuilt, "CLOSE", base, f"{view}\nCLOSE")  # type: ignore[arg-type]
+        held = KeptConversation((*loop[:-1], ToolMessage(content=view, tool_call_id="t1")), 0.0)
+        assert guard(agent, ["ev_0901"], rebuilt, "CLOSE", held, "CLOSE")  # type: ignore[arg-type]
+
+
+def _without_budget(bodies: list[dict[str, Any]]) -> str:
+    import re
+
+    return re.sub(r"budget remaining: [^\\]*", "", json.dumps(bodies, sort_keys=True))
+
+
+def AgentISR_with(cited: list[str]) -> Any:  # noqa: N802 — a builder named for what it builds
+    from maljan.schemas.isr_models import AgentISR
+
+    return AgentISR(
+        agent_id="static",
+        domain="static",
+        revision_round=0,
+        claims=[
+            ClaimEvidence(claim=f"c{n}", evidence_ref=ref, confidence=0.5, technique_id=None)
+            for n, ref in enumerate(cited)
+        ],
+    )
 
 
 class TestTheBreakpointRule:

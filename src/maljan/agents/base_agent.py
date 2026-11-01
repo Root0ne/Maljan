@@ -8535,8 +8535,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         carries its id and its digest, stands verbatim in the loop's
         conversation, or the view stands verbatim in ``over_base``. A summary
         line, a note in place of the body or a text that merely contains the
-        body counts for nothing: a continued question never shows the model
-        less than the rebuilt one.
+        body counts for nothing; an entry the rebuilt conversation holds that
+        the loop's conversation does not hold as written needs its view in
+        either. A continued question never shows the model less than the
+        rebuilt one.
         """
         shown = cited_entry_texts(self, cited, messages)
         held = "\n".join(
@@ -8559,6 +8561,16 @@ class BaseAnalyst(BudgetMeter, ABC):
             if fenced_view and view in held:
                 continue
             return False
+        # An entry the rebuilt conversation holds, so the rebuilt question
+        # shows nothing of it, that the loop's conversation does not hold as
+        # written: its fenced view must stand in the loop's conversation or
+        # in the continued question.
+        unheld = cited_entry_texts(self, cited, list(base.messages))
+        rest = [entry_id for entry_id in unheld if entry_id not in shown]
+        for text in cited_entry_texts(self, rest, []).values():
+            _head, said, view = text.rstrip().partition(":\n")
+            if said and view not in over_base and view not in held:
+                return False
         return True
 
     def _live_question_base(
