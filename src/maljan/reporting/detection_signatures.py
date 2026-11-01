@@ -248,6 +248,9 @@ def is_benign(report: MalwareReport) -> bool:
 # The IOC-table kinds a draft may match on, and the network kinds among them.
 _DRAFT_STRING_KINDS = frozenset({"url", "domain", "ip", "registry", "mutex", "command", "path"})
 _DRAFT_NETWORK_KINDS = frozenset({"domain", "ip", "url"})
+# The IOC-table kind of a user agent the code sends, which a Suricata draft
+# matches in the request header and no other draft reads.
+_USER_AGENT_KIND = "user_agent"
 
 
 def _published_rows(report: MalwareReport) -> list[Any]:
@@ -1039,14 +1042,29 @@ _SURICATA_MAX_BODY_BYTES = 16_000
 
 
 def _build_suricata(report: MalwareReport) -> DetectionRule | None:
-    """Alert rules over the network indicators this run publishes, and no others."""
-    published = [row for row in _published_rows(report) if row.kind in _DRAFT_NETWORK_KINDS]
+    """Alert rules over the network indicators this run publishes, and no others.
+
+    A published user agent is one of them: the header every HTTP request the
+    sample's session makes carries, matched in the sensor's ``http.user_agent``
+    buffer. Its rules follow the others, so a run that publishes none keeps the
+    SIDs it had.
+    """
+    published = [
+        row
+        for row in _published_rows(report)
+        if row.kind in _DRAFT_NETWORK_KINDS or row.kind == _USER_AGENT_KIND
+    ]
     why = {(row.kind, row.value): _why_published(row) for row in published}
     domains = [NetworkDomain(fqdn=row.value) for row in published if row.kind == "domain"]
     ips = [NetworkIP(address=row.value) for row in published if row.kind == "ip"]
     urls = [NetworkURL(url=row.value) for row in published if row.kind == "url"]
+    agents = list(
+        dict.fromkeys(
+            str(row.value) for row in published if row.kind == _USER_AGENT_KIND and row.value
+        )
+    )
 
-    if not (domains or ips or urls):
+    if not (domains or ips or urls or agents):
         return None
 
     seed = _rule_name_seed(report)
@@ -1096,13 +1114,27 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
             sources.append(f"url:{url.url}")
             sid += 1
 
-    for what, rows in (("domains", domains), ("addresses", ips), ("URLs", urls)):
+    for agent in agents[:_MAX_SURICATA_RULES]:
+        rule = _suricata_user_agent_rule(agent, sid, sha256, family)
+        if rule is not None:
+            lines.append(_comment(why.get((_USER_AGENT_KIND, agent), agent)))
+            lines.append(rule)
+            sources.append(f"{_USER_AGENT_KIND}:{agent}")
+            sid += 1
+
+    counted: tuple[tuple[str, list[Any]], ...] = (
+        ("domains", domains),
+        ("addresses", ips),
+        ("URLs", urls),
+        ("user agents", agents),
+    )
+    for what, rows in counted:
         if len(rows) > _MAX_SURICATA_RULES:
             lines.append(
                 "# " + LEFT_OUT_COMMENT.format(rest=len(rows) - _MAX_SURICATA_RULES, what=what)
             )
 
-    capped = sum(max(0, len(rows) - _MAX_SURICATA_RULES) for rows in (domains, ips, urls))
+    capped = sum(max(0, len(rows) - _MAX_SURICATA_RULES) for _what, rows in counted)
     body = _suricata_body_within(lines, header=3, capped=capped)
 
     compile_error = _validate_suricata(body)
@@ -1218,6 +1250,29 @@ def _suricata_http_rule(url: NetworkURL, sid: int, sha256: str, family: str) -> 
         f"flow:established,to_server; "
         f'http.host; content:"{host_content}"; nocase; '
         f'http.uri; content:"{path_content}"; nocase; '
+        f"classtype:trojan-activity; sid:{sid}; rev:1; "
+        f"metadata:auto_generated maljan, sha256 {sha256[:12]};)"
+    )
+
+
+def _suricata_user_agent_rule(agent: str, sid: int, sha256: str, family: str) -> str | None:
+    """One rule matching ``agent`` in the request's ``User-Agent`` header.
+
+    The value is the published text as the code sends it, every character the
+    content syntax could read as its own (a quote, ``;``, a parenthesis, a
+    control character) written as a hex byte, so the header's own
+    ``(compatible; ...)`` cannot end the content or the rule. The message
+    names the family only: the comment above the rule carries the value, and
+    a backslash a user agent may hold is not text a message may carry bare.
+    """
+    if not agent:
+        return None
+    content = _suricata_content_escape(agent)
+    msg = f"Maljan AutoGen HTTP user agent ({family})"
+    return (
+        f'alert http any any -> any any (msg:"{_suricata_msg_escape(msg)}"; '
+        f"flow:established,to_server; "
+        f'http.user_agent; content:"{content}"; '
         f"classtype:trojan-activity; sid:{sid}; rev:1; "
         f"metadata:auto_generated maljan, sha256 {sha256[:12]};)"
     )

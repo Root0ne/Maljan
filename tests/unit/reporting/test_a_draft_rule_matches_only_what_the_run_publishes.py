@@ -123,6 +123,101 @@ class TestAMalwareVerdict:
         assert OBSERVED in body
 
 
+AGENT = "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Tob 1.1)"
+
+
+def _with_agent(report: MalwareReport, value: str = AGENT, *, published: bool = True) -> Any:
+    from maljan.reporting.models import ConsolidatedIOC
+
+    report.consolidated_iocs = [
+        *report.consolidated_iocs,
+        ConsolidatedIOC(
+            type="User agent",
+            kind="user_agent",
+            value=value,
+            source="call_argument",
+            published=(
+                "yes: the code passes it to InternetOpenW as argument 1"
+                if published
+                else "no: no call is shown to send it"
+            ),
+        ),
+    ]
+    return report
+
+
+def _rule_lines(body: str) -> list[str]:
+    return [line for line in body.splitlines() if line.startswith("alert")]
+
+
+class TestAPublishedUserAgent:
+    def test_gets_a_rule_on_the_request_header_after_the_other_rules(self) -> None:
+        rule = _rule(_with_agent(_report()), "suricata")
+
+        assert rule.compile_error is None
+        *others, agent = _rule_lines(rule.body)
+        assert others and all("http.user_agent" not in line for line in others)
+        assert "flow:established,to_server; http.user_agent; content:" in agent
+        # The header's parentheses, semicolons and commas are hex bytes, so
+        # none of them ends the content or the rule.
+        assert (
+            'content:"Mozilla/4.0 |28|compatible|3B| MSIE 7.0|3B| Windows NT 5.1|3B| Tob 1.1|29|"'
+            in agent
+        )
+        sids = [int(line.split("sid:")[1].split(";")[0]) for line in _rule_lines(rule.body)]
+        assert sids == list(range(sids[0], sids[0] + len(sids)))
+        assert f"user_agent:{AGENT}" in rule.source_evidence
+        comment = rule.body.splitlines()[rule.body.splitlines().index(agent) - 1]
+        assert comment == (
+            f"# {AGENT}: published because the code passes it to InternetOpenW as argument 1"
+        )
+
+    def test_the_other_rules_keep_their_sids(self) -> None:
+        before = _rule(_report(), "suricata").body
+        after = _rule(_with_agent(_report()), "suricata").body
+
+        assert _rule_lines(after)[: len(_rule_lines(before))] == _rule_lines(before)
+
+    def test_alone_it_still_makes_a_draft(self) -> None:
+        report = _report()
+        report.network = NetworkIOCs()
+        report.consolidated_iocs = build_consolidated_iocs(report)
+
+        rule = _rule(_with_agent(report), "suricata")
+
+        assert rule is not None and rule.compile_error is None
+        assert len(_rule_lines(rule.body)) == 1 and "http.user_agent" in rule.body
+
+    def test_an_unpublished_agent_gets_none(self) -> None:
+        body = _rule(_with_agent(_report(), published=False), "suricata").body
+
+        assert "http.user_agent" not in body
+
+    def test_a_quote_or_a_line_break_cannot_end_the_rule(self) -> None:
+        hostile = 'x"; sid:1; rev:1;)\nalert ip any any -> any any (msg:"y"\\'
+        rule = _rule(_with_agent(_report(), hostile), "suricata")
+
+        assert rule.compile_error is None
+        (line,) = [line for line in _rule_lines(rule.body) if "http.user_agent" in line]
+        # Two quoted strings, the message and the content, and one end.
+        assert line.count('"') == 4 and line.count(";)") == 1
+        content = line.split('content:"')[1].split('"')[0]
+        assert not set(content) & set('";()\\\n')
+        assert not [line for line in _rule_lines(rule.body) if 'msg:"y"' in line]
+
+    def test_a_long_list_is_capped_and_says_so(self) -> None:
+        from maljan.reporting.detection_signatures import _MAX_SURICATA_RULES, LEFT_OUT_COMMENT
+
+        report = _report()
+        for i in range(_MAX_SURICATA_RULES + 2):
+            report = _with_agent(report, f"agent-{i}/1.0")
+
+        body = _rule(report, "suricata").body
+
+        assert body.count("http.user_agent") == _MAX_SURICATA_RULES
+        assert "# " + LEFT_OUT_COMMENT.format(rest=2, what="user agents") in body
+
+
 class TestSigma:
     """A Sigma selection is held to the same rule: published, or watched by a sandbox."""
 

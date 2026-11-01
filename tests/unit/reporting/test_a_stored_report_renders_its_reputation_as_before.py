@@ -49,11 +49,15 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # the STIX gains one platform ``indicates`` edge per indicator related to no
 # malware object (the similarity digests aside), each named by the report
 # object, and nothing else.
+# The STIX re-pinned when the similarity digests came to indicate the sample as
+# every other digest does (T-498): each export gains the platform ``indicates``
+# edge from its imphash indicator, named by the report object, and nothing
+# else; the Markdown and HTML did not change.
 STORED_RENDERS = {
-    "run7": ("b6b67d78ed8bfe45", "985ed08f2496b1e3", "c6313f103ee42d52"),
-    "run5": ("3f3f15bbd3933f1f", "b376d7a47c654122", "276aad22c908ff48"),
-    "run4": ("9da95bae69272ee5", "7c6021dbe84ce2ff", "b0060de27f126465"),
-    "local8": ("9a23cffd548254ce", "ad6790825e501610", "bd6ac195bc590655"),
+    "run7": ("b6b67d78ed8bfe45", "985ed08f2496b1e3", "4d46d6cf236c0314"),
+    "run5": ("3f3f15bbd3933f1f", "b376d7a47c654122", "17b962beee2bc479"),
+    "run4": ("9da95bae69272ee5", "7c6021dbe84ce2ff", "b925e0563640683a"),
+    "local8": ("9a23cffd548254ce", "ad6790825e501610", "b4f3b32be0178777"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

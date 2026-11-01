@@ -438,9 +438,10 @@ class TestEveryMalwareExportHangsTogether:
     def test_every_indicator_indicates_the_malware_by_its_maker_or_the_platform(self) -> None:
         """Every indicator the export publishes indicates a malware object: by
         an edge the judge wrote, by the sample's own hash edge, or by an edge
-        the platform adds and says it added; one typed ``benign`` and the
-        similarity digests are related to nothing. Every edge is listed in the
-        report object's ``object_refs``."""
+        the platform adds and says it added; one typed ``benign`` is related to
+        nothing, and the sample's import-table and similarity digests indicate
+        it like every other digest. Every edge is listed in the report object's
+        ``object_refs``."""
         for name, bundle in _malware_exports():
             by_id = {o.id: o for o in bundle.objects}
             sample_hash = {
@@ -464,10 +465,8 @@ class TestEveryMalwareExportHangsTogether:
                 indicating.add(o.source_ref)
             for o in bundle.objects:
                 if o.type == "indicator":
-                    # Typed benign, or the similarity digests (which match
-                    # files that are not the sample): related to nothing.
-                    similar = str(o.name or "").startswith("Files like the sample")
-                    if "benign" in (o.indicator_types or []) or similar:
+                    # Typed benign: related to nothing.
+                    if "benign" in (o.indicator_types or []):
                         assert o.id not in indicating and o.id in listed, (name, o.id)
                     else:
                         assert o.id in indicating, (name, o.id)
