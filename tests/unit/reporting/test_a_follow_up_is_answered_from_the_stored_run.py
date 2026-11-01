@@ -34,6 +34,7 @@ from maljan.reporting.follow_up import (
     recorded_reporter,
     reporter_overrides,
     spilled_rows,
+    stored_ledger,
     stored_open_questions,
     stored_run,
 )
@@ -175,6 +176,27 @@ class TestTheStoredRun:
         run = stored_run(_payload(), [*_rows(), {"entry_id": "ev_9", "ok": "not a flag"}, 3])
 
         assert run.notes[0] == "2 stored ledger row(s) do not read as ledger entries"
+
+    @pytest.mark.parametrize("name", sorted(set(LedgerEntry.model_fields) - {"id"}))
+    def test_a_null_column_reads_as_absent(self, name: str) -> None:
+        # A database row keeps NULL for a column the entry carried nothing in.
+        row = {"entry_id": "ev_0001", "seq": 1, "agent": "static", "tool": "strings"}
+        row.pop(name, None)
+
+        (absent,), _ = stored_ledger([row])
+        (null,), unread = stored_ledger([{**row, name: None}])
+
+        assert unread == 0
+        assert null.model_dump(mode="json") == absent.model_dump(mode="json")
+
+    def test_a_row_with_every_column_null_that_can_be_reads_back(self) -> None:
+        row = {name: None for name in LedgerEntry.model_fields}
+        row.update({"entry_id": "ev_0003", "seq": 3, "agent": "static", "tool": "strings"})
+
+        run = stored_run(_payload(), [row, *_rows()])
+
+        assert [e.id for e in run.ledger] == ["ev_0001", "ev_0002", "ev_0003"]
+        assert not any("ledger row" in note for note in run.notes)
 
     def test_a_payload_that_is_not_a_report_is_refused(self) -> None:
         with pytest.raises(ValueError, match="does not read as a report"):

@@ -84,3 +84,34 @@ def test_the_verifier_sees_a_malformed_row_and_says_why_it_read_none(
     assert "holds no entries" in verify.verify_run(tmp_path)["evidence_not_read"]
     (tmp_path / "evidence.json").unlink()
     assert "absent" in verify.verify_run(tmp_path)["evidence_not_read"]
+
+
+def test_the_replay_reads_a_row_with_null_columns_as_the_database_exports_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A job read from the database (``--job``) keeps NULL in each column its
+    # entry carried nothing in, those the entry schema admits no null for too.
+    row = {"entry_id": "ev_0001", "seq": 1, "agent": "static", "tool": "strings",
+           "output": "x", "started_at": None, "ran_on": None, "args": None,
+           "structured_from_server": None}  # fmt: skip
+    (tmp_path / "evidence.json").write_text(json.dumps({"items": [row]}), encoding="utf-8")
+
+    from scripts.replay import rules
+
+    runs: list[Any] = []
+    read_ledger = rules._read_ledger
+
+    def _kept(run: Any) -> None:
+        runs.append(run)
+        read_ledger(run)
+
+    monkeypatch.setattr(rules, "_read_ledger", _kept)
+    record = rules.replay_run(read_run(tmp_path))
+
+    (run,) = runs
+    assert [entry.id for entry in run.ledger] == ["ev_0001"]
+    assert not [
+        said
+        for said in record["not_replayed"]
+        if said["part"] == "ledger" and "do not read" in said["why"]
+    ]

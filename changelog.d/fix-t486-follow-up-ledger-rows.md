@@ -1,0 +1,3 @@
+### Fixed
+
+- **A follow-up question reads the job's ledger rows as the database returns them (T-486).** The follow-up's reader of the stored ledger refused every row that held NULL in a column the entry schema does not admit null for (`started_at`, `ran_on`, `args_nulls_dropped`, `args_nulls_withheld`, `structured_from_server`), and nearly every row holds one (all 214 of a recent job did), so the console's Chat answered from no evidence and noted that the rows did not read. A null column now reads as absent, the entry's default standing for it; every field that admits null defaults to it, so a stored run's ledger reads exactly as before. The replay reads a ledger through the same reader, so a job it reads from the database (`--job`) has its ledger read too.

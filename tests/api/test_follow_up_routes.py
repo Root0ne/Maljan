@@ -327,3 +327,50 @@ def test_the_owner_is_answered_with_no_transaction_open_while_the_model_answers(
     assert stored.session.get(AnalysisReport, stored.report.id).malware_report == (
         stored.report.malware_report
     )
+
+
+def test_ledger_rows_with_null_columns_reach_the_question_as_the_database_returns_them(
+    stored: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.models.evidence import EvidenceEntry
+
+    # NULL in every nullable column of the table, as a row whose entry carried
+    # nothing there, or one older than the column, is stored.
+    nullable = [c.name for c in EvidenceEntry.__table__.columns if c.nullable]
+    stored.session.add_all(
+        [
+            EvidenceEntry(
+                **{name: None for name in nullable},
+                job_id=stored.job.id,
+                entry_id=f"ev_000{seq}",
+                seq=seq,
+                agent="static",
+                tool="strings",
+                output="beacons to example.test",
+            )
+            for seq in (1, 2)
+        ]
+    )
+    stored.session.commit()
+    read: list[Any] = []
+
+    async def _answer(prepared: Any, question: str) -> follow_up.Answered:
+        read.append(prepared.run)
+        answer = QuestionAnswer(
+            question=question, outcome="established", answer="Yes [ev_0002].",
+            evidence_ids=["ev_0002"],
+        )  # fmt: skip
+        return follow_up.Answered(answer=answer, model="openai gpt-test", notes=prepared.run.notes)
+
+    monkeypatch.setattr(follow_up, "answer", _answer)
+    client = _real_client(stored, stored.owner)
+
+    res = client.post(f"/api/v1/jobs/{stored.job.id}/follow-ups", json={"question": "Q?"})
+
+    assert res.status_code == 201, res.text
+    assert {"started_at", "ran_on", "args_nulls_withheld", "structured_from_server"} <= set(
+        nullable
+    )
+    (run,) = read
+    assert [e.id for e in run.ledger] == ["ev_0001", "ev_0002"]
+    assert not any("ledger" in note for note in res.json()["notes"])
