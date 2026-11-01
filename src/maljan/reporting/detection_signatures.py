@@ -1060,7 +1060,9 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     urls = [NetworkURL(url=row.value) for row in published if row.kind == "url"]
     agents = list(
         dict.fromkeys(
-            str(row.value) for row in published if row.kind == _USER_AGENT_KIND and row.value
+            str(row.value)
+            for row in published
+            if row.kind == _USER_AGENT_KIND and _draftable_agent(str(row.value or ""))
         )
     )
 
@@ -1187,11 +1189,15 @@ def _suricata_content_escape(value: str) -> str:
     Suricata's ``content:`` directive accepts ASCII plus ``|XX|`` hex bytes.
     We pass through a conservative safe set and hex-encode the rest, so the
     resulting rule cannot break out of the string and inject a directive.
+    A sensor compares bytes, so a character outside the safe set is written
+    as the bytes of its UTF-8 encoding, one ``|XX|`` pair each: its code
+    point written as hex matched nothing (``é`` is ``|C3||A9|`` on the wire,
+    not ``|E9|``) and, above U+00FF, was not a byte at all.
     """
     out: list[str] = []
     for ch in value:
         if _SURICATA_CONTENT_RE.match(ch):
-            out.append(f"|{ord(ch):02X}|")
+            out.extend(f"|{byte:02X}|" for byte in ch.encode("utf-8", errors="surrogatepass"))
         else:
             out.append(ch)
     return "".join(out)
@@ -1255,31 +1261,48 @@ def _suricata_http_rule(url: NetworkURL, sid: int, sha256: str, family: str) -> 
     )
 
 
+# The fewest bytes, spaces aside, a user agent holds before a draft matches
+# on it. A one-word product name (``Mozilla``, ``WinHTTP``) or a stray letter
+# says too little to be a sample's own header even matched whole, and the
+# shortest of the user agents a client library sends with its version
+# (``curl/7.1``, ``Wget/1.2``) is eight bytes.
+_MIN_USER_AGENT_BYTES = 8
+
+
+def _draftable_agent(agent: str) -> bool:
+    """Whether ``agent`` holds enough to draft a rule on (:data:`_MIN_USER_AGENT_BYTES`)."""
+    return len(agent.strip().encode("utf-8", errors="surrogatepass")) >= _MIN_USER_AGENT_BYTES
+
+
 def _suricata_user_agent_rule(agent: str, sid: int, sha256: str, family: str) -> str | None:
-    """One rule matching ``agent`` in the request's ``User-Agent`` header.
+    """One rule matching ``agent`` as the whole of the request's ``User-Agent`` header.
 
     The value is the published text as the code sends it, every character the
     content syntax could read as its own (a quote, ``;``, a parenthesis, a
     control character) written as a hex byte, so the header's own
-    ``(compatible; ...)`` cannot end the content or the rule. The message
-    names the family only: the comment above the rule carries the value, and
-    a backslash a user agent may hold is not text a message may carry bare.
+    ``(compatible; ...)`` cannot end the content or the rule. The content is
+    anchored at both ends of the buffer (``startswith; endswith;``), as the
+    STIX pattern compares the header whole: unanchored, a published
+    ``Mozilla/5.0`` matched every browser's request. A value too short to
+    draft on (:func:`_draftable_agent`) gets none. The message names the
+    family only: the comment above the rule carries the value.
     """
-    if not agent:
+    if not _draftable_agent(agent):
         return None
     content = _suricata_content_escape(agent)
     msg = f"Maljan AutoGen HTTP user agent ({family})"
     return (
         f'alert http any any -> any any (msg:"{_suricata_msg_escape(msg)}"; '
         f"flow:established,to_server; "
-        f'http.user_agent; content:"{content}"; '
+        f'http.user_agent; content:"{content}"; startswith; endswith; '
         f"classtype:trojan-activity; sid:{sid}; rev:1; "
         f"metadata:auto_generated maljan, sha256 {sha256[:12]};)"
     )
 
 
 def _suricata_msg_escape(value: str) -> str:
-    return _one_line(value).replace('"', "'").replace(";", ",")
+    """``value`` as message text: no quote, ``;`` or backslash a sensor reads as syntax."""
+    return _one_line(value).replace('"', "'").replace(";", ",").replace("\\", "/")
 
 
 def _one_line(value: str) -> str:
@@ -1300,6 +1323,23 @@ _SURICATA_HEAD_RE = re.compile(r"^alert\s+\S+\s+")
 _SURICATA_SID_RE = re.compile(r"\bsid:\s*\d+\b")
 _SURICATA_MSG_RE = re.compile(r'\bmsg:"[^"]*"')
 _SURICATA_END_RE = re.compile(r";\s*\)$")
+_SURICATA_CONTENT_VALUE_RE = re.compile(r'\bcontent:"([^"]*)"')
+_SURICATA_HEX_GROUP_RE = re.compile(r"\s*[0-9A-Fa-f]{2}(?:\s+[0-9A-Fa-f]{2})*\s*")
+
+
+def _content_is_well_formed(line: str) -> bool:
+    """Whether every ``|...|`` group of each content in ``line`` is hex byte pairs.
+
+    A group of another shape (an odd digit, a code point of four, a ``|``
+    left open) is a rule a sensor refuses.
+    """
+    for value in _SURICATA_CONTENT_VALUE_RE.findall(line):
+        parts = value.split("|")
+        if len(parts) % 2 == 0:
+            return False
+        if not all(_SURICATA_HEX_GROUP_RE.fullmatch(group) for group in parts[1::2]):
+            return False
+    return True
 
 
 def _validate_suricata(body: str) -> str | None:
@@ -1319,6 +1359,7 @@ def _validate_suricata(body: str) -> str | None:
             and _SURICATA_SID_RE.search(line)
             and _SURICATA_MSG_RE.search(line)
             and _SURICATA_END_RE.search(line)
+            and _content_is_well_formed(line)
         ):
             bad.append(marked_cut(line, 80))
     if bad:

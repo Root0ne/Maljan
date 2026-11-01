@@ -217,6 +217,96 @@ class TestAPublishedUserAgent:
         assert body.count("http.user_agent") == _MAX_SURICATA_RULES
         assert "# " + LEFT_OUT_COMMENT.format(rest=2, what="user agents") in body
 
+    def test_a_short_published_agent_is_matched_whole(self) -> None:
+        """A published ``Mozilla/5.0`` matched anywhere in the header would
+        alert on every browser; the rule matches the header that is exactly it."""
+        rule = _rule(_with_agent(_report(), "Mozilla/5.0"), "suricata")
+
+        (line,) = [line for line in _rule_lines(rule.body) if "http.user_agent" in line]
+        assert 'http.user_agent; content:"Mozilla/5.0"; startswith; endswith; ' in line
+        assert rule.compile_error is None
+
+    @pytest.mark.parametrize("value", ["   ", "\t\r\n", "A", "Mozilla", " Mozilla "])
+    def test_a_blank_or_too_short_agent_gets_none(self, value: str) -> None:
+        body = _rule(_with_agent(_report(), value), "suricata").body
+
+        assert "http.user_agent" not in body
+
+    @pytest.mark.parametrize(
+        ("value", "bytes_written"),
+        [
+            ("Agent café/1.0", "Agent caf|C3||A9|/1.0"),
+            ("Agent/1.0 \U0001f600", "Agent/1.0 |F0||9F||98||80|"),
+            ("Agent\u2028tail/1.0", "Agent|E2||80||A8|tail/1.0"),
+        ],
+    )
+    def test_a_character_beyond_ascii_is_written_as_its_utf8_bytes(
+        self, value: str, bytes_written: str
+    ) -> None:
+        """A sensor compares bytes: the code point written as hex matched
+        nothing, and one above U+00FF was not a byte a sensor reads."""
+        rule = _rule(_with_agent(_report(), value), "suricata")
+
+        (line,) = [line for line in _rule_lines(rule.body) if "http.user_agent" in line]
+        assert f'content:"{bytes_written}"; startswith; endswith;' in line
+        assert rule.compile_error is None
+
+    def test_one_agent_longer_than_the_draft_is_left_out_whole_and_counted(self) -> None:
+        rule = _rule(_with_agent(_report(), "Agent/" + "x" * 20_000), "suricata")
+
+        assert "http.user_agent" not in rule.body
+        assert "xxxx" not in rule.body
+        assert rule.body.splitlines()[-1] == (
+            "# (cut at the draft's size: 1 more indicators are not included; "
+            "the report's IOC table carries every indicator)"
+        )
+        assert rule.compile_error is None
+
+
+class TestTheSuricataSyntaxCheck:
+    @pytest.mark.parametrize(
+        "content",
+        ["|E9 1|", "|2028|", "|1F600|", "open|41", "|GG|", "||"],
+    )
+    def test_a_content_group_that_is_not_hex_byte_pairs_is_refused(self, content: str) -> None:
+        from maljan.reporting.detection_signatures import _validate_suricata
+
+        line = (
+            f'alert http any any -> any any (msg:"m"; http.user_agent; content:"{content}"; '
+            "sid:1; rev:1;)"
+        )
+
+        assert _validate_suricata(line) is not None
+
+    @pytest.mark.parametrize("content", ["plain", "a|41|b", "|C3 A9|", "|0D||0A|"])
+    def test_hex_byte_pairs_pass(self, content: str) -> None:
+        from maljan.reporting.detection_signatures import _validate_suricata
+
+        line = (
+            f'alert http any any -> any any (msg:"m"; http.user_agent; content:"{content}"; '
+            "sid:1; rev:1;)"
+        )
+
+        assert _validate_suricata(line) is None
+
+    def test_a_backslash_in_the_family_cannot_reach_a_message(self) -> None:
+        from maljan.reporting.detection_signatures import (
+            _suricata_dns_rule,
+            _suricata_user_agent_rule,
+            _validate_suricata,
+        )
+        from maljan.reporting.models import NetworkDomain
+
+        family = 'Fam\\ily"; sid:2;\\'
+        for line in (
+            _suricata_dns_rule(NetworkDomain(fqdn="gate9.example.org"), 1, "c" * 64, family),
+            _suricata_user_agent_rule(AGENT, 2, "c" * 64, family),
+        ):
+            assert line is not None
+            msg = line.split('msg:"')[1].split('"')[0]
+            assert "\\" not in msg and ";" not in msg
+            assert _validate_suricata(line) is None
+
 
 class TestSigma:
     """A Sigma selection is held to the same rule: published, or watched by a sandbox."""
