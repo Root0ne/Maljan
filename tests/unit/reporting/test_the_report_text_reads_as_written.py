@@ -383,3 +383,42 @@ class TestADiagramBoxTitleIsDefanged:
     def test_a_cut_before_a_mark_that_ends_a_word_keeps_the_word(self) -> None:
         assert _word_cut("a" * 10 + " word, then more", 16) == "a" * 10 + " word\u2026"
         assert _word_cut("see evil.example now", 9) == "see\u2026"
+
+
+class TestOnlyProseTheBundlePrintsIsCompacted:
+    def test_a_clause_only_the_analyst_report_prints_keeps_every_offset(self) -> None:
+        for field in ("analyst_limitations", "analyst_conclusion"):
+            report = _report(
+                technical_analysis={
+                    field: {"title": "T", "body": f"Limits; {_long_clause()}.", "evidence_refs": []}
+                }
+            )
+            analyst = MarkdownRenderer(layout=ANALYST).render(report)
+            assert "every one listed in the evidence bundle" not in analyst, field
+            assert all(c in analyst for c in _CALLERS), field
+
+    def test_the_prose_list_is_what_the_bundle_prints(self) -> None:
+        from maljan.reporting.models import TechnicalAnalysis, TechnicalSubsection
+        from maljan.reporting.renderers.markdown import SECTION_5_PROSE
+
+        fields = [
+            name
+            for name, info in TechnicalAnalysis.model_fields.items()
+            if "TechnicalSubsection" in str(info.annotation)
+        ]
+        report = _report(
+            technical_analysis={
+                name: {"title": name, "body": f"Marker zq{n}zq.", "evidence_refs": []}
+                for n, name in enumerate(fields)
+            }
+        )
+        assert all(
+            isinstance(getattr(report.technical_analysis, name), TechnicalSubsection)
+            for name in fields
+        )
+        listed = {name for names in SECTION_5_PROSE.values() for name in names}
+        for layout in (FULL, BUNDLE):
+            markdown = MarkdownRenderer(layout=layout).render(report)
+            section_5 = markdown.split("\n## 5. ", 1)[1].split("\n## 6. ", 1)[0]
+            printed = {name for n, name in enumerate(fields) if f"zq{n}zq" in section_5}
+            assert printed == listed, layout

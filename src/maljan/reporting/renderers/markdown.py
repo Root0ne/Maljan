@@ -311,6 +311,25 @@ INDICATORS_TITLE = "Indicators of compromise"
 STATIC_TITLE = "Static properties"
 
 
+# The report model's prose subsections section 5 prints, by the subsection
+# that prints them, in order. The one list the single-file report and the
+# bundle print section 5's prose from, and the one the analyst report reads to
+# know which prose the bundle prints whole (``prose_forms``).
+SECTION_5_PROSE: dict[str, tuple[str, ...]] = {
+    "5.1": ("packing_obfuscation", "evasion_antiforensics"),
+    "5.2": ("string_resolution",),
+    "5.4": ("persistence_detail",),
+    "5.5": ("discovery",),
+    "5.7": ("command_and_control", "message_packet_structure"),
+    "5.8": ("payloads",),
+}
+
+
+def _section_5_prose(ta: Any, number: str) -> list[TechnicalSubsection | None]:
+    """The prose subsections section ``number`` prints (:data:`SECTION_5_PROSE`)."""
+    return [getattr(ta, name, None) for name in SECTION_5_PROSE[number]] if ta else []
+
+
 class MarkdownRenderer:
     """Render a complete ``MalwareReport`` as a single markdown string.
 
@@ -898,7 +917,7 @@ class MarkdownRenderer:
             _subsection(
                 "5.1",
                 "Packing, obfuscation and anti-analysis",
-                [ta.packing_obfuscation, ta.evasion_antiforensics] if ta else [],
+                _section_5_prose(ta, "5.1"),
                 measured,
                 ctx,
                 absent=ctx.absence("packing, obfuscation or anti-analysis", sandbox=False),
@@ -932,7 +951,7 @@ class MarkdownRenderer:
             _subsection(
                 "5.2",
                 "API and string resolution",
-                [ta.string_resolution] if ta else [],
+                _section_5_prose(ta, "5.2"),
                 measured,
                 ctx,
                 absent=ctx.absence("imports or API resolution", sandbox=False),
@@ -1020,7 +1039,7 @@ class MarkdownRenderer:
             _subsection(
                 "5.4",
                 "Persistence",
-                [ta.persistence_detail] if ta else [],
+                _section_5_prose(ta, "5.4"),
                 measured,
                 ctx,
                 absent=ctx.absence("persistence mechanism", sandbox=True),
@@ -1045,7 +1064,7 @@ class MarkdownRenderer:
             _subsection(
                 "5.5",
                 "Discovery",
-                [ta.discovery] if ta else [],
+                _section_5_prose(ta, "5.5"),
                 measured,
                 ctx,
                 absent=ctx.absence("discovery command", sandbox=True),
@@ -1148,7 +1167,7 @@ class MarkdownRenderer:
             prints = [f"JA3 {_code_span(_one_line(j))}" for j in net.ja3_fingerprints]
             prints += [f"JA3S {_code_span(_one_line(j))}" for j in net.ja3s_fingerprints]
             measured.extend(["", f"_{OBSERVED}:_ TLS fingerprints " + ", ".join(prints) + "."])
-        prose = [ta.command_and_control, ta.message_packet_structure] if ta else []
+        prose = _section_5_prose(ta, "5.7")
         blocks.append(
             _subsection(
                 "5.7",
@@ -1207,7 +1226,7 @@ class MarkdownRenderer:
             _subsection(
                 "5.8",
                 "Payloads and dropped files",
-                [ta.payloads] if ta else [],
+                _section_5_prose(ta, "5.8"),
                 measured,
                 ctx,
                 absent=ctx.absence("carved payload or dropped file", sandbox=True),

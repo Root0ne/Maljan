@@ -423,18 +423,21 @@ def _compact_callers(
 
 
 def _section_5_clauses(report: Any) -> frozenset[tuple[str, str]]:
-    """The routine and callers of each long clause a section 5 body holds: the bodies the
-    single-file report and the bundle print."""
+    """The routine and callers of each long clause a section 5 prose body holds: the bodies
+    the single-file report and the bundle print (``markdown.SECTION_5_PROSE``)."""
     from maljan.reporting.models import TechnicalSubsection
+    from maljan.reporting.renderers.markdown import SECTION_5_PROSE
 
     ta = getattr(report, "technical_analysis", None)
     found: set[tuple[str, str]] = set()
-    for name in type(ta).model_fields if ta is not None else ():
-        sub = getattr(ta, name, None)
-        if isinstance(sub, TechnicalSubsection) and "has no listed code" in sub.body:
-            found.update(
-                (m.group("routine"), m.group("callers")) for m in _UNREAD_CLAUSE.finditer(sub.body)
-            )
+    for names in SECTION_5_PROSE.values() if ta is not None else ():
+        for name in names:
+            sub = getattr(ta, name, None)
+            if isinstance(sub, TechnicalSubsection) and "has no listed code" in sub.body:
+                found.update(
+                    (m.group("routine"), m.group("callers"))
+                    for m in _UNREAD_CLAUSE.finditer(sub.body)
+                )
     return frozenset(found)
 
 
