@@ -376,6 +376,119 @@ class TestWhatIsNotContinued:
         assert agent._question_base_of(sent, tools=True) is None
 
 
+FIRST_TWO = (
+    "CLAIM: it reads a file\nEVIDENCE: ev_0001\nCONFIDENCE: 0.6\nTECHNIQUE: T1005\n---\n"
+    "CLAIM: it checks a debugger at 0x309c\nEVIDENCE: ev_0099\nCONFIDENCE: 0.6\n"
+    "TECHNIQUE: NONE\n"
+)
+RETRY_NUMBERED = "CLAIM 1: it reads a file\nEVIDENCE: ev_0001\nCONFIDENCE: 0.6\nTECHNIQUE: T1005\n"
+WHOLE = (
+    "CLAIM: it reads a file from disk\nEVIDENCE: ev_0001\nCONFIDENCE: 0.6\nTECHNIQUE: T1005\n"
+    "---\nCLAIM: it writes a log\nEVIDENCE: ev_0002\nCONFIDENCE: 0.6\nTECHNIQUE: NONE\n"
+)
+
+
+def _last_user_text(body: dict[str, Any]) -> str:
+    turn = body["messages"][-1]
+    content = turn["content"]
+    if isinstance(content, str):
+        return content
+    return json.dumps(content, ensure_ascii=False)
+
+
+def _chain_answer(body: dict[str, Any]) -> dict[str, Any]:
+    """The loop calls twice and answers two claims; each question is answered in one turn."""
+    from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+
+    done = _results(body)
+    asked = _is_question(body)
+    if not asked and _calls_allowed(body) and done < 2:
+        call = {
+            "type": "tool_use",
+            "id": f"toolu_{done}",
+            "name": "lookup",
+            "input": {"what": str(done)},
+        }
+        return message([_thinking(done), call], stop="tool_use", usage=USAGE)
+    last = _last_user_text(body)
+    if "no longer states these items" in last:
+        text = "KEEP: it is in the code"
+    elif not asked:
+        text = FIRST_TWO
+    elif WHOLE_ANSWER_AFTER_RETRY_LEAD in last:
+        text = WHOLE
+    else:
+        text = RETRY_NUMBERED
+    block = {"type": "text", "text": text}
+    return message([_thinking(200 + len(body["messages"])), block], stop="end_turn", usage=USAGE)
+
+
+@pytest.fixture
+def chain(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from maljan.agents import base_agent
+    from maljan.pipeline.retry_merge import RetryMerge
+    from maljan.schemas.evidence import LedgerEntry
+
+    wire = Wire(_chain_answer)
+    install(monkeypatch, wire)
+    monkeypatch.setattr(base_agent, "loop_limits", lambda *_a, **_k: (None, 40))
+    # The retry's numbers are not placed, so the whole answer is asked for.
+    monkeypatch.setattr(
+        base_agent, "merge_retry", lambda *_a, **_k: RetryMerge(why="its numbers were not read")
+    )
+    agent = _Analyst(llm=_model(), name="static")
+    agent.run_state_block = "sample: c"
+    agent.tools = [_lookup()]
+    text = agent.execute_tool_loop([("system", SYSTEM), ("human", "Analyse.")])
+    agent._evidence_entries.append(
+        LedgerEntry(id="ev_0099", agent="static", tool="batch_decompile", output=EARLIER)
+    )
+    isr = agent._text_to_isr(text, revision_round=0)
+    answers = iter([TOLD, TOLD])
+    with patch("maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
+        agent._validate_isr(isr, "the raw data")
+    return wire
+
+
+def _asked(wire: Wire, marker: str) -> list[dict[str, Any]]:
+    return [b for b in wire.bodies if marker in _last_user_text(b)]
+
+
+class TestEveryQuestionContinuesTheLoop:
+    def test_the_whole_answer_question_sends_the_retry_s_question_as_sent(self, chain: Any) -> None:
+        from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+
+        assert chain.refused == []
+        whole = _asked(chain, WHOLE_ANSWER_AFTER_RETRY_LEAD)
+        assert len(whole) == 1
+        retry = next(
+            b
+            for b in chain.bodies
+            if _is_question(b) and WHOLE_ANSWER_AFTER_RETRY_LEAD not in _last_user_text(b)
+        )
+        size = len(retry["messages"])
+        assert "the raw data" not in json.dumps(whole[0]["messages"]), "continued"
+        assert _canonical(whole[0], size) == _canonical(retry, size), (
+            "the loop, the answer and the retry's question, byte for byte"
+        )
+
+    def test_the_whole_answer_question_shows_what_the_loop_never_held(self, chain: Any) -> None:
+        from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+
+        whole = _asked(chain, WHOLE_ANSWER_AFTER_RETRY_LEAD)[0]
+        feedback = json.dumps(whole["messages"][-3]["content"], ensure_ascii=False)
+        assert "PEB BeingDebugged" in feedback
+        assert "answer for 0" not in feedback
+
+    def test_the_drops_question_shows_what_the_loop_never_held(self, chain: Any) -> None:
+        drops = _asked(chain, "no longer states these items")
+        assert len(drops) == 1
+        assert "the raw data" not in json.dumps(drops[0]["messages"]), "continued"
+        question = _last_user_text(drops[0])
+        assert "PEB BeingDebugged" in question
+        assert "answer for 0" not in question
+
+
 class TestTheBreakpointRule:
     def test_a_string_turn_s_breakpoint_reads_the_loop_s_entry(self) -> None:
         memory = anthropic_history.Memory()

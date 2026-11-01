@@ -450,6 +450,12 @@ def _technique_fact(attck: Any, tid: str) -> str:
             said += f": a sub-technique of {parent}{f' {parent_name}' if parent_name else ''}"
         tactics = ", ".join(str(t) for t in row.get("tactics") or [])
         return f"{said}; tactics: {tactics}" if tactics else said
+    if row.get("valid"):
+        # A valid id the technique table carries no row for: its name is not
+        # known here, and it is a technique all the same.
+        tactics = ", ".join(str(t) for t in row.get("tactics") or [])
+        said = f"- {tid}: a technique of the catalogue"
+        return f"{said}; tactics: {tactics}" if tactics else said
     reason = str(row.get("reason") or "the catalogue has no technique with this id")
     reasons = [reason]
     # The catalogue's reason already says the release and the successor where

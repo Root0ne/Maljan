@@ -106,3 +106,14 @@ class TestWhatTheyHold:
         line = note.splitlines()[1]
         assert line.count("v12") == 1 and line.count("T1574.002") == 1
         assert "revoked by T1574.002" in line
+
+    def test_a_valid_id_the_table_has_no_row_for_is_a_technique(self) -> None:
+        class _Unnamed:
+            @staticmethod
+            def attck_lookup(tid: str) -> dict[str, Any]:
+                return {"valid": True, "name": "", "tactics": []}
+
+        note = technique_facts_note(
+            [_asked(UNGROUNDED_TECHNIQUE_CODE)], [_claim("T1700")], _Unnamed()
+        )
+        assert note.splitlines()[1] == "- T1700: a technique of the catalogue"

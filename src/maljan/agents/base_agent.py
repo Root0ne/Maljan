@@ -10174,6 +10174,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # answered.
         round_asked: list[list[Violation]] = []
         rounds_answered: list[list[Violation]] = []
+        # The closing the retry's question was sent with over the loop's own
+        # conversation, when it was: the whole-answer question sends that
+        # question again as it was sent.
+        held_closing: list[str] = []
 
         def _run(turns: list[Any]) -> Any:
             if first:
@@ -10217,6 +10221,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     *turns[:-1],
                     HumanMessage(content=feedback_text(asked_now, closing=held, cards=cards)),
                 ]
+                held_closing[:] = [held]
             continued = BaseAnalyst._continued_question(  # type: ignore[arg-type]
                 self,
                 turns,
@@ -10224,6 +10229,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                 max(widest, int(self.output_cap_tokens() or 0)),
                 tools=tooled,
             )
+            if continued is None:
+                held_closing.clear()
             answer = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
                 self,
                 plain
@@ -10393,10 +10400,31 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             self.validation_retries += 1
             plain = frame_messages(turns, run_state=current_run_state(self))
-            # Over the loop's own conversation (:meth:`_continued_question`).
-            continued = BaseAnalyst._continued_question(  # type: ignore[arg-type]
-                self, turns, messages, int(self.output_cap_tokens() or 0), tools=tooled
-            )
+            # Over the loop's own conversation (:meth:`_continued_question`),
+            # the retry's question is the one the continued retry sent; where
+            # the retry was not continued, its entries are fitted against that
+            # conversation.
+            continued = None
+            base = getattr(self, "_question_base", None)
+            if isinstance(base, KeptConversation):
+                if held_closing:
+                    over_base = held_closing[0]
+                else:
+                    over_base = BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
+                        self,
+                        first_answer,
+                        list(base.messages),
+                        bare_closing,
+                        lambda text: [*base.messages, *_turns(text)[len(messages) :]],
+                        int(self.output_cap_tokens() or 0),
+                    )
+                continued = BaseAnalyst._continued_question(  # type: ignore[arg-type]
+                    self,
+                    _turns(over_base),
+                    messages,
+                    int(self.output_cap_tokens() or 0),
+                    tools=tooled,
+                )
             try:
                 answer = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
                     self,
@@ -11417,9 +11445,21 @@ class BaseAnalyst(BudgetMeter, ABC):
         labelled = drops.labelled()
         cited = [entry_id for _l, _k, item, _m in labelled for entry_id in retry_drop_cited(item)]
         entries = cited_entry_texts(self, cited, messages)
-        asked_in = BaseAnalyst._retry_drop_parts(  # type: ignore[arg-type]
-            self, drops, question, entries, answer, messages
-        )
+        # Asked over the loop's own conversation (:meth:`_continued_question`),
+        # the entries and the parts are those of that conversation: an entry
+        # it holds is not shown again, one only the rebuilt first turn held is.
+        # The rebuilt request each part falls back to shows the same items
+        # with the entries the rebuilt conversation does not hold.
+        base = getattr(self, "_question_base", None) if tools else None
+        if isinstance(base, KeptConversation):
+            held_entries = cited_entry_texts(self, cited, list(base.messages))
+            asked_in = BaseAnalyst._retry_drop_parts(  # type: ignore[arg-type]
+                self, drops, question, held_entries, answer, list(base.messages)
+            )
+        else:
+            asked_in = BaseAnalyst._retry_drop_parts(  # type: ignore[arg-type]
+                self, drops, question, entries, answer, messages
+            )
         named = sorted({entry_id for _items, _shown, unfit in asked_in for entry_id in unfit})
         if len(asked_in) > 1 or named:
             self.logger.warning(
@@ -11475,11 +11515,28 @@ class BaseAnalyst(BudgetMeter, ABC):
                     AIMessage(content=str(answer or "")),
                     HumanMessage(content=asked),
                 ]
+                continued = None
+                if isinstance(base, KeptConversation):
+                    # Over the loop's own conversation (:meth:`_continued_question`).
+                    continued = BaseAnalyst._continued_question(  # type: ignore[arg-type]
+                        self, turns, messages, int(self.output_cap_tokens() or 0), tools=tools
+                    )
+                    item_cited = [
+                        entry_id
+                        for _l, _k, item, _m in part_rows
+                        for entry_id in retry_drop_cited(item)
+                    ]
+                    turns = [
+                        *turns[:-1],
+                        HumanMessage(
+                            content=question(
+                                items,
+                                {i: entries[i] for i in dict.fromkeys(item_cited) if i in entries},
+                                part=(number, len(asked_in)) if len(asked_in) > 1 else None,
+                            )
+                        ),
+                    ]
                 plain = frame_messages(turns, run_state=current_run_state(self))
-                # Over the loop's own conversation (:meth:`_continued_question`).
-                continued = BaseAnalyst._continued_question(  # type: ignore[arg-type]
-                    self, turns, messages, int(self.output_cap_tokens() or 0), tools=tools
-                )
                 reply = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
                     self,
                     plain
