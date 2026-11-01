@@ -401,6 +401,9 @@ class ServerHandle:
         self._all_tools: list[Any] = []
         self._job_id: str = ""
         self._sample_sha256: str = ""
+        # The job's settings, set by its registry: what a launch hands the
+        # server of a tool's declared data (``_hand_declared_data``).
+        self.settings: Any = None
         # True once ``aopen`` has attached this handle: its exit stack was
         # wound on whichever loop called it, so it must be unwound there too
         # (see ``close``).
@@ -630,6 +633,28 @@ class ServerHandle:
         env[staging.STAGING_JOB_ENV] = leaf
         staging.note_job_directory(self._job_id, staging.staging_base(env) / leaf)
 
+    def _hand_declared_data(self, env: dict[str, str]) -> None:
+        """Hand a sidecar of this repository the data paths the settings name.
+
+        A tool's declared data path whose core setting names another path than
+        the default reaches the server under the override the declaration
+        names (``tools.sidecar_needs.handed_env``), so the server's tool reads
+        what every other reading of it is handed. Any other launch is left as
+        it is before a setting is read. The job's settings when whoever built
+        the handle gave them (the registry, a provider), else the process's:
+        a connection test or an enrichment lookup builds a handle of its own.
+        """
+        from maljan.tools.sidecar_needs import BY_DIRECTORY, handed_env, sidecar_of
+
+        if sidecar_of(self.config) not in BY_DIRECTORY:
+            return
+        settings = self.settings
+        if settings is None:
+            from maljan.core.config import get_settings
+
+            settings = get_settings()
+        env.update(handed_env(self.config, settings))
+
     def _name_the_sample(self, env: dict[str, str]) -> None:
         """Give a server that asks for it the run's sample sha256.
 
@@ -680,6 +705,7 @@ class ServerHandle:
             except LaunchCwdError as exc:
                 raise ProviderConfigurationError(f"mcp server {self.name!r}: {exc}") from exc
             env = launch.env
+            self._hand_declared_data(env)
             self._name_the_job_staging(env)
             self._name_the_sample(env)
             if not self.config.shipped:
@@ -2049,6 +2075,7 @@ class ServerRegistry:
             handle.measures_isolation = True
             # The job's change count, which each attach of the server bumps.
             handle.server_changes = server_changes
+            handle.settings = cfg
         # Every rest this job gave a server, in the order the breakers opened;
         # the judge node reads it into the run summary. Written from whichever
         # loop's call tripped the breaker, so appended under the lock.
@@ -2217,6 +2244,7 @@ class ServerRegistry:
                 # The job's own copy of the sample there, the same for every loop.
                 replica.held_sample_path = handle.held_sample_path
                 replica.declared_source = handle.declared_source
+                replica.settings = handle.settings
                 replica.measures_isolation = handle.measures_isolation
                 # Its own process or session: its attach counts as a change.
                 replica.server_changes = handle.server_changes

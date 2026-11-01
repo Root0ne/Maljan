@@ -15,6 +15,9 @@ server's block.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 from maljan.tools import crypto_constants, emulated_strings, readers, rules, transforms, upx
 from maljan.tools.capabilities import ToolNeeds, binary, data, module
 
@@ -40,10 +43,16 @@ YARA_REMEDIATION = "install yara-python on the host that runs this server: uv sy
 
 # The rule corpora fetched rather than vendored (``.gitignore``), so a fresh
 # clone or worktree has none until they are fetched. The worker hands its own
-# reading of capa the operator's setting, and the server's tool reads the
-# default; Sigma's are the server's default unless its environment names
-# others. A tool whose data is vendored declares none.
-CAPA_RULES = data(rules.DEFAULT_CAPA_RULES, setting="static.capa.rules_dir", pattern="*.yml")
+# reading of capa the operator's setting, and the server's tool the same value
+# through the override its launch is given (``handed_env``); Sigma's are the
+# server's default unless its environment names others. A tool whose data is
+# vendored declares none.
+CAPA_RULES = data(
+    rules.DEFAULT_CAPA_RULES,
+    setting="static.capa.rules_dir",
+    override=rules.CAPA_RULES_ENV,
+    pattern="*.yml",
+)
 SIGMA_RULES = data(rules.DEFAULT_SIGMA_RULES, override=rules.SIGMA_RULES_ENV, pattern="*.y*ml")
 
 # What each tool needs beyond the interpreter, probed once when the server
@@ -163,3 +172,42 @@ def without_reads(tool: str, server: str | None = None) -> frozenset[str] | None
             if entry.name == tool and entry.without_reads:
                 return frozenset(entry.without_reads)
     return None
+
+
+def sidecar_of(config: Any) -> str | None:
+    """The ``services/<dir>`` whose ``server.py`` ``config`` launches, or ``None``."""
+    from maljan.core.paths import get_project_root, resolve_mcp_args
+
+    args = resolve_mcp_args([str(a) for a in getattr(config, "args", None) or []])
+    if not args:
+        return None
+    script = Path(args[0])
+    services = Path(get_project_root()) / "services"
+    if script.name != "server.py" or script.parent.parent != services:
+        return None
+    return script.parent.name
+
+
+def handed_env(config: Any, settings: Any) -> dict[str, str]:
+    """The environment that hands a sidecar's tools the data paths ``settings`` names.
+
+    For each data path a tool of the sidecar ``config`` launches over stdio
+    declares with both a core setting and a server override
+    (``Requirement.handed``), the override set to the setting's value, so the
+    server's tool reads the path every other reading of it is handed. Empty
+    for any other launch (a server reached at an address, a container, a
+    program of another tree), which keeps its own environment, and a name the
+    block's own ``env`` sets is the block's.
+    """
+    if str(getattr(config, "transport", "")) != "stdio":
+        return {}
+    directory = sidecar_of(config)
+    needs = BY_DIRECTORY.get(directory) if directory else None
+    own = getattr(config, "env", None) or {}
+    handed: dict[str, str] = {}
+    for need in needs or ():
+        for req in need.requires:
+            for name, value in req.handed(settings).items():
+                if name not in own:
+                    handed[name] = value
+    return handed

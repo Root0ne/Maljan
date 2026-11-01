@@ -16,7 +16,9 @@ every submit and every status read, and linear in the tools declared.
 * **The servers the job calls** (``composition.servers_a_job_calls``: its
   team's, the triage pack's, the static provider's) that are switched on and
   are one of those sidecars launched over stdio on this interpreter. A tool
-  the server's block does not offer is not named.
+  the server's block does not offer is not named. A data path is looked at
+  where the server reads it, with what its launch hands it
+  (``tools.sidecar_needs.handed_env``).
 * **The triage pack's own readings** (``tools.readers``): every enabled
   in-process step whose reading stands in for a sidecar's tool runs in the
   worker's own process unless the server declaring that tool is switched on
@@ -42,7 +44,6 @@ import logging
 import os
 import sys
 from collections.abc import Iterable, Mapping
-from pathlib import Path
 from typing import Any
 
 from maljan.core.logger import logger
@@ -62,16 +63,9 @@ def _same_interpreter(command: str) -> bool:
 
 def _sidecar_directory(config: Any) -> str | None:
     """The ``services/<dir>`` whose ``server.py`` ``config`` launches, or ``None``."""
-    from maljan.core.paths import get_project_root, resolve_mcp_args
+    from maljan.tools.sidecar_needs import sidecar_of
 
-    args = resolve_mcp_args([str(a) for a in getattr(config, "args", None) or []])
-    if not args:
-        return None
-    script = Path(args[0])
-    services = Path(get_project_root()) / "services"
-    if script.name != "server.py" or script.parent.parent != services:
-        return None
-    return script.parent.name
+    return sidecar_of(config)
 
 
 def _sidecar_needs(config: Any) -> list[ToolNeeds] | None:
@@ -90,15 +84,23 @@ def _sidecar_needs(config: Any) -> list[ToolNeeds] | None:
     return BY_DIRECTORY.get(directory) if directory else None
 
 
-def _environ(key: str, config: Any) -> dict[str, str]:
-    """The environment the server is started with, which is where it looks for an executable."""
-    from maljan.agents.subprocess_env import child_env
+def _environ(key: str, config: Any, settings: Any = None) -> dict[str, str]:
+    """The environment the server is started with, which is where it looks for an executable.
 
-    return child_env(
+    With ``settings``, what its launch hands it of a tool's declared data as
+    well (``tools.sidecar_needs.handed_env``), as ``ServerHandle`` does.
+    """
+    from maljan.agents.subprocess_env import child_env
+    from maljan.tools.sidecar_needs import handed_env
+
+    environ = child_env(
         dict(getattr(config, "env", None) or {}),
         allow=tuple(getattr(config, "env_allow", None) or ()),
         server=key,
     )
+    if settings is not None:
+        environ.update(handed_env(config, settings))
+    return environ
 
 
 def _reading_needs(config: Any, tool: str) -> tuple[str, ToolNeeds] | None:
@@ -180,13 +182,16 @@ def _missing(
     *,
     settings: Any = None,
     unchecked: frozenset[str] = frozenset(),
+    handed: frozenset[str] | None = None,
 ) -> Unavailable | None:
     """``need`` as unavailable when one of its requirements is absent, else ``None``.
 
     ``answered`` keeps each requirement's answer for ``environ``: an
     executable or a data path's override is looked for in it, so another
     environment is asked again. ``settings`` is given where the caller hands
-    the tool a data path's setting (``Requirement.installed``), and the
+    the tool a data path's setting (``Requirement.installed``): to every data
+    path, or with ``handed`` to those whose override names one of it (a
+    server's launch hands those, ``tools.sidecar_needs.handed_env``). The
     requirements of a kind in ``unchecked`` are left to the server.
     """
     reasons = []
@@ -196,7 +201,8 @@ def _missing(
             continue
         held = (req, id(environ))
         if held not in answered:
-            answered[held] = req.installed(environ, settings)
+            given = settings if handed is None or req.override in handed else None
+            answered[held] = req.installed(environ, given)
         if answered[held]:
             reasons.append(str(answered[held]))
             absent.append(req)
@@ -233,6 +239,7 @@ def unavailable_tools(
     a debug line for a status read.
     """
     from maljan.agents.composition import servers_a_job_calls
+    from maljan.tools.sidecar_needs import handed_env
 
     if profile and profile != str(settings.agents.profile):
         agents = settings.agents.model_copy(update={"profile": profile})
@@ -262,15 +269,18 @@ def unavailable_tools(
                 "tool availability: %s sets PYTHONPATH; its modules and data are not checked here",
                 log_safe(key),
             )
-        environ = _environ(key, config)
+        environ = _environ(key, config, settings)
+        handed = frozenset(handed_env(config, settings))
         # One answer per requirement: two tools needing one module ask once.
         answered: dict[Any, str | None] = {}
         for need in needs:
             if offered is not None and need.name not in offered:
                 continue
-            # No settings: the server's tool reads its own default or
-            # override, never the setting the worker hands its own reading.
-            missing = _missing(need, environ, answered, unchecked=unchecked)
+            # The setting only where the launch hands it: otherwise the
+            # server's tool reads its own default or the block's override.
+            missing = _missing(
+                need, environ, answered, settings=settings, unchecked=unchecked, handed=handed
+            )
             if missing is not None:
                 missing.server = key
                 found.append(missing)
