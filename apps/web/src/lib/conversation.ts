@@ -125,6 +125,9 @@ export interface ConversationItem {
   speaker: string;
   /** The name a reader sees: the label an operator gave the agent. */
   displayName: string;
+  /** The role the line was published under (`analyst`, `reviser`,
+   *  `negotiator`, …), when the publisher named one. */
+  role?: string;
   addressedTo?: string;
   addressedToName?: string;
   text: string;
@@ -292,6 +295,39 @@ export function groupOf(kind: ItemKind): ItemGroup {
     return "notices";
   }
   return "says";
+}
+
+/**
+ * The room's moderator speaking, and under which name.
+ *
+ * A watcher nobody composed — the mediator — publishes as the room, under a
+ * role of its own, and names itself at the head of the line ("Mediator: …").
+ * It is talking to the team, so it is drawn as a speaker rather than as a
+ * note; a room line filed under the plain `system` role (a ledger check, a
+ * cap notice) stays a note. `null` for every other line.
+ */
+export function moderatorOf(item: ConversationItem): { name: string; text: string } | null {
+  if (item.kind !== "system" || !item.role || item.role === "system") return null;
+  const head = /^([A-Z][\w .()-]{0,40}):\s+/.exec(item.text);
+  if (head) return { name: head[1], text: item.text.slice(head[0].length) };
+  return { name: item.displayName || prettyName(item.role), text: item.text };
+}
+
+/** Which of the three groups a line is filtered under. A moderator's line is
+ *  speech, whatever kind it was published as. */
+export function itemGroup(item: ConversationItem): ItemGroup {
+  return moderatorOf(item) ? "says" : groupOf(item.kind);
+}
+
+/** Whether a line records something that went wrong: a call that failed, a
+ *  turn that ended without an answer, a correction the retry did not fix, or
+ *  the failure that ended the run. */
+export function isFailure(item: ConversationItem): boolean {
+  if (item.kind === "run_failed") return true;
+  if (item.tool && item.tool.ok === false) return true;
+  if (item.status === "failed" || item.status === "timeout") return true;
+  const states = item.feedback ?? [];
+  return states.length > 0 && states[states.length - 1].state === "survived";
 }
 
 /**
@@ -603,6 +639,7 @@ function fold(state: BuilderState, event: RunEvent): void {
       round,
       speaker,
       displayName: speaker ? nameOf(state, speaker, text(data.display_name) || undefined) : "",
+      role: text(data.role) || undefined,
       addressedTo,
       addressedToName: addressedTo ? nameOf(state, addressedTo) : undefined,
       text: text(data.text),
@@ -1020,11 +1057,23 @@ export function resetConversationCache(): void {
 
 /* ── Filtering ─────────────────────────────────────────── */
 
+/** What the kind filter narrows to: one of the three groups, or every line
+ *  that records a failure, whatever its group. */
+export type FilterKey = ItemGroup | "failures";
+
 export interface ConversationFilter {
   /** Agent keys to keep. Empty keeps everyone. */
   agents: ReadonlySet<string>;
-  /** Groups to keep. Empty keeps everything. */
-  groups: ReadonlySet<ItemGroup>;
+  /** Kinds to keep; a line matching any of them stays. Empty keeps
+   *  everything. */
+  groups: ReadonlySet<FilterKey>;
+}
+
+/** Whether a line answers to one of the chosen kinds. */
+function matchesKinds(item: ConversationItem, kinds: ReadonlySet<FilterKey>): boolean {
+  if (kinds.size === 0) return true;
+  if (kinds.has(itemGroup(item))) return true;
+  return kinds.has("failures") && isFailure(item);
 }
 
 /** The conversation as a filter leaves it. A stage with nothing left to show
@@ -1041,7 +1090,7 @@ export function filterConversation(
     for (const round of stage.rounds) {
       const items = round.items.filter(
         (item) =>
-          (filter.groups.size === 0 || filter.groups.has(groupOf(item.kind))) &&
+          matchesKinds(item, filter.groups) &&
           (filter.agents.size === 0 || (item.speaker ? filter.agents.has(item.speaker) : false)),
       );
       if (items.length > 0) rounds.push({ round: round.round, items });

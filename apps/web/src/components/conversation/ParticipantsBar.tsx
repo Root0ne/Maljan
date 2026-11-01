@@ -17,7 +17,8 @@ import { CornerDownRight } from "lucide-react";
 
 import type { Participant, ParticipantState } from "@/lib/conversation";
 import { progressTone } from "@/lib/status";
-import { agentColor, agentInitials } from "./agentIdentity";
+import { toneOf, type AgentTone } from "./agentIdentity";
+import Avatar from "./Avatar";
 
 const STATE_LABEL: Record<ParticipantState, string> = {
   waiting: "Waiting",
@@ -54,6 +55,8 @@ export default function ParticipantsBar({
   countsUnavailable = false,
   selected,
   onToggle,
+  tones,
+  initials,
 }: {
   participants: Participant[];
   /** Answered calls per agent, from the one selector that counts them. */
@@ -63,11 +66,12 @@ export default function ParticipantsBar({
   countsUnavailable?: boolean;
   selected: ReadonlySet<string>;
   onToggle: (key: string) => void;
+  /** The tones and initials the conversation draws its avatars with, so a
+   *  participant looks the same here as beside its messages. */
+  tones: Record<string, AgentTone>;
+  initials: Record<string, string>;
 }) {
   if (participants.length === 0) return null;
-  const initials = agentInitials(
-    Object.fromEntries(participants.map((p) => [p.key, p.name])),
-  );
   /* Two participants can carry the same name — a run drew `Jd Judge` beside
    * `Ju Judge`, telling them apart by two letters of an avatar. Where a name
    * is not unique its key comes with it, and where it is nothing changes. */
@@ -80,7 +84,7 @@ export default function ParticipantsBar({
   return (
     <div className="flex flex-wrap gap-1.5">
       {participants.map((participant) => {
-        const color = agentColor(participant.key);
+        const tone = toneOf(tones, participant.key);
         const active = selected.has(participant.key);
         const via = participant.stages.length === 0 ? participant.via : [];
         return (
@@ -94,17 +98,11 @@ export default function ParticipantsBar({
                 ? `${participant.name} — tasked by ${via.join(", ")}`
                 : `${participant.name} — ${STATE_LABEL[participant.state].toLowerCase()}`
             }
-            className={`flex items-center gap-2 rounded border px-2 py-1 text-left ${
-              active ? "border-accent bg-bg-active" : "border-border bg-bg-surface"
+            className={`flex items-center gap-2 rounded-full border py-1 pl-1 pr-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
+              active ? "border-accent bg-bg-active" : "border-border-light bg-bg-surface hover:border-border"
             }`}
           >
-            <span
-              aria-hidden="true"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold"
-              style={{ borderColor: color, color }}
-            >
-              {initials[participant.key]}
-            </span>
+            <Avatar initials={initials[participant.key] ?? "?"} tone={tone} size="sm" />
             <span className="min-w-0">
               <span className="flex items-center gap-1.5">
                 <span className="truncate text-xs text-text-primary">{participant.name}</span>
