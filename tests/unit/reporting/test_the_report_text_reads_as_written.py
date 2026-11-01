@@ -17,15 +17,22 @@ from markdown_it import MarkdownIt
 
 from maljan.reporting.figures import build_execution_flow
 from maljan.reporting.models import EvidenceSection, MalwareReport
-from maljan.reporting.renderers.analyst import _LABEL_CHARS, flow_step_labels, flow_steps
+from maljan.reporting.renderers.analyst import (
+    _LABEL_CHARS,
+    _word_cut,
+    flow_step_labels,
+    flow_steps,
+)
 from maljan.reporting.renderers.html import HtmlRenderer
 from maljan.reporting.renderers.layout import ANALYST, BUNDLE, FULL
 from maljan.reporting.renderers.markdown import MarkdownRenderer
 from maljan.reporting.renderers.prose_forms import (
     CALLERS_IN_PROSE,
     _code_spans,
+    _prose_escaped,
     pack_spellings,
     section_reference,
+    tidied,
 )
 from maljan.reporting.section_agreement import unread_callee_clause
 
@@ -160,8 +167,6 @@ class TestADecodedTextPrintsAsItsValue:
         assert pack_spellings(report) == {}
 
     def test_a_fenced_block_is_left_as_written(self) -> None:
-        from maljan.reporting.renderers.prose_forms import tidied
-
         fenced = f'```\n$s = "{_PACKED}"\n```'
         assert tidied([fenced], _registry_report(), analyst=False) == [fenced]
 
@@ -250,3 +255,131 @@ class TestADiagramLabelIsCutAtAWord:
         word = "x" * (_LABEL_CHARS + 10)
         label = flow_step_labels(_flow_report([word, "Second step."]))[0][0]
         assert label == f"1. {word[: _LABEL_CHARS - 1]}…"
+
+
+# -- review round: each case a reader could see go wrong ---------------------
+
+
+def _star_report(body: str, *, cells: list[str] | None = None) -> MalwareReport:
+    """A report whose tool table recorded ``HKCR\\*\\shell\\`` and whose prose is ``body``."""
+    return _report(
+        sections=[
+            EvidenceSection(
+                key="decoded_strings",
+                title="Decoded strings",
+                source="tool",
+                kind="table",
+                columns=["Text"],
+                rows=[[cell] for cell in (cells or ["HKCR\\*\\shell\\"])],
+                evidence_ids=["ev_0001"],
+            )
+        ],
+        technical_analysis={
+            "discovery": {"title": "Discovery", "body": body, "evidence_refs": ["ev_0001"]}
+        },
+    )
+
+
+def _long_clause(routine: str = "offset 0xad34", callers: list[str] | None = None) -> str:
+    return unread_callee_clause(routine, "offsets " + ", ".join(callers or _CALLERS), "routines")
+
+
+class TestAValuePrintedInProseOpensNoMarkup:
+    def test_a_star_after_a_backslash_opens_no_emphasis(self) -> None:
+        body = "The sample writes HKCR\\*\\shell\\x5c and reads a*b from the key."
+        html = HtmlRenderer(layout=FULL).render(_star_report(body))
+        paragraph = re.search(r"<p>The sample writes.*?</p>", html)
+        assert paragraph is not None
+        assert "<em>" not in paragraph.group(0)
+        assert "HKCR\\*\\shell\\ and reads a*b" in paragraph.group(0)
+
+    def test_a_dot_and_a_colon_are_never_escaped(self) -> None:
+        # The backslash before each is escaped; the dot and the colon are not.
+        assert _prose_escaped("evil\\.example\\:x\\", " ") == "evil\\\\.example\\\\:x\\"
+        assert _prose_escaped("a\\*b\\", "'") == "a\\\\\\*b\\\\"
+
+    def test_the_escaped_form_prints_the_value_escaped(self) -> None:
+        # haiku5 printed the spelling with each backslash escaped.
+        escaped = _PACKED.replace("\\", "\\\\")
+        [text] = tidied([f"it decodes {escaped} at 0x10220"], _registry_report(), analyst=False)
+        assert text == f"it decodes {_DECODED.replace(chr(92), chr(92) * 2)} at 0x10220"
+        assert f"it decodes {_DECODED} at" in _html_text(text)
+
+    def test_a_table_cell_with_an_escaped_separator_is_read(self) -> None:
+        report = _star_report("x", cells=["a|b\\c\\"])
+        [text] = tidied(["| `a\\|b\\c\\x5c` | q |"], report, analyst=False)
+        assert text == "| `a\\|b\\c\\` | q |"
+
+    def test_a_spelling_inside_a_longer_tool_cell_is_left_as_written(self) -> None:
+        report = _registry_report()
+        report.sections[0].rows.append(["0x10300", f"text={_PACKED}, sources=ev_0021"])
+        assert pack_spellings(report) == {}
+
+
+class TestTheBundleHoldsWhatTheAnalystReportLeavesOut:
+    def test_every_offset_the_analyst_report_leaves_out_is_in_the_bundle(self) -> None:
+        report = _clause_report(_CALLERS)
+        analyst = MarkdownRenderer(layout=ANALYST).render(report)
+        bundle = MarkdownRenderer(layout=BUNDLE).render(report)
+        left_out = [c for c in _CALLERS if c not in analyst]
+        assert left_out
+        assert all(c in bundle for c in left_out)
+
+    def test_a_clause_outside_a_section_5_body_is_left_whole(self) -> None:
+        [text] = tidied([f"A claim: {_long_clause()}."], _report(), analyst=True)
+        assert all(c in text for c in _CALLERS)
+
+    def test_two_clauses_in_one_paragraph_each_get_their_list(self) -> None:
+        other = [f"0x{n:x}" for n in range(0x2000, 0x2050, 0x10)]
+        first, second = _long_clause(), _long_clause("offset 0xbe00", other)
+        report = _report(
+            technical_analysis={
+                "payloads": {
+                    "title": "Payloads and dropped files",
+                    "body": f"Not established; {first}; {second}.",
+                    "evidence_refs": ["ev_0025"],
+                }
+            }
+        )
+        full = MarkdownRenderer(layout=FULL).render(report).splitlines()
+        at = next(n for n, line in enumerate(full) if "listed below" in line)
+        assert full[at].count("listed below") == 2
+        assert full[at + 2] == f"- Read routines that call offset 0xad34: {', '.join(_CALLERS)}"
+        assert full[at + 3] == f"- Read routines that call offset 0xbe00: {', '.join(other)}"
+        analyst = MarkdownRenderer(layout=ANALYST).render(report)
+        assert analyst.count("every one listed in the evidence bundle") == 2
+
+    def test_the_list_closes_before_the_next_block_starts(self) -> None:
+        for after in ("### 5.9 Next", "| a | b |", "```", "- item"):
+            [text] = tidied([f"Prose; {_long_clause()}.\n{after}\nmore"], _report(), analyst=False)
+            lines = text.splitlines()
+            assert lines[1] == "" and lines[2].startswith("- Read routines that call"), after
+            assert lines[3] == "" and lines[4] == after, after
+
+    def test_an_indented_line_is_not_a_paragraph(self) -> None:
+        indented = f"    code; {_long_clause()}."
+        assert tidied([indented], _report(), analyst=False) == [indented]
+
+    def test_the_bundle_link_names_an_anchor_the_bundle_prints(self) -> None:
+        analyst = MarkdownRenderer(layout=ANALYST).render(_degraded())
+        anchors = re.findall(r"\(evidence-bundle\.html#(sec-[a-z0-9-]+)\)", analyst)
+        assert "sec-limitations-and-analysis-notes" in anchors
+        bundle = HtmlRenderer(layout=BUNDLE).render(_degraded())
+        for anchor in anchors:
+            assert f'id="{anchor}"' in bundle, anchor
+
+
+class TestADiagramBoxTitleIsDefanged:
+    def test_a_url_in_a_step_is_defanged_in_the_box_title(self) -> None:
+        report = _flow_report(
+            ["The loader fetches https://evil.example/payload from its server.", "Second step."]
+        )
+        html = HtmlRenderer(layout=ANALYST).render(report)
+        figure = html.split('id="fig-execution-flow"', 1)[1].split("</figure>", 1)[0]
+        titles = re.findall(r"<title>(.*?)</title>", figure)
+        assert titles and "https://evil.example" not in figure
+        assert "evil[.]example" in titles[0]
+
+    def test_a_cut_before_a_mark_that_ends_a_word_keeps_the_word(self) -> None:
+        assert _word_cut("a" * 10 + " word, then more", 16) == "a" * 10 + " word\u2026"
+        assert _word_cut("see evil.example now", 9) == "see\u2026"

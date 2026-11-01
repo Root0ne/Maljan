@@ -351,12 +351,26 @@ def _word_cut(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     head = text[: limit - 1]
-    if not text[limit - 1].isspace():
-        # The cut falls inside a word: back to the space before it.
+    after, beyond = text[limit - 1], text[limit : limit + 1]
+    # A mark ends the word only where a space or the text's end follows it: the
+    # dot in "a.example" is inside a token.
+    ends = after in _WORD_ENDS and (not beyond or beyond.isspace())
+    if not (after.isspace() or (_word_char(head[-1]) and ends)):
+        # The cut falls inside a word or a token: back to the space before it.
+        # A cut before a space, or before a mark that ends a whole word, keeps
+        # the word.
         space = head.rfind(" ")
         if space > 0:
             head = head[:space]
     return head.rstrip(" ,;:([{") + "\u2026"
+
+
+# The marks that end a whole word in a sentence.
+_WORD_ENDS = frozenset(",;:.!?)")
+
+
+def _word_char(char: str) -> bool:
+    return char.isalnum() or char == "_"
 
 
 def _mermaid_label(text: str) -> str:

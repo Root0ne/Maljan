@@ -191,12 +191,21 @@ def pack_spellings(report: Any) -> dict[str, str]:
     (``bound_values``). Only a text whose pack spelling differs by its closing
     backslash (``\\x5c``) is read: one printable line holding no quote, so the
     text printed in its place starts no line and closes no quote. A spelling
-    that is itself a recorded text is left out: the two cannot be told apart.
+    a tool table's cell holds, whole or inside a longer cell, is left out: a
+    tool wrote those characters, and a model quoting the tool is not corrected.
+
+    The limit: only the run's recorded texts are read, so a model's own words
+    that happen to spell a recorded text with ``\\x5c`` are printed as that
+    text, and a spelling a tool wrote in an answer the report holds no table
+    of is not known here.
     """
     values: set[str] = set()
+    cells: list[str] = []
     for section in getattr(report, "sections", None) or ():
         for row in getattr(section, "rows", None) or ():
-            values.update(cell for cell in row if isinstance(cell, str) and "\\" in cell)
+            held = [cell for cell in row if isinstance(cell, str) and "\\" in cell]
+            values.update(held)
+            cells.extend(cell for cell in held if "\\x5c" in cell)
     recovered = getattr(report, "emulated_strings", None)
     if recovered is not None:
         values.update(v for v in recovered.spelled.values() if "\\" in v)
@@ -214,22 +223,47 @@ def pack_spellings(report: Any) -> dict[str, str]:
         ):
             continue
         spelling = pack_escaped(value)
-        if spelling == value[:-1] + "\\x5c" and spelling not in values:
+        if spelling == value[:-1] + "\\x5c" and not any(spelling in cell for cell in cells):
             out[spelling] = value
     return out
 
 
-def _spelling_pattern(spellings: dict[str, str]) -> re.Pattern[str] | None:
-    """Every spelling, as written and with its backslashes escaped, longest first."""
-    if not spellings:
+# How a spelling stands in the rendered text: as written, or with each
+# backslash escaped (a value a section escaped as inline text); either one may
+# have its table separators escaped too (a value in a table cell).
+_RAW, _ESCAPED = "raw", "escaped"
+
+
+def _forms(spellings: dict[str, str]) -> dict[str, tuple[str, str, bool]]:
+    """Each form a spelling stands in, to its text, how it was escaped and whether its
+    table separators were."""
+    out: dict[str, tuple[str, str, bool]] = {}
+    for spelling, text in spellings.items():
+        for form, how in ((spelling, _RAW), (_escaped(spelling), _ESCAPED)):
+            out.setdefault(form, (text, how, False))
+            if _PIPE in form:
+                out.setdefault(_piped(form), (text, how, True))
+    return out
+
+
+def _spelling_pattern(forms: dict[str, tuple[str, str, bool]]) -> re.Pattern[str] | None:
+    """Every form, longest first."""
+    if not forms:
         return None
-    forms = {form for spelling in spellings for form in (spelling, _escaped(spelling))}
     alternatives = "|".join(re.escape(form) for form in sorted(forms, key=len, reverse=True))
     return re.compile(r"(?<![\w\\])(?:" + alternatives + r")(?![0-9A-Za-z])")
 
 
+# The table separator, named as the Markdown renderer names it.
+_PIPE = chr(124)
+
+
 def _escaped(text: str) -> str:
     return text.replace("\\", "\\\\")
+
+
+def _piped(text: str) -> str:
+    return text.replace(_PIPE, "\\" + _PIPE)
 
 
 def _code_spans(line: str) -> list[tuple[int, int]]:
@@ -270,43 +304,58 @@ def _code_spans(line: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _unspelled_line(line: str, pattern: re.Pattern[str], spellings: dict[str, str]) -> str:
+def _unspelled_line(
+    line: str, pattern: re.Pattern[str], forms: dict[str, tuple[str, str, bool]]
+) -> str:
     if "\\x5c" not in line:
         return line
     spans: list[tuple[int, int]] | None = None
 
     def value(found: re.Match[str]) -> str:
         nonlocal spans
-        written = found.group(0)
-        raw = written in spellings
-        text = spellings[written] if raw else spellings[written.replace("\\\\", "\\")]
-        if not raw:
+        text, how, piped = forms[found.group(0)]
+        if how == _ESCAPED:
             # Among escaped text, escaped as its neighbours are.
-            return _escaped(text)
-        if spans is None:
-            spans = _code_spans(line)
-        if any(start < found.start() < end for start, end in spans):
-            # Inside a code span a backslash is printed as written.
-            return text
-        return _prose_escaped(text, line[found.end() : found.end() + 1])
+            out = _escaped(text)
+        else:
+            if spans is None:
+                spans = _code_spans(line)
+            if any(start < found.start() < end for start, end in spans):
+                # Inside a code span a backslash is printed as written.
+                out = text
+            else:
+                out = _prose_escaped(text, line[found.end() : found.end() + 1])
+        return _piped(out) if piped else out
 
     return pattern.sub(value, line)
 
 
 def _prose_escaped(text: str, following: str) -> str:
-    """``text`` among prose: each backslash a viewer would read as an escape or a line break
-    (before ASCII punctuation, or ending the line) escaped, every other one as written."""
+    """``text`` among prose, printed as written.
+
+    A backslash a viewer would read as an escape (before ASCII punctuation) or
+    as a line break (ending the line) is escaped; a punctuation mark after a
+    backslash in the value, which was inert behind it, is escaped too where
+    Markdown reads it (``HKCR\\*\\shell\\`` would otherwise open emphasis). A
+    dot and a colon are never escaped, so no domain or URL is hidden from the
+    defanger. The text's closing backslash escapes only itself: the character
+    after it is the surrounding text's.
+    """
     out: list[str] = []
     for index, char in enumerate(text):
         if char == "\\":
             after = text[index + 1] if index + 1 < len(text) else following
             if not after or after in _ASCII_PUNCTUATION:
                 out.append("\\")
+        elif index and text[index - 1] == "\\" and char in _MARKDOWN_ACTIVE:
+            out.append("\\")
         out.append(char)
     return "".join(out)
 
 
 _ASCII_PUNCTUATION = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
+# The punctuation Markdown may read as markup, which an escape keeps literal.
+_MARKDOWN_ACTIVE = _ASCII_PUNCTUATION - frozenset(".:\\")
 
 
 # ---------------------------------------------------------------------------
@@ -324,18 +373,23 @@ _UNREAD_CLAUSE = re.compile(
     + str(CALLERS_IN_PROSE)
     + r",})(?P<tail>, has no listed code \(decompiled or disassembled\))"
 )
-# A line that is not a paragraph's: a table row, a list item, a quote, a heading.
-# The table separator is named, as the Markdown renderer names it.
-_NOT_PROSE = re.compile(r"^\s*(?:[>#" + chr(124) + r"]|[-*+] |\d+[.)] )")
+# A line that is not a paragraph's: a table row, a list item, a quote, a
+# heading, an indented code line. The table separator is named, as the
+# Markdown renderer names it.
+_NOT_PROSE = re.compile(r"^(?: {4}|\t|\s*(?:[>#" + chr(124) + r"]|[-*+] |\d+[.)] ))")
 
 
-def _compact_callers(line: str, *, analyst: bool) -> tuple[str, list[str]]:
+def _compact_callers(
+    line: str, *, analyst: bool, printed_whole: frozenset[tuple[str, str]]
+) -> tuple[str, list[str]]:
     """The line with each long caller list compacted, and the list lines to print after it.
 
     In the analyst report the clause names :data:`CALLERS_IN_PROSE` callers,
-    the count and the bundle; elsewhere a paragraph's clause names the count
-    and its callers follow the paragraph as a list. A clause in a table row or
-    a list item outside the analyst report is left whole.
+    the count and the bundle, only where the clause stands in a section 5 body
+    (``printed_whole``: its routine and callers), which the single-file
+    report and the bundle print; elsewhere a paragraph's clause names the
+    count and its callers follow the paragraph as a list. A clause in a table
+    row or a list item outside the analyst report is left whole.
     """
     if "has no listed code" not in line:
         return line, []
@@ -348,6 +402,8 @@ def _compact_callers(line: str, *, analyst: bool) -> tuple[str, list[str]]:
         callers = found.group("callers").split(", ")
         word = found.group("word") or ""
         if analyst:
+            if (found.group("routine"), found.group("callers")) not in printed_whole:
+                return found.group(0)
             more = len(callers) - CALLERS_IN_PROSE
             named = ", ".join(callers[:CALLERS_IN_PROSE])
             where = f"{word}{named} and {more} more, every one listed in the evidence bundle"
@@ -364,6 +420,22 @@ def _compact_callers(line: str, *, analyst: bool) -> tuple[str, list[str]]:
         )
 
     return _UNREAD_CLAUSE.sub(compact, line), listed
+
+
+def _section_5_clauses(report: Any) -> frozenset[tuple[str, str]]:
+    """The routine and callers of each long clause a section 5 body holds: the bodies the
+    single-file report and the bundle print."""
+    from maljan.reporting.models import TechnicalSubsection
+
+    ta = getattr(report, "technical_analysis", None)
+    found: set[tuple[str, str]] = set()
+    for name in type(ta).model_fields if ta is not None else ():
+        sub = getattr(ta, name, None)
+        if isinstance(sub, TechnicalSubsection) and "has no listed code" in sub.body:
+            found.update(
+                (m.group("routine"), m.group("callers")) for m in _UNREAD_CLAUSE.finditer(sub.body)
+            )
+    return frozenset(found)
 
 
 def finished(sections: list[str], report: Any, *, analyst: bool) -> list[str]:
@@ -383,8 +455,9 @@ def tidied(sections: Sequence[str], report: Any, *, analyst: bool) -> list[str]:
     compacted (module docstring). One pass over each section's lines outside fences."""
     from maljan.reporting.renderers.markdown import _TEXT, _ReferenceScan
 
-    spellings = pack_spellings(report)
-    pattern = _spelling_pattern(spellings)
+    forms = _forms(pack_spellings(report))
+    pattern = _spelling_pattern(forms)
+    printed_whole = _section_5_clauses(report) if analyst else frozenset()
     out: list[str] = []
     for text in sections:
         if pattern is None and "has no listed code" not in text:
@@ -393,17 +466,20 @@ def tidied(sections: Sequence[str], report: Any, *, analyst: bool) -> list[str]:
         lines: list[str] = []
         pending: list[str] = []
         for line, kind in _ReferenceScan().lines(text):
+            if pending and (kind != _TEXT or not line.strip() or _NOT_PROSE.match(line)):
+                # The paragraph ended: its callers follow it as a list, apart
+                # from whatever block starts next.
+                lines.extend(["\n", *(item + "\n" for item in pending)])
+                if line.strip():
+                    lines.append("\n")
+                pending = []
             if kind != _TEXT:
                 lines.append(line)
                 continue
-            if pending and not line.strip():
-                # The paragraph ended: its callers follow it as a list.
-                lines.extend(["\n", *(item + "\n" for item in pending)])
-                pending = []
             if pattern is not None:
                 ending = line[len(line.rstrip("\r\n")) :]
-                line = _unspelled_line(line.rstrip("\r\n"), pattern, spellings) + ending
-            line, listed = _compact_callers(line, analyst=analyst)
+                line = _unspelled_line(line.rstrip("\r\n"), pattern, forms) + ending
+            line, listed = _compact_callers(line, analyst=analyst, printed_whole=printed_whole)
             pending.extend(listed)
             lines.append(line)
         if pending:
