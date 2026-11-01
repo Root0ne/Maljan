@@ -489,6 +489,105 @@ class TestEveryQuestionContinuesTheLoop:
         assert "answer for 0" not in question
 
 
+LARGE = "LARGE ENTRY BODY " + "0x309c " * 4000
+ROOM_CHARS = 9000.0
+
+
+def _chain_bodies(monkeypatch: pytest.MonkeyPatch, mode: str) -> list[dict[str, Any]]:
+    """Every request of the whole chain, with an entry too large to show beside the turns.
+
+    ``mode``: ``"dev"`` asks over the rebuilt conversation only (no loop base
+    is kept, as on dev); ``"window"`` keeps the base but the loop's
+    conversation does not fit the window; ``"aged"`` keeps it past the cache
+    lifetime; ``"kept"`` keeps it and asks over it.
+    """
+    from maljan.agents import base_agent
+    from maljan.pipeline.retry_merge import RetryMerge
+    from maljan.schemas.evidence import LedgerEntry
+
+    wire = Wire(_chain_answer)
+    install(monkeypatch, wire)
+    monkeypatch.setattr(base_agent, "loop_limits", lambda *_a, **_k: (None, 40))
+    monkeypatch.setattr(
+        base_agent, "merge_retry", lambda *_a, **_k: RetryMerge(why="its numbers were not read")
+    )
+    monkeypatch.setattr(BaseAnalyst, "_window_room_chars", lambda *_a, **_k: ROOM_CHARS)
+    if mode == "dev":
+        monkeypatch.setattr(BaseAnalyst, "_question_base_of", lambda *_a, **_k: None)
+    if mode == "window":
+        real = BaseAnalyst._fits_the_window
+
+        def fits(agent: Any, messages: list[Any], cap: int) -> bool:
+            if any("Analyse." in str(getattr(m, "content", "")) for m in messages):
+                return False
+            return real(agent, messages, cap)
+
+        monkeypatch.setattr(BaseAnalyst, "_fits_the_window", fits)
+    agent = _Analyst(llm=_model(), name="static")
+    agent.run_state_block = "sample: c"
+    agent.tools = [_lookup()]
+    text = agent.execute_tool_loop([("system", SYSTEM), ("human", "Analyse.")])
+    agent._evidence_entries.append(
+        LedgerEntry(id="ev_0099", agent="static", tool="batch_decompile", output=LARGE)
+    )
+    if mode == "aged":
+        kept = agent._kept_conversation
+        assert kept is not None
+        agent._kept_conversation = KeptConversation(kept.messages, kept.sent_at - 3600.0)
+    isr = agent._text_to_isr(text, revision_round=0)
+    answers = iter([TOLD, TOLD])
+    with patch("maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
+        agent._validate_isr(isr, "the raw data")
+    assert wire.refused == []
+    return list(wire.bodies)
+
+
+class TestWhereNoQuestionIsContinuedEveryRequestIsDevs:
+    @pytest.mark.parametrize("mode", ["window", "aged"])
+    def test_every_request_is_the_one_dev_sends(
+        self, monkeypatch: pytest.MonkeyPatch, mode: str
+    ) -> None:
+        with pytest.MonkeyPatch.context() as dev_patch:
+            dev = _chain_bodies(dev_patch, "dev")
+        with pytest.MonkeyPatch.context() as kept_patch:
+            kept = _chain_bodies(kept_patch, mode)
+        assert json.dumps(kept, sort_keys=True) == json.dumps(dev, sort_keys=True)
+
+    def test_the_drops_question_names_the_entry_too_large_to_show(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bodies = _chain_bodies(monkeypatch, "window")
+        drops = [b for b in bodies if "no longer states these items" in _last_user_text(b)]
+        assert len(drops) == 1
+        question = _last_user_text(drops[0])
+        assert "ev_0099" in question
+        assert "LARGE ENTRY BODY" not in question, "named, not shown past the window"
+
+
+class TestARefusedContinuedPartIsAskedAsBuilt:
+    def test_its_items_are_asked_again_over_the_rebuilt_turns(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.agents.base_agent import ContinuationRefused
+
+        real = BaseAnalyst._answer_after_loop
+
+        def refusing(agent: Any, messages: list[Any], *args: Any, **kwargs: Any) -> Any:
+            # As a continued question whose loop would end in the tools-free call.
+            if kwargs.get("refuse_tools_free"):
+                raise ContinuationRefused("its loop ended without an answer")
+            return real(agent, messages, *args, **kwargs)
+
+        monkeypatch.setattr(BaseAnalyst, "_answer_after_loop", refusing)
+        with pytest.MonkeyPatch.context() as dev_patch:
+            dev = _chain_bodies(dev_patch, "dev")
+        bodies = _chain_bodies(monkeypatch, "kept")
+        marker = "no longer states these items"
+        asked = [b for b in bodies if marker in _last_user_text(b)]
+        built = [b for b in dev if marker in _last_user_text(b)]
+        assert asked and json.dumps(asked, sort_keys=True) == json.dumps(built, sort_keys=True)
+
+
 class TestTheBreakpointRule:
     def test_a_string_turn_s_breakpoint_reads_the_loop_s_entry(self) -> None:
         memory = anthropic_history.Memory()
