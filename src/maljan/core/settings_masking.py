@@ -825,6 +825,18 @@ def _flag_name(arg: str) -> str:
     return arg.lstrip("-").split("=", 1)[0]
 
 
+# The first word of a flag that turns a credential's use on or off
+# (``--no-auth``, ``--disable-token``, ``--require-password``): a switch, so
+# the argument after it is the next argument, not its value.
+_SWITCH_FIRST_WORDS = frozenset({"no", "disable", "skip", "without", "require", "enable"})
+
+
+def _switch_flag(name: str) -> bool:
+    """Whether a flag ``name`` is a switch by its first word (``no-auth``)."""
+    words = [word for word in re.split(r"[^a-z0-9]+", name.lower()) if word]
+    return len(words) > 1 and words[0] in _SWITCH_FIRST_WORDS
+
+
 # ``NAME=value`` as a whole argument (``docker -e API_KEY=v``, a bare
 # ``TOKEN=v``), and ``Header: value`` (``-H "Authorization: Bearer v"``).
 # Possessive, so each costs time linear in the argument.
@@ -868,7 +880,9 @@ def masked_args(args: list[Any], mask: str = SNAPSHOT_MASK, *, by_value: bool = 
     The value after a flag whose name marks a credential (``--api-key T``,
     ``--token=T``): the argument after such a flag is its value unless it is
     another long flag (``--...``), since a credential may itself begin with
-    ``-``. And, whatever flag stands before it, the value of a ``NAME=value``
+    ``-``. A flag whose first word switches the credential on or off
+    (``--no-auth``, ``--disable-token``) takes no value, so the argument after
+    it is kept. And, whatever flag stands before it, the value of a ``NAME=value``
     whose name marks a credential (``-e API_KEY=T``, ``--env=TOKEN=T``) and of
     a ``Header: value`` whose header carries one (``-H "Authorization: T"``,
     ``X-Api-Key: T``).
@@ -891,7 +905,7 @@ def masked_args(args: list[Any], mask: str = SNAPSHOT_MASK, *, by_value: bool = 
                 out.append(f"{flag}={mask}" if value else arg)
             else:
                 out.append(arg)
-                after_flag = True
+                after_flag = not _switch_flag(_flag_name(arg))
             continue
         if arg.startswith("-") and "=" in arg:
             flag, value = arg.split("=", 1)

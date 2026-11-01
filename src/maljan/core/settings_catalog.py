@@ -443,6 +443,7 @@ _CREDENTIAL_LAST_WORDS = frozenset(
         "bearer",
         "auth",
         "cookie",
+        "cookies",
         "jwt",
     }
 )

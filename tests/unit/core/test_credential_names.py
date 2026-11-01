@@ -140,3 +140,54 @@ def test_an_auth_block_is_read_by_its_keys_not_masked_whole():
     assert sm.masked_value(block, by_value=False) == {
         "auth": {"header": "Authorization", "scheme": "Bearer", "token": MASK}
     }
+
+
+def test_cookies_is_a_credential_and_cookies_enabled_a_setting():
+    assert names_a_credential_value("COOKIES")
+    assert names_a_credential_value("session_cookies")
+    assert not names_a_credential_value("cookies_enabled")
+
+
+def test_the_structural_rules_mask_a_credential_named_entry_whatever_its_value():
+    """A switch is kept out of the values held, never out of the masking where it stands."""
+    assert sm.masked_value({"AUTH": "basic"}, by_value=False) == {"AUTH": MASK}
+    assert sm.masked_server({"env": {"AUTH": "basic"}}, by_value=False) == {"env": {"AUTH": MASK}}
+
+
+@pytest.mark.parametrize("key", ["auth", "jwt", "cookie", "session_cookies", "PGPASSWORD"])
+def test_a_credential_named_query_value_is_masked_in_an_event(key):
+    from maljan.pipeline import events
+
+    value = _secret(4)
+    events.remember_secret_values([_secret(5)], scope="test")
+    try:
+        kept = events.safe_answer_text(f"fetched https://h.example/p?{key}={value}&page=2")
+    finally:
+        events.forget_secret_values()
+    assert kept == f"fetched https://h.example/p?{key}=***&page=2"
+
+
+@pytest.mark.parametrize("key", ["author", "oauth", "authority", "auth_mode"])
+def test_a_query_value_about_a_credential_is_kept_in_an_event(key):
+    from maljan.pipeline import events
+
+    events.remember_secret_values([_secret(5)], scope="test")
+    try:
+        kept = events.safe_answer_text(f"fetched https://h.example/p?{key}=someone&page=2")
+    finally:
+        events.forget_secret_values()
+    assert kept == f"fetched https://h.example/p?{key}=someone&page=2"
+
+
+@pytest.mark.parametrize(
+    "flag", ["--no-auth", "--disable-token", "--skip-password", "--require-auth", "--no-password"]
+)
+def test_a_switch_flag_takes_no_value(flag):
+    assert sm.masked_args([flag, "/x"], by_value=False) == [flag, "/x"]
+
+
+@pytest.mark.parametrize("flag", ["--auth", "--jwt", "--cookie", "--api-key"])
+def test_a_credential_flag_still_masks_its_value(flag):
+    value = _secret(6)
+    assert sm.masked_args([flag, value], by_value=False) == [flag, MASK]
+    assert sm.masked_args([f"{flag}={value}"], by_value=False) == [f"{flag}={MASK}"]
