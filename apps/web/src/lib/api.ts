@@ -1,6 +1,6 @@
 import type { TranscriptRow } from "@/lib/conversation";
 import type { JobRoster } from "@/types/events";
-import type { EvidenceListResponse, EvidenceQuery } from "@/types/evidence";
+import type { CallMapResponse, EvidenceListResponse, EvidenceQuery } from "@/types/evidence";
 import type { RunDiff } from "@/types/runDiff";
 import type {
   EnrichTriggerResponse,
@@ -1131,6 +1131,12 @@ class ApiClient {
     return this.request<EvidenceListResponse>(
       `/api/v1/jobs/${encodeURIComponent(jobId)}/evidence?${params}`
     );
+  }
+
+  /** The functions the run's code reading touched, what each calls and what
+   *  calls it, derived from the job's stored ledger. */
+  getJobCallMap(jobId: string) {
+    return this.request<CallMapResponse>(`/api/v1/jobs/${encodeURIComponent(jobId)}/evidence/call-map`);
   }
 
   /* ── Reports ───────────────────────────────────────────

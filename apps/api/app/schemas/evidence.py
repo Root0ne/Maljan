@@ -151,3 +151,31 @@ class EvidenceListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class CallMapFunction(BaseModel):
+    """One function the run's code reading touched (``maljan.reporting.call_map``).
+
+    ``address`` and ``offset`` are hex; ``offset`` is ``None`` without one image
+    base, and ``address`` ``None`` for a function listed under a name alone.
+    ``read`` says whether an entry holds its listing (``listed_in``) or a call
+    only names it; ``read_by`` are the agents whose calls listed it.
+    """
+
+    address: str | None
+    offset: str | None = None
+    names: list[str] = Field(default_factory=list)
+    read: bool
+    listed_in: list[str] = Field(default_factory=list)
+    read_by: list[str] = Field(default_factory=list)
+    calls: list[str] = Field(default_factory=list)
+    called_by: list[str] = Field(default_factory=list)
+
+
+class CallMapResponse(BaseModel):
+    """The job's call map, derived from its stored ledger when asked for; nothing is stored."""
+
+    job_id: uuid.UUID
+    image_base: str | None = None
+    functions: list[CallMapFunction]
+    roots: list[str]

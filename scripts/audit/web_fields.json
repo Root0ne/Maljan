@@ -1,5 +1,5 @@
 {
- "about": "Which API fields each analysis tab of the web console renders, read from apps/web/src: the header, then the six tabs (Overview, Behaviour, Network, Static & code, Indicators & detection, Evidence). A path is '<root>:<dotted path>', '[]' walking a list. Roots: report = GET /api/v1/reports/job/{job_id}, job = GET /api/v1/jobs/{job_id}, stix = GET /api/v1/reports/{report_id}/stix, evidence = GET /api/v1/jobs/{job_id}/evidence, events = GET /api/v1/jobs/{job_id}/events, follow_ups = GET /api/v1/jobs/{job_id}/follow-ups. 'limit' is how many list entries the tab draws; 'hidden_if_section' names section keys whose content makes the tab draw the section instead of the field. Sections (report:malware_report.sections[]) are placed by 'section_routing' and drawn by 'section_body'.",
+ "about": "Which API fields each analysis tab of the web console renders, read from apps/web/src: the header, then the six tabs (Overview, Behaviour, Network, Static & code, Indicators & detection, Evidence). A path is '<root>:<dotted path>', '[]' walking a list. Roots: report = GET /api/v1/reports/job/{job_id}, job = GET /api/v1/jobs/{job_id}, stix = GET /api/v1/reports/{report_id}/stix, evidence = GET /api/v1/jobs/{job_id}/evidence, events = GET /api/v1/jobs/{job_id}/events, follow_ups = GET /api/v1/jobs/{job_id}/follow-ups, call_map = GET /api/v1/jobs/{job_id}/evidence/call-map. 'limit' is how many list entries the tab draws; 'hidden_if_section' names section keys whose content makes the tab draw the section instead of the field. Sections (report:malware_report.sections[]) are placed by 'section_routing' and drawn by 'section_body'.",
  "base": "apps/web/src",
  "tabs": {
   "header": {
@@ -104,20 +104,26 @@
     {"path": "report:malware_report.identity.hashes.ssdeep", "ref": "components/analysis/tabs/IdentityContent.tsx:81"},
     {"path": "report:malware_report.identity.hashes.tlsh", "ref": "components/analysis/tabs/IdentityContent.tsx:81"},
     {"path": "report:malware_report.reputation[].summary", "ref": "components/analysis/reputation.ts:53"},
-    {"path": "report:malware_report.static.api_technique_hits[].technique_id", "ref": "components/analysis/tabs/StaticContent.tsx:233", "note": "under the Imports sub-tab"},
+    {"path": "report:malware_report.static.api_technique_hits[].technique_id", "ref": "components/analysis/tabs/StaticContent.tsx:235", "note": "under the Imports sub-tab"},
     {"path": "report:malware_report.static.packer_matches[].name", "ref": "components/analysis/tabs/IdentityContent.tsx:242"},
     {"path": "report:malware_report.static.pdb_path", "ref": "components/analysis/tabs/IdentityContent.tsx:261"},
     {"path": "report:malware_report.static.obfuscation_indicators[]", "ref": "components/analysis/tabs/IdentityContent.tsx:266"},
-    {"path": "report:malware_report.static.sections[].name", "ref": "components/analysis/tabs/StaticContent.tsx:158", "hidden_if_section": ["pe_sections", "elf_sections", "macho_sections", "apk_sections"]},
-    {"path": "report:malware_report.static.imports[].function", "ref": "components/analysis/tabs/StaticContent.tsx:199", "hidden_if_section": ["pe_imports", "elf_imports", "macho_imports", "apk_imports"]},
-    {"path": "report:malware_report.static.interesting_strings[].value", "ref": "components/analysis/tabs/StaticContent.tsx:423"},
-    {"path": "report:malware_report.technical_analysis.configuration[].key", "ref": "components/analysis/tabs/StaticContent.tsx:453", "note": "the technical analysis on Behaviour links here (components/analysis/TechnicalAnalysisPanel.tsx)"},
-    {"path": "report:malware_report.technical_analysis.configuration[].value", "ref": "components/analysis/tabs/StaticContent.tsx:456"},
-    {"path": "report:malware_report.static.exports[]", "ref": "components/analysis/tabs/StaticContent.tsx:312", "hidden_if_section": ["pe_exports", "elf_exports", "macho_exports", "apk_exports"]},
+    {"path": "report:malware_report.static.sections[].name", "ref": "components/analysis/tabs/StaticContent.tsx:159", "hidden_if_section": ["pe_sections", "elf_sections", "macho_sections", "apk_sections"]},
+    {"path": "report:malware_report.static.imports[].function", "ref": "components/analysis/tabs/StaticContent.tsx:200", "hidden_if_section": ["pe_imports", "elf_imports", "macho_imports", "apk_imports"]},
+    {"path": "report:malware_report.static.interesting_strings[].value", "ref": "components/analysis/tabs/StaticContent.tsx:424"},
+    {"path": "report:malware_report.technical_analysis.configuration[].key", "ref": "components/analysis/tabs/StaticContent.tsx:454", "note": "the technical analysis on Behaviour links here (components/analysis/TechnicalAnalysisPanel.tsx)"},
+    {"path": "report:malware_report.technical_analysis.configuration[].value", "ref": "components/analysis/tabs/StaticContent.tsx:457"},
+    {"path": "report:malware_report.static.exports[]", "ref": "components/analysis/tabs/StaticContent.tsx:313", "hidden_if_section": ["pe_exports", "elf_exports", "macho_exports", "apk_exports"]},
     {"path": "report:malware_report.directed_text[].family", "ref": "components/analysis/DirectedTextBlock.tsx:55"},
     {"path": "report:malware_report.directed_text[].text", "ref": "components/analysis/DirectedTextBlock.tsx:66", "note": "quoted as the sample's text"},
     {"path": "report:malware_report.directed_text[].where", "ref": "components/analysis/DirectedTextBlock.tsx:70"},
-    {"path": "report:malware_report.directed_text[].evidence_id", "ref": "components/analysis/DirectedTextBlock.tsx:71", "note": "as a citation mark, the id in its name"}
+    {"path": "report:malware_report.directed_text[].evidence_id", "ref": "components/analysis/DirectedTextBlock.tsx:71", "note": "as a citation mark, the id in its name"},
+    {"path": "call_map:image_base", "ref": "components/analysis/CallMap.tsx:121"},
+    {"path": "call_map:functions[].address", "ref": "components/analysis/CallMap.tsx:427", "limit": 25, "note": "the call map's List view, 25 rows a step; the Tree view draws the roots and what a reader opens"},
+    {"path": "call_map:functions[].names[]", "ref": "components/analysis/CallMap.tsx:428", "limit": 25},
+    {"path": "call_map:functions[].offset", "ref": "components/analysis/CallMap.tsx:429", "limit": 25},
+    {"path": "call_map:functions[].read_by[]", "ref": "components/analysis/CallMap.tsx:436", "limit": 25},
+    {"path": "call_map:functions[].listed_in[]", "ref": "components/analysis/CallMap.tsx:456", "limit": 25, "note": "each a link to its evidence record"}
    ]
   },
   "indicators": {

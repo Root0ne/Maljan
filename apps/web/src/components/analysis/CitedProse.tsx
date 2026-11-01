@@ -42,12 +42,16 @@ export function CiteMark({
   ids,
   title = "Evidence for this statement",
   named = false,
+  tabIndex,
 }: {
   ids: readonly string[];
   title?: string;
   /** The id was written in the text: say it in the mark's name too, so the
    *  reader loses nothing the plain text gave. */
   named?: boolean;
+  /** -1 inside a composite widget (a tree) that keeps one tab stop and opens
+   *  the citation from its own key; a tab stop of its own otherwise. */
+  tabIndex?: number;
 }) {
   const { showEvidence } = useReport();
   if (ids.length === 0) return null;
@@ -56,6 +60,7 @@ export function CiteMark({
       <button
         type="button"
         data-citation=""
+        tabIndex={tabIndex}
         onClick={(e) =>
           showEvidence?.({ title, details: [], techniques: [], evidenceIds: [...ids] }, e.currentTarget)
         }

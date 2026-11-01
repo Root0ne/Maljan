@@ -11,6 +11,7 @@ import Th from "@/components/ui/Th";
 import VerticalTabs from "@/components/ui/VerticalTabs";
 import { entropyClass, formatBytes } from "@/lib/report-utils";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
+import CallMap from "@/components/analysis/CallMap";
 import EvidenceChips from "@/components/analysis/EvidenceChips";
 import {
   binarySectionKeys,
@@ -36,9 +37,9 @@ import type { StringIOCKind } from "@/types/malware-report";
 /**
  * What reading the file without running it showed: its structure (sections,
  * imports, exports and resources, one at a time), the strings it carries,
- * the configuration recovered from it, and the functions the analysis
- * examined. The sections a tool wrote lead each place; the extractor's typed
- * table draws where no section already says the same thing.
+ * the configuration recovered from it, the functions the analysis examined
+ * and the map of what they call. The sections a tool wrote lead each place;
+ * the extractor's typed table draws where no section says the same thing.
  */
 export default function StaticContent({ report }: { report: ReportDetailDTO }) {
   const [tab, setTab] = useState<StructureTab>("sections");
@@ -487,6 +488,12 @@ export default function StaticContent({ report }: { report: ReportDetailDTO }) {
           </div>
         </Section>
       </div>
+
+      {report.job_id && (
+        <div id="call-map" className="scroll-mt-16">
+          <CallMap jobId={report.job_id} />
+        </div>
+      )}
 
       {slots.other.length > 0 && (
         <div id="static-other" className="scroll-mt-16 space-y-3">
