@@ -8496,8 +8496,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         places no breakpoint for, whose cache it cannot reason about) or the
         base's entry is past it less :data:`KEPT_CONVERSATION_MARGIN_S`, or
         when the turns, framed as they are sent, and an answer of ``cap``
-        tokens do not fit the window. A base asked over is read at that
-        moment, so its entry lives from then.
+        tokens do not fit the window.
         """
         size = len(rebuilt)
         if len(turns) <= size or any(a is not b for a, b in zip(turns, rebuilt, strict=False)):
@@ -8507,10 +8506,39 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         if base is None:
             return None
-        self._question_base: KeptConversation | None = KeptConversation(
-            base.messages, time.monotonic()
-        )
         return [*base.messages, *turns[size:]]
+
+    def _shows_what_the_rebuilt_shows(
+        self,
+        answer: AgentISR,
+        messages: list[Any],
+        rebuilt: str,
+        base: KeptConversation,
+        over_base: str,
+    ) -> bool:
+        """Whether a question over ``base`` shows each entry the rebuilt question shows whole.
+
+        ``rebuilt`` is the question's text over the rebuilt conversation
+        ``messages``, ``over_base`` its text over the loop's. Each entry
+        ``answer`` cites that the rebuilt text shows whole is either held by
+        the loop's conversation (:func:`cited_entry_texts` names it nowhere
+        there) or shown whole in ``over_base``; a continued question never
+        shows the model less than the rebuilt one.
+        """
+        cited = [
+            entry_id
+            for item in [*answer.claims, *(answer.findings or [])]
+            for entry_id in retry_drop_cited(item)
+        ]
+        shown = cited_entry_texts(self, cited, messages)
+        unheld = cited_entry_texts(self, cited, list(base.messages))
+        for entry_id, text in shown.items():
+            body = text.rstrip()
+            if not body or body not in rebuilt or entry_id not in unheld:
+                continue
+            if unheld[entry_id].rstrip() not in over_base:
+                return False
+        return True
 
     def _live_question_base(
         self, tail: list[Any], cap: int, *, tools: bool
@@ -8625,6 +8653,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         self._question_budget = None
         self._asking = what
         unanswered = ""
+        base = getattr(self, "_question_base", None)
+        if (plain is not None or refuse_tools_free) and isinstance(base, KeptConversation):
+            # A question over the loop's conversation is sent now: the base's
+            # cache entry is read, so it lives from here.
+            self._question_base: KeptConversation | None = KeptConversation(
+                base.messages, time.monotonic()
+            )
         try:
             return self.execute_tool_loop(list(messages), asked=what, seconds=timeout, steps=steps)
         except ToolsNotBound as exc:
@@ -10258,17 +10293,28 @@ class BaseAnalyst(BudgetMeter, ABC):
                     _continued_turns,
                     max(widest, int(self.output_cap_tokens() or 0)),
                 )
-                turns = [
-                    *turns[:-1],
-                    HumanMessage(content=feedback_text(asked_now, closing=held, cards=cards)),
-                ]
-                held_closing[:] = [held]
-            continued = BaseAnalyst._continued_question(  # type: ignore[arg-type]
-                self,
-                turns,
-                messages,
-                max(widest, int(self.output_cap_tokens() or 0)),
-                tools=tooled,
+                # Continued only where it shows every entry the rebuilt
+                # question shows (:meth:`_shows_what_the_rebuilt_shows`).
+                if BaseAnalyst._shows_what_the_rebuilt_shows(  # type: ignore[arg-type]
+                    self, isr, messages, str(turns[-1].content), base, held
+                ):
+                    turns = [
+                        *turns[:-1],
+                        HumanMessage(content=feedback_text(asked_now, closing=held, cards=cards)),
+                    ]
+                    held_closing[:] = [held]
+                else:
+                    turns = []
+            continued = (
+                BaseAnalyst._continued_question(  # type: ignore[arg-type]
+                    self,
+                    turns,
+                    messages,
+                    max(widest, int(self.output_cap_tokens() or 0)),
+                    tools=tooled,
+                )
+                if turns
+                else None
             )
             if continued is None:
                 held_closing.clear()
@@ -10431,16 +10477,15 @@ class BaseAnalyst(BudgetMeter, ABC):
 
             # The entries are fitted again: this turn also carries the retry's
             # own answer and the question after it, beside a whole answer.
-            turns = _turns(
-                BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
-                    self,
-                    first_answer,
-                    messages,
-                    bare_closing,
-                    _turns,
-                    int(self.output_cap_tokens() or 0),
-                )
+            rebuilt_closing = BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
+                self,
+                first_answer,
+                messages,
+                bare_closing,
+                _turns,
+                int(self.output_cap_tokens() or 0),
             )
+            turns = _turns(rebuilt_closing)
             self.validation_retries += 1
             plain = frame_messages(turns, run_state=current_run_state(self))
             # Over the loop's own conversation (:meth:`_continued_question`),
@@ -10464,13 +10509,18 @@ class BaseAnalyst(BudgetMeter, ABC):
                         ],
                         int(self.output_cap_tokens() or 0),
                     )
-                continued = BaseAnalyst._continued_question(  # type: ignore[arg-type]
-                    self,
-                    _turns(over_base, question_prior),
-                    messages,
-                    int(self.output_cap_tokens() or 0),
-                    tools=tooled,
-                )
+                # Continued only where it shows every entry the rebuilt
+                # question shows (:meth:`_shows_what_the_rebuilt_shows`).
+                if BaseAnalyst._shows_what_the_rebuilt_shows(  # type: ignore[arg-type]
+                    self, first_answer, messages, rebuilt_closing, base, over_base
+                ):
+                    continued = BaseAnalyst._continued_question(  # type: ignore[arg-type]
+                        self,
+                        _turns(over_base, question_prior),
+                        messages,
+                        int(self.output_cap_tokens() or 0),
+                        tools=tooled,
+                    )
             try:
                 answer = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
                     self,
@@ -11506,6 +11556,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             cap,
             tools=tools,
         )
+        held_entries: dict[str, str] = {}
         if base is not None:
             held_entries = cited_entry_texts(self, cited, list(base.messages))
             asked_in = BaseAnalyst._retry_drop_parts(  # type: ignore[arg-type]
@@ -11577,8 +11628,23 @@ class BaseAnalyst(BudgetMeter, ABC):
                 ]
                 try:
                     if continuing:
-                        continued = BaseAnalyst._continued_question(  # type: ignore[arg-type]
-                            self, turns, messages, cap, tools=tools
+                        # Continued only where the part shows every entry its
+                        # items cite that the loop's conversation does not
+                        # hold, none of them named in place of its text.
+                        part_cited = {
+                            entry_id
+                            for _l, _k, item, _m in part_rows
+                            for entry_id in retry_drop_cited(item)
+                        }
+                        whole = not unfit and all(
+                            entry_id in shown for entry_id in part_cited if entry_id in held_entries
+                        )
+                        continued = (
+                            BaseAnalyst._continued_question(  # type: ignore[arg-type]
+                                self, turns, messages, cap, tools=tools
+                            )
+                            if whole
+                            else None
                         )
                         if continued is None:
                             again.append(items)
@@ -11624,12 +11690,24 @@ class BaseAnalyst(BudgetMeter, ABC):
                 claims=tuple(pair for part in again for pair in part.claims),
                 findings=tuple(item for part in again for item in part.findings),
             )
-            _ask_parts(
-                BaseAnalyst._retry_drop_parts(  # type: ignore[arg-type]
-                    self, rest, question, entries, answer, messages
-                ),
-                False,
+            again_in = BaseAnalyst._retry_drop_parts(  # type: ignore[arg-type]
+                self, rest, question, entries, answer, messages
             )
+            named_again = sorted(
+                {entry_id for _items, _shown, unfit in again_in for entry_id in unfit}
+            )
+            if len(again_in) > 1 or named_again:
+                self.logger.warning(
+                    "Validation: the kept-retry drops question for '%s' is asked again over its "
+                    "rebuilt conversation in %d part(s), each beside the entries its items cite; "
+                    "%s.",
+                    self.name,
+                    len(again_in),
+                    f"too large to show even alone: {', '.join(named_again)}"
+                    if named_again
+                    else "all shown",
+                )
+            _ask_parts(again_in, False)
         _emit(
             VALIDATION_RESOLVED
             if all(id(row[2]) in decided for row in labelled)

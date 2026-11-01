@@ -269,21 +269,42 @@ class TestTheRebuiltConversationStands:
         assert agent._continued_question(merged, rebuilt, 0, tools=True) is None
         assert agent._continued_question(asked, rebuilt, 0, tools=False) is None
 
-    def test_a_base_read_lives_again_from_that_read(self) -> None:
+    def test_a_base_past_its_lifetime_is_not_asked_over(self) -> None:
         from maljan.agents import base_agent
 
         agent = _Analyst(llm=cast(Any, None), name="static")
         rebuilt = [_human("the raw data")]
         asked = [*rebuilt, _ai(REPORT), _human("q")]
-        agent._question_base = KeptConversation((_human("Analyse."),), time.monotonic() - 250.0)
+        sent_at = time.monotonic() - 250.0
+        agent._question_base = KeptConversation((_human("Analyse."),), sent_at)
         with patch("maljan.llm.anthropic_history.prompt_cache_seconds", lambda *_a, **_k: 300):
             assert agent._continued_question(asked, rebuilt, 0, tools=True) is not None
-            assert time.monotonic() - agent._question_base.sent_at < 5.0
+            assert agent._question_base.sent_at == sent_at, "built, not yet sent"
             agent._question_base = KeptConversation(
                 agent._question_base.messages,
                 time.monotonic() - 300.0 + base_agent.KEPT_CONVERSATION_MARGIN_S,
             )
             assert agent._continued_question(asked, rebuilt, 0, tools=True) is None
+
+    def test_a_base_lives_again_only_once_a_continued_question_is_sent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.agents.base_agent import ContinuationRefused
+
+        agent = _Analyst(llm=cast(Any, None), name="static")
+        sent_at = time.monotonic() - 250.0
+        agent._question_base = KeptConversation((_human("Analyse."),), sent_at)
+        monkeypatch.setattr(agent, "execute_tool_loop", lambda *_a, **_k: "answered")
+        turns = [_human("Analyse."), _ai(REPORT), _human("q")]
+        # Refused before it is sent: one step left, too few for a turn with tools.
+        agent._last_loop_steps_known = True
+        agent._last_loop_steps_left = 1
+        with pytest.raises(ContinuationRefused):
+            agent._answer_after_loop(turns, None, what="drops", tools=True, refuse_tools_free=True)
+        assert agent._question_base.sent_at == sent_at
+        agent._last_loop_steps_known = False
+        agent._answer_after_loop(turns, None, what="drops", tools=True, refuse_tools_free=True)
+        assert time.monotonic() - agent._question_base.sent_at < 5.0
 
     def test_a_tools_free_call_asks_over_the_rebuilt_turns(
         self, monkeypatch: pytest.MonkeyPatch
@@ -493,7 +514,14 @@ LARGE = "LARGE ENTRY BODY " + "0x309c " * 4000
 ROOM_CHARS = 9000.0
 
 
-def _chain_bodies(monkeypatch: pytest.MonkeyPatch, mode: str) -> list[dict[str, Any]]:
+def _chain_bodies(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    *,
+    room: float = ROOM_CHARS,
+    task: str = "Analyse.",
+    entry: str = LARGE,
+) -> list[dict[str, Any]]:
     """Every request of the whole chain, with an entry too large to show beside the turns.
 
     ``mode``: ``"dev"`` asks over the rebuilt conversation only (no loop base
@@ -511,7 +539,7 @@ def _chain_bodies(monkeypatch: pytest.MonkeyPatch, mode: str) -> list[dict[str, 
     monkeypatch.setattr(
         base_agent, "merge_retry", lambda *_a, **_k: RetryMerge(why="its numbers were not read")
     )
-    monkeypatch.setattr(BaseAnalyst, "_window_room_chars", lambda *_a, **_k: ROOM_CHARS)
+    monkeypatch.setattr(BaseAnalyst, "_window_room_chars", lambda *_a, **_k: room)
     if mode == "dev":
         monkeypatch.setattr(BaseAnalyst, "_question_base_of", lambda *_a, **_k: None)
     if mode == "window":
@@ -526,9 +554,9 @@ def _chain_bodies(monkeypatch: pytest.MonkeyPatch, mode: str) -> list[dict[str, 
     agent = _Analyst(llm=_model(), name="static")
     agent.run_state_block = "sample: c"
     agent.tools = [_lookup()]
-    text = agent.execute_tool_loop([("system", SYSTEM), ("human", "Analyse.")])
+    text = agent.execute_tool_loop([("system", SYSTEM), ("human", task)])
     agent._evidence_entries.append(
-        LedgerEntry(id="ev_0099", agent="static", tool="batch_decompile", output=LARGE)
+        LedgerEntry(id="ev_0099", agent="static", tool="batch_decompile", output=entry)
     )
     if mode == "aged":
         kept = agent._kept_conversation
@@ -542,7 +570,14 @@ def _chain_bodies(monkeypatch: pytest.MonkeyPatch, mode: str) -> list[dict[str, 
     return list(wire.bodies)
 
 
-class TestWhereNoQuestionIsContinuedEveryRequestIsDevs:
+class TestWhereNoQuestionIsContinuedEveryRequestIsTheRebuiltOne:
+    """With a base kept and not asked over, every request is the one sent without a base.
+
+    The expectation is the same chain with no loop base kept
+    (``_question_base_of`` answering ``None``): the path every question took
+    before questions were continued.
+    """
+
     @pytest.mark.parametrize("mode", ["window", "aged"])
     def test_every_request_is_the_one_dev_sends(
         self, monkeypatch: pytest.MonkeyPatch, mode: str
@@ -586,6 +621,43 @@ class TestARefusedContinuedPartIsAskedAsBuilt:
         asked = [b for b in bodies if marker in _last_user_text(b)]
         built = [b for b in dev if marker in _last_user_text(b)]
         assert asked and json.dumps(asked, sort_keys=True) == json.dumps(built, sort_keys=True)
+
+
+MID = "MIDBODY " + "y" * 3000
+PAD = " pad" * 1000
+
+
+def _kind(body: dict[str, Any]) -> str:
+    from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+
+    last = _last_user_text(body)
+    if "no longer states these items" in last:
+        return "drops"
+    if WHOLE_ANSWER_AFTER_RETRY_LEAD in last:
+        return "whole"
+    if _is_question(body):
+        return "retry"
+    return "loop"
+
+
+class TestAContinuedQuestionShowsWhatTheRebuiltOneShows:
+    @pytest.mark.parametrize("room", [6000.0, 7000.0, 9000.0, 12000.0, 20000.0])
+    def test_each_question_shows_every_entry_the_rebuilt_one_shows(
+        self, monkeypatch: pytest.MonkeyPatch, room: float
+    ) -> None:
+        with pytest.MonkeyPatch.context() as rebuilt_patch:
+            rebuilt = _chain_bodies(
+                rebuilt_patch, "dev", room=room, task="Analyse." + PAD, entry=MID
+            )
+        kept = _chain_bodies(monkeypatch, "kept", room=room, task="Analyse." + PAD, entry=MID)
+        built = {_kind(b): b for b in rebuilt if _kind(b) != "loop"}
+        asked = {_kind(b): b for b in kept if _kind(b) != "loop"}
+        assert set(asked) == set(built)
+        for kind, body in asked.items():
+            if body == built[kind]:
+                continue
+            if "MIDBODY" in _last_user_text(built[kind]):
+                assert "MIDBODY" in json.dumps(body["messages"]), (kind, room)
 
 
 class TestTheBreakpointRule:
