@@ -46,6 +46,7 @@ from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT,
     KEEP_REPLY,
 )
+from maljan.agents.technique_facts import notes_kept_after_clearing, with_technique_facts
 from maljan.agents.tool_answer_clearing import (
     CLEARED_FOR_REFUSAL,
     CLEARED_FOR_TIER,
@@ -4175,6 +4176,12 @@ def frame_messages(
     anything else is sent without it, because the platform does not add
     words to what a model said. Empty blocks change nothing, so an agent
     outside a staged run sends exactly what it always sent.
+
+    Between the two, the catalogue facts of each technique id the
+    conversation names (``technique_facts``): a note at the end of the user
+    turn that closes each stretch, a function of the turns before it, so it
+    stands at the same place on every later request; a conversation that
+    names no technique id carries none.
     """
     from langchain_core.messages import HumanMessage
 
@@ -4193,6 +4200,10 @@ def frame_messages(
                         content=f"{facts_block}\n\n{content}", response_metadata=noted
                     )
                 break
+    # After the pack, which the turns carry from the loop's first frame on, so
+    # a request framed with it and one framed from turns already holding it
+    # read the same ids.
+    out = with_technique_facts(out)
     if run_state and out and _carries_run_state(out[-1]):
         out[-1] = _with_run_state_on(out[-1], run_state)
     return out
@@ -6280,7 +6291,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Counted on every turn whether or not there is a block to show
             # it in: the budget is what an ask from inside this loop reads.
             ledger.note_turns(messages)
-            sent = messages
+            # The catalogue facts of the technique ids the turns name ride
+            # every request, framed or not (``technique_facts``).
+            sent = with_technique_facts(messages)
             if str(getattr(self, "run_state_block", "") or ""):
                 # The budget is stated in model turns (``model_turns_left``):
                 # the framing and the tool results cost nothing, an assistant
@@ -6294,7 +6307,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     )
                 except Exception as exc:  # noqa: BLE001 — the block never costs a turn
                     self.logger.debug("%s: run-state refresh skipped (%s).", self.name, exc)
-                    sent = messages
+                    sent = with_technique_facts(messages)
             # And what the request weighs, block included, which is what the
             # next tool answer's cap is measured against.
             # The blocks earlier turns were sent with, where the model's
@@ -6307,6 +6320,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             cleared_chars = 0
             if clearing is not None:
                 sent, cleared_chars = self._cleared_request(clearing, sent, on_clear, offered)
+                # A cleared answer keeps the facts it was the place of.
+                sent = notes_kept_after_clearing(sent)
             self._note_conversation(sent, cleared_chars)
             # The spend ceiling's word on the turn about to be sent: held to
             # what the spend it may use pays for, or not sent, and then the
