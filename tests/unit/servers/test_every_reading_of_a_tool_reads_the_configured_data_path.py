@@ -174,6 +174,21 @@ class TestTheServerProcess:
             env = each._build_toolkit(None, 0, None).params.env
             assert env[OVERRIDE] == "/srv/rules/capa"
 
+    def test_a_providers_handle_carries_the_settings_it_was_built_from(self) -> None:
+        """The generic static provider and the CAPE provider hand their launch the job's."""
+        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+        from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+
+        cfg = Settings()
+        cfg.static.capa.rules_dir = "/srv/rules/capa"
+        cfg.static.generic.server = "analysis"
+        provider = GenericMCPStaticProvider.from_settings(cfg)
+        assert provider._handle.settings is cfg
+        assert provider._handle.config is cfg.mcp.servers["analysis"]
+
+        cape = CAPE2SandboxProvider.from_settings(cfg)
+        assert cape._server().settings is cfg
+
     def test_a_launch_of_no_declared_sidecar_reads_no_settings(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
