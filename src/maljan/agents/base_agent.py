@@ -11560,15 +11560,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         again: list[RetryDrops] = []
 
         def _ask_parts(
-            parts: list[tuple[RetryDrops, dict[str, str], list[str]]], continuing: bool
+            asked_parts: list[tuple[RetryDrops, dict[str, str], list[str]]], continuing: bool
         ) -> None:
-            for number, (items, shown, unfit) in enumerate(parts, start=1):
+            for number, (items, shown, unfit) in enumerate(asked_parts, start=1):
                 part_rows = items.labelled()
                 asked = question(
                     items,
                     shown,
                     unfit=unfit,
-                    part=(number, len(parts)) if len(parts) > 1 else None,
+                    part=(number, len(asked_parts)) if len(asked_parts) > 1 else None,
                 )
                 turns = [
                     *messages,
