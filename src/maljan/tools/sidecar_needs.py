@@ -15,8 +15,8 @@ server's block.
 
 from __future__ import annotations
 
-from maljan.tools import crypto_constants, emulated_strings, readers, transforms, upx
-from maljan.tools.capabilities import ToolNeeds, binary, module
+from maljan.tools import crypto_constants, emulated_strings, readers, rules, transforms, upx
+from maljan.tools.capabilities import ToolNeeds, binary, data, module
 
 # The wall clock each rule engine is given. Named once so the tool's own
 # default and the manifest that declares it cannot drift: a model told
@@ -38,8 +38,16 @@ FLOSS_TIMEOUT_S: int | None = emulated_strings.FLOSS_TIMEOUT_S
 CAPA_REMEDIATION = "install capa on the host that runs this server: uv sync --extra capa"
 YARA_REMEDIATION = "install yara-python on the host that runs this server: uv sync --extra yara"
 
+# The rule corpora fetched rather than vendored (``.gitignore``), so a fresh
+# clone or worktree has none until they are fetched. The worker hands its own
+# reading of capa the operator's setting, and the server's tool reads the
+# default; Sigma's are the server's default unless its environment names
+# others. A tool whose data is vendored declares none.
+CAPA_RULES = data(rules.DEFAULT_CAPA_RULES, setting="static.capa.rules_dir", pattern="*.yml")
+SIGMA_RULES = data(rules.DEFAULT_SIGMA_RULES, override=rules.SIGMA_RULES_ENV, pattern="*.y*ml")
+
 # What each tool needs beyond the interpreter, probed once when the server
-# starts. A tool that is not listed always answers.
+# starts (a data path only before a job). A tool that is not listed always answers.
 ANALYSIS: list[ToolNeeds] = [
     ToolNeeds("identify_file"),
     ToolNeeds("hashes"),
@@ -67,11 +75,11 @@ ANALYSIS: list[ToolNeeds] = [
         without="the regex fallback over the corpus",
         remediation=YARA_REMEDIATION,
     ),
-    ToolNeeds("sigma_match", (module("sigma"),)),
-    ToolNeeds("sigma_match_sandbox", (module("sigma"),)),
+    ToolNeeds("sigma_match", (module("sigma"), SIGMA_RULES)),
+    ToolNeeds("sigma_match_sandbox", (module("sigma"), SIGMA_RULES)),
     ToolNeeds(
         "capa",
-        (module("capa"),),
+        (module("capa"), CAPA_RULES),
         timeout_s=CAPA_TIMEOUT_S,
         long_running=True,
         remediation=CAPA_REMEDIATION,

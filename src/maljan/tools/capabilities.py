@@ -10,8 +10,8 @@ call at a time, mid-run. The capability manifest says it up front::
                 "available": false, "reason": "olefile is not installed",
                 "timeout_s": null}, ...]}
 
-Each sidecar declares which tool needs which optional module, binary or
-setting, and ``manifest`` probes each of them on the server's own interpreter
+Each sidecar declares which tool needs which optional module, binary,
+setting or data path, and ``manifest`` probes each of them on the server's own interpreter
 and host — an import, a ``which``, an environment variable — when the server
 starts. Nothing is hard-coded as present: a manifest that drifted from the
 host would be worse than none. The registry reads it once per job through the
@@ -29,6 +29,7 @@ import os
 import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from maljan.tools.errors import MISSING_DEPENDENCY, NOT_CONFIGURED, REMEDIATIONS
@@ -40,15 +41,24 @@ CAPABILITIES_TOOL = "capabilities"
 
 @dataclass(frozen=True)
 class Requirement:
-    """One thing a tool needs on the host: a module, a binary or a setting."""
+    """One thing a tool needs on the host: a module, a binary, a setting or data."""
 
-    kind: str  # "module" | "binary" | "env"
+    kind: str  # "module" | "binary" | "env" | "data"
     name: str
     # For a binary found somewhere other than ``PATH`` alone: the lookup that
     # answers ``None`` when it is present, else the reason it is not. Called
     # with no argument inside the server, and with the server's environment
     # when the check is made from outside it (``installed``).
     locate: Callable[..., str | None] | None = field(default=None, compare=False)
+    # For data (a rule corpus, a signature set): the core setting whose value
+    # is the path a caller hands the tool, as a dotted path
+    # (``static.capa.rules_dir``), and the server environment variable that
+    # overrides ``name``, the default path, where the tool reads one instead.
+    # Either may be empty. ``pattern`` is what a file in a directory must match
+    # for the directory to hold the data.
+    setting: str = ""
+    override: str = ""
+    pattern: str = "*"
 
     def probe(self) -> str | None:
         """``None`` when present, else the reason it is not.
@@ -76,10 +86,16 @@ class Requirement:
             return None if shutil.which(self.name) else f"{self.name} is not on PATH"
         if self.kind == "env":
             return None if os.environ.get(self.name) else f"{self.name} is not configured"
+        if self.kind == "data":
+            # The path a tool is handed is the caller's setting, which the
+            # server does not read: the check before a job does (``installed``).
+            return None
         return f"unknown requirement kind {self.kind!r}"
 
-    def installed(self, environ: Mapping[str, str] | None = None) -> str | None:
-        """``None`` when the module or binary is on this host, else the reason ``probe`` gives.
+    def installed(
+        self, environ: Mapping[str, str] | None = None, settings: Any = None
+    ) -> str | None:
+        """``None`` when the module, binary or data is on this host, else the reason.
 
         The check made before a job, from outside the server: nothing is
         imported and nothing is run. A module is looked up on the import path
@@ -90,6 +106,17 @@ class Requirement:
         no install: an ``env`` requirement answers ``None`` here, since the
         value is handed to the server by its own settings, which this
         process's environment does not show.
+
+        A data path is read where the tool reads it. ``settings`` is given
+        only by a caller that hands the tool the declared setting's value (the
+        worker's own reading): the setting is then the path. Otherwise, as for
+        a tool a server runs with its own defaults, the path is the override
+        in ``environ`` (this process's environment when ``None``), else the
+        default. It is missing when nothing is there, a file is empty or a
+        directory holds no file matching ``pattern``. The reason names what
+        named the path, and the path itself only relative to the project root:
+        the answer is read by any signed-in user, and a path outside the
+        project is the host's, not theirs.
 
         The import path looked on is this process's: a server started with a
         ``PYTHONPATH`` of its own can import what this answers is missing, so
@@ -108,7 +135,70 @@ class Requirement:
                 return self.locate(environ)
             path = None if environ is None else environ.get("PATH")
             return None if shutil.which(self.name, path=path) else f"{self.name} is not on PATH"
+        if self.kind == "data":
+            return self._data_missing(environ, settings)
         return None
+
+    def _data_missing(self, environ: Mapping[str, str] | None, settings: Any) -> str | None:
+        value, named_by = self.name, "the default"
+        held = _setting_value(settings, self.setting) if self.setting else None
+        if held is not None:
+            value, named_by = str(held), self.setting
+        elif self.override:
+            given = (os.environ if environ is None else environ).get(self.override, "")
+            if given.strip():
+                value, named_by = given, self.override
+        if not value.strip():
+            return f"{named_by} names no path"
+        base = _data_root()
+        target = Path(value)
+        target = target if target.is_absolute() else base / target
+        if data_held(target, self.pattern):
+            return None
+        try:
+            shown = target.relative_to(base).as_posix()
+        except ValueError:
+            return f"the path {named_by} names is missing or empty"
+        return f"{shown} is missing or empty (named by {named_by})"
+
+    @property
+    def remedy(self) -> str:
+        """What puts a missing data path in place, in words naming no one tool."""
+        named = " or ".join(name for name in (self.setting, self.override) if name)
+        point = f", or point {named} at a populated copy" if named else ""
+        return (
+            f"put the data in {self.name}{point}: it is not in version control, so a "
+            "fresh clone or git worktree has it only once make external has fetched it "
+            "or the main checkout's copy is linked in"
+        )
+
+
+def _setting_value(settings: Any, dotted: str) -> Any:
+    """The value at ``dotted`` in ``settings``, or ``None`` when there is none to read."""
+    node = settings
+    for part in dotted.split("."):
+        if node is None:
+            return None
+        node = node.get(part) if isinstance(node, Mapping) else getattr(node, part, None)
+    return node
+
+
+def _data_root() -> Path:
+    """The directory a relative data path is read against (``core.paths.resolve_data``)."""
+    from maljan.core.paths import get_project_root
+
+    return get_project_root()
+
+
+def data_held(path: str | os.PathLike[str], pattern: str = "*") -> bool:
+    """Whether ``path`` holds data: a non-empty file, or a directory with a file of ``pattern``."""
+    target = Path(path)
+    try:
+        if target.is_file():
+            return target.stat().st_size > 0
+        return target.is_dir() and any(entry.is_file() for entry in target.rglob(pattern))
+    except OSError:
+        return False
 
 
 def module(name: str) -> Requirement:
@@ -128,6 +218,21 @@ def binary(name: str, locate: Callable[..., str | None] | None = None) -> Requir
 
 def env(name: str) -> Requirement:
     return Requirement("env", name)
+
+
+def data(default: str, *, setting: str = "", override: str = "", pattern: str = "*") -> Requirement:
+    """A file or directory the tool reads its rules or signatures from.
+
+    ``default`` is the path the tool reads when nothing names another;
+    ``setting`` the core setting whose value a caller that reads it hands the
+    tool instead (a server running the tool with its own defaults does not),
+    ``override`` the server environment variable that replaces the default,
+    and ``pattern`` what a file of a directory must match to count. A path
+    that is missing or holds nothing is named before a job (``installed``)
+    with what named it: a tool reading an empty corpus answers nothing, and
+    says so only once the run has paid for it.
+    """
+    return Requirement("data", default, setting=setting, override=override, pattern=pattern)
 
 
 @dataclass(frozen=True)
@@ -164,7 +269,8 @@ def _cell(tool: ToolNeeds) -> dict[str, Any]:
     # the environment for every cell of every manifest.
     probed = [(req, req.probe()) for req in tool.requires]
     missing = [(req, reason) for req, reason in probed if reason]
-    dependency = ", ".join(req.name for req in tool.requires) or None
+    # A data path is never probed here (``Requirement.probe``), so not listed.
+    dependency = ", ".join(req.name for req in tool.requires if req.kind != "data") or None
     cell: dict[str, Any] = {
         "name": tool.name,
         "optional_dependency": dependency,
@@ -183,7 +289,7 @@ def _cell(tool: ToolNeeds) -> dict[str, Any]:
         # library missing is a loss, and the code, not the reason's words, is
         # what tells them apart (``pipeline.operator_choice``).
         cell["code"] = code
-        cell["remediation"] = tool.remediation or REMEDIATIONS[code]
+        cell["remediation"] = remedy_for(tool, [req for req, _reason in missing])
         if tool.without:
             cell["without"] = tool.without
             if tool.without_reads:
@@ -206,6 +312,17 @@ def manifest(server: str, tools: list[ToolNeeds], *, version: str | None = None)
         "version": version if version is not None else package_version(),
         "tools": [_cell(tool) for tool in tools],
     }
+
+
+def remedy_for(tool: ToolNeeds, missing: list[Requirement]) -> str:
+    """The remedy for ``missing``: the tool's for what is not data, each data path's own."""
+    remedies = []
+    other = {req.kind for req in missing if req.kind != "data"}
+    if other or not missing:
+        code = NOT_CONFIGURED if other == {"env"} else MISSING_DEPENDENCY
+        remedies.append(tool.remediation or REMEDIATIONS[code])
+    remedies.extend(req.remedy for req in missing if req.kind == "data")
+    return "; ".join(dict.fromkeys(remedies))
 
 
 @dataclass

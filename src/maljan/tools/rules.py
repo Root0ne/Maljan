@@ -46,7 +46,7 @@ _SIGMA_CACHE: dict[str, Any] = {}
 # their own rules points the server at them and nothing in the library reads
 # ``Settings`` to find a rule file.
 _YARA_RULES_ENV = "MALJAN_YARA_RULES_DIR"
-_SIGMA_RULES_ENV = "MALJAN_SIGMA_RULES_DIR"
+SIGMA_RULES_ENV = "MALJAN_SIGMA_RULES_DIR"
 
 
 def corpus_roots() -> tuple[Path, ...]:
@@ -61,7 +61,7 @@ def corpus_roots() -> tuple[Path, ...]:
     anything: the trust boundary is the server, not this module.
     """
     roots = [resolve_data("data")]
-    for env_var in (_YARA_RULES_ENV, _SIGMA_RULES_ENV):
+    for env_var in (_YARA_RULES_ENV, SIGMA_RULES_ENV):
         override = os.environ.get(env_var, "").strip()
         if override:
             roots.append(resolve_data(override))
@@ -279,7 +279,7 @@ def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
 
 
 def _sigma_layer(ruleset: str) -> Any:
-    path = _resolve_ruleset(ruleset, DEFAULT_SIGMA_RULES, _SIGMA_RULES_ENV)
+    path = _resolve_ruleset(ruleset, DEFAULT_SIGMA_RULES, SIGMA_RULES_ENV)
     key = str(path)
     with _CACHE_LOCK:
         cached = _SIGMA_CACHE.get(key)

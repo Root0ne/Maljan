@@ -17,15 +17,16 @@ import pytest
 
 from app.services.tool_availability import as_rows, unavailable_tools
 from maljan.core.config import Settings
-from maljan.tools import emulated_strings, sidecar_needs
+from maljan.tools import capabilities, emulated_strings, sidecar_needs
 from maljan.tools.capabilities import Requirement, ToolNeeds, binary, env, manifest, module
 
 
 def _without(monkeypatch: pytest.MonkeyPatch, *missing: str) -> list[str]:
-    """A host holding every declared library and the pinned FLOSS but ``missing``.
+    """A host holding every declared library and data path and the pinned FLOSS but ``missing``.
 
-    Whatever the test host has installed: the import path finds every module
-    but the ones named, and FLOSS is found. Answers the names looked up.
+    Whatever the test host has installed or fetched: the import path finds
+    every module but the ones named, every declared data path holds data, and
+    FLOSS is found. Answers the names looked up.
     """
     asked: list[str] = []
 
@@ -35,6 +36,7 @@ def _without(monkeypatch: pytest.MonkeyPatch, *missing: str) -> list[str]:
 
     monkeypatch.setattr(importlib.util, "find_spec", find_spec)
     monkeypatch.setattr(emulated_strings, "find_floss", lambda environ=None: ("floss", ""))
+    monkeypatch.setattr(capabilities, "data_held", lambda path, pattern="*": True)
     return asked
 
 
@@ -82,7 +84,12 @@ class TestTheSidecarsDeclareTheirNeedsOnce:
         assert cells["yara_scan"]["timeout_s"] == sidecar_needs.YARA_TIMEOUT_S
 
     def test_capa_and_yara_name_their_own_extra(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(Requirement, "probe", lambda self: f"{self.name} is not installed")
+        # Every library missing; a data path is never probed by the server.
+        monkeypatch.setattr(
+            Requirement,
+            "probe",
+            lambda self: None if self.kind == "data" else f"{self.name} is not installed",
+        )
         cells = {c["name"]: c for c in manifest("analysis", sidecar_needs.ANALYSIS)["tools"]}
         assert cells["capa"]["remediation"].endswith("uv sync --extra capa")
         assert cells["yara_scan"]["remediation"].endswith("uv sync --extra yara")

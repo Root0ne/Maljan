@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,7 +24,7 @@ from app.api.v1.system import router as system_router
 from app.database import get_db
 from app.deps import get_current_user, optional_current_user
 from maljan.core.config import Settings
-from maljan.tools import emulated_strings
+from maljan.tools import capabilities, emulated_strings
 
 CAPA_ROW = {
     "server": "analysis",
@@ -42,7 +43,7 @@ CAPA_ROW = {
 
 @pytest.fixture
 def host(monkeypatch: pytest.MonkeyPatch) -> Any:
-    """A host with every declared library and FLOSS but the ones the test removes."""
+    """A host with every declared library, data path and FLOSS but what the test removes."""
     missing: set[str] = set()
 
     def find_spec(name: str, *args: Any, **kwargs: Any) -> Any:
@@ -50,6 +51,7 @@ def host(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     monkeypatch.setattr(importlib.util, "find_spec", find_spec)
     monkeypatch.setattr(emulated_strings, "find_floss", lambda environ=None: ("floss", ""))
+    monkeypatch.setattr(capabilities, "data_held", lambda path, pattern="*": True)
     return missing
 
 
@@ -61,7 +63,7 @@ def _jobs_client() -> TestClient:
     return TestClient(app)
 
 
-def _submit(config: dict[str, Any] | None = None) -> Any:
+def _submit(config: dict[str, Any] | None = None, settings: Settings | None = None) -> Any:
     created = MagicMock(
         id=uuid.uuid4(),
         sample_id=uuid.uuid4(),
@@ -86,7 +88,7 @@ def _submit(config: dict[str, Any] | None = None) -> Any:
         patch("app.api.v1.jobs._unready_providers_for", AsyncMock(return_value=[])),
         patch(
             "app.services.settings_service.effective_core_settings",
-            AsyncMock(return_value=Settings()),
+            AsyncMock(return_value=settings or Settings()),
         ),
     ):
         return _jobs_client().post(
@@ -131,7 +133,7 @@ class TestSubmit:
         assert response.json()["unavailable_tools"] is None
 
 
-def _status(user: Any) -> dict[str, Any]:
+def _status(user: Any, settings: Settings | None = None) -> dict[str, Any]:
     app = FastAPI()
     app.include_router(system_router, prefix="/api/v1")
     app.dependency_overrides[optional_current_user] = lambda: user
@@ -150,7 +152,10 @@ def _status(user: Any) -> dict[str, Any]:
                 }[n]
             ),
         ),
-        patch("app.api.v1.system.runtime_config.core", AsyncMock(return_value=Settings())),
+        patch(
+            "app.api.v1.system.runtime_config.core",
+            AsyncMock(return_value=settings or Settings()),
+        ),
         patch("app.api.v1.system._enrichment_sources", AsyncMock(return_value=[])),
     ):
         response = TestClient(app).get("/api/v1/system/status")
@@ -169,3 +174,49 @@ class TestStatus:
     def test_an_anonymous_reader_is_not_told(self, host: set[str]) -> None:
         host.add("capa")
         assert "unavailable_tools" not in _status(None)
+
+
+# The real look at a path, kept before the ``host`` fixture stands one in.
+_DATA_HELD = capabilities.data_held
+
+
+def _host_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
+    """A project root of ``tmp_path`` holding the Sigma corpus and no capa rules."""
+    monkeypatch.setattr(capabilities, "data_held", _DATA_HELD)
+    monkeypatch.setattr(capabilities, "_data_root", lambda: tmp_path)
+    (tmp_path / "data" / "sigma_rules").mkdir(parents=True)
+    (tmp_path / "data" / "sigma_rules" / "r.yml").write_text("title: r\n", encoding="utf-8")
+    return Settings()
+
+
+class TestADeclaredDataPath:
+    """The haiku8 shape (T-492): capa installed, its rules directory not fetched."""
+
+    def test_a_rules_directory_never_fetched_is_named_by_the_gate_and_the_status(
+        self, host: set[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        settings = _host_data(tmp_path, monkeypatch)
+
+        response = _submit(settings=settings)
+        assert response.status_code == 201
+        (row,) = response.json()["unavailable_tools"]
+        assert (row["server"], row["tool"]) == ("analysis", "capa")
+        # The server's tool reads its default, the worker's reading the setting.
+        assert row["reason"] == (
+            "data/capa-rules is missing or empty (named by the default); "
+            "data/capa-rules is missing or empty (named by static.capa.rules_dir)"
+        )
+        assert "static.capa.rules_dir" in row["remediation"]
+        assert str(tmp_path) not in str(row)
+        assert row["manifest_code"] == "missing_dependency"
+        assert _status(MagicMock(role="user"), settings)["unavailable_tools"] == [row]
+
+    def test_a_populated_rules_directory_is_not_named(
+        self, host: set[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        settings = _host_data(tmp_path, monkeypatch)
+        (tmp_path / "data" / "capa-rules").mkdir()
+        (tmp_path / "data" / "capa-rules" / "r.yml").write_text("rule:\n", encoding="utf-8")
+
+        assert _submit(settings=settings).json()["unavailable_tools"] is None
+        assert _status(MagicMock(role="user"), settings)["unavailable_tools"] == []
