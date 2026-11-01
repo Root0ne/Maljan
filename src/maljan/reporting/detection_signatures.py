@@ -1058,13 +1058,13 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     domains = [NetworkDomain(fqdn=row.value) for row in published if row.kind == "domain"]
     ips = [NetworkIP(address=row.value) for row in published if row.kind == "ip"]
     urls = [NetworkURL(url=row.value) for row in published if row.kind == "url"]
-    agents = list(
-        dict.fromkeys(
-            str(row.value)
-            for row in published
-            if row.kind == _USER_AGENT_KIND and _draftable_agent(str(row.value or ""))
-        )
-    )
+    # A sensor's ``http.user_agent`` buffer holds the header trimmed, so a
+    # user agent is drafted, deduplicated and explained by its trimmed text.
+    agent_why: dict[str, str] = {}
+    for row in published:
+        if row.kind == _USER_AGENT_KIND and _draftable_agent(str(row.value or "")):
+            agent_why.setdefault(str(row.value).strip(), _why_published(row))
+    agents = list(agent_why)
 
     if not (domains or ips or urls or agents):
         return None
@@ -1119,7 +1119,7 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
     for agent in agents[:_MAX_SURICATA_RULES]:
         rule = _suricata_user_agent_rule(agent, sid, sha256, family)
         if rule is not None:
-            lines.append(_comment(why.get((_USER_AGENT_KIND, agent), agent)))
+            lines.append(_comment(agent_why[agent]))
             lines.append(rule)
             sources.append(f"{_USER_AGENT_KIND}:{agent}")
             sid += 1
@@ -1284,12 +1284,14 @@ def _suricata_user_agent_rule(agent: str, sid: int, sha256: str, family: str) ->
     anchored at both ends of the buffer (``startswith; endswith;``), as the
     STIX pattern compares the header whole: unanchored, a published
     ``Mozilla/5.0`` matched every browser's request. A value too short to
-    draft on (:func:`_draftable_agent`) gets none. The message names the
-    family only: the comment above the rule carries the value.
+    draft on (:func:`_draftable_agent`) gets none. The content is the value
+    trimmed, as the sensor's buffer holds the header: anchored with a space at
+    an edge, it matched no request. The message names the family only: the
+    comment above the rule carries the value.
     """
     if not _draftable_agent(agent):
         return None
-    content = _suricata_content_escape(agent)
+    content = _suricata_content_escape(agent.strip())
     msg = f"Maljan AutoGen HTTP user agent ({family})"
     return (
         f'alert http any any -> any any (msg:"{_suricata_msg_escape(msg)}"; '

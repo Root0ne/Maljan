@@ -226,6 +226,21 @@ class TestAPublishedUserAgent:
         assert 'http.user_agent; content:"Mozilla/5.0"; startswith; endswith; ' in line
         assert rule.compile_error is None
 
+    def test_an_agent_is_drafted_trimmed_and_once(self) -> None:
+        """A sensor's ``http.user_agent`` buffer is the header trimmed: an
+        anchored content with a space at an edge matched no request."""
+        report = _with_agent(_with_agent(_report(), " curl/7.81.0 "), "curl/7.81.0")
+
+        rule = _rule(report, "suricata")
+
+        (line,) = [line for line in _rule_lines(rule.body) if "http.user_agent" in line]
+        assert 'http.user_agent; content:"curl/7.81.0"; startswith; endswith; ' in line
+        assert rule.source_evidence[-1] == "user_agent:curl/7.81.0"
+        assert rule.body.splitlines()[rule.body.splitlines().index(line) - 1].startswith(
+            "#  curl/7.81.0 : published because"
+        )
+        assert rule.compile_error is None
+
     @pytest.mark.parametrize("value", ["   ", "\t\r\n", "A", "Mozilla", " Mozilla "])
     def test_a_blank_or_too_short_agent_gets_none(self, value: str) -> None:
         body = _rule(_with_agent(_report(), value), "suricata").body
