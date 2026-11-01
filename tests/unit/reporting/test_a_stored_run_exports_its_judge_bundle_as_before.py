@@ -27,15 +27,12 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # a command line, the sample's indicator adds its SHA-1 and MD5, its imphash
 # is an anomalous-activity indicator of its own, and an indicator's reason is
 # read from the rebuilt table.
-# Re-pinned when the similarity digests came to indicate the sample (T-498):
-# each export gains the platform ``indicates`` edge from its imphash indicator,
-# named by the report object, and nothing else.
 STORED_EXPORTS = {
-    "run7": "643dd19cc60a7aea",
-    "run5": "7d8ba5de5730dc81",
-    "run4": "f5bffce5d423de43",
-    "local8": "6c2f0f3e1136b711",
-    "haiku4": "fc1b9a1425d7bfbf",
+    "run7": "8954bac7f3ea132c",
+    "run5": "efe981ba18209c11",
+    "run4": "9a3a7b4040b09b57",
+    "local8": "952f4e3743111201",
+    "haiku4": "d8d0d7500af6a3ff",
 }
 # ``(markdown, html with the nonce "fixed", normalised STIX)`` for haiku4. The
 # Markdown and HTML were re-pinned when a sample's, a tool's or a finding's text
@@ -59,11 +56,7 @@ STORED_EXPORTS = {
 # ``indicates`` edge per indicator related to no malware object (the similarity
 # digests and benign-typed ones aside), each named by the report object, and
 # nothing else (run4's export over the judge's bundle gains none).
-# The STIX re-pinned when the similarity digests came to indicate the sample as
-# every other digest does (T-498): one platform ``indicates`` edge from the
-# imphash indicator, named by the report object; the Markdown and HTML did not
-# change.
-HAIKU4_RENDERS = ("0f6dfb3b3023d7e9", "8e00936f17be76df", "095628abe4a2e6b9")
+HAIKU4_RENDERS = ("0f6dfb3b3023d7e9", "8e00936f17be76df", "830330837272aa44")
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")

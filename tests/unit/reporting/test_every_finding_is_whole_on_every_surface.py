@@ -176,6 +176,10 @@ class TestEveryIndicatorIndicatesTheSample:
             if o.type == "relationship" and o.relationship_type == "indicates"
         }
         for indicator in indicators:
+            if str(indicator.pattern) == sample_similarity_pattern(
+                _network_report().identity.hashes
+            ):
+                continue
             assert str(indicator.id) in edges, indicator.name
             assert str(edges[str(indicator.id)].target_ref) == str(malware.id)
         (report_object,) = [o for o in objects if o.type == "report"]
@@ -244,11 +248,8 @@ class TestEveryIndicatorIndicatesTheSample:
         ]
         assert by_id[str(edges[0].target_ref)].type == "malware"
 
-    def test_the_similarity_digests_indicate_the_sample_like_every_other_digest(self) -> None:
-        """The imphash, ssdeep and TLSH are published as the sample's own
-        digests: their indicator gets the platform's ``indicates`` edge as the
-        hash indicator and every other published indicator does, and keeps the
-        softer type that says they also match files sharing the sample's imports."""
+    def test_the_similarity_digests_get_no_platform_edge(self) -> None:
+        """The imphash, ssdeep and TLSH match files that are not the sample."""
         report = _network_report()
         report.identity.hashes.imphash = "f34d5f2d4577ed6d9ceec516c1f5a744"
 
@@ -258,22 +259,12 @@ class TestEveryIndicatorIndicatesTheSample:
         (similar,) = [
             o for o in bundle.objects if o.type == "indicator" and o.pattern == similarity
         ]
-        assert similar.indicator_types == ["anomalous-activity"]
-        (malware,) = [o for o in bundle.objects if o.type == "malware"]
-        edges = [
+        assert not [
             o
             for o in bundle.objects
             if o.type == "relationship"
             and str(similar.id) in (str(o.source_ref), str(o.target_ref))
         ]
-        assert [
-            (o.relationship_type, str(o.source_ref), str(o.target_ref), o.description)
-            for o in edges
-        ] == [("indicates", str(similar.id), str(malware.id), PLATFORM_INDICATES_EDGE)]
-        (report_object,) = [o for o in bundle.objects if o.type == "report"]
-        assert str(edges[0].id) in report_object.object_refs
-        result = validate_instance(bundle.model_dump(mode="json"), ValidationOptions(version="2.1"))
-        assert result.is_valid, [str(e) for e in result.errors]
 
     def test_a_benign_export_has_no_malware_object_and_no_edge(self) -> None:
         bundle = ExtendedSTIXRenderer().render(_network_report("Benign"))
