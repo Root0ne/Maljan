@@ -49,10 +49,14 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # the STIX gains one platform ``indicates`` edge per indicator related to no
 # malware object (the similarity digests aside), each named by the report
 # object, and nothing else.
+# Re-pinned when a decoded text the pack spells with a closing ``\x5c`` came to
+# print as the text (T-493): run4, run5 and run7 print ``\Registry\Machine\``
+# where they printed ``\Registry\Machine\x5c``, and nothing else changed (the STIX
+# did not change).
 STORED_RENDERS = {
-    "run7": ("b6b67d78ed8bfe45", "985ed08f2496b1e3", "c6313f103ee42d52"),
-    "run5": ("3f3f15bbd3933f1f", "b376d7a47c654122", "276aad22c908ff48"),
-    "run4": ("9da95bae69272ee5", "7c6021dbe84ce2ff", "b0060de27f126465"),
+    "run7": ("87ad1594f3cbc6ea", "125193da10162be9", "c6313f103ee42d52"),
+    "run5": ("4fbb0b856aea7f8e", "60e2582c1e229b35", "276aad22c908ff48"),
+    "run4": ("581eb11ec3924a68", "75af799857a50862", "b0060de27f126465"),
     "local8": ("9a23cffd548254ce", "ad6790825e501610", "bd6ac195bc590655"),
 }
 

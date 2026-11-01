@@ -343,22 +343,26 @@ def build_execution_flow(report: MalwareReport) -> Figure | None:
     (``renderers.analyst.flow_step_labels``, the same labels its Markdown
     diagram carries); ``None`` for fewer than two steps.
     """
-    from maljan.reporting.renderers.analyst import flow_step_labels
+    from maljan.reporting.renderers.analyst import flow_steps
 
-    labels = flow_step_labels(report)
+    labels = flow_steps(report)
     if not labels:
         return None
     box_w, box_h, gap = 660, 30, 18
     width = box_w + 24
     height = len(labels) * (box_h + gap) - gap + 24
     parts: list[str] = []
-    for i, (label, mark) in enumerate(labels):
+    for i, (label, mark, sentence) in enumerate(labels):
         y = 12 + i * (box_h + gap)
         observed = mark == "observed"
+        # The box's title is the step's whole first sentence: a viewer shows
+        # it over a label cut at a word.
+        parts.append(f"<g><title>{escape(_written(f'{sentence} ({mark})'))}</title>")
         parts.append(
             _rect(12, y, box_w, box_h, fill="#f6f8fa", stroke=_ACCENT if observed else _LINE)
         )
         parts.append(_text(22, y + 19, _written(f"{label} ({mark})"), fill=_INK, size=11))
+        parts.append("</g>")
         if i < len(labels) - 1:
             x = 12 + box_w // 2
             parts.append(
@@ -375,7 +379,8 @@ def build_execution_flow(report: MalwareReport) -> Figure | None:
         kind="execution_flow",
         content=_svg(width, height, defs + "".join(parts)),
         legend="A step a sandbox watched is outlined in blue; every other step is read from "
-        "the code. Each box holds its step's first sentence.",
+        "the code. Each box holds its step's first sentence, shortened at a word where it is "
+        "long; the box's title and the numbered steps hold it whole.",
     )
 
 

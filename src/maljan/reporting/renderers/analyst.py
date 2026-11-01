@@ -46,6 +46,7 @@ from maljan.reporting.renderers.markdown import (
     _EV_RE,
     _NETWORK_KINDS,
     _PIPE,
+    ANALYST_LIMITATIONS_TITLE,
     _code_span,
     _degraded_sentence,
     _divider,
@@ -318,23 +319,44 @@ _LABEL_CHARS = 72
 _DIAGRAM_STEPS = 2
 
 
-def flow_step_labels(report: MalwareReport) -> list[tuple[str, str]]:
-    """Each execution-flow step as the diagram labels it, in order, with its mark.
+def flow_steps(report: MalwareReport) -> list[tuple[str, str, str]]:
+    """Each execution-flow step as the diagram draws it: its label, its mark, its sentence.
 
-    The step's first sentence, its citations out, cut with a mark at
-    :data:`_LABEL_CHARS`; ``observed`` or ``assessed`` as the step is marked.
-    Read by the Markdown's diagram and by the HTML's figure
+    The label is the step's first sentence, its citations out, shortened at
+    the last word that fits :data:`_LABEL_CHARS` with a mark (never inside a
+    word); the sentence is the whole first sentence, which the HTML figure
+    carries as each box's title and the numbered steps under the diagram
+    print whole. ``observed`` or ``assessed`` as the step is marked. Read by
+    the Markdown's diagram and by the HTML's figure
     (``figures.build_execution_flow``), so both draw the same boxes.
     """
     ta = report.technical_analysis
     steps = sorted(ta.execution_flow, key=lambda s: s.order) if ta is not None else []
-    out: list[tuple[str, str]] = []
+    out: list[tuple[str, str, str]] = []
     for index, step in enumerate(steps, start=1):
         sentence = _first_sentence(_CITATION_RUN.sub("", str(step.action or "")))
-        if len(sentence) > _LABEL_CHARS:
-            sentence = sentence[: _LABEL_CHARS - 1].rstrip() + "\u2026"
-        out.append((f"{index}. {sentence}", "observed" if step.voice == "observed" else "assessed"))
+        mark = "observed" if step.voice == "observed" else "assessed"
+        out.append((f"{index}. {_word_cut(sentence, _LABEL_CHARS)}", mark, f"{index}. {sentence}"))
     return out if len(out) >= _DIAGRAM_STEPS else []
+
+
+def flow_step_labels(report: MalwareReport) -> list[tuple[str, str]]:
+    """Each execution-flow step's label and mark (:func:`flow_steps`)."""
+    return [(label, mark) for label, mark, _sentence in flow_steps(report)]
+
+
+def _word_cut(text: str, limit: int) -> str:
+    """``text`` whole when it fits ``limit``, else cut after its last whole word that fits,
+    with a mark; a first word longer than the limit is cut where the limit falls."""
+    if len(text) <= limit:
+        return text
+    head = text[: limit - 1]
+    if not text[limit - 1].isspace():
+        # The cut falls inside a word: back to the space before it.
+        space = head.rfind(" ")
+        if space > 0:
+            head = head[:space]
+    return head.rstrip(" ,;:([{") + "\u2026"
 
 
 def _mermaid_label(text: str) -> str:
@@ -773,6 +795,8 @@ class _Analyst:
             lines.append("The report model wrote no execution flow in this run.")
         labels = flow_step_labels(self.report)
         if labels:
+            # A label cut at a word stands for its step, printed whole in the
+            # numbered list under the diagram.
             # The steps as a diagram (the HTML draws it as a figure); its words
             # are defanged as the steps' are.
             nodes = [
@@ -1490,11 +1514,11 @@ class _Analyst:
             paragraph = self._prose(" ".join(composed.body.split()), composed.evidence_refs)
             if kept:
                 paragraph += " " + _paragraph_line(" ".join(kept))
-            lines = [_heading(11, "Limitations"), "", paragraph]
+            lines = [_heading(11, ANALYST_LIMITATIONS_TITLE), "", paragraph]
             return "\n".join([*lines, "", _behind("limitations")])
         if not said:
             said.append("The run recorded no limitation.")
-        lines = [_heading(11, "Limitations"), "", _paragraph_line(" ".join(said))]
+        lines = [_heading(11, ANALYST_LIMITATIONS_TITLE), "", _paragraph_line(" ".join(said))]
         return "\n".join([*lines, "", _behind("limitations")])
 
     # -- appendix ----------------------------------------------------------

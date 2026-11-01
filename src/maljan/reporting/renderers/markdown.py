@@ -116,6 +116,12 @@ from maljan.reporting.prose_decisions import (
     with_decided_statements,
 )
 from maljan.reporting.renderers.layout import ANALYST, BUNDLE, FULL, checked
+from maljan.reporting.renderers.prose_forms import (
+    end_references,
+    finished,
+    references_for_render,
+    section_reference,
+)
 from maljan.schemas.evidence import is_guard_answer
 from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, UNVERIFIED_TECHNIQUE_MARKER
 from maljan.utils.marked_cut import CUT_MARK
@@ -296,6 +302,15 @@ _UNCITED_NOTE = (
 )
 
 
+# The titles of the sections other sections send the reader to
+# (``prose_forms.section_reference``): each heading and each reference read
+# the one name, and the number is the rendered heading's.
+LIMITATIONS_TITLE = "Limitations and analysis notes"
+ANALYST_LIMITATIONS_TITLE = "Limitations"
+INDICATORS_TITLE = "Indicators of compromise"
+STATIC_TITLE = "Static properties"
+
+
 class MarkdownRenderer:
     """Render a complete ``MalwareReport`` as a single markdown string.
 
@@ -326,9 +341,13 @@ class MarkdownRenderer:
         """
         # The links this report keeps as links, for the whole of this render.
         token = _KEPT_LINKS.set(_Kept.of(report))
+        # The references to other sections this render writes, resolved once
+        # its headings are known (``prose_forms``).
+        references = references_for_render()
         try:
             return self._render(report)
         finally:
+            end_references(references)
             _KEPT_LINKS.reset(token)
 
     def _render(self, report: MalwareReport) -> tuple[str, list[Any]]:
@@ -348,6 +367,7 @@ class MarkdownRenderer:
                 # own: what it set aside is not this render's to restore.
                 _, notes = analyst_sections(self, report, _Context.of(report))
                 sections = bundle_sections(self, report, ctx, sections, notes)
+        sections = finished(sections, report, analyst=self._layout == ANALYST)
         return self._closed(sections, ctx), notes
 
     def _full_sections(self, report: MalwareReport, ctx: _Context) -> list[str]:
@@ -462,13 +482,13 @@ class MarkdownRenderer:
             )
         if report.degraded_mode:
             # One sentence a reader can act on, built from what ran; the reasons
-            # themselves, with their operator remedies, are §13's.
+            # themselves, with their operator remedies, are the limitations section's.
             lines.append("\n> **[DEGRADED RUN]** " + _degraded_sentence(report, ctx))
         elif report.degradation_reasons:
             count = len(report.degradation_reasons)
             lines.append(
                 f"\n**Notes:** this run recorded {count} limitation"
-                f"{'' if count == 1 else 's'}; see §13."
+                f"{'' if count == 1 else 's'}; see {section_reference(LIMITATIONS_TITLE)}."
             )
 
         evidence = (report.run_summary or {}).get("evidence") or {}
@@ -481,7 +501,7 @@ class MarkdownRenderer:
             said += f", {repeats} answered from an earlier entry" if repeats else ""
             guarded = int(evidence.get("guard_answers") or 0)
             said += f", {guarded} answered by a guard with no tool run" if guarded else ""
-            lines.append(said + " (see §13).")
+            lines.append(said + f" (see {section_reference(LIMITATIONS_TITLE)}).")
         profile = (report.run_summary or {}).get("profile") or {}
         # A reduced profile changes what evidence backs the verdict, so a
         # non-default one is named; the default keeps the block unchanged.
@@ -1232,8 +1252,9 @@ class MarkdownRenderer:
         lines.append("")
         if dyn is None:
             lines.append(
-                "The sandbox recorded network activity only; it is in §5.7 and §9."
-                + ctx.partial_sentence()
+                "The sandbox recorded network activity only; it is in "
+                f"{section_reference('Command and control')} and "
+                f"{section_reference(INDICATORS_TITLE)}." + ctx.partial_sentence()
             )
             return "\n".join(lines)
         if dyn.unavailable:
@@ -1344,14 +1365,14 @@ class MarkdownRenderer:
         static = report.static
         if static is None:
             lines = [
-                _heading(7, "Static properties", MEASURED),
+                _heading(7, STATIC_TITLE, MEASURED),
                 "",
                 "Not examined in this run: no static tool's answer is recorded in this report.",
             ]
             if report.directed_text:
                 lines.extend(["", *_directed_text_lines(report.directed_text, ctx)])
             return "\n".join(lines).rstrip()
-        lines = [_heading(7, "Static properties", MEASURED), ""]
+        lines = [_heading(7, STATIC_TITLE, MEASURED), ""]
 
         if static.sections:
             lines.extend([_plain_heading("Sections"), ""])
@@ -1656,7 +1677,7 @@ class MarkdownRenderer:
     # ------------------------------------------------------------------
 
     def _section_indicators(self, report: MalwareReport, ctx: _Context) -> str:
-        lines = [_heading(9, "Indicators of compromise", PER_ROW), ""]
+        lines = [_heading(9, INDICATORS_TITLE, PER_ROW), ""]
         host = [row for row in ctx.iocs if row.kind not in _NETWORK_KINDS]
         network = [row for row in ctx.iocs if row.kind in _NETWORK_KINDS]
         ta = report.technical_analysis
@@ -1746,7 +1767,11 @@ class MarkdownRenderer:
                 every = [_one_line(row[at]) for row in section.rows if len(row) > at]
                 names = every[:20]
                 ids = f" ({_ids(section.evidence_ids)})" if section.evidence_ids else ""
-                more = f" and {len(every) - 20} more (§7)" if len(every) > 20 else ""
+                more = (
+                    f" and {len(every) - 20} more ({section_reference(STATIC_TITLE)})"
+                    if len(every) > 20
+                    else ""
+                )
                 body.append(
                     _item(
                         f"{section.title}{ids}: "
@@ -1754,7 +1779,11 @@ class MarkdownRenderer:
                     )
                 )
             body.extend(
-                ["", "_The rule sets and their licences are the tools' own; see Rule hits in §7._"]
+                [
+                    "",
+                    "_The rule sets and their licences are the tools' own; see Rule hits in "
+                    f"{section_reference(STATIC_TITLE)}._",
+                ]
             )
             blocks.append("\n".join(body))
         else:
@@ -2016,7 +2045,7 @@ class MarkdownRenderer:
 
     def _section_limitations(self, report: MalwareReport, ctx: _Context) -> str:
         summary = report.run_summary or {}
-        lines = [_heading(13, "Limitations and analysis notes", MEASURED), ""]
+        lines = [_heading(13, LIMITATIONS_TITLE, MEASURED), ""]
 
         ran = [row for row in (summary.get("stages") or []) if isinstance(row, dict)]
         if ran:
@@ -3170,7 +3199,8 @@ def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
     Built from the stage and agent records and the sandbox's state, and from
     the reasons only the bare name of each tool the run went without: the
     reasons are the operator's, carry codes and install commands, and are
-    listed whole in §13.
+    listed whole in the limitations section, which the sentence names by its
+    rendered number.
     """
     from maljan.pipeline.operator_choice import facts_from_record, lost_tools
 
@@ -3196,8 +3226,9 @@ def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
         parts.append("this run had less evidence than a full analysis")
     said = _joined(parts)
     return (
-        f"{said[0].upper()}{said[1:]}; the verdict above is tentative. See §13 for what this "
-        "run could not examine."
+        f"{said[0].upper()}{said[1:]}; the verdict above is tentative. See "
+        f"{section_reference(LIMITATIONS_TITLE, ANALYST_LIMITATIONS_TITLE)} for what this run "
+        "could not examine."
     )
 
 
@@ -4628,10 +4659,12 @@ def analyst_list_note(analysts: list[str], kind: str = "") -> str:
     """The line an analyst's table is printed under in Appendix A, saying where else it is shown."""
     who = ", ".join(f"the {_one_line(name)} analyst" for name in analysts)
     shown = {
-        "persistence": " Its rows are in §5.4 under Assessed, and its Run keys, tasks and "
-        "services in §9 as the analyst's, each with the publish rule's answer.",
-        "values": " Each value it types as an indicator is in §9 as the analyst's, with the "
-        "publish rule's answer.",
+        "persistence": f" Its rows are in {section_reference('Persistence')} under Assessed, "
+        f"and its Run keys, tasks and services in {section_reference(INDICATORS_TITLE)} as "
+        "the analyst's, each with the publish rule's answer.",
+        "values": " Each value it types as an indicator is in "
+        f"{section_reference(INDICATORS_TITLE)} as the analyst's, with the publish rule's "
+        "answer.",
     }
     where = shown.get(listing_kind(kind), "")
     return (

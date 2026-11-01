@@ -799,14 +799,14 @@ def _numbered(figures: list[Figure]) -> int:
 # A listing figure's code, and an SVG text element's words: the escaped text
 # between the tags a figure builder wrote around it.
 _LISTING_BODY = re.compile(r'(<pre class="listing">)(.*?)(</pre>)', re.DOTALL)
-_SVG_TEXT = re.compile(r"(<text\b[^>]*>)(.*?)(</text>)", re.DOTALL)
+_SVG_TEXT = re.compile(r"(<(?:text|title)\b[^>]*>)(.*?)(</(?:text|title)>)", re.DOTALL)
 
 
 def _figure_read(fig: Figure, run_values: ProseDefanger) -> Figure:
     """``fig`` with every network value in its words defanged, the run's own values first.
 
     The caption and the legend are read as text. A listing's code and every
-    SVG figure's text elements (a process tree's names, an entropy chart's
+    SVG figure's text and title elements (a process tree's names, an entropy chart's
     section names) are the escaped text a figure builder wrote: each is
     unescaped, defanged and escaped again, and the markup around it is left
     as drawn. A line saying a figure was not drawn names no value and

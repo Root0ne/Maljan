@@ -247,10 +247,13 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # Re-pinned when no table cell of the body came to be cut (T-399): the only
 # changes are body cells that ended in … printed whole, the methodology's
 # sentence about cut values, and the HTML print stylesheet's fixed table layout.
+# Re-pinned when a decoded text the pack spells with a closing ``\x5c`` came to
+# print as the text (T-493): run4, run5 and run7 print ``\Registry\Machine\``
+# where they printed ``\Registry\Machine\x5c``, and nothing else changed.
 STORED_RENDERS = {
-    "run7": ("b6b67d78ed8bfe45", "985ed08f2496b1e3"),
-    "run5": ("3f3f15bbd3933f1f", "b376d7a47c654122"),
-    "run4": ("9da95bae69272ee5", "7c6021dbe84ce2ff"),
+    "run7": ("87ad1594f3cbc6ea", "125193da10162be9"),
+    "run5": ("4fbb0b856aea7f8e", "60e2582c1e229b35"),
+    "run4": ("581eb11ec3924a68", "75af799857a50862"),
     "local8": ("9a23cffd548254ce", "ad6790825e501610"),
     "haiku4": ("0f6dfb3b3023d7e9", "8e00936f17be76df"),
 }
