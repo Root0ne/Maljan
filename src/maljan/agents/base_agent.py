@@ -46,7 +46,12 @@ from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT,
     KEEP_REPLY,
 )
-from maljan.agents.technique_facts import notes_kept_after_clearing, with_technique_facts
+from maljan.agents.technique_facts import (
+    STANDING_FACTS_CHARS,
+    notes_kept_after_clearing,
+    with_technique_facts,
+    without_tool_answer_notes,
+)
 from maljan.agents.tool_answer_clearing import (
     CLEARED_FOR_REFUSAL,
     CLEARED_FOR_TIER,
@@ -4195,7 +4200,13 @@ def frame_messages(
                 # read as the pack it left the analyst without one.
                 if not _carries_facts(message, facts_block):
                     content = str(message.content)
-                    noted = {**(message.response_metadata or {}), FACTS_ATTACHED: True}
+                    # Its length too: the pack is data, which names no
+                    # technique id for the catalogue facts (``technique_facts``).
+                    noted = {
+                        **(message.response_metadata or {}),
+                        FACTS_ATTACHED: True,
+                        STANDING_FACTS_CHARS: len(facts_block),
+                    }
                     out[index] = HumanMessage(
                         content=f"{facts_block}\n\n{content}", response_metadata=noted
                     )
@@ -5292,6 +5303,7 @@ class BudgetMeter:
         sent: list[Any],
         on_clear: Callable[[Clearing], None] | None,
         offered: Callable[[], bool] | None = None,
+        noted_chars: int = 0,
     ) -> tuple[list[Any], int]:
         """``sent`` with the loop's clears in place, and the characters newly cleared.
 
@@ -5299,13 +5311,18 @@ class BudgetMeter:
         (``offered``), raises :class:`OfferReadAgainFirst` instead: the loop
         builds its graph again with the tool and sends the turn again. Never
         raises otherwise.
+
+        ``noted_chars`` is what the catalogue notes taken off the clearable
+        answers weigh (``technique_facts.without_tool_answer_notes``): they are
+        put back after the clear, so the request is measured with them, in
+        the part no clear takes.
         """
         per_token = self._clearing_per_token()
 
         def reported(messages: list[Any]) -> tuple[int, int]:
             return _reported_request(messages, per_token)
 
-        extra = self._definitions_sent() + self._replayed_run_state_chars()
+        extra = self._definitions_sent() + self._replayed_run_state_chars() + int(noted_chars)
         try:
             if offered is not None and not offered():
                 due = clearing.due(
@@ -6319,8 +6336,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             # the answers already cleared stay cleared, under the same text.
             cleared_chars = 0
             if clearing is not None:
-                sent, cleared_chars = self._cleared_request(clearing, sent, on_clear, offered)
-                # A cleared answer keeps the facts it was the place of.
+                # Each answer is measured, and a cleared one named, without the
+                # catalogue note it carries; every note goes back after it.
+                bare, noted_chars = without_tool_answer_notes(sent)
+                sent, cleared_chars = self._cleared_request(
+                    clearing, bare, on_clear, offered, noted_chars=noted_chars
+                )
                 sent = notes_kept_after_clearing(sent)
             self._note_conversation(sent, cleared_chars)
             # The spend ceiling's word on the turn about to be sent: held to
