@@ -57,8 +57,12 @@ next; the turn written as one string before a request's newest assistant
 turn is sent the same way where a breakpoint goes on it and no thinking block
 follows it, and any turn so listed is sent so on every later request
 (:func:`_turns_listed`), so a tools-free retry's first turn, sent again by the
-questions after it, is read from the cache. A single-shot call carries none
-and pays no write premium
+questions after it, is read from the cache. A breakpoint whose turn keeps a
+string's shape goes on the nearest earlier user turn whose prefix a request
+of the model marked before, where it reads and writes nothing
+(:func:`_cache_breakpoints`): a question asked at the end of a tool loop's
+conversation reads what the loop wrote, and one asked once writes nothing.
+A single-shot call carries none and pays no write premium
 (https://platform.claude.com/docs/en/build-with-claude/prompt-caching) — except
 where its first user turn is noted with a head that other requests repeat
 (:data:`SHARED_HEAD`, the report composer's sections): that turn is sent as two
@@ -78,6 +82,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import time
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
@@ -129,6 +134,10 @@ class Memory:
         self.listed_turns: set[str] = set()
         # signature digests of blocks the API was asked to drop.
         self.stale: set[str] = set()
+        # digest of a request prefix a breakpoint was placed at, through the
+        # marked turn -> when (``time.monotonic``): the cache entries this
+        # model's requests wrote or read, and when each last lived again.
+        self.marked: dict[str, float] = {}
 
     def clear(self) -> None:
         with self.lock:
@@ -137,6 +146,7 @@ class Memory:
             self.listed_first.clear()
             self.listed_turns.clear()
             self.stale.clear()
+            self.marked.clear()
 
 
 _memory_lock = threading.Lock()
@@ -622,16 +632,77 @@ def _turns_listed(memory: Memory, messages: list[Any], loop: bool, last: bool) -
     return out
 
 
+def _markable(message: Any) -> bool:
+    """Whether a turn can carry a breakpoint as it is sent: a block list not ending on thinking."""
+    content = message.get("content") if isinstance(message, dict) else None
+    return (
+        isinstance(content, list)
+        and bool(content)
+        and isinstance(content[-1], dict)
+        and not _is_thinking(content[-1])
+    )
+
+
+def _prefix_digests(payload: dict[str, Any], messages: list[Any]) -> list[str]:
+    """The digest of the request through each turn, its tools and system prompt first."""
+    running = hashlib.sha256(
+        _dump({"system": payload.get("system"), "tools": payload.get("tools")})
+    )
+    out: list[str] = []
+    for message in messages:
+        running.update(b"\x00" + _dump(message))
+        out.append(running.copy().hexdigest())
+    return out
+
+
 def _cache_breakpoints(
-    messages: list[Any], marker: dict[str, str], loop: bool, last: bool = False
+    messages: list[Any],
+    marker: dict[str, str],
+    loop: bool,
+    last: bool = False,
+    memory: Memory | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> list[Any]:
     """Explicit breakpoints on a conversation that re-sends its prefix, none otherwise.
 
     ``last``: no later request sends this conversation again (:data:`LAST_REQUEST`),
     so a breakpoint here would write an entry nothing reads.
+
+    With ``memory``, a breakpoint whose turn cannot carry one as sent (a turn
+    written as one string that keeps that shape, :func:`_turns_listed`) goes
+    on the nearest user turn before it whose prefix an earlier request of the
+    model marked, where it reads that entry and writes none; with no such
+    turn, or where a breakpoint placed after that turn reads it already, it is
+    left out. A question asked at the end of a loop's conversation so reads
+    the prefix the loop wrote, and a question asked once writes nothing. Every
+    prefix marked is remembered with when (``Memory.marked``), and only one
+    marked within the marker's lifetime (five minutes, or an hour where it
+    asks one) counts as an entry still written.
     """
     roles = [m.get("role") if isinstance(m, dict) else None for m in messages]
     marks = _breakpoint_turns(roles, loop, last)
+    if memory is not None and marks:
+        digests = _prefix_digests(payload or {}, messages)
+        with memory.lock:
+            now = time.monotonic()
+            lifetime = _ONE_HOUR if marker.get("ttl") == "1h" else _FIVE_MINUTES
+            written = {key for key, at in memory.marked.items() if now - at < lifetime}
+        placed = {index for index in marks if _markable(messages[index])}
+        for index in sorted(marks - placed):
+            earlier = next(
+                (
+                    j
+                    for j in range(index - 1, -1, -1)
+                    if roles[j] == "user" and _markable(messages[j]) and digests[j] in written
+                ),
+                None,
+            )
+            # A breakpoint already placed after it reads that entry on its own.
+            if earlier is not None and not any(i > earlier for i in placed):
+                placed.add(earlier)
+        marks = placed
+        with memory.lock:
+            memory.marked.update((digests[i], now) for i in marks)
     return [_marked(m, marker) if i in marks else m for i, m in enumerate(messages)]
 
 
@@ -760,7 +831,9 @@ def prepared(
             pending = _PENDING.get()
             if pending is not None:
                 pending[:] = [whole]
-        payload["messages"] = _cache_breakpoints(messages, cache_marker, loop, last)
+        payload["messages"] = _cache_breakpoints(
+            messages, cache_marker, loop, last, memory=memory, payload=payload
+        )
         newest = messages[-1] if messages else None
         if isinstance(newest, dict) and newest.get("role") == "assistant":
             logger.warning(

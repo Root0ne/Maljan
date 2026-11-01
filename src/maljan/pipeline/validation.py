@@ -48,6 +48,7 @@ from maljan.analysis.technique_ids import (
     TECHNIQUE_WORD_RE,
     declared_technique_id,
     is_technique_id,
+    technique_ids_in,
     written_technique_id,
 )
 from maljan.core.declared_reading import (
@@ -417,6 +418,93 @@ def analyst_feedback_closing(*, whole: bool, techniques: bool = True, tools: boo
     else:
         closing = ANALYST_FEEDBACK_CLOSING_BY_NUMBER_WITHOUT_TECHNIQUES
     return f"{ANALYST_TOOLS_ATTACHED}\n{closing}" if tools else closing
+
+
+# The head of the catalogue facts a retry about technique lines carries
+# (:func:`technique_facts_note`).
+TECHNIQUE_FACTS_LEAD = (
+    "What the platform's ATT&CK catalogue holds for each technique id your answer and these "
+    "questions name, so a fix needs no look-up of them:"
+)
+
+
+def _asks_about_techniques(violation: Violation) -> bool:
+    """Whether a question is about a claim's technique ids or its TECHNIQUE line."""
+    code = str(violation.code or "")
+    return code.startswith("attck.") or code in (
+        UNGROUNDED_TECHNIQUE_CODE,
+        TECHNIQUE_LINE_UNREAD_CODE,
+    )
+
+
+def _technique_fact(attck: Any, tid: str) -> str:
+    """One id's catalogue line: its name, its parent and its tactics, or why it is no technique."""
+    row = attck.attck_lookup(tid) or {}
+    name = str(row.get("name") or "")
+    if row.get("valid") and name:
+        said = f"- {tid} {name}"
+        parent = tid.split(".")[0]
+        if parent != tid:
+            above = attck.attck_lookup(parent) or {}
+            parent_name = str(above.get("name") or "")
+            said += f": a sub-technique of {parent}{f' {parent_name}' if parent_name else ''}"
+        tactics = ", ".join(str(t) for t in row.get("tactics") or [])
+        return f"{said}; tactics: {tactics}" if tactics else said
+    if row.get("valid"):
+        # A valid id the technique table carries no row for: its name is not
+        # known here, and it is a technique all the same.
+        tactics = ", ".join(str(t) for t in row.get("tactics") or [])
+        said = f"- {tid}: a technique of the catalogue"
+        return f"{said}; tactics: {tactics}" if tactics else said
+    reason = str(row.get("reason") or "the catalogue has no technique with this id")
+    reasons = [reason]
+    # The catalogue's reason already says the release and the successor where
+    # it knows them; each is added only where it does not.
+    retired = str(row.get("retired_in") or "")
+    if retired and retired not in reason:
+        reasons.append(f"retired in {retired}")
+    successor = str(row.get("revoked_by") or "")
+    if successor and successor not in reason:
+        reasons.append(f"revoked by {successor}")
+    checked = getattr(attck, "attck_validate", None)
+    nearest: list[str] = []
+    if callable(checked):
+        for invalid in (checked([tid]) or {}).get("invalid") or []:
+            nearest.extend(str(t) for t in invalid.get("suggestions") or [])
+    tail = f"; the catalogue's nearest ids: {', '.join(nearest)}" if nearest else ""
+    return f"- {tid}: not a technique of the catalogue ({'; '.join(reasons)}){tail}"
+
+
+def technique_facts_note(violations: Sequence[Violation], claims: Iterable[Any], attck: Any) -> str:
+    """The catalogue facts for a retry about technique lines, or ``""``.
+
+    A question about a claim's technique ids asks the model to keep, replace or
+    remove an id, and the id's name, tactics, parent and validity are what it
+    reads to decide: the platform holds them (the vendored catalogue the check
+    itself reads, ``tools.knowledge``), so the retry carries them, one line per
+    id the answer's claims write (their ids and their TECHNIQUE lines) or the
+    questions name, rather than leaving the model a look-up for each. The tools
+    that answer the same stay attached. ``""`` when no question is about
+    technique ids, or no catalogue answers.
+    """
+    if not any(_asks_about_techniques(v) for v in violations):
+        return ""
+    if not callable(getattr(attck, "attck_lookup", None)):
+        return ""
+    written: list[str] = []
+    for claim in claims:
+        written.append(str(getattr(claim, "technique_id", None) or ""))
+        written.append(str(getattr(claim, "technique_line", None) or ""))
+    for violation in violations:
+        if _asks_about_techniques(violation):
+            written.append(str(violation.subject or ""))
+    lines: list[str] = []
+    for tid in technique_ids_in([text for text in written if text]):
+        try:
+            lines.append(_technique_fact(attck, tid))
+        except Exception as exc:  # noqa: BLE001 — an id the catalogue cannot answer is left out
+            logger.debug("technique facts: %s was not read (%s)", tid, exc)
+    return "\n".join([TECHNIQUE_FACTS_LEAD, *lines]) if lines else ""
 
 
 UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"

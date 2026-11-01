@@ -993,6 +993,15 @@ class ToolsNotBound(Exception):  # noqa: N818 — a signal, not a failure
     """
 
 
+class ContinuationRefused(AnalystError):
+    """Raised where a question asked over a loop's conversation would be asked tools-free.
+
+    The caller asks it again over the conversation it built, exactly as that
+    question is asked without a loop's conversation
+    (``BaseAnalyst._answer_after_loop``'s ``refuse_tools_free``).
+    """
+
+
 class QuestionUnanswered(AnalystError):
     """Raised by a question's loop that ended without an answer: at a cap, or with no text.
 
@@ -3665,6 +3674,15 @@ PACK_SUMMARY_NOTE = (
 )
 
 
+def _cited_by(answer: Any) -> list[str]:
+    """The entry ids ``answer``'s claims and findings cite, in order."""
+    return [
+        entry_id
+        for item in [*answer.claims, *(answer.findings or [])]
+        for entry_id in retry_drop_cited(item)
+    ]
+
+
 def cited_entry_texts(
     agent: Any, cited: Sequence[str], messages: Sequence[Any], *, summary_lines: bool = True
 ) -> dict[str, str]:
@@ -4741,6 +4759,30 @@ def _earlier_call_lines(entries: Sequence[Any]) -> list[str]:
         said = f": {excerpt_view(headline)}" if headline else ""
         lines.append(f"- {tool}({shown}) \u2192 {entry_id}{failed}{said}")
     return lines
+
+
+# What a question that continues a loop's conversation keeps clear of its
+# cache entry's end, in seconds: the entry lives from the loop's last request,
+# and the question is built and sent some moments after its answer.
+KEPT_CONVERSATION_MARGIN_S = 30.0
+
+
+@dataclass(frozen=True)
+class KeptConversation:
+    """A tool loop's conversation as it last sent it, ending on the answer it wrote.
+
+    ``sent_at`` is when its latest request went out (``time.monotonic``): a
+    provider that caches the prefix keeps it from then for the model's stated
+    lifetime (``anthropic_history.prompt_cache_seconds``).
+    """
+
+    messages: tuple[Any, ...]
+    sent_at: float
+
+
+def _same_answer(written: str, sent: str) -> bool:
+    """Whether two texts are one answer: the same words in the same order, spacing aside."""
+    return bool(written.strip()) and written.split() == sent.split()
 
 
 class _PriorAnswer:
@@ -6292,6 +6334,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                     messages,
                     ledger_entries=len(getattr(recorder, "entries", None) or []),
                 )
+            # When the loop's latest request went out: a question that
+            # continues the conversation reads its cached prefix only while
+            # the entry lives (:meth:`_continued_question`).
+            self._last_request_sent = time.monotonic()
             # Each turn of a tool loop says so, for a provider that caches a
             # conversation it will send again (``anthropic_history``); the
             # note rides the request alone, never the loop's own messages.
@@ -6417,6 +6463,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         if not asked:
             # Known again once this loop has counted its turns.
             self._last_loop_steps_known = False
+            # A question asked after this loop continues this loop's own
+            # conversation, never an earlier one's.
+            self._kept_conversation: KeptConversation | None = None
         # What each model turn is recorded as: a question's turns under its
         # own call (``analysis.efficiency`` reads their share), a loop's as
         # loop turns.
@@ -7446,6 +7495,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Counted above, where it cost a step; not sent back to a model, which
         # would read the graph's sentence as its own last turn.
         msgs = [message for message in msgs if not is_the_graph_s_step_stop(message)]
+        # The conversation as the loop last sent it and the answer it ended on,
+        # for the questions asked after it to be asked over
+        # (:meth:`_question_base_of`). A loop that offered ``read_evidence``
+        # sent a tool list its questions do not bind, so its prefix is not
+        # theirs; a question's own loop keeps the loop it follows.
+        if not asked:
+            self._kept_conversation = (
+                None
+                if self._offered_after_clear
+                else KeptConversation(tuple(msgs), float(getattr(self, "_last_request_sent", 0.0)))
+            )
         # A question asked after a loop: its answer is the model's last turn,
         # read by its caller as the tools-free call's was, findings block and
         # all. A loop a cap ended wrote no answer to the question; the salvage
@@ -8400,8 +8460,168 @@ class BaseAnalyst(BudgetMeter, ABC):
         if isinstance(reasons, list) and reason not in reasons:
             reasons.append(reason)
 
+    def _question_base_of(self, answer: str, *, tools: bool) -> KeptConversation | None:
+        """The loop conversation ``answer`` was written in, without the answer, or ``None``.
+
+        The questions asked after a loop (a validation retry, the whole-answer
+        question, the drops question) were each asked over a conversation
+        rebuilt from text: the system prompt and the evidence as its first
+        turn, then the answers and the question. That prefix was none the loop
+        had sent, so the provider wrote it again for them, and a question asked
+        once read nothing back. Asked over the loop's own conversation as the
+        loop last sent it, each question's request is the loop's last request
+        plus the turns the rebuilt one put after its first turn, as they are:
+        the provider reads the whole prefix from the cache the loop wrote, the
+        model has every tool answer it wrote from in view, and nothing before
+        the answer is written again (:meth:`_continued_question`).
+
+        ``None`` when no loop of this agent ended on ``answer`` (a merged,
+        salvaged, nudged or cut answer, or one shown in part), or when the
+        questions do not carry the agent's tools: the loop's turns hold tool
+        calls a tools-free request cannot send.
+        """
+        kept = getattr(self, "_kept_conversation", None)
+        if not tools or not isinstance(kept, KeptConversation) or len(kept.messages) < 2:
+            return None
+        last = kept.messages[-1]
+        if not is_model_turn(last) or getattr(last, "tool_calls", None):
+            return None
+        written = strip_tool_call_scaffolding(answer_text(getattr(last, "content", "")))
+        if not _same_answer(written, str(answer or "")):
+            return None
+        return KeptConversation(kept.messages[:-1], kept.sent_at)
+
+    def _continued_question(
+        self, turns: list[Any], rebuilt: list[Any], cap: int, *, tools: bool
+    ) -> list[Any] | None:
+        """``turns`` with the ``rebuilt`` conversation they start with replaced by the loop's.
+
+        The base is :meth:`_question_base_of`'s, kept for the validation turn
+        (``_question_base``). ``None``, and the question is asked over
+        ``turns``, when there is none, when the question carries no tools, when
+        ``turns`` do not start with ``rebuilt`` as it was built (a question
+        written into its last turn), when the model states no cache lifetime
+        (``anthropic_history.prompt_cache_seconds``: a model this platform
+        places no breakpoint for, whose cache it cannot reason about) or the
+        base's entry is past it less :data:`KEPT_CONVERSATION_MARGIN_S`, or
+        when the turns, framed as they are sent, and an answer of ``cap``
+        tokens do not fit the window.
+        """
+        size = len(rebuilt)
+        if len(turns) <= size or any(a is not b for a, b in zip(turns, rebuilt, strict=False)):
+            return None
+        base = BaseAnalyst._live_question_base(  # type: ignore[arg-type]
+            self, turns[size:], cap, tools=tools
+        )
+        if base is None:
+            return None
+        return [*base.messages, *turns[size:]]
+
+    def _shows_what_the_rebuilt_shows(
+        self,
+        cited: Sequence[str],
+        messages: list[Any],
+        rebuilt: str,
+        base: KeptConversation,
+        over_base: str,
+    ) -> bool:
+        """Whether a question over ``base`` shows every entry body the rebuilt question shows.
+
+        ``rebuilt`` is the text of the question's new turns over the rebuilt
+        conversation ``messages``, ``over_base`` their text over the loop's.
+        For each entry of ``cited`` the rebuilt text shows whole (its id, its
+        tool and its view, as :func:`cited_entry_texts` writes it), the
+        continued question shows it too: either the entry's fenced view, which
+        carries its id and its digest, stands verbatim in the loop's
+        conversation, or the view stands verbatim in ``over_base``. A summary
+        line, a note in place of the body or a text that merely contains the
+        body counts for nothing; an entry the rebuilt conversation holds that
+        the loop's conversation does not hold as written needs its view in
+        either. A continued question never shows the model less than the
+        rebuilt one.
+        """
+        shown = cited_entry_texts(self, cited, messages)
+        held = "\n".join(
+            content if isinstance(content, str) else answer_text(content)
+            for content in (getattr(m, "content", "") for m in base.messages)
+        )
+        for entry_id, text in shown.items():
+            whole = text.rstrip()
+            _head, said, view = whole.partition(":\n")
+            if not said or whole not in rebuilt:
+                continue
+            if view in over_base:
+                continue
+            opening = view.split("\n", 1)[0]
+            fenced_view = bool(
+                re.fullmatch(
+                    r"<<tool output \[" + re.escape(entry_id) + r"\] \S+>>", opening, re.IGNORECASE
+                )
+            )
+            if fenced_view and view in held:
+                continue
+            return False
+        # An entry the rebuilt conversation holds, so the rebuilt question
+        # shows nothing of it, that the loop's conversation does not hold as
+        # written: its fenced view must stand in the loop's conversation or
+        # in the continued question.
+        unheld = cited_entry_texts(self, cited, list(base.messages))
+        rest = [entry_id for entry_id in unheld if entry_id not in shown]
+        for text in cited_entry_texts(self, rest, []).values():
+            _head, said, view = text.rstrip().partition(":\n")
+            if said and view not in over_base and view not in held:
+                return False
+        return True
+
+    def _live_question_base(
+        self, tail: list[Any], cap: int, *, tools: bool
+    ) -> KeptConversation | None:
+        """The validation turn's loop base where ``tail`` may be asked over it, or ``None``.
+
+        ``None`` when there is none, when the question carries no tools, when
+        the model states no cache lifetime (``anthropic_history.prompt_cache_seconds``)
+        or the base's entry is past it less :data:`KEPT_CONVERSATION_MARGIN_S`,
+        or when the base and ``tail``, framed as they are sent, and an answer
+        of ``cap`` tokens do not fit the window.
+        """
+        from langchain_core.messages import HumanMessage
+
+        from maljan.llm.anthropic_history import prompt_cache_seconds
+
+        base = getattr(self, "_question_base", None)
+        if not tools or not isinstance(base, KeptConversation):
+            return None
+        lifetime = prompt_cache_seconds(getattr(self, "llm", None))
+        if lifetime is None or (
+            time.monotonic() - base.sent_at >= float(lifetime) - KEPT_CONVERSATION_MARGIN_S
+        ):
+            return None
+        continued = [*base.messages, *tail]
+        # Measured as it is sent: the pack and the run-state block in their
+        # places, and where the provider sends the earlier turns' blocks
+        # again (``replays_earlier_blocks``), one more block per user turn.
+        state = current_run_state(self)
+        framed = frame_messages(
+            continued,
+            facts_block=str(getattr(self, "facts_block", "") or ""),
+            run_state=state,
+        )
+        if state and replays_earlier_blocks(getattr(self, "llm", None)):
+            turned = sum(1 for m in continued[:-1] if getattr(m, "type", "") in ("human", "tool"))
+            framed = [*framed, HumanMessage(content=state * turned)] if turned else framed
+        if not BaseAnalyst._fits_the_window(self, framed, int(cap)):  # type: ignore[arg-type]
+            return None
+        return base
+
     def _answer_after_loop(
-        self, messages: list[Any], timeout: float | None, *, what: str, tools: bool
+        self,
+        messages: list[Any],
+        timeout: float | None,
+        *,
+        what: str,
+        tools: bool,
+        plain: list[Any] | None = None,
+        refuse_tools_free: bool = False,
     ) -> str:
         """A question asked after this agent's loop, with its tools when ``tools``; its answer's text.
 
@@ -8427,7 +8647,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         budget record the question writes is put on the record of the loop it
         follows, under ``asked_after``, where the validation turn's own notes
         go (:meth:`_fold_question_records`).
+
+        ``plain`` is the question over the conversation the caller built, where
+        ``messages`` continues a loop's own (:meth:`_continued_question`):
+        those turns hold tool calls, so the tools-free call asks over ``plain``.
+        ``refuse_tools_free`` raises :class:`ContinuationRefused` where the
+        tools-free call would be asked, for a caller that asks again over the
+        conversation it built.
         """
+        free = messages if plain is None else plain
         if not tools:
             # An agent with tools whose model could not bind them asks without
             # them, and its loop's record says so; one with none asks as it
@@ -8436,7 +8664,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 BaseAnalyst._note_question_without_tools(  # type: ignore[arg-type]
                     self, what, "its model could not bind its tools"
                 )
-            return self._invoke_llm_with_timeout(messages, timeout, what=what)
+            return self._invoke_llm_with_timeout(free, timeout, what=what)
         deadline = getattr(self, "_last_loop_deadline", None)
         timeout = BaseAnalyst._question_seconds(self, what, timeout, deadline)  # type: ignore[arg-type]
         known = bool(getattr(self, "_last_loop_steps_known", False))
@@ -8446,8 +8674,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 f"{steps} step(s) of its loop were left, and a turn that may call a tool needs "
                 "three; asked without its tools"
             )
+            if refuse_tools_free:
+                raise ContinuationRefused(why)
             return BaseAnalyst._ask_without_tools(  # type: ignore[arg-type]
-                self, messages, timeout, what=what, why=why
+                self, free, timeout, what=what, why=why
             )
         with self._the_meter_s_lock():
             records_before = len(getattr(self, "_budget_records", None) or [])
@@ -8456,19 +8686,32 @@ class BaseAnalyst(BudgetMeter, ABC):
         self._question_budget = None
         self._asking = what
         unanswered = ""
+        base = getattr(self, "_question_base", None)
+        if (plain is not None or refuse_tools_free) and isinstance(base, KeptConversation):
+            # A question over the loop's conversation is sent now: the base's
+            # cache entry is read, so it lives from here.
+            self._question_base: KeptConversation | None = KeptConversation(
+                base.messages, time.monotonic()
+            )
         try:
             return self.execute_tool_loop(list(messages), asked=what, seconds=timeout, steps=steps)
         except ToolsNotBound as exc:
             BaseAnalyst._say_the_tools_were_not_bound(self, what, exc)
             unanswered = "the question's loop could not bind its tools"
+            # Nothing was sent: the base's entry lives from when it last did.
+            if isinstance(base, KeptConversation):
+                self._question_base = base
         except QuestionUnanswered as exc:
             unanswered = f"its loop ended at {exc.ended} without an answer"
         except AnalystError as exc:
             # A failed turn of the question's loop (a provider refusing the
             # request that carries the tools, a stalled call): the tools-free
             # call is still asked, as dev asked it. The hard cap is a
-            # TimeoutError and is not caught.
+            # TimeoutError and is not caught. A request refused is no read of
+            # the base's entry.
             unanswered = f"its loop failed: {exc}"
+            if isinstance(base, KeptConversation):
+                self._question_base = base
         finally:
             self._asking = ""
             spent = getattr(self._question_budget, "own_steps", 0) or 0
@@ -8484,9 +8727,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             BaseAnalyst._fold_question_records(self, records_before)  # type: ignore[arg-type]
         # Never worse than the tools-free call: asked once in it, in the time
         # the loop it follows still leaves.
+        if refuse_tools_free:
+            raise ContinuationRefused(unanswered)
         return BaseAnalyst._ask_without_tools(  # type: ignore[arg-type]
             self,
-            messages,
+            free,
             BaseAnalyst._question_seconds(self, what, timeout, deadline),  # type: ignore[arg-type]
             what=what,
             why=unanswered,
@@ -9585,7 +9830,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         The turn's questions carry this agent's own tools where its model
         binds them (:meth:`_answer_after_loop`); while it runs,
         ``_questions_carry_tools`` says so to the window measures, which then
-        count the tool definitions the requests carry.
+        count the tool definitions the requests carry, and ``_question_base``
+        holds the loop conversation its questions are asked over
+        (:meth:`_continued_question`).
         """
         try:
             return BaseAnalyst._validation_turn(  # type: ignore[arg-type]
@@ -9593,6 +9840,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
         finally:
             self._questions_carry_tools = False
+            self._question_base = None
 
     def _validation_turn(
         self,
@@ -9920,6 +10168,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             analyst_feedback_closing,
             feedback_text,
             gate_removed_note,
+            technique_facts_note,
         )
 
         # A retry that is not asked for a whole answer changes only the claims
@@ -9935,6 +10184,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         if isr.gate_removed and isr.answer_text:
             closing = f"{gate_removed_note(isr.gate_removed)}\n{closing}"
+        # A question about technique ids carries what the catalogue holds for
+        # each id the answer writes: deterministic facts, not a look-up the
+        # model makes for each (its tools stay attached).
+        facts = technique_facts_note(initial, isr.claims, knowledge)
+        if facts:
+            closing = f"{facts}\n{closing}"
         sent = with_question(messages, feedback_text(initial, closing=closing))
         loop_repeat = _repeated(isr)
         widest = max((cap for cap, _text, _chunk in loop_cuts), default=0)
@@ -10014,6 +10269,16 @@ class BaseAnalyst(BudgetMeter, ABC):
             shown_repeat = None
             first[:] = [_PriorAnswer(isr)]
 
+        # The loop conversation the answer was written in, which every
+        # question of this turn is asked over where the answer is the one it
+        # ended on, as it is sent back (:meth:`_question_base_of`).
+        # The answer as the retry sends it back, which the whole-answer
+        # question sends again over that conversation.
+        question_prior = str(first[0].content)
+        self._question_base = BaseAnalyst._question_base_of(  # type: ignore[arg-type]
+            self, question_prior, tools=tooled
+        )
+
         # Each retry answer's own text, by the ISR it parsed to: a retry the
         # first answer is kept over is kept in the run record whole.
         raw_answers: dict[int, str] = {}
@@ -10024,18 +10289,89 @@ class BaseAnalyst(BudgetMeter, ABC):
         # answered.
         round_asked: list[list[Violation]] = []
         rounds_answered: list[list[Violation]] = []
+        # The closing the retry's question was sent with over the loop's own
+        # conversation, when it was: the whole-answer question sends that
+        # question again as it was sent.
+        held_closing: list[str] = []
 
         def _run(turns: list[Any]) -> Any:
             if first:
                 return first.pop()
             # The block moves to the retry's own question, the last message,
             # and the turn that carried it before is sent as it was written.
+            plain = frame_messages(turns, run_state=current_run_state(self))
+            # Over the loop's own conversation where the answer is the one it
+            # ended on (:meth:`_continued_question`): the entries the answer
+            # cites are fitted again against that conversation, which holds
+            # the tool answers its own calls returned; an entry it does not
+            # hold (an earlier round's, the brief's, one its answer was cut
+            # from) is still shown.
+            base = getattr(self, "_question_base", None)
+            if (
+                len(turns) == len(messages) + 2
+                and isinstance(turns[-2], AIMessage)
+                and isinstance(turns[-1], HumanMessage)
+                and round_asked
+                and isinstance(base, KeptConversation)
+            ):
+                asked_now = round_asked[0]
+                prior = turns[-2]
+
+                def _continued_turns(text: str) -> list[Any]:
+                    return [
+                        *base.messages,
+                        prior,
+                        HumanMessage(content=feedback_text(asked_now, closing=text, cards=cards)),
+                    ]
+
+                held = BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
+                    self,
+                    isr,
+                    list(base.messages),
+                    bare_closing,
+                    _continued_turns,
+                    max(widest, int(self.output_cap_tokens() or 0)),
+                    quiet=True,
+                )
+                # Continued only where it shows every entry the rebuilt
+                # question shows (:meth:`_shows_what_the_rebuilt_shows`).
+                if BaseAnalyst._shows_what_the_rebuilt_shows(  # type: ignore[arg-type]
+                    self,
+                    _cited_by(isr),
+                    messages,
+                    str(turns[-1].content),
+                    base,
+                    feedback_text(asked_now, closing=held, cards=cards),
+                ):
+                    turns = [
+                        *turns[:-1],
+                        HumanMessage(content=feedback_text(asked_now, closing=held, cards=cards)),
+                    ]
+                    held_closing[:] = [held]
+                else:
+                    turns = []
+            continued = (
+                BaseAnalyst._continued_question(  # type: ignore[arg-type]
+                    self,
+                    turns,
+                    messages,
+                    max(widest, int(self.output_cap_tokens() or 0)),
+                    tools=tooled,
+                )
+                if turns
+                else None
+            )
+            if continued is None:
+                held_closing.clear()
             answer = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
                 self,
-                frame_messages(turns, run_state=current_run_state(self)),
+                plain
+                if continued is None
+                else frame_messages(continued, run_state=current_run_state(self)),
                 left,
                 what=VALIDATION_RETRY_CALL,
                 tools=tooled,
+                plain=None if continued is None else plain,
             )
             if round_asked:
                 rounds_answered.append(round_asked.pop())
@@ -10166,10 +10502,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             retried_answer = raw_answers.get(id(retried), "")
             question = whole_answer_after_retry_question(why, techniques=techniques, tools=tooled)
 
-            def _turns(text: str) -> list[Any]:
+            def _turns(text: str, prior: str | None = None) -> list[Any]:
                 asked = _with_feedback(
                     messages,
-                    first_answer.answer_text or first_answer.to_text_summary(),
+                    first_answer.answer_text or first_answer.to_text_summary()
+                    if prior is None
+                    else prior,
                     shown,
                     closing=text,
                     cards=cards,
@@ -10184,24 +10522,61 @@ class BaseAnalyst(BudgetMeter, ABC):
 
             # The entries are fitted again: this turn also carries the retry's
             # own answer and the question after it, beside a whole answer.
-            turns = _turns(
-                BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
-                    self,
-                    first_answer,
-                    messages,
-                    bare_closing,
-                    _turns,
-                    int(self.output_cap_tokens() or 0),
-                )
+            rebuilt_closing = BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
+                self,
+                first_answer,
+                messages,
+                bare_closing,
+                _turns,
+                int(self.output_cap_tokens() or 0),
             )
+            turns = _turns(rebuilt_closing)
             self.validation_retries += 1
+            plain = frame_messages(turns, run_state=current_run_state(self))
+            # Over the loop's own conversation (:meth:`_continued_question`),
+            # the retry's question is the one the continued retry sent; where
+            # the retry was not continued, its entries are fitted against that
+            # conversation.
+            continued = None
+            base = getattr(self, "_question_base", None)
+            if isinstance(base, KeptConversation):
+                if held_closing:
+                    over_base = held_closing[0]
+                else:
+                    over_base = BaseAnalyst._with_cited_entries(  # type: ignore[arg-type]
+                        self,
+                        first_answer,
+                        list(base.messages),
+                        bare_closing,
+                        lambda text: [
+                            *base.messages,
+                            *_turns(text, question_prior)[len(messages) :],
+                        ],
+                        int(self.output_cap_tokens() or 0),
+                        quiet=True,
+                    )
+                # Continued only where it shows every entry the rebuilt
+                # question shows (:meth:`_shows_what_the_rebuilt_shows`).
+                if BaseAnalyst._shows_what_the_rebuilt_shows(  # type: ignore[arg-type]
+                    self, _cited_by(first_answer), messages, rebuilt_closing, base, over_base
+                ):
+                    continued = BaseAnalyst._continued_question(  # type: ignore[arg-type]
+                        self,
+                        _turns(over_base, question_prior),
+                        messages,
+                        int(self.output_cap_tokens() or 0),
+                        tools=tooled,
+                    )
             try:
                 answer = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
                     self,
-                    frame_messages(turns, run_state=current_run_state(self)),
+                    plain
+                    if continued is None
+                    else frame_messages(continued, run_state=current_run_state(self)),
                     left,
                     what=WHOLE_ANSWER_RETRY_CALL,
                     tools=tooled,
+                    plain=None if continued is None else plain,
                 )
             except Exception as exc:  # noqa: BLE001 — unanswered, the first answer stays
                 self.logger.warning(
@@ -11026,6 +11401,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         closing: str,
         turns: Callable[[str], list[Any]],
         cap: int,
+        quiet: bool = False,
     ) -> str:
         """``closing`` with the ledger entries ``isr`` cites in front of it, as many as fit.
 
@@ -11039,7 +11415,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         that does not fit beside those shown is named by id. When none fits,
         ``closing`` is returned as it was: a line of names alone would only
         make the turn longer. With no window known every entry is shown.
-        Nothing is cut. Linear in the entries.
+        Nothing is cut. Linear in the entries. ``quiet`` logs nothing: a fit
+        for a question that may not be sent so.
         """
         cited = [
             entry_id
@@ -11071,6 +11448,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             else:
                 unfit.append(entry_id)
         if not shown:
+            if quiet:
+                return closing
             self.logger.warning(
                 "Validation: none of the %d ledger entries '%s' cites fits beside its "
                 "validation turn; it is asked without them.",
@@ -11078,7 +11457,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 self.name,
             )
             return closing
-        if unfit:
+        if unfit and not quiet:
             self.logger.warning(
                 "Validation: %d of the %d ledger entries '%s' cites do not fit beside its "
                 "validation retry and are named by id: %s.",
@@ -11212,9 +11591,61 @@ class BaseAnalyst(BudgetMeter, ABC):
         labelled = drops.labelled()
         cited = [entry_id for _l, _k, item, _m in labelled for entry_id in retry_drop_cited(item)]
         entries = cited_entry_texts(self, cited, messages)
-        asked_in = BaseAnalyst._retry_drop_parts(  # type: ignore[arg-type]
+        # Whether the question is asked over the loop's own conversation
+        # (:meth:`_continued_question`) is decided once, for every part
+        # together: the items are cut into parts beside that conversation's
+        # entries, and the parts are asked over it only where none names an
+        # entry in place of its text, every part fits, and they show every
+        # entry body the rebuilt parts show (:meth:`_shows_what_the_rebuilt_shows`).
+        # Otherwise the parts are the rebuilt conversation's, as they always
+        # were, and so is every request.
+        cap = int(self.output_cap_tokens() or 0)
+        rebuilt_in = BaseAnalyst._retry_drop_parts(  # type: ignore[arg-type]
             self, drops, question, entries, answer, messages
         )
+
+        def _texts(asked_parts: list[tuple[RetryDrops, dict[str, str], list[str]]]) -> list[str]:
+            return [
+                question(
+                    items,
+                    shown,
+                    unfit=unfit,
+                    part=(number, len(asked_parts)) if len(asked_parts) > 1 else None,
+                )
+                for number, (items, shown, unfit) in enumerate(asked_parts, start=1)
+            ]
+
+        def _over(text: str) -> list[Any]:
+            return [*messages, AIMessage(content=str(answer or "")), HumanMessage(content=text)]
+
+        asked_in, continuing = rebuilt_in, False
+        base = BaseAnalyst._live_question_base(  # type: ignore[arg-type]
+            self, _over("")[len(messages) :], cap, tools=tools
+        )
+        if base is not None:
+            base_in = BaseAnalyst._retry_drop_parts(  # type: ignore[arg-type]
+                self,
+                drops,
+                question,
+                cited_entry_texts(self, cited, list(base.messages)),
+                answer,
+                list(base.messages),
+            )
+            texts = _texts(base_in)
+            if (
+                not any(unfit for _items, _shown, unfit in base_in)
+                and all(
+                    BaseAnalyst._continued_question(  # type: ignore[arg-type]
+                        self, _over(text), messages, cap, tools=tools
+                    )
+                    is not None
+                    for text in texts
+                )
+                and BaseAnalyst._shows_what_the_rebuilt_shows(  # type: ignore[arg-type]
+                    self, cited, messages, "\n".join(_texts(rebuilt_in)), base, "\n".join(texts)
+                )
+            ):
+                asked_in, continuing = base_in, True
         named = sorted({entry_id for _items, _shown, unfit in asked_in for entry_id in unfit})
         if len(asked_in) > 1 or named:
             self.logger.warning(
@@ -11256,40 +11687,83 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         _emit(VALIDATION_RETRIED)
         decided: dict[int, tuple[str, str]] = {}
-        for number, (items, shown, unfit) in enumerate(asked_in, start=1):
-            part_rows = items.labelled()
-            asked = question(
-                items,
-                shown,
-                unfit=unfit,
-                part=(number, len(asked_in)) if len(asked_in) > 1 else None,
+        # Whether a continued part's loop would have ended in the tools-free
+        # call: the rebuilt parts that hold an item left undecided are then
+        # asked as they always were.
+        refused: list[bool] = []
+
+        def _ask_parts(
+            asked_parts: list[tuple[RetryDrops, dict[str, str], list[str]]],
+            over_base: bool,
+            undecided_only: bool = False,
+        ) -> None:
+            for number, (items, shown, unfit) in enumerate(asked_parts, start=1):
+                part_rows = items.labelled()
+                if undecided_only and all(id(row[2]) in decided for row in part_rows):
+                    continue
+                asked = question(
+                    items,
+                    shown,
+                    unfit=unfit,
+                    part=(number, len(asked_parts)) if len(asked_parts) > 1 else None,
+                )
+                turns = _over(asked)
+                try:
+                    continued = (
+                        BaseAnalyst._continued_question(  # type: ignore[arg-type]
+                            self, turns, messages, cap, tools=tools
+                        )
+                        if over_base
+                        else None
+                    )
+                    if over_base and continued is None:
+                        refused.append(True)
+                        continue
+                    if continued is not None:
+                        try:
+                            reply = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
+                                self,
+                                frame_messages(continued, run_state=current_run_state(self)),
+                                left,
+                                what=RETRY_DROPS_QUESTION_CALL,
+                                tools=tools,
+                                refuse_tools_free=True,
+                            )
+                        except ContinuationRefused:
+                            refused.append(True)
+                            continue
+                    else:
+                        reply = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
+                            self,
+                            frame_messages(turns, run_state=current_run_state(self)),
+                            left,
+                            what=RETRY_DROPS_QUESTION_CALL,
+                            tools=tools,
+                        )
+                    read = read_retry_drop_answers(
+                        answer_text(getattr(reply, "content", reply)),
+                        [row[0] for row in part_rows],
+                    )
+                except Exception as exc:  # noqa: BLE001 — unanswered, the first answer's items stay
+                    self.logger.warning(
+                        "Validation: the kept-retry drops question for '%s' was not answered (%s).",
+                        self.name,
+                        describe_exception_for_log(exc),
+                    )
+                    continue
+                for label, _kind, item, _missing in part_rows:
+                    if label in read:
+                        decided[id(item)] = read[label]
+
+        _ask_parts(asked_in, continuing)
+        if refused:
+            self.logger.warning(
+                "Validation: a part of the kept-retry drops question for '%s' could not be asked "
+                "over its loop's conversation; the parts holding the items it left undecided are "
+                "asked over the rebuilt conversation.",
+                self.name,
             )
-            try:
-                turns = [
-                    *messages,
-                    AIMessage(content=str(answer or "")),
-                    HumanMessage(content=asked),
-                ]
-                reply = BaseAnalyst._answer_after_loop(  # type: ignore[arg-type]
-                    self,
-                    frame_messages(turns, run_state=current_run_state(self)),
-                    left,
-                    what=RETRY_DROPS_QUESTION_CALL,
-                    tools=tools,
-                )
-                read = read_retry_drop_answers(
-                    answer_text(getattr(reply, "content", reply)), [row[0] for row in part_rows]
-                )
-            except Exception as exc:  # noqa: BLE001 — unanswered, the first answer's items stay
-                self.logger.warning(
-                    "Validation: the kept-retry drops question for '%s' was not answered (%s).",
-                    self.name,
-                    describe_exception_for_log(exc),
-                )
-                continue
-            for label, _kind, item, _missing in part_rows:
-                if label in read:
-                    decided[id(item)] = read[label]
+            _ask_parts(rebuilt_in, False, undecided_only=True)
         _emit(
             VALIDATION_RESOLVED
             if all(id(row[2]) in decided for row in labelled)
