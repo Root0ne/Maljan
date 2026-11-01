@@ -62,6 +62,25 @@ class TestWhatTheLaunchIsHanded:
         block = settings.mcp.servers["analysis"]
         assert sidecar_needs.handed_env(block, settings) == {OVERRIDE: "/srv/rules/capa"}
 
+    def test_a_relative_setting_is_handed_absolute_and_stripped(self) -> None:
+        from maljan.core.paths import resolve_data
+
+        settings = Settings()
+        settings.static.capa.rules_dir = "  rules/capa  "
+        block = settings.mcp.servers["analysis"]
+        assert sidecar_needs.handed_env(block, settings) == {
+            OVERRIDE: str(resolve_data("rules/capa"))
+        }
+
+    def test_the_default_spelt_otherwise_hands_nothing(self) -> None:
+        from maljan.core.paths import resolve_data
+
+        settings = Settings()
+        block = settings.mcp.servers["analysis"]
+        for spelt in (f" {rules.DEFAULT_CAPA_RULES} ", str(resolve_data(rules.DEFAULT_CAPA_RULES))):
+            settings.static.capa.rules_dir = spelt
+            assert sidecar_needs.handed_env(block, settings) == {}
+
     def test_the_default_hands_nothing(self) -> None:
         settings = Settings()
         assert sidecar_needs.handed_env(settings.mcp.servers["analysis"], settings) == {}
@@ -128,6 +147,48 @@ class TestTheServerProcess:
     ) -> None:
         assert OVERRIDE not in _launch_env(monkeypatch, Settings())
 
+    def test_the_jobs_registry_hands_its_own_settings_not_the_processs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A handle and its replica for another loop launch with the job's settings."""
+        import maljan.agents.mcp_client as mcp_client
+        from maljan.core import config as core_config
+        from maljan.providers.servers import ServerRegistry
+
+        monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", _Toolkit)
+        monkeypatch.setattr(core_config, "_settings_instance", None)
+        core_config.install_settings(Settings())
+        job = Settings()
+        job.static.capa.rules_dir = "/srv/rules/capa"
+        registry = ServerRegistry(job)
+        handle = registry.get("analysis")
+        handle._owner_loop = asyncio.new_event_loop()
+        other = asyncio.new_event_loop()
+        try:
+            replica = registry._handle_for(handle, other)
+        finally:
+            handle._owner_loop.close()
+            other.close()
+        assert replica is not handle
+        for each in (handle, replica):
+            env = each._build_toolkit(None, 0, None).params.env
+            assert env[OVERRIDE] == "/srv/rules/capa"
+
+    def test_a_launch_of_no_declared_sidecar_reads_no_settings(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core import config as core_config
+        from maljan.core.config import MCPServerConfig
+
+        def _unread() -> Settings:
+            raise AssertionError("settings read for a launch nothing is handed to")
+
+        monkeypatch.setattr(core_config, "get_settings", _unread)
+        handle = ServerHandle("other", MCPServerConfig(enabled=True, command="r2mcp"))
+        env: dict[str, str] = {}
+        handle._hand_declared_data(env)
+        assert env == {}
+
     def test_its_capa_reads_the_handed_directory_else_the_default(
         self, root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -165,6 +226,11 @@ class TestTheServerProcess:
         monkeypatch.delenv(OVERRIDE)
         answer = asyncio.run(analysis.capa(str(sample), timeout_s=6))
         assert "error" not in answer
+        assert read == [str(configured), str(default)]
+
+        # An empty directory a caller hands names no path, as readiness says.
+        named_none = rules.capa(str(sample), rules_dir="  ")
+        assert named_none == {"error": "no capa rules directory is named", "tool": "capa"}
         assert read == [str(configured), str(default)]
 
 

@@ -4955,7 +4955,8 @@ server's `capa` tool reads as `MALJAN_CAPA_RULES_DIR`) and the Sigma corpus
 A data path declared with both a setting and a server variable is read in one
 place by every reading of the tool: when the setting names a path other than the
 default, a server of this repository launched over stdio (`services/<dir>/server.py`)
-is started with the variable set to the setting's value, so the worker's own
+is started with the variable set to the setting's value, resolved against the
+project root to an absolute path, so the worker's own
 reading, the static provider and the agents' calls to the server read one rule
 set. A server block whose `env` sets the variable keeps its own value; a server
 reached at an address or launched as another program (a container) keeps its own

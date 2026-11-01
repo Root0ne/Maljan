@@ -442,7 +442,7 @@ def capa(
     path: str,
     timeout_s: int | None = None,
     backend: str = "auto",
-    rules_dir: str = "",
+    rules_dir: str = "default",
     signatures_dir: str = DEFAULT_CAPA_SIGNATURES,
     scratch: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -460,13 +460,16 @@ def capa(
 
     ``library_functions`` names the functions capa's signatures identified as
     library code, or says why none were looked for (``capa_library_functions``);
-    an empty ``signatures_dir`` runs without library identification. An empty
-    ``rules_dir``, as the sidecar passes, is the environment's corpus when one
-    is set (``CAPA_RULES_ENV``), else the one the pipeline fetches.
+    an empty ``signatures_dir`` runs without library identification.
+    ``rules_dir="default"``, as the sidecar passes, is the environment's corpus
+    when one is set (``CAPA_RULES_ENV``), else the one the pipeline fetches; an
+    empty one names no path, as the check before a job says of it.
     """
     target = Path(path)
     if not target.is_file():
         return {"error": f"no such file: {path}", "tool": "capa"}
+    if not rules_dir.strip():
+        return {"error": "no capa rules directory is named", "tool": "capa"}
     rules = _resolve_ruleset(rules_dir, DEFAULT_CAPA_RULES, CAPA_RULES_ENV)
     if not rules.is_dir() or not any(rules.rglob("*.yml")):
         return {"error": f"capa rules directory {rules} is missing or empty", "tool": "capa"}

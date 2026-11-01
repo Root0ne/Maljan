@@ -218,6 +218,8 @@ class CAPE2SandboxProvider(SandboxProvider):
             sample_open=getattr(block, "sample_open", None),
             block=block,
         )
+        # The deployment's settings, for what a launch hands a declared tool.
+        handle.settings = self._settings
         self._handle = handle
         return handle
 

@@ -134,7 +134,12 @@ class GenericMCPStaticProvider(StaticProvider):
         emit_tool_server_rested(self.event_sink, record)
 
     def _regard(self, cfg: Any) -> None:
-        """Rebuild the guard from ``cfg``, the settings this provider was built from."""
+        """Rebuild the guard from ``cfg``, the settings this provider was built from.
+
+        The handle is given ``cfg`` too: what its launch hands the server of a
+        tool's declared data is read from the job's settings, not the process's.
+        """
+        self._handle.settings = cfg
         self._handle.guard = None
         self._attach_guard(cfg)
 

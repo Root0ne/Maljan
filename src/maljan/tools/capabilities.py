@@ -172,10 +172,18 @@ class Requirement:
         """
         if self.kind != "data" or not self.setting or not self.override:
             return {}
-        value = _setting_value(settings, self.setting)
-        if value is None or not str(value).strip() or str(value) == self.name:
+        held = _setting_value(settings, self.setting)
+        value = "" if held is None else str(held).strip()
+        if not value:
             return {}
-        return {self.override: str(value)}
+        from maljan.core.paths import resolve_data
+
+        # Absolute, as the caller's own reading resolves it: a server started
+        # in another working directory or tree reads the same path.
+        path = resolve_data(value)
+        if path == resolve_data(self.name):
+            return {}
+        return {self.override: str(path)}
 
     @property
     def remedy(self) -> str:

@@ -639,11 +639,15 @@ class ServerHandle:
         A tool's declared data path whose core setting names another path than
         the default reaches the server under the override the declaration
         names (``tools.sidecar_needs.handed_env``), so the server's tool reads
-        what every other reading of it is handed. The job's settings when the
-        registry gave them, else the process's.
+        what every other reading of it is handed. Any other launch is left as
+        it is before a setting is read. The job's settings when whoever built
+        the handle gave them (the registry, a provider), else the process's:
+        a connection test or an enrichment lookup builds a handle of its own.
         """
-        from maljan.tools.sidecar_needs import handed_env
+        from maljan.tools.sidecar_needs import BY_DIRECTORY, handed_env, sidecar_of
 
+        if sidecar_of(self.config) not in BY_DIRECTORY:
+            return
         settings = self.settings
         if settings is None:
             from maljan.core.config import get_settings
