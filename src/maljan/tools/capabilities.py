@@ -161,6 +161,22 @@ class Requirement:
             return f"the path {named_by} names is missing or empty"
         return f"{shown} is missing or empty (named by {named_by})"
 
+    def handed(self, settings: Any) -> dict[str, str]:
+        """The server environment that hands the tool this data path's setting.
+
+        ``{override: value}`` for data declaring both a core setting and a
+        server override, when ``settings`` names a path other than the
+        default: the server's tool then reads the path a caller handing the
+        setting reads. Empty otherwise, so a launch under the defaults is
+        given nothing it was not given before.
+        """
+        if self.kind != "data" or not self.setting or not self.override:
+            return {}
+        value = _setting_value(settings, self.setting)
+        if value is None or not str(value).strip() or str(value) == self.name:
+            return {}
+        return {self.override: str(value)}
+
     @property
     def remedy(self) -> str:
         """What puts a missing data path in place, in words naming no one tool."""
@@ -225,7 +241,9 @@ def data(default: str, *, setting: str = "", override: str = "", pattern: str = 
 
     ``default`` is the path the tool reads when nothing names another;
     ``setting`` the core setting whose value a caller that reads it hands the
-    tool instead (a server running the tool with its own defaults does not),
+    tool instead (a server running the tool with its own defaults does not,
+    unless ``override`` is declared too: its launch is then handed the
+    setting's value under it, ``handed``),
     ``override`` the server environment variable that replaces the default,
     and ``pattern`` what a file of a directory must match to count. A path
     that is missing or holds nothing is named before a job (``installed``)

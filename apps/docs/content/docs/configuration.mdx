@@ -4948,12 +4948,22 @@ the lost tools from it.
 setting whose value a caller that reads it hands the tool instead, the server
 environment variable that replaces the default, and the file pattern a directory
 must hold. The built-in sidecars declare the corpora that are fetched rather than
-tracked: capa's rules (`*.yml`; the worker's own reading of capa is handed
-`static.capa.rules_dir`, the analysis server's `capa` tool reads `data/capa-rules`)
-and the Sigma corpus (`*.yml` or `*.yaml`; `MALJAN_SIGMA_RULES_DIR`, else
-`data/sigma_rules`). `POST /jobs` and the system status look at each declared path
-where the tool would read it: for a tool a server runs, its override or default;
-for the worker's own reading, the setting. A tool whose path is missing, an empty
+tracked: capa's rules (`*.yml`; `static.capa.rules_dir`, which the analysis
+server's `capa` tool reads as `MALJAN_CAPA_RULES_DIR`) and the Sigma corpus
+(`*.yml` or `*.yaml`; `MALJAN_SIGMA_RULES_DIR`, else `data/sigma_rules`).
+
+A data path declared with both a setting and a server variable is read in one
+place by every reading of the tool: when the setting names a path other than the
+default, a server of this repository launched over stdio (`services/<dir>/server.py`)
+is started with the variable set to the setting's value, so the worker's own
+reading, the static provider and the agents' calls to the server read one rule
+set. A server block whose `env` sets the variable keeps its own value; a server
+reached at an address or launched as another program (a container) keeps its own
+environment; under the default nothing is added to a launch.
+
+`POST /jobs` and the system status look at each declared path where the tool
+would read it: for a tool a server runs, the setting its launch is handed, else
+its override or default; for the worker's own reading, the setting. A tool whose path is missing, an empty
 file, or a directory holding no matching file is named as unavailable: the reason
 gives what named the path, and the path relative to the project root
 (`data/capa-rules is missing or empty (named by the default)`; a path outside the

@@ -149,13 +149,16 @@ class TestTheSidecarsDeclarations:
 
 
 class TestReadinessNamesAMissingDataPath:
-    def test_the_servers_tool_is_named_by_the_default_it_reads(self, host: Path) -> None:
-        """The analysis server's capa reads its default, whatever the setting names."""
+    def test_the_servers_tool_is_named_by_the_override_it_reads(self, host: Path) -> None:
+        """The analysis server's capa reads its block's override where one is set."""
         settings = Settings()
         settings.static.capa.rules_dir = str(_populated(host / "set"))
+        settings.mcp.servers["analysis"].env = {"MALJAN_CAPA_RULES_DIR": "data/capa-rules"}
         (row,) = as_rows(unavailable_tools(settings))
         assert (row["server"], row["tool"]) == ("analysis", "capa")
-        assert row["reason"] == "data/capa-rules is missing or empty (named by the default)"
+        assert row["reason"] == (
+            "data/capa-rules is missing or empty (named by MALJAN_CAPA_RULES_DIR)"
+        )
         assert row["remediation"] == sidecar_needs.CAPA_RULES.remedy
         assert row["manifest_code"] == "missing_dependency"
         assert row["degradation_reason"].startswith("server.analysis.capa_unavailable(")

@@ -44,9 +44,12 @@ _SIGMA_CACHE: dict[str, Any] = {}
 # configuration surface for the rule corpora now: the sidecar that runs these
 # tools is handed them in ``core.mcp.servers.analysis.env``, so an operator with
 # their own rules points the server at them and nothing in the library reads
-# ``Settings`` to find a rule file.
+# ``Settings`` to find a rule file. capa's is handed to a sidecar of this
+# repository from the core setting its data declaration names
+# (``tools.sidecar_needs.handed_env``), so the server reads the operator's rules.
 _YARA_RULES_ENV = "MALJAN_YARA_RULES_DIR"
 SIGMA_RULES_ENV = "MALJAN_SIGMA_RULES_DIR"
+CAPA_RULES_ENV = "MALJAN_CAPA_RULES_DIR"
 
 
 def corpus_roots() -> tuple[Path, ...]:
@@ -439,7 +442,7 @@ def capa(
     path: str,
     timeout_s: int | None = None,
     backend: str = "auto",
-    rules_dir: str = DEFAULT_CAPA_RULES,
+    rules_dir: str = "",
     signatures_dir: str = DEFAULT_CAPA_SIGNATURES,
     scratch: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -457,12 +460,14 @@ def capa(
 
     ``library_functions`` names the functions capa's signatures identified as
     library code, or says why none were looked for (``capa_library_functions``);
-    an empty ``signatures_dir`` runs without library identification.
+    an empty ``signatures_dir`` runs without library identification. An empty
+    ``rules_dir``, as the sidecar passes, is the environment's corpus when one
+    is set (``CAPA_RULES_ENV``), else the one the pipeline fetches.
     """
     target = Path(path)
     if not target.is_file():
         return {"error": f"no such file: {path}", "tool": "capa"}
-    rules = resolve_data(rules_dir)
+    rules = _resolve_ruleset(rules_dir, DEFAULT_CAPA_RULES, CAPA_RULES_ENV)
     if not rules.is_dir() or not any(rules.rglob("*.yml")):
         return {"error": f"capa rules directory {rules} is missing or empty", "tool": "capa"}
 
