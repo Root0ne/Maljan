@@ -100,6 +100,13 @@ class TestWhichCommandIsTheSamples:
         started, others = started_by_the_sample(report)
         assert [node.pid for node in started] == [71] and others == []
 
+    def test_a_child_with_no_recorded_pid_is_placed_by_its_parent(self) -> None:
+        started, others = started_by_the_sample(
+            _report(_sample(84, _child(0, 84, "cmd.exe /c whoami")), _desktop())
+        )
+        assert [node.command_line for node in started] == ["cmd.exe /c whoami"]
+        assert [node.pid for node in others] == [95]
+
     def test_no_lineage_fact_attributes_nothing(self) -> None:
         unmarked = ProcessNode(
             pid=93,

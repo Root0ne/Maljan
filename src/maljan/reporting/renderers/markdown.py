@@ -5944,11 +5944,13 @@ def started_by_the_sample(report: MalwareReport) -> tuple[list[ProcessNode], lis
 
     def _walk(node: ProcessNode) -> None:
         # By place in the tree (``reached``): a repeated reading of one pid
-        # unsettles a record's pid, not a process the listing places.
+        # unsettles a record's pid, not a process the listing places; a child
+        # with no recorded pid is placed by its parent.
         parent_is_the_sample_s = pid_text(node.pid) in tree.reached
         for child in node.children:
             if child.command_line:
-                ours = parent_is_the_sample_s and pid_text(child.pid) in tree.reached
+                child_pid = pid_text(child.pid)
+                ours = parent_is_the_sample_s and (not child_pid or child_pid in tree.reached)
                 (started if ours else others).append(child)
             _walk(child)
 
