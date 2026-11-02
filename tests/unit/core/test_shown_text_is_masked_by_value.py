@@ -150,8 +150,10 @@ def test_a_held_value_inside_a_path_json_or_a_unc_share_is_masked(written):
     assert _reveals_no_more(shown, written.replace("{pw}", MASK))
 
 
-# The residual shapes of T-481 and the named residuals of T-471 / T-474: the
-# structural rules keep each, and the value, once held, is masked in them.
+# The shapes of T-481, which the structural rules now mask too
+# (``test_a_credential_in_a_structural_shape_is_masked``), and the named
+# residuals of T-471 / T-474, which they keep: the value, once held, is masked
+# in each.
 _RESIDUALS = [
     "C:\\x=u:{pw}@h:8080",
     "C:\\x)u:{pw}@h:8080",
