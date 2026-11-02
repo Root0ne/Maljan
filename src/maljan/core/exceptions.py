@@ -76,11 +76,16 @@ class SampleNotOpenedOnOneProvider(Exception):  # noqa: N818 — named for what 
     failed is filed as an ordinary failed call carrying that provider's
     sentence, and the loop goes on (``agents.composition``). Not an
     :class:`AnalystError`, so nothing that ends a loop on one reads it as such.
+    ``sent_args`` are, as on :class:`SampleNotOpened`, the arguments the call
+    was actually sent with when the platform held them to its own path.
     """
 
-    def __init__(self, sentence: str, *, provider: str = "") -> None:
+    def __init__(
+        self, sentence: str, *, provider: str = "", sent_args: dict[str, object] | None = None
+    ) -> None:
         super().__init__(sentence)
         self.provider = provider
+        self.sent_args = sent_args
 
 
 class LLMError(MaljanError):

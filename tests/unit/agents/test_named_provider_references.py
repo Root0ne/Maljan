@@ -619,3 +619,61 @@ def test_the_pre_pass_opens_the_sample_on_each_provider_and_goes_on_past_one_tha
 def test_an_agent_with_one_provider_keeps_the_base_check():
     analyst = _analyst({FIRST: _Opening(FIRST)}, (FIRST,))
     assert analyst._held_providers() == []
+
+
+# --- verification round: what the ledger and the hints say -----------------
+
+
+def test_a_failed_call_on_one_provider_is_recorded_with_the_path_it_was_sent():
+    from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
+    from maljan.core.exceptions import SampleNotOpened
+    from maljan.schemas.evidence import EvidenceCounter
+
+    def held_to_a_path(path: str = "") -> str:
+        failure = SampleNotOpened("R2 cannot read it.", provider=SECOND)
+        failure.sent_args = {"path": "/mirror/sample"}
+        raise failure
+
+    raw = StructuredTool.from_function(func=held_to_a_path, name="open_file", description="o")
+    providers = _providers()
+    providers[SECOND].get_tools = lambda: [raw]  # type: ignore[method-assign]
+    resolved = resolve_agent("reader", _Container(_two(), providers))
+    wrapped = next(t for t in resolved.tools if t.name == f"{SECOND}__open_file")
+
+    recorder = EvidenceRecorder("reader", counter=EvidenceCounter(), sink=lambda *a: None)
+    (tool,) = record_tools([wrapped], recorder, RepeatGuard())
+    answer = tool.invoke({"path": "model-said"})
+    assert "tool call failed" in answer
+    (entry,) = recorder.entries
+    assert entry.ok is False
+    assert entry.args == {"path": "/mirror/sample"}
+
+
+def test_a_later_providers_priority_hint_names_its_tools_as_offered(monkeypatch):
+    from maljan.providers import base
+
+    monkeypatch.setattr(
+        base,
+        "prepare_sample",
+        lambda provider, path, log=None: f"{provider.id}: read FUN_1 with `decompile` first.",
+    )
+    analyst = _analyst({FIRST: _Opening(FIRST), SECOND: _Opening(SECOND)}, (FIRST, SECOND))
+    plain = _tool("decompile")
+    plain.metadata = {PROVIDER_ID_METADATA_KEY: FIRST}
+    renamed = _tool(f"{SECOND}__decompile")
+    renamed.metadata = {PROVIDER_ID_METADATA_KEY: SECOND, DECLARED_NAME_METADATA_KEY: "decompile"}
+    analyst.tools = [plain, renamed]
+    assert analyst._prepare_on_each(analyst._held_providers(), "/m/s") == (
+        f"{FIRST}: read FUN_1 with `decompile` first.\n"
+        f"{SECOND}: read FUN_1 with `{SECOND}__decompile` first."
+    )
+
+
+def test_aggregate_notes_name_a_tool_by_its_fully_qualified_fallback():
+    from maljan.providers.servers import _offered_names
+
+    seen = {"open_file": f"provider:{FIRST}", "box__open_file": f"provider:{SECOND}"}
+    assert _offered_names("box", [_tool("open_file"), _tool("list")], seen) == {
+        "open_file": "mcp__box__open_file",
+        "list": "list",
+    }

@@ -868,7 +868,9 @@ def _failing_as_a_call(tool: Any, provider_id: str) -> dict[str, Any]:
 
     def _said(exc: SampleNotOpened) -> SampleNotOpenedOnOneProvider:
         sentence = str(getattr(exc, "remediation", "") or exc)
-        return SampleNotOpenedOnOneProvider(sentence, provider=exc.provider or provider_id)
+        return SampleNotOpenedOnOneProvider(
+            sentence, provider=exc.provider or provider_id, sent_args=exc.sent_args
+        )
 
     out: dict[str, Any] = {}
     func = getattr(tool, "func", None)

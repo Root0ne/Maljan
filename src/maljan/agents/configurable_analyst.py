@@ -214,15 +214,24 @@ class ConfigurableAnalyst(BaseAnalyst):
         while another one could; only when none could is the first failure
         raised, which ends the loop as it does for an agent with one provider.
         """
+        from maljan.agents.composition import _renamed_tools, _with_offered_names
         from maljan.providers.base import prepare_sample
 
         hints: list[str] = []
         failures: list[tuple[str, SampleNotOpened]] = []
         for provider_id, provider in held:
             try:
-                hints.append(prepare_sample(provider, path, self.logger))
+                hint = prepare_sample(provider, path, self.logger)
             except SampleNotOpened as exc:
                 failures.append((provider_id, exc))
+                continue
+            # A provider's hint names its tools as it declares them; a tool
+            # offered under a namespaced name is named as it is offered.
+            hints.append(
+                _with_offered_names(
+                    hint, _renamed_tools(getattr(self, "tools", None) or [], provider_id)
+                )
+            )
         if failures and len(failures) == len(held):
             raise failures[0][1]
         for provider_id, failure in failures:

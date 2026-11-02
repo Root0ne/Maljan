@@ -70,6 +70,8 @@ def _provider_tool_names(provider: str) -> set[str]:
 
     block = provider_declaration(provider)
     names = set(_facts_names(block))
+    # What was listed is read from this process's record, so before a listing
+    # the advisory warning knows the declared names only; accepted as advisory.
     try:
         facts = block.get("tool_facts") if isinstance(block, dict) else None
         listed = tools_in_force(f"provider:{provider}", SimpleNamespace(tool_facts=facts or {}))

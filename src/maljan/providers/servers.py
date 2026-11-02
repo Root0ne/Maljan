@@ -1887,8 +1887,20 @@ def _offered_names(server: str, incoming: Sequence[Any], seen: dict[str, str]) -
     for tool in incoming:
         name = str(getattr(tool, "name", "") or "")
         if name:
-            out.setdefault(name, offered_name(server, name, claimed))
+            out.setdefault(name, _merged_name(server, name, claimed))
     return out
+
+
+def _merged_name(server: str, name: str, seen: dict[str, str]) -> str:
+    """The name :meth:`ServerRegistry.merge_tools` offers ``server``'s tool ``name`` under.
+
+    :func:`offered_name`, and where another source already holds the
+    namespaced name, the fully qualified ``mcp__<server>__<name>``.
+    """
+    offered = offered_name(server, name, seen)
+    if offered != name and seen.get(offered) not in (None, server):
+        return f"mcp__{server}__{name}"
+    return offered
 
 
 def settle_tool_notes(tools: Sequence[Any], settings: Any = None) -> list[Any]:
@@ -2004,7 +2016,7 @@ def _own_words(handle: Any, tools: list[BaseTool], seen: dict[str, str] | None =
     server = str(getattr(handle, "name", "") or "")
     claimed = dict(seen or {})
     names = {
-        name: offered_name(server, name, claimed)
+        name: _merged_name(server, name, claimed)
         for tool in tools
         for name in (str(getattr(tool, "name", "") or ""),)
     }
