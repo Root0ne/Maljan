@@ -1684,13 +1684,15 @@ _FIELD_LINE_RE = re.compile(
 _FIELD_LABEL_AS_TAIL_RE = re.compile(
     r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE|DISSENT))[ \t]*(?:\*\*)?[ \t]*:"
 )
-# The start of a field's value, past the brackets, dashes and marks before
-# it: nothing, or a ledger id, a number, a technique id, NONE, a plain
-# confidence word or a field label as its first word.
+# The start of a field's value, past every mark, quote, bullet or sign before
+# it (anything but a letter or digit): nothing, or a ledger id, a number, a
+# technique id, NONE, TBD, a plain confidence word, "see" or a field label as
+# its first word.
 _FIELD_VALUE_START_RE = re.compile(
-    r"[\s\[\](),;:*_`>#/\u2013\u2014-]*+(?:\Z|(?:ev_\d+|\d+(?:\.\d+)?%?|"
+    r"[\W_]*+(?:\Z|(?:ev_\d+|\d+(?:\.\d+)?%?|"
     + ID_BODY
-    + r"|none|n/a|high|medium|moderate|low|unknown|evidence|confidence|technique|dissent)"
+    + r"|none|n[./]?a|tbd|very|high|medium|moderate|low|unknown|see"
+    r"|evidence|confidence|technique|dissent)"
     r"(?![^\W_]))",
     re.IGNORECASE,
 )
