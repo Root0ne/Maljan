@@ -119,20 +119,46 @@ async def refresh(session_maker: Any) -> None:
     (the settings, the jobs, the system status). Read in a session of its
     own from ``session_maker`` (the application's), never the request's,
     so it holds nothing of the request's transaction. Never fails a request.
+
+    A read that fails leaves the reading before it in force, and is said once
+    per distinct failure (which read, and the error's type), not at every
+    request a few seconds apart; the failure in force is
+    :func:`refresh_failure`, until a read succeeds again.
     """
     now = time.monotonic()
     if now - _READ_AT[0] < REFRESH_SECONDS:
         return
     _READ_AT[0] = now
+    step = "the servers' kept declarations"
     try:
         async with session_maker() as db:
             await load(db)
             # The API installs no settings of its own: its built-in servers
             # are read through the blocks the stored settings hold, as the
             # worker reads them (``declared_reading.read_through_settings``).
+            step = "the stored settings"
             await read_through_stored(db)
     except Exception as exc:  # noqa: BLE001 — a kept declaration never fails a request
-        logger.warning("The servers' kept declarations were not read (%s).", type(exc).__name__)
+        failure = f"{step} ({type(exc).__name__})"
+        if _REFRESH_FAILURE[0] != failure:
+            logger.warning(
+                "%s were not read; the reading before stays in force until a read succeeds.",
+                failure[0].upper() + failure[1:],
+            )
+        _REFRESH_FAILURE[0] = failure
+        return
+    if _REFRESH_FAILURE[0] is not None:
+        logger.info("The servers' kept declarations and the stored settings are read again.")
+        _REFRESH_FAILURE[0] = None
+
+
+# What the last read of :func:`refresh` failed on, ``None`` when it succeeded.
+_REFRESH_FAILURE: list[str | None] = [None]
+
+
+def refresh_failure() -> str | None:
+    """What the API's last read of the kept declarations failed on; ``None`` when it succeeded."""
+    return _REFRESH_FAILURE[0]
 
 
 async def read_through_stored(db: AsyncSession) -> None:

@@ -26,6 +26,7 @@ from app.logging_config import get_logger
 from app.models.user import User
 from app.runtime_config import runtime_config
 from app.services import audit
+from app.services.served_declarations_store import refresh_failure
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
@@ -136,6 +137,16 @@ class SystemStatusResponse(BaseModel):
             "key accepted, so it is on the status an operator reads. Admin "
             "callers only — omitted for anonymous requests, and omitted "
             "entirely when no previous secret is set."
+        ),
+    )
+    served_declarations_unread: str | None = Field(
+        default=None,
+        description=(
+            "What this API process's last read of the servers' kept declarations "
+            "and the stored settings it reads its built-in servers through failed "
+            "on (which read, and the error's type); the reading before it stays in "
+            "force. Admin callers only — omitted for anonymous requests, and when "
+            "the last read succeeded."
         ),
     )
 
@@ -292,6 +303,7 @@ async def system_status(
         throttle=throttle_state() if is_admin else None,
         audit_write_failures=observability.counters.audit_write_failures if is_admin else None,
         jwt_grace_secret=_grace_secret_state() if is_admin else None,
+        served_declarations_unread=refresh_failure() if is_admin else None,
     )
 
 

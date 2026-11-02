@@ -157,6 +157,62 @@ def test_a_request_rereads_the_store_at_most_every_few_seconds(
     asyncio.run(store.refresh(_maker(db)))  # never fails the request
 
 
+def test_stored_settings_that_cannot_be_read_are_said_once_and_leave_the_reading_in_force(
+    db: _Awaited, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failing settings read is said once per distinct failure, not every few seconds (T-437)."""
+    import logging
+
+    from app.services import settings_service
+    from maljan.core import declared_reading
+
+    held = object()
+    monkeypatch.setattr(declared_reading, "_READ_THROUGH", [held])
+    monkeypatch.setattr(store, "_REFRESH_FAILURE", [None])
+
+    async def _load(session: Any) -> int:
+        return 0
+
+    failures: list[Exception] = [ValueError("bad"), ValueError("bad again"), KeyError("x")]
+
+    async def _stored(session: Any) -> Any:
+        if failures:
+            raise failures.pop(0)
+        return "the settings read"
+
+    monkeypatch.setattr(store, "load", _load)
+    monkeypatch.setattr(settings_service, "effective_core_settings", _stored)
+
+    def _refresh() -> None:
+        monkeypatch.setattr(store, "_READ_AT", [float("-inf")])
+        asyncio.run(store.refresh(_maker(db)))  # never fails the request
+
+    def _said() -> list[str]:
+        return [r.getMessage() for r in caplog.records if "were not read" in r.getMessage()]
+
+    with caplog.at_level(logging.INFO):
+        _refresh()
+        _refresh()
+        # The same failure twice: said once, the reading before still in force.
+        assert _said() == [
+            "The stored settings (ValueError) were not read; the reading before stays "
+            "in force until a read succeeds."
+        ]
+        assert declared_reading._READ_THROUGH[0] is held
+        assert store.refresh_failure() == "the stored settings (ValueError)"
+        # Another failure is said in its turn.
+        _refresh()
+        assert len(_said()) == 2
+        assert store.refresh_failure() == "the stored settings (KeyError)"
+        # A read that succeeds says so, ends the failure and takes over.
+        _refresh()
+        assert store.refresh_failure() is None
+        assert declared_reading._READ_THROUGH[0] == "the settings read"
+        assert any("are read again" in r.getMessage() for r in caplog.records)
+        _refresh()
+        assert len(_said()) == 2
+
+
 def test_a_store_not_migrated_yet_is_said_once(caplog: pytest.LogCaptureFixture) -> None:
     import logging
 
