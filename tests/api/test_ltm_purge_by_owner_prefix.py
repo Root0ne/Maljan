@@ -19,7 +19,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from app.deps import require_admin
+from app.deps import require_admin, require_admin_session
 from maljan.memory.in_memory_store import InMemoryStore
 from maljan.memory.long_term_memory import StoredCase
 
@@ -40,7 +40,7 @@ def _client(*, admin: bool = True) -> tuple[TestClient, Any]:
 
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
-    app.dependency_overrides[require_admin] = _admin
+    app.dependency_overrides[require_admin_session] = _admin
     app.dependency_overrides[get_db] = lambda: MagicMock()
     return TestClient(app), caller
 
@@ -73,7 +73,7 @@ def test_a_dry_run_counts_keeps_and_leaves_no_row() -> None:
 
     assert response.status_code == 200, response.text
     assert response.json() == {
-        "owner_prefix": f"{UID}/job",
+        "owner_prefix": f"{UID}/job/",
         "cases": 2,
         "function_hashes": 0,
         "backend": "InMemoryStore",
@@ -98,14 +98,15 @@ def test_a_purge_removes_the_job_owners_alone_and_is_audited() -> None:
     assert row.kwargs["user_id"] == caller.id
     assert row.kwargs["details"] == {
         "backend": "InMemoryStore",
-        "owner_prefix": f"{UID}/job",
+        "owner_prefix": f"{UID}/job/",
+        "whole_account": False,
         "outcome": "completed",
-        "removed": 2,
-        "function_hashes": 0,
+        "cases_removed": 2,
+        "function_hashes_removed": 0,
     }
 
 
-@pytest.mark.parametrize("prefix", ["", "   ", "/"])
+@pytest.mark.parametrize("prefix", ["   ", "/", "u1//job"])
 def test_a_prefix_naming_no_owner_path_is_refused_before_the_store(prefix: str) -> None:
     response, record, _ = _post(_store(), {"owner_prefix": prefix})
 
@@ -155,7 +156,8 @@ def test_a_failure_part_way_is_audited_with_what_was_lost() -> None:
     (row,) = record.await_args_list
     assert row.kwargs["details"]["outcome"] == "failed"
     assert row.kwargs["details"]["error"] == "RuntimeError"
-    assert row.kwargs["details"]["removed"] == 1
+    assert row.kwargs["details"]["cases_removed"] == 1
+    assert row.kwargs["details"]["function_hashes_removed"] is None
 
 
 def test_a_caller_who_is_not_an_admin_is_refused() -> None:
@@ -166,7 +168,7 @@ def test_a_caller_who_is_not_an_admin_is_refused() -> None:
     record.assert_not_awaited()
 
 
-def test_the_route_takes_the_admin_dependency_the_purge_takes() -> None:
+def test_the_route_takes_a_bearer_session_admin() -> None:
     from fastapi.routing import APIRoute
 
     from app.api.v1.system import router
@@ -176,7 +178,62 @@ def test_the_route_takes_the_admin_dependency_the_purge_takes() -> None:
         for route in router.routes
         if isinstance(route, APIRoute)
     }
-    purge = next(p for p in deps if p.endswith("/ltm/purge"))
     owners = next(p for p in deps if p.endswith("/ltm/purge-owners"))
-    assert require_admin in deps[purge]
-    assert require_admin in deps[owners]
+    assert require_admin_session in deps[owners]
+    assert require_admin not in deps[owners]
+
+
+def test_an_empty_or_over_long_prefix_or_an_unknown_field_is_refused() -> None:
+    for body in (
+        {"owner_prefix": ""},
+        {"owner_prefix": "u" * 513},
+        {"owner_prefix": f"{UID}/job/", "owners": "all"},
+    ):
+        response, record, _ = _post(_store(), body)
+        assert response.status_code == 422, body
+        record.assert_not_awaited()
+
+
+def test_a_whole_account_is_purged_only_on_the_explicit_ask() -> None:
+    store = _store()
+
+    refused, record, _ = _post(store, {"owner_prefix": UID})
+    assert refused.status_code == 422
+    assert "whole_account" in refused.json()["detail"]
+    record.assert_not_awaited()
+    refused, _, _ = _post(store, {"owner_prefix": f"{UID}/"})
+    assert refused.status_code == 422
+
+    response, record, _ = _post(store, {"owner_prefix": UID, "whole_account": True})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["cases"] == 3
+    assert sorted(str(case.owner) for case, _v, _b in store._cases) == sorted(
+        [f"{UID}0/job/1", "None"]
+    )
+    assert record.await_args_list[0].kwargs["details"]["whole_account"] is True
+
+
+def test_a_purge_that_matches_nothing_is_said_not_answered_zero() -> None:
+    store = _store()
+
+    response, record, _ = _post(store, {"owner_prefix": f"{UID}/jbo/"})
+
+    assert response.status_code == 422
+    assert "nothing was purged" in response.json()["detail"]
+    record.assert_not_awaited()
+    assert store.count() == 5
+
+    dry, _, _ = _post(store, {"owner_prefix": f"{UID}/jbo/", "dry_run": True})
+    assert dry.status_code == 200
+    assert dry.json()["cases"] == 0
+
+
+def test_an_upper_case_account_id_matches_as_filed() -> None:
+    store = _store()
+
+    response, _, _ = _post(store, {"owner_prefix": f"{UID.upper()}/job/"})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["owner_prefix"] == f"{UID}/job/"
+    assert response.json()["cases"] == 2

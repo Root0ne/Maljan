@@ -18,7 +18,13 @@ import pytest
 from maljan.memory import embeddings
 from maljan.memory.function_hash_store import FunctionHashStore
 from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import StoredCase, owner_prefix_key, owner_under
+from maljan.memory.long_term_memory import (
+    StoredCase,
+    owner_prefix_key,
+    owner_prefix_segments,
+    owner_under,
+)
+from maljan.memory.memory_repair import OwnerPurgeFailed, purge_owned_points
 from maljan.memory.qdrant_store import OWNER_KEY, QdrantStore
 
 UID = "3f1c2b9e-6a1d-4f7e-9b2a-0c8d7e6f5a41"
@@ -92,10 +98,31 @@ class TestTheRule:
         assert owner_under(PURGED[0], PURGED[0])
         assert not owner_under(f"{PURGED[0]}0", PURGED[0])
 
-    @pytest.mark.parametrize("prefix", ["", " ", "/", None])
+    def test_a_trailing_separator_means_strictly_below(self) -> None:
+        assert owner_under("u1/x", "u1/")
+        assert not owner_under("u1", "u1/")
+        assert owner_under("u1", "u1")
+        assert owner_under("u1/x", "u1")
+        assert not owner_under(f"{UID}/job", JOBS)
+        assert owner_under(f"{UID}/job", JOBS.rstrip("/"))
+
+    @pytest.mark.parametrize("prefix", ["", " ", "/", "//", None, "u1//job", "u1//", "/u1"])
     def test_a_prefix_naming_no_owner_path_names_nothing(self, prefix: str | None) -> None:
         assert owner_prefix_key(prefix) is None
         assert not owner_under(PURGED[0], prefix)
+        assert not owner_under("u1/job/1", prefix)
+
+    def test_an_account_id_in_upper_case_is_read_as_filed(self) -> None:
+        assert owner_prefix_key(f"{UID.upper()}/job/") == JOBS
+        assert owner_prefix_key(JOBS.upper()) == f"{UID}/JOB/"
+        assert owner_under(f"{UID}/JOB/1", JOBS.upper())
+        assert not owner_under(PURGED[0], JOBS.upper())  # only the id is case-folded
+
+    def test_the_segments_are_counted(self) -> None:
+        assert owner_prefix_segments(UID) == 1
+        assert owner_prefix_segments(f"{UID}/") == 1
+        assert owner_prefix_segments(JOBS) == 2
+        assert owner_prefix_segments("/") == 0
 
 
 class TestTheInMemoryStore:
@@ -170,5 +197,75 @@ class TestQdrant:
             raise RuntimeError("scroll failed")
 
         monkeypatch.setattr(qdrant._client, "scroll", _broken)
-        with pytest.raises(RuntimeError):
+        with pytest.raises(OwnerPurgeFailed) as failed:
             qdrant.purge_owners(JOBS)
+        assert isinstance(failed.value.__cause__, RuntimeError)
+        assert failed.value.counts == {"cases": 0, "function_hashes": 0}
+
+    def test_a_failure_in_the_function_hashes_says_what_each_kind_lost(
+        self, qdrant: QdrantStore, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _fill(qdrant)
+        self._hashes(qdrant)
+        delete = qdrant._client.delete
+
+        def _delete(*args: Any, **kwargs: Any) -> Any:
+            if kwargs.get("collection_name") == "hashes":
+                raise RuntimeError("delete failed")
+            return delete(*args, **kwargs)
+
+        monkeypatch.setattr(qdrant._client, "delete", _delete)
+        with pytest.raises(OwnerPurgeFailed) as failed:
+            qdrant.purge_owners(JOBS)
+
+        assert failed.value.counts == {"cases": 2, "function_hashes": 0}
+        assert _owners(qdrant, "cases") == sorted([*KEPT, ""])
+
+
+class TestManyPoints:
+    """More owned points than one scroll page (256) holds: every page is read and deleted."""
+
+    def _collection(self, n: int) -> Any:
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import Distance, PointStruct, VectorParams
+
+        client = QdrantClient(location=":memory:")
+        client.create_collection("x", vectors_config=VectorParams(size=1, distance=Distance.DOT))
+        owners = [f"{UID}/job/{i}" if i % 2 else (UID if i % 3 else None) for i in range(n)]
+        client.upsert(
+            "x",
+            [
+                PointStruct(id=i, vector=[1.0], payload={OWNER_KEY: o} if o else {})
+                for i, o in enumerate(owners)
+            ],
+        )
+        return client, sum(1 for o in owners if owner_under(o, JOBS))
+
+    def test_every_page_is_counted_and_deleted(self) -> None:
+        client, expected = self._collection(700)
+
+        assert expected > 256
+        assert purge_owned_points(client, "x", JOBS, dry_run=True) == expected
+        assert purge_owned_points(client, "x", JOBS, dry_run=False) == expected
+        assert client.count("x").count == 700 - expected
+        assert purge_owned_points(client, "x", JOBS, dry_run=True) == 0
+
+    def test_a_failed_page_names_the_ids_already_deleted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client, expected = self._collection(700)
+        delete = client.delete
+        calls: list[int] = []
+
+        def _delete(*args: Any, **kwargs: Any) -> Any:
+            calls.append(1)
+            if len(calls) == 2:
+                raise RuntimeError("delete failed")
+            return delete(*args, **kwargs)
+
+        monkeypatch.setattr(client, "delete", _delete)
+        with pytest.raises(OwnerPurgeFailed) as failed:
+            purge_owned_points(client, "x", JOBS, dry_run=False)
+
+        assert len(failed.value.deleted["x"]) == 256
+        assert client.count("x").count == 700 - 256

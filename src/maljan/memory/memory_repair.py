@@ -291,8 +291,10 @@ def purge_owned_points(client: Any, collection: str, prefix: str, *, dry_run: bo
     owned points are read a page at a time, their owner alone, and each is
     matched by the one prefix rule (``long_term_memory.owner_under``), so an
     owner that only shares characters with the prefix and every unscoped point
-    stay. Deleted a page at a time; a failure raises, with the points of the
-    pages before it already gone. A collection that does not exist holds none.
+    stay. Deleted a page at a time; a failure of a delete raises
+    :class:`OwnerPurgeFailed` naming the ids already deleted, and one of the
+    walk raises as it came, before anything is deleted. A collection that does
+    not exist holds none.
     """
     from qdrant_client.models import Filter, IsEmptyCondition, PayloadField, PointIdsList
 
@@ -320,13 +322,33 @@ def purge_owned_points(client: Any, collection: str, prefix: str, *, dry_run: bo
             break
     if not dry_run:
         # After the walk, so a deleted page never moves the scroll's offset.
+        deleted: list[Any] = []
         for start in range(0, len(doomed), _PAGE):
-            client.delete(
-                collection_name=collection,
-                points_selector=PointIdsList(points=doomed[start : start + _PAGE]),
-                wait=True,
-            )
+            page = doomed[start : start + _PAGE]
+            try:
+                client.delete(
+                    collection_name=collection,
+                    points_selector=PointIdsList(points=page),
+                    wait=True,
+                )
+            except Exception as exc:
+                raise OwnerPurgeFailed({collection: deleted}) from exc
+            deleted.extend(page)
     return len(doomed)
+
+
+class OwnerPurgeFailed(Exception):  # noqa: N818 - carries what a failed purge had deleted
+    """A purge by owner that stopped part way: what it had deleted, the cause chained.
+
+    ``deleted`` holds the ids already deleted per collection; ``counts`` the
+    numbers per kind where a store names its collections (``cases``,
+    ``function_hashes``).
+    """
+
+    def __init__(self, deleted: dict[str, list[Any]], counts: dict[str, int] | None = None) -> None:
+        super().__init__("purge by owner stopped part way")
+        self.deleted = {name: list(ids) for name, ids in deleted.items()}
+        self.counts = dict(counts or {})
 
 
 def _ownerless_pages(client: Any, collection: str) -> Any:

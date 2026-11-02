@@ -326,25 +326,46 @@ def memory_owner_for(created_by: Any, job_id: Any, isolated: bool) -> str:
     return f"{created_by}{ISOLATED_JOB_SCOPE}{job}"
 
 
+_UUID_SEGMENT = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+)
+
+
 def owner_prefix_key(prefix: Any) -> str | None:
     """``prefix`` as the owner path a purge by owner reads (:func:`owner_under`).
 
-    ``None`` when it names no owner path: empty, or separators alone. One
-    trailing separator is not part of the path: ``<uid>/job/`` and
-    ``<uid>/job`` name the same owners.
+    ``None`` when it names no owner path: empty, separators alone, an empty
+    segment (``u1//job``) or more than one trailing separator. One trailing
+    separator is kept: it means strictly below the path. A first segment
+    shaped like a UUID is written lower case, as an account's id is filed.
     """
     text = str(prefix).strip() if prefix is not None else ""
-    if text.endswith(OWNER_PATH_SEPARATOR):
-        text = text[: -len(OWNER_PATH_SEPARATOR)]
-    return text if text.strip(OWNER_PATH_SEPARATOR) else None
+    below = text.endswith(OWNER_PATH_SEPARATOR)
+    path = text[: -len(OWNER_PATH_SEPARATOR)] if below else text
+    segments = path.split(OWNER_PATH_SEPARATOR)
+    if not path or any(not segment.strip() for segment in segments):
+        return None
+    if _UUID_SEGMENT.fullmatch(segments[0]):
+        segments[0] = segments[0].lower()
+    return OWNER_PATH_SEPARATOR.join(segments) + (OWNER_PATH_SEPARATOR if below else "")
+
+
+def owner_prefix_segments(prefix: Any) -> int:
+    """How many path segments the owner path ``prefix`` names; 0 when it names none."""
+    key = owner_prefix_key(prefix)
+    if key is None:
+        return 0
+    return len(key.rstrip(OWNER_PATH_SEPARATOR).split(OWNER_PATH_SEPARATOR))
 
 
 def owner_under(owner: Any, prefix: Any) -> bool:
-    """Whether ``owner`` is the owner path ``prefix`` names, or one filed below it.
+    """Whether ``owner`` lies at or below the owner path ``prefix`` names.
 
-    Read a path segment at a time, never as a bare string prefix: ``<uid>/job/``
-    names ``<uid>/job/<job id>`` and never ``<uid>`` itself, ``<uid>/jobs`` or
-    another account whose key merely begins with the same characters. An
+    Read a path segment at a time, never as a bare string prefix: ``u1/job``
+    names ``u1/job`` and ``u1/job/<job id>``; with a trailing separator,
+    ``u1/job/`` names only what is strictly below (``u1/job/<job id>``), and
+    ``u1/`` names ``u1/x`` and never ``u1`` itself. Neither names ``u1/jobs``
+    or another account whose key merely begins with the same characters. An
     unscoped entry (no owner) is under no prefix, and a prefix that names no
     owner path (:func:`owner_prefix_key`) names nothing.
     """
@@ -352,6 +373,8 @@ def owner_under(owner: Any, prefix: Any) -> bool:
     base = owner_prefix_key(prefix)
     if key is None or base is None:
         return False
+    if base.endswith(OWNER_PATH_SEPARATOR):
+        return key.startswith(base) and len(key) > len(base)
     return key == base or key.startswith(base + OWNER_PATH_SEPARATOR)
 
 
