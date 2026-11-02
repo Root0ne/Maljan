@@ -462,6 +462,18 @@ def _offsets(addresses: Sequence[int], bases: Sequence[int]) -> str:
 _NOT_LISTED = "no entry lists its code (decompiled or disassembled)"
 
 
+def unread_callee_clause(routine: str, callers: str, plural: str) -> str:
+    """The clause a section 5 sentence qualified on an unread callee gains, in its words.
+
+    The renderers read it back by these words (``renderers.prose_forms``) to
+    print a long caller list as a list.
+    """
+    return (
+        f"the routine at {routine}, called by the read {plural} at {callers}, has no listed "
+        "code (decompiled or disassembled)"
+    )
+
+
 def _ledger_passages(entries: Iterable[Any], shown: Sequence[Passage]) -> list[Passage]:
     """The ledger's facts as passages: the unread callees, then each failed call answered later.
 
@@ -500,10 +512,8 @@ def _ledger_passages(entries: Iterable[Any], shown: Sequence[Passage]) -> list[P
                     kind=FACT,
                     cites=cites,
                     addresses=_spelled_both([unread.address, *unread.callers], bases),
-                    qualifier=(
-                        f"the routine at {_offsets([unread.address], bases)}, called by the "
-                        f"read {plural} at {_offsets(unread.callers, bases)}, has no listed "
-                        "code (decompiled or disassembled)"
+                    qualifier=unread_callee_clause(
+                        _offsets([unread.address], bases), _offsets(unread.callers, bases), plural
                     ),
                 )
             )
