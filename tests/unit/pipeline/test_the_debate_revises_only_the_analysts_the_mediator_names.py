@@ -434,7 +434,11 @@ class TestTheNarrowedPrompt:
         # Claim 1: that claim is quoted from the peer's answer in force
         # (``test_a_revision_is_shown_the_contested_claims_of_its_peers``).
         assert peers == {
-            "static": "  Claim 1: Reads the flag at 0x40. | Evidence: [ev_0010] | Confidence: 0.80"
+            "static": (
+                "Claim 1 quoted, with its disputes and other points naming you; the whole "
+                "report is not shown.\n"
+                "  Claim 1: Reads the flag at 0x40. | Evidence: [ev_0010] | Confidence: 0.80"
+            )
         }
         assert peers["static"].claims == (1,)
         assert "Claim 2" in feedback and "[ev_0007]" in feedback

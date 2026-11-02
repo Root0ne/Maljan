@@ -999,8 +999,8 @@ def contested_input(
     peers = {k: v for k, v in reports.items() if k != name and str(k) in shown}
     if isrs is None:
         return feedback, peers
-    # Numbered as the mediation listed the lines, so a sentence names the line
-    # the mediator wrote.
+    # Numbered among the blocking lines the round was given, as the
+    # sentences name them ("blocking line N").
     refs = contested_refs([str(line) for line in blocking], participants)
     held = {str(k).lower(): v for k, v in isrs.items()}
     return feedback, {
@@ -1012,6 +1012,7 @@ def contested_input(
             held.get(str(peer).lower()),
             spellings.get(name) or [_name_pattern(name)],
             revision_round,
+            participants,
         )
         for peer, whole in peers.items()
     }
@@ -2283,6 +2284,31 @@ def claims_named_by_lines(
     return NamedByLines(read_claim_references(lines, participants))
 
 
+# How many claims a range a line writes ("claims 32-34") may span and be
+# quoted: a wider one is not read as a list of claims.
+_CLAIM_RANGE = 20
+
+# "claim(s) N" with every number written after it: lists ("3, 4, and 5",
+# "3/4", "3 & 4") and ranges ("32-34", "32–34", "32 through 34", "17 to 19").
+_RANGE_WORD = r"(?:[-–—]|\bthrough\b|\bthru\b|\bto\b)"
+_CLAIM_EXPRESSION = re.compile(
+    r"\bclaims?\s*+#?\s*+(\d++(?:\s*+(?:,\s*+(?:and\b|or\b|&)?|/|&|\+|\band\b|\bor\b|"
+    + _RANGE_WORD
+    + r")\s*+#?\s*+\d++)*+)",
+    re.IGNORECASE,
+)
+_RANGE_TOKEN = re.compile(r"(\d++)|" + _RANGE_WORD, re.IGNORECASE)
+# The mediator's marks written right after a line's field, before its text.
+_MARKS_AFTER_FIELD = re.compile(
+    r"(?:\s*+\[\s*+(?:not\s+blocking|blocking)\s*+:" + _REASON + r"\]"
+    r"|\s*+\[\s*+(?:carried\s*+:\s*+L?\s*+\d{1,9}\s*+|new\s*+)\])++",
+    re.IGNORECASE,
+)
+# What stands between two references that the second continues the first
+# ("claim #3 and claim 4").
+_CONTINUES = re.compile(r"[\s,]*+(?:and|or|&|/|\+)?[\s,]*+", re.IGNORECASE)
+
+
 @dataclass(frozen=True)
 class ContestedRef:
     """What one listed line of a mediation refers to, read from its text.
@@ -2291,9 +2317,13 @@ class ContestedRef:
     the mediator's mark (``read_marks``); ``analysts`` the participants its
     ``[analysts: ...]`` field names (none for a line without one); ``claims``
     each ``(analyst, claim number)`` it writes, for any participant, field or
-    not, in the order written; ``unplaced`` the analysts it gives a claim
-    number too long to be a place; ``entries`` the ledger ids it cites,
-    lower-cased; ``question`` the line without its mark.
+    not, in the order written, a range read as every claim in it;
+    ``unplaced`` the analysts it gives a claim number too long to be a place;
+    ``wide`` the analysts it gives a range it cannot place (wider than
+    :data:`_CLAIM_RANGE` claims, or written backwards); ``unattributed``
+    whether it writes a claim number it attributes to no analyst; ``entries``
+    the ledger ids it cites, lower-cased; ``question`` the line without its
+    carried-or-new mark.
     """
 
     line: int
@@ -2303,36 +2333,125 @@ class ContestedRef:
     entries: tuple[str, ...]
     question: str
     unplaced: tuple[str, ...] = ()
+    wide: tuple[str, ...] = ()
+    unattributed: bool = False
 
     def claims_of(self, analyst: str) -> tuple[int, ...]:
         """The claim numbers the line writes for ``analyst``, each once, in order."""
         return tuple(dict.fromkeys(n for who, n in self.claims if who == analyst))
 
 
+def _claim_owners(text: str, names: Sequence[str], field_names: list[str] | None) -> dict[int, str]:
+    """``{where the digits of a "claim(s) N" start: the analyst it is}`` for one line.
+
+    The analyst is read as ``_line_claims`` reads it: the analyst's name right
+    before "claim(s)" (``_CLAIM_NUMBERS``, a longer name first), the one
+    analyst a field names for numbers right after the field, and a short form
+    of a name before "claim(s)" where the line has a field (``_short_named``).
+    """
+    owners: dict[int, str] = {}
+    taken = bytearray(len(text))
+    for name in sorted(names, key=len, reverse=True):
+        for match in _name_pattern(name).finditer(text):
+            start, end = match.span()
+            if taken.find(1, start, end) != -1:
+                continue
+            taken[start:end] = b"\x01" * (end - start)
+            numbers = _CLAIM_NUMBERS.match(text, end)
+            if numbers is not None:
+                owners.setdefault(numbers.start(1), name)
+    if field_names is not None and len(field_names) == 1:
+        opened = _ANALYSTS_FIELD.search(text)
+        if opened is not None:
+            # The mediator's mark may stand between the field and the numbers
+            # ("[analysts: X] [blocking: ...] Claims 11 and 20 say ...").
+            after = _MARKS_AFTER_FIELD.match(text, opened.end())
+            bare = _BARE_CLAIMS.match(text, after.end() if after else opened.end())
+            if bare is not None:
+                owners.setdefault(bare.start(1), field_names[0])
+    if field_names:
+        for reference in _CLAIM_REFERENCE.finditer(text):
+            short = _short_named(text, reference.start(), names)
+            if short is not None:
+                owners.setdefault(reference.start(1), short)
+    return owners
+
+
+def _numbers_written(expression: str) -> tuple[list[str], bool]:
+    """``(the digits each claim number is written with, a range was unreadable)``.
+
+    A range ("32-34", "17 to 19") is every number in it; one wider than
+    :data:`_CLAIM_RANGE` claims, written backwards, or with a number longer
+    than :data:`_CLAIM_DIGITS` digits at an end, is not read, and says so.
+    """
+    out: list[str] = []
+    unread = False
+    ranging = False
+    for token in _RANGE_TOKEN.finditer(expression):
+        digits = token.group(1)
+        if digits is None:
+            ranging = bool(out)
+            continue
+        if ranging:
+            ranging = False
+            low, high = out[-1].lstrip("0"), digits.lstrip("0")
+            if len(low) > _CLAIM_DIGITS or len(high) > _CLAIM_DIGITS:
+                unread = True
+                continue
+            first, last = int(low or "0"), int(high or "0")
+            if last < first or last - first + 1 > _CLAIM_RANGE:
+                unread = True
+                continue
+            out.extend(str(n) for n in range(first + 1, last + 1))
+            continue
+        out.append(digits)
+    return out, unread
+
+
 def contested_refs(lines: Sequence[str], participants: Sequence[str]) -> list[ContestedRef]:
     """One :class:`ContestedRef` per line, in order. Linear in the lines.
 
-    Read as ``claims_named_by_lines`` reads the claim numbers (``_line_claims``),
-    without its rule that a line with a field counts only for the field's
-    analysts: a peer's claim a line cites is what a revision is shown of it.
-    A number of zero is kept (no claim has it); one longer than
-    :data:`_CLAIM_DIGITS` digits is never converted and names its analyst in
-    ``unplaced``.
+    Every "claim(s) N" of a line (``_CLAIM_EXPRESSION``: lists and bounded
+    ranges read whole) is given the analyst ``claims_named_by_lines`` would
+    read for it (``_claim_owners``), without that reader's rule that a line
+    with a field counts only for the field's analysts: a peer's claim a line
+    cites is what a revision is shown of it. A reference no analyst is read
+    for takes the analyst of the reference it continues ("STATIC claim #3 and
+    claim 4"); otherwise the line is marked ``unattributed``. A number of zero
+    is kept (no claim has it); one longer than :data:`_CLAIM_DIGITS` digits is
+    never converted and names its analyst in ``unplaced``. The merge's reading
+    (``claims_named_by_lines``) is not changed by this one.
     """
     names = [str(p) for p in participants if str(p).strip()]
     out: list[ContestedRef] = []
     for number, (line, mark) in enumerate(zip(lines, read_marks(lines), strict=True), 1):
         text = without_line_mark(str(line))
-        field_names, found = _line_claims(text, names)
+        field_names = _named_in(text, names)
+        owners = _claim_owners(text, names, field_names)
         claims: dict[tuple[str, int], None] = {}
         unplaced: dict[str, None] = {}
-        for name, digits in found:
+        wide: dict[str, None] = {}
+        unattributed = False
+        previous: tuple[int, str | None] = (-1, None)
+        for reference in _CLAIM_EXPRESSION.finditer(text):
+            owner = owners.get(reference.start(1))
+            if owner is None and previous[1] is not None:
+                between = text[previous[0] : reference.start()]
+                if _CONTINUES.fullmatch(between):
+                    owner = previous[1]
+            previous = (reference.end(), owner)
+            if owner is None:
+                unattributed = True
+                continue
+            digits, unread = _numbers_written(reference.group(1))
+            if unread:
+                wide[owner] = None
             for written in digits:
                 stripped = written.lstrip("0")
                 if len(stripped) > _CLAIM_DIGITS:
-                    unplaced[name] = None
+                    unplaced[owner] = None
                     continue
-                claims[(name, int(stripped or "0"))] = None
+                claims[(owner, int(stripped or "0"))] = None
         out.append(
             ContestedRef(
                 line=number,
@@ -2342,6 +2461,8 @@ def contested_refs(lines: Sequence[str], participants: Sequence[str]) -> list[Co
                 entries=tuple(line_entry_ids([str(line)])),
                 question=" ".join(text.split()),
                 unplaced=tuple(unplaced),
+                wide=tuple(wide),
+                unattributed=unattributed,
             )
         )
     return out
@@ -2353,9 +2474,10 @@ class ShownReport(str):
     The text is the excerpt, or the whole report. ``claims`` are the claim
     numbers quoted (none: the whole report is shown), ``whole_chars`` the
     length of the whole report and ``note`` the sentence saying why a peer
-    whose report could have been cut is shown whole ("" otherwise). A plain
-    ``str`` everywhere else: the revision prompt heads a report with
-    ``claims`` by them (:func:`peer_report_heading`).
+    whose report could have been cut is shown whole ("" otherwise). An
+    excerpt's text opens with the sentence saying what it quotes and that the
+    whole report is not shown, so every prompt that carries it says so; the
+    revision prompts head it as an excerpt (:func:`peer_report_heading`).
     """
 
     claims: tuple[int, ...]
@@ -2379,23 +2501,38 @@ class ShownReport(str):
         return ShownReport(text, self.claims, self.whole_chars, self.note)
 
 
-def peer_report_heading(name: str, report: str) -> str:
+def peer_report_heading(name: str, report: str, *, analyst: bool = False) -> str:
     """The heading a revision prompt writes over one peer's report.
 
-    ``<NAME> REPORT:`` for a whole report, as every revision prompt wrote it;
-    for an excerpt (a :class:`ShownReport` with claims) it says which claims
-    are quoted and that the whole report is not shown.
+    ``<NAME> REPORT:`` for a whole report (``<NAME> ANALYST REPORT:`` on the
+    plain text revision, ``analyst=True``), as every revision prompt wrote
+    it; ``<NAME> REPORT (excerpt):`` for an excerpt (a :class:`ShownReport`
+    with claims), whose own first line says what it quotes.
     """
-    claims = getattr(report, "claims", ()) if isinstance(report, ShownReport) else ()
-    if not claims:
-        return f"{name.upper()} REPORT:"
-    which = "claim" if len(claims) == 1 else "claims"
+    label = f"{name.upper()} ANALYST REPORT" if analyst else f"{name.upper()} REPORT"
+    claims = report.claims if isinstance(report, ShownReport) else ()
+    return f"{label} (excerpt):" if claims else f"{label}:"
+
+
+def excerpt_statement(claims: Sequence[int]) -> str:
+    """An excerpt's first line: the claims it quotes, and that the whole report is not shown."""
+    which = "Claim" if len(claims) == 1 else "Claims"
     numbers = ", ".join(str(n) for n in claims)
-    return f"{name.upper()} REPORT ({which} {numbers} quoted; the whole report is not shown):"
+    return (
+        f"{which} {numbers} quoted, with its disputes and other points naming you; "
+        "the whole report is not shown."
+    )
 
 
 def _blocks_of(isr: Any) -> list[list[Any]]:
-    """The analyst's claims grouped by block, in order: block N is claim N."""
+    """The analyst's claims grouped by block, in order: block N is claim N.
+
+    ``AgentISR.claim_blocks``; an answer held in another shape is grouped as
+    that method groups it.
+    """
+    blocks_of = getattr(isr, "claim_blocks", None)
+    if callable(blocks_of):
+        return [list(block) for block in blocks_of()]
     from maljan.pipeline.validation import claim_block_indexes
 
     claims = list(getattr(isr, "claims", None) or [])
@@ -2425,6 +2562,62 @@ def _claim_numbers_said(numbers: Sequence[int]) -> str:
     return f"{which} {said}" + (f" and {rest} more" if rest > 0 else "")
 
 
+# The ledger ids and the addresses a text writes: what a quoted claim must
+# share with the line citing it.
+_LEDGER_ID = re.compile(r"\bev_\d++\b", re.IGNORECASE)
+_ADDRESS = re.compile(r"\b0x([0-9a-f]{2,16})\b", re.IGNORECASE)
+
+
+def _ids_and_addresses(text: str) -> set[str]:
+    """The ledger ids (lower-cased) and the addresses (as numbers) ``text`` writes."""
+    found = {m.group(0).lower() for m in _LEDGER_ID.finditer(text)}
+    found.update(f"0x{int(m.group(1), 16):x}" for m in _ADDRESS.finditer(text))
+    return found
+
+
+def _names_analyst(
+    text: str, name: str, patterns: Sequence[re.Pattern[str]], participants: Sequence[str]
+) -> bool:
+    """Whether ``text`` writes ``name``: its key or label, or a short form before a claim number."""
+    if any(p.search(text) for p in patterns):
+        return True
+    names = [str(p) for p in participants if str(p).strip()]
+    return any(
+        _short_named(text, reference.start(), names) == name
+        for reference in _CLAIM_REFERENCE.finditer(text)
+    )
+
+
+# Where a line opens an item of a list: a bullet or a number.
+_ITEM_OPENS = re.compile(r"^\s*+(?:[-*•]|\d++[.)])\s")
+
+
+def _items_besides_claims(report: str) -> list[str]:
+    """The items of a report's section written besides its claims, each whole.
+
+    The section an answer in force carries after
+    ``base_agent.WRITTEN_BESIDES_CLAIMS``: each bullet with the lines that
+    continue it, and each other line on its own; ``[]`` without one.
+    """
+    from maljan.agents.base_agent import WRITTEN_BESIDES_CLAIMS
+
+    at = report.find(WRITTEN_BESIDES_CLAIMS)
+    if at < 0:
+        return []
+    items: list[list[str]] = []
+    opened = False
+    for line in report[at + len(WRITTEN_BESIDES_CLAIMS) :].splitlines():
+        if not line.strip():
+            opened = False
+            continue
+        if _ITEM_OPENS.match(line) or not opened:
+            items.append([line.rstrip()])
+            opened = bool(_ITEM_OPENS.match(line))
+        else:
+            items[-1].append(line.rstrip())
+    return ["\n".join(item) for item in items]
+
+
 def peer_excerpt(
     name: str,
     peer: str,
@@ -2433,18 +2626,27 @@ def peer_excerpt(
     isr: Any,
     patterns: Sequence[re.Pattern[str]],
     revision_round: int = 0,
+    participants: Sequence[str] = (),
 ) -> ShownReport:
     """The peer's report as the ``name`` analyst's revision is shown it.
 
-    ``refs`` are the lines naming ``name`` that name ``peer`` too (in the
-    field, or by key or label). Their claim numbers for the peer are quoted
-    from its answer in force (``isr``, the ISR the mediator read), numbered by
-    block as every summary numbers them, each as the summary writes it
-    (``claim_summary_line``), followed by the peer's disputes that write
-    ``name``'s key or label (``patterns``). The whole report is shown instead,
-    with a note saying why, when a line names the peer with no claim number
-    for it, or one too long to read, when a number is past the claims of its
-    answer in force, or when that answer is not held.
+    ``refs`` are the blocking lines naming ``name`` that name ``peer`` too (in
+    the field, or by key or label). Their claim numbers for the peer are
+    quoted from its answer in force (``isr``, the ISR the mediator read),
+    numbered by block as every summary numbers them, each as the summary
+    writes it (``claim_summary_line``), after the sentence saying what is
+    quoted (:func:`excerpt_statement`). Then the peer's disputes, and the
+    items of its report's section written besides its claims, that write
+    ``name``: its key or label (``patterns``), or a short form of it before a
+    claim number (``participants``).
+
+    The whole report is shown instead, with a note saying why, when a line
+    names the peer with no claim number for it, one too long to read or a
+    range it cannot place, when it cites a claim of no analyst it names, when
+    a number is past the claims of the answer in force, when a quoted claim
+    shares no ledger id or address with the line citing it (the mediator may
+    have cited a claim by another number), or when the answer in force is not
+    held.
     """
     from maljan.schemas.isr_models import claim_summary_line
 
@@ -2456,32 +2658,57 @@ def peer_excerpt(
     blocks = _blocks_of(isr)
     numbers: dict[int, None] = {}
     for ref in refs:
+        at = f"blocking line {ref.line}"
         if peer in ref.unplaced:
-            return _whole(
-                f"contested line {ref.line} writes a claim number for it too long to be one"
-            )
+            return _whole(f"{at} writes a claim number for it too long to be one")
+        if peer in ref.wide:
+            return _whole(f"{at} writes a claim range it cannot place")
+        if ref.unattributed:
+            return _whole(f"{at} cites a claim without naming its analyst")
         written = ref.claims_of(peer)
         if not written:
-            return _whole(f"contested line {ref.line} names it without a claim number")
+            return _whole(f"{at} names it without a claim number")
         past = [n for n in written if not 1 <= n <= len(blocks)]
         if past:
             return _whole(
-                f"contested line {ref.line} names its {_claim_numbers_said(past)}, and its "
-                f"answer in force holds {len(blocks)} claim(s)"
+                f"{at} names its {_claim_numbers_said(past)}, and its answer in force holds "
+                f"{len(blocks)} claim(s)"
             )
+        cited = _ids_and_addresses(ref.question)
+        for n in written:
+            said = " ".join(
+                f"{getattr(c, 'claim', '') or ''} {getattr(c, 'evidence_ref', '') or ''}"
+                for c in blocks[n - 1]
+            )
+            if not cited & _ids_and_addresses(said):
+                return _whole(
+                    f"{at} cites claim {n} of it, which shares no ledger id or address with "
+                    "the line"
+                )
         numbers.update(dict.fromkeys(written))
     if not numbers:
         return _whole("no contested line names a claim of it")
     quoted = sorted(numbers)
-    lines = [f"  {claim_summary_line(n, blocks[n - 1][0], blocks[n - 1])}" for n in quoted]
+    lines = [excerpt_statement(quoted)]
+    lines.extend(f"  {claim_summary_line(n, blocks[n - 1][0], blocks[n - 1])}" for n in quoted)
     disputes = [
         str(item)
         for item in getattr(isr, "dissent_items", None) or []
-        if any(p.search(str(item)) for p in patterns)
+        if _names_analyst(str(item), name, patterns, participants)
     ]
     if disputes:
         lines.append(f"  Disputes naming the {name} analyst:")
         lines.extend(f"    - {item}" for item in disputes)
+    besides = [
+        item
+        for item in _items_besides_claims(whole)
+        if _names_analyst(item, name, patterns, participants)
+    ]
+    if besides:
+        lines.append(f"  Written besides its claims, naming the {name} analyst:")
+        lines.extend(
+            "\n".join(f"    {part.strip()}" for part in item.splitlines()) for item in besides
+        )
     return ShownReport("\n".join(lines), quoted, len(whole))
 
 

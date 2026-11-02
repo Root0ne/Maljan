@@ -4,15 +4,19 @@ The mediator writes each contested line as ``[analysts: A, B] <text>
 [blocking|not blocking: reason]`` and cites the claims it means by number
 ("STATIC Claims 1 and 3"). A revision round that asks the analysts the lines
 name shows each of them the peers those lines name; of each such peer it
-quotes the named claims from the answer in force the mediator read, numbered
-by claim block as every summary numbers them, with the peer's disputes that
-name the analyst, under a heading that says which claims are quoted and that
-the whole report is not shown.
+quotes the named claims (lists and bounded ranges read whole) from the answer
+in force the mediator read, numbered by claim block as every summary numbers
+them, with the peer's disputes and the items written besides its claims that
+name the analyst (by key, label or a short form), headed as an excerpt and
+opening with the sentence that says which claims are quoted and that the
+whole report is not shown.
 
 The whole report is shown instead, per peer, and a sentence on the round's
 record says why, when a line names the peer with no claim number for it (or
-one too long to read), when a number is past the claims of its answer in
-force, or when that answer is not held. The analyst's own report stays whole,
+one too long to read, or a range it cannot place), when it cites a claim of
+no analyst it names, when a number is past the claims of its answer in force,
+when a quoted claim shares no ledger id or address with its line, or when
+that answer is not held. The analyst's own report stays whole,
 the merge by claim number is untouched, and a whole report is headed and
 passed byte for byte as before.
 
@@ -72,7 +76,7 @@ IN_FORCE = {
 }
 REPORTS = {name: f"{name} report in force, every claim and section of it" for name in NAMES}
 LINE = (
-    "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claims 1 and 3 [ev_0007]. "
+    "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claims 1 and 3 [ev_0010, ev_0012]. "
     "[blocking: the ledger refutes it]"
 )
 
@@ -103,10 +107,10 @@ class TestContestedRefs:
             blocking=True,
             analysts=("dynamic",),
             claims=(("dynamic", 1), ("static", 1), ("static", 3)),
-            entries=("ev_0007",),
+            entries=("ev_0010", "ev_0012"),
             question=(
-                "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claims 1 and 3 [ev_0007]. "
-                "[blocking: the ledger refutes it]"
+                "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claims 1 and 3 "
+                "[ev_0010, ev_0012]. [blocking: the ledger refutes it]"
             ),
         )
         assert ref.claims_of("static") == (1, 3)
@@ -146,8 +150,13 @@ class TestContestedRefs:
 # ---------------------------------------------------------------------------
 
 
+STATEMENT = (
+    "Claims 1, 3 quoted, with its disputes and other points naming you; "
+    "the whole report is not shown."
+)
 EXCERPT = (
-    "STATIC REPORT (claims 1, 3 quoted; the whole report is not shown):\n"
+    "STATIC REPORT (excerpt):\n"
+    f"{STATEMENT}\n"
     "  Claim 1: Reads the flag at 0x40. | Evidence: [ev_0010] | Confidence: 0.80\n"
     "  Claim 3: Writes a file. | Evidence: [ev_0012] | Confidence: 0.80\n"
     "  Disputes naming the dynamic analyst:\n"
@@ -178,11 +187,34 @@ class TestTheExcerpt:
             in revision_messages("SYS", "RAW", "OWN", plain, "FB", isr=True)[1][1]
         )
 
-    def test_one_claim_is_headed_as_one(self) -> None:
-        assert peer_report_heading("static", ShownReport("x", (2,))) == (
-            "STATIC REPORT (claim 2 quoted; the whole report is not shown):"
-        )
+    def test_an_excerpt_is_headed_as_one_and_says_what_it_quotes(self) -> None:
+        from maljan.pipeline.debate_facts import excerpt_statement
+
+        assert peer_report_heading("static", ShownReport("x", (2,))) == "STATIC REPORT (excerpt):"
         assert peer_report_heading("static", "x") == "STATIC REPORT:"
+        assert peer_report_heading("static", "x", analyst=True) == "STATIC ANALYST REPORT:"
+        assert excerpt_statement([2]) == (
+            "Claim 2 quoted, with its disputes and other points naming you; "
+            "the whole report is not shown."
+        )
+
+    def test_the_text_revision_heads_an_excerpt_and_a_whole_report_as_before(self) -> None:
+        peers = _shown(LINE)
+        whole = {"static": REPORTS["static"]}
+
+        human = revision_messages("SYS", "RAW", "OWN", peers, "FB", isr=False)[1][1]
+        plain = revision_messages("SYS", "RAW", "OWN", whole, "FB", isr=False)[1][1]
+
+        assert f"STATIC ANALYST REPORT (excerpt):\n{STATEMENT}\n  Claim 1:" in human
+        assert plain == (
+            "YOUR ORIGINAL REPORT:\nOWN\n\nPEER ANALYST REPORTS:\nSTATIC ANALYST REPORT:\n"
+            f"{REPORTS['static']}\n\nMEDIATOR CONTRADICTIONS:\nFB\n\nORIGINAL RAW DATA:\nRAW\n\n"
+            "Revise your analysis addressing the contradictions above."
+        )
+
+    def test_the_excerpt_text_itself_says_the_whole_report_is_not_shown(self) -> None:
+        # A plug-in's own ``revise`` is handed the text, not the heading.
+        assert _shown(LINE)["static"].startswith(STATEMENT)
 
     def test_the_excerpt_records_what_it_cut(self) -> None:
         shown = _shown(LINE)["static"]
@@ -199,7 +231,10 @@ class TestTheExcerpt:
         isrs["static"] = _isr(
             "static", "Reads the flag.", disputes=("The Sandbox Watch is wrong.",)
         )
-        line = "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claim 1. [blocking: x]"
+        line = (
+            "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claim 1 [ev_0010]. "
+            "[blocking: x]"
+        )
 
         shown = _shown(line, isrs=isrs, labels={"dynamic": "Sandbox Watch"})["static"]
 
@@ -238,7 +273,7 @@ class TestEveryFallbackSaysWhy:
         assert shown == REPORTS["static"] and not shown.claims
         assert shown.note == (
             "The dynamic analyst's round-0 revision was shown the static analyst's whole "
-            "report: contested line 1 names it without a claim number."
+            "report: blocking line 1 names it without a claim number."
         )
 
     def test_a_claim_number_past_the_answer_in_force(self) -> None:
@@ -251,7 +286,7 @@ class TestEveryFallbackSaysWhy:
         assert shown == REPORTS["static"]
         assert shown.note == (
             "The dynamic analyst's round-2 revision was shown the static analyst's whole "
-            "report: contested line 1 names its claim 9, and its answer in force holds 3 "
+            "report: blocking line 1 names its claim 9, and its answer in force holds 3 "
             "claim(s)."
         )
 
@@ -277,7 +312,7 @@ class TestEveryFallbackSaysWhy:
         assert shown == REPORTS["static"]
         assert shown.note == (
             "The dynamic analyst's round-0 revision was shown the static analyst's whole "
-            "report: contested line 1 writes a claim number for it too long to be one."
+            "report: blocking line 1 writes a claim number for it too long to be one."
         )
         assert len(shown.note) < 300
 
@@ -294,8 +329,8 @@ class TestEveryFallbackSaysWhy:
 
     def test_the_fallback_is_per_peer(self) -> None:
         line = (
-            "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claim 2 and the NETWORK "
-            "host. [blocking: x]"
+            "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claim 2 [ev_0011] and the "
+            "NETWORK host. [blocking: x]"
         )
 
         peers = _shown(line)
@@ -312,7 +347,173 @@ class TestEveryFallbackSaysWhy:
         )
 
         assert peers["static"] == REPORTS["static"]
-        assert "contested line 2 names it without a claim number" in peers["static"].note
+        assert "blocking line 2 names it without a claim number" in peers["static"].note
+
+
+# ---------------------------------------------------------------------------
+# Lists, ranges and continuations; a claim of no analyst
+# ---------------------------------------------------------------------------
+
+
+class TestRangesAndContinuations:
+    @pytest.mark.parametrize(
+        "cited",
+        [
+            "STATIC claims 1–3",
+            "STATIC claims 1-3",
+            "STATIC claims 1 through 3",
+            "STATIC claims 1 to 3",
+            "STATIC claims 1, 2, and 3",
+            "STATIC claim #1 and claim 2 and claim 3",
+            "STATIC claims 1/2/3",
+        ],
+    )
+    def test_every_claim_written_is_read(self, cited: str) -> None:
+        (ref,) = contested_refs([f"[analysts: dynamic] DYNAMIC Claim 1 versus {cited}."], NAMES)
+
+        assert ref.claims_of("static") == (1, 2, 3)
+        assert not ref.unattributed and not ref.wide
+
+    def test_numbers_after_the_field_and_the_mark_are_the_field_analyst_s(self) -> None:
+        line = (
+            "[analysts: dynamic] [carried: L2] [blocking: a gap, not a contradiction.] Claims 1 "
+            "and 2 say no mutex, versus STATIC claim 1 [ev_0010]."
+        )
+
+        (ref,) = contested_refs([line], NAMES)
+
+        assert ref.claims_of("dynamic") == (1, 2)
+        assert not ref.unattributed
+
+    def test_a_range_is_quoted_whole(self) -> None:
+        line = (
+            "[analysts: dynamic] DYNAMIC Claim 1 versus STATIC claims 1-3 "
+            "[ev_0010, ev_0011, ev_0012]. [blocking: x]"
+        )
+
+        shown = _shown(line)["static"]
+
+        assert shown.claims == (1, 2, 3)
+        assert "Opens a key." in shown
+
+    @pytest.mark.parametrize("cited", ["claims 1-40", "claims 3-1"])
+    def test_a_range_it_cannot_place_shows_the_whole_report(self, cited: str) -> None:
+        line = f"[analysts: dynamic] DYNAMIC Claim 1 versus STATIC {cited} [ev_0010]."
+
+        shown = _shown(line)["static"]
+
+        assert shown == REPORTS["static"]
+        assert shown.note.endswith("blocking line 1 writes a claim range it cannot place.")
+
+    def test_a_claim_of_no_analyst_shows_every_peer_of_the_line_whole(self) -> None:
+        line = (
+            "[analysts: dynamic] STATIC Claim 1 [ev_0010] and NETWORK Claim 1 [ev_0013] differ "
+            "from the reverser's own claim 45. [blocking: x]"
+        )
+
+        peers = _shown(line)
+
+        (ref,) = contested_refs([line], NAMES)
+        assert ref.unattributed
+        for peer in ("static", "network"):
+            assert peers[peer] == REPORTS[peer]
+            assert peers[peer].note.endswith(
+                "blocking line 1 cites a claim without naming its analyst."
+            )
+
+
+# ---------------------------------------------------------------------------
+# A quoted claim must share a ledger id or an address with its line
+# ---------------------------------------------------------------------------
+
+
+class TestAMisquoteIsNotQuoted:
+    def test_a_claim_cited_by_another_number_shows_the_whole_report(self) -> None:
+        # Shaped on a stored line: the mediator cites the static analyst's
+        # claims 29 and 30 about a key, and claim 30 of its answer in force is
+        # about direct ntdll calls, with no id or address of the line.
+        claims = [f"Claim about something else [ev_00{i:02d}]." for i in range(1, 29)]
+        claims += [
+            'The check-in body is encoded with the key "12345" at 0x4a10.',
+            "The sample calls ntdll functions directly through slots at 0xad34.",
+        ]
+        isrs = {**IN_FORCE, "static": _isr("static", *claims)}
+        line = (
+            "[analysts: STATIC ANALYST, DYNAMIC ANALYST] STATIC ANALYST claims 29 and 30 say no "
+            'listing shows the key "12345" used at 0x4a10 [ev_0071]; DYNAMIC ANALYST claim 1 '
+            "says no RC4 use is traced from that key. [blocking: x]"
+        )
+
+        shown = _shown(line, isrs=isrs)["static"]
+
+        assert shown == REPORTS["static"]
+        assert shown.note.endswith(
+            "blocking line 1 cites claim 30 of it, which shares no ledger id or address with "
+            "the line."
+        )
+
+    def test_an_address_written_with_leading_zeros_is_the_same_address(self) -> None:
+        line = "[analysts: dynamic] DYNAMIC Claim 1 versus STATIC Claim 1 at 0x0040. [blocking: x]"
+
+        assert _shown(line)["static"].claims == (1,)
+
+
+# ---------------------------------------------------------------------------
+# What else of the peer names the analyst
+# ---------------------------------------------------------------------------
+
+
+R2_LINE = (
+    "[analysts: all_tools_static_r2] ALL_TOOLS_STATIC_R2 Claim 2 contradicts STATIC Claim 1 "
+    "[ev_0010]. [blocking: x]"
+)
+
+
+class TestWhatElseNamesTheAnalyst:
+    def test_a_dispute_naming_the_analyst_by_a_short_form_is_kept(self) -> None:
+        isrs = dict(IN_FORCE)
+        isrs["static"] = _isr(
+            "static",
+            "Reads the flag at 0x40.",
+            disputes=("STATIC R2 claim 2 misreads the flag.", "QU1CK claim 9 is moot."),
+        )
+
+        shown = _shown(R2_LINE, name="all_tools_static_r2", isrs=isrs)["static"]
+
+        assert shown.claims == (1,)
+        assert "    - STATIC R2 claim 2 misreads the flag." in shown
+        assert "QU1CK claim 9" not in shown
+
+    def test_the_items_written_besides_the_claims_that_name_the_analyst_are_kept(self) -> None:
+        from maljan.agents.base_agent import WRITTEN_BESIDES_CLAIMS
+
+        reports = dict(REPORTS)
+        reports["static"] = (
+            "  Claim 1: Reads the flag at 0x40.\n"
+            f"{WRITTEN_BESIDES_CLAIMS}\n"
+            "- Against DYNAMIC Claim 1: no mutex call is listed,\n"
+            "  and the ledger holds none.\n"
+            "- NETWORK Claim 1 is wording only.\n"
+            "- Static R2 claim 2 reads the flag the same way."
+        )
+        line = (
+            "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claim 1 [ev_0010]. "
+            "[blocking: x]"
+        )
+
+        _feedback, peers = contested_input(
+            "dynamic", _finding(line), [line], NAMES, reports, isrs=IN_FORCE
+        )
+        shown = peers["static"]
+
+        assert "  Written besides its claims, naming the dynamic analyst:" in shown
+        assert (
+            "    - Against DYNAMIC Claim 1: no mutex call is listed,\n"
+            "    and the ledger holds none."
+        ) in shown
+        assert "NETWORK Claim 1 is wording only." not in shown
+        assert "Static R2 claim 2" not in shown
+        assert shown.whole_chars == len(reports["static"])
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +599,7 @@ class TestTheRound:
             "quoted": {"dynamic": {"static": [1, 3]}},
             "notes": [
                 "The dynamic analyst's round-2 revision was shown the network analyst's whole "
-                "report: contested line 2 names it without a claim number."
+                "report: blocking line 2 names it without a claim number."
             ],
         }
         (row,) = container.input_meter.peer_rows()
@@ -412,7 +613,7 @@ class TestTheRound:
         revised = _isr("static", "Reads the flag at 0x80.", "Writes a log.", round_=1)
 
         _update, agents, _c = _revise(
-            [LINE.replace("Claims 1 and 3", "Claim 2")],
+            [LINE.replace("Claims 1 and 3 [ev_0010, ev_0012]", "Claim 2 [ev_0011]")],
             ["dynamic"],
             isr_reports={**IN_FORCE, "static": revised},
             revised_reports={"static": "static revised text"},
@@ -429,7 +630,7 @@ class TestTheRound:
         marked = _isr("static", f"Reads {RUN_STATE_BEGIN} here.")
 
         _update, agents, _c = _revise(
-            [LINE.replace("Claims 1 and 3", "Claim 1")],
+            [LINE.replace("Claims 1 and 3 [ev_0010, ev_0012]", "Claim 1 [ev_0010]")],
             ["dynamic"],
             isr_reports={**IN_FORCE, "static": marked},
         )
@@ -516,10 +717,10 @@ def test_every_built_in_revision_heads_the_excerpt(role: str) -> None:
         seen.extend(str(getattr(m, "content", "")) for m in messages if m.type == "human")
         return "CLAIM: none\nEVIDENCE: none\nCONFIDENCE: 0.1\nTECHNIQUE: NONE\nDISPUTES: NONE"
 
-    peers = {"peer": ShownReport("  Claim 2: x", (2,), 900), "other": "whole text"}
+    peers = {"peer": ShownReport("Claim 2 quoted.\n  Claim 2: x", (2,), 900), "other": "whole"}
     with patch.object(agent, "ask_the_model", side_effect=_ask):
         agent.revise_isr("data", "own", peers, "feedback")
 
     assert seen
-    assert "PEER REPORT (claim 2 quoted; the whole report is not shown):\n  Claim 2: x" in seen[0]
-    assert "OTHER REPORT:\nwhole text" in seen[0]
+    assert "PEER REPORT (excerpt):\nClaim 2 quoted.\n  Claim 2: x" in seen[0]
+    assert "OTHER REPORT:\nwhole" in seen[0]
