@@ -195,6 +195,22 @@ def _open_questions(report: MalwareReport) -> list[str]:
     return []
 
 
+def _redone_calls(report: MalwareReport) -> list[str]:
+    """Each failed call a later call redid, as the run's bounds hold it (``evidence.redone``)."""
+    evidence = (report.run_summary or {}).get("evidence") or {}
+    said: list[str] = []
+    for row in evidence.get("redone") or []:
+        if not isinstance(row, dict):
+            continue
+        by = ", ".join(str(i) for i in row.get("answered_by") or [])
+        if row.get("entry_id") and by:
+            said.append(
+                f"{row['entry_id']} ({' '.join(str(row.get('tool') or '').split())[:80]}) "
+                f"failed and was redone: {by} answered for the same address, so it left no gap"
+            )
+    return said
+
+
 def analyst_bundle(
     section: str,
     report: MalwareReport,
@@ -212,7 +228,11 @@ def analyst_bundle(
     force are not shown again: the findings were written from them, and every
     claim beside them would put each of these calls over a price tier.
     """
-    from maljan.reporting.evidence_bundles import binary_facts, sandbox_entry_ids
+    from maljan.reporting.evidence_bundles import (
+        REDONE_CALLS_FACT,
+        binary_facts,
+        sandbox_entry_ids,
+    )
 
     binary = binary_facts(report)
     findings = [
@@ -261,6 +281,11 @@ def analyst_bundle(
             "degraded_run": bool(report.degraded_mode),
             "verdict_not_assessed": report.verdict_not_assessed or "",
         }
+        # A failed call a later call redid is no gap, said so beside the open
+        # questions an analyst may have filed on it (T-494 D6); none, no key.
+        redone = _redone_calls(report)
+        if redone:
+            facts[REDONE_CALLS_FACT] = redone
         return {"claims": [], "tool_outputs": [], "binary": binary, "facts": facts}
     if section == "attack_procedures":
         published = published_techniques(report)

@@ -731,8 +731,11 @@ def _function_index(section: str, table: list[FunctionCode]) -> list[dict[str, A
 # id and its tool), which the composer shows readable. Every other fact is the
 # sample's or a tool's text, and every ledger id in it is written out
 # (``composer._fact_line``), as the pack writes the sample's text.
+# The limitations fact naming each failed call a later call redid
+# (``composer_pro._redone_calls``) is one of them.
+REDONE_CALLS_FACT = "failed_calls_redone"
 PLATFORM_CITED_FACTS: frozenset[str] = frozenset(
-    {"sandbox_entries", "string_entries", "crypto_finding_entries"}
+    {"sandbox_entries", "string_entries", "crypto_finding_entries", REDONE_CALLS_FACT}
 )
 # The fact mapping each of the sample's values to the entries holding it
 # (:func:`value_entries`): its values are the sample's, its ids the platform's.
