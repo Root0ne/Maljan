@@ -3136,6 +3136,124 @@ def stage_runs(stage: Any, state: AnalysisState) -> tuple[bool, str]:
     return False, f"condition not met: {when}"
 
 
+# The key a stage record carries when the stage was skipped for want of data.
+DATALESS_STAGE_KEY = "dataless"
+
+
+def _upstream_found_something(stage: Any, state: AnalysisState) -> bool:
+    """Whether a stage ``stage`` depends on and injects ran and found a claim: data of its own."""
+    if str(getattr(stage, "inject_upstream", "findings")) == "none":
+        return False
+    results = state.get("stage_results") or {}
+    for key in getattr(stage, "depends_on", None) or ():
+        record = results.get(key)
+        if isinstance(record, dict) and record.get("ran") and int(record.get("claim_count") or 0):
+            return True
+    return False
+
+
+def dataless_stage_reason(stage: Any, state: AnalysisState, container: Any) -> str:
+    """Why ``stage`` holds none of the data its analysts read, or ``""`` when it holds some.
+
+    Read from declarations before any analyst is built (``pipeline.data_needs``):
+    each analyst's input slice and its tools' sources against the kinds of
+    data the job holds. A stage with any analyst that holds data, reads data
+    no declaration ties to a kind, or is fed findings by a stage it depends
+    on, runs. A decision that cannot be read runs the stage.
+    """
+    from maljan.pipeline.data_needs import agent_reads, dataless_reason, job_data, missing_kinds
+    from maljan.pipeline.sandbox_status import observed_report
+
+    agents = [str(name) for name in getattr(stage, "agents", None) or ()]
+    if not agents or _upstream_found_something(stage, state):
+        return ""
+    try:
+        file_hash = str(state.get("file_hash") or "")
+        job = job_data(
+            observed_report(state.get("sandbox_report")),
+            job_captures(state),
+            stored=lambda agent: bool(container.holds_stored_data(file_hash, agent)),
+        )
+        held: dict[str, tuple[str, ...] | None] = {}
+
+        def server_roles(server: str) -> tuple[str, ...] | None:
+            if server not in held:
+                from maljan.core.declared_reading import declarations
+
+                declared = declarations(container.config).source(f"mcp:{server}")
+                held[server] = None if declared is None else tuple(declared.roles)
+            return held[server]
+
+        def servers_of(name: str) -> set[str] | None:
+            # Every server the agent reaches, by reference, capability or the
+            # server's own binding; ``None`` (untied) where that is not read.
+            from maljan.agents.composition import servers_bound_to
+
+            try:
+                return set(servers_bound_to(container.config, name))
+            except Exception:  # noqa: BLE001 — servers not read are untied
+                return None
+
+        missing: dict[str, frozenset[str]] = {}
+        for name in agents:
+            definition = container.config.agents.definitions.get(name)
+            role = str(getattr(definition, "role", "") or "")
+            reads = agent_reads(
+                definition,
+                role,
+                sample_fed=role in SAMPLE_FED_ROLES,
+                sandbox_report=job.sandbox_report,
+                servers=servers_of(name) if definition is not None else None,
+                server_roles=server_roles,
+            )
+            lacking = missing_kinds(reads, job, name)
+            if lacking is None:
+                return ""
+            missing[name] = lacking
+    except Exception as exc:  # noqa: BLE001 — a decision not read runs the stage
+        logger.warning(
+            "stage %s: whether it holds data was not read (%s); it runs.",
+            getattr(stage, "key", "?"),
+            type(exc).__name__,
+        )
+        return ""
+    return dataless_reason(missing)
+
+
+def _analysis_roster(container: Any, fallback: Sequence[str]) -> list[str]:
+    """Every analysis-stage agent of the active profile, in stage order, else ``fallback``."""
+    try:
+        return [
+            str(name)
+            for stage in container.active_profile().stages
+            if stage.kind == "analysis"
+            for name in stage.agents
+        ]
+    except Exception:  # noqa: BLE001 — a double without a profile keeps what it had
+        return list(fallback)
+
+
+def _dataless_absence(container: Any, agent_name: str, state: AnalysisState) -> str:
+    """The no-data guard's reason for an analyst of a stage skipped for want of data."""
+    try:
+        role = container.agent_role(agent_name)
+    except Exception:  # noqa: BLE001 — an unread role is no sandbox-fed one
+        role = ""
+    if _sandbox_fed(str(role)) and _sandbox_report_is_synthetic(state):
+        return SYNTHETIC_SANDBOX_REASON
+    return NO_AGENT_DATA_REASON
+
+
+def dataless_stages(state: AnalysisState) -> list[tuple[str, str, list[str]]]:
+    """Each stage skipped for want of data: its key, its reason and its analysts."""
+    out: list[tuple[str, str, list[str]]] = []
+    for key, record in (state.get("stage_results") or {}).items():
+        if isinstance(record, dict) and record.get(DATALESS_STAGE_KEY) and not record.get("ran"):
+            agents = list(record.get("agents") or []) or list(record.get("agent_reasons") or {})
+            out.append((str(key), str(record.get("reason") or ""), [str(a) for a in agents]))
+    return out
+
+
 def _stage_seconds_left(agent: Any, started: float) -> float | None:
     """What is left of one analyst's stage time: its loop budget less what the node spent.
 
@@ -3179,8 +3297,13 @@ def stage_record(
     technique_ids: tuple[str, ...] = (),
     finding_count: int = 0,
     duration_ms: int = 0,
+    dataless: bool = False,
 ) -> dict[str, Any]:
     """One stage's contribution to ``state["stage_results"]``.
+
+    ``dataless`` marks a stage skipped because the job holds none of the data
+    its analysts read (:func:`dataless_stage_reason`), so the verdict's
+    degradation reasons can say so.
 
     ``reason`` answers "why did this stage not run", and one other thing: why a
     stage that did run went wrong, which ``failure`` says. A stage of three
@@ -3224,6 +3347,8 @@ def stage_record(
     # a chain and wrong for a fan-out; it needs the mode to tell them apart.
     entry["mode"] = str(getattr(stage, "mode", "sequential"))
     entry["duration_ms"] = int(duration_ms)
+    if dataless and not ran:
+        entry[DATALESS_STAGE_KEY] = True
     return {"stage_results": {str(getattr(stage, "key", "")): entry}}
 
 
@@ -4159,6 +4284,50 @@ def make_stage_agent_node(
             if announces:
                 announce_skipped(container, stage, skip_reason)
             return stage_record(stage, ran=False, reason=skip_reason)
+
+        # A stage none of whose analysts holds any of the data they read is
+        # skipped before one of them is built: no tool server is attached and
+        # no model is called to say there is nothing to read. Each analyst
+        # leaves what the no-data guard below leaves (a skip line and an empty
+        # ISR), so the judge and the report read it as they read a skipped
+        # analyst, and the stage says why it did not run. The mock pipeline
+        # reads no data and is left as it is.
+        dataless = "" if container.is_mock else dataless_stage_reason(stage, state, container)
+        if dataless:
+            logger.info("stage %s skipped for %s: %s", stage.key, agent_name, dataless)
+            if announces:
+                announce_skipped(container, stage, dataless)
+            # The analyst's own reason and line are the no-data guard's words
+            # below, so the report keeps the specific cause (a sandbox that
+            # never ran); the kinds the stage lacked are the stage's reason.
+            absence = _dataless_absence(container, agent_name, state)
+            skipped_text = (
+                f"[WARN] {agent_name}: {SYNTHETIC_SANDBOX_REASON} — analyst skipped."
+                if absence == SYNTHETIC_SANDBOX_REASON
+                else f"[WARN] {agent_name}: no {agent_name} data available "
+                "for this sample — analyst skipped."
+            )
+            emit_agent_message(
+                container.event_sink,
+                speaker=agent_name,
+                role="analyst",
+                text=skipped_text,
+                status="no_data",
+                stage=stage_key_of(stage, "analysis"),
+                display_name=label_of(container, agent_name),
+            )
+            return {
+                "reports": {agent_name: skipped_text},
+                "isr_reports": {agent_name: _empty_isr(agent_name)},
+                **stage_record(
+                    stage,
+                    ran=False,
+                    reason=dataless,
+                    agents=(agent_name,),
+                    agent_reasons={agent_name: absence},
+                    dataless=True,
+                ),
+            }
 
         if announces:
             announce_started(container, stage)
@@ -6740,6 +6909,21 @@ def make_judge_node(
                     ]
                 )
             )
+            # The analysts of a stage skipped for want of data had no input of
+            # their own either: each is placed where its stage stands in the
+            # team, as it stood when its own guard skipped it, so the reasons
+            # read the same.
+            _dataless_agents = {n for _k, _w, names in dataless_stages(state) for n in names}
+            if _dataless_agents:
+                _empty_set = set(_empty_analysts) | _dataless_agents
+                _empty_analysts = [
+                    name
+                    for name in dict.fromkeys(
+                        _analysis_roster(container, [*_empty_analysts, *sorted(_dataless_agents)])
+                    )
+                    if name in _empty_set
+                ]
+                _no_data_analysts |= _dataless_agents
             # D10: surface anti-emulation / anti-VM / sandbox-detection
             # signatures so the existing DEGRADED RUN banner can explain
             # the empty dynamic tab (sandbox traced nothing because the

@@ -59,7 +59,7 @@ from maljan.llm.context_window import record_built_cap
 from maljan.llm.generation_rate import GenerationRates, attach_rate_meter
 from maljan.llm.registry import LLMProviderRegistry
 from maljan.llm.transient import attach_retry_recorder
-from maljan.loaders.file_loader import FileDataLoader
+from maljan.loaders.file_loader import FileDataLoader, no_data_placeholder
 from maljan.parsers.registry import ParserRegistry
 from maljan.schemas.evidence import EvidenceCounter
 
@@ -2371,6 +2371,25 @@ class ServiceContainer:
                 cached = self.loader.load(sample_id, data_type)
                 self._data_cache[key] = cached
             return cached
+
+    def holds_stored_data(self, sample_id: str, data_type: str) -> bool:
+        """Whether stored data of ``data_type`` exists for ``sample_id``, without loading it.
+
+        What :meth:`load_data` already read, where it read it; else the
+        loader's own answer. True where the loader cannot say, so nothing is
+        decided on a guess that there is no data.
+        """
+        with self._lock:
+            cached = self._data_cache.get((sample_id, data_type))
+        if cached is not None:
+            return cached != no_data_placeholder(sample_id, data_type)
+        holds = getattr(self.loader, "holds", None)
+        if not callable(holds):
+            return True
+        try:
+            return bool(holds(sample_id, data_type))
+        except Exception:  # noqa: BLE001 — a loader that cannot say says nothing is missing
+            return True
 
     def load_chunked(
         self,
