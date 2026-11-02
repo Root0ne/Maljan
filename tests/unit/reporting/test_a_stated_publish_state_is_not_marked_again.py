@@ -145,7 +145,18 @@ class TestAStatedState:
                 "investigated",
             )
         ]
-        + ["(publish state: not yet confirmed)"],
+        + [
+            "(publish state: not yet confirmed)",
+            # A publish word left undecided.
+            "(publish state: no IOC yet decided)",
+            "(publish state: not an indicator yet confirmed)",
+            # An answer that is not a state; a real reason is still read
+            # (``test_the_table_s_reason_restated_is_a_stated_state``).
+            "(publish state: not applicable)",
+            "(publish state: not available)",
+            "(publish state: no data)",
+            "(publish state: no evidence of sample traffic)",
+        ],
     )
     def test_a_negation_of_an_article_a_noun_or_indecision_is_asked_about(
         self, written: str

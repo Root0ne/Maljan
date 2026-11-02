@@ -112,7 +112,8 @@ def test_the_technique_s_own_word_is_still_asked(text: str, technique: str) -> N
 
 def test_no_parent_s_rarest_own_word_written_bare_sets_a_child_s_word_aside() -> None:
     # Over every shipped parent where only the rarest-own-word rule could set
-    # the child's rarest word aside: the bare stem names a thing and never does.
+    # the child's rarest word aside: the bare stem or its plural names a thing
+    # and never does.
     families = name_stem_families()
     read = 0
     for technique in sorted(technique_names()):
@@ -128,9 +129,34 @@ def test_no_parent_s_rarest_own_word_written_bare_sets_a_child_s_word_aside() ->
         for stem in sorted(own):
             if families.get(stem, 0) == rarest and stem.isalpha():
                 read += 1
-                assert not _another_member_s_word(technique, f"The {stem}.")(child), (
-                    technique,
-                    stem,
-                    child,
-                )
+                # The bare stem, and its plural ("images", "resources").
+                for text in (f"The {stem}.", f"The {stem}s."):
+                    assert not _another_member_s_word(technique, text)(child), (
+                        technique,
+                        text,
+                        child,
+                    )
     assert read
+
+
+@pytest.mark.parametrize(
+    ("technique", "word"),
+    [
+        ("T1543", "created"),
+        ("T1136", "created"),
+        ("T1560", "archived"),
+        ("T1608", "staged"),
+        ("T1683", "generated"),
+    ],
+)
+def test_a_silent_e_verb_s_inflection_of_the_rarest_own_word_affirms(
+    technique: str, word: str
+) -> None:
+    # "created" is Create's act, though its stem ("creat") is not the name's.
+    families = name_stem_families()
+    own, others = _family_name_stems(technique)
+    child = min(others, key=lambda stem: (families.get(stem, 0), stem))
+    assert _another_member_s_word(technique, f"It was {word}.")(child)
+    if families.get(child, 0) < min(families.get(stem, 0) for stem in own):
+        # Where only the rarest-own-word rule could set it aside, the bare verb does not.
+        assert not _another_member_s_word(technique, f"The {word[:-1]} step.")(child)

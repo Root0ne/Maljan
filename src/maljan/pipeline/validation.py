@@ -1361,6 +1361,12 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
         negated: Callable[[int], bool] | None = None
         for match in re.finditer(r"[A-Za-z]{3,}", text):
             stem = _stem(match.group(0))
+            if stem not in own and stem not in others:
+                # "created" under Create Account: a silent-"e" verb's inflection
+                # meets only the rarest stem of the technique's own name.
+                silent = _silent_e_stem(match.group(0))
+                if silent in own and families.get(silent, 0) == own_rarest:
+                    stem = silent
             if (stem not in own and stem not in others) or stem not in vocabulary:
                 continue
             reader = reader or _NegationReader(text)
@@ -1396,6 +1402,10 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
 _ACT_ENDINGS = frozenset(
     {"ed", "ing", "ings", "ion", "ions", "ation", "ations", "ated", "ating", "ates"}
 )
+# The inflection of ``_SILENT_E_INFLECTIONS`` that writes a silent-"e" verb's
+# act ("created", "archived"). Its "-s" form is left out: on a name's noun it
+# is the plural ("images", "resources"), a thing and not the act.
+_SILENT_E_ACT_ENDINGS = ("d",)
 # The words after a word in its clause that deny it ("obfuscation is
 # unlikely", "obfuscation-free", "obfuscated strings: none"), beside the
 # negations (``_NEGATIONS``).
@@ -1410,9 +1420,24 @@ _FREE_OF_BEFORE_RE = re.compile(r"\bfree\s+(?:of|from)\s+(?:\w+\s+)?$", re.IGNOR
 
 
 def _writes_the_act(word: str, stem: str) -> bool:
-    """Whether ``word`` writes ``stem`` with one of the ``_ACT_ENDINGS``."""
+    """Whether ``word`` writes ``stem`` with one of the ``_ACT_ENDINGS``, or, for
+    a stem that ends in a silent "e", with one of ``_SILENT_E_ACT_ENDINGS``
+    ("created", "archived")."""
     lowered = word.lower()
-    return lowered.startswith(stem) and lowered[len(stem) :] in _ACT_ENDINGS
+    if not lowered.startswith(stem):
+        return False
+    rest = lowered[len(stem) :]
+    return rest in _ACT_ENDINGS or (stem.endswith("e") and rest in _SILENT_E_ACT_ENDINGS)
+
+
+def _silent_e_stem(word: str) -> str:
+    """The silent-"e" verb ``word`` writes as its act ("created": "create"), at
+    least four letters before the "e" as :func:`_inflected_forms` reads it, or
+    ``""``."""
+    lowered = word.lower()
+    if lowered[-1:] in _SILENT_E_ACT_ENDINGS and re.fullmatch(r"[a-z]{4,}e", lowered[:-1]):
+        return lowered[:-1]
+    return ""
 
 
 def _negated_after(text: str, start: int, end: int) -> bool:
@@ -7481,6 +7506,9 @@ def _negation_states_a_state(after: str) -> bool:
         return False
     if _STATE_PARTICIPLE_RE.fullmatch(words[0]) is not None:
         return True
+    # A publish word left undecided is no state ("no IOC yet decided").
+    if _STATE_UNDECIDED_WORDS & set(words[:4]):
+        return False
     for lead in _STATE_PUBLISH_LEADS:
         if tuple(words[: len(lead)]) == lead:
             words = words[len(lead) :]
