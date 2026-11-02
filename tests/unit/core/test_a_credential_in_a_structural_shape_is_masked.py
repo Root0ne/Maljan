@@ -73,6 +73,10 @@ _PINNED = [
     ("PS C:\\>:/{pw}\\x@[::1]:;x'", "PS C:\\>***@[::1]:;x'"),
     (".\\,a/|:a{pw}@h/v1", ".\\,a/|***@h/v1"),
     ("..\\a;{pw}|@h:8080@x;x", "..\\a;***@x;x"),
+    # A quote behind a run of backslashes after a host with no port.
+    ('u:{pw}@h\\\\"}', '***@h\\\\"}'),
+    ('{"a":"u:{pw}@h\\\\\\"}"}', '{"***@h\\\\\\"}"}'),
+    ("u:{pw}@h.example\\\\'", "***@h.example\\\\'"),
     *(
         (f"u:{{pw}}@h.example:8080{after}", f"***@h.example:8080{after}")
         for after in ("|jq", "=x", "&x", "+x", "!", "*", "^", "~", "`", "\\x", "é")
