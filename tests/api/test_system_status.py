@@ -174,6 +174,43 @@ class TestSystemStatus:
         else:
             assert "served_declarations_unread" not in body
 
+    def test_the_failure_the_refresh_left_reaches_the_admin_s_status(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What the store's refresh holds is what the status says, through its getter (T-437)."""
+        from app.services import served_declarations_store as store
+
+        fake_settings = MagicMock()
+        fake_settings.app_name = "Maljan"
+        fake_settings.app_version = "0.1.0"
+        client.app.dependency_overrides[optional_current_user] = lambda: MagicMock(role="admin")
+        values = {
+            "enrichment_enabled": False,
+            "mock_mode_allowed": False,
+            "enrichment_sources": {},
+            "enrichment_reputation_servers": False,
+        }
+        failure = "the servers' kept declarations (OperationalError)"
+        monkeypatch.setattr(store, "_REFRESH_FAILURE", [failure])
+        try:
+            with (
+                patch("app.api.v1.system.settings", fake_settings),
+                patch(
+                    "app.api.v1.system.runtime_config.get",
+                    AsyncMock(side_effect=lambda n: values[n]),
+                ),
+                patch(
+                    "app.api.v1.system.runtime_config.get_secret",
+                    AsyncMock(return_value=""),
+                ),
+            ):
+                resp = client.get("/api/v1/system/status")
+        finally:
+            del client.app.dependency_overrides[optional_current_user]
+
+        assert resp.status_code == 200
+        assert resp.json()["served_declarations_unread"] == failure
+
     def test_never_returns_raw_secret_values(self, client: TestClient) -> None:
         # Belt-and-braces: even with both keys configured, response payload
         # must not contain the literal key text.

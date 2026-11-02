@@ -243,6 +243,9 @@ def no_server_is_listed_or_reread_unless_a_test_asks(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(served_listing, "unlisted", lambda settings: [])
     # Read last at the end of time: never due again.
     monkeypatch.setattr(served_declarations_store, "_READ_AT", [float("inf")])
+    # And no failure a test's read left is in force in the next test.
+    monkeypatch.setattr(served_declarations_store, "_REFRESH_FAILURE", [None])
+    monkeypatch.setattr(served_declarations_store, "_LOAD_FAILURE", [None])
 
 
 @pytest.fixture(autouse=True)

@@ -50,7 +50,8 @@ async def load(db: AsyncSession) -> int:
         rows = (await db.execute(select(ServedDeclaration))).scalars().all()
     except SQLAlchemyError as exc:
         await db.rollback()
-        # Said once per process: a store not migrated yet says so at every read.
+        _LOAD_FAILURE[0] = type(exc).__name__
+        # Said once per outage: a store not migrated yet says so at every read.
         if not _SAID_UNREAD[0]:
             _SAID_UNREAD[0] = True
             logger.warning(
@@ -63,10 +64,15 @@ async def load(db: AsyncSession) -> int:
     # The read is over: the session holds no transaction past it.
     await db.rollback()
     install_persisted(held)
+    # The outage is over: the next one is said in its turn.
+    _LOAD_FAILURE[0] = None
+    _SAID_UNREAD[0] = False
     return len(held)
 
 
 _SAID_UNREAD: list[bool] = [False]
+# The error's type of :func:`load`'s last read, ``None`` when it succeeded.
+_LOAD_FAILURE: list[str | None] = [None]
 
 
 async def save(db: AsyncSession) -> int:
@@ -129,17 +135,22 @@ async def refresh(session_maker: Any) -> None:
     if now - _READ_AT[0] < REFRESH_SECONDS:
         return
     _READ_AT[0] = now
+    failed: list[str] = []
     step = "the servers' kept declarations"
     try:
         async with session_maker() as db:
-            await load(db)
+            # A store that cannot be read raises nothing out of load: it says -1.
+            if await load(db) < 0:
+                failed.append(f"{step} ({_LOAD_FAILURE[0] or 'unread'})")
             # The API installs no settings of its own: its built-in servers
             # are read through the blocks the stored settings hold, as the
             # worker reads them (``declared_reading.read_through_settings``).
             step = "the stored settings"
             await read_through_stored(db)
     except Exception as exc:  # noqa: BLE001 — a kept declaration never fails a request
-        failure = f"{step} ({type(exc).__name__})"
+        failed.append(f"{step} ({type(exc).__name__})")
+    if failed:
+        failure = " and ".join(failed)
         if _REFRESH_FAILURE[0] != failure:
             logger.warning(
                 "%s were not read; the reading before stays in force until a read succeeds.",
