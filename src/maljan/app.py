@@ -343,16 +343,17 @@ class MaljanApp:
             if isinstance(claim, dict)
             else None
         )
-        if record is not None:
-            report[TARGET_KEY] = target_mark(record)
-        elif TARGET_KEY in report:
+        if TARGET_KEY in report:
             report.pop(TARGET_KEY)
             logger.warning(
                 "The sandbox report carries a top-level %r block; that word is the "
                 "platform's mark for a report naming another target, so the block was "
-                "taken out.",
+                "taken out%s.",
                 TARGET_KEY,
+                " and the run's own mark set in its place" if record is not None else "",
             )
+        if record is not None:
+            report[TARGET_KEY] = target_mark(record)
         return report
 
     async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:

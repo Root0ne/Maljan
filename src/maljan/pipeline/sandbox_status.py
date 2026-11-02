@@ -21,6 +21,7 @@ theirs to decide.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -99,7 +100,9 @@ def _target_statement(mark: Any) -> str:
     """The sentences of a report's target mark; ``""`` with none.
 
     Both values are kept again as the record keeps a sandbox's value, whoever
-    wrote the mark: a value that is not a SHA-256 is one bounded line.
+    wrote the mark: a value that is not a SHA-256 is one bounded line. Each is
+    written as a code span (:func:`_code`), so the sandbox's text reads as a
+    value in the pack and in the report, never as their markup.
     """
     from maljan.analysis.sample_integrity import (
         kept_hash,
@@ -109,10 +112,29 @@ def _target_statement(mark: Any) -> str:
 
     if not isinstance(mark, Mapping):
         return ""
-    record = sandbox_target_record(
-        kept_hash(str(mark.get("expected_sha256") or "")), mark.get("sandbox_sha256")
-    )
-    return " ".join(sandbox_target_lines(record, str))
+    expected = kept_hash(str(mark.get("expected_sha256") or ""))
+    record = sandbox_target_record(expected, mark.get("sandbox_sha256"))
+    if record is None and expected and mark.get("sandbox_sha256_valid") is False:
+        # A target that held no printable character: kept empty, still said.
+        record = {"expected_sha256": expected, "sandbox_sha256": "", "sandbox_sha256_valid": False}
+    return " ".join(sandbox_target_lines(record, _code))
+
+
+def _code(text: str) -> str:
+    """``text`` as one code span, fenced longer than any backtick run inside it.
+
+    Its ledger ids, run-state markers and chat-template control tokens are
+    written out first, as a sample's text is wherever a line holds it.
+    """
+    from maljan.utils.written_forms import sample_written_out
+
+    # A chat template's control token is written out as a prompt hint writes it.
+    written = sample_written_out(text).replace("<|", "\\x3c|").replace("|>", "|\\x3e")
+    longest = max((len(run) for run in re.findall(r"`+", written)), default=0)
+    if not longest:
+        return f"`{written}`"
+    fence = "`" * (longest + 1)
+    return f"{fence} {written} {fence}"
 
 
 def observed_report(report: Any) -> dict[str, Any] | None:
