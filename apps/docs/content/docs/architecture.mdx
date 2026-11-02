@@ -3910,9 +3910,17 @@ reader is scoped by that owner under the owner rule, with no special case:
 `recall`, `match_functions` and `earlier_case` read only what the job wrote,
 which is nothing before it completes, and its own case and function hashes
 are filed under the job's key, so they never replace the owner's. Without the
-option the owner is the creator's key, byte for byte as before. Its run
-summary carries `isolated_memory: true` (and its legacy Markdown a
-`**Memory**` line), absent on every other job. Every benchmark run sets it.
+option the owner is the creator's key, byte for byte as before. A container
+given the switch without an owner (the command line's unscoped memory) does
+not record it, since that job reads the whole unscoped memory. Its run
+summary carries `isolated_memory: true`, absent on every other job, and the
+benchmark's `score` and `gate` count a run as independent only when its
+summary says both switches (or its score states a fresh account's memory).
+Every benchmark run sets it. A case corpus mined from the memory
+(`scripts/knowledge/build_attck_case_kb.py`, read by the knowledge server's
+`similar_cases`) is not owner-scoped: every job reads it, an isolated one
+included. It is built from the unscoped cases alone, so no case filed under an
+owner, an isolated job's among them, is ever copied into it.
 
 Another run's ids never reach a run in its own form. Ledger ids (`ev_0007`)
 and sandbox item ids (`net:4`) are each run's own sequence numbers, so a past

@@ -201,3 +201,113 @@ class TestTheAnalysisWorker:
         db.execute = AsyncMock(return_value=row)
 
         assert await enrich_worker._job_owner(db, job.id) == seen["owner"]
+
+
+def _stored_state(container: Any) -> dict[str, Any]:
+    """A run's state with the summary its judge built, which never says isolated_memory."""
+    import time
+
+    from maljan.pipeline.stopped_run import partial_report
+
+    state: dict[str, Any] = {
+        "file_hash": INTAKE,
+        "file_name": "sample.exe",
+        "run_started_at": time.time() - 5,
+        "reports": {},
+        "isr_reports": {},
+        "evidence_ledger": [],
+        "discussion_history": [],
+        "degradation_reasons": [],
+        "stage_results": {},
+        "final_decision": "Malware",
+        "run_summary": {"degraded_mode": False, "degradation_reasons": []},
+    }
+    state["malware_report"] = partial_report(state, container, note="the run failed")
+    return state
+
+
+def _isolated_container(isolated: bool) -> Any:
+    from maljan.core.config import Settings
+    from maljan.core.container import ServiceContainer
+
+    job = uuid.uuid4()
+    return ServiceContainer(
+        Settings(_env_file=None),
+        mock=True,
+        job_id=str(job),
+        memory_owner=memory_owner_for(CREATOR, job, isolated),
+        isolated_memory=isolated,
+    )
+
+
+def _kept_report(factory: SessionFactory) -> Any:
+    from app.models.report import AnalysisReport
+
+    added = [obj for session in factory.sessions for obj in session.added]
+    [report] = [obj for obj in added if isinstance(obj, AnalysisReport)]
+    return report
+
+
+class TestEveryStoreSaysIt:
+    """The report kept after a failure and the stopped run's say it as the completed run's do."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("isolated", [True, False])
+    async def test_a_report_kept_after_a_failure(self, isolated: bool) -> None:
+        from maljan.core.config import Settings
+
+        container = _isolated_container(isolated)
+        job = fake_job()
+        factory = SessionFactory(rows_for(job, fake_sample(job.sample_id, sha256=INTAKE)))
+
+        kept = await analysis_worker.keep_the_built_report(
+            factory,
+            job_uuid=job.id,
+            job_id=str(job.id),
+            built=_stored_state(container),
+            note="the run failed after its report was built",
+            transcript=[],
+            core_settings=Settings(_env_file=None),
+            override_keys=(),
+            hash_mismatch_reason=None,
+            container=container,
+        )
+
+        assert kept is True
+        report = _kept_report(factory)
+        assert (report.run_summary.get("isolated_memory") is True) is isolated
+        assert (report.malware_report["run_summary"].get("isolated_memory") is True) is isolated
+        if not isolated:
+            assert "isolated_memory" not in report.run_summary
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("isolated", [True, False])
+    async def test_a_stopped_run(self, isolated: bool) -> None:
+        from types import SimpleNamespace
+
+        from maljan.core.config import Settings
+
+        container = _isolated_container(isolated)
+        state = _stored_state(container)
+        state.pop("malware_report")
+        app = SimpleNamespace(container=container, built_report=None, latest_state=state)
+        job = fake_job()
+        factory = SessionFactory(rows_for(job, fake_sample(job.sample_id, sha256=INTAKE)))
+
+        kept = await analysis_worker.keep_the_stopped_run(
+            factory,
+            job_uuid=job.id,
+            job_id=str(job.id),
+            app=app,
+            note="Stopped by the operator.",
+            transcript=[],
+            core_settings=Settings(_env_file=None),
+            override_keys=(),
+            hash_mismatch_reason=None,
+        )
+
+        assert kept is True
+        report = _kept_report(factory)
+        assert (report.run_summary.get("isolated_memory") is True) is isolated
+        if not isolated:
+            assert "isolated_memory" not in report.run_summary

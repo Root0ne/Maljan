@@ -18,7 +18,6 @@ import pytest
 
 from maljan.analysis.run_summary import (
     ISOLATED_MEMORY_KEY,
-    ISOLATED_MEMORY_SENTENCE,
     RunSummaryBuilder,
     with_isolated_memory,
 )
@@ -162,11 +161,10 @@ class TestTheRunSummary:
         assert ISOLATED_MEMORY_KEY not in off.to_dict()
         assert off.to_markdown() == plain.to_markdown()
 
-    def test_on_the_dict_and_the_markdown_say_so(self) -> None:
+    def test_on_the_dict_says_so(self) -> None:
         summary = RunSummaryBuilder(start_time=0.0).set_isolated_memory(True).build()
 
         assert summary.to_dict()[ISOLATED_MEMORY_KEY] is True
-        assert f"**Memory**: {ISOLATED_MEMORY_SENTENCE}" in summary.to_markdown()
 
     def test_a_stored_summary_is_marked_only_when_isolated(self) -> None:
         assert with_isolated_memory({"a": 1}, False) == {"a": 1}
@@ -191,4 +189,15 @@ class TestTheRunSummary:
 
         assert MaljanApp(mock=True).container.isolated_memory is False
         assert MaljanApp(mock=True).container.memory_owner is None
-        assert MaljanApp(mock=True, isolated_memory=True).container.isolated_memory is True
+        owner = memory_owner_for(ALICE, JOB_B, True)
+        isolated = MaljanApp(mock=True, memory_owner=owner, isolated_memory=True).container
+        assert isolated.isolated_memory is True
+        assert isolated.memory_owner == owner
+
+    def test_without_an_owner_the_switch_is_not_claimed(self) -> None:
+        from maljan.app import MaljanApp
+
+        # The job reads the whole unscoped memory: its summary must not say isolated.
+        container = MaljanApp(mock=True, isolated_memory=True).container
+        assert container.memory_owner is None
+        assert container.isolated_memory is False

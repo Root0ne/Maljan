@@ -72,15 +72,11 @@ EARLIER_RUNS_IGNORED_SENTENCE = (
     "not read; this job started without what an earlier run on this sample stored"
 )
 
-# The run summary's key, and what it says, for a job whose long-term memory
-# was its own (``ServiceContainer.isolated_memory``): no case, similar sample
-# or function-hash family another job stored was read for it, and its own
-# case was filed under the job's key (``long_term_memory.memory_owner_for``).
+# The run summary's key for a job whose long-term memory was its own
+# (``ServiceContainer.isolated_memory``): no case, similar sample or
+# function-hash family another job stored was read for it, and its own case
+# was filed under the job's key (``long_term_memory.memory_owner_for``).
 ISOLATED_MEMORY_KEY = "isolated_memory"
-ISOLATED_MEMORY_SENTENCE = (
-    "isolated; this job read nothing another job stored (no earlier run, similar sample "
-    "or function-hash family), and its own case is kept under this job alone"
-)
 
 
 def with_isolated_memory(summary: dict[str, Any], isolated: bool) -> dict[str, Any]:
@@ -1349,7 +1345,9 @@ class RunSummary:
     earlier_runs_ignored: bool = False
     # Whether the job's long-term memory was its own
     # (``ServiceContainer.isolated_memory``). Written to the dict only when it
-    # was, so every other summary reads as it always has.
+    # was, so every other summary reads as it always has. Not rendered in the
+    # Markdown: only the command line renders it, and its runs are never
+    # isolated.
     isolated_memory: bool = False
     # Each model's measured generation rate and each per-call timeout it
     # produced (``llm.generation_rate.GenerationRates.snapshot``). ``None`` on
@@ -1410,7 +1408,6 @@ class RunSummary:
                 if self.earlier_runs_ignored
                 else []
             ),
-            *([f"**Memory**: {ISOLATED_MEMORY_SENTENCE}  "] if self.isolated_memory else []),
             *stage_duration_lines(self.stages),
             *tool_latency_lines(self.tool_latency),
             "",
