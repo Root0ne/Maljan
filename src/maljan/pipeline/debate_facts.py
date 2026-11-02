@@ -12,12 +12,13 @@ things:
   for ``matches``). No call is made for them: they ride on the calls the
   debate makes anyway, the revision directive of the analysts the line names
   and the next mediation's prompt;
-- **states rule matches**: for a listed line that cites a signature-rule
-  answer (``core.rule_matches``: read by its declaration, or by its shape
-  where its tool declares no kind) and speaks of rules, it states every such
-  answer of the ledger with where it came from and what matched, "0 rule
+- **states rule matches**: when listed lines cite a rule-match answer
+  (``core.rule_matches``: read by its declaration, or by its shape where its
+  tool declares no kind) and speak of rules, it states every such answer of
+  the ledger once, with where it came from and what matched, "0 rule
   matches of 31 rules run" included, so two rule sets that disagree are both
-  heard, whichever one the line cites;
+  heard, whichever one a line cites. The fact is kept apart from the count
+  facts: no count is read from it, and the report leaves it out;
 - **says what the ledger already stated**: a blocking line that disputes a
   count itself (two numbers for one noun: "three matches" against "0 hits"),
   every count of which (a number before a plural noun: "0 hits", "31 rules") the cited
@@ -312,9 +313,9 @@ def ledger_count_facts(
         stated = _line_counts(text, names, entries, isr_reports).said
         if stated:
             facts.append(f'For the line "{text}": {"; ".join(stated)}.')
-        rules = _rule_match_fact(text, names, isr_reports, matched)
-        if rules:
-            facts.append(rules)
+    rules = _rule_match_fact([str(line) for line in lines], names, isr_reports, matched)
+    if rules:
+        facts.append(rules)
     return facts
 
 
@@ -327,7 +328,7 @@ _RULE_WORD = re.compile(r"\b(?:rules?|signatures?)\b", re.IGNORECASE)
 
 
 def _rule_match_entries(ledger: Sequence[Any]) -> list[Any]:
-    """Every signature-rule answer of the ledger, in ledger order (``core.rule_matches``)."""
+    """Every rule-match answer of the ledger, in ledger order (``core.rule_matches``)."""
     from maljan.core.rule_matches import rule_matches_of
 
     found = []
@@ -364,7 +365,10 @@ def _rule_match_part(group: Sequence[Any]) -> str:
     origin = [f"tool {held.tool}"] if held.tool else []
     if held.server:
         origin.append(f"server {held.server}")
-    origin.append(f"declared {held.source}" if held.source else "read from its answer's shape")
+    if held.declared:
+        origin.append(f"declared {held.source}" if held.source else "declared")
+    else:
+        origin.append("read from its answer's shape")
     ids = ", ".join(each.entry_id for each in group)
     count = len(held.rules)
     said = f"entr{'ies' if len(group) > 1 else 'y'} {ids} ({', '.join(origin)}) "
@@ -384,25 +388,41 @@ def _rule_match_part(group: Sequence[Any]) -> str:
 
 
 def _rule_match_fact(
-    text: str, names: Sequence[str], isr_reports: Mapping[str, Any], matched: Sequence[Any]
+    lines: Sequence[str],
+    names: Sequence[str],
+    isr_reports: Mapping[str, Any],
+    matched: Sequence[Any],
 ) -> str:
-    """Every rule-match answer of the ledger, for a line that cites one and speaks of rules.
+    """Every rule-match answer of the ledger, once, for the lines that cite one and speak of rules.
 
     A line about a rule match cites one answer, the side it argues from; the
     others may hold another rule set's matches, or none. Each answer is
-    stated with where it came from (its tool and server, and its declared
-    name or that its shape was read), so contradictory rule sets are both
+    stated with where it came from (its tool and server, and whether its
+    declaration or its shape was read), so contradictory rule sets are both
     heard; answers that say one thing (one tool, origin and result) are
-    stated once with every entry id. ``""`` for any other line. Never raises.
+    stated once with every entry id. One fact per mediation, quoting every
+    such line (so a revision told the facts naming its analyst hears it),
+    opening with :data:`~maljan.core.rule_matches.RULE_FACT_HEAD`, which
+    keeps it apart from the count facts. ``""`` when no line is such a line.
+    Never raises.
     """
+    from maljan.core.rule_matches import RULE_FACT_HEAD
+
     if not matched:
         return ""
     try:
-        bare = without_line_mark(text)
-        cited_ids = set(_cited_ids(bare, names, isr_reports))
-        cited = [held for held in matched if held.entry_id in cited_ids]
-        if not cited or not _about_rules(bare, cited):
+        about: list[str] = []
+        cited_ids: set[str] = set()
+        for text in dict.fromkeys(lines):
+            bare = without_line_mark(text)
+            ids = set(_cited_ids(bare, names, isr_reports))
+            own = [held for held in matched if held.entry_id in ids]
+            if own and _about_rules(bare, own):
+                about.append(text)
+                cited_ids |= ids
+        if not about:
             return ""
+        cited = [held for held in matched if held.entry_id in cited_ids]
         groups: dict[tuple[Any, ...], list[Any]] = {}
         for held in matched:
             groups.setdefault(_same_answer(held), []).append(held)
@@ -415,8 +435,9 @@ def _rule_match_fact(
         rest = sum(len(group) for key, group in groups.items() if key not in kept)
         if rest > 0:
             parts.append(f"and {rest} more rule-match entries")
-        return f'For the line "{text}", every rule-match answer of the ledger: {"; ".join(parts)}.'
-    except Exception:  # noqa: BLE001 — a line that cannot be read gets no fact
+        quoted = "; ".join(f'"{text}"' for text in about)
+        return f"{RULE_FACT_HEAD} {quoted}: {'; '.join(parts)}."
+    except Exception:  # noqa: BLE001 — lines that cannot be read get no fact
         return ""
 
 
@@ -587,9 +608,15 @@ _STATED_PART = re.compile(r"(ev_\d++)(?: \([^)]*+\))? states (.*)", re.DOTALL)
 
 def fact_atoms(facts: Iterable[str]) -> frozenset[tuple[str, str]]:
     """``(entry id, "key = value")`` for every count these stated facts carry."""
+    from maljan.core.rule_matches import is_rule_fact
+
     atoms: set[tuple[str, str]] = set()
     for fact in facts:
         text = str(fact)
+        # The rule-match fact states no count; the lines it quotes are the
+        # mediator's words.
+        if is_rule_fact(text):
+            continue
         head = text.rfind('": entry ev_')
         body = text[head + 3 :] if head >= 0 else text
         body = body.removeprefix("entry ").removesuffix(".")

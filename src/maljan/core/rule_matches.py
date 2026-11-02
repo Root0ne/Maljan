@@ -1,4 +1,4 @@
-"""The signature-rule matches a ledger entry's answer holds, by declaration or by its shape.
+"""The rule matches a ledger entry's answer holds, by declaration or by its shape.
 
 A tool whose declaration names the ``signature_rules`` kind is read where it
 says: its rows (``ToolFacts.rows``, else the ``matches`` field the tools of
@@ -21,6 +21,13 @@ all. An empty match list is read as "no rule matched" only where its key
 names rules or the answer beside it counts the rules it ran
 (``rule_count``), so an empty list of anything else is never read as a rule
 scan. A tool that declares another kind is read as that kind, never here.
+
+What the shape reading finds is "rule matches" and nothing more: a byte
+signature's, an event rule's, an indicator list's or a technique catalogue's
+rows read alike, each named by its entry's tool and server, never sorted
+into a kind. Every rule name is cleaned before anything states it
+(:func:`clean_rule_name`): it comes from the tool's answer, which a sample's
+contents can shape.
 """
 
 from __future__ import annotations
@@ -31,7 +38,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-# The kind whose rows are rule matches over the sample's bytes.
+# The declared kind read here: a rule-match list.
 SIGNATURE_RULES = "signature_rules"
 # The field the tools of the kind share for their rows, where a declaration names none.
 _SHARED_ROWS = "matches"
@@ -49,6 +56,20 @@ _COUNT_WORDS = frozenset({"count", "counts", "total", "totals", "num", "number",
 _RULE_IDENTIFIER = re.compile(r"[A-Za-z_][\w.:\-]{0,127}")
 # The longest rule name read from a row's field.
 _RULE_NAME_CHARS = 200
+# What a stated rule name may hold: a cleaned name keeps word characters,
+# dots, colons, hyphens and single spaces, at most this long; anything else
+# (a semicolon, a quote, a line break) becomes "_".
+_RULE_NAME_KEPT = 64
+_NOT_IN_A_NAME = re.compile(r"[^\w.:\- ]")
+# The words that open the debate's fact of rule-match answers
+# (``pipeline.debate_facts``): a fact opening with them is that fact, never a
+# count fact, whatever lines it quotes.
+RULE_FACT_HEAD = "Every rule-match answer of the ledger, for the listed lines"
+# Deliberately not read, so no other list is taken for a match (false
+# negatives, by design): a rule name with spaces or other characters standing
+# as a key or a bare list item ({"matched_rules": ["a b"]}); a map of rule
+# names to counts ({"matched_rules": {"r1": 1}}); a list of rules each
+# marked matched or not ({"rules": [{"name": "a", "matched": true}]}).
 # How deep the answer is read for a match list, and how many of its nodes:
 # a reading linear in the answer and bounded whatever its size.
 _DEPTH = 6
@@ -57,7 +78,7 @@ _NODES = 20_000
 
 @dataclass(frozen=True)
 class RuleMatches:
-    """One ledger entry's signature-rule matches: one rule name per matched row.
+    """One ledger entry's rule matches: one cleaned rule name per matched row.
 
     ``rule_count`` is how many rules the answer says it ran, where it says;
     ``declared`` whether the tool's declaration said where the rows are,
@@ -72,6 +93,20 @@ class RuleMatches:
     rule_count: int | None
     declared: bool
     source: str = ""
+
+
+def clean_rule_name(name: Any) -> str:
+    """A rule name as it may be stated: whitespace collapsed, other characters "_", capped.
+
+    ``"?"`` for a name that holds nothing.
+    """
+    text = " ".join(str(name if name is not None else "").split())
+    return _NOT_IN_A_NAME.sub("_", text)[:_RULE_NAME_KEPT].strip() or "?"
+
+
+def is_rule_fact(fact: Any) -> bool:
+    """Whether a debate fact is the one stating rule-match answers (:data:`RULE_FACT_HEAD`)."""
+    return str(fact).startswith(RULE_FACT_HEAD)
 
 
 def _words(key: Any) -> list[str]:
@@ -233,12 +268,13 @@ def _declared_rules(answer: Any, facts: Any) -> list[str] | None:
         named = first(row, path) if path else None
         if named is None and isinstance(row, Mapping):
             named = row.get("rule") or row.get("name")
-        names.append(str(named) if named not in (None, "") else "?")
+        # An unnamed row is cleaned to "?".
+        names.append(str(named) if isinstance(named, (str, int)) else "")
     return names
 
 
 def rule_matches_of(entry: Any) -> RuleMatches | None:
-    """The signature-rule matches one ok ledger entry's answer holds, or ``None``.
+    """The rule matches one ok ledger entry's answer holds, or ``None``.
 
     By the declaration the entry stored (``core.declared_reading``) where it
     names the kind; by the answer's shape where it names no kind; never for
@@ -270,12 +306,13 @@ def rule_matches_of(entry: Any) -> RuleMatches | None:
     if declared and facts is not None:
         # The display name is read without a kind (``kind_free_facts``).
         named = kind_free_facts(entry).display_name
-        source = str(named or getattr(facts, "source", "") or "")
+        held = named or getattr(facts, "source", "") or ""
+        source = clean_rule_name(held) if held else ""
     return RuleMatches(
         entry_id=str(_field(entry, "id") or _field(entry, "entry_id") or ""),
-        tool=str(_field(entry, "tool") or ""),
-        server=str(_field(entry, "server") or ""),
-        rules=tuple(rules),
+        tool=clean_rule_name(_field(entry, "tool")) if _field(entry, "tool") else "",
+        server=clean_rule_name(_field(entry, "server")) if _field(entry, "server") else "",
+        rules=tuple(clean_rule_name(rule) for rule in rules),
         rule_count=ran,
         declared=declared,
         source=source,
