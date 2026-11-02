@@ -1849,9 +1849,10 @@ class ReportComposer:
         messages: on the structured path each section sends its own schema as
         a tool, so only sections answering with the same schema (the prose
         subsections) share a prefix; on the manual path no section sends a
-        tool, and every section shares one. A group of one shares nothing
-        and is left out, so its request carries no breakpoint and pays no
-        cache write. ``manual`` asks for the manual path's groups whatever
+        tool, and every section shares one. Sections sent on the manual path
+        from their first call (:meth:`_schema_tool_offered`) are one group.
+        A group of one shares nothing and is left out, so its request carries
+        no breakpoint and pays no cache write. ``manual`` asks for the manual path's groups whatever
         path the sections are first sent on: a structured answer that is not
         read is asked again there.
         """
@@ -1862,6 +1863,7 @@ class ReportComposer:
             not manual
             and structured_output_supported_for_llm(llm)
             and not spend_ceiling_set(getattr(self, "token_ledger", None))
+            and self._schema_tool_offered()
         )
         members: dict[str, list[int]] = {}
         for index, planned in enumerate(plan):

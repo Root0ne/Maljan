@@ -2386,7 +2386,10 @@ method replaces a model's bound tools and cannot read a reply that reads).
 The composer's sections, the narrative round and the judge's technique
 question are then asked for their JSON in text from the first call, with
 `read_evidence` and no schema tool, and the model says so once in the log; the
-answer is read by the same parser that read it from the text before. A schema offered alone (the
+answer is read by the same parser that read it from the text before. Every
+section so sends the same tools, system prompt and head, one group whose
+first section is sent alone and whose others follow once its answer has
+begun, so they read the head it cached. A schema offered alone (the
 mediation's extraction) and every other provider keep the tool.
 
 ### The judge's tool loop is cached as an analyst's is
