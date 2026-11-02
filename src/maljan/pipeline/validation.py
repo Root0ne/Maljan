@@ -7287,14 +7287,15 @@ _STATE_NEGATION_OPENING_RE = re.compile(r"^\W*(?:no|not|never)\b", re.IGNORECASE
 # "never seen"): a regular one, or one of the common irregular ones, named
 # whole (an "-en" or "-wn" ending alone also ends "even", "often", "own").
 _STATE_PARTICIPLE_RE = re.compile(
-    r"[a-z]{2,}ed|seen|shown|kept|held|sent|found|given|taken|written|made|built|put|set"
+    r"[a-z]{2,}ed|seen|shown|kept|held|sent|found|taken|written|made|built|put|set"
     r"|done|run|left|drawn|chosen|bought|meant|told",
     re.IGNORECASE,
 )
 # The words after an opening negation, or after its "yet", that leave the
-# state undecided ("not decided", "not yet decided", "not clear"): plain
-# English words of indecision. Such a state says nothing of the table's, and
-# the model is asked.
+# state undecided ("not decided", "not yet decided", "not clear", "not
+# confirmed", "not given"): plain English words of indecision, or of a check
+# not yet made. Such a state says nothing of the table's, and the model is
+# asked.
 _STATE_UNDECIDED_WORDS = frozenset(
     {
         "decided",
@@ -7307,6 +7308,17 @@ _STATE_UNDECIDED_WORDS = frozenset(
         "resolved",
         "assessed",
         "evaluated",
+        "confirmed",
+        "verified",
+        "specified",
+        "stated",
+        "established",
+        "given",
+        "provided",
+        "reviewed",
+        "checked",
+        "finalized",
+        "investigated",
     }
 )
 # A named state that says the value is published.

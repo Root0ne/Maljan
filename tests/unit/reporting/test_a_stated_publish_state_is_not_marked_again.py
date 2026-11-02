@@ -117,7 +117,24 @@ class TestAStatedState:
             "(publish state: not a concern)",
             "(publish state: no concern here)",
             "(publish state: never mind)",
-        ],
+        ]
+        + [
+            f"(publish state: not {word})"
+            for word in (
+                "confirmed",
+                "verified",
+                "specified",
+                "stated",
+                "established",
+                "given",
+                "provided",
+                "reviewed",
+                "checked",
+                "finalized",
+                "investigated",
+            )
+        ]
+        + ["(publish state: not yet confirmed)"],
     )
     def test_a_negation_of_an_article_a_noun_or_indecision_is_asked_about(
         self, written: str
