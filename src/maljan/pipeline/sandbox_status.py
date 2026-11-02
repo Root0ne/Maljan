@@ -126,10 +126,10 @@ def _code(text: str) -> str:
     Its ledger ids, run-state markers and chat-template control tokens are
     written out first, as a sample's text is wherever a line holds it.
     """
-    from maljan.utils.written_forms import sample_written_out
+    from maljan.utils.written_forms import sample_written_out, template_tokens_written_out
 
     # A chat template's control token is written out as a prompt hint writes it.
-    written = sample_written_out(text).replace("<|", "\\x3c|").replace("|>", "|\\x3e")
+    written = template_tokens_written_out(sample_written_out(text))
     longest = max((len(run) for run in re.findall(r"`+", written)), default=0)
     if not longest:
         return f"`{written}`"

@@ -126,7 +126,12 @@ def hint_escaped(text: str) -> str:
     they are, so ``std::vector<int>::push_back`` and ``operator<<`` read and
     copy as the names they are.
     """
-    return pack_escaped(text).replace("<|", "\\x3c|").replace("|>", "|\\x3e")
+    return template_tokens_written_out(pack_escaped(text))
+
+
+def template_tokens_written_out(text: str) -> str:
+    """``text`` with a chat template's control-token brackets (``<|``, ``|>``) written out."""
+    return text.replace("<|", "\\x3c|").replace("|>", "|\\x3e")
 
 
 def markers_written_out(text: str) -> str:
