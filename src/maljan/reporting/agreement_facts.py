@@ -4,12 +4,16 @@ Section 5 is written from the code and the tool answers, and the round asked a
 section 5 sentence only against the decoded texts bound to an API argument: a
 sentence that called a behaviour absent while the routine behind a read gate
 was never read (T-404), or that blamed "two decompile failures" for a routine
-a later call decompiled (T-396), had no fact to be asked against. Two more are
-read here, from the ledger alone:
+a later call decompiled (T-396), had no fact to be asked against; nor had a
+sentence that called a routine's body "not read" or "not in this evidence"
+while an entry lists its code (T-494). Three more are read here, from the
+ledger alone:
 
 * **An unread callee** (``agents.function_callees``): a routine a read routine
   calls, by a decompiled listing or a function index answer, that no entry
   reads.
+* **A listed routine** (``agents.function_callees.read_routines``): a routine
+  whose code an entry lists (decompiled or disassembled), with those entries.
 * **A failed call answered later**: a call for an address that failed, and the
   first later call that answered for the same address, of the same tool or,
   for a call that lists code, any later listing of that function.
@@ -24,7 +28,13 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from maljan.agents.function_callees import UnreadCallee, listing_is_error, unread_callees
+from maljan.agents.function_callees import (
+    UnreadCallee,
+    call_edges,
+    listing_is_error,
+    read_routines,
+    unread_callees,
+)
 from maljan.agents.function_map import build_function_map, one_spelling
 from maljan.core.undeclared_tools import (
     entry_address_arguments,
@@ -39,7 +49,14 @@ from maljan.pipeline.validation import (
 )
 from maljan.schemas.evidence import answer_not_shown
 
-__all__ = ["AnsweredLater", "LedgerFacts", "answered_later", "ledger_facts", "spelled"]
+__all__ = [
+    "AnsweredLater",
+    "LedgerFacts",
+    "ListedRoutine",
+    "answered_later",
+    "ledger_facts",
+    "spelled",
+]
 
 
 @dataclass(frozen=True)
@@ -56,12 +73,21 @@ class AnsweredLater:
 
 
 @dataclass(frozen=True)
+class ListedRoutine:
+    """A routine at ``address`` whose code the entries ``listed_in`` list."""
+
+    address: int
+    listed_in: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class LedgerFacts:
     """The facts read off one ledger, and the image bases its answers stated."""
 
     unread: tuple[UnreadCallee, ...] = ()
     answered: tuple[AnsweredLater, ...] = ()
     image_bases: tuple[int, ...] = ()
+    listed: tuple[ListedRoutine, ...] = ()
 
 
 def _asked(entry: Any) -> list[int]:
@@ -145,14 +171,20 @@ def answered_later(entries: Iterable[Any], image_bases: Sequence[int] = ()) -> l
 
 
 def ledger_facts(entries: Iterable[Any]) -> LedgerFacts:
-    """The unread callees and the failed calls answered later, read off ``entries``."""
+    """The unread callees, the failed calls answered later and the listed routines, read
+    off ``entries``."""
     entries = list(entries)
     found = build_function_map(entries, None, ())
     bases = tuple(found.image_bases)
+    edges = call_edges(entries)
     return LedgerFacts(
-        unread=tuple(unread_callees(entries, found)),
+        unread=tuple(unread_callees(entries, found, edges)),
         answered=tuple(answered_later(entries, bases)),
         image_bases=bases,
+        listed=tuple(
+            ListedRoutine(address=address, listed_in=tuple(listed))
+            for address, listed in sorted(read_routines(entries, found, edges).items())
+        ),
     )
 
 

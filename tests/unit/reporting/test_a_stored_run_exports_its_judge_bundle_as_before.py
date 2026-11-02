@@ -56,7 +56,10 @@ STORED_EXPORTS = {
 # ``indicates`` edge per indicator related to no malware object (the similarity
 # digests and benign-typed ones aside), each named by the report object, and
 # nothing else (run4's export over the judge's bundle gains none).
-HAIKU4_RENDERS = ("0f6dfb3b3023d7e9", "8e00936f17be76df", "830330837272aa44")
+# Re-pinned when the commands table came to list only what descends from a
+# process running the sample (T-494): explorer.exe under sihost.exe leaves the
+# table for a line naming its pid; the STIX export did not change.
+HAIKU4_RENDERS = ("4d0f7b8660292310", "693cc953c7f6e694", "830330837272aa44")
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")

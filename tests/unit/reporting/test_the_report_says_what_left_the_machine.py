@@ -250,12 +250,15 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # Re-pinned when a decoded text the pack spells with a closing ``\x5c`` came to
 # print as the text (T-493): run4, run5 and run7 print ``\Registry\Machine\``
 # where they printed ``\Registry\Machine\x5c``, and nothing else changed.
+# haiku4 and local8 re-pinned when the commands table came to list only what
+# descends from a process running the sample (T-494): explorer.exe under
+# sihost.exe leaves the table for a line naming its pid, and nothing else changed.
 STORED_RENDERS = {
     "run7": ("87ad1594f3cbc6ea", "125193da10162be9"),
     "run5": ("4fbb0b856aea7f8e", "60e2582c1e229b35"),
     "run4": ("581eb11ec3924a68", "75af799857a50862"),
-    "local8": ("9a23cffd548254ce", "ad6790825e501610"),
-    "haiku4": ("0f6dfb3b3023d7e9", "8e00936f17be76df"),
+    "local8": ("74c9cee38f6d57b0", "214cc3a297d1dda7"),
+    "haiku4": ("4d0f7b8660292310", "693cc953c7f6e694"),
 }
 
 

@@ -1049,11 +1049,7 @@ class MarkdownRenderer:
 
         # 5.5 Discovery.
         measured = []
-        commands = [
-            node
-            for node in _spawned(distinct_processes(dynamic.process_tree if dynamic else []))
-            if node.command_line
-        ]
+        commands, others = started_by_the_sample(report)
         if commands:
             measured.extend([f"_{OBSERVED}:_ commands the sample started", ""])
             measured.append(_row("PID", "Command line"))
@@ -1061,6 +1057,9 @@ class MarkdownRenderer:
             for node in commands[:20]:
                 measured.append(_row(node.pid, _code_span(_whole(ctx.plain(node.command_line)))))
             measured.extend(_left_out(len(commands), 20, "commands"))
+        elif others:
+            measured.append(f"_{OBSERVED}:_ no command line below a process that runs the sample.")
+        measured.extend(not_started_by_the_sample_line(others))
         blocks.append(
             _subsection(
                 "5.5",
@@ -5922,14 +5921,55 @@ def _header_facts(report: MalwareReport) -> dict[str, Any]:
     return facts
 
 
-def _spawned(roots: list[ProcessNode]) -> list[ProcessNode]:
-    """Every process below the roots: the ones the sample started."""
-    out: list[ProcessNode] = []
-    for root in roots:
-        for child in root.children:
-            out.append(child)
-            out.extend(_spawned([child]))
-    return out
+def started_by_the_sample(report: MalwareReport) -> tuple[list[ProcessNode], list[ProcessNode]]:
+    """The processes with a command line the sample started, and the others below a root.
+
+    A process the sample started descends, in the process tree, from a process
+    that runs the submitted file (its name or its digest,
+    ``sandbox_report.runs_the_submitted_file``). The sandbox's mark alone never
+    makes a process the sample's: a desktop process it marks, under a root that
+    runs none of the sample (explorer.exe under sihost.exe), is no command the
+    sample started. The second list is every other process below a root with
+    a command line, which a table of the sample's commands states it leaves out.
+    """
+    from maljan.schemas.sandbox_report import runs_the_submitted_file
+
+    dynamic = report.dynamic
+    file_name = str(report.identity.file_name or "")
+    sha256 = str(report.identity.hashes.sha256 or "")
+    started: list[ProcessNode] = []
+    others: list[ProcessNode] = []
+
+    def _walk(node: ProcessNode, below_the_sample: bool) -> None:
+        runs = bool(file_name or sha256) and runs_the_submitted_file(
+            node.name, node.command_line, file_name, sha256
+        )
+        for child in node.children:
+            if child.command_line:
+                (started if below_the_sample or runs else others).append(child)
+            _walk(child, below_the_sample or runs)
+
+    for root in distinct_processes(dynamic.process_tree if dynamic else []):
+        _walk(root, False)
+    return started, others
+
+
+def not_started_by_the_sample_line(
+    others: list[ProcessNode], tree: str = "the process tree"
+) -> list[str]:
+    """The line a table of the sample's commands ends with for the processes it leaves out,
+    naming where ``tree`` lists every process."""
+    if not others:
+        return []
+    pids = ", ".join(str(node.pid) for node in others[:10])
+    more = f" and {len(others) - 10:,} more" if len(others) > 10 else ""
+    one = len(others) == 1
+    return [
+        "",
+        f"_Not listed: {len(others):,} command line{'' if one else 's'} the sandbox recorded "
+        f"under a process that runs none of the sample (pid{'' if one else 's'} {pids}{more}); "
+        f"{tree} lists every process._",
+    ]
 
 
 def _as_is(text: str) -> str:

@@ -1,15 +1,16 @@
 """One question once the report body is written: does a passage say otherwise than section 5?
 
 The key findings, the summary, the execution flow, the host identifiers, the
-background and the composed sections shown no function's code (the cipher
-table, the channel table, the packing prose) are written from the analysts'
-claims, at the same time as section 5 is written from the code and the tool
-answers; none of them is shown section 5. A claim that calls a routine's body
-"not read", a key's use "not established" or a mutex name "open" is that
-analyst's view, and a writer shown only the claim repeats it beside a section
-5 that states the thing (T-390). The absence check (``validation.
-ledger_absence_contradictions``) decides such a sentence only where it names
-an address, an entry or a value; "the sleep constants" names none.
+background, the ATT&CK table's procedures and the composed sections shown no
+function's code (the cipher table, the channel table, the packing prose) are
+written from the analysts' claims, at the same time as section 5 is written
+from the code and the tool answers; none of them is shown section 5. A claim
+that calls a routine's body "not read", a key's use "not established" or a
+mutex name "open" is that analyst's view, and a writer shown only the claim
+repeats it beside a section 5 that states the thing (T-390). The absence
+check (``validation.ledger_absence_contradictions``) decides such a sentence
+only where it names an address, an entry or a value; "the sleep constants"
+names none.
 
 So, after every section is written, the reporter's model is shown, once:
 
@@ -17,9 +18,10 @@ So, after every section is written, the reporter's model is shown, once:
   argument (``report.bound_values``), in the words every surface that
   publishes it uses (``call_bindings.binding_words``); each routine a read
   routine calls whose code no entry lists, a fact of its own where a passage
-  names it (the rest counted), and each failed call for an address with the
-  later call that answered for it (``reporting.agreement_facts``), read off
-  the ledger;
+  names it (the rest counted), each routine whose code an entry lists where a
+  passage calls code it names not read (``_said_unread``), and each failed
+  call for an address with the later call that answered for it
+  (``reporting.agreement_facts``), read off the ledger;
 - section 5's passages written from the code: each prose subsection and each
   row of the configuration, command and flag tables, with the ids it cites;
 - the debate's mediations, in round order, as the mediator wrote them;
@@ -29,12 +31,13 @@ It lists each sentence of a passage written without the code that calls
 absent, unknown or open, or states the opposite of, what a section 5 passage,
 a fact or a closed debate line states, and each sentence of a section 5
 passage a fact contradicts; names the sources; and keeps the sentence or
-rewrites it. Nothing here reads a sentence's words: which sentences, and on
-which subject, is the model's call. A sentence of a passage written without
-the code may be rewritten on any source; a sentence of a section 5 prose
-passage only on the platform's facts, never on another model's words (a
-section 5 sentence was pulled toward an analyst's wrong claim when it could
-be), and kept, it is listed, the listing recorded as the model's answer; a
+rewrites it. Nothing here reads a sentence's words to decide: which
+sentences, and on which subject, is the model's call (the words that call
+code not read only choose which listed routines are shown). A sentence of a
+passage written without the code may be rewritten on any source; a sentence of
+a section 5 prose passage only on the platform's facts, never on another
+model's words (a section 5 sentence was pulled toward an analyst's wrong claim
+when it could be), and kept, it is listed, the listing recorded as the model's answer; a
 table cell's value is shown for reading, and a sentence of one is listed and
 kept. Code checks the answer's structure: the passage is one it
 was shown, the copied text is one whole sentence of it standing there once,
@@ -402,6 +405,25 @@ def passages_of(
                 CLAIM_LED,
             )
         )
+    if ta is not None:
+        # The ATT&CK table's procedures are written from the claims, one sentence
+        # each, beside section 5 (T-494): asked like every other such passage.
+        for index, row in enumerate(ta.technique_procedures, 1):
+            if not row.procedure.strip():
+                continue
+            uncoded.append(
+                Passage(
+                    id=f"procedures.{index}",
+                    label=(
+                        "ATT&CK table, the procedure for "
+                        f"{_sample_text(_one_line(row.technique_id))}"
+                    ),
+                    text=row.procedure,
+                    kind=CLAIM_LED,
+                    cites=_ids(row.evidence_refs, row.procedure),
+                    write=_setter(row, "procedure"),
+                )
+            )
     if report.intro_background.strip():
         uncoded.append(
             Passage(
@@ -416,6 +438,11 @@ def passages_of(
     shown = [*facts, *coded, *debate, *uncoded]
     facts.extend(_ledger_passages(entries, shown))
     return [*facts, *coded, *debate, *uncoded]
+
+
+def _one_line(text: Any, limit: int = 40) -> str:
+    """A short field as one line: whitespace collapsed, cut at ``limit`` characters."""
+    return " ".join(str(text or "").split())[:limit]
 
 
 def _sample_text(text: Any) -> str:
@@ -462,6 +489,50 @@ def _offsets(addresses: Sequence[int], bases: Sequence[int]) -> str:
 _NOT_LISTED = "no entry lists its code (decompiled or disassembled)"
 
 
+# Words that call code not read, not listed or not in the evidence: what makes a
+# listed routine a passage names a fact worth showing (``_said_unread``). Which
+# sentence the listing contradicts is still the model's call.
+_SAID_UNREAD = re.compile(
+    r"\b(?:not|never)\s+(?:yet\s+)?(?:been\s+)?(?:read|decompiled|disassembled|listed|examined"
+    r"|opened|obtained)\b|\bnot\s+(?:in|part\s+of)\s+(?:this|the|my)\s+(?:evidence|ledger|rows)\b"
+    r"|\bunread\b",
+    re.IGNORECASE,
+)
+
+
+# The clause the platform adds to a section 5 sentence on an unread callee
+# (``unread_callee_clause``): its callers are read routines, named by the fact.
+_UNREAD_CLAUSE = re.compile(
+    r"the routine at [^;]*?, called by the read routines? at [^;]*?, has no listed code "
+    r"\(decompiled or disassembled\)",
+    re.IGNORECASE,
+)
+
+
+def _said_unread(passages: Iterable[Passage]) -> set[int]:
+    """Every address a passage names in a sentence that, or whose next sentence ("Its body
+    was not read."), calls code not read or not in the evidence; the platform's own clause
+    on an unread callee names none. One pass over each text."""
+    out: set[int] = set()
+    for passage in passages:
+        starts, _ends = _sentence_units(_UNREAD_CLAUSE.sub("", passage.text))
+        ordered = [s for _at, s in sorted((at, s) for s, ats in starts.items() for at in ats)]
+        said = [bool(_SAID_UNREAD.search(sentence)) for sentence in ordered]
+        for index, sentence in enumerate(ordered):
+            if said[index] or (index + 1 < len(ordered) and said[index + 1]):
+                out.update(_addresses_written(sentence))
+    return out
+
+
+# How a listed routine's code was read, in the facts' words.
+_LISTED_AS = "decompiled or disassembled"
+
+
+def listed_routine_clause(routine: str, ids: str, verb: str) -> str:
+    """The clause a section 5 sentence qualified on a listed routine gains, in its words."""
+    return f"{ids} {verb} the code of the routine at {routine} ({_LISTED_AS})"
+
+
 def unread_callee_clause(routine: str, callers: str, plural: str) -> str:
     """The clause a section 5 sentence qualified on an unread callee gains, in its words.
 
@@ -475,13 +546,18 @@ def unread_callee_clause(routine: str, callers: str, plural: str) -> str:
 
 
 def _ledger_passages(entries: Iterable[Any], shown: Sequence[Passage]) -> list[Passage]:
-    """The ledger's facts as passages: the unread callees, then each failed call answered later.
+    """The ledger's facts as passages: the unread callees, the listed routines, then each
+    failed call answered later.
 
     An unread callee is a fact of its own where a passage shown names its
     address; the ones no passage names are one count, citing nothing: a
     routine no passage names bears on no sentence by its address, and listing
-    each one per caller cost the prompt more than every fact of its own. Which
-    passage a fact bears on is the model's call. The addresses are the
+    each one per caller cost the prompt more than every fact of its own. A
+    routine whose code an entry lists is a fact only where a passage shown
+    names it in a sentence that, or whose next sentence, calls code not read or
+    not in the evidence (:func:`_said_unread`): it bears on such a sentence
+    (T-494) and on no other, and every read routine a passage names would be
+    most of the prompt. Which passage a fact bears on is the model's call. The addresses are the
     platform's own; a tool's name is the run's record of a server's word, one
     quoted value.
     """
@@ -529,6 +605,26 @@ def _ledger_passages(entries: Iterable[Any], shown: Sequence[Passage]) -> list[P
                     f"call, none of them named by a passage; for each, {_NOT_LISTED}"
                 ),
                 kind=FACT,
+            )
+        )
+    listed_facts = 0
+    said_unread = _said_unread(shown) if found.listed else set()
+    for listed in found.listed:
+        cites = _ids(listed.listed_in)
+        if not cites or not _spelled_both([listed.address], bases) & said_unread:
+            continue
+        ids = ", ".join(sorted(cites))
+        verb = "lists" if len(cites) == 1 else "list"
+        listed_facts += 1
+        out.append(
+            Passage(
+                id=f"listed.{listed_facts}",
+                label="routine whose code an entry lists",
+                text=f"{spelled(listed.address, bases)}: {ids} {verb} its code ({_LISTED_AS})",
+                kind=FACT,
+                cites=cites,
+                addresses=_spelled_both([listed.address], bases),
+                qualifier=listed_routine_clause(_offsets([listed.address], bases), ids, verb),
             )
         )
     for index, link in enumerate(found.answered, 1):
@@ -772,7 +868,7 @@ def _row_violations(
                     f"states otherwise than {safe_finding_value(passage.id)}, but "
                     + (
                         "a section 5 passage is answered by a platform fact (bound.N, "
-                        "unread.N, answered.N) alone."
+                        "unread.N, listed.N, answered.N) alone."
                         if passage.kind == SECTION_5
                         else "only the facts, the section 5 passages and the debate rounds "
                         "listed are sources."
@@ -1057,7 +1153,9 @@ SYSTEM_PROMPT = (
     "does not do anything; it contradicts only a sentence that says that code was read, or "
     "that calls a behaviour absent from the sample on the grounds of the code read; it never "
     "contradicts what another entry (a rule match, an emulation, a call graph) states about "
-    "that routine. A call a later call answered did not fail for good. "
+    "that routine. A routine an entry lists was read: the listing contradicts a sentence that "
+    "calls that routine's code or body not read, not shown or not in the evidence. "
+    "A call a later call answered did not fail for good. "
     "A debate round is the mediator's words: a line it closed counts as settled only "
     "with the entry it closed it on. " + QUOTED_VALUE_STATEMENT + "\n"
     "List each sentence of a passage written without the code that calls absent, unknown, "
