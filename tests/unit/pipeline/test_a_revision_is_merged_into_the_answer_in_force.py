@@ -422,8 +422,8 @@ class TestAContestedClaimLeftUnansweredIsNamed:
 
         assert merge.merged is not None
         crypto = merge.merged.claims[-1]
-        assert crypto.carried_contested_by == ["L5"]
-        assert "contested by L5 and not answered" in claim_summary_line(3, crypto)
+        assert crypto.carried_contested_by == ["L5 (round 3)"]
+        assert "contested by L5 (round 3) and not answered" in claim_summary_line(3, crypto)
 
     def test_a_claim_the_revision_restates_is_never_withdrawn_by_rule(self) -> None:
         answer = _block(MUTEX) + _block(FIXED_BEACON, "T1071.001")
@@ -493,16 +493,90 @@ class TestAContestedClaimLeftUnansweredIsNamed:
 
         stands = out["isr_reports"]["static"].claims
         assert [c.claim for c in stands] == [MUTEX, CRYPTO]
-        assert stands[1].carried_contested_by == ["L2"]
+        assert stands[1].carried_contested_by == ["L2 (round 2)"]
         [row] = [r for r in out["dropped_claims"] if r["claim"] == BEACON]
         assert row["missing"] and "withdrawn by rule" in row["sentence"]
         assert any("blocking line L1" in s for s in out["revision_replacements"])
+
+    def test_a_claim_the_revision_argues_in_its_disputes_is_carried_not_withdrawn(self) -> None:
+        answer = _block(MUTEX)
+        revision = _isr(answer)
+        revision.dissent_items = ["I keep claim 2: the listing the line cites is another call."]
+
+        merge = merge_revision(_isr(THREE), revision, answer, 3, {2: [(4, True)]})
+
+        assert merge.withdrawn_by_rule == ()
+        assert merge.merged is not None
+        beacon = next(c for c in merge.merged.claims if c.claim == BEACON)
+        assert beacon.carried_contested_by == ["L4 (round 3)"]
+
+    def test_a_dispute_that_restates_the_claim_answers_the_line_too(self) -> None:
+        answer = _block(MUTEX)
+        revision = _isr(answer)
+        revision.dissent_items = [f"The beacon stands as written: {BEACON}"]
+
+        merge = merge_revision(_isr(THREE), revision, answer, 3, {2: [(4, True)]})
+
+        assert merge.withdrawn_by_rule == ()
+
+
+class TestAShortFormNamesOneAnalystOnly:
+    PARTICIPANTS = (
+        "triage",
+        "static",
+        "all_tools_static_r2",
+        "all_tools_qu1cksc0pe",
+        "all_tools_reverser_ghidra",
+        "dynamic",
+        "network",
+    )
+
+    def _named(self, line: str) -> dict[str, Any]:
+        from maljan.pipeline.debate_facts import claims_named_by_lines
+
+        return {
+            name: sorted(claims)
+            for name, claims in claims_named_by_lines([line], list(self.PARTICIPANTS)).items()
+        }
+
+    def test_a_whole_name_is_that_analyst_even_beside_a_longer_one(self) -> None:
+        line = (
+            "[analysts: ALL_TOOLS_STATIC_R2 ANALYST] Static claim 3 says X, versus Static R2 "
+            "claim 5. [blocking: x]"
+        )
+
+        # "Static claim 3" is the static analyst's, which the field does not name.
+        assert self._named(line) == {"all_tools_static_r2": [5]}
+
+    def test_both_analysts_in_the_field_keep_their_own_numbers(self) -> None:
+        line = (
+            "[analysts: STATIC ANALYST, ALL_TOOLS_STATIC_R2 ANALYST] Static claim 3 says X, "
+            "versus Static R2 claim 5. [blocking: x]"
+        )
+
+        assert self._named(line) == {"static": [3], "all_tools_static_r2": [5]}
+
+    def test_a_short_word_of_prose_names_no_analyst(self) -> None:
+        line = (
+            "[analysts: ALL_TOOLS_QU1CKSC0PE ANALYST, ALL_TOOLS_STATIC_R2 ANALYST] The ledger "
+            "runs contrary to claim 7. [blocking: x]"
+        )
+
+        assert self._named(line) == {}
+
+    def test_a_whole_part_of_two_letters_still_names_its_analyst(self) -> None:
+        line = (
+            "[analysts: ALL_TOOLS_STATIC_R2 ANALYST] As stated in claim 12 of the triage report, "
+            "R2's claim 3 is wrong. [blocking: q]"
+        )
+
+        assert self._named(line) == {"all_tools_static_r2": [3]}
 
 
 def _carried_claim() -> ClaimEvidence:
     claim = ClaimEvidence(claim="A.", evidence_ref="[ev_0001]", confidence=0.5)
     claim.carried_since_round = 2
-    claim.carried_contested_by = ["L3"]
+    claim.carried_contested_by = ["L3 (round 2)"]
     return claim
 
 
@@ -513,7 +587,7 @@ class TestACarriedClaimSaysSoOnEverySurface:
         [row] = claims_to_payload([_carried_claim()])
 
         assert row["carried_since_round"] == 2
-        assert row["carried_note"].endswith("contested by L3 and not answered")
+        assert row["carried_note"].endswith("contested by L3 (round 2) and not answered")
 
     def test_an_unmarked_claim_s_payload_is_unchanged(self) -> None:
         from maljan.pipeline.events import claims_to_payload

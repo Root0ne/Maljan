@@ -1605,32 +1605,48 @@ _CLAIM_REFERENCE = re.compile(
 )
 _WORD_BEFORE = re.compile(r"[A-Za-z][A-Za-z0-9]*+")
 # Words a short form of a name may carry that are no part of the name.
-_FILLER_WORDS = frozenset({"analyst", "analysts", "the", "s"})
+_FILLER_WORDS = frozenset(
+    {
+        "analyst", "analysts", "the", "s", "to", "all", "in", "as", "of", "and", "versus",
+        "per", "its",
+    }
+)  # fmt: skip
+# How long a word of a short form must be to open a part of a name, unless it
+# is a whole part ("r2").
+_SHORT_WORD_LENGTH = 3
 
 
-def _short_named(text: str, start: int, field_names: Sequence[str]) -> str | None:
-    """The one field analyst the words just before ``start`` name in a short form, or ``None``.
+def _short_named(text: str, start: int, participants: Sequence[str]) -> str | None:
+    """The one participant the words just before ``start`` name in a short form, or ``None``.
 
     The mediator writes a peer's claim as "Static R2 claim 3" or "Reverser
     claims 1 and 9": the one, two or three words right before "claim" (the
-    nearest that read) each open a part of exactly one of the line's field
-    analysts' names (two letters at least). Only the field's analysts are
-    read, so the form is never taken for an analyst the line did not ask.
+    nearest that read). Words that name the participant whole ("Static" for
+    the static analyst) name it outright; otherwise each word opens a part of
+    the participant's name (three letters at least, or a whole part such as
+    "r2"), and the form names a participant only when exactly one of all the
+    participants fits it. The caller keeps it only for an analyst the line's
+    field names.
     """
     before = text[max(0, start - 80) : start]
     tail = re.split(r"[^A-Za-z0-9'\s]", before)[-1]
     words = [w.lower() for w in _WORD_BEFORE.findall(tail) if w.lower() not in _FILLER_WORDS]
-    parts = {name: [p for p in re.split(r"[_\-\s]+", name.lower()) if p] for name in field_names}
+    parts = {name: [p for p in re.split(r"[_\-\s]+", name.lower()) if p] for name in participants}
     for size in (3, 2, 1):
         if len(words) < size:
             continue
         chosen = words[-size:]
-        if any(len(w) < 2 for w in chosen):
-            continue
+        whole = [name for name, pieces in parts.items() if pieces == chosen]
+        if len(whole) == 1:
+            return whole[0]
         fits = [
             name
             for name, pieces in parts.items()
-            if all(any(piece.startswith(w) for piece in pieces) for w in chosen)
+            if all(
+                w in pieces
+                or (len(w) >= _SHORT_WORD_LENGTH and any(piece.startswith(w) for piece in pieces))
+                for w in chosen
+            )
         ]
         if len(fits) == 1:
             return fits[0]
@@ -1666,7 +1682,7 @@ def claims_named_by_lines(
         if field_names:
             # A short form of a field analyst's name before "claim(s) N".
             for reference in _CLAIM_REFERENCE.finditer(text):
-                short = _short_named(text, reference.start(), field_names)
+                short = _short_named(text, reference.start(), names)
                 if short is not None:
                     found.append((short, re.findall(r"\d+", reference.group(1))))
         for name, digits in found:

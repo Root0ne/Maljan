@@ -37,12 +37,19 @@ revision's claims is written again, a claim whose words merely recur is not.
 A revision that writes again or withdraws every claim in force merges
 nothing: it stands as written, as it always did.
 
+The rule reads only the lines of the mediation right before the round: a
+claim a line of an earlier mediation contested, and that the mediator no
+longer listed, is carried with its mark like any other. A claim a blocking
+line named that the revision argues in its disputes (by its number, or by
+restating it there) is answered, and carried with that line.
+
 Nothing here edits a claim's words; the merge only chooses which claims
 stand, and :class:`RevisionMerge` records every choice.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -190,6 +197,29 @@ def _restated(earlier: _Block, readings: Sequence[_Reading]) -> tuple[bool, int 
     if any(_strong(v) for v in pooled) and len(pooled) / len(values) >= RESTATED_SHARE:
         return True, None
     return False, None
+
+
+_OWN_CLAIM_NUMBERS = re.compile(
+    r"\bclaims?\s*+#?\s*+(\d++(?:\s*+(?:/|,|&|and|\+)\s*+#?\d++)*+)", re.IGNORECASE
+)
+
+
+def _disputed(earlier: _Block, disputes: Sequence[str]) -> bool:
+    """Whether one of the revision's dispute items argues ``earlier``: by number or by statement.
+
+    An item that writes "claim N" for the claim's number, or that restates it
+    (:func:`_block_restates`), answers the line that named it.
+    """
+    for item in disputes:
+        for match in _OWN_CLAIM_NUMBERS.finditer(item):
+            if earlier.number in {int(n) for n in re.findall(r"\d+", match.group(1))}:
+                return True
+        reading = _Reading(
+            searched=_searched(item), words=content_words(item), techniques=frozenset()
+        )
+        if _block_restates(earlier, reading):
+            return True
+    return False
 
 
 def _declares_withdrawal(claim: Any) -> bool:
@@ -417,8 +447,10 @@ def merge_revision(
     for number in written_again:
         withdrawn.pop(number, None)
 
+    disputes = [str(item) for item in getattr(revision, "dissent_items", None) or [] if item]
     # What the revision left unanswered: withdrawn by rule where a blocking
-    # line named it, carried forward otherwise.
+    # line named it and the revision's disputes do not argue it, carried
+    # forward otherwise.
     ruled: dict[int, str] = {}
     contested: dict[int, list[int]] = {}
     for block in first:
@@ -426,7 +458,11 @@ def merge_revision(
             continue
         lines = list(named.get(block.number, ()))
         blocking = sorted({line for line, blocks in lines if blocks})
-        if blocking:
+        if blocking and _disputed(block, disputes):
+            # The revision did not restate it but argued for it in its
+            # disputes: an answer, carried with the line that contested it.
+            contested[block.number] = sorted({line for line, _b in lines})
+        elif blocking:
             ruled[block.number] = (
                 f"named by blocking line {_lines(blocking)} of the round-{int(revision_round)} "
                 "mediation; the revision did not restate it"
@@ -482,7 +518,9 @@ def merge_revision(
                 if getattr(copy, "carried_since_round", None) is None:
                     copy.carried_since_round = int(revision_round)
                 if block.number in contested:
-                    copy.carried_contested_by = [f"L{n}" for n in contested[block.number]]
+                    copy.carried_contested_by = [
+                        f"L{n} (round {int(revision_round)})" for n in contested[block.number]
+                    ]
                 claims.append(copy)
         for index in at.get(block.number, ()):
             claims.extend(revised[index].claims)

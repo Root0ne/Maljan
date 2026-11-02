@@ -2527,8 +2527,9 @@ claim (`pipeline.revision_merge`): a claim it writes again replaces its
 predecessor; a claim it withdraws (a `WITHDRAW CLAIM <n>: <reason>` line, or a
 block under the claim's number that declares the withdrawal) is removed with
 its reason; a claim a blocking line of the round's mediation named that the
-revision neither writes again nor withdraws is withdrawn by rule, the line
-being its reason (`debate_facts.claims_named_by_lines` reads the claim numbers
+revision neither writes again, withdraws nor argues in its disputes is
+withdrawn by rule, the line being its reason (only the mediation right before
+the round is read) (`debate_facts.claims_named_by_lines` reads the claim numbers
 each line names per analyst); and any other claim it neither writes again nor
 withdraws stands unchanged, marked carried forward from that round
 (`ClaimEvidence.carried_since_round`, with `carried_contested_by` when a line
