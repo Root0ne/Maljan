@@ -33,8 +33,13 @@ from maljan.core.model_assignments import assignments_for
 FIRST, SECOND = "ghidra", "r2"
 
 
-def _tool(name: str) -> StructuredTool:
-    return StructuredTool.from_function(func=lambda: name, name=name, description=name)
+def _tool(name: str, owner: str = "", raises: Exception | None = None) -> StructuredTool:
+    def run() -> str:
+        if raises is not None:
+            raise raises
+        return f"{owner}:{name}"
+
+    return StructuredTool.from_function(func=run, name=name, description=name)
 
 
 class _Provider:
@@ -50,19 +55,24 @@ class _Provider:
         self._names = tools
         self.opened = 0
         self.pinned: list[str | None] = []
+        self.fragment = f"{provider_id.upper()}-FRAGMENT"
+        self.fails_to_open: Exception | None = None
+        self.call_raises: Exception | None = None
 
     def prompt_fragment(self) -> str:
-        return f"{self.id.upper()}-FRAGMENT"
+        return self.fragment
 
     def absent_fragment(self) -> str:
         return f"{self.id.upper()}-ABSENT"
 
     def open(self, job: Any) -> None:
+        if self.fails_to_open is not None:
+            raise self.fails_to_open
         self.opened += 1
         self.job = job
 
     def get_tools(self) -> list[Any]:
-        return [_tool(name) for name in self._names]
+        return [_tool(name, self.id, self.call_raises) for name in self._names]
 
     def pin_sample(self, path: str | None) -> None:
         self.pinned.append(path)
@@ -393,3 +403,219 @@ def test_a_prompt_may_name_both_providers_tools_without_a_warning(monkeypatch):
         "open_file",
         "disassemble",
     }
+
+
+# --- review round: names under a clash, failures of one provider ----------
+
+
+def _two() -> Settings:
+    return _settings(
+        [{"kind": "provider", "provider": FIRST}, {"kind": "provider", "provider": SECOND}]
+    )
+
+
+def test_a_prefixed_tool_runs_the_second_providers_tool():
+    resolved = resolve_agent("reader", _Container(_two(), _providers()))
+    by_name = {t.name: t for t in resolved.tools}
+    assert by_name["open_file"].invoke({}) == f"{FIRST}:open_file"
+    assert by_name[f"{SECOND}__open_file"].invoke({}) == f"{SECOND}:open_file"
+
+
+def test_a_providers_text_names_its_clashing_tools_as_they_are_offered():
+    providers = _providers()
+    providers[FIRST].fragment = "FIRST: call `open_file`, then open_file(path)."
+    providers[SECOND].fragment = (
+        "SECOND: call `open_file`, then open_file(path); `disassemble` reads; "
+        "an open_file is prose."
+    )
+    prompt = resolve_agent("reader", _Container(_two(), providers)).prompt
+    first = prompt[prompt.index("FIRST:") : prompt.index("SECOND:")]
+    second = prompt[prompt.index("SECOND:") :]
+    assert "call `open_file`, then open_file(path)" in first
+    assert f"call `{SECOND}__open_file`, then {SECOND}__open_file(path)" in second
+    assert "`disassemble` reads" in second
+    assert "an open_file is prose" in second
+
+
+def test_one_provider_that_will_not_open_leaves_the_other_and_says_so():
+    providers = _providers()
+    providers[FIRST].fails_to_open = RuntimeError("no session")
+    container = _Container(_two(), providers)
+    resolved = resolve_agent("reader", container)
+    assert [t.name for t in resolved.tools] == ["open_file", "disassemble"]
+    assert {t.metadata[PROVIDER_ID_METADATA_KEY] for t in resolved.tools} == {SECOND}
+    assert f"static provider '{FIRST}' did not open" in resolved.degradation_reasons
+    assert f"static provider '{FIRST}' did not open" in container._registry.degradation_reasons
+    assert "GHIDRA-ABSENT" in resolved.prompt
+    assert "R2-FRAGMENT" in resolved.prompt
+
+
+def test_with_one_provider_a_failed_open_still_fails_the_resolution():
+    providers = _providers()
+    providers[SECOND].fails_to_open = RuntimeError("no session")
+    cfg = _settings([{"kind": "provider"}], static_provider=SECOND)
+    with pytest.raises(RuntimeError):
+        resolve_agent("reader", _Container(cfg, providers))
+
+
+def test_a_sample_one_provider_cannot_open_fails_that_call_not_the_loop():
+    from maljan.core.exceptions import SampleNotOpened, SampleNotOpenedOnOneProvider
+
+    providers = _providers()
+    providers[SECOND].call_raises = SampleNotOpened("R2 cannot read it.", provider=SECOND)
+    resolved = resolve_agent("reader", _Container(_two(), providers))
+    by_name = {t.name: t for t in resolved.tools}
+    with pytest.raises(SampleNotOpenedOnOneProvider) as exc:
+        by_name["disassemble"].func()
+    assert str(exc.value) == "R2 cannot read it."
+    assert exc.value.provider == SECOND
+    assert not isinstance(exc.value, SampleNotOpened)
+    assert by_name["open_file"].invoke({}) == f"{FIRST}:open_file"
+
+
+def test_with_one_provider_an_unopened_sample_still_ends_the_loop():
+    from maljan.core.exceptions import SampleNotOpened
+
+    providers = _providers()
+    providers[SECOND].call_raises = SampleNotOpened("R2 cannot read it.", provider=SECOND)
+    cfg = _settings([{"kind": "provider"}], static_provider=SECOND)
+    resolved = resolve_agent("reader", _Container(cfg, providers))
+    with pytest.raises(SampleNotOpened):
+        resolved.tools[0].func()
+
+
+class _Plain:
+    """A tool that cannot be copied: no ``model_copy``."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.metadata: dict[str, Any] = {}
+
+
+def test_a_tool_that_cannot_be_copied_is_kept_unless_it_must_be_renamed():
+    from maljan.agents.composition import _claim_provider_tools
+
+    tools: list[Any] = []
+    seen: dict[str, str] = {}
+    first, clash, own = _Plain("open_file"), _Plain("open_file"), _Plain("disassemble")
+    _claim_provider_tools([(FIRST, [first]), (SECOND, [clash, own])], tools, seen)
+    assert tools == [first, own]
+    assert seen == {"open_file": f"provider:{FIRST}", "disassemble": f"provider:{SECOND}"}
+
+
+def test_a_namespaced_name_another_source_holds_falls_back_to_a_qualified_one():
+    from maljan.agents.composition import _claim_provider_tools
+
+    tools: list[Any] = []
+    seen = {f"{SECOND}__open_file": "mcp-server"}
+    _claim_provider_tools(
+        [(FIRST, [_tool("open_file")]), (SECOND, [_tool("open_file")])], tools, seen
+    )
+    assert [t.name for t in tools] == ["open_file", f"provider__{SECOND}__open_file"]
+
+
+def test_a_servers_namespaced_name_another_source_holds_falls_back_to_a_qualified_one():
+    from maljan.providers.servers import ServerRegistry
+
+    tools: list[Any] = []
+    seen = {"open_file": f"provider:{FIRST}", "box__open_file": f"provider:{SECOND}"}
+    ServerRegistry(Settings(_env_file=None)).merge_tools("box", [_tool("open_file")], tools, seen)
+    assert [t.name for t in tools] == ["mcp__box__open_file"]
+    assert tools[0].metadata[DECLARED_NAME_METADATA_KEY] == "open_file"
+
+
+# --- the analyst's own check before its loop -------------------------------
+
+
+class _Opening(_Provider):
+    """A provider that remembers whether it could open the sample."""
+
+    def __init__(self, provider_id: str, failure: Exception | None = None) -> None:
+        super().__init__(provider_id, [])
+        self.failure = failure
+        self.opened_paths: list[str] = []
+
+    def sample_failure(self, path: str | None = None) -> Any:
+        return self.failure
+
+    def open_sample(self, path: str | None = None) -> bool:
+        if self.failure is not None:
+            raise self.failure
+        self.opened_paths.append(str(path))
+        return True
+
+
+def _analyst(providers: dict[str, Any], provider_ids: tuple[str, ...]) -> Any:
+    import logging
+    from types import SimpleNamespace
+
+    from maljan.agents.configurable_analyst import ConfigurableAnalyst
+
+    class _Holder:
+        def get_static_provider(self, provider_id: str | None = None) -> Any:
+            return providers[str(provider_id)]
+
+    analyst = object.__new__(ConfigurableAnalyst)
+    analyst.name = "reader"
+    analyst.logger = logging.getLogger("test.reader")
+    analyst.degradation_reasons = []
+    analyst._resolved = SimpleNamespace(
+        provider_ids=provider_ids, static_provider_id=provider_ids[0]
+    )
+    analyst._container = _Holder()
+    return analyst
+
+
+def test_one_provider_that_did_not_open_the_sample_leaves_the_loop_to_the_other():
+    from maljan.core.exceptions import SampleNotOpened
+
+    providers = {
+        FIRST: _Opening(FIRST, SampleNotOpened("G cannot.", provider=FIRST)),
+        SECOND: _Opening(SECOND),
+    }
+    analyst = _analyst(providers, (FIRST, SECOND))
+    analyst._stop_if_the_sample_did_not_open()
+    assert analyst.degradation_reasons == [
+        f"agent 'reader': static provider '{FIRST}' could not open the sample"
+    ]
+    # The other way round: the second fails, the first carries the loop.
+    providers = {FIRST: _Opening(FIRST), SECOND: _Opening(SECOND, SampleNotOpened("R."))}
+    analyst = _analyst(providers, (FIRST, SECOND))
+    analyst._stop_if_the_sample_did_not_open()
+    assert analyst.degradation_reasons == [
+        f"agent 'reader': static provider '{SECOND}' could not open the sample"
+    ]
+
+
+def test_every_provider_that_did_not_open_the_sample_stops_the_loop():
+    from maljan.core.exceptions import SampleNotOpened
+
+    first = SampleNotOpened("G cannot.", provider=FIRST)
+    providers = {FIRST: _Opening(FIRST, first), SECOND: _Opening(SECOND, SampleNotOpened("R."))}
+    analyst = _analyst(providers, (FIRST, SECOND))
+    with pytest.raises(SampleNotOpened) as exc:
+        analyst._stop_if_the_sample_did_not_open()
+    assert exc.value is first
+    assert first.stopped_agent == "reader"
+
+
+def test_the_pre_pass_opens_the_sample_on_each_provider_and_goes_on_past_one_that_cannot():
+    from maljan.core.exceptions import SampleNotOpened
+
+    providers = {
+        FIRST: _Opening(FIRST, SampleNotOpened("G cannot.", provider=FIRST)),
+        SECOND: _Opening(SECOND),
+    }
+    analyst = _analyst(providers, (FIRST, SECOND))
+    assert analyst._prepare_on_each(analyst._held_providers(), "/m/s") == ""
+    assert providers[SECOND].opened_paths == ["/m/s"]
+    assert len(analyst.degradation_reasons) == 1
+
+    providers[SECOND].failure = SampleNotOpened("R.", provider=SECOND)
+    with pytest.raises(SampleNotOpened):
+        analyst._prepare_on_each(analyst._held_providers(), "/m/s")
+
+
+def test_an_agent_with_one_provider_keeps_the_base_check():
+    analyst = _analyst({FIRST: _Opening(FIRST)}, (FIRST,))
+    assert analyst._held_providers() == []

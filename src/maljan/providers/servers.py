@@ -2440,6 +2440,25 @@ class ServerRegistry:
             if offered != name:
                 if seen.get(offered) == server:
                     continue
+                if offered in seen:
+                    # Another source (a provider of the same id, say) holds the
+                    # namespaced name too: fully qualified, never dropped unsaid.
+                    fallback = f"mcp__{server}__{name}"
+                    logger.warning(
+                        "mcp server '%s': %r is taken by %s; offered as %r.",
+                        server,
+                        offered,
+                        seen[offered],
+                        fallback,
+                    )
+                    if fallback in seen:
+                        logger.warning(
+                            "mcp server '%s': tool %r has no free name and is left out.",
+                            server,
+                            name,
+                        )
+                        continue
+                    offered = fallback
                 update["name"] = offered
                 # The server declares the tool under the name it gave it.
                 from maljan.agents.tool_pinning import DECLARED_NAME_METADATA_KEY

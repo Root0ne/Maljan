@@ -855,6 +855,16 @@ export function AgentDetail({
                     </label>
                   </li>
                 ))}
+            {/* The served choices do not say which providers offer tools, so
+                the rows say it of themselves rather than guessing. */}
+            {PROVIDER_ROLES.has(agent.role) &&
+              agent.role !== "static" &&
+              !locked &&
+              offeredProviders(agent.tools, staticProviders).length > 0 && (
+                <li role="none" className="text-xs text-text-muted ml-5">
+                  A provider that offers no tools adds none.
+                </li>
+              )}
             {/* The job's sandbox report, read through in-process tools. Any
                 role may hold it, a judge cross-checking a claim as much as a
                 dynamic analyst. */}

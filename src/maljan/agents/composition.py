@@ -703,20 +703,52 @@ def _several_provider_parts(
     labels: list[str] = []
     for index, provider_id in enumerate(provider_ids):
         provider = container.get_static_provider(provider_id)
-        text, _statement = static_provider_parts(
-            provider, _of_provider(tools, provider_id, index == 0)
-        )
+        own = _of_provider(tools, provider_id, index == 0)
+        text, _statement = static_provider_parts(provider, own)
         if not definition.attck_techniques:
             from maljan.providers.base import without_attck_focus
 
             text = without_attck_focus(text)
-        texts.append(text)
+        # A provider's text names its tools as it declares them; one of its
+        # tools whose name an earlier provider holds reaches the model as
+        # ``<provider>__<tool>``, and the text says that name.
+        texts.append(_with_offered_names(text, _renamed_tools(own, provider_id)))
         labels.append(
             str(getattr(provider, "label", "") or getattr(provider, "id", "") or provider_id)
         )
     joined = ", ".join(labels[:-1]) + " and " + labels[-1]
     statement = tools_statement(tools, provider_label=f"the {joined} static providers")
     return (*texts, statement)
+
+
+def _renamed_tools(tools: Sequence[Any], provider_id: str) -> dict[str, str]:
+    """Each of ``provider_id``'s tools in ``tools`` offered under another name, declared to offered."""
+    from maljan.agents.tool_pinning import declared_name_of
+
+    out: dict[str, str] = {}
+    for tool in tools:
+        if (getattr(tool, "metadata", None) or {}).get(PROVIDER_ID_METADATA_KEY) != provider_id:
+            continue
+        declared, offered = declared_name_of(tool), str(getattr(tool, "name", "") or "")
+        if declared and offered and declared != offered:
+            out[declared] = offered
+    return out
+
+
+def _with_offered_names(text: str, renamed: Mapping[str, str]) -> str:
+    """``text`` with each declared tool name it writes as code replaced by the name offered.
+
+    The forms a workflow names a tool in: set off in backticks (`` `name` ``)
+    and called (``name(``). A word that only happens to be spelled like a tool
+    is prose and stays.
+    """
+    import re
+
+    for declared, offered in renamed.items():
+        name = re.escape(declared)
+        text = re.sub(rf"`{name}`", f"`{offered}`", text)
+        text = re.sub(rf"(?<![\w.]){name}(?=\s*\()", offered, text)
+    return text
 
 
 def prompt_for(resolved: ResolvedAgent, container: Any, tools: Sequence[Any]) -> str:
@@ -777,21 +809,91 @@ def _dedupe(tools: list[BaseTool]) -> list[BaseTool]:
     return out
 
 
+# What the run says of one of several providers an agent holds that would not
+# open (``_providers_tools``).
+PROVIDER_NOT_OPENED_REASON = "static provider '{provider}' did not open"
+
+
 def _providers_tools(
     container: Any, definition: AgentDefinition, provider_ids: Sequence[str]
-) -> list[tuple[str, list[Any]]]:
-    """Each referenced provider's tools, by provider id, in reference order (``_provider_tools``).
+) -> tuple[list[tuple[str, list[Any]]], list[str]]:
+    """Each referenced provider's tools, by provider id, in reference order, and the reasons.
 
-    Every provider is opened on its own: the container holds one object per
-    id and closes each at the end of the job (``ServiceContainer.aclose``),
-    so an agent holding several leaves nothing open behind it.
+    Every provider is opened on its own (``_provider_tools``): the container
+    holds one object per id and closes each at the end of the job
+    (``ServiceContainer.aclose``), so an agent holding several leaves nothing
+    open behind it. With one provider a failed open fails the resolution, as
+    it always did. With several, a provider that will not open is logged,
+    named in a degradation reason (also on the job's registry, which the run
+    summary reads) and gives no tools, so the prompt carries its absent
+    text; the others are opened all the same.
     """
     if not opens_provider_by_reference(definition):
-        return []
-    return [
-        (str(provider_id), _provider_tools(container, definition, str(provider_id)))
-        for provider_id in provider_ids
-    ]
+        return [], []
+    if len(provider_ids) <= 1:
+        return [
+            (str(provider_id), _provider_tools(container, definition, str(provider_id)))
+            for provider_id in provider_ids
+        ], []
+    out: list[tuple[str, list[Any]]] = []
+    reasons: list[str] = []
+    for provider_id in provider_ids:
+        try:
+            out.append((str(provider_id), _provider_tools(container, definition, str(provider_id))))
+        except Exception as exc:  # noqa: BLE001 — the agent's other providers still serve
+            logger.warning("static provider '%s' did not open: %s", provider_id, type(exc).__name__)
+            reason = PROVIDER_NOT_OPENED_REASON.format(provider=provider_id)
+            reasons.append(reason)
+            try:
+                held = getattr(container.get_server_registry(), "degradation_reasons", None)
+            except Exception:  # noqa: BLE001 — the reason is still on the agent
+                held = None
+            if isinstance(held, list) and reason not in held:
+                held.append(reason)
+            out.append((str(provider_id), []))
+    return out, reasons
+
+
+def _failing_as_a_call(tool: Any, provider_id: str) -> dict[str, Any]:
+    """``tool``'s callables, a :class:`SampleNotOpened` they raise filed as an ordinary failure.
+
+    For an agent holding several providers: a provider that cannot open the
+    sample answers each call with its sentence, as a failed call
+    (:class:`SampleNotOpenedOnOneProvider`), so the loop goes on with the
+    agent's other providers. Empty for a tool with no callable to wrap.
+    """
+    import functools
+
+    from maljan.core.exceptions import SampleNotOpened, SampleNotOpenedOnOneProvider
+
+    def _said(exc: SampleNotOpened) -> SampleNotOpenedOnOneProvider:
+        sentence = str(getattr(exc, "remediation", "") or exc)
+        return SampleNotOpenedOnOneProvider(sentence, provider=exc.provider or provider_id)
+
+    out: dict[str, Any] = {}
+    func = getattr(tool, "func", None)
+    if callable(func):
+
+        @functools.wraps(func)
+        def run(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(*args, **kwargs)
+            except SampleNotOpened as exc:
+                raise _said(exc) from exc
+
+        out["func"] = run
+    coroutine = getattr(tool, "coroutine", None)
+    if callable(coroutine):
+
+        @functools.wraps(coroutine)
+        async def arun(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await coroutine(*args, **kwargs)
+            except SampleNotOpened as exc:
+                raise _said(exc) from exc
+
+        out["coroutine"] = arun
+    return out
 
 
 def _claim_provider_tools(
@@ -802,9 +904,12 @@ def _claim_provider_tools(
     The servers' collision rule (``providers.servers.offered_name``): the
     first provider to claim a name keeps it, and a later provider's tool of
     the same name is offered as ``<provider id>__<name>``, its declared name
-    kept beside it, as a server's is. With one provider this is
+    kept beside it, as a server's is; where another source already holds that
+    name too, ``provider__<provider id>__<name>``. With one provider this is
     ``_claim_in_process_tools`` exactly; with several, each tool is marked
-    with the provider it came from (``PROVIDER_ID_METADATA_KEY``).
+    with the provider it came from (``PROVIDER_ID_METADATA_KEY``) and a
+    sample its provider cannot open fails that call rather than the loop
+    (``_failing_as_a_call``).
     """
     if len(by_provider) <= 1:
         for provider_id, incoming in by_provider:
@@ -824,29 +929,53 @@ def _claim_provider_tools(
                 **(getattr(tool, "metadata", None) or {}),
                 PROVIDER_ID_METADATA_KEY: provider_id,
             }
-            update: dict[str, Any] = {"metadata": metadata}
+            update: dict[str, Any] = {"metadata": metadata, **_failing_as_a_call(tool, provider_id)}
             offered = name
             if owner is not None:
                 offered = f"{provider_id}__{name}"
                 if offered in seen:
+                    # Another source holds the namespaced name as well.
+                    fallback = f"provider__{provider_id}__{name}"
+                    logger.warning(
+                        "static provider '%s': %r is taken by %s; offered as %r.",
+                        provider_id,
+                        offered,
+                        seen[offered],
+                        fallback,
+                    )
+                    offered = fallback
+                if offered in seen:
+                    logger.warning(
+                        "static provider '%s': tool %r has no free name and is left out.",
+                        provider_id,
+                        name,
+                    )
                     continue
                 metadata[DECLARED_NAME_METADATA_KEY] = name
                 update["name"] = offered
             copy = getattr(tool, "model_copy", None)
             try:
-                tool = copy(update=update) if callable(copy) else None
-            except Exception:  # noqa: BLE001 — a tool that cannot be copied is not offered twice
-                tool = None
-            if tool is None:
-                logger.warning(
-                    "static provider '%s': tool %r could not be marked and is left out.",
+                marked = copy(update=update) if callable(copy) else None
+            except Exception:  # noqa: BLE001 — handled below
+                marked = None
+            if marked is None:
+                if offered != name:
+                    # Offered under its own name it would clash; it cannot be renamed.
+                    logger.warning(
+                        "static provider '%s': tool %r could not be renamed and is left out.",
+                        provider_id,
+                        name,
+                    )
+                    continue
+                logger.info(
+                    "static provider '%s': tool %r could not be marked; offered as it is.",
                     provider_id,
                     name,
                 )
-                continue
+                marked = tool
             renamed += offered != name
             seen[offered] = source
-            tools.append(tool)
+            tools.append(marked)
         if renamed:
             logger.info(
                 "static provider '%s': %d tool name(s) already taken, prefixed with '%s__'.",
@@ -1572,7 +1701,9 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     # dropped as a duplicate of a tool it has nothing to do with.
     seen: dict[str, str] = {}
     tools: list[Any] = []
-    _claim_provider_tools(_providers_tools(container, definition, provider_ids), tools, seen)
+    by_provider, provider_reasons = _providers_tools(container, definition, provider_ids)
+    reasons.extend(provider_reasons)
+    _claim_provider_tools(by_provider, tools, seen)
     _claim_in_process_tools(
         _sandbox_tools(container, definition), "in-process:sandbox", tools, seen
     )
@@ -1654,11 +1785,11 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     # loop. Awaited callers (the judge's node, the settings probe) keep serving
     # everything else, and the probe's ``asyncio.wait`` budget can actually
     # preempt a wedged provider.
-    _claim_provider_tools(
-        await asyncio.to_thread(_providers_tools, container, definition, provider_ids),
-        tools,
-        seen,
+    by_provider, provider_reasons = await asyncio.to_thread(
+        _providers_tools, container, definition, provider_ids
     )
+    reasons.extend(provider_reasons)
+    _claim_provider_tools(by_provider, tools, seen)
     # Off the loop for the same reason, and before the registry asks for it:
     # learning the window is a metadata request, and the first caller to build
     # the budget pays for it. For every role but ``generic`` the provider call
