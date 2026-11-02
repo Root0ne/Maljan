@@ -1098,7 +1098,7 @@ def procedure_value_violations(
     claims that name the technique's behaviour (:func:`first_claim_sentences`;
     a plain text is one claim of one unit). Each claim is read as the unit that
     shares the most identifying values with the procedure, then names most of
-    the technique, then stands first. The procedure stands when it carries every
+    the technique, then says it is so, then stands first. The procedure stands when it carries every
     identifying value (:func:`identifying_values`) of one claim's unit; else it
     is asked for what it drops of the unit it shares the most with, the
     earliest claim on a tie. A claim whose unit names no identifying value
@@ -1112,11 +1112,13 @@ def procedure_value_violations(
         held = carrying_form(str(row.get("procedure") or ""))
         read: list[tuple[list[str], list[str]]] = []
         for candidates in claims:
-            best: tuple[tuple[int, int, int], list[str], list[str]] | None = None
+            best: tuple[tuple[int, int, int, int], list[str], list[str]] | None = None
             for unit in candidates:
                 named = identifying_values(carried_values(unit.text, reader))
                 dropped = values_not_carried(named, held, formed=True)
-                rank = (len(named) - len(dropped), unit.score, -unit.index)
+                # A part that says the behaviour is not so loses a tie, never
+                # a procedure that carries its values.
+                rank = (len(named) - len(dropped), not unit.negated, unit.score, -unit.index)
                 if best is None or rank > best[0]:
                     best = (rank, named, dropped)
             if best is not None:
@@ -1148,6 +1150,8 @@ class _Unit:
     text: str
     score: int = 0
     index: int = 0
+    # Whether its sentences naming the behaviour all say it is not so.
+    negated: bool = False
 
 
 @dataclass(frozen=True)
@@ -1191,7 +1195,8 @@ _ENDINGS = frozenset(
 )
 # A sentence that says a thing is not so: the behaviour it names is not the
 # technique's procedure while another unit names one.
-_NEGATION = re.compile(r"\b(?:not|never|no|none|neither|nor|cannot|without)\b|n't\b", re.IGNORECASE)
+# A verb's negation only: "with no visible window" says how the behaviour is done.
+_NEGATION = re.compile(r"\b(?:not|never|cannot)\b|n't\b", re.IGNORECASE)
 
 
 def _claim_units(claim: str) -> list[str]:
@@ -1262,9 +1267,11 @@ def behaviour_units(
     T1027/T1140 are kept"). Else the clauses (:func:`_clauses`) naming words of
     the technique's name (:func:`_same_word`), most first: one item of a list of
     commands, not the list. A unit whose sentences naming the behaviour all say
-    it is not so ("does not delete itself", "was not run") is taken only when
-    no other unit qualifies. A claim that names neither keeps its first
-    sentence that says no "not".
+    it is not so ("does not delete itself", "was not run") is marked
+    ``negated``: it stays a candidate, losing a tie to one that says the
+    behaviour is so; the units naming ``tid`` stand alone only when one of them
+    is not negated. A claim that names neither keeps its first sentence that
+    says no "not".
     """
     units = _claim_units(claim)
     if not units:
@@ -1276,35 +1283,32 @@ def behaviour_units(
         return own in {m.upper() for m in _TECHNIQUE_IN_TEXT.findall(text)}
 
     by_id = [
-        _Unit(unit, 0, at)
+        _Unit(unit, 0, at, _negated(unit, _names_id))
         for at, unit in enumerate(units)
         if _names_id(unit) and not {m.upper() for m in _TECHNIQUE_IN_TEXT.findall(unit)} & others
     ]
     words = _name_words(name)
     clauses = [clause for unit in units for clause in _clauses(unit)]
     by_name = [
-        _Unit(clause, score, at)
+        _Unit(clause, score, at, _negated(clause, lambda s: _name_score(s, words) > 0))
         for at, clause in enumerate(clauses)
         if (score := _name_score(clause, words))
     ]
-    for found, names in ((by_id, _names_id), (by_name, lambda s: _name_score(s, words) > 0)):
-        kept = tuple(unit for unit in found if not _negated(unit.text, names))
-        if kept:
-            return kept
-    for found in (by_id, by_name):
-        if found:
-            return tuple(found)
+    if any(not unit.negated for unit in by_id):
+        return tuple(by_id)
+    if by_name or by_id:
+        return (*by_name, *by_id)
     plain = [unit for unit in units if not _NEGATION.search(unit)]
     return (_Unit((plain or units)[0]),)
 
 
 def behaviour_sentence(tid: str, name: str, claim: str, published: Collection[str] = ()) -> str:
     """The unit of ``claim`` :func:`behaviour_units` puts first, read with no procedure:
-    most words of the name, then the earliest."""
+    one saying the behaviour is so, then most words of the name, then the earliest."""
     units = behaviour_units(tid, name, claim, published)
     if not units:
         return ""
-    return max(units, key=lambda unit: (unit.score, -unit.index)).text
+    return max(units, key=lambda unit: (not unit.negated, unit.score, -unit.index)).text
 
 
 def _clauses(unit: str) -> list[str]:

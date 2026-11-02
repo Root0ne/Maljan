@@ -1020,6 +1020,22 @@ class TestAProcedureIsHeldToItsOwnBehaviour:
         only = "The sample does not delete itself (T1070.004 is not shown)."
         assert self._unit("T1070.004", "Indicator Removal: File Deletion", only) == only
 
+    def test_a_negated_object_is_no_negated_behaviour(self) -> None:
+        # "with no visible window" says how the window is hidden: the procedure that
+        # carries that sentence's values stands (A6).
+        claim = (
+            "Routine 0x2000 registers the window class `MainWnd`. The runner 0x1030 starts "
+            "cmd.exe with no visible window (SW_HIDE)."
+        )
+        firsts = self._firsts(_cell("T1564.003", "Hidden Window", claim))
+        procedure = "The runner 0x1030 starts cmd.exe hidden with SW_HIDE."
+        assert self._asked(firsts, "T1564.003", procedure) == []
+        # A procedure that carries a negated part's values stands too; a negated
+        # part still loses a tie.
+        claim = "Routine 0x3000 was not run. Routine 0x3100 is not obfuscated."
+        firsts = self._firsts(_cell("T1027", "Obfuscated Files or Information", claim))
+        assert self._asked(firsts, "T1027", "Routine 0x3100 decodes strings.") == []
+
     # A3: every claim is read, each as the unit the procedure shares most with.
     def test_a_procedure_showing_another_claim_of_its_technique_stands(self) -> None:
         cell = CapabilityCell(
