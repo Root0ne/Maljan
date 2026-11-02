@@ -11,10 +11,17 @@ summary and the report all ask this module rather than the report's keys, so
 each says the same true thing: no sandbox ran, or the report is a recorded
 fixture and not a live detonation, or nothing is added to what a sandbox
 observed.
+
+A live report whose sandbox names a target SHA-256 that is not the sample's
+is still an observation, and reads as one everywhere; the run marks it before
+the graph runs (``app.MaljanApp``), and its status carries the sentence that
+says so, for the pack to hand the analysts and the judge. What it touches is
+theirs to decide.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +36,11 @@ SYNTHETIC_KEY = "synthetic"
 # The mark a report the mock sandbox read from a fixture file carries
 # (``schemas.sandbox_document``).
 FIXTURE_KEY = "recorded_fixture"
+# The mark the run sets on a live report whose sandbox names a target SHA-256
+# that is not the sample's intake SHA-256: the two hashes, as
+# ``analysis.sample_integrity.sandbox_target_record`` keeps them. A report
+# whose target is the sample, or that names none, carries no mark.
+TARGET_KEY = "target_not_the_sample"
 
 # The tool name of the pack entry that states the status. Named like the
 # sandbox views so the console files it with them.
@@ -69,7 +81,38 @@ def sandbox_status(report: Any) -> SandboxStatus:
         return SandboxStatus(NOT_RUN, _STAND_IN)
     if report.get(FIXTURE_KEY):
         return SandboxStatus(RECORDED_FIXTURE, _FIXTURE)
-    return SandboxStatus(OBSERVED, "")
+    return SandboxStatus(OBSERVED, _target_statement(report.get(TARGET_KEY)))
+
+
+def target_mark(record: Mapping[str, Any]) -> dict[str, Any]:
+    """The mark a report carries for ``record``, a ``sandbox_target_record``: its two hashes."""
+    mark: dict[str, Any] = {
+        "expected_sha256": str(record.get("expected_sha256") or ""),
+        "sandbox_sha256": str(record.get("sandbox_sha256") or ""),
+    }
+    if record.get("sandbox_sha256_valid") is False:
+        mark["sandbox_sha256_valid"] = False
+    return mark
+
+
+def _target_statement(mark: Any) -> str:
+    """The sentences of a report's target mark; ``""`` with none.
+
+    Both values are kept again as the record keeps a sandbox's value, whoever
+    wrote the mark: a value that is not a SHA-256 is one bounded line.
+    """
+    from maljan.analysis.sample_integrity import (
+        kept_hash,
+        sandbox_target_lines,
+        sandbox_target_record,
+    )
+
+    if not isinstance(mark, Mapping):
+        return ""
+    record = sandbox_target_record(
+        kept_hash(str(mark.get("expected_sha256") or "")), mark.get("sandbox_sha256")
+    )
+    return " ".join(sandbox_target_lines(record, str))
 
 
 def observed_report(report: Any) -> dict[str, Any] | None:

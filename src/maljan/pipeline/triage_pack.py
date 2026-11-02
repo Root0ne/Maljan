@@ -1437,16 +1437,18 @@ class _Pack:
             )
 
     def _sandbox_status(self, step: PackStep) -> None:
-        """The one sentence that says what the report is, where no live sandbox observed the run.
+        """The sentence that says what the report is, where no live sandbox observed the sample.
 
         Where no sandbox ran — no report, or the mock sandbox's empty stand-in
         — that sentence is all there is: a stand-in's empty sections rendered
         as "0 processes" and "no network activity recorded" read as a
         detonation that did nothing. A recorded fixture is said to be one
-        before its contents. A live sandbox's report needs no sentence.
+        before its contents. A live sandbox's report needs no sentence, unless
+        its sandbox names a target that is not the sample: then the sentence
+        says so before the behaviour, and what it touches is the reader's call.
         """
         found = sandbox_status(self.inputs.sandbox_report)
-        if found.status != OBSERVED:
+        if found.status != OBSERVED or found.statement:
             self.record(STATUS_TOOL, {}, found.as_entry)
 
     def _sandbox_view(self, step: PackStep) -> None:

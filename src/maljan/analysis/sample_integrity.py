@@ -178,6 +178,12 @@ def sandbox_target_record(
     }
 
 
+def kept_hash(value: str) -> str:
+    """``value`` as a record keeps a hash: a SHA-256 in lower case, else as :func:`_shown`."""
+    lowered = str(value or "").strip().lower()
+    return lowered if _SHA256.fullmatch(lowered) else _shown(lowered)
+
+
 def _shown(value: str) -> str:
     """A sandbox's value that is not a SHA-256, as a sandbox failure's words are kept.
 
