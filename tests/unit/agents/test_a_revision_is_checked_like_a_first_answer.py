@@ -180,11 +180,19 @@ class TestARevisionWithFewerClaimsStandsAndIsSaid:
 
         out = _node_run(in_force, revision)
 
-        # The model's revision is the answer in force.
-        assert len(out["isr_reports"]["reverser"].claims) == 18
-        assert out["revision_replacements"] == [
-            "The reverser analyst's round-1 revision replaced 38 claim(s) with 18."
-        ]
+        # Every claim the revision wrote stands; each claim in force it
+        # neither restated nor withdrew stands carried forward, and is said.
+        stands = out["isr_reports"]["reverser"].claims
+        written = [c.claim for c in revision.claims]
+        assert sorted(c.claim for c in stands if c.carried_since_round is None) == sorted(written)
+        carried = [c for c in stands if c.carried_since_round == 1]
+        assert carried and len(stands) == 18 + len(carried)
+        assert {c.claim for c in carried} <= {c.claim for c in in_force.claims}
+        [said] = out["revision_replacements"]
+        assert said.startswith(
+            "The reverser analyst's round-1 revision wrote 18 claim(s) against 38 in force"
+        )
+        assert f"the other {len(carried)} stand carried forward unchanged" in said
 
     def test_a_revision_that_keeps_or_adds_claims_is_not_a_replacement_to_state(self) -> None:
         in_force = AgentISR(agent_id="reverser", domain="static", claims=_claims(3))

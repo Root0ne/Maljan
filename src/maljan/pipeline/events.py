@@ -428,6 +428,14 @@ def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
             retried = getattr(claim, "added_by_retry_in_round", None)
             if isinstance(retried, int) and not isinstance(retried, bool):
                 out[-1]["added_by_retry_in_round"] = retried
+            # The round from which a revision carried it forward unwritten,
+            # with its note; only on such a claim.
+            carried = getattr(claim, "carried_since_round", None)
+            if isinstance(carried, int) and not isinstance(carried, bool):
+                from maljan.schemas.isr_models import carried_note
+
+                out[-1]["carried_since_round"] = carried
+                out[-1]["carried_note"] = carried_note(claim)
         except Exception:  # noqa: BLE001 — one malformed claim must not drop the rest
             continue
     return out

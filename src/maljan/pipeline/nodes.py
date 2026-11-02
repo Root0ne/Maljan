@@ -85,6 +85,7 @@ from maljan.pipeline.claim_drops import (
     dropped_values,
     dropped_values_sentence,
     unchanged_in_substance,
+    values_as_written,
 )
 from maljan.pipeline.conditions import (
     PACK_LEFT_OUT,
@@ -99,6 +100,7 @@ from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
     analysts_to_revise,
     carried_marks,
+    claims_named_by_lines,
     contested_input,
     facts_naming,
     ledger_count_facts,
@@ -140,6 +142,7 @@ from maljan.pipeline.outcome import (
     verdict_for_run,
     verdict_reading,
 )
+from maljan.pipeline.revision_merge import RevisionMerge, merge_revision, rule_sentence
 from maljan.pipeline.routing import (
     revised_in,
     revision_round_before,
@@ -195,6 +198,7 @@ from maljan.schemas.isr_models import (
     FAILED_CALLS_MARKER,
     AgentISR,
     ClaimEvidence,
+    carried_note,
     retry_added_marker,
 )
 from maljan.schemas.stix_models import Bundle, SimilarCases
@@ -945,8 +949,8 @@ def revision_replacement_sentence(
 ) -> str:
     """The sentence for a revision that replaced an answer with fewer claims, or ``""``.
 
-    The revision the model made stands: the model decides what its answer is.
-    What the platform states is the replacement and both counts, so a reader
+    Said for a revision that stands as written (``revision_merge``: it
+    restated or withdrew every claim in force), with both counts, so a reader
     of the run can tell a revision that dropped claims from one that kept them.
     """
     before = len(list(getattr(in_force, "claims", None) or []))
@@ -3399,6 +3403,9 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
             retried = getattr(claim, "added_by_retry_in_round", None)
             if isinstance(retried, int) and not isinstance(retried, bool):
                 reference = f"{reference}, {retry_added_marker(retried)}"
+            carried = carried_note(claim)
+            if carried:
+                reference = f"{reference}, {carried}"
             confidence = float(getattr(claim, "confidence", 0.0) or 0.0)
             text = " ".join(str(getattr(claim, "claim", "") or "").split())
             lines.append(f"- {text} [{technique}, confidence {confidence:.2f}, {reference}]")
@@ -6074,7 +6081,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # records it for a first answer: a revision is checked the same way.
         revision_validation: dict[str, Any] = {}
         # A revision that stands with fewer claims than the answer it replaces,
-        # said: the model decided, and the run summary states the replacement.
+        # and one merged into the answer in force with claims carried forward
+        # or withdrawn, said: the run summary states each.
         revision_replacements: list[str] = []
         # The values of the answer in force a revision that stood states
         # nowhere any more, per analyst and claim: recorded, never asked.
@@ -6138,6 +6146,14 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 display_name=label,
             )
 
+        # Per analyst, the claims each line of the round's mediation named, and
+        # whether the line blocks (``revision_merge``: a blocking line's claim
+        # the revision leaves unanswered is withdrawn by rule).
+        try:
+            named_by_lines = claims_named_by_lines(contested, list(agent_names))
+        except Exception as exc:  # noqa: BLE001 — no lines read is no claim named
+            logger.debug("revision: the lines' claim numbers were not read (%s).", exc)
+            named_by_lines = {}
         # An analyst the mediation did not name keeps its answer in force.
         for name in agent_names:
             if name not in asked:
@@ -6268,6 +6284,29 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 # and a kept retry's own words, go on the record below.
                 noted = isr if isinstance(isr, AgentISR) else None
                 report_now = (noted.report_in_force if noted else "") or revised_text
+                # Merged into the answer in force by claim: a claim the
+                # revision neither wrote again nor withdrew stands, carried
+                # forward (``revision_merge``). A revision that wrote again or
+                # withdrew every claim stands as written.
+                merge = (
+                    merge_revision(
+                        kept_isrs.get(name),
+                        isr,
+                        revised_text,
+                        iteration,
+                        named_by_lines.get(name),
+                    )
+                    if noted is not None and name not in not_asked
+                    else RevisionMerge()
+                )
+                if merge.merged is not None:
+                    from maljan.agents.base_agent import answer_in_force_text
+
+                    isr = merge.merged
+                    # No text the analyst wrote holds the claims that stand:
+                    # they are rendered as a summary, numbered, with what the
+                    # revision wrote besides its claims after them.
+                    report_now = answer_in_force_text(revised_text, ("", ()), isr)
                 revised[name] = report_now
                 revised_isrs[name] = isr
                 if name in not_asked:
@@ -6291,7 +6330,33 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                         sum(len(d.missing) for d in dropped_here),
                         len(dropped_here),
                     )
+                # A claim withdrawn by rule is recorded with its values and
+                # the rule's sentence, never in silence.
+                ruled_sentences = {
+                    sentence: rule_sentence(name, iteration, number, sentence, reason)
+                    for number, sentence, reason in merge.withdrawn_by_rule
+                }
+                for claim in merge.ruled_claims:
+                    said_claim = " ".join(str(claim.claim or "").split())
+                    if said_claim not in ruled_sentences:
+                        continue
+                    dropped_rows.append(
+                        {
+                            "agent": name,
+                            "round": int(iteration),
+                            "claim": str(claim.claim or ""),
+                            "missing": list(
+                                values_as_written(
+                                    str(claim.claim or ""), claim.technique_id
+                                ).values()
+                            ),
+                            "sentence": ruled_sentences.pop(said_claim),
+                        }
+                    )
+                ruled_texts = {str(c.claim or "") for c in merge.ruled_claims}
                 for dropped in dropped_here:
+                    if dropped.claim in ruled_texts:
+                        continue
                     sentence = dropped_values_sentence(name, iteration, dropped)
                     logger.debug("%s", sentence)
                     dropped_rows.append(
@@ -6303,10 +6368,15 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                             "sentence": sentence,
                         }
                     )
-                replaced = revision_replacement_sentence(name, iteration, kept_isrs.get(name), isr)
-                if replaced:
-                    logger.warning("%s", replaced)
-                    revision_replacements.append(replaced)
+                merged_said = merge.sentences(name, iteration)
+                replaced = (
+                    ""
+                    if merge.merged is not None
+                    else revision_replacement_sentence(name, iteration, kept_isrs.get(name), isr)
+                )
+                for said in [replaced, *merged_said] if replaced else merged_said:
+                    logger.warning("%s", said)
+                    revision_replacements.append(said)
                 emit_agent_message(
                     container.event_sink,
                     speaker=name,

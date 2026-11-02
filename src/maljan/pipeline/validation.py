@@ -2986,6 +2986,9 @@ def claim_block_indexes(claims: Sequence[Any]) -> list[int]:
             # A claim a validation retry added beside the answer in force is
             # never one block with a claim it did not add.
             getattr(claim, "added_by_retry_in_round", None),
+            # Nor is a claim carried forward unwritten by a revision with one
+            # the revision wrote.
+            getattr(claim, "carried_since_round", None),
         )
         tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
         recorded = getattr(claim, "block", None)

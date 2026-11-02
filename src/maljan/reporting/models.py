@@ -1321,6 +1321,9 @@ class ClaimNotDiscussed(BaseModel):
     # The round whose tool-less validation retry added the claim beside the
     # answer in force (``ClaimEvidence.added_by_retry_in_round``), or ``None``.
     added_by_retry_in_round: int | None = None
+    # The first round whose revision carried the claim forward unwritten
+    # (``ClaimEvidence.carried_since_round``), or ``None``.
+    carried_since_round: int | None = None
     # Every technique id the claim names, in its order: a claim mapped to
     # several techniques is one row with all of them.
     technique_ids: list[str] = Field(default_factory=list)

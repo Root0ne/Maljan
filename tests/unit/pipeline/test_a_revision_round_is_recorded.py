@@ -167,7 +167,11 @@ class TestDroppedValues:
     def test_a_value_stated_nowhere_is_recorded_with_its_sentence(self) -> None:
         update, _ = _run(
             {
-                "static": ("Prose claim.", _isr("static", "Prose claim.")),
+                # A withdrawn claim leaves the answer; its value is recorded.
+                "static": (
+                    "Prose claim.\nWITHDRAW CLAIM 1: the key is a peer's.",
+                    _isr("static", "Prose claim."),
+                ),
                 "dynamic": ("Writes a file.", IN_FORCE["dynamic"]),
             }
         )
@@ -186,7 +190,10 @@ class TestDroppedValues:
         with caplog.at_level(logging.DEBUG, logger="maljan"):
             _run(
                 {
-                    "static": ("Other.", _isr("static", "Other.")),
+                    "static": (
+                        "Other.\nWITHDRAW CLAIM 1: the key is a peer's.",
+                        _isr("static", "Other."),
+                    ),
                     "dynamic": ("Writes a file.", IN_FORCE["dynamic"]),
                 }
             )

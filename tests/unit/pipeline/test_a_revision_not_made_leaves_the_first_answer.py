@@ -211,11 +211,14 @@ class TestTwoUnlabelledLongKeysInOneStage:
 
 
 class TestARevisionThatWasMade:
-    def test_replaces_the_first_answer_even_with_fewer_claims(self) -> None:
+    def test_with_fewer_claims_replaces_what_it_restates_and_carries_the_rest(self) -> None:
         made = ("CLAIM: revised\n", _first("static", "T1106", 2))
         empty_composed = ("", AgentISR(agent_id=LONG_KEY, domain="static", claims=[]))
         _update, merged, _recorder = _run(
             {"static": made, LONG_KEY: empty_composed, "triage": made}
         )
-        assert len(merged["static"].claims) == 2
-        assert merged["static"].claims[0].technique_id == "T1106"
+        claims = merged["static"].claims
+        # Its two claims replace the two they restate; the seven it left
+        # unmentioned stand, carried forward from the round.
+        assert [c.technique_id for c in claims[:2]] == ["T1106", None]
+        assert [c.carried_since_round for c in claims] == [None, None] + [1] * 7
