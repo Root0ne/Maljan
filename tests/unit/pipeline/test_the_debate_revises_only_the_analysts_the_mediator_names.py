@@ -12,9 +12,11 @@ The platform reads that field and nothing else of the line's prose:
   analyst, as before, and the round's record says why;
 - a named analyst's revision carries the contested points that name it and,
   of its peers, only the ones those points name (in the field, or by key or
-  label in any case or form), each shown exactly as a round asking every
-  analyst shows it: its answer in force, whole, no claim picked out by its
-  number.
+  label in any case or form). Read without the answers in force, each is shown
+  exactly as a round asking every analyst shows it: its answer in force,
+  whole, no claim picked out of its text by a heading's number. With them,
+  the claims a point cites are quoted by block number from the answer in
+  force (``test_a_revision_is_shown_the_contested_claims_of_its_peers``).
 
 Every value is synthetic.
 """
@@ -423,14 +425,18 @@ class TestTheNarrowedPrompt:
         assert feedback.startswith("The reports agree on the loader.")
         assert feedback.endswith("Confidence: 0.60")
 
-    def test_a_peer_cited_by_claim_number_is_shown_whole(self) -> None:
+    def test_a_peer_cited_by_claim_number_is_shown_the_claim_it_is_cited_by(self) -> None:
         _update, agents = _revise(_mediator(revise=["static", "all_tools_static_r2", "dynamic"]))
 
         args, _kw = agents["all_tools_static_r2"].safe_revise_isr.call_args
         peers, feedback = args[2], args[3]
         # Its one point names only itself in the field, and cites STATIC
-        # Claim 1: the peer is shown whole, as every peer is in a full round.
-        assert peers == {"static": _whole("static")}
+        # Claim 1: that claim is quoted from the peer's answer in force
+        # (``test_a_revision_is_shown_the_contested_claims_of_its_peers``).
+        assert peers == {
+            "static": "  Claim 1: Reads the flag at 0x40. | Evidence: [ev_0010] | Confidence: 0.80"
+        }
+        assert peers["static"].claims == (1,)
         assert "Claim 2" in feedback and "[ev_0007]" in feedback
 
     def test_every_claim_number_and_entry_id_the_points_cite_is_kept(self) -> None:

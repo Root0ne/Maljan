@@ -215,6 +215,9 @@ class InputMeter:
         # budget, held until the loop is closed so its identity is not reused.
         self._loops: dict[tuple[str, int], tuple[Any, dict[str, Any]]] = {}
         self._calls: dict[tuple[str, str, str], dict[str, Any]] = {}
+        # Per revision round, what its named revisions were shown of their
+        # peers (``debate_facts.peers_shown_record``), in the order recorded.
+        self._peers: list[dict[str, Any]] = []
 
     def request(
         self,
@@ -288,6 +291,33 @@ class InputMeter:
                         row["input_tokens"] += max(0, int(usage.get("input_tokens") or 0))
         except Exception:  # noqa: BLE001 — recording never raises
             return
+
+    def peers_shown(self, stage: str, revision_round: int, record: Mapping[str, Any]) -> None:
+        """One revision round's peer reports: how many were excerpts and how many whole, sized.
+
+        The counts and character sizes of ``record``
+        (``debate_facts.peers_shown_record``); the sentences stay on the
+        round's own record.
+        """
+        try:
+            row: dict[str, Any] = {"stage": str(stage), "round": int(revision_round)}
+            for key in (
+                "excerpted",
+                "whole",
+                "excerpt_chars",
+                "excerpted_whole_chars",
+                "whole_chars",
+            ):
+                row[key] = max(0, int(record.get(key) or 0))
+            with self._lock:
+                self._peers.append(row)
+        except Exception:  # noqa: BLE001 — recording never raises
+            return
+
+    def peer_rows(self) -> list[dict[str, Any]]:
+        """A plain copy of each round's :meth:`peers_shown` row, in order."""
+        with self._lock:
+            return [dict(row) for row in self._peers]
 
     def rows(self) -> list[dict[str, Any]]:
         """A plain copy of every row, in order; ``input_tokens`` only where a request reported."""

@@ -36,8 +36,11 @@ things:
 - **reads names**: the mediator opens each line with ``[analysts: <name>, ...]``,
   the analysts who must revise over it. A revision round asks the analysts the
   blocking lines name, each shown the lines that name it and the peers they
-  name. A blocking line without the field, or naming no analyst of the
-  debate, leaves the names unread and the round asks every analyst.
+  name: of each peer, the claims the lines cite by number, quoted from its
+  answer in force, or its whole report where they cannot be, with the
+  reason recorded (``contested_input``). A blocking line without the field,
+  or naming no analyst of the debate, leaves the names unread and the round
+  asks every analyst.
 
 A size or a time is not a count: keys naming seconds, milliseconds, bytes or a
 size are left out.
@@ -934,6 +937,8 @@ def contested_input(
     participants: Sequence[str],
     reports: Mapping[str, str],
     labels: Mapping[str, str] | None = None,
+    isrs: Mapping[str, Any] | None = None,
+    revision_round: int = 0,
 ) -> tuple[str, dict[str, str]]:
     """``(mediator feedback, peer reports)`` for a named analyst's revision.
 
@@ -945,11 +950,19 @@ def contested_input(
     The peers shown are the ones those lines name in their field, and every
     peer, or other analyst whose report ``reports`` holds, whose key or label
     (``labels``) the lines write, in any case or form:
-    a peer the prose may mean is shown rather than left out. Each is shown
-    exactly as a round that asks every analyst shows it, its answer in force
-    from ``reports`` whole, in ``reports``' order; no claim is picked out of it.
+    a peer the prose may mean is shown rather than left out, in ``reports``'
+    order. Without ``isrs`` each is shown exactly as a round that asks every
+    analyst shows it, its answer in force from ``reports`` whole.
+
+    With ``isrs``, the answers in force the mediator read, each is a
+    :class:`ShownReport`: the claims those lines name of it, quoted from its
+    answer in force, and its disputes naming ``name``
+    (:func:`peer_excerpt`); or its whole report, with the sentence saying why
+    no excerpt was made. ``revision_round`` is the round those sentences name.
     """
-    mine = points_naming(name, blocking, participants)
+    # The places of the lines naming ``name`` among the lines given.
+    mine_at = [i for i, line in enumerate(blocking) if points_naming(name, [line], participants)]
+    mine = [str(blocking[i]) for i in mine_at]
     head_at = finding.rfind(_LISTED_HEAD)
     tail_at = finding.rfind(_CONFIDENCE_TAIL)
     if 0 <= head_at < tail_at:
@@ -965,17 +978,43 @@ def contested_input(
         # Every report a round shows, a participant's or not, as dev shows it.
         for p in dict.fromkeys([*map(str, participants), *map(str, reports)])
     }
-    shown: set[str] = set()
-    for line in mine:
-        shown.update(
-            found
-            for written in (read_analysts_field(line) or [])
-            if (found := resolve_analyst(written, participants)) is not None
+    # Per peer shown, the places of the lines naming it.
+    shown: dict[str, list[int]] = {}
+    for at, line in zip(mine_at, mine, strict=True):
+        for peer in [
+            *(
+                found
+                for written in (read_analysts_field(line) or [])
+                if (found := resolve_analyst(written, participants)) is not None
+            ),
+            *(
+                peer
+                for peer, patterns in spellings.items()
+                if any(p.search(line) for p in patterns)
+            ),
+        ]:
+            places = shown.setdefault(peer, [])
+            if at not in places:
+                places.append(at)
+    peers = {k: v for k, v in reports.items() if k != name and str(k) in shown}
+    if isrs is None:
+        return feedback, peers
+    # Numbered as the mediation listed the lines, so a sentence names the line
+    # the mediator wrote.
+    refs = contested_refs([str(line) for line in blocking], participants)
+    held = {str(k).lower(): v for k, v in isrs.items()}
+    return feedback, {
+        peer: peer_excerpt(
+            name,
+            str(peer),
+            [refs[at] for at in shown[str(peer)]],
+            str(whole or ""),
+            held.get(str(peer).lower()),
+            spellings.get(name) or [_name_pattern(name)],
+            revision_round,
         )
-        shown.update(
-            peer for peer, patterns in spellings.items() if any(p.search(line) for p in patterns)
-        )
-    return feedback, {k: v for k, v in reports.items() if k != name and str(k) in shown}
+        for peer, whole in peers.items()
+    }
 
 
 # The words of a listed line once its fields, its mark and its numbers are read
@@ -2205,6 +2244,33 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
     )
 
 
+def _line_claims(
+    text: str, names: Sequence[str]
+) -> tuple[list[str] | None, list[tuple[str, list[str]]]]:
+    """``(the analysts the field names, [(analyst, claim digits), ...])`` for one line.
+
+    Every analyst the line writes "claim(s) N" for, field or not
+    (``claims_named_by_lines`` keeps the field's): the analyst's name before
+    the numbers (``_claims_named``), numbers right after a field that names one
+    analyst alone, and a short form of a name before them where the line has
+    a field (``_short_named``). The text is the line without its mark.
+    """
+    field_names = _named_in(text, names)
+    found: list[tuple[str, list[str]]] = list(_claims_named(text, names))
+    if field_names is not None and len(field_names) == 1:
+        opened = _ANALYSTS_FIELD.search(text)
+        bare = _BARE_CLAIMS.match(text, opened.end()) if opened is not None else None
+        if bare is not None:
+            found.append((field_names[0], re.findall(r"\d+", bare.group(1))))
+    if field_names:
+        # A short form of a field analyst's name before "claim(s) N".
+        for reference in _CLAIM_REFERENCE.finditer(text):
+            short = _short_named(text, reference.start(), names)
+            if short is not None:
+                found.append((short, re.findall(r"\d+", reference.group(1))))
+    return field_names, found
+
+
 def claims_named_by_lines(
     lines: Sequence[str], participants: Sequence[str]
 ) -> dict[str, dict[int, list[tuple[int, bool]]]]:
@@ -2215,3 +2281,248 @@ def claims_named_by_lines(
     Linear in the lines.
     """
     return NamedByLines(read_claim_references(lines, participants))
+
+
+@dataclass(frozen=True)
+class ContestedRef:
+    """What one listed line of a mediation refers to, read from its text.
+
+    ``line`` counts from 1 in the order the lines were given; ``blocking`` is
+    the mediator's mark (``read_marks``); ``analysts`` the participants its
+    ``[analysts: ...]`` field names (none for a line without one); ``claims``
+    each ``(analyst, claim number)`` it writes, for any participant, field or
+    not, in the order written; ``unplaced`` the analysts it gives a claim
+    number too long to be a place; ``entries`` the ledger ids it cites,
+    lower-cased; ``question`` the line without its mark.
+    """
+
+    line: int
+    blocking: bool
+    analysts: tuple[str, ...]
+    claims: tuple[tuple[str, int], ...]
+    entries: tuple[str, ...]
+    question: str
+    unplaced: tuple[str, ...] = ()
+
+    def claims_of(self, analyst: str) -> tuple[int, ...]:
+        """The claim numbers the line writes for ``analyst``, each once, in order."""
+        return tuple(dict.fromkeys(n for who, n in self.claims if who == analyst))
+
+
+def contested_refs(lines: Sequence[str], participants: Sequence[str]) -> list[ContestedRef]:
+    """One :class:`ContestedRef` per line, in order. Linear in the lines.
+
+    Read as ``claims_named_by_lines`` reads the claim numbers (``_line_claims``),
+    without its rule that a line with a field counts only for the field's
+    analysts: a peer's claim a line cites is what a revision is shown of it.
+    A number of zero is kept (no claim has it); one longer than
+    :data:`_CLAIM_DIGITS` digits is never converted and names its analyst in
+    ``unplaced``.
+    """
+    names = [str(p) for p in participants if str(p).strip()]
+    out: list[ContestedRef] = []
+    for number, (line, mark) in enumerate(zip(lines, read_marks(lines), strict=True), 1):
+        text = without_line_mark(str(line))
+        field_names, found = _line_claims(text, names)
+        claims: dict[tuple[str, int], None] = {}
+        unplaced: dict[str, None] = {}
+        for name, digits in found:
+            for written in digits:
+                stripped = written.lstrip("0")
+                if len(stripped) > _CLAIM_DIGITS:
+                    unplaced[name] = None
+                    continue
+                claims[(name, int(stripped or "0"))] = None
+        out.append(
+            ContestedRef(
+                line=number,
+                blocking=mark.blocking,
+                analysts=tuple(field_names or ()),
+                claims=tuple(claims),
+                entries=tuple(line_entry_ids([str(line)])),
+                question=" ".join(text.split()),
+                unplaced=tuple(unplaced),
+            )
+        )
+    return out
+
+
+class ShownReport(str):
+    """A peer's report as a named analyst's revision is shown it, with what was cut.
+
+    The text is the excerpt, or the whole report. ``claims`` are the claim
+    numbers quoted (none: the whole report is shown), ``whole_chars`` the
+    length of the whole report and ``note`` the sentence saying why a peer
+    whose report could have been cut is shown whole ("" otherwise). A plain
+    ``str`` everywhere else: the revision prompt heads a report with
+    ``claims`` by them (:func:`peer_report_heading`).
+    """
+
+    claims: tuple[int, ...]
+    whole_chars: int
+    note: str
+
+    def __new__(
+        cls, text: str = "", claims: Sequence[int] = (), whole_chars: int = 0, note: str = ""
+    ) -> ShownReport:
+        made = super().__new__(cls, text)
+        made.claims = tuple(int(n) for n in claims)
+        made.whole_chars = int(whole_chars)
+        made.note = str(note)
+        return made
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (ShownReport, (str(self), self.claims, self.whole_chars, self.note))
+
+    def written(self, text: str) -> ShownReport:
+        """``text`` (this report written again: same length, same claims) with this one's record."""
+        return ShownReport(text, self.claims, self.whole_chars, self.note)
+
+
+def peer_report_heading(name: str, report: str) -> str:
+    """The heading a revision prompt writes over one peer's report.
+
+    ``<NAME> REPORT:`` for a whole report, as every revision prompt wrote it;
+    for an excerpt (a :class:`ShownReport` with claims) it says which claims
+    are quoted and that the whole report is not shown.
+    """
+    claims = getattr(report, "claims", ()) if isinstance(report, ShownReport) else ()
+    if not claims:
+        return f"{name.upper()} REPORT:"
+    which = "claim" if len(claims) == 1 else "claims"
+    numbers = ", ".join(str(n) for n in claims)
+    return f"{name.upper()} REPORT ({which} {numbers} quoted; the whole report is not shown):"
+
+
+def _blocks_of(isr: Any) -> list[list[Any]]:
+    """The analyst's claims grouped by block, in order: block N is claim N."""
+    from maljan.pipeline.validation import claim_block_indexes
+
+    claims = list(getattr(isr, "claims", None) or [])
+    blocks: list[list[Any]] = []
+    for index, claim in zip(claim_block_indexes(claims), claims, strict=True):
+        if index == len(blocks):
+            blocks.append([])
+        blocks[index].append(claim)
+    return blocks
+
+
+def _whole_note(name: str, peer: str, revision_round: int, why: str) -> str:
+    return (
+        f"The {name} analyst's round-{int(revision_round)} revision was shown the {peer} "
+        f"analyst's whole report: {why}."
+    )
+
+
+# How many claim numbers a sentence writes out before it counts the rest.
+_NUMBERS_SAID = 5
+
+
+def _claim_numbers_said(numbers: Sequence[int]) -> str:
+    which = "claim" if len(numbers) == 1 else "claims"
+    said = ", ".join(str(n) for n in numbers[:_NUMBERS_SAID])
+    rest = len(numbers) - _NUMBERS_SAID
+    return f"{which} {said}" + (f" and {rest} more" if rest > 0 else "")
+
+
+def peer_excerpt(
+    name: str,
+    peer: str,
+    refs: Sequence[ContestedRef],
+    whole: str,
+    isr: Any,
+    patterns: Sequence[re.Pattern[str]],
+    revision_round: int = 0,
+) -> ShownReport:
+    """The peer's report as the ``name`` analyst's revision is shown it.
+
+    ``refs`` are the lines naming ``name`` that name ``peer`` too (in the
+    field, or by key or label). Their claim numbers for the peer are quoted
+    from its answer in force (``isr``, the ISR the mediator read), numbered by
+    block as every summary numbers them, each as the summary writes it
+    (``claim_summary_line``), followed by the peer's disputes that write
+    ``name``'s key or label (``patterns``). The whole report is shown instead,
+    with a note saying why, when a line names the peer with no claim number
+    for it, or one too long to read, when a number is past the claims of its
+    answer in force, or when that answer is not held.
+    """
+    from maljan.schemas.isr_models import claim_summary_line
+
+    def _whole(why: str) -> ShownReport:
+        return ShownReport(whole, (), len(whole), _whole_note(name, peer, revision_round, why))
+
+    if isr is None:
+        return _whole("its answer in force was not read")
+    blocks = _blocks_of(isr)
+    numbers: dict[int, None] = {}
+    for ref in refs:
+        if peer in ref.unplaced:
+            return _whole(
+                f"contested line {ref.line} writes a claim number for it too long to be one"
+            )
+        written = ref.claims_of(peer)
+        if not written:
+            return _whole(f"contested line {ref.line} names it without a claim number")
+        past = [n for n in written if not 1 <= n <= len(blocks)]
+        if past:
+            return _whole(
+                f"contested line {ref.line} names its {_claim_numbers_said(past)}, and its "
+                f"answer in force holds {len(blocks)} claim(s)"
+            )
+        numbers.update(dict.fromkeys(written))
+    if not numbers:
+        return _whole("no contested line names a claim of it")
+    quoted = sorted(numbers)
+    lines = [f"  {claim_summary_line(n, blocks[n - 1][0], blocks[n - 1])}" for n in quoted]
+    disputes = [
+        str(item)
+        for item in getattr(isr, "dissent_items", None) or []
+        if any(p.search(str(item)) for p in patterns)
+    ]
+    if disputes:
+        lines.append(f"  Disputes naming the {name} analyst:")
+        lines.extend(f"    - {item}" for item in disputes)
+    return ShownReport("\n".join(lines), quoted, len(whole))
+
+
+def peers_shown_record(shown: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """What a round's revisions were shown of their peers, for the round's record.
+
+    ``shown`` is, per named analyst, each peer report its revision was given
+    (:func:`contested_input` with the answers in force). ``excerpted`` and
+    ``whole`` count the peer reports cut to the claims the lines name and the
+    ones shown whole; ``excerpt_chars`` is what the excerpts hold and
+    ``excerpted_whole_chars`` what the same reports hold whole, the saving
+    being the difference; ``whole_chars`` is what the reports shown whole
+    hold. ``quoted`` is the claim numbers quoted per analyst and peer, and
+    ``notes`` the sentence for each report shown whole, in order. ``{}`` for a
+    round that showed no peer.
+    """
+    excerpted = whole = excerpt_chars = excerpted_whole = whole_chars = 0
+    quoted: dict[str, dict[str, list[int]]] = {}
+    notes: list[str] = []
+    for name, peers in shown.items():
+        for peer, text in peers.items():
+            claims = text.claims if isinstance(text, ShownReport) else ()
+            if claims:
+                excerpted += 1
+                excerpt_chars += len(text)
+                excerpted_whole += text.whole_chars
+                quoted.setdefault(str(name), {})[str(peer)] = list(claims)
+                continue
+            whole += 1
+            whole_chars += len(str(text or ""))
+            note = text.note if isinstance(text, ShownReport) else ""
+            if note:
+                notes.append(note)
+    if not excerpted and not whole:
+        return {}
+    return {
+        "excerpted": excerpted,
+        "whole": whole,
+        "excerpt_chars": excerpt_chars,
+        "excerpted_whole_chars": excerpted_whole,
+        "whole_chars": whole_chars,
+        **({"quoted": quoted} if quoted else {}),
+        **({"notes": notes} if notes else {}),
+    }

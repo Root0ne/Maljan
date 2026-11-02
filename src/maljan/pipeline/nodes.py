@@ -5919,6 +5919,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         not_asked: set[str] = set()
         # Of those, the ones whose input could not be loaded again, and why.
         not_loaded: dict[str, str] = {}
+        # Per named analyst, each peer report its revision was shown: an
+        # excerpt of the claims its lines name, or the whole report and why.
+        peers_shown: dict[str, dict[str, Any]] = {}
 
         async def _revise_one(name: str) -> tuple[str, AgentISR]:
             # Same guard the analyst node applies before the initial pass. It
@@ -5984,7 +5987,10 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             directive = revision_directive
             if named is not None:
                 # A named analyst is shown the contested points that name it
-                # and the peers those points name, not every peer's answer.
+                # and the peers those points name, not every peer's answer:
+                # of each, the claims the points name, numbered and quoted
+                # from the answers in force the mediator read, or the whole
+                # report where they cannot be, with the reason recorded.
                 feedback, peer_reports = contested_input(
                     name,
                     mediator_feedback,
@@ -5992,7 +5998,10 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     agent_names,
                     reports_in_force,
                     {n: label_of(container, n) for n in [*agent_names, *reports_in_force]},
+                    isrs=kept_isrs,
+                    revision_round=int(iteration),
                 )
+                peers_shown[name] = dict(peer_reports)
                 directive = feedback
             # The functions the lines naming this analyst name, and whether
             # each was listed. An analyst with tools is told it can read one
@@ -6013,7 +6022,18 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             # The reports are what models wrote: a run-state marker in one is
             # written out, so the debate never shows one as the platform's
             # block. One character for one: every length read of them holds.
+            from maljan.pipeline.debate_facts import ShownReport
             from maljan.utils.written_forms import markers_written_out
+
+            def _written(text: Any) -> Any:
+                # An excerpt keeps the claims it quotes, which head it in the
+                # prompt; a whole report is passed as a plain text, as before.
+                if not isinstance(text, str):
+                    return text
+                out = markers_written_out(str(text))
+                if isinstance(text, ShownReport) and text.claims:
+                    return text.written(out)
+                return out
 
             # Each passed only when it says something, so a round with neither
             # makes the call it always made.
@@ -6026,10 +6046,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 agent.safe_revise_isr,
                 data,
                 markers_written_out(own_report) if isinstance(own_report, str) else own_report,
-                {
-                    peer: markers_written_out(text) if isinstance(text, str) else text
-                    for peer, text in peer_reports.items()
-                },
+                {peer: _written(text) for peer, text in peer_reports.items()},
                 # The ledger counts of the lines that name this analyst.
                 with_place_facts(
                     with_ledger_facts(directive, facts_naming(name, ledger_facts)),
@@ -6411,6 +6428,18 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             state, revised_isrs, revised_names, entries_shown, revision_ledger
         )
         out: dict[str, Any] = {"revised_reports": revised, "isr_reports": revised_isrs}
+        # What the named revisions were shown of their peers: excerpts against
+        # the whole reports, and why each report shown whole was, said.
+        from maljan.pipeline.debate_facts import peers_shown_record
+
+        peers_record = peers_shown_record(peers_shown)
+        for said in peers_record.get("notes") or ():
+            logger.info("%s", said)
+        if peers_record:
+            with suppress(Exception):
+                container.input_meter.peers_shown(
+                    stage_key_of(stage, "debate"), int(iteration), peers_record
+                )
         if revision_ledger:
             out["evidence_ledger"] = revision_ledger
         if revision_nudge_modes:
@@ -6440,6 +6469,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 ),
                 **({"asked_all": asked_all} if asked_all else {}),
                 **({"retry_added": retry_added} if retry_added else {}),
+                **({"peers": peers_record} if peers_record else {}),
                 # The entries each revision was shown, for the claims of later
                 # rounds to be read against (``_mark_claims_on_shown_entries``).
                 **(

@@ -4374,7 +4374,9 @@ def revision_messages(
     negotiation round, which appends ``_REVISION_ISR_FRAMING`` and asks for the
     CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE plus DISPUTES shape the ISR parsers
     read. Everything here — the labels, the order of the blocks, the closing
-    sentence — is byte-for-byte what the network analyst sent before.
+    sentence — is byte-for-byte what the network analyst sent before. A peer
+    report cut to the claims a contested line names is headed by them
+    (``debate_facts.peer_report_heading``); a whole one is headed as before.
 
     ``revision_round`` is not interpolated into the prompt (it never was); it
     is carried so a caller's log line and the returned ISR agree about which
@@ -4391,9 +4393,14 @@ def revision_messages(
         len(peer_reports),
     )
     if isr:
+        # A peer's report cut to the claims a contested line names is headed
+        # by them; a whole one as it always was (``debate_facts.contested_input``).
+        from maljan.pipeline.debate_facts import peer_report_heading
+
         peer_section = (
             "\n\n".join(
-                f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
+                f"{peer_report_heading(name, report)}\n{report}"
+                for name, report in peer_reports.items()
             )
             or "No peer reports available."
         )
