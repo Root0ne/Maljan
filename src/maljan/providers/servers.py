@@ -720,10 +720,10 @@ class ServerHandle:
             # Kept so the backstop reap can tell this handle's child from any
             # other subprocess that happened to start in the same window; see
             # ``_child_matches``.
-            self._launch_argv = (self.config.command, *args)
+            self._launch_argv = (launch.command, *args)
             self._launch_env_names = tuple(env)
             params = StdioServerParameters(
-                command=self.config.command,
+                command=launch.command,
                 args=args,
                 env=env,
                 cwd=launch.cwd,
