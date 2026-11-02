@@ -22,6 +22,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from maljan.pipeline.validation import EntryTexts
 from maljan.reporting.agreement_facts import ledger_facts
 from maljan.reporting.models import (
+    CapabilityCell,
     FileHashes,
     MalwareReport,
     SampleIdentity,
@@ -84,6 +85,15 @@ def _report(persistence: str = "") -> MalwareReport:
                 TechniqueProcedure(technique_id="T1564.003", procedure=HIDDEN),
             ],
         ),
+        capability_matrix=[
+            CapabilityCell(
+                tactic="TA0005",
+                tactic_name="Defense Evasion",
+                technique_id="T1564.003",
+                technique_name="Hidden Window",
+                evidence=["The runner 0x1030 starts each command in a hidden window [ev_0109]."],
+            )
+        ],
     )
 
 
@@ -128,13 +138,25 @@ def test_the_ledger_facts_list_each_read_routine_with_its_listings() -> None:
 def test_a_routine_a_sentence_calls_unread_is_shown_with_its_listing() -> None:
     passages = passages_of(_report(), entries=_ledger())
     facts = {p.id: p for p in passages if p.kind == FACT and p.id.startswith("listed.")}
-    # Both routines stand in the sentence before "Its body was not read".
+    # "Its body was not read" is about the routine named last before it.
     assert sorted(f.text for f in facts.values()) == [
-        f"{hex(INSTALL)} (offset 0x33ac): ev_0107 lists its code (decompiled or disassembled)",
         f"{hex(COPY)} (offset 0x7504): ev_0175 lists its code (decompiled or disassembled)",
     ]
     assert "A routine an entry lists was read" in SYSTEM_PROMPT
     assert "ev_0175 lists its code" in prompt_text(passages)
+
+
+def test_only_the_routine_the_absence_is_about_is_a_fact() -> None:
+    # The address in the clause that says the code is not read, not another one
+    # the sentence names; an active "does not read" says nothing of code.
+    said = "Routine 0x33ac copies the module, and the code of 0x7504 was not read [ev_0107]."
+    passages = passages_of(_report(said), entries=_ledger())
+    assert [p.text.split(":")[0] for p in passages if p.id.startswith("listed.")] == [
+        f"{hex(COPY)} (offset 0x7504)"
+    ]
+    active = "Routine 0x33ac does not read the key, and 0x7504 copies the module [ev_0107]."
+    passages = passages_of(_report(active), entries=_ledger())
+    assert not [p for p in passages if p.id.startswith("listed.")]
 
 
 def test_a_routine_no_sentence_calls_unread_is_no_fact() -> None:
@@ -154,7 +176,7 @@ def test_the_platform_s_own_unread_clause_makes_no_routine_a_fact() -> None:
 
 def test_a_section_5_sentence_calling_a_listed_routine_unread_is_qualified() -> None:
     report = _report()
-    row = _row("persistence_detail", UNREAD, ["listed.2"], "Its body was read [ev_0175].")
+    row = _row("persistence_detail", UNREAD, ["listed.1"], "Its body was read [ev_0175].")
     done = _ask(report, {"sentences": [row]})
     body = report.technical_analysis.persistence_detail.body
     assert body.endswith(
@@ -176,3 +198,17 @@ def test_a_procedure_is_a_passage_written_without_the_code_and_may_be_rewritten(
     assert row.procedure == rewrite
     assert row.evidence_refs == ["ev_0109"]
     assert done.summary["rewritten"] == 1
+
+
+def test_a_procedure_rewrite_is_held_to_what_a_procedure_is_held_to() -> None:
+    # Two sentences, or a rewrite dropping the value of the technique's claim, is
+    # not put in: the composer would not have taken it as a procedure.
+    for rewrite in (
+        "The runner 0x1030 starts each command. It hides the window with SW_HIDE [ev_0109].",
+        "Each command starts with SW_HIDE [ev_0109].",
+    ):
+        report = _report()
+        row = _row("procedures.1", HIDDEN, ["discovery"], rewrite)
+        done = _ask(report, {"sentences": [row]}, {"sentences": [row]})
+        assert report.technical_analysis.technique_procedures[0].procedure == HIDDEN
+        assert done.summary["rewritten"] == 0 and done.summary["not_applied"] == 1

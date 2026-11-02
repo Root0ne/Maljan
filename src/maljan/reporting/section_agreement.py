@@ -178,6 +178,10 @@ class Passage:
     # the model chose to qualify on it (``_qualified``); none for a fact that
     # grounds no rewrite.
     qualifier: str = ""
+    # The checks the field a passage stands in holds its text to, run on a
+    # rewrite before it is put in (an ATT&CK procedure: one sentence, carrying
+    # its technique's values); none for a passage held to the round's alone.
+    check: Callable[[str], list[Violation]] | None = None
 
 
 def _ids(*sources: Any) -> frozenset[str]:
@@ -405,9 +409,11 @@ def passages_of(
                 CLAIM_LED,
             )
         )
-    if ta is not None:
+    if ta is not None and ta.technique_procedures:
         # The ATT&CK table's procedures are written from the claims, one sentence
-        # each, beside section 5 (T-494): asked like every other such passage.
+        # each, beside section 5 (T-494): asked like every other such passage,
+        # and a rewrite held to what the composer holds a procedure to.
+        held_to = _procedure_check(report)
         for index, row in enumerate(ta.technique_procedures, 1):
             if not row.procedure.strip():
                 continue
@@ -422,6 +428,7 @@ def passages_of(
                     kind=CLAIM_LED,
                     cites=_ids(row.evidence_refs, row.procedure),
                     write=_setter(row, "procedure"),
+                    check=held_to(row.technique_id),
                 )
             )
     if report.intro_background.strip():
@@ -438,6 +445,36 @@ def passages_of(
     shown = [*facts, *coded, *debate, *uncoded]
     facts.extend(_ledger_passages(entries, shown))
     return [*facts, *coded, *debate, *uncoded]
+
+
+def _procedure_check(report: MalwareReport) -> Callable[[str], Callable[[str], list[Violation]]]:
+    """For a technique, the check a rewrite of its procedure passes: one sentence, for a
+    technique the report publishes, carrying its claims' values
+    (``composer_pro.procedure_violations``, ``procedure_value_violations``). The
+    technique's claims are read once for every procedure."""
+    from maljan.reporting.composer_pro import (
+        ValueReader,
+        first_claim_sentences,
+        procedure_value_violations,
+        procedure_violations,
+        published_techniques,
+    )
+
+    published = list(published_techniques(report))
+    firsts = first_claim_sentences(report)
+    reader = ValueReader.of(report)
+
+    def _for(tid: str) -> Callable[[str], list[Violation]]:
+        def _check(text: str) -> list[Violation]:
+            payload = {"procedures": [{"technique_id": tid, "procedure": text}]}
+            return [
+                *procedure_violations(payload, published),
+                *procedure_value_violations(payload, firsts, reader),
+            ]
+
+        return _check
+
+    return _for
 
 
 def _one_line(text: Any, limit: int = 40) -> str:
@@ -492,12 +529,19 @@ _NOT_LISTED = "no entry lists its code (decompiled or disassembled)"
 # Words that call code not read, not listed or not in the evidence: what makes a
 # listed routine a passage names a fact worth showing (``_said_unread``). Which
 # sentence the listing contradicts is still the model's call.
+_UNREAD_VERB = r"(?:read|decompiled|disassembled|listed|examined|opened|obtained)"
 _SAID_UNREAD = re.compile(
-    r"\b(?:not|never)\s+(?:yet\s+)?(?:been\s+)?(?:read|decompiled|disassembled|listed|examined"
-    r"|opened|obtained)\b|\bnot\s+(?:in|part\s+of)\s+(?:this|the|my)\s+(?:evidence|ledger|rows)\b"
+    r"\b(?:is|are|was|were|be|been|being|has|have|had|remains?|remained)\s+(?:still\s+)?"
+    rf"(?:not|never)\s+(?:yet\s+)?(?:been\s+)?{_UNREAD_VERB}\b"
+    rf"|\b(?:code|body|bodies|listing|listings)\s+(?:not|never)\s+{_UNREAD_VERB}\b"
+    r"|\b(?:is|are|was|were)\s+not\s+(?:in|part\s+of)\s+(?:this|the|my)\s+"
+    r"(?:evidence|ledger|rows)\b"
     r"|\bunread\b",
     re.IGNORECASE,
 )
+# Where a clause ends inside a sentence: the code an absence is about stands in
+# its own clause, or right before it ("0x7504 is called. Its body was not read.").
+_CLAUSE_BREAK = re.compile(r"[;:,()\u2014\u2013]|\s(?:but|while|whereas|although|so)\s")
 
 
 # The clause the platform adds to a section 5 sentence on an unread callee
@@ -509,18 +553,38 @@ _UNREAD_CLAUSE = re.compile(
 )
 
 
+def _addresses_before(text: str) -> set[int]:
+    """The last address ``text`` writes, read word by word from its end."""
+    for word in reversed(text.split()):
+        found = _addresses_written(word)
+        if found:
+            return set(found)
+    return set()
+
+
 def _said_unread(passages: Iterable[Passage]) -> set[int]:
-    """Every address a passage names in a sentence that, or whose next sentence ("Its body
-    was not read."), calls code not read or not in the evidence; the platform's own clause
-    on an unread callee names none. One pass over each text."""
+    """Every address a passage says the code of is not read or not in the evidence.
+
+    The passive statement only ("was not read", "is not in this evidence", never
+    "does not read the key"), and only the addresses in its own clause, else the
+    nearest one before it in the sentence, else the last one of the sentence
+    before ("0x7504 is called. Its body was not read."). The platform's own
+    clause on an unread callee names none. One pass over each text.
+    """
     out: set[int] = set()
     for passage in passages:
         starts, _ends = _sentence_units(_UNREAD_CLAUSE.sub("", passage.text))
         ordered = [s for _at, s in sorted((at, s) for s, ats in starts.items() for at in ats)]
-        said = [bool(_SAID_UNREAD.search(sentence)) for sentence in ordered]
         for index, sentence in enumerate(ordered):
-            if said[index] or (index + 1 < len(ordered) and said[index + 1]):
-                out.update(_addresses_written(sentence))
+            for match in _SAID_UNREAD.finditer(sentence):
+                before = sentence[: match.start()]
+                breaks = [m.end() for m in _CLAUSE_BREAK.finditer(before)]
+                after = _CLAUSE_BREAK.search(sentence, match.end())
+                clause = sentence[breaks[-1] if breaks else 0 : after.start() if after else None]
+                found = set(_addresses_written(clause)) or _addresses_before(before)
+                if not found and index:
+                    found = _addresses_before(ordered[index - 1])
+                out.update(found)
     return out
 
 
@@ -877,6 +941,21 @@ def _row_violations(
                 ),
                 path=f"{path}.sources",
             )
+        )
+    if row.decision == "rewrite" and passage.check is not None:
+        # What the field the passage stands in holds its text to holds the
+        # rewrite too: a procedure stays one sentence carrying its values.
+        out.extend(
+            replace(
+                violation,
+                message=(
+                    f"row {safe_finding_value(index + 1)}: the rewrite of "
+                    f"{safe_finding_value(passage.id)}: {safe_finding_value(violation.message)}"
+                ),
+                sentence="",
+                path=f"{path}.rewrite",
+            )
+            for violation in passage.check(row.rewrite)
         )
     if row.decision == "rewrite" and _writable(passage):
         # Only a source the passage may rest on grounds its rewrite: a section

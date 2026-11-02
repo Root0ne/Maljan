@@ -916,12 +916,11 @@ class _Analyst:
         return [*lines, ""]
 
     def _commands_started(self) -> list[str]:
-        # Only the descendants of a process running the sample, never a process
-        # the sandbox marks alone; the ones left out are said.
+        # Only the sample's own processes, by the export's lineage rule; the ones
+        # left out are said under a table that has rows.
         commands, others = started_by_the_sample(self.report)
         if not commands:
-            left = not_started_by_the_sample_line(others, _BUNDLE_TREE)[1:]
-            return [*left, ""] if left else []
+            return []
         lines = ["Commands the sample started _(observed)_:", "", _row("PID", "Command line")]
         lines.append(_divider(2))
         for node in commands[:20]:

@@ -85,21 +85,41 @@ class TestWhichCommandIsTheSamples:
         assert [node.pid for node in started] == [101, 102]
         assert [node.pid for node in others] == [95]
 
-    def test_no_process_running_the_sample_attributes_nothing(self) -> None:
-        report = _report(_desktop())
-        report.identity.file_name = "other.exe"
-        report.identity.hashes.sha256 = "ab" * 32
+    def test_a_marked_root_no_file_names_keeps_its_children(self) -> None:
+        # A renamed or staged copy the sandbox marks, its name and digest unmatched:
+        # the mark is then the one lineage fact, and its children are its own.
+        renamed = ProcessNode(
+            pid=70,
+            ppid=4,
+            name="C:\\Users\\a\\AppData\\Local\\Temp\\inner.exe",
+            command_line="inner.exe",
+            marked=True,
+            children=[_child(71, 70, "cmd.exe /c whoami")],
+        )
+        report = _report(renamed)
         started, others = started_by_the_sample(report)
+        assert [node.pid for node in started] == [71] and others == []
+
+    def test_no_lineage_fact_attributes_nothing(self) -> None:
+        unmarked = ProcessNode(
+            pid=93,
+            ppid=29,
+            name="C:\\Windows\\system32\\sihost.exe",
+            command_line="sihost.exe",
+            children=[_child(95, 93, "explorer.exe /LOADSAVEDWINDOWS")],
+        )
+        started, others = started_by_the_sample(_report(unmarked))
         assert started == [] and [node.pid for node in others] == [95]
 
 
 class TestTheTablesSayWhatTheyLeaveOut:
-    def test_the_analyst_report_lists_no_desktop_process_and_says_so(self) -> None:
-        markdown = MarkdownRenderer(layout=ANALYST).render(_report(_sample(84), _desktop()))
-        assert "Commands the sample started" not in markdown
-        assert "`explorer.exe /LOADSAVEDWINDOWS`" not in markdown
-        assert "Not listed: 1 command line the sandbox recorded" in markdown
-        assert "(pid 95)" in markdown
+    def test_no_table_and_no_line_when_the_sample_started_nothing(self) -> None:
+        report = _report(_sample(84), _desktop())
+        for layout in (ANALYST, FULL):
+            markdown = MarkdownRenderer(layout=layout).render(report)
+            assert "ommands the sample started" not in markdown
+            assert "| 95 | `explorer.exe /LOADSAVEDWINDOWS` |" not in markdown
+            assert "Not listed" not in markdown
 
     def test_the_analyst_table_keeps_the_sample_s_own_commands(self) -> None:
         child = _child(101, 84, "cmd.exe /c ipconfig /all")
@@ -107,10 +127,14 @@ class TestTheTablesSayWhatTheyLeaveOut:
         assert "Commands the sample started" in markdown
         assert "| 101 | `cmd.exe /c ipconfig /all` |" in markdown
         assert "| 95 |" not in markdown
-        assert "the evidence bundle's process tree lists every process" in markdown
+        assert (
+            "_Not listed: 1 command line not attributed to the sample (pid 95); the evidence "
+            "bundle's process tree lists every process._"
+        ) in markdown
 
     def test_the_full_report_says_it_too(self) -> None:
-        markdown = MarkdownRenderer(layout=FULL).render(_report(_sample(84), _desktop()))
-        assert "commands the sample started" not in markdown
-        assert "no command line below a process that runs the sample" in markdown
-        assert "Not listed: 1 command line" in markdown
+        child = _child(101, 84, "cmd.exe /c ipconfig /all")
+        markdown = MarkdownRenderer(layout=FULL).render(_report(_sample(84, child), _desktop()))
+        assert "commands the sample started" in markdown
+        assert "| 101 | `cmd.exe /c ipconfig /all` |" in markdown
+        assert "Not listed: 1 command line not attributed to the sample (pid 95)" in markdown

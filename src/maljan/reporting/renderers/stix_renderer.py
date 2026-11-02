@@ -83,7 +83,11 @@ from maljan.reporting.models import (
     stated_family,
 )
 from maljan.schemas.judgement import indicator_type_for
-from maljan.schemas.sandbox_report import LINEAGE_STORED_MARKED_BY
+from maljan.schemas.sandbox_report import (
+    LINEAGE_STORED_MARKED_BY,
+    SampleTree,
+    sample_process_tree,
+)
 from maljan.schemas.stix_models import (
     ATTACK_PATTERN_NAMESPACE,
     EVIDENCE_REFS_PROPERTY,
@@ -2767,7 +2771,7 @@ def sandbox_facts_for_the_judge(
     run's ``persistence`` mechanisms names is that mechanism's row
     (:func:`persistence_run_keys`) and is not asked about. ``sample`` is the
     routed identity (``file_name``, ``sha256``) the sample's process tree is
-    found by (:func:`_tree_processes`); without it no process is the sample's.
+    found by (:func:`sample_process_tree`); without it no process is the sample's.
     Read from the blocks the report will be built from, before the judge's
     verdict exists, so nothing about the judge's own keep is in it. The
     lookups are built once here, so asking about every value of a bundle reads
@@ -3143,113 +3147,13 @@ _PID_KEYS = ("pid", "process_id", "pids")
 _PROCESS_KEYS = ("process", "process_name", "processes")
 
 
-@dataclass(frozen=True)
-class _SampleTree:
-    """The sample's process tree as the host rows read it.
-
-    ``pids`` and ``names`` (lower case) of its processes; ``unsettled`` the
-    pids whose attribution the listing does not settle: one the two lineage
-    facts disagree about, or one more than one listed process carries with
-    lineages that differ. A record naming an unsettled pid is unattributed.
-    """
-
-    pids: frozenset[str]
-    names: frozenset[str]
-    unsettled: frozenset[str]
-
-
-def _pid_text(value: Any) -> str:
-    text = "" if value is None or isinstance(value, bool) else str(value).strip()
-    return "" if text in ("0", "None") else text
-
-
-def _tree_processes(roots: list[Any], file_name: str = "", sha256: str = "") -> _SampleTree:
-    """The sample's process tree among the listed processes, read from its lineage facts.
-
-    The facts the network block's flows are attributed by
-    (``schemas.sandbox_report``): the processes that run the submitted file
-    (its name or its digest, ``runs_the_submitted_file``) and the processes
-    the sandbox marks as the sample's (``ProcessNode.marked``). Each gives a
-    tree, the listed processes whose parent chain reaches one it names; where
-    both name processes, a process in both trees is the sample's and one in
-    exactly one is disputed. A listed root that is neither is not the sample's,
-    nor is anything under it, whatever the listing calls a root. A parent pid
-    more than one listed process carries is no link: the chain stops there.
-    """
-    from maljan.schemas.sandbox_report import runs_the_submitted_file
-
-    nodes: list[tuple[str, str, str, bool, bool]] = []
-    stack: list[tuple[Any, str]] = [(node, "") for node in roots]
-    while stack:
-        node, container = stack.pop()
-        pid = _pid_text(_field(node, "pid"))
-        name = str(_field(node, "name") or "")
-        runs = bool(file_name or sha256) and runs_the_submitted_file(
-            name, str(_field(node, "command_line") or ""), file_name, sha256
-        )
-        nodes.append(
-            (
-                pid,
-                _pid_text(_field(node, "ppid")) or container,
-                name,
-                runs,
-                _field(node, "marked") is True,
-            )
-        )
-        stack.extend((child, pid) for child in _field(node, "children") or [])
-    by_pid: dict[str, list[int]] = {}
-    for index, (pid, *_rest) in enumerate(nodes):
-        if pid:
-            by_pid.setdefault(pid, []).append(index)
-
-    def _reach(seeds: set[int]) -> set[int]:
-        # Each process settled once: a chain is walked to the first settled
-        # process, and every process on it takes that answer.
-        settled: dict[int, bool] = {}
-        for start in range(len(nodes)):
-            chain: list[int] = []
-            on_chain: set[int] = set()
-            current: int | None = start
-            reaches = False
-            while current is not None:
-                if current in settled:
-                    reaches = settled[current]
-                    break
-                if current in seeds:
-                    reaches = settled[current] = True
-                    break
-                if current in on_chain:
-                    break
-                on_chain.add(current)
-                chain.append(current)
-                parents = by_pid.get(nodes[current][1]) or []
-                current = parents[0] if len(parents) == 1 else None
-            for one in chain:
-                settled[one] = reaches
-        return {index for index, reaches in settled.items() if reaches}
-
-    by_file = _reach({i for i, node in enumerate(nodes) if node[3]})
-    by_mark = _reach({i for i, node in enumerate(nodes) if node[4]})
-    if by_file and by_mark:
-        tree, disputed = by_file & by_mark, by_file ^ by_mark
-    else:
-        tree, disputed = by_file | by_mark, set()
-    unsettled = {nodes[i][0] for i in disputed if nodes[i][0]}
-    unsettled.update(pid for pid, listed in by_pid.items() if len({i in tree for i in listed}) > 1)
-    return _SampleTree(
-        pids=frozenset(nodes[i][0] for i in tree if nodes[i][0]) - unsettled,
-        names=frozenset(n for n in (nodes[i][2].strip().lower() for i in tree) if n),
-        unsettled=frozenset(unsettled),
-    )
-
-
-def _not_the_sample_s(record: Any, tree: _SampleTree, did: str) -> str:
+def _not_the_sample_s(record: Any, tree: SampleTree, did: str) -> str:
     """Why a sandbox record is not the sample's, or ``""`` when a process of its tree made it.
 
     Decided by the record's pid when it names one; its image name is read only
     when it names no pid, because a common image the tree also runs
     (``explorer.exe``) would otherwise attribute every record of that name. A
-    record naming a pid the listing does not settle (:class:`_SampleTree`) is
+    record naming a pid the listing does not settle (:class:`SampleTree`) is
     unattributed.
     """
     pids, names = tree.pids, tree.names
@@ -3290,7 +3194,7 @@ def _sandbox_host_index(report: Any) -> dict[tuple[str, str], str]:
         if dynamic is None:
             return {}
         identity = _field(report, "identity")
-        tree = _tree_processes(
+        tree = sample_process_tree(
             list(_field(dynamic, "process_tree") or []),
             str(_field(identity, "file_name") or ""),
             str(_field(_field(identity, "hashes"), "sha256") or ""),

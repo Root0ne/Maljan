@@ -55,12 +55,12 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # did not change).
 # local8 re-pinned when the commands table came to list only what descends from a
 # process running the sample (T-494): explorer.exe under sihost.exe leaves the
-# table for a line naming its pid, and nothing else changed (the STIX did not).
+# table, which has no row left and is not printed; nothing else changed (nor the STIX).
 STORED_RENDERS = {
     "run7": ("87ad1594f3cbc6ea", "125193da10162be9", "c6313f103ee42d52"),
     "run5": ("4fbb0b856aea7f8e", "60e2582c1e229b35", "276aad22c908ff48"),
     "run4": ("581eb11ec3924a68", "75af799857a50862", "b0060de27f126465"),
-    "local8": ("74c9cee38f6d57b0", "214cc3a297d1dda7", "bd6ac195bc590655"),
+    "local8": ("058e0d21f925bb0e", "8148921046a3b91c", "bd6ac195bc590655"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")

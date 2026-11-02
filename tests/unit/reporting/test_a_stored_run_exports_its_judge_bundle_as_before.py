@@ -58,8 +58,8 @@ STORED_EXPORTS = {
 # nothing else (run4's export over the judge's bundle gains none).
 # Re-pinned when the commands table came to list only what descends from a
 # process running the sample (T-494): explorer.exe under sihost.exe leaves the
-# table for a line naming its pid; the STIX export did not change.
-HAIKU4_RENDERS = ("4d0f7b8660292310", "693cc953c7f6e694", "830330837272aa44")
+# table, which has no row left and is not printed; the STIX export did not change.
+HAIKU4_RENDERS = ("06a395f0432b80a2", "eaaa767d3f812838", "830330837272aa44")
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")
