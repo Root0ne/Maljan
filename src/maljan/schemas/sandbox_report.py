@@ -898,24 +898,26 @@ def pid_text(value: Any) -> str:
     return "" if text in ("0", "None") else text
 
 
-def sample_process_tree(roots: list[Any], file_name: str = "", sha256: str = "") -> SampleTree:
-    """The sample's process tree among the listed processes, read from its lineage facts.
+@dataclass(frozen=True)
+class _Placed:
+    """The listed processes, in listing order, and where the two lineage facts place each."""
 
-    The facts the network block's flows are attributed by: the processes that
-    run the submitted file (its name or its digest,
-    :func:`runs_the_submitted_file`) and the processes the sandbox marks as the
-    sample's (``marked``). Each gives a tree, the listed processes whose parent
-    chain reaches one it names; where both name processes, a process in both
-    trees is the sample's and one in exactly one is disputed; where one alone
-    names any, its tree is the answer. A listed root that is neither is not
-    the sample's, nor is anything under it, whatever the listing calls a root.
-    A parent pid more than one listed process carries is no link: the chain
-    stops there. One rule for every surface that attributes a process: the
-    export's host values and the report's table of the commands the sample
-    started.
-    """
-    nodes: list[tuple[str, str, str, bool, bool]] = []
-    stack: list[tuple[Any, str]] = [(node, "") for node in roots]
+    nodes: list[tuple[Any, str, str]]  # (the node, its pid text, its name)
+    tree: set[int]
+    disputed: set[int]
+    marked: set[int]
+    stated: bool
+    # The processes that record a lineage of their own: a parent pid, or a
+    # place under another listed process.
+    linked: set[int]
+
+
+def _placed(roots: list[Any], file_name: str, sha256: str) -> _Placed:
+    """Each listed process placed by the two lineage facts (:func:`sample_process_tree`)."""
+    # (node, pid, parent pid, index of the process it is listed under, name,
+    #  runs the submitted file, marked)
+    nodes: list[tuple[Any, str, str, int | None, str, bool, bool]] = []
+    stack: list[tuple[Any, int | None]] = [(node, None) for node in reversed(roots)]
     while stack:
         node, container = stack.pop()
         pid = pid_text(_node_field(node, "pid"))
@@ -923,20 +925,29 @@ def sample_process_tree(roots: list[Any], file_name: str = "", sha256: str = "")
         runs = bool(file_name or sha256) and runs_the_submitted_file(
             name, str(_node_field(node, "command_line") or ""), file_name, sha256
         )
-        nodes.append(
-            (
-                pid,
-                pid_text(_node_field(node, "ppid")) or container,
-                name,
-                runs,
-                _node_field(node, "marked") is True,
-            )
+        parent = pid_text(_node_field(node, "ppid")) or (
+            nodes[container][1] if container is not None else ""
         )
-        stack.extend((child, pid) for child in _node_field(node, "children") or [])
+        index = len(nodes)
+        nodes.append(
+            (node, pid, parent, container, name, runs, _node_field(node, "marked") is True)
+        )
+        stack.extend(
+            (child, index) for child in reversed(list(_node_field(node, "children") or []))
+        )
     by_pid: dict[str, list[int]] = {}
-    for index, (pid, *_rest) in enumerate(nodes):
-        if pid:
-            by_pid.setdefault(pid, []).append(index)
+    for index, row in enumerate(nodes):
+        if row[1]:
+            by_pid.setdefault(row[1], []).append(index)
+
+    def _parent_of(index: int) -> int | None:
+        _node, _pid, parent, container, *_rest = nodes[index]
+        if parent:
+            parents = by_pid.get(parent) or []
+            return parents[0] if len(parents) == 1 else None
+        # No parent pid recorded, under a process that records none either:
+        # the place in the listing is the only link there is.
+        return container
 
     def _reach(seeds: set[int]) -> set[int]:
         # Each process settled once: a chain is walked to the first settled
@@ -958,26 +969,103 @@ def sample_process_tree(roots: list[Any], file_name: str = "", sha256: str = "")
                     break
                 on_chain.add(current)
                 chain.append(current)
-                parents = by_pid.get(nodes[current][1]) or []
-                current = parents[0] if len(parents) == 1 else None
+                current = _parent_of(current)
             for one in chain:
                 settled[one] = reaches
         return {index for index, reaches in settled.items() if reaches}
 
-    by_file = _reach({i for i, node in enumerate(nodes) if node[3]})
-    by_mark = _reach({i for i, node in enumerate(nodes) if node[4]})
+    by_file = _reach({i for i, row in enumerate(nodes) if row[5]})
+    by_mark = _reach({i for i, row in enumerate(nodes) if row[6]})
     if by_file and by_mark:
         tree, disputed = by_file & by_mark, by_file ^ by_mark
     else:
         tree, disputed = by_file | by_mark, set()
-    unsettled = {nodes[i][0] for i in disputed if nodes[i][0]}
+    return _Placed(
+        nodes=[(row[0], row[1], row[4]) for row in nodes],
+        tree=tree,
+        disputed=disputed,
+        marked=by_mark,
+        stated=bool(by_file or by_mark),
+        linked={i for i, row in enumerate(nodes) if row[2] or row[3] is not None},
+    )
+
+
+def sample_process_tree(roots: list[Any], file_name: str = "", sha256: str = "") -> SampleTree:
+    """The sample's process tree among the listed processes, read from its lineage facts.
+
+    The facts the network block's flows are attributed by: the processes that
+    run the submitted file (its name or its digest,
+    :func:`runs_the_submitted_file`) and the processes the sandbox marks as the
+    sample's (``marked``). Each gives a tree, the listed processes whose parent
+    chain reaches one it names; where both name processes, a process in both
+    trees is the sample's and one in exactly one is disputed; where one alone
+    names any, its tree is the answer. A listed root that is neither is not
+    the sample's, nor is anything under it, whatever the listing calls a root.
+    A parent pid more than one listed process carries is no link: the chain
+    stops there. A process that records no parent pid, listed under one that
+    records no pid either, descends from that one by its place in the listing.
+    One rule for every surface that attributes a process: the export's host
+    values and the report's table of the commands the sample started.
+    """
+    placed = _placed(roots, file_name, sha256)
+    nodes, tree = placed.nodes, placed.tree
+    by_pid: dict[str, list[int]] = {}
+    for index, (_node, pid, _name) in enumerate(nodes):
+        if pid:
+            by_pid.setdefault(pid, []).append(index)
+    unsettled = {nodes[i][1] for i in placed.disputed if nodes[i][1]}
     unsettled.update(pid for pid, listed in by_pid.items() if len({i in tree for i in listed}) > 1)
     return SampleTree(
-        pids=frozenset(nodes[i][0] for i in tree if nodes[i][0]) - unsettled,
+        pids=frozenset(nodes[i][1] for i in tree if nodes[i][1]) - unsettled,
         names=frozenset(n for n in (nodes[i][2].strip().lower() for i in tree) if n),
         unsettled=frozenset(unsettled),
-        reached=frozenset(nodes[i][0] for i in tree if nodes[i][0]),
+        reached=frozenset(nodes[i][1] for i in tree if nodes[i][1]),
     )
+
+
+# Where :func:`process_placement` places a listed process: in the sample's
+# tree, outside it, or disputed (``LINEAGE_MARKED`` or ``LINEAGE_FILE``, the
+# fact that alone names it); ``PLACED_UNSTATED`` for every process of a
+# listing neither fact names any process in.
+PLACED_IN_TREE = "tree"
+PLACED_OUTSIDE = "outside"
+PLACED_UNSTATED = ""
+# A process outside the tree that carries a pid a process of the tree carries
+# and records no lineage of its own (no parent pid, listed as a root): another
+# reading of that process as much as another process, so not placed.
+PLACED_UNSETTLED = "unsettled"
+
+
+def process_placement(
+    roots: list[Any], file_name: str = "", sha256: str = ""
+) -> list[tuple[Any, str]]:
+    """Each listed process, in listing order, with where the sample's lineage rule places it.
+
+    The rule of :func:`sample_process_tree`, read per listed process rather
+    than per pid: a process with no recorded pid that runs the submitted file
+    or carries the sandbox's mark is placed by its own fact, and two
+    processes that carry one pid are each placed by their own lineage. Where
+    neither fact names any process, no process is placed
+    (``PLACED_UNSTATED``): the listing says nothing either way. A process
+    that records no lineage of its own and carries a pid a process of the
+    tree carries is a reading of that pid alone (``PLACED_UNSETTLED``).
+    """
+    placed = _placed(roots, file_name, sha256)
+    tree_pids = {placed.nodes[i][1] for i in placed.tree if placed.nodes[i][1]}
+    out: list[tuple[Any, str]] = []
+    for index, (node, pid, _name) in enumerate(placed.nodes):
+        if not placed.stated:
+            where = PLACED_UNSTATED
+        elif index in placed.tree:
+            where = PLACED_IN_TREE
+        elif index in placed.disputed:
+            where = LINEAGE_MARKED if index in placed.marked else LINEAGE_FILE
+        elif index not in placed.linked and pid in tree_pids:
+            where = PLACED_UNSETTLED
+        else:
+            where = PLACED_OUTSIDE
+        out.append((node, where))
+    return out
 
 
 # Which of the two facts alone names a flow's process as the sample's, on a

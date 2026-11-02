@@ -183,3 +183,109 @@ def test_a_judge_process_never_carries_the_platform_s_property() -> None:
     assert SAMPLE_TREE_PROPERTY not in bundle["objects"][0]
     assert LINEAGE_DISPUTED_PROPERTY not in bundle["objects"][0]
     assert [v.code for v in found] == [PROPERTY_NOT_CARRIED_CODE]
+
+
+def _labels(tree: list[ProcessNode], file_name: str = "sample.exe") -> dict[str, Any]:
+    return {
+        name: p.get(SAMPLE_TREE_PROPERTY, p.get(LINEAGE_DISPUTED_PROPERTY))
+        for name, p in _processes(_exported(_report(tree, file_name))).items()
+    }
+
+
+def test_a_listing_neither_fact_names_any_process_in_labels_nothing() -> None:
+    # A renamed sample the sandbox does not mark: the listing says nothing
+    # about which process is the sample's, so no process is said not to be.
+    tree = [
+        ProcessNode(
+            pid=10,
+            name="explorer.exe",
+            children=[ProcessNode(pid=11, ppid=10, name="a1b2.exe", command_line="a1b2.exe")],
+        )
+    ]
+
+    assert _labels(tree, file_name="evil.exe") == {"explorer.exe": None, "a1b2.exe": None}
+
+
+def test_a_sample_process_with_no_recorded_pid_is_placed_by_its_own_facts() -> None:
+    tree = [
+        ProcessNode(
+            pid=10,
+            name="explorer.exe",
+            children=[
+                ProcessNode(
+                    pid=0,
+                    name="sample.exe",
+                    command_line="sample.exe",
+                    marked=True,
+                    children=[ProcessNode(pid=12, name="cmd.exe", command_line="cmd /c x")],
+                )
+            ],
+        )
+    ]
+
+    assert _labels(tree) == {"explorer.exe": False, "sample.exe": None, "cmd.exe": None}
+
+
+def test_two_processes_carrying_one_pid_are_each_placed_by_their_own_lineage() -> None:
+    tree = [
+        ProcessNode(
+            pid=10,
+            name="sample.exe",
+            command_line="sample.exe",
+            children=[ProcessNode(pid=11, name="cmd.exe", command_line="cmd /c x")],
+        ),
+        ProcessNode(
+            pid=20,
+            name="sihost.exe",
+            children=[ProcessNode(pid=11, name="explorer.exe", command_line="explorer")],
+        ),
+    ]
+
+    assert _labels(tree) == {
+        "sample.exe": None,
+        "cmd.exe": None,
+        "sihost.exe": False,
+        "explorer.exe": False,
+    }
+
+
+def test_a_reading_of_a_tree_pid_with_no_lineage_of_its_own_carries_nothing() -> None:
+    # A stored tree lists the sample's process again as a bare root row (no
+    # parent pid, no command line): another reading of that pid, not a
+    # process outside the tree.
+    tree = [
+        ProcessNode(pid=10, name="sample.exe", command_line="sample.exe"),
+        ProcessNode(pid=10, name="sample.exe (re-read)"),
+        ProcessNode(pid=30, name="svchost.exe"),
+    ]
+
+    assert _labels(tree) == {
+        "sample.exe": None,
+        "sample.exe (re-read)": None,
+        "svchost.exe": False,
+    }
+
+
+def test_the_commands_table_places_each_process_as_the_export_does() -> None:
+    from maljan.reporting.renderers.markdown import started_by_the_sample
+
+    report = _report(
+        [
+            ProcessNode(
+                pid=0,
+                name="sample.exe",
+                command_line="sample.exe",
+                children=[ProcessNode(pid=11, name="cmd.exe", command_line="cmd /c x")],
+            ),
+            ProcessNode(
+                pid=20,
+                name="sihost.exe",
+                children=[ProcessNode(pid=11, name="explorer.exe", command_line="explorer")],
+            ),
+        ]
+    )
+
+    started, others = started_by_the_sample(report)
+
+    assert [p.name for p in started] == ["cmd.exe"]
+    assert [p.name for p in others] == ["explorer.exe"]

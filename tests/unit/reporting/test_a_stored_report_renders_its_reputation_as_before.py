@@ -58,8 +58,11 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # table, which has no row left and is not printed; nothing else changed (nor the STIX).
 # The STIX re-pinned when a process the sample's lineage rule leaves out of its
 # tree came to say so (T-511): each desktop process carries
-# ``x_maljan_sample_process_tree: false`` (run4 two, run5 and run7 one, local8
-# five), and nothing else changed; the Markdown and HTML did not change.
+# ``x_maljan_sample_process_tree: false`` (run4 six: svchost.exe and
+# SecurityHealthHost.exe, each in the three readings the stored tree lists;
+# run5 and run7 one; local8 five), and nothing else changed; the Markdown and
+# HTML did not change. The readings of a pid of the sample's tree that record
+# no lineage of their own (run4's pid 83 and 89 rows) carry nothing.
 STORED_RENDERS = {
     "run7": ("87ad1594f3cbc6ea", "125193da10162be9", "d7d34f660c1bb621"),
     "run5": ("4fbb0b856aea7f8e", "60e2582c1e229b35", "9641d065877c52f9"),

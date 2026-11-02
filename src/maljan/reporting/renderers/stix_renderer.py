@@ -87,8 +87,12 @@ from maljan.schemas.sandbox_report import (
     LINEAGE_FILE,
     LINEAGE_MARKED,
     LINEAGE_STORED_MARKED_BY,
+    PLACED_IN_TREE,
+    PLACED_OUTSIDE,
+    PLACED_UNSETTLED,
+    PLACED_UNSTATED,
     SampleTree,
-    pid_text,
+    process_placement,
     sample_process_tree,
 )
 from maljan.schemas.stix_models import (
@@ -5146,41 +5150,37 @@ def _lineage_marks(
 ) -> dict[tuple[int, int, str, str], dict[str, Any]]:
     """What the sample's lineage rule says of each process it leaves out of the sample's tree.
 
-    By process identity, the properties its observable carries. The rule the
-    commands table and the host values read (:func:`sample_process_tree`): a
-    process with a recorded pid no process of the tree carries is outside it
-    (:data:`SAMPLE_TREE_PROPERTY` ``false``), unless the two lineage facts
-    disagree about it, and then it is disputed and says which fact alone
+    By process identity, the properties its observable carries, read per
+    listed process (:func:`process_placement`), never per pid: a process
+    outside the tree carries :data:`SAMPLE_TREE_PROPERTY` ``false``; one the
+    two lineage facts disagree about is disputed and says which fact alone
     names it as the sample's (:data:`LINEAGE_DISPUTED_PROPERTY`), as the
-    report's network rows say it of a flow's process. A process with no
-    recorded pid is placed by its parent. A process that stands in two places
-    takes the answer nearest the sample's tree. A process of the tree carries
-    nothing.
+    report's network rows say it of a flow's process. A process that stands
+    in two places takes the answer nearest the sample's tree. A process of
+    the tree carries nothing, nor does a reading of a tree process's pid
+    that records no lineage of its own, nor every process of a listing neither
+    fact names any process in: it says nothing either way.
     """
-    tree = sample_process_tree(roots, file_name, sha256)
-    marked = sample_process_tree(roots).reached
     # 0: the tree's; 1: disputed, with the fact alone naming it; 2: outside.
+    rank = {
+        PLACED_IN_TREE: 0,
+        PLACED_UNSETTLED: 0,
+        LINEAGE_MARKED: 1,
+        LINEAGE_FILE: 1,
+        PLACED_OUTSIDE: 2,
+    }
     placed: dict[tuple[int, int, str, str], tuple[int, str]] = {}
-    pending: list[tuple[ProcessNode, tuple[int, str]]] = [(root, (0, "")) for root in roots]
-    while pending:
-        node, parent = pending.pop()
-        pid = pid_text(node.pid)
-        if not pid:
-            state = parent
-        elif pid in tree.reached:
-            state = (0, "")
-        elif pid in tree.unsettled:
-            state = (1, LINEAGE_MARKED if pid in marked else LINEAGE_FILE)
-        else:
-            state = (2, "")
+    for node, where in process_placement(roots, file_name, sha256):
+        if where == PLACED_UNSTATED:
+            return {}
+        state = (rank[where], where if rank[where] == 1 else "")
         key = process_identity(node)
         placed[key] = min(placed.get(key, state), state)
-        pending.extend((child, state) for child in node.children)
     marks: dict[tuple[int, int, str, str], dict[str, Any]] = {}
-    for key, (rank, which) in placed.items():
-        if rank == 2:
+    for key, (level, which) in placed.items():
+        if level == 2:
             marks[key] = {SAMPLE_TREE_PROPERTY: False}
-        elif rank == 1:
+        elif level == 1:
             marks[key] = {LINEAGE_DISPUTED_PROPERTY: which}
     return marks
 

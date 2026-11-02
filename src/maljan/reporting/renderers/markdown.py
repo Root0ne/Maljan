@@ -5931,26 +5931,32 @@ def started_by_the_sample(report: MalwareReport) -> tuple[list[ProcessNode], lis
     of the sample (explorer.exe under sihost.exe) is no command the sample
     started, and a renamed copy the sandbox marks keeps its own. The second
     list is every other process below a root with a command line.
+
+    Each process is placed as the export places it
+    (``sandbox_report.process_placement``): by its own place in the listing,
+    never by its pid, so two processes that carry one pid are each placed by
+    their own lineage, and one with no recorded pid by its own facts and its
+    parent.
     """
-    from maljan.schemas.sandbox_report import pid_text, sample_process_tree
+    from maljan.schemas.sandbox_report import PLACED_IN_TREE, process_placement
 
     dynamic = report.dynamic
     roots = distinct_processes(dynamic.process_tree if dynamic else [])
-    tree = sample_process_tree(
-        roots, str(report.identity.file_name or ""), str(report.identity.hashes.sha256 or "")
-    )
+    in_tree = {
+        id(node)
+        for node, where in process_placement(
+            roots, str(report.identity.file_name or ""), str(report.identity.hashes.sha256 or "")
+        )
+        if where == PLACED_IN_TREE
+    }
     started: list[ProcessNode] = []
     others: list[ProcessNode] = []
 
     def _walk(node: ProcessNode) -> None:
-        # By place in the tree (``reached``): a repeated reading of one pid
-        # unsettles a record's pid, not a process the listing places; a child
-        # with no recorded pid is placed by its parent.
-        parent_is_the_sample_s = pid_text(node.pid) in tree.reached
+        parent_is_the_sample_s = id(node) in in_tree
         for child in node.children:
             if child.command_line:
-                child_pid = pid_text(child.pid)
-                ours = parent_is_the_sample_s and (not child_pid or child_pid in tree.reached)
+                ours = parent_is_the_sample_s and id(child) in in_tree
                 (started if ours else others).append(child)
             _walk(child)
 
