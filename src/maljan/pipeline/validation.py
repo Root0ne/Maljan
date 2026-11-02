@@ -7237,6 +7237,31 @@ _STATE_WITHHELD_RE = re.compile(
     r"|kept\s+out\b|excluded\b)",
     re.IGNORECASE,
 )
+# A named state's opening negation.
+_STATE_NEGATION_OPENING_RE = re.compile(r"^\W*(?:no|not|never)\b", re.IGNORECASE)
+# A participle an opening negation governs to state a state ("not attributed",
+# "never seen"): a regular one, or one of the common irregular ones.
+_STATE_PARTICIPLE_RE = re.compile(
+    r"[a-z]{2,}ed|seen|shown|kept|held|sent|found|given|taken|written", re.IGNORECASE
+)
+# The words after an opening negation that leave the state undecided ("not
+# decided", "not yet decided", "not clear"): plain English words of indecision,
+# and "yet". Such a state says nothing of the table's, and the model is asked.
+_STATE_UNDECIDED_WORDS = frozenset(
+    {
+        "decided",
+        "determined",
+        "known",
+        "sure",
+        "clear",
+        "certain",
+        "settled",
+        "resolved",
+        "assessed",
+        "evaluated",
+        "yet",
+    }
+)
 # A named state that says the value is published.
 _STATE_AFFIRMS_RE = re.compile(r"^\W*(?:yes|published)\b", re.IGNORECASE)
 # The platform's own words for a value it does not publish, written by the model.
@@ -7322,7 +7347,11 @@ def _unnegated(pattern: re.Pattern[str], text: str) -> bool:
 def _reads_withheld(said: str) -> bool:
     """Whether a named state reads as not published, and nothing in it says otherwise.
 
-    It opens with a negation or a withholding word (``_STATE_WITHHELD_RE``);
+    It opens with a negation or a withholding word (``_STATE_WITHHELD_RE``), a
+    negation that stands bare ("no", "no;", "no —") or governs a participle
+    that states a state ("not attributed", "never seen"), never an article, a
+    noun, an adverb or a word of indecision ("not a concern", "not yet
+    decided", ``_STATE_UNDECIDED_WORDS``);
     it names "publish" nowhere but in its own "not published" opening; and no
     negation stands within ``_WITHHOLDING_NEGATION_WINDOW`` words before a
     withholding word ("not withheld", "no longer withheld"), the opening's own
@@ -7330,6 +7359,9 @@ def _reads_withheld(said: str) -> bool:
     model is asked.
     """
     if not _STATE_WITHHELD_RE.search(said):
+        return False
+    opening = _STATE_NEGATION_OPENING_RE.match(said)
+    if opening is not None and not _negation_states_a_state(said[opening.end() :]):
         return False
     rest = _NOT_PUBLISHED_OPENING_RE.sub(" ", said, count=1)
     if _PUBLISH_WORD_RE.search(rest):
@@ -7339,6 +7371,21 @@ def _reads_withheld(said: str) -> bool:
         if _NEGATIONS & set(before[-_WITHHOLDING_NEGATION_WINDOW:]):
             return False
     return True
+
+
+def _negation_states_a_state(after: str) -> bool:
+    """Whether what follows a named state's opening negation leaves it a state.
+
+    The negation stands bare (nothing, or a mark, follows it) or governs a
+    participle that is no word of indecision.
+    """
+    tail = after.lstrip()
+    if not tail or not tail[0].isalnum():
+        return True
+    word = re.match(r"[A-Za-z]+", tail)
+    if word is None or word.group(0).lower() in _STATE_UNDECIDED_WORDS:
+        return False
+    return _STATE_PARTICIPLE_RE.fullmatch(word.group(0)) is not None
 
 
 def _restates_reason(after: str, answer: str, *, slack: float = 0.0) -> bool:

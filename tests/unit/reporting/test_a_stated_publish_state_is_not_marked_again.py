@@ -71,6 +71,43 @@ class TestAStatedState:
     def test_a_state_that_agrees_with_the_table_raises_nothing(self, written: str) -> None:
         assert _found(f"The capture holds {ADDRESS} {written} with two flows [ev_0031].") == []
 
+    @pytest.mark.parametrize(
+        "written",
+        [
+            "(publish state: no)",
+            "(publish state: no; the capture names no process)",
+            "(publish state: no — the capture names no process)",
+            "(publish state: not attributed to the sample's processes in the sandbox)",
+            "(publish state: not published, the capture names no process)",
+            "(publish state: never seen in the sample's process tree)",
+        ],
+    )
+    def test_a_bare_negation_or_one_of_a_state_s_participle_is_a_stated_state(
+        self, written: str
+    ) -> None:
+        assert _found(f"The capture holds {ADDRESS} {written} with two flows [ev_0031].") == []
+
+    @pytest.mark.parametrize(
+        "written",
+        [
+            "(publish state: not decided)",
+            "(publish state: not yet decided)",
+            "(publish state: not determined)",
+            "(publish state: not known)",
+            "(publish state: not sure)",
+            "(publish state: not clear)",
+            "(publish state: not a concern)",
+            "(publish state: no concern here)",
+            "(publish state: never mind)",
+        ],
+    )
+    def test_a_negation_of_an_article_a_noun_or_indecision_is_asked_about(
+        self, written: str
+    ) -> None:
+        (found,) = _found(f"The capture holds {ADDRESS} {written} with two flows [ev_0031].")
+
+        assert found.code == UNPUBLISHED_VALUE_CODE
+
     def test_the_table_s_reason_restated_is_a_stated_state(self) -> None:
         body = f"It holds {ADDRESS}:53 (the capture names no process behind these flows)."
 
