@@ -70,19 +70,33 @@ def test_a_sentence_that_mentions_a_field_word_is_still_read() -> None:
 
 
 @pytest.mark.parametrize(
-    "sentence",
+    ("sentence", "claim"),
     [
-        "Evidence: the routine at 0x10 decodes strings.",
-        "evidence: the routine at 0x10 decodes strings.",
-        "Confidence: the routine at 0x10 decodes strings.",
-        "**Evidence:** the routine at 0x10 decodes strings.",
+        (
+            "Evidence: the routine at 0x10 decodes strings.",
+            "Evidence: the routine at 0x10 decodes strings.",
+        ),
+        (
+            "evidence: the routine at 0x10 decodes strings.",
+            "evidence: the routine at 0x10 decodes strings.",
+        ),
+        (
+            "Confidence: the routine at 0x10 decodes strings.",
+            "Confidence: the routine at 0x10 decodes strings.",
+        ),
+        (
+            "**Evidence:** the routine at 0x10 decodes strings.",
+            "Evidence:** the routine at 0x10 decodes strings.",
+        ),
     ],
 )
-def test_a_sentence_that_opens_with_a_label_in_another_casing_is_read(sentence: str) -> None:
+def test_a_sentence_that_opens_with_a_label_in_another_casing_is_read(
+    sentence: str, claim: str
+) -> None:
     read = read_claim_blocks(
         f"CLAIM: {sentence}\nEVIDENCE: [ev_0002]\nCONFIDENCE: 0.8\n", require_evidence=True
     )
-    assert [claim.claim.lstrip("*") for claim in read.claims] == [sentence.lstrip("*")]
+    assert [found.claim for found in read.claims] == [claim]
     assert read.begun == 1
     assert read.unread == 0
 
@@ -100,10 +114,36 @@ def test_a_sentence_that_opens_with_a_label_in_another_casing_is_read(sentence: 
         "Evidence: NONE",
         "Dissent: none",
         "- **Evidence**: _ev_0001_",
+        "Evidence: [ev_0001] (strings output)",
+        "Evidence: [ev_0001], see above",
+        "Evidence: [ev_0001] \u2014 strings",
+        "Evidence: [ev_0001] and [ev_0002]",
+        "Confidence: high",
+        "Confidence: high because the loop is clear",
+        "Evidence: N/A",
+        "Dissent: the peer is wrong",
+        "DISSENT: the peer's packer claim is wrong [ev_0001]",
+        "Evidence: [ev_0001] strings\nConfidence: high\nTechnique: T1027",
     ],
 )
-def test_a_label_the_tail_reads_or_a_bare_field_value_is_still_no_sentence(field: str) -> None:
-    read = read_claim_blocks(f"CLAIM: {field}\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.9\n")
+@pytest.mark.parametrize("heading", ["CLAIM: ", "CLAIM:\n"])
+@pytest.mark.parametrize("require_evidence", [True, False])
+def test_a_label_the_tail_reads_or_a_field_value_is_still_no_sentence(
+    field: str, heading: str, require_evidence: bool
+) -> None:
+    read = read_claim_blocks(
+        f"{heading}{field}\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.9\n",
+        require_evidence=require_evidence,
+    )
+    assert read.claims == []
+    assert read.begun == 1
+    assert read.unread == 1
+
+
+def test_a_title_case_block_with_no_sentence_stores_no_technique() -> None:
+    read = read_claim_blocks(
+        "CLAIM:\nEvidence: [ev_0001] strings\nTechnique: T1027\nCONFIDENCE: 0.8\n"
+    )
     assert read.claims == []
     assert read.begun == 1
     assert read.unread == 1

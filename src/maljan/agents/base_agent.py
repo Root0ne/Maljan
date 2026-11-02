@@ -1670,26 +1670,30 @@ _BLOCK_CLAIM_RE = re.compile(
 # A field line, as a claim's sentence would begin if its heading wrote none:
 # ``CLAIM:`` with nothing after it and ``EVIDENCE: [ev_0001]`` on the next line
 # is a claim with no sentence, never one whose sentence is its evidence line.
-# A label in any casing begins one; ``_FIELD_LABEL_AS_TAIL_RE`` is the casing
-# ``_TAIL_START_RE`` takes as a field, and any other line that opens with a label
-# is a field only when what follows it is nothing but a field's value
-# (``_is_field_line``). "Evidence: the routine at 0x10 decodes strings." is a
-# sentence.
+# A label in any casing begins one. ``_FIELD_LABEL_AS_TAIL_RE`` is a label
+# always taken as a field: EVIDENCE and CONFIDENCE in the casing
+# ``_TAIL_START_RE`` reads, TECHNIQUE and DISSENT in any casing (as the
+# heading readers take DISSENT). A label in another casing is a field when
+# nothing follows it or the first word after it is a field's value
+# (``_is_field_line``): "Evidence: [ev_0003] (strings output)" is a field,
+# "Evidence: the routine at 0x10 decodes strings." is a sentence.
 _FIELD_LINE_RE = re.compile(
     r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE|DISSENT)[ \t]*(?:\*\*)?[ \t]*:",
     re.IGNORECASE,
 )
 _FIELD_LABEL_AS_TAIL_RE = re.compile(
-    r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE))[ \t]*(?:\*\*)?[ \t]*:"
+    r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE|DISSENT))[ \t]*(?:\*\*)?[ \t]*:"
 )
-# One word of a field's value: a ledger id, a number, a technique id, NONE, or
-# a field label of the next line; the brackets, commas and marks between them
-# are not words.
-_FIELD_VALUE_WORD_RE = re.compile(
-    r"ev_\d+|\d+(?:\.\d+)?%?|" + ID_BODY + r"|none|evidence|confidence|technique|dissent",
+# The start of a field's value, past the brackets, dashes and marks before
+# it: nothing, or a ledger id, a number, a technique id, NONE, a plain
+# confidence word or a field label as its first word.
+_FIELD_VALUE_START_RE = re.compile(
+    r"[\s\[\](),;:*_`>#/\u2013\u2014-]*+(?:\Z|(?:ev_\d+|\d+(?:\.\d+)?%?|"
+    + ID_BODY
+    + r"|none|n/a|high|medium|moderate|low|unknown|evidence|confidence|technique|dissent)"
+    r"(?![^\W_]))",
     re.IGNORECASE,
 )
-_FIELD_VALUE_SPLIT_RE = re.compile(r"[\s\[\](),;*`>#-]+")
 # The fields are read in a block's tail: from the first field label that
 # begins a line to the block's end. The claim sentence above the tail never
 # lends a field, so a claim that says "TECHNIQUE: flags" mid-sentence keeps
@@ -2506,21 +2510,18 @@ class ClaimRead:
 def _is_field_line(claim_text: str) -> bool:
     """Whether a claim's sentence as read is a field line: its heading wrote none.
 
-    It is when it opens with a label the tail reader takes as a field, or with
-    a label in another casing followed by nothing but a field's value (ledger
-    ids, a number, technique ids, NONE). Any other text after a label in
-    another casing is the claim's sentence.
+    It is when it opens with a label always taken as a field, or with a label
+    in another casing followed by nothing or by a field's value as its first
+    word (a ledger id, a number, a technique id, NONE, a plain confidence
+    word). Any other text after a label in another casing is the claim's
+    sentence.
     """
     opening = _FIELD_LINE_RE.match(claim_text)
     if opening is None:
         return False
     if _FIELD_LABEL_AS_TAIL_RE.match(claim_text):
         return True
-    return all(
-        _FIELD_VALUE_WORD_RE.fullmatch(word.strip("_.:"))
-        for word in _FIELD_VALUE_SPLIT_RE.split(claim_text[opening.end() :])
-        if word.strip("_.:")
-    )
+    return _FIELD_VALUE_START_RE.match(claim_text, opening.end()) is not None
 
 
 def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead:
