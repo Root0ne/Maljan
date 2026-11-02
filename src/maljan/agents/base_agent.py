@@ -1684,6 +1684,10 @@ _FIELD_LINE_RE = re.compile(
 _FIELD_LABEL_AS_TAIL_RE = re.compile(
     r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE|DISSENT))[ \t]*(?:\*\*)?[ \t]*:"
 )
+# An evidence label and a ledger id anywhere after it: an evidence line in any
+# casing, whatever words sit around its ids.
+_EVIDENCE_LABEL_RE = re.compile(r"EVIDENCE", re.IGNORECASE)
+_LEDGER_ID_ANYWHERE_RE = re.compile(r"ev_\d", re.IGNORECASE)
 # The start of a field's value, past every mark, quote, bullet or sign before
 # it (anything but a letter or digit): nothing, or a ledger id, a number, a
 # technique id, NONE, TBD, a plain confidence word, "see" or a field label as
@@ -2512,16 +2516,21 @@ class ClaimRead:
 def _is_field_line(claim_text: str) -> bool:
     """Whether a claim's sentence as read is a field line: its heading wrote none.
 
-    It is when it opens with a label always taken as a field, or with a label
-    in another casing followed by nothing or by a field's value as its first
-    word (a ledger id, a number, a technique id, NONE, a plain confidence
-    word). Any other text after a label in another casing is the claim's
-    sentence.
+    It is when it opens with a label always taken as a field, with an
+    evidence label in any casing whose value cites a ledger id anywhere, or
+    with a label in another casing followed by nothing or by a field's value
+    as its first word (a ledger id, a number, a technique id, NONE, a plain
+    confidence word). Any other text after a label in another casing is the
+    claim's sentence.
     """
     opening = _FIELD_LINE_RE.match(claim_text)
     if opening is None:
         return False
     if _FIELD_LABEL_AS_TAIL_RE.match(claim_text):
+        return True
+    if _EVIDENCE_LABEL_RE.search(opening.group(0)) and _LEDGER_ID_ANYWHERE_RE.search(
+        claim_text, opening.end()
+    ):
         return True
     return _FIELD_VALUE_START_RE.match(claim_text, opening.end()) is not None
 
