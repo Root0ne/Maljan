@@ -2388,6 +2388,21 @@ verdict, the technique question, the mediation's extraction) carry no
 breakpoint: no later request repeats their tools and system prompt within
 the cache's lifetime, so a breakpoint would only add the write premium.
 
+### The triage pack has a breakpoint of its own
+
+An agent's debate rounds send the same tools, system prompt and triage pack
+again, often more than five minutes apart (twelve to thirty-two in haiku8),
+so each round's first request wrote the whole prefix and read none of it. On
+Anthropic the pack at the head of a turn, noted with its length where the
+platform puts it there, is sent as its own text block with a breakpoint that
+lives `llm.anthropic.pack_cache_ttl` (`1h` by default; `5m`, or `off` for
+none); joined, the two blocks are the turn's text. Every other breakpoint keeps
+`llm.anthropic.prompt_cache_ttl`, the pack's is never shorter and always
+first, as the API requires, and a request carries at most four. A turn that
+begins with a pack sent this way is sent the same way again even where its
+note was lost, so the history a thinking block was written after never
+changes. Other providers send the request as before.
+
 A stored `true` or `false` (a JSON boolean) keeps its meaning. Stages used to
 be written with `sequential` whether or not anybody chose it; the database
 revision `20261002000000` takes that word off every analysis stage, so the

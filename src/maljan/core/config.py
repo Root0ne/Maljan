@@ -345,6 +345,14 @@ class AnthropicConfig(BaseModel):
     # vendor's price list prices both) and outlives a pause longer than five
     # minutes between two turns of one conversation.
     prompt_cache_ttl: Literal["5m", "1h"] = "5m"
+    # How long the prompt cache keeps the standing facts at the head of a
+    # turn (the triage pack), behind a breakpoint of their own: an agent's
+    # next round sends them again after a pause that often passes five
+    # minutes. ``1h`` by default, which writes them at the hour's price once
+    # and reads them in every later round; ``5m`` keeps the breakpoint at the
+    # five-minute price, ``off`` places none. Never shorter than
+    # ``prompt_cache_ttl``: an entry that lives longer must come first.
+    pack_cache_ttl: Literal["off", "5m", "1h"] = "1h"
     # Plain http to the base URL is taken for loopback alone. Set, it is also
     # taken for a Docker host gateway (``host.docker.internal``,
     # ``gateway.docker.internal``, 172.17.0.0 to 172.31.255.255), which a

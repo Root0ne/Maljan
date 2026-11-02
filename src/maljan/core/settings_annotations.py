@@ -488,6 +488,19 @@ ANNOTATIONS: dict[str, Annotation] = {
         "subgroup": "Anthropic",
         "advanced": True,
     },
+    "llm.anthropic.pack_cache_ttl": {
+        "title": "Anthropic triage pack cache lifetime",
+        "description": (
+            "How long the prompt cache keeps the triage pack at the head of an agent's turn, "
+            "behind a breakpoint of its own: 1h, the default, writes it at the hour's price once "
+            "and reads it in each later debate round, which often starts more than five minutes "
+            "after the last; 5m keeps the breakpoint at the five-minute price; off places none. "
+            "Never shorter than the prompt cache lifetime. Every other breakpoint keeps that "
+            "lifetime."
+        ),
+        "subgroup": "Anthropic",
+        "advanced": True,
+    },
     "llm.expert_max_tokens": {
         "title": "Analyst max output tokens",
         "description": (

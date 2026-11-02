@@ -24,7 +24,10 @@ description of the model — and nothing else:
   conversation — with explicit breakpoints on the newest user turn and on the
   turn the previous request ended with (``anthropic_history``); a single-shot
   call carries no marker and pays no write premium.
-  ``llm.anthropic.prompt_cache_ttl`` sets the lifetime.
+  ``llm.anthropic.prompt_cache_ttl`` sets the lifetime. The triage pack at
+  the head of a turn has a breakpoint of its own on every request that sends
+  it, at ``llm.anthropic.pack_cache_ttl`` (an hour by default), so an agent's
+  next debate round reads it after a pause past five minutes.
 * **Streaming.** A request whose output cap is past what the Anthropic SDK
   sends unstreamed by its own rule (an answer it expects to run past ten
   minutes) is streamed and joined into the same answer. The SDK would not
@@ -627,6 +630,7 @@ class AnthropicProvider(LLMProvider):
                         )
                     ),
                     str(getattr(settings, "prompt_cache_ttl", "5m") or "5m"),
+                    str(getattr(settings, "pack_cache_ttl", "off") or "off"),
                 )
             ),
             "anthropic",
