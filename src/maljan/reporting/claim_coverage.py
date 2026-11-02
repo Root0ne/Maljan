@@ -98,6 +98,8 @@ class ClaimInForce:
     confidence: float | None
     # The round whose tool-less validation retry added it, or ``None``.
     added_by_retry_in_round: int | None = None
+    # The first revision round that carried it forward unwritten, or ``None``.
+    carried_since_round: int | None = None
     # The technique ids the claim's block listed, in its order, each once.
     technique_ids: tuple[str, ...] = ()
     # Of those, the ids the catalogue does not have (``technique_id_valid``
@@ -111,8 +113,8 @@ class ClaimInForce:
         return claim_label(self.agent, self.number)
 
 
-def _retry_round(claim: Any) -> int | None:
-    value = getattr(claim, "added_by_retry_in_round", None)
+def _retry_round(claim: Any, field: str = "added_by_retry_in_round") -> int | None:
+    value = getattr(claim, field, None)
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
@@ -153,6 +155,7 @@ def claims_in_force(isr_reports: Mapping[str, Any] | None) -> list[ClaimInForce]
                     evidence_ref=str(getattr(claim, "evidence_ref", "") or ""),
                     confidence=float(confidence) if isinstance(confidence, int | float) else None,
                     added_by_retry_in_round=_retry_round(claim),
+                    carried_since_round=_retry_round(claim, "carried_since_round"),
                     technique_ids=tuple(ids.get(block, ())),
                     unverified_technique_ids=tuple(unverified.get(block, ())),
                     absence_kept_technique_ids=tuple(kept.get(block, ())),

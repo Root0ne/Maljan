@@ -187,16 +187,22 @@ class TestTheRevisionNode:
         )
         assert revision_decided_nothing(_empty_revision_retried("x", TIMING)) is True
 
-    def test_a_revision_that_wrote_claims_still_replaces_the_answer(self) -> None:
+    def test_a_revision_that_wrote_claims_is_merged_into_the_answer(self) -> None:
         in_force = {"reverser": _in_force("reverser")}
         revision = AgentISR(agent_id="reverser", domain="reverser", claims=[RETRY_NEW])
 
         update = _revise({"reverser": ("CLAIM: ...", revision)}, in_force)
 
-        assert update["isr_reports"]["reverser"] is revision
-        assert update["revision_replacements"] == [
-            "The reverser analyst's round-2 revision replaced 3 claim(s) with 1."
-        ]
+        # Its claim stands; the claims in force it does not restate stand
+        # carried forward, none of them dropped in silence.
+        stands = update["isr_reports"]["reverser"].claims
+        assert [c.claim for c in stands if c.carried_since_round is None] == [RETRY_NEW.claim]
+        carried = [c for c in stands if c.carried_since_round == 2]
+        assert {c.claim for c in carried} == {c.claim for c in in_force["reverser"].claims}
+        [said] = update["revision_replacements"]
+        assert said.startswith(
+            "The reverser analyst's round-2 revision wrote 1 claim(s) against 3 in force"
+        )
 
     def test_with_nothing_in_force_the_retry_claims_carry_their_provenance(self) -> None:
         empty_in_force = {"reverser": AgentISR(agent_id="reverser", domain="reverser")}
@@ -325,10 +331,16 @@ class TestTheRevisionPathRecordsIt:
 
             update = _revise({"reverser": (revision, isr)}, {"reverser": _in_force("reverser")})
 
-            assert update["isr_reports"]["reverser"] is isr
-            assert update["revision_replacements"] == [
-                "The reverser analyst's round-2 revision replaced 3 claim(s) with 2."
-            ]
+            # Its claims are the revision's own, merged into the answer in
+            # force, never added beside it as a tool-less retry's.
+            stands = update["isr_reports"]["reverser"].claims
+            own = [c for c in stands if c.carried_since_round is None]
+            assert [c.claim for c in own] == [c.claim for c in isr.claims]
+            assert all(c.added_by_retry_in_round is None for c in stands)
+            [said] = update["revision_replacements"]
+            assert said.startswith(
+                "The reverser analyst's round-2 revision wrote 2 claim(s) against 3 in force"
+            )
             assert "retry_added" not in update["revision_rounds"][0]
 
     def test_a_revision_with_claims_is_not_recorded(self) -> None:

@@ -468,7 +468,8 @@ class AnalysisState(TypedDict):
     validation_unparsed_answers: Annotated[list[dict[str, str]], operator.add]
 
     # A revision that stood with fewer claims than the answer it replaced, one
-    # sentence each (``nodes.revision_replacement_sentence``). Append-only:
+    # sentence each (``nodes.revision_replacement_sentence``), and each merge
+    # that carried claims forward or withdrew one (``revision_merge``). Append-only:
     # every round adds its own; the judge reads them into
     # ``run_summary.negotiation.revision_replacements``.
     revision_replacements: Annotated[list[str], operator.add]

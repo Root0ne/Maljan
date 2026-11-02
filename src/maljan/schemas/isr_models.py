@@ -46,6 +46,21 @@ def retry_added_marker(revision_round: int) -> str:
     return f"added by a tool-less retry, round {int(revision_round)}"
 
 
+def carried_marker(revision_round: int) -> str:
+    """The note on a claim in force a revision neither wrote again nor withdrew.
+
+    The revision is merged into the answer in force by claim
+    (``pipeline.revision_merge``): a claim it leaves unwritten stays as it
+    was, and carries this note from the first round that left it unwritten
+    (``ClaimEvidence.carried_since_round``) to the judge's summary, the
+    transcript and the report.
+    """
+    return (
+        f"carried forward: the round-{int(revision_round)} revision neither wrote it "
+        "again nor withdrew it"
+    )
+
+
 # The note on a technique the judge named in its bundle and no analyst claimed.
 # The rule it is published by: a technique the judge states is the judge's own
 # claim, asked the catalogue and platform questions every claim is asked, and
@@ -176,6 +191,17 @@ class ClaimEvidence(BaseModel):
         description=(
             "The revision round whose validation retry, written without tools, added this "
             "claim beside the answer in force."
+        ),
+        exclude_if=lambda value: value is None,
+    )
+    # The first revision round that neither wrote this claim again nor
+    # withdrew it (``pipeline.revision_merge``): the claim stands as the answer
+    # in force wrote it. Left out of the serialised claim when unset.
+    carried_since_round: int | None = Field(
+        default=None,
+        description=(
+            "The first revision round that neither wrote this claim again nor withdrew it, "
+            "so it stands as the answer in force wrote it."
         ),
         exclude_if=lambda value: value is None,
     )
@@ -428,9 +454,14 @@ def claim_summary_line(
         if claim.added_by_retry_in_round is not None
         else ""
     )
+    carried = (
+        f" ({carried_marker(claim.carried_since_round)})"
+        if claim.carried_since_round is not None
+        else ""
+    )
     return (
         f"Claim {number}{noted}: {claim.claim}{tech}"
-        f" | Evidence: {claim.evidence_ref}{failed}{retried}"
+        f" | Evidence: {claim.evidence_ref}{failed}{retried}{carried}"
         f" | Confidence: {claim.confidence:.2f}"
     )
 

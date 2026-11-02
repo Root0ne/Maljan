@@ -220,17 +220,23 @@ def _claims_text(report: MalwareReport, isr_reports: dict[str, Any] | None) -> l
     body neither cites nor discusses it.
     """
     from maljan.reporting.claim_coverage import claims_in_force
-    from maljan.schemas.isr_models import retry_added_marker
+    from maljan.schemas.isr_models import carried_marker, retry_added_marker
+
+    def _noted(claim: Any) -> str:
+        # A claim a tool-less retry added, or one a revision carried forward
+        # unwritten, says so beside its evidence.
+        ref = str(claim.evidence_ref)
+        if claim.added_by_retry_in_round is not None:
+            ref = f"{ref} ({retry_added_marker(claim.added_by_retry_in_round)})"
+        carried = getattr(claim, "carried_since_round", None)
+        if carried is not None:
+            ref = f"{ref} ({carried_marker(carried)})"
+        return ref
 
     return [
         {
             "claim": claim.claim,
-            # A claim a tool-less retry added says so beside its evidence.
-            "evidence_ref": (
-                f"{claim.evidence_ref} ({retry_added_marker(claim.added_by_retry_in_round)})"
-                if claim.added_by_retry_in_round is not None
-                else claim.evidence_ref
-            ),
+            "evidence_ref": _noted(claim),
             "agent": claim.agent,
             "label": claim.label,
         }

@@ -2522,10 +2522,22 @@ turn's confidence question (`isr.claim_without_confidence`) asks about it with
 the value quoted. A block with no CONFIDENCE label is counted apart as before.
 A revision round's answer passes the same consistency gate and validation turn
 a first answer passes, with the first answer's loop deadline and nudge flag
-cleared before it is made; a revision the model made with fewer claims still
-replaces the answer in force, and `run_summary.negotiation.revision_replacements`
-states each such replacement ("The X analyst's round-N revision replaced N
-claim(s) with M."). The DISPUTES section opens at its label,
+cleared before it is made. A revision is merged into the answer in force by
+claim (`pipeline.revision_merge`): a claim it writes again replaces its
+predecessor, a claim it withdraws (a `WITHDRAW CLAIM <n>: <reason>` line, or a
+block under the claim's number that declares the withdrawal) is removed with
+its reason, and a claim it neither writes again nor withdraws stands unchanged,
+marked carried forward from that round (`ClaimEvidence.carried_since_round`,
+shown beside the claim in every summary and in the evidence bundle). A revision
+whose every block writes a number that names a claim in force it shares a value
+with, or a number after the last one, is placed by those numbers; any other is
+placed by what its claims state (a claim in force is restated when the
+revision's claims state at least half of its values or four fifths of its
+content words, or half of its content words when it states no value). A revision that restates or withdraws every claim in
+force stands as written. `run_summary.negotiation.revision_replacements` states
+each merge that carried claims, with their numbers, and each withdrawal with its
+reason; a revision with fewer claims that carried nothing is still stated ("The
+X analyst's round-N revision replaced N claim(s) with M."). The DISPUTES section opens at its label,
 case-sensitive, with its colon (`DISPUTES:`) or as a Markdown heading; a label
 that says there is none on its own line (`DISPUTES: NONE`, `N/A`, a dash)
 opens no section, and prose beginning "Disputes …" is prose. Claims under the
