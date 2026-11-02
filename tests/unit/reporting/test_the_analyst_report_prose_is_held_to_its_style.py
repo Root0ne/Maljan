@@ -898,6 +898,98 @@ class TestADroppedValueIsAskedAbout:
         assert "QZ_MUTEX_771" in llm.asked["summary"][0]
 
 
+# A first claim several discovery techniques share, as the haiku8 run wrote it
+# (T-495): its first sentence is the runner, each list item one technique.
+_SHARED_CLAIM = (
+    "Thread 0x2200, started by 0x2118, runs eleven decoded command lines through the runner "
+    "0x1030 [ev_0025]. The command text is decoded from the sample's own data. Each is "
+    "described here by what it does:\n"
+    "- `ipconfig /all` prints the host's network configuration. That is the T1016 behaviour.\n"
+    "- `whoami /groups` lists the user's groups. That is the T1069 behaviour. The claim does "
+    "not assert T1033.\n"
+    "- `net view /all` lists the other computers on the network. That is T1018.\n"
+)
+
+
+def _cell(tid: str, name: str, claim: str) -> CapabilityCell:
+    return CapabilityCell(
+        tactic="TA0007",
+        tactic_name="Discovery",
+        technique_id=tid,
+        technique_name=name,
+        evidence=[claim],
+    )
+
+
+class TestAProcedureIsHeldToItsOwnBehaviour:
+    """T-495: a procedure is asked for its technique's behaviour, not the claim's first words."""
+
+    def _firsts(self, *cells: CapabilityCell) -> dict[str, str]:
+        from maljan.reporting.composer_pro import first_claim_sentences
+
+        return first_claim_sentences(_report(capability_matrix=list(cells), ttp_mappings=[]))
+
+    def test_the_list_item_naming_the_technique_is_its_sentence(self) -> None:
+        firsts = self._firsts(
+            _cell("T1016", "System Network Configuration Discovery", _SHARED_CLAIM),
+            _cell("T1018", "Remote System Discovery", _SHARED_CLAIM),
+        )
+        assert firsts["T1016"].startswith("`ipconfig /all`")
+        assert firsts["T1018"].startswith("`net view /all`")
+        # The runner's addresses are no value of either behaviour.
+        own = {"procedures": [{"technique_id": "T1016", "procedure": "It runs ipconfig /all."}]}
+        assert procedure_value_violations(own, firsts) == []
+        # The behaviour's own value is still asked for.
+        (found,) = procedure_value_violations(
+            {"procedures": [{"technique_id": "T1018", "procedure": "It lists hosts."}]}, firsts
+        )
+        assert found.values == ("net view /all",)
+
+    def test_a_remark_naming_another_published_technique_is_no_behaviour(self) -> None:
+        claim = (
+            "Routine 0xae78 decodes the strings at run time. The rule tags T1027.005, so only "
+            "T1027/T1140 are kept. The obfuscation is a rolling XOR with seed 0x33629d40."
+        )
+        firsts = self._firsts(
+            _cell("T1027", "Obfuscated Files or Information", claim),
+            _cell("T1140", "Deobfuscate/Decode Files or Information", claim),
+        )
+        assert firsts["T1027"].startswith("The obfuscation is a rolling XOR")
+        assert firsts["T1140"].startswith("Routine 0xae78 decodes")
+
+    def test_the_sentence_naming_the_technique_s_words(self) -> None:
+        claim = (
+            "Routine 0x1a08 enumerates the Desktop with FindFirstFileA (`&desklinks=[`). "
+            "Routine 0x1c38 lists processes with Toolhelp (`&proclist=[`)."
+        )
+        firsts = self._firsts(_cell("T1057", "Process Discovery", claim))
+        dropped = {
+            "procedures": [{"technique_id": "T1057", "procedure": "Routine 0x1c38 lists them."}]
+        }
+        (found,) = procedure_value_violations(dropped, firsts)
+        assert found.values == ("&proclist=[",)
+        assert "0x1a08" not in found.message and "desklinks" not in found.message
+
+    def test_one_item_of_a_list_of_commands_not_the_list(self) -> None:
+        claim = (
+            "Commands decoded at 0xf000 run from 0x2200: ipconfig /all; "
+            'net group "Domain Admins" /domain; nltest /domain_trusts.'
+        )
+        firsts = self._firsts(_cell("T1482", "Domain Trust Discovery", claim))
+        assert firsts["T1482"] == "nltest /domain_trusts."
+
+    def test_a_claim_naming_neither_keeps_its_first_sentence(self) -> None:
+        claim = "Routine 0x4d20 posts the check-in. It retries after 0x5030 fails."
+        firsts = self._firsts(_cell("T1071.001", "Web Protocols", claim))
+        assert firsts["T1071.001"] == "Routine 0x4d20 posts the check-in."
+
+    def test_no_section_argument_or_byte_constant_is_asked_for(self) -> None:
+        firsts = {"T1105": "Command 0x0e (0x7170) calls 0x6f48 with arg2 = 0 from `.text`."}
+        dropped = {"procedures": [{"technique_id": "T1105", "procedure": "It fetches a body."}]}
+        (found,) = procedure_value_violations(dropped, firsts)
+        assert found.values == ("0x7170", "0x6f48")
+
+
 # ---------------------------------------------------------------------------
 # The exemption reads the sample's evidence only, never the platform's own text
 # ---------------------------------------------------------------------------

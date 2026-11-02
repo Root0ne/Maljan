@@ -34,13 +34,13 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from maljan.analysis.technique_ids import is_technique_id
+from maljan.analysis.technique_ids import ID_BODY, is_technique_id
 from maljan.memory.attck_loader import TACTIC_ID_RE
 from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
@@ -1090,16 +1090,19 @@ def summary_value_violations(
 def procedure_value_violations(
     payload: Any, firsts: Mapping[str, str], reader: ValueReader | None = None
 ) -> list[Violation]:
-    """A procedure that drops a value its technique's first claim sentence names.
+    """A procedure that drops an identifying value its technique's behaviour sentence names.
 
-    ``firsts`` is each published technique's first claim sentence, the one the
-    procedure replaces in the ATT&CK table.
+    ``firsts`` is each published technique's sentence of its first claim that
+    names the technique's behaviour (:func:`first_claim_sentences`). Only the
+    values that identify that behaviour are asked for (:func:`_identifying`):
+    never a section name, an argument name or a one-byte constant.
     """
     out: list[Violation] = []
     for index, row in enumerate(_rows(payload, "procedures")):
         tid = str(row.get("technique_id") or "").strip().upper()
         first = firsts.get(tid, "")
-        dropped = values_not_carried(carried_values(first, reader), str(row.get("procedure") or ""))
+        named = [value for value in carried_values(first, reader) if _identifying(value)]
+        dropped = values_not_carried(named, str(row.get("procedure") or ""))
         if dropped:
             out.append(
                 Violation(
@@ -1117,14 +1120,120 @@ def procedure_value_violations(
 
 
 def first_claim_sentences(report: MalwareReport) -> dict[str, str]:
-    """Each published technique's first claim sentence, as the ATT&CK table picks it."""
+    """Each published technique's sentence of its first claim that names the technique's behaviour.
+
+    A first claim often covers several behaviours, and several techniques can
+    share it, so the procedure is held to the part that is its own
+    (:func:`behaviour_sentence`), not to whatever the claim states first.
+    """
+    published = published_techniques(report)
+    ids = {tid.upper() for tid in published}
     out: dict[str, str] = {}
-    for tid, (_name, claims, _refs) in published_techniques(report).items():
+    for tid, (name, claims, _refs) in published.items():
         if claims:
-            text = _CITATIONS.sub("", claims[0])
-            text = re.sub(r"^\s*\d{1,3}\.\s+", "", " ".join(text.split()))
-            out[tid.upper()] = (sentences(text) or [""])[0]
+            out[tid.upper()] = behaviour_sentence(tid, name, claims[0], ids)
     return out
+
+
+# A technique name's words that name no behaviour of their own.
+_NAME_FILLER = frozenset(
+    {"and", "or", "the", "of", "for", "with", "from", "via", "to", "a", "an", "in", "on", "by"}
+    | {"information", "file", "files", "system", "data", "windows", "protocol", "protocols"}
+    | {"name", "names", "match", "legitimate", "location", "discovery", "execution"}
+)
+_BULLET = re.compile(r"^\s*[-*•]\s+")
+
+
+def _claim_units(claim: str) -> list[str]:
+    """``claim``'s units, without citations or its number: each list item whole, the
+    text between them by sentence."""
+    text = re.sub(r"^\s*\d{1,3}\.\s+", "", _CITATIONS.sub("", str(claim or "")))
+    out: list[str] = []
+    prose: list[str] = []
+    for line in [*text.splitlines(), "- "]:
+        if not _BULLET.match(line):
+            prose.append(line)
+            continue
+        out.extend(sentences(" ".join(" ".join(prose).split())))
+        prose = []
+        # A list item is one behaviour with the words that name it ("... That is T1018.").
+        item = " ".join(_BULLET.sub("", line).split())
+        if item:
+            out.append(item)
+    return out
+
+
+def behaviour_sentence(tid: str, name: str, claim: str, published: Collection[str] = ()) -> str:
+    """The unit of ``claim`` that names technique ``tid``'s behaviour; its first sentence else.
+
+    A unit naming ``tid`` itself comes first, unless it names another
+    published technique too (``published``): that is a remark on the mapping
+    ("only T1027/T1140 are kept"), not one behaviour. Else the clause
+    (:func:`_clauses`) naming most of the words of the technique's name (each
+    read by its first five letters, so "processes" names Process Discovery and
+    "encrypted" Symmetric Cryptography), the earliest on a tie: one item of a
+    list of commands, not the list. A claim that names neither keeps its first
+    sentence.
+    """
+    units = _claim_units(claim)
+    if not units:
+        return ""
+    own = tid.upper()
+    others = {str(t).upper() for t in published} - {own}
+    for unit in units:
+        named = {m.upper() for m in _TECHNIQUE_IN_TEXT.findall(unit)}
+        if own in named and not named & others:
+            return unit
+    stems = {
+        word[:5]
+        for word in re.findall(r"[a-z0-9]+", str(name or "").lower())
+        if len(word) >= 4 and word not in _NAME_FILLER
+    }
+    best, score = units[0], 0
+    for unit in (clause for whole in units for clause in _clauses(whole)):
+        lowered = unit.lower()
+        hits = sum(
+            1
+            for stem in stems
+            if (stem in lowered if len(stem) >= 5 else re.search(rf"\b{stem}", lowered))
+        )
+        if hits > score:
+            best, score = unit, hits
+    return best
+
+
+def _clauses(unit: str) -> list[str]:
+    """``unit`` split at each semicolon outside parentheses, quotes and code spans."""
+    out: list[str] = []
+    depth, code, quoted, start = 0, False, False, 0
+    for at, char in enumerate(unit):
+        if char == "`":
+            code = not code
+        elif char == '"' and not code:
+            quoted = not quoted
+        elif char in "([{" and not (code or quoted):
+            depth += 1
+        elif char in ")]}" and not (code or quoted):
+            depth = max(0, depth - 1)
+        elif char == ";" and not (depth or code or quoted):
+            out.append(unit[start:at])
+            start = at + 1
+    out.append(unit[start:])
+    return [clause.strip() for clause in out if clause.strip()]
+
+
+_TECHNIQUE_IN_TEXT = re.compile(rf"(?i)(?<![\w.]){ID_BODY}(?![\w]|\.\d)")
+_SECTION_NAME = re.compile(r"^\.[A-Za-z0-9_$]{1,8}$")
+_ARGUMENT_NAME = re.compile(r"(?i)^(?:arg|param|var|local)_?\d+$")
+_BYTE_CONSTANT = re.compile(r"(?i)^0x[0-9a-f]{1,2}$")
+
+
+def _identifying(value: str) -> bool:
+    """Whether ``value`` identifies a behaviour: never a section name or an extension
+    (``.text``, ``.exe``), an argument name (``arg2``) or a one-byte constant (``0x0e``)."""
+    return not (
+        _SECTION_NAME.match(value) or _ARGUMENT_NAME.match(value) or _BYTE_CONSTANT.match(value)
+    )
 
 
 def held_text(report: MalwareReport) -> str:
