@@ -522,6 +522,9 @@ def test_annotations_flags_and_vendor_keywords_are_no_schema() -> None:
         {"patternProperties": {"^path$": {"type": "string"}}},
         {"if": PATH_OBJECT},
         {"path": {"type": "string"}},
+        {"group": {"inner": {"path": {"type": "string"}}}},
+        {"group": [{"tag": "a"}, PATH_OBJECT]},
+        [[{"path": {"type": "string"}}]],
         [PATH_OBJECT],
         {"type": "slider", "properties": PATH_LEAF},
     ],
@@ -541,6 +544,9 @@ def test_annotations_flags_and_vendor_keywords_are_no_schema() -> None:
         "pattern-properties",
         "if",
         "map-of-schemas",
+        "map-of-maps-of-schemas",
+        "list-in-a-map",
+        "list-of-lists",
         "list-of-schemas",
         "ui-type-beside-properties",
     ],
@@ -568,6 +574,7 @@ def test_an_untrusted_server_s_vendor_keyword_that_looks_like_a_schema_fails_clo
         {"type": "slider"},
         {"type": ["slider", "knob"]},
         {"widget": {"type": "slider"}},
+        {"form": {"rows": [{"widget": {"type": "slider"}}]}},
         [{"type": "slider"}],
         {"a": 1},
         "path",
@@ -579,6 +586,7 @@ def test_an_untrusted_server_s_vendor_keyword_that_looks_like_a_schema_fails_clo
         "ui-type",
         "ui-type-list",
         "map-of-ui-hints",
+        "deep-ui-hints",
         "list-of-ui-hints",
         "data",
         "text",
@@ -593,6 +601,17 @@ def test_a_vendor_value_that_does_not_look_like_a_schema_is_no_schema_whoever_li
     schema = _object(opts={"type": "object", "x-vendor": value})
     assert not dd._walk(schema)[1]
     assert not discloses(_tool(schema))
+
+
+def test_a_vendor_value_too_large_to_look_through_is_read_as_a_schema() -> None:
+    wide = {f"k{i}": {"a": i} for i in range(dd._MAX_ARGUMENTS + 1)}
+    assert dd._vendor_schema(wide)
+    deep: Any = {"a": 1}
+    for _level in range(dd._MAX_ARGUMENTS + 1):
+        deep = {"next": deep}
+    assert dd._vendor_schema(deep)
+    # Below the cap, plain data is still none.
+    assert not dd._vendor_schema({f"k{i}": {"a": i} for i in range(16)})
 
 
 def test_a_vendor_schema_is_read_once_per_listing_and_lifted_only_for_a_trusted_server() -> None:

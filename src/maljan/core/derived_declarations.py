@@ -499,18 +499,27 @@ def _schema_like(value: Any) -> bool:
 
 
 def _vendor_schema(value: Any) -> bool:
-    """Whether a vendor's ``x-`` value looks like a schema, or holds schemas.
+    """Whether a vendor's ``x-`` value looks like a schema, or holds schemas at any depth.
 
     A mapping that looks like one (:func:`_schema_like`), or a list or a map
-    one of whose values does. A UI hint such as ``{"type": "slider"}`` names
-    no JSON Schema type and is not one.
+    holding one, however deep through further lists and maps. A UI hint such
+    as ``{"type": "slider"}`` names no JSON Schema type and is not one. At
+    most :data:`_MAX_ARGUMENTS` lists and maps are looked into; a value with
+    more is read as one, since what is left could hold a schema.
     """
-    if _schema_like(value):
-        return True
-    members = (
-        value.values() if isinstance(value, Mapping) else value if isinstance(value, list) else ()
-    )
-    return any(_schema_like(member) for member in members)
+    waiting = [value]
+    looked = 0
+    while waiting:
+        held = waiting.pop()
+        if not isinstance(held, (Mapping, list)):
+            continue
+        if _schema_like(held):
+            return True
+        looked += 1
+        if looked > _MAX_ARGUMENTS:
+            return True
+        waiting.extend(held.values() if isinstance(held, Mapping) else held)
+    return False
 
 
 def _children(
