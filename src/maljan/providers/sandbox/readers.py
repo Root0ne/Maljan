@@ -32,6 +32,7 @@ from maljan.core.report_formats import (
     effective_formats,
     format_named,
 )
+from maljan.schemas.sandbox_document import FIXTURE_KEY, SYNTHETIC_KEY
 from maljan.schemas.sandbox_report import CAPE_RENAMES
 
 if TYPE_CHECKING:
@@ -69,6 +70,12 @@ class ReportReader(ABC):
     # Whether the reader reads a report through a JSONPath mapping (``mapping``
     # in its context): a format declaring a mapping names such a reader.
     reads_mapping: ClassVar[bool] = False
+    # The platform marks (``schemas.sandbox_document.PLATFORM_MARKS``) the
+    # reader sets itself on what it reads. Only a reader of the platform's own
+    # stand-ins and fixtures sets one; a mark any other reader's report holds
+    # came from the sandbox's document and is taken out at intake
+    # (``app.MaljanApp``).
+    platform_marks: ClassVar[frozenset[str]] = frozenset()
 
     def builtin_format(self) -> ReportFormat | None:
         """The shipped format declaration under this reader's id, if any."""
@@ -404,6 +411,9 @@ class MockReportReader(CapeReportReader):
     id = "mock"
     sniffs = False
     choosable = False
+    # The stand-in the mock sandbox builds is marked synthetic, and a fixture
+    # it reads is marked recorded: the platform's marks, set by the platform.
+    platform_marks = frozenset({SYNTHETIC_KEY, FIXTURE_KEY})
 
     def read(
         self,

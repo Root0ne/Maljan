@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import bisect
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -159,6 +159,49 @@ CONTAINERS: frozenset[Path] = frozenset(
 # keys, written by the readers and the providers, never by a sandbox.
 SYNTHETIC_KEY = "synthetic"
 FIXTURE_KEY = "recorded_fixture"
+# Every platform mark a document can carry at its top level. A sandbox's own
+# report holding a key under one of these words is not the platform's mark,
+# and a reader that does not set the mark itself never passes it on
+# (:func:`unearned_marks_removed`).
+PLATFORM_MARKS: tuple[str, ...] = (SYNTHETIC_KEY, FIXTURE_KEY)
+
+
+def unearned_marks_removed(report: SandboxReport, earned: Collection[str] = ()) -> list[str]:
+    """Take every platform mark out of ``report`` that is not in ``earned``; the ones taken out.
+
+    ``earned`` are the marks the reader that read ``report`` sets itself
+    (``ReportReader.platform_marks``): the mock sandbox's reader marks its own
+    stand-in and its recorded fixtures, and no other reader marks anything. A
+    mark a provider's document carried reaches the report three ways, and is
+    taken out of each: the report's field of the same name (a reader that
+    read the source's key), a part kept as the source published it, or a
+    block kept beside the parts. Each mark taken out is named in a warning; a
+    report that carries none is left as it came, byte for byte.
+    """
+    fields = type(report).model_fields
+    found: list[str] = []
+    for key in PLATFORM_MARKS:
+        if key in earned:
+            continue
+        held = False
+        if key in fields and getattr(report, key) is not False:
+            setattr(report, key, False)
+            held = True
+        for kept in (report.published, report.extras):
+            if key in kept:
+                del kept[key]
+                held = True
+        if held:
+            found.append(key)
+    if found:
+        logger.warning(
+            "sandbox report from %r carries %s, the platform's own mark%s, which the "
+            "platform did not set: taken out, and the report is read as the sandbox's.",
+            report.provider,
+            ", ".join(repr(key) for key in found),
+            "" if len(found) == 1 else "s",
+        )
+    return found
 
 
 def _at(document: Any, path: Path) -> tuple[bool, Any]:
