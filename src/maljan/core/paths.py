@@ -9,6 +9,7 @@ against the current working directory.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from maljan.core.exceptions import ProjectRootNotFoundError
@@ -101,3 +102,32 @@ def _rooted(arg: str, project_root: Path) -> str:
     if not first or not (project_root / first).exists():
         return arg
     return str(project_root / p)
+
+
+def resolve_mcp_command(command: str) -> str:
+    """An MCP ``command`` rooted at the project root when it is a relative path into it.
+
+    The rule :func:`resolve_mcp_args` roots an argument by, kept tighter for
+    the program a server runs: a value with no path separator (a bare program
+    name such as ``npx`` or ``uvx``, looked up on the child's ``PATH``), an
+    absolute path, ``~``, a scheme or option is left as written; ``\\`` is a
+    separator only where the platform's is. A relative path is rooted only when
+    its first component past any leading ``.`` exists under the project root
+    and the rooted path stays inside it, so ``../x``, ``./../x`` and
+    ``./missing/x`` are left as written, as the child reads them.
+    """
+    if not command or command.startswith(("-", "@", "~")) or ":" in command or "=" in command:
+        return command
+    written = command.replace("\\", "/") if os.sep == "\\" else command
+    if "/" not in written or Path(written).is_absolute():
+        return command
+    parts = [part for part in written.split("/") if part]
+    while parts and parts[0] == ".":
+        parts.pop(0)
+    if not parts or parts[0] == "..":
+        return command
+    root = get_project_root()
+    rooted = Path(os.path.normpath(root / written))
+    if not rooted.is_relative_to(root) or not (root / parts[0]).exists():
+        return command
+    return str(rooted)

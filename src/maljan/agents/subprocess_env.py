@@ -140,14 +140,15 @@ def stdio_launch(config: Any, *, server: str = "") -> StdioLaunch:
     environment the block's ``env`` and ``env_allow`` give
     (:func:`child_env`), before what a job adds; its working directory as
     :func:`launch_cwd` reads it (:class:`LaunchCwdError` for one it refuses).
-    Its command, where the block names no working directory, by the same
-    rule as its arguments: a relative path into the project is rooted there
-    rather than at whatever directory the parent runs in, and a bare program
-    name (``npx``, ``uvx``) or an absolute path is left as written. A block
-    with a working directory has a relative command run from that directory,
-    already rooted, and keeps it as written.
+    Its command, where the block names no working directory, as
+    ``core.paths.resolve_mcp_command`` roots it: a relative path into the
+    project is rooted there rather than at whatever directory the parent runs
+    in, and a bare program name (``npx``, ``uvx``), an absolute path or one
+    that leaves the project is left as written. A block with a working
+    directory has a relative command run from that directory, already
+    rooted, and keeps it as written.
     """
-    from maljan.core.paths import resolve_mcp_args
+    from maljan.core.paths import resolve_mcp_args, resolve_mcp_command
 
     env = child_env(
         getattr(config, "env", None) or {},
@@ -156,7 +157,7 @@ def stdio_launch(config: Any, *, server: str = "") -> StdioLaunch:
     )
     cwd = launch_cwd(getattr(config, "cwd", None))
     command = str(getattr(config, "command", None) or "")
-    if command and cwd is None:
-        command = resolve_mcp_args([command])[0]
+    if cwd is None:
+        command = resolve_mcp_command(command)
     args = resolve_mcp_args([str(arg) for arg in getattr(config, "args", None) or ()])
     return StdioLaunch(command=command, args=args, env=env, cwd=cwd)

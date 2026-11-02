@@ -364,12 +364,15 @@ class TestRootedCommand:
         root = tmp_path / "project"
         (root / "scripts").mkdir(parents=True)
         (root / "scripts" / "run.sh").write_text("#!/bin/sh\n")
+        (tmp_path / "evil").write_text("#!/bin/sh\n")
         (tmp_path / "elsewhere" / "scripts").mkdir(parents=True)
         monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: root)
         monkeypatch.chdir(tmp_path / "elsewhere")
         return root
 
-    @pytest.mark.parametrize("written", ["scripts/run.sh", "./scripts/run.sh"])
+    @pytest.mark.parametrize(
+        "written", ["scripts/run.sh", "./scripts/run.sh", "././scripts/run.sh"]
+    )
     def test_a_relative_command_into_the_project_is_rooted_there(
         self, project: Path, written: str
     ) -> None:
@@ -378,13 +381,35 @@ class TestRootedCommand:
         launch = stdio_launch(MCPServerConfig(enabled=True, command=written))
         assert launch.command == str(project / "scripts" / "run.sh")
 
-    @pytest.mark.parametrize("written", ["npx", "uvx", "/usr/bin/env", "missing/run.sh", "~/bin/x"])
+    @pytest.mark.parametrize(
+        "written",
+        [
+            "npx",
+            "uvx",
+            "/usr/bin/env",
+            "missing/run.sh",
+            "./missing/run.sh",
+            "~/bin/x",
+            "../evil",
+            "./../evil",
+            "scripts/../../evil",
+            "scripts\\run.sh",
+        ],
+    )
     def test_a_bare_name_an_absolute_path_or_no_project_path_is_left_as_written(
         self, project: Path, written: str
     ) -> None:
+        import os
+
+        from maljan.core import tool_declarations as td
         from maljan.core.config import MCPServerConfig
 
-        assert stdio_launch(MCPServerConfig(enabled=True, command=written)).command == written
+        config = MCPServerConfig(enabled=True, command=written)
+        assert stdio_launch(config).command == written
+        # The grant reads it as the child runs it: from the parent's directory.
+        resolved = td._resolved_launch(config)
+        if resolved is not None and "/" in written and not written.startswith(("/", "~")):
+            assert resolved["command"] == os.path.realpath(Path.cwd() / written)
 
     def test_a_relative_command_beside_a_working_directory_is_run_from_it(
         self, project: Path
@@ -411,6 +436,61 @@ class TestRootedCommand:
         rooted = str(project / "scripts" / "run.sh")
         assert recorder.call_args.kwargs["command"] == rooted
         assert handle._launch_argv[0] == rooted
+
+    def test_a_backslash_separates_only_where_the_platform_s_separator_is_one(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.paths import resolve_mcp_command
+
+        assert resolve_mcp_command("scripts\\run.sh") == "scripts\\run.sh"
+        monkeypatch.setattr("maljan.core.paths.os.sep", "\\")
+        assert resolve_mcp_command("scripts\\run.sh") == str(project / "scripts" / "run.sh")
+        assert resolve_mcp_command("..\\evil") == "..\\evil"
+
+    def test_ghidra_starts_the_command_its_grant_reads(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+
+        from maljan.core import tool_declarations as td
+        from maljan.core.config import MCPServerConfig, MemoryConfig, PreprocessingConfig
+        from maljan.providers.base import StaticJobContext
+        from maljan.providers.static.ghidra import GhidraStaticProvider
+
+        recorder = MagicMock()
+        monkeypatch.setattr("mcp.StdioServerParameters", recorder)
+        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _toolkit_factory())
+        (project / "srv").mkdir()
+        config = MCPServerConfig(
+            enabled=True, transport="stdio", command="scripts/run.sh", args=["scripts/run.sh"]
+        )
+        GhidraStaticProvider(config, PreprocessingConfig(), MemoryConfig()).open(StaticJobContext())
+        started = recorder.call_args.kwargs
+        rooted = str(project / "scripts" / "run.sh")
+        assert started["command"] == rooted
+        assert started["args"] == [rooted]
+        assert started["cwd"] is None
+        resolved = td._resolved_launch(config)
+        assert resolved is not None
+        assert resolved["command"] == os.path.realpath(started["command"])
+        # A working directory reaches the child, and the grant reads the
+        # command from it as the child runs it.
+        recorder.reset_mock()
+        beside = config.model_copy(update={"command": "../scripts/run.sh", "cwd": "srv"})
+        GhidraStaticProvider(beside, PreprocessingConfig(), MemoryConfig()).open(StaticJobContext())
+        started = recorder.call_args.kwargs
+        assert started["cwd"] == str((project / "srv").resolve())
+        resolved = td._resolved_launch(beside)
+        assert resolved is not None
+        assert resolved["command"] == os.path.realpath(Path(started["cwd"]) / started["command"])
+        # A working directory the launch refuses is said, as for any server.
+        from maljan.providers.errors import ProviderConfigurationError
+
+        missing = config.model_copy(update={"cwd": "no-such-dir"})
+        with pytest.raises(ProviderConfigurationError, match="no-such-dir"):
+            GhidraStaticProvider(missing, PreprocessingConfig(), MemoryConfig()).open(
+                StaticJobContext()
+            )
 
     def test_every_shipped_stdio_server_starts_its_command_as_written(self) -> None:
         from maljan.core.config import Settings
