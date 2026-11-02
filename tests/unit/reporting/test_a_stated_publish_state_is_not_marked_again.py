@@ -80,6 +80,9 @@ class TestAStatedState:
             "(publish state: not attributed to the sample's processes in the sandbox)",
             "(publish state: not published, the capture names no process)",
             "(publish state: never seen in the sample's process tree)",
+            # "yet" is read past: the word after it decides.
+            "(publish state: not yet attributed to the sample in the capture)",
+            "(publish state: not yet published)",
         ],
     )
     def test_a_bare_negation_or_one_of_a_state_s_participle_is_a_stated_state(
@@ -92,6 +95,8 @@ class TestAStatedState:
         [
             "(publish state: not decided)",
             "(publish state: not yet decided)",
+            "(publish state: not yet)",
+            "(publish state: not yet clear)",
             "(publish state: not determined)",
             "(publish state: not known)",
             "(publish state: not sure)",

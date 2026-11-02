@@ -7288,9 +7288,10 @@ _STATE_NEGATION_OPENING_RE = re.compile(r"^\W*(?:no|not|never)\b", re.IGNORECASE
 _STATE_PARTICIPLE_RE = re.compile(
     r"[a-z]{2,}ed|seen|shown|kept|held|sent|found|given|taken|written", re.IGNORECASE
 )
-# The words after an opening negation that leave the state undecided ("not
-# decided", "not yet decided", "not clear"): plain English words of indecision,
-# and "yet". Such a state says nothing of the table's, and the model is asked.
+# The words after an opening negation, or after its "yet", that leave the
+# state undecided ("not decided", "not yet decided", "not clear"): plain
+# English words of indecision. Such a state says nothing of the table's, and
+# the model is asked.
 _STATE_UNDECIDED_WORDS = frozenset(
     {
         "decided",
@@ -7303,7 +7304,6 @@ _STATE_UNDECIDED_WORDS = frozenset(
         "resolved",
         "assessed",
         "evaluated",
-        "yet",
     }
 )
 # A named state that says the value is published.
@@ -7329,7 +7329,7 @@ _KEPT_CLAIM_RE = re.compile(
 # A form of "publish" that is not "unpublished".
 _PUBLISH_WORD_RE = re.compile(r"(?<![a-z])publish(?:ed|es)?\b", re.IGNORECASE)
 # A named state's own "not published" opening: the one "published" it may carry.
-_NOT_PUBLISHED_OPENING_RE = re.compile(r"^\W*(?:not|never)\s+published\b", re.IGNORECASE)
+_NOT_PUBLISHED_OPENING_RE = re.compile(r"^\W*(?:not|never)\s+(?:yet\s+)?published\b", re.IGNORECASE)
 # The words that withhold a value, each read for a negation just before it.
 _WITHHOLDING_RE = re.compile(r"withheld|kept\s+out|excluded|un\w*published", re.IGNORECASE)
 # How many words before a withholding word a negation turns it around.
@@ -7393,10 +7393,10 @@ def _reads_withheld(said: str) -> bool:
 
     It opens with a negation or a withholding word (``_STATE_WITHHELD_RE``), a
     negation that stands bare ("no", "no;", "no —") or governs a participle
-    that states a state ("not attributed", "never seen"), never an article, a
-    noun, an adverb or a word of indecision ("not a concern", "not yet
-    decided", ``_STATE_UNDECIDED_WORDS``);
-    it names "publish" nowhere but in its own "not published" opening; and no
+    that states a state ("not attributed", "never seen", "not yet
+    attributed"), never an article, a noun, an adverb or a word of indecision
+    ("not a concern", "not yet decided", ``_STATE_UNDECIDED_WORDS``);
+    it names "publish" nowhere but in its own "not (yet) published" opening; and no
     negation stands within ``_WITHHOLDING_NEGATION_WINDOW`` words before a
     withholding word ("not withheld", "no longer withheld"), the opening's own
     negation aside ("never published; withheld"). When in doubt it is no state, and the
@@ -7421,15 +7421,19 @@ def _negation_states_a_state(after: str) -> bool:
     """Whether what follows a named state's opening negation leaves it a state.
 
     The negation stands bare (nothing, or a mark, follows it) or governs a
-    participle that is no word of indecision.
+    participle that is no word of indecision; after "yet" the word that
+    follows is read the same way ("not yet attributed" is a state, "not yet
+    decided" is not).
     """
     tail = after.lstrip()
     if not tail or not tail[0].isalnum():
         return True
-    word = re.match(r"[A-Za-z]+", tail)
-    if word is None or word.group(0).lower() in _STATE_UNDECIDED_WORDS:
+    words = re.findall(r"[A-Za-z]+", tail)[:2]
+    if words and words[0].lower() == "yet":
+        words = words[1:]
+    if not words or words[0].lower() in _STATE_UNDECIDED_WORDS:
         return False
-    return _STATE_PARTICIPLE_RE.fullmatch(word.group(0)) is not None
+    return _STATE_PARTICIPLE_RE.fullmatch(words[0]) is not None
 
 
 def _restates_reason(after: str, answer: str, *, slack: float = 0.0) -> bool:
