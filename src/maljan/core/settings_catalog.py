@@ -14,6 +14,7 @@ import types
 import typing
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from typing import Any, Literal, get_args, get_origin
 
 from pydantic import BaseModel, SecretStr
@@ -626,6 +627,81 @@ def snapshot_hidden_paths(settings: BaseModel) -> tuple[list[str], list[str]]:
     return secrets, servers
 
 
+def _names_an_identifier(field: FieldInfo) -> bool:
+    """Whether the model holds ``field`` to a pattern (a stage's ``key``).
+
+    A value held to a pattern is a name the settings give something and
+    refer to elsewhere, never a credential: an operator chooses a credential,
+    the model does not shape it. A test walks every patterned field of the
+    settings models, so a credential field given a pattern fails there.
+    """
+    return any(getattr(meta, "pattern", None) for meta in field.metadata)
+
+
+def _field_reading(name: str, field: FieldInfo) -> tuple[Any, bool]:
+    """``(annotation, secret)`` of a declared field, as a stored map of it is read.
+
+    Secret where the catalogue types it so (a ``SecretStr``, a name in
+    ``_SECRET_NAMES``), and where its name names a credential unless the model
+    holds its value to a name pattern (:func:`_names_an_identifier`): a
+    stage's ``key`` is the stage's name.
+    """
+    tp, _ = _unwrap_optional(field.annotation)
+    secret = (
+        tp is SecretStr
+        or name in _SECRET_NAMES
+        or (names_a_credential_value(name) and not _names_an_identifier(field))
+    )
+    return field.annotation, secret
+
+
+def _member_reading(declared: Any, key: str) -> tuple[Any, bool | None]:
+    """``(annotation, secret)`` of entry ``key`` of a mapping ``declared`` types.
+
+    A model's declared field is read as :func:`_field_reading` reads it; an
+    entry of a typed map takes the map's value type. ``secret`` is ``None``
+    where nothing declares the entry (a key a model keeps as an extra, a
+    plugin's block, an ``env`` or ``headers`` entry): it is then read by its
+    name (``names_a_credential_value``), as every entry was before.
+    """
+    tp, _ = _unwrap_optional(declared)
+    if get_origin(tp) is typing.Annotated:
+        tp = get_args(tp)[0]
+    if _is_model(tp):
+        field = tp.model_fields.get(key)
+        return _field_reading(key, field) if field is not None else (None, None)
+    if get_origin(tp) in (dict, Mapping) and len(get_args(tp)) == 2:
+        return get_args(tp)[1], None
+    return None, None
+
+
+def _item_annotation(declared: Any) -> Any:
+    """The item type of a list, tuple or set ``declared`` types, else ``None``."""
+    tp, _ = _unwrap_optional(declared)
+    args = get_args(tp)
+    return args[0] if get_origin(tp) in (list, tuple, set, frozenset) and args else None
+
+
+@lru_cache(maxsize=1024)
+def _stored_key_reading(key: str) -> tuple[Any, bool | None]:
+    """How a stored row is read: a catalogue key (``core.<path>``) as the model declares
+    ``<path>``, a key no model declares (a plugin's block) by its name."""
+    if not key.startswith("core."):
+        return None, None
+    reading: tuple[Any, bool | None] = (Settings, None)
+    for part in key.removeprefix("core.").split("."):
+        if reading[0] is None:
+            return None, None
+        reading = _member_reading(reading[0], part)
+    return reading
+
+
+# How ``configured_secret_values`` reads a source passed to it: a plain map as a
+# map of stored rows (``SettingsService.load_overrides``), each key a catalogue
+# key where it is one (:func:`_stored_key_reading`), any other key by its name.
+_STORED_ROWS = object()
+
+
 def configured_secret_values(*sources: Any) -> set[str]:
     """Every secret-kind value the given settings hold, as the platform would send it.
 
@@ -637,7 +713,9 @@ def configured_secret_values(*sources: Any) -> set[str]:
     well. Nothing else is collected: a field or a key that merely mentions a
     credential (``max_tokens``, ``AUTH_MODE``, ``TOKEN_LIMIT``) holds no secret
     (``names_a_credential_value``), and the REST sandbox's JSONPath maps are not
-    read. The scrub masks these values by exact value
+    read. A stored map is read as the model declares it (T-506): a field the
+    model holds to a name pattern (a stage's ``key``) is no credential, though
+    its name reads as one. The scrub masks these values by exact value
     (``pipeline.events.remember_secret_values``).
     """
     from maljan.core.settings_masking import bare_addresses
@@ -656,15 +734,15 @@ def configured_secret_values(*sources: Any) -> set[str]:
             if lowered.startswith(scheme) and text[len(scheme) :].strip():
                 found.add(text[len(scheme) :].strip())
 
-    def _walk(value: Any, name: str, named_secret: bool) -> None:
+    def _walk(value: Any, name: str, named_secret: bool, declared: Any = None) -> None:
         if isinstance(value, SecretStr):
             _add(value.get_secret_value())
         elif isinstance(value, BaseModel):
             fields = dict(type(value).model_fields)
-            for key in fields:
+            for key, field in fields.items():
                 if key in _FIELD_MAPS:
                     continue
-                _walk(getattr(value, key, None), key, key in _SECRET_NAMES)
+                _walk(getattr(value, key, None), key, key in _SECRET_NAMES, field.annotation)
             # A model that keeps extra keys holds blocks no field declares: a
             # plugin's ``llm.<id>`` or ``memory.<id>`` settings, read with its
             # own settings model or kept as stored. Their keys are read as a
@@ -673,11 +751,20 @@ def configured_secret_values(*sources: Any) -> set[str]:
                 name = str(key)
                 _walk(item, name, name in _SECRET_NAMES or names_a_credential_value(name))
         elif isinstance(value, dict):
+            # A stored map is read as the model declares it (a stored row by
+            # its catalogue key), so a stage's ``key`` is its name; an entry
+            # nothing declares is read by its name.
             for key, item in value.items():
-                _walk(item, str(key), names_a_credential_value(str(key)))
+                text = str(key)
+                if declared is _STORED_ROWS:
+                    annotation, typed = _stored_key_reading(text)
+                else:
+                    annotation, typed = _member_reading(declared, text)
+                held = names_a_credential_value(text) if typed is None else typed
+                _walk(item, text, held, annotation)
         elif isinstance(value, list | tuple | set):
             for item in value:
-                _walk(item, name, named_secret)
+                _walk(item, name, named_secret, _item_annotation(declared))
         elif isinstance(value, str):
             if named_secret:
                 _add(value)
@@ -693,7 +780,7 @@ def configured_secret_values(*sources: Any) -> set[str]:
                         _add(secret)
 
     for source in sources:
-        _walk(source, "", False)
+        _walk(source, "", False, _STORED_ROWS)
     return found
 
 
