@@ -59,6 +59,11 @@ def _validate_data_type(data_type: str) -> str:
     return data_type
 
 
+def no_data_placeholder(sample_id: str, data_type: str) -> str:
+    """What :meth:`FileDataLoader.load` answers when no data file exists for the sample."""
+    return f"No {data_type} data available for sample {sample_id}."
+
+
 class FileDataLoader:
     """Loads analysis data from local JSON files and parses via registered parsers."""
 
@@ -105,6 +110,17 @@ class FileDataLoader:
             raise UnsafePathError(f"Resolved path escapes samples directory: {candidate}") from exc
         return candidate
 
+    def holds(self, sample_id: str, data_type: str) -> bool:
+        """Whether a data file exists for ``sample_id`` and ``data_type``: what :meth:`load` reads.
+
+        An identifier :meth:`load` would refuse answers true, so the caller
+        meets the refusal where it always did rather than a guess here.
+        """
+        try:
+            return self._resolve_sample_path(sample_id, data_type).is_file()
+        except UnsafePathError:
+            return True
+
     def load(self, sample_id: str, data_type: str) -> str:
         """Load and parse data for a given sample and data type.
 
@@ -116,7 +132,7 @@ class FileDataLoader:
         raw = self._load_json(path)
 
         if raw is None:
-            return f"No {data_type} data available for sample {sample_id}."
+            return no_data_placeholder(sample_id, data_type)
 
         try:
             parser = self._parser_registry.create(data_type)
