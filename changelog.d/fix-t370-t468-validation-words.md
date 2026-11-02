@@ -1,0 +1,3 @@
+### Fixed
+
+- **"Not packed; strings are obfuscated." is no longer asked as the absence of Obfuscated Files or Information (T-370).** Under a parent technique a child's word ("packed") is set aside when the claim also affirms the family's behaviour with a word that no more families' names hold than the child's word does. "Obfuscated" is in three families' names and "packed" in two, so the parent's own word never set it aside. The rarest word of the technique's own name now affirms whatever its count; the commoner words of that name ("file", "information") still affirm nothing by themselves, and a negated one affirms nothing.

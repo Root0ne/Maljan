@@ -12,7 +12,8 @@ may be its absence ("The DLL is not packed."), so it is set aside only when the
 claim also names the family's behaviour without negating it ("its strings are
 XOR-encoded"), by a word of a family member's name that the parent's own
 vendored data writes and that no more families' names hold than the child's
-word does. The rule is built from the catalogue's names alone, for every
+word does, or that is the rarest word of the parent's own name ("strings are
+obfuscated"). The rule is built from the catalogue's names alone, for every
 parent and child; the member that owns the word is asked as before.
 
 Every sentence here is made up for the test.
@@ -47,6 +48,19 @@ def test_a_parent_s_own_rarer_word_sets_a_child_s_word_aside() -> None:
 
 
 @pytest.mark.parametrize(
+    "text",
+    [
+        "Not packed; strings are obfuscated.",
+        "Not packed; strings are obfuscated/encrypted.",
+    ],
+)
+def test_the_rarest_word_of_the_parent_s_own_name_sets_a_child_s_word_aside(text: str) -> None:
+    # "obfusc" is in more families' names than "pack", yet it is the rarest
+    # word of Obfuscated Files or Information itself.
+    assert absence_claim_violation(_claim(text, "T1027"), "T1027", knowledge) is None
+
+
+@pytest.mark.parametrize(
     ("text", "technique"),
     [
         # The member whose name holds the word is asked as before.
@@ -63,6 +77,11 @@ def test_a_parent_s_own_rarer_word_sets_a_child_s_word_aside() -> None:
         ("No packer; an icon resource is present.", "T1027"),
         ("Not packed; the HTML report is attached.", "T1027"),
         ("Not packed, and nothing is encoded.", "T1027"),
+        # The commoner words of the parent's own name affirm nothing by themselves.
+        ("Not packed; the file is a DLL.", "T1027"),
+        ("Not packed; information is collected.", "T1027"),
+        # The parent's rarest own word, negated, affirms nothing.
+        ("Not packed; nothing is obfuscated.", "T1027"),
         # A word of the technique's own name.
         ("The beacon channel is not encrypted.", "T1573"),
         ("The sample has no anti-debugging check.", "T1622"),

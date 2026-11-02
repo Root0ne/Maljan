@@ -1340,13 +1340,18 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
     the vendored data writes for the parent itself (:func:`technique_vocabulary`),
     and in no more technique families' names than the rarest family stem of the
     word it would set aside ("strings XOR-encoded; not packed": "encod", two
-    families, beside "pack", two). Read from the catalogue's names and the
-    vendored data, for every parent and child, with no number of its own."""
+    families, beside "pack", two). The rarest stem of the technique's own name
+    affirms whatever its count ("strings obfuscated; not packed": "obfusc",
+    three families, beside "pack", two); its commoner ones ("file", "inform")
+    never do by that alone. Read from the catalogue's names and the vendored
+    data, for every parent and child, with no number of its own."""
     own, others = _family_name_stems(technique_id)
     families = _name_stem_families()
     parent = "." not in str(technique_id or "")
     affirmed: list[int] = []
+    own_rarest_affirmed = False
     if parent:
+        own_rarest = min((families.get(stem, 0) for stem in own), default=0)
         text = _read_dashes(text)
         vocabulary = technique_vocabulary(technique_id)
         reader: _NegationReader | None = None
@@ -1361,6 +1366,7 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
                 match.start()
             ):
                 affirmed.append(families.get(stem, 0))
+                own_rarest_affirmed |= stem in own and families.get(stem, 0) == own_rarest
         if not affirmed:
             return lambda _mention: False
 
@@ -1371,7 +1377,7 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
         if not parent:
             return True
         rarest = min(families.get(stem, 0) for stem in stems & others)
-        return any(count <= rarest for count in affirmed)
+        return own_rarest_affirmed or any(count <= rarest for count in affirmed)
 
     return another_s
 
