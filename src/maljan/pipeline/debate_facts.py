@@ -1,7 +1,7 @@
 """The ledger's counts for the contradictions a mediator lists, and the mediator's own marks.
 
 The mediator's final ``CONTRADICTIONS:`` block decides whether the analysts
-revise. The platform decides nothing about a line's content. It does two
+revise. The platform decides nothing about a line's content. It does these
 things:
 
 - **states facts**: for a listed line whose cited ledger entries (cited by
@@ -12,6 +12,12 @@ things:
   for ``matches``). No call is made for them: they ride on the calls the
   debate makes anyway, the revision directive of the analysts the line names
   and the next mediation's prompt;
+- **states rule matches**: for a listed line that cites a signature-rule
+  answer (``core.rule_matches``: read by its declaration, or by its shape
+  where its tool declares no kind) and speaks of rules, it states every such
+  answer of the ledger with where it came from and what matched, "0 rule
+  matches of 31 rules run" included, so two rule sets that disagree are both
+  heard, whichever one the line cites;
 - **says what the ledger already stated**: a blocking line that disputes a
   count itself (two numbers for one noun: "three matches" against "0 hits"),
   every count of which (a number before a plural noun: "0 hits", "31 rules") the cited
@@ -297,14 +303,121 @@ def ledger_count_facts(
     for ``domains``). Never raises on a line it cannot read.
     """
     names = list(agent_names) or [str(k) for k in isr_reports]
+    ledger = list(ledger or ())
     entries = _ledger_counts_by_id(ledger)
+    matched = _rule_match_entries(ledger)
     facts: list[str] = []
     for line in lines:
         text = str(line)
         stated = _line_counts(text, names, entries, isr_reports).said
         if stated:
             facts.append(f'For the line "{text}": {"; ".join(stated)}.')
+        rules = _rule_match_fact(text, names, isr_reports, matched)
+        if rules:
+            facts.append(rules)
     return facts
+
+
+# The most rule-match results one fact names (answers that say one thing are
+# one), and the most rule names it gives one result; the rest are counted.
+_RULE_FACT_ENTRIES = 12
+_RULE_FACT_NAMES = 10
+# A line about rules says so in a word, or names one of the rules or tools.
+_RULE_WORD = re.compile(r"\b(?:rules?|signatures?)\b", re.IGNORECASE)
+
+
+def _rule_match_entries(ledger: Sequence[Any]) -> list[Any]:
+    """Every signature-rule answer of the ledger, in ledger order (``core.rule_matches``)."""
+    from maljan.core.rule_matches import rule_matches_of
+
+    found = []
+    for entry in ledger:
+        try:
+            held = rule_matches_of(entry)
+        except Exception:  # noqa: BLE001 — an entry that cannot be read holds no match
+            held = None
+        if held is not None and held.entry_id:
+            found.append(held)
+    return found
+
+
+def _about_rules(line: str, cited: Sequence[Any]) -> bool:
+    """Whether a line citing rule-match answers speaks of rules: a rule word, rule or tool name."""
+    if _RULE_WORD.search(line):
+        return True
+    words = {w.lower() for w in re.findall(r"[\w.:\-]+", line)}
+    for held in cited:
+        named = {*held.rules, held.tool, held.source}
+        if any(name and name.lower() in words for name in named):
+            return True
+    return False
+
+
+def _same_answer(held: Any) -> tuple[Any, ...]:
+    """What makes two rule-match answers say one thing: one tool, one origin, one result."""
+    return (held.tool, held.server, held.source, held.declared, held.rules, held.rule_count)
+
+
+def _rule_match_part(group: Sequence[Any]) -> str:
+    """Answers that say one thing, as a fact states them: their entries, origin and matches."""
+    held = group[0]
+    origin = [f"tool {held.tool}"] if held.tool else []
+    if held.server:
+        origin.append(f"server {held.server}")
+    origin.append(f"declared {held.source}" if held.source else "read from its answer's shape")
+    ids = ", ".join(each.entry_id for each in group)
+    count = len(held.rules)
+    said = f"entr{'ies' if len(group) > 1 else 'y'} {ids} ({', '.join(origin)}) "
+    said += f"{'each hold' if len(group) > 1 else 'holds'} {count} rule match"
+    said += "" if count == 1 else "es"
+    if held.rule_count is not None:
+        said += f" of {held.rule_count} rules run"
+    if held.rules:
+        tally: dict[str, int] = {}
+        for rule in held.rules:
+            tally[rule] = tally.get(rule, 0) + 1
+        shown = [f"{rule} ({n})" if n > 1 else rule for rule, n in tally.items()]
+        rest = len(shown) - _RULE_FACT_NAMES
+        said += ": " + ", ".join(shown[:_RULE_FACT_NAMES])
+        said += f" and {rest} more rules" if rest > 0 else ""
+    return said
+
+
+def _rule_match_fact(
+    text: str, names: Sequence[str], isr_reports: Mapping[str, Any], matched: Sequence[Any]
+) -> str:
+    """Every rule-match answer of the ledger, for a line that cites one and speaks of rules.
+
+    A line about a rule match cites one answer, the side it argues from; the
+    others may hold another rule set's matches, or none. Each answer is
+    stated with where it came from (its tool and server, and its declared
+    name or that its shape was read), so contradictory rule sets are both
+    heard; answers that say one thing (one tool, origin and result) are
+    stated once with every entry id. ``""`` for any other line. Never raises.
+    """
+    if not matched:
+        return ""
+    try:
+        bare = without_line_mark(text)
+        cited_ids = set(_cited_ids(bare, names, isr_reports))
+        cited = [held for held in matched if held.entry_id in cited_ids]
+        if not cited or not _about_rules(bare, cited):
+            return ""
+        groups: dict[tuple[Any, ...], list[Any]] = {}
+        for held in matched:
+            groups.setdefault(_same_answer(held), []).append(held)
+        # The results a cited answer holds always, then the others in ledger
+        # order, up to the bound.
+        holds_cited = {_same_answer(held) for held in cited}
+        room = max(0, _RULE_FACT_ENTRIES - len(holds_cited))
+        kept = holds_cited | set([key for key in groups if key not in holds_cited][:room])
+        parts = [_rule_match_part(group) for key, group in groups.items() if key in kept]
+        rest = sum(len(group) for key, group in groups.items() if key not in kept)
+        if rest > 0:
+            parts.append(f"and {rest} more rule-match entries")
+        return f'For the line "{text}", every rule-match answer of the ledger: {"; ".join(parts)}.'
+    except Exception:  # noqa: BLE001 — a line that cannot be read gets no fact
+        return ""
 
 
 @dataclass(frozen=True)
@@ -398,6 +511,19 @@ def _count_or_reference(match: re.Match[str]) -> str:
     return " "
 
 
+def _cited_ids(text: str, names: Sequence[str], isr_reports: Mapping[str, Any]) -> list[str]:
+    """The ledger ids a line cites: its own, then those of the claims it names, each once."""
+    cited = list(dict.fromkeys(_ENTRY_ID.findall(text)))
+    for name, claim_numbers in _claims_named(text, names):
+        claims = _claims_of(isr_reports, name)
+        for number in claim_numbers:
+            place = _claim_place(number, len(claims))
+            if place is not None:
+                ref = str(getattr(claims[place], "evidence_ref", "") or "")
+                cited.extend(i for i in _ENTRY_ID.findall(ref) if i not in cited)
+    return cited
+
+
 def _line_counts(
     text: str,
     names: Sequence[str],
@@ -429,14 +555,7 @@ def _line_counts(
         nouns_of: dict[int, set[str]] = {}
         for value, noun in counted:
             nouns_of.setdefault(value, set()).add(noun)
-        cited = list(dict.fromkeys(_ENTRY_ID.findall(text)))
-        for name, claim_numbers in _claims_named(text, names):
-            claims = _claims_of(isr_reports, name)
-            for number in claim_numbers:
-                place = _claim_place(number, len(claims))
-                if place is not None:
-                    ref = str(getattr(claims[place], "evidence_ref", "") or "")
-                    cited.extend(i for i in _ENTRY_ID.findall(ref) if i not in cited)
+        cited = _cited_ids(text, names, isr_reports)
         stated: list[str] = []
         by_entry: list[tuple[str, list[tuple[str, int, str, bool]]]] = []
         for entry_id in cited:
