@@ -67,3 +67,43 @@ def test_a_sentence_that_mentions_a_field_word_is_still_read() -> None:
     assert [claim.claim for claim in read.claims] == [
         "Evidence of a decode loop sits in routine 0x4100."
     ]
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "Evidence: the routine at 0x10 decodes strings.",
+        "evidence: the routine at 0x10 decodes strings.",
+        "Confidence: the routine at 0x10 decodes strings.",
+        "**Evidence:** the routine at 0x10 decodes strings.",
+    ],
+)
+def test_a_sentence_that_opens_with_a_label_in_another_casing_is_read(sentence: str) -> None:
+    read = read_claim_blocks(
+        f"CLAIM: {sentence}\nEVIDENCE: [ev_0002]\nCONFIDENCE: 0.8\n", require_evidence=True
+    )
+    assert [claim.claim.lstrip("*") for claim in read.claims] == [sentence.lstrip("*")]
+    assert read.begun == 1
+    assert read.unread == 0
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "EVIDENCE: the routine at 0x10 decodes strings.",
+        "Technique: T1027",
+        "technique: the routine at 0x10 decodes strings.",
+        "Evidence: [ev_0001], [ev_0002].",
+        "confidence: 0.9",
+        "Confidence: 90%",
+        "Technique: T1027, T1140.",
+        "Evidence: NONE",
+        "Dissent: none",
+        "- **Evidence**: _ev_0001_",
+    ],
+)
+def test_a_label_the_tail_reads_or_a_bare_field_value_is_still_no_sentence(field: str) -> None:
+    read = read_claim_blocks(f"CLAIM: {field}\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.9\n")
+    assert read.claims == []
+    assert read.begun == 1
+    assert read.unread == 1

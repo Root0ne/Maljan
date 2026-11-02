@@ -1,0 +1,3 @@
+### Fixed
+
+- **A claim sentence that opens with a field label in another casing is read (T-202).** "CLAIM: Evidence: the routine at 0x10 decodes strings." was dropped as a heading with no sentence and counted as begun and not read, because the label was matched in any casing while the field reader reads EVIDENCE and CONFIDENCE only in capitals. A block is now dropped only when its sentence opens with a label the field reader takes as a field (EVIDENCE, CONFIDENCE in capitals, TECHNIQUE in any casing), or with a label followed by nothing but a field's value: ledger ids, a number, technique ids or NONE. Every such block is still counted as unread. Prompts are unchanged.
