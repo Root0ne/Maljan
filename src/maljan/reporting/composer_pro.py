@@ -196,17 +196,24 @@ def _open_questions(report: MalwareReport) -> list[str]:
 
 
 def _redone_calls(report: MalwareReport) -> list[str]:
-    """Each failed call a later call redid, as the run's bounds hold it (``evidence.redone``)."""
+    """Each failed call a later call redid, as the run's bounds hold it (``evidence.redone``).
+
+    Shown readable as the platform's citations, so only the ids, each of an
+    entry id's shape; the tool's name, a server's word, is not repeated here.
+    """
+    from maljan.reporting.redone_calls import ENTRY_ID
+
     evidence = (report.run_summary or {}).get("evidence") or {}
     said: list[str] = []
     for row in evidence.get("redone") or []:
         if not isinstance(row, dict):
             continue
-        by = ", ".join(str(i) for i in row.get("answered_by") or [])
-        if row.get("entry_id") and by:
+        failed = str(row.get("entry_id") or "")
+        by = [str(i) for i in row.get("answered_by") or [] if ENTRY_ID.fullmatch(str(i))]
+        if ENTRY_ID.fullmatch(failed) and by:
             said.append(
-                f"{row['entry_id']} ({' '.join(str(row.get('tool') or '').split())[:80]}) "
-                f"failed and was redone: {by} answered for the same address, so it left no gap"
+                f"{failed} failed and was redone: {', '.join(by)} answered for the same "
+                "address, so it left no gap"
             )
     return said
 

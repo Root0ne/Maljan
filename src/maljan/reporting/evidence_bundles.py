@@ -732,7 +732,8 @@ def _function_index(section: str, table: list[FunctionCode]) -> list[dict[str, A
 # sample's or a tool's text, and every ledger id in it is written out
 # (``composer._fact_line``), as the pack writes the sample's text.
 # The limitations fact naming each failed call a later call redid
-# (``composer_pro._redone_calls``) is one of them.
+# (``composer_pro._redone_calls``) is one of them: entry ids of their own
+# shape and the platform's words, no tool's text.
 REDONE_CALLS_FACT = "failed_calls_redone"
 PLATFORM_CITED_FACTS: frozenset[str] = frozenset(
     {"sandbox_entries", "string_entries", "crypto_finding_entries", REDONE_CALLS_FACT}

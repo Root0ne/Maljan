@@ -116,6 +116,7 @@ from maljan.reporting.prose_decisions import (
     PUBLISHED_TECHNIQUE_DOUBTED_CODE,
     with_decided_statements,
 )
+from maljan.reporting.redone_calls import ENTRY_ID
 from maljan.reporting.renderers.layout import ANALYST, BUNDLE, FULL, checked
 from maljan.reporting.renderers.prose_forms import (
     end_references,
@@ -3017,10 +3018,6 @@ def _redone_rows(evidence: dict[str, Any]) -> list[dict[str, Any]]:
     return [row for row in (evidence.get("redone") or []) if isinstance(row, dict)]
 
 
-# An entry id as a redone row may name it: the platform's own shape, one token.
-_ENTRY_ID = re.compile(r"[\w.-]{1,64}")
-
-
 def _redone_clause(evidence: dict[str, Any], *, ids: bool) -> str:
     """``", N of them redone ..."`` after a failed count, or ``""`` when none was redone.
 
@@ -3036,8 +3033,8 @@ def _redone_clause(evidence: dict[str, Any], *, ids: bool) -> str:
     pairs = []
     for row in rows:
         failed = str(row.get("entry_id") or "")
-        by = [str(i) for i in row.get("answered_by") or [] if _ENTRY_ID.fullmatch(str(i))]
-        if _ENTRY_ID.fullmatch(failed) and by:
+        by = [str(i) for i in row.get("answered_by") or [] if ENTRY_ID.fullmatch(str(i))]
+        if ENTRY_ID.fullmatch(failed) and by:
             pairs.append(f"{failed} by {', '.join(by)}")
     return f" ({said}" + (f": {'; '.join(pairs)}" if pairs else "") + ")"
 

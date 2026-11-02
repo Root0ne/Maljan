@@ -231,7 +231,11 @@ export default function RunQuality() {
               <Stat label="Calls" value={evidence.entries ?? 0} />
               <Stat label="Succeeded" value={evidence.ok ?? 0} accent="text-status-green" />
               <Stat
-                label="Failed"
+                label={
+                  (evidence.redone?.length ?? 0) > 0
+                    ? `Failed, ${evidence.redone?.length} redone`
+                    : "Failed"
+                }
                 value={evidence.failed ?? 0}
                 accent={(evidence.failed ?? 0) > 0 ? "text-status-red" : undefined}
               />

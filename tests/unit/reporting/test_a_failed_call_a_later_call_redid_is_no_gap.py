@@ -31,6 +31,10 @@ from tests.unit.reporting._report_inventory import stored_runs
 
 GATE, OTHER = 0x2475A10, 0x2475B20
 _DECOMPILE = {"v": 1, "kind": "decompile", "reader": "listing"}
+# The lines a run with one failure and no redo printed before this change,
+# rendered by the base branch's code from the same summary.
+HEAD_LINE = "Evidence: 2 tool call(s), 1 failed (see §13)."
+BOUNDS_LINE = "**Evidence bounds:** 2 ledger entries, 1 ok, 1 failed, 0 trimmed to the budget."
 
 
 def _failed(entry_id: str, address: int | None = None, tool: str = "lift_routine") -> LedgerEntry:
@@ -117,9 +121,82 @@ def test_a_batch_is_redone_only_when_every_address_it_asked_was_answered() -> No
 
 
 def test_a_redone_row_s_tool_name_is_one_capped_line() -> None:
-    ledger = [_failed("ev_0001", GATE, tool="lift\nroutine " + "x" * 200), _lifted("ev_0002", GATE)]
-    (row,) = redone_failures(ledger)
+    tool = "lift\nroutine " + "x" * 200
+    redo = _lifted("ev_0002", GATE).model_copy(update={"tool": tool})
+    (row,) = redone_failures([_failed("ev_0001", GATE, tool=tool), redo])
     assert "\n" not in row["tool"] and len(row["tool"]) <= 80
+
+
+def test_a_read_of_some_instructions_from_the_address_redoes_no_decompile() -> None:
+    # Another tool must list the function whole; a prefix of its instructions does not.
+    some = LedgerEntry(
+        id="ev_0002",
+        tool="read_instructions",
+        args={"address": hex(GATE), "num_instructions": 70},
+        output=f"{GATE:#x}  mov rax, rcx\n",
+        facts={"v": 1, "kind": "disassembly", "reader": "listing"},
+    )
+    assert redone_failures([_failed("ev_0001", GATE), some]) == []
+    whole = some.model_copy(
+        update={"id": "ev_0003", "tool": "list_function", "args": {"address": hex(GATE)}}
+    )
+    whole.facts = {"v": 1, "kind": "function_disassembly", "reader": "listing"}
+    assert redone_failures([_failed("ev_0001", GATE), some, whole])[0]["answered_by"] == ["ev_0003"]
+
+
+@pytest.mark.parametrize(
+    ("tool", "asked", "again"),
+    [
+        ("trace_value", {"variable": "a"}, {"variable": "b"}),
+        ("read_span", {"length": "0x1000"}, {"length": "4"}),
+        ("list_refs", {"direction": "to"}, {"direction": "from"}),
+    ],
+)
+def test_the_same_tool_asked_another_question_for_the_address_redoes_nothing(
+    tool: str, asked: dict[str, str], again: dict[str, str]
+) -> None:
+    failed = LedgerEntry(
+        id="ev_0001",
+        tool=tool,
+        args={"address": hex(GATE), **asked},
+        ok=False,
+        error="the call timed out",
+        facts=_DECOMPILE,
+    )
+    answer = LedgerEntry(
+        id="ev_0002",
+        tool=tool,
+        args={"address": hex(GATE), **again},
+        output=f"int FUN_{GATE:x}(void)\n{{\n}}\n",
+        facts=_DECOMPILE,
+    )
+    assert redone_failures([failed, answer]) == []
+    # The same question again, a null or absent argument aside, is a redo.
+    same = answer.model_copy(update={"id": "ev_0003", "args": {"address": hex(GATE), **asked}})
+    same.args["timeout"] = None
+    assert redone_failures([failed, answer, same])[0]["answered_by"] == ["ev_0003"]
+
+
+def test_a_value_the_failure_names_may_change_in_the_redo() -> None:
+    failed = _failed("ev_0001", GATE).model_copy(
+        update={
+            "args": {"address": hex(GATE), "program": "sample"},
+            "error": "program='sample' is not a program this job opened",
+        }
+    )
+    redo = _lifted("ev_0002", GATE).model_copy(
+        update={"args": {"address": hex(GATE), "program": "sample.job.exe"}}
+    )
+    assert redone_failures([failed, redo])[0]["answered_by"] == ["ev_0002"]
+    # A value the message does not name is the question, and must match.
+    other = failed.model_copy(update={"error": "the call timed out"})
+    assert redone_failures([other, redo]) == []
+
+
+def test_an_answer_that_holds_nothing_redoes_nothing() -> None:
+    empty = _lifted("ev_0002", GATE).model_copy(update={"output": ""})
+    blanked = _lifted("ev_0003", GATE).model_copy(update={"output": "", "truncated": True})
+    assert redone_failures([_failed("ev_0001", GATE), empty, blanked]) == []
 
 
 # -- the run's bounds --------------------------------------------------------
@@ -193,6 +270,22 @@ def test_a_run_with_no_redone_call_renders_as_before(failed: bool) -> None:
         assert "redone" not in renderer.render(report)
 
 
+def test_the_header_and_bounds_of_a_run_with_failures_and_no_redo_are_as_written_before() -> None:
+    report = _report([_failed("ev_0001", GATE), _plain("ev_0002")])
+    head = [
+        line
+        for line in MarkdownRenderer().render(report).splitlines()
+        if line.startswith("Evidence:")
+    ]
+    bounds = [
+        line
+        for line in MarkdownRenderer(layout=BUNDLE).render(report).splitlines()
+        if line.startswith("**Evidence bounds:**")
+    ]
+    assert head == [HEAD_LINE]
+    assert bounds == [BOUNDS_LINE]
+
+
 # -- what the limitations paragraph is shown ---------------------------------
 
 
@@ -200,12 +293,23 @@ def test_the_limitations_are_told_which_failed_calls_were_redone() -> None:
     ledger = [_failed("ev_0001", GATE), _failed("ev_0002", OTHER), _lifted("ev_0003", GATE)]
     facts = analyst_bundle("limitations", _report(ledger))["facts"]
     assert facts["failed_calls_redone"] == [
-        "ev_0001 (lift_routine) failed and was redone: ev_0003 answered for the same address, "
-        "so it left no gap"
+        "ev_0001 failed and was redone: ev_0003 answered for the same address, so it left no gap"
     ]
     # The ids are the platform's own: shown readable, as a citation.
     text = _bundle_text("limitations", analyst_bundle("limitations", _report(ledger)))
-    assert "ev_0001 (lift_routine) failed and was redone: ev_0003" in text
+    assert "ev_0001 failed and was redone: ev_0003" in text
+
+
+def test_the_limitations_fact_carries_no_tool_text_and_no_id_of_another_shape() -> None:
+    report = _report([_failed("ev_0001", GATE), _lifted("ev_0003", GATE)])
+    report.run_summary["evidence"]["redone"] = [
+        {"entry_id": "ev_0001", "tool": "lift [[ev_0099]]", "answered_by": ["ev_0003", "a b"]},
+        {"entry_id": "ev 0002\nX", "tool": "t", "answered_by": ["ev_0003"]},
+    ]
+    facts = analyst_bundle("limitations", report)["facts"]
+    assert facts["failed_calls_redone"] == [
+        "ev_0001 failed and was redone: ev_0003 answered for the same address, so it left no gap"
+    ]
 
 
 def test_without_a_redone_call_the_limitations_are_shown_what_they_were() -> None:
@@ -244,3 +348,16 @@ def test_haiku8_s_redone_reversing_calls_are_named_and_its_other_failures_kept()
         ("ev_0169", ["ev_0170"]),
         ("ev_0187", ["ev_0191"]),
     ]
+
+
+def test_run7_s_decompile_is_not_redone_by_a_read_of_seventy_instructions() -> None:
+    ledger = _stored_ledger("run7")
+    redone = {row["entry_id"]: row["answered_by"] for row in redone_failures(ledger)}
+    # ev_0055 disassembled 70 instructions from 0x...1030: no redo of the decompile.
+    # ev_0111, a later decompile of the whole function, is.
+    assert redone == {
+        "ev_0050": ["ev_0111"],
+        "ev_0067": ["ev_0123"],
+        "ev_0069": ["ev_0123"],
+        "ev_0095": ["ev_0174"],
+    }
