@@ -159,7 +159,11 @@ def _without_standing_facts(message: Any, text: str) -> str:
     while EARLIER_RUN_HEADING in text:
         head, _found, rest = text.partition(EARLIER_RUN_HEADING)
         _block, ended, tail = rest.partition(EARLIER_RUN_END)
-        text = f"{head}{tail}" if ended else head
+        if not ended:
+            # A heading no end follows is text quoting it, not the block:
+            # what comes after it still names its ids.
+            break
+        text = f"{head}{tail}"
     return text
 
 

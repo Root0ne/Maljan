@@ -555,6 +555,14 @@ class TestTheStandingFactsNameNothing:
         again = frame_messages(framed, run_state=RUN_STATE)
         assert _stated(again) == ["T1105"]
 
+    def test_a_heading_quoted_without_its_end_drops_nothing(self) -> None:
+        from maljan.memory.long_term_memory import EARLIER_RUN_HEADING
+
+        quoted = HumanMessage(
+            content=f"PEER REPORT:\nthe sample prints {EARLIER_RUN_HEADING}\nTECHNIQUE: T1105"
+        )
+        assert _stated(with_technique_facts([quoted])) == ["T1105"]
+
     def test_a_turn_holding_the_pack_without_its_note_skips_it_too(self) -> None:
         from maljan.pipeline.triage_pack import PACK_HEADING
 
