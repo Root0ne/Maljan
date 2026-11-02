@@ -18,7 +18,11 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.judge_agent import sample_identity_block
+from maljan.agents.judge_agent import (
+    SAMPLE_BYTES_IDENTITY_HEADER,
+    SAMPLE_IDENTITY_HEADER,
+    sample_identity_block,
+)
 from maljan.analysis.sample_integrity import file_sha256, sample_fingerprints, sandbox_target_record
 from maljan.pipeline import sandbox_status as status
 from maljan.pipeline.nodes import _sample_identity
@@ -82,12 +86,56 @@ class TestAMarkedReport:
 
         assert "md5" not in identity
         assert "sha1" not in identity
-        assert TARGET_SIZE != identity.get("size_bytes")
+        # Nor the changed copy's size, read off the disk.
+        assert "size_bytes" not in identity
 
     def test_no_sample_on_disk_gives_no_hash_and_no_size(self) -> None:
         identity = _sample_identity(_state(_marked(), None))
 
-        assert set(identity) == {"sha256", "file_name", "file_type", "platform"}
+        assert set(identity) == {
+            "sha256",
+            "file_name",
+            "file_type",
+            "platform",
+            status.IDENTITY_SOURCE_KEY,
+        }
+
+    def test_the_block_says_its_values_are_the_sample_s_own_bytes(self, tmp_path: Path) -> None:
+        identity = _sample_identity(_state(_marked(), _sample(tmp_path)))
+        block = sample_identity_block(identity)
+
+        assert block.startswith(f"=== {SAMPLE_BYTES_IDENTITY_HEADER} ===\n")
+        assert SAMPLE_IDENTITY_HEADER not in block
+        assert "sandbox's own file block" not in block
+        # The provenance picks the header; it is never a row of the block.
+        assert status.IDENTITY_SOURCE_KEY not in block
+        assert status.FROM_SAMPLE_BYTES not in block
+
+    def test_each_judge_turn_reads_the_copy_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import maljan.analysis.sample_integrity as integrity
+
+        reads: list[str] = []
+        real = integrity._file_digests
+
+        def _counted(*args: Any) -> Any:
+            reads.append(str(args[0]))
+            return real(*args)
+
+        monkeypatch.setattr(integrity, "_file_digests", _counted)
+        monkeypatch.setattr(integrity, "_FINGERPRINTS", {})
+        state = _state(_marked(), _sample(tmp_path))
+
+        first = _sample_identity(state)
+        for _ in range(5):
+            assert _sample_identity(state) == first
+        assert len(reads) == 1
+
+        # Other bytes written in its place are read again.
+        Path(state["sample_path"]).write_bytes(b"x" * 7)
+        assert "md5" not in _sample_identity(state)
+        assert len(reads) == 2
 
     def test_a_mark_of_a_value_that_is_not_a_sha256_still_drops_the_block(
         self, tmp_path: Path
@@ -140,6 +188,12 @@ class TestTheFingerprints:
         assert sample_fingerprints(path, INTAKE.upper())["size_bytes"] == len(BYTES)
         assert file_sha256(path) == (INTAKE, "")
         assert file_sha256(path, len(BYTES) + 1)[0] == ""
+
+    def test_the_intake_size_bounds_the_read(self, tmp_path: Path) -> None:
+        path = _sample(tmp_path)
+
+        assert sample_fingerprints(path, INTAKE, len(BYTES))["size_bytes"] == len(BYTES)
+        assert sample_fingerprints(path, INTAKE, len(BYTES) - 1) == {}
 
     @pytest.mark.parametrize("path", [None, "", 7, "/nonexistent/maljan/sample"])
     def test_nothing_read_is_nothing_given(self, path: Any) -> None:

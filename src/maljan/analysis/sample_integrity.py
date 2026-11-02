@@ -80,24 +80,40 @@ def file_sha256(path: str | os.PathLike[str], size: int | None = None) -> tuple[
     return str(digests.get("sha256") or ""), why
 
 
-def sample_fingerprints(path: Any, expected: str) -> dict[str, Any]:
+def sample_fingerprints(path: Any, expected: str, size: int | None = None) -> dict[str, Any]:
     """The md5, sha1 and size of the sample at ``path``, read from its own bytes; ``{}`` else.
 
-    One streaming pass, the copy opened as :func:`file_sha256` opens it. They
-    are given only where the same pass reads ``expected``, the intake SHA-256:
-    a copy that is not the bytes the job took in, or one that could not be
-    read, gives none. Never raises.
+    One streaming pass, the copy opened as :func:`file_sha256` opens it, of
+    no more than ``size`` bytes where the intake size is given. They are
+    given only where the same pass reads ``expected``, the intake SHA-256: a
+    copy that is not the bytes the job took in, or one that could not be
+    read, gives none. A copy is read once while its size and modification
+    time hold (:data:`_FINGERPRINTS`), however many judge turns ask. Never
+    raises.
     """
     if not path or not expected:
         return {}
     try:
         where = os.fspath(path)
-    except TypeError:
+        held = os.stat(where, follow_symlinks=False)
+    except (OSError, TypeError, ValueError):
         return {}
-    digests, why = _file_digests(where, None, ("md5", "sha1", "sha256"))
-    if why or digests.get("sha256") != str(expected).strip().lower():
-        return {}
-    return {"md5": digests["md5"], "sha1": digests["sha1"], "size_bytes": digests["size"]}
+    key = (where, held.st_size, held.st_mtime_ns, str(expected).strip().lower(), size)
+    if key not in _FINGERPRINTS:
+        digests, why = _file_digests(where, size, ("md5", "sha1", "sha256"))
+        found: dict[str, Any] = {}
+        if not why and digests.get("sha256") == key[3]:
+            found = {"md5": digests["md5"], "sha1": digests["sha1"], "size_bytes": digests["size"]}
+        while len(_FINGERPRINTS) >= _FINGERPRINTS_HELD:
+            _FINGERPRINTS.pop(next(iter(_FINGERPRINTS)))
+        _FINGERPRINTS[key] = found
+    return dict(_FINGERPRINTS[key])
+
+
+# Each copy's fingerprints as last read, by (path, size, modification time,
+# intake digest, intake size); the oldest go first past the bound.
+_FINGERPRINTS: dict[tuple[str, int, int, str, int | None], dict[str, Any]] = {}
+_FINGERPRINTS_HELD = 32
 
 
 def _file_digests(

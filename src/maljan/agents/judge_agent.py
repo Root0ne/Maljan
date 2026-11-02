@@ -1748,6 +1748,11 @@ JUDGE_VERDICT_SYSTEM = (
 SAMPLE_IDENTITY_HEADER = (
     "SAMPLE IDENTITY (established by the router and the sandbox's own file block, not by analysis)"
 )
+# The same, where the sandbox report names another target and nothing in the
+# block came from it (``sandbox_status.sample_file_identity``).
+SAMPLE_BYTES_IDENTITY_HEADER = (
+    "SAMPLE IDENTITY (established by the router and the sample's own bytes, not by analysis)"
+)
 
 _IDENTITY_FIELDS: tuple[tuple[str, str], ...] = (
     ("sha256", "sha256"),
@@ -1766,6 +1771,7 @@ _QUOTED_IDENTITY_FIELDS = frozenset({"file_name"})
 
 def sample_identity_block(sample: Any) -> str:
     """The sample's own facts as one block, or ``""`` when there are none."""
+    from maljan.pipeline.sandbox_status import FROM_SAMPLE_BYTES, IDENTITY_SOURCE_KEY
     from maljan.utils.written_forms import pack_escaped
 
     data = sample if isinstance(sample, dict) else {}
@@ -1780,7 +1786,12 @@ def sample_identity_block(sample: Any) -> str:
     ]
     if not rows:
         return ""
-    return f"=== {SAMPLE_IDENTITY_HEADER} ===\n" + "\n".join(rows)
+    header = (
+        SAMPLE_BYTES_IDENTITY_HEADER
+        if data.get(IDENTITY_SOURCE_KEY) == FROM_SAMPLE_BYTES
+        else SAMPLE_IDENTITY_HEADER
+    )
+    return f"=== {header} ===\n" + "\n".join(rows)
 
 
 def _identity_prefix(sample: Any) -> str:

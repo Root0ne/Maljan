@@ -42,6 +42,12 @@ NOT_RUN = "not run"
 RECORDED_FIXTURE = "recorded fixture"
 OBSERVED = "observed"
 
+# Where the md5, sha1 and size of a marked report's identity came from
+# (:func:`sample_file_identity`): never a field of the block, only which
+# header the judge's block is written under.
+IDENTITY_SOURCE_KEY = "identity_source"
+FROM_SAMPLE_BYTES = "sample_bytes"
+
 # The tool name of the pack entry that states the status. Named like the
 # sandbox views so the console files it with them.
 STATUS_TOOL = "sandbox_status"
@@ -151,12 +157,17 @@ def sample_file_identity(report: Any, sample_path: Any, expected: str) -> dict[s
     sandbox named, not of the sample, so none of it is given as the sample's:
     the values are read from the sample's own bytes instead, and only where
     that copy still reads ``expected``, the intake SHA-256
-    (``analysis.sample_integrity.sample_fingerprints``).
+    (``analysis.sample_integrity.sample_fingerprints``). A marked identity
+    carries :data:`IDENTITY_SOURCE_KEY`, whether or not the copy gave values:
+    no size is then taken from a copy that is not the intake bytes either.
     """
     if isinstance(report, dict) and isinstance(report.get(TARGET_KEY), Mapping):
         from maljan.analysis.sample_integrity import sample_fingerprints
 
-        return sample_fingerprints(sample_path, expected)
+        return {
+            **sample_fingerprints(sample_path, expected),
+            IDENTITY_SOURCE_KEY: FROM_SAMPLE_BYTES,
+        }
     target = report.get("target") if isinstance(report, dict) else None
     sandbox_file = target.get("file") if isinstance(target, dict) else None
     if not isinstance(sandbox_file, dict):
