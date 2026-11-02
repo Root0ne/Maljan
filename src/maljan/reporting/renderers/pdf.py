@@ -4,7 +4,8 @@ There is no second layout here on purpose: the PDF is exactly what
 ``HtmlRenderer`` produces, run through WeasyPrint, so the two exports can never
 disagree. Everything that makes the output page-ready — the A4 ``@page`` box,
 page numbers, ``break-inside`` rules on tables and figures, and the print-only
-table-of-contents page numbers — already lives in the HTML stylesheet.
+table-of-contents page numbers — already lives in the HTML stylesheet; the one
+print correction WeasyPrint needs on top of it is below.
 
 WeasyPrint is imported lazily. The Python wheel installs anywhere, but it binds
 to Pango/HarfBuzz through ``ctypes`` at *call* time, so a machine without those
@@ -16,9 +17,24 @@ traceback from a dependency the caller never mentioned.
 
 from __future__ import annotations
 
+from typing import Any
+
 from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers.html import HtmlRenderer
 from maljan.reporting.renderers.layout import FULL
+
+# WeasyPrint leaves a ``target-counter()`` at 0 when the box it fills is a flex
+# item, and the contents entry is a flex row on screen, so every page number
+# printed "0". On paper the entry is a block and its page number floats right:
+# the same row, with the number WeasyPrint resolves. It is given as a user
+# sheet (``!important`` to outrank the document's own rule) so the HTML export
+# stays byte for byte what it was.
+_PRINT_CORRECTIONS = """
+@media print {
+  nav.toc a { display: block !important; }
+  nav.toc a::after { float: right !important; }
+}
+"""
 
 
 class PdfUnavailableError(RuntimeError):
@@ -52,8 +68,19 @@ class PdfRenderer:
     @staticmethod
     def render_html(html_doc: str) -> bytes:
         """Convert an already-rendered HTML document to PDF bytes."""
+        pdf = PdfRenderer.layout_html(html_doc).write_pdf()
+        if pdf is None:  # pragma: no cover — write_pdf() returns bytes when no target
+            raise PdfUnavailableError("WeasyPrint returned no PDF payload.")
+        return bytes(pdf)
+
+    @staticmethod
+    def layout_html(html_doc: str) -> Any:
+        """Lay an already-rendered HTML document out in pages, as the PDF prints it.
+
+        Returns WeasyPrint's laid-out document (its ``pages`` hold the boxes).
+        """
         try:
-            from weasyprint import HTML  # noqa: PLC0415 — see module docstring
+            from weasyprint import CSS, HTML  # noqa: PLC0415 — see module docstring
         except (ImportError, OSError) as exc:
             # OSError is what WeasyPrint raises when the wheel is installed but
             # libpango/libharfbuzz are absent — a different failure to ImportError,
@@ -69,7 +96,6 @@ class PdfRenderer:
         # base_url=None: the document is self-contained by construction (inline
         # CSS, inline SVG), so WeasyPrint must never be given a filesystem root
         # it could be talked into reading through a crafted url().
-        pdf = HTML(string=html_doc, base_url=None).write_pdf()
-        if pdf is None:  # pragma: no cover — write_pdf() returns bytes when no target
-            raise PdfUnavailableError("WeasyPrint returned no PDF payload.")
-        return bytes(pdf)
+        return HTML(string=html_doc, base_url=None).render(
+            stylesheets=[CSS(string=_PRINT_CORRECTIONS)]
+        )
