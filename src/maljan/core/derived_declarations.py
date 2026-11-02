@@ -469,13 +469,48 @@ def _names_beside(form: Mapping[str, Any]) -> Iterator[str]:
             yield from (value for value in held if isinstance(value, str))
 
 
-# The keywords that make a vendor's ``x-`` value read as a schema.
-_SCHEMA_SIGNS = ("type", "properties", "items", _REF)
+# The keywords that make a vendor's ``x-`` value read as a schema; ``type``
+# does only with a JSON Schema type name (:data:`_JSON_TYPES`).
+_SCHEMA_SIGNS = frozenset(
+    {
+        *_HOLDERS,
+        *_SAME_ARGUMENT_LISTS,
+        "items",
+        "prefixItems",
+        "additionalProperties",
+        "patternProperties",
+        "not",
+        _REF,
+        _DYNAMIC_REF,
+    }
+)
+_JSON_TYPES = frozenset({"string", "number", "integer", "boolean", "object", "array", "null"})
+
+
+def _schema_like(value: Any) -> bool:
+    """Whether a mapping holds a schema's keyword, or a ``type`` naming a JSON Schema type."""
+    if not isinstance(value, Mapping):
+        return False
+    if any(key in _SCHEMA_SIGNS for key in value):
+        return True
+    held = value.get("type")
+    types = [held] if isinstance(held, str) else held if isinstance(held, list) else []
+    return any(isinstance(t, str) and t in _JSON_TYPES for t in types)
 
 
 def _vendor_schema(value: Any) -> bool:
-    """Whether a vendor's ``x-`` value looks like a schema: a mapping holding a schema's keyword."""
-    return isinstance(value, Mapping) and any(sign in value for sign in _SCHEMA_SIGNS)
+    """Whether a vendor's ``x-`` value looks like a schema, or holds schemas.
+
+    A mapping that looks like one (:func:`_schema_like`), or a list or a map
+    one of whose values does. A UI hint such as ``{"type": "slider"}`` names
+    no JSON Schema type and is not one.
+    """
+    if _schema_like(value):
+        return True
+    members = (
+        value.values() if isinstance(value, Mapping) else value if isinstance(value, list) else ()
+    )
+    return any(_schema_like(member) for member in members)
 
 
 def _children(
@@ -948,10 +983,12 @@ def derived_readings(
     """What is read of every tool of a listing, and what of it a trusted server's hints lift.
 
     The first map is the reading of every tool, by the name it is listed
-    under; the second, for each tool whose disclosure only its server's own
-    hints could lift (bytes it takes, marked read-only and closed), the
-    reading a block that trusts its server keeps instead (empty for nothing
-    read). Each definition is read once. A definition whose name no tool can
+    under, as an untrusted server's; the second, for each tool read as
+    sending only as an untrusted server's (bytes it takes, marked read-only
+    and closed, which only its server's own hints lift; an argument named in
+    letters outside ASCII; a vendor ``x-`` keyword that looks like a schema),
+    the reading a block that trusts its server keeps instead (empty for
+    nothing read). Each definition is read once. A definition whose name no tool can
     have, and one nothing is read of, are left out; one that cannot be read
     is read as sending the sample (``discloses_sample``), with a warning.
     """
@@ -1043,11 +1080,11 @@ def program_readings_of(definitions: Iterable[Any], where: str = "") -> dict[str
 
 
 def closed_by_hints(definitions: Iterable[Any]) -> dict[str, ToolFacts]:
-    """The tools of a listing whose disclosure only their server's own hints could lift.
+    """The tools of a listing read as sending only when their server is not trusted.
 
-    Each takes the file's content as bytes and is marked read-only and
-    closed: read as sending it from any server, and from one its block trusts
-    read as the reading given here (:func:`lay_under`).
+    Each is read as sending from an untrusted server, and from one its block
+    trusts as the reading given here (:func:`lay_under`); see
+    :func:`derived_readings`.
     """
     return derived_readings(definitions)[1]
 

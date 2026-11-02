@@ -494,7 +494,8 @@ def test_annotations_flags_and_vendor_keywords_are_no_schema() -> None:
         "deprecated": False,
         "uniqueItems": True,
         "nullable": True,
-        "x-vendor": {"path": {"type": "string"}},
+        "x-vendor": {"widget": "slider", "rows": 3},
+        "x-ui": {"type": "slider"},
         "$defs": {"Unused": PATH_OBJECT},
         "not": PATH_OBJECT,
         "items": {"type": "integer"},
@@ -507,15 +508,46 @@ def test_annotations_flags_and_vendor_keywords_are_no_schema() -> None:
     "hidden",
     [
         {"type": "string"},
+        {"type": ["null", "string"]},
         PATH_OBJECT,
         {"items": PATH_OBJECT},
+        {"prefixItems": [PATH_OBJECT]},
         {"$ref": "#/$defs/Hidden"},
+        {"$dynamicRef": "#meta"},
+        {"anyOf": [PATH_OBJECT]},
+        {"oneOf": [PATH_OBJECT]},
+        {"allOf": [PATH_OBJECT]},
+        {"not": PATH_OBJECT},
+        {"additionalProperties": {"type": "string"}},
+        {"patternProperties": {"^path$": {"type": "string"}}},
+        {"if": PATH_OBJECT},
+        {"path": {"type": "string"}},
+        [PATH_OBJECT],
+        {"type": "slider", "properties": PATH_LEAF},
     ],
-    ids=["type", "properties", "items", "ref"],
+    ids=[
+        "type",
+        "type-list",
+        "properties",
+        "items",
+        "prefix-items",
+        "ref",
+        "dynamic-ref",
+        "any-of",
+        "one-of",
+        "all-of",
+        "not",
+        "additional-properties",
+        "pattern-properties",
+        "if",
+        "map-of-schemas",
+        "list-of-schemas",
+        "ui-type-beside-properties",
+    ],
 )
 @pytest.mark.parametrize("depth", [1, 3, 5])
 def test_an_untrusted_server_s_vendor_keyword_that_looks_like_a_schema_fails_closed(
-    hidden: dict[str, Any], depth: int
+    hidden: Any, depth: int
 ) -> None:
     schema = _by_properties(depth, {**QUIET_LEAF, "opts": {"type": "object", "x-args": hidden}})
     schema["$defs"] = {"Hidden": PATH_OBJECT}
@@ -532,8 +564,28 @@ def test_an_untrusted_server_s_vendor_keyword_that_looks_like_a_schema_fails_clo
 
 @pytest.mark.parametrize(
     "value",
-    [{"path": {"type": "string"}}, {"a": 1}, "path", ["type"], True, {}],
-    ids=["map-of-schemas", "data", "text", "list", "flag", "empty"],
+    [
+        {"type": "slider"},
+        {"type": ["slider", "knob"]},
+        {"widget": {"type": "slider"}},
+        [{"type": "slider"}],
+        {"a": 1},
+        "path",
+        ["type"],
+        True,
+        {},
+    ],
+    ids=[
+        "ui-type",
+        "ui-type-list",
+        "map-of-ui-hints",
+        "list-of-ui-hints",
+        "data",
+        "text",
+        "list",
+        "flag",
+        "empty",
+    ],
 )
 def test_a_vendor_value_that_does_not_look_like_a_schema_is_no_schema_whoever_lists_it(
     value: Any,
