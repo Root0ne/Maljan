@@ -7,9 +7,10 @@ command, working directory or argument may live in that one of them mounts and
 another does not resolves differently, so the grant would silently never hold
 there. Each compose file mounts, in every such service it defines, the same
 trees under ``/app``, each from the same source and of the same kind (a bind,
-a named volume, an anonymous one), whatever its mode; a writable mount below
-one of them (the sample and upload directories) changes no path and is left to
-each service, and so is a cache mounted outside ``/app`` (a path there fails
+a named volume, an anonymous one), whatever its mode; a mount below another
+is compared as any other, except the writable ones below ``/app/data``
+(the sample and upload directories), which change no launch path and are
+left to each service, and so is a cache mounted outside ``/app`` (a path there fails
 closed at grant time in the API). The development overlay is checked merged
 over the production file as well, the way ``make dev-up`` starts them: an
 overlay that remounts a tree in one service but not in another, or from
@@ -41,8 +42,11 @@ def _services(path: Path) -> dict:
 
 
 # A short-syntax entry: ``source:target[:mode]`` or an anonymous ``target``;
-# a ``${VAR:-default}`` source keeps its colon.
-_SHORT = re.compile(r"^(?P<a>(?:\$\{[^}]*\}|[^:])+)(?::(?P<b>[^:]+))?(?::[^:]*)?$")
+# a ``${VAR:-default}`` source and a Windows drive (``C:\\x``) keep their colon.
+_SHORT = re.compile(
+    r"^(?P<a>(?:[A-Za-z]:(?=[\\/]))?(?:\$\{[^}]*\}|[^:])+)(?::(?P<b>[^:]+))?(?::[^:]*)?$"
+)
+_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 
 
 def _mount(entry: object) -> tuple[str, str, str] | None:
@@ -64,7 +68,7 @@ def _mount(entry: object) -> tuple[str, str, str] | None:
         if match.group("b") is None:
             return "anonymous", "", match.group("a").rstrip("/") or "/"
         source, target = match.group("a"), match.group("b")
-        named = not source.startswith((".", "/", "~", "$"))
+        named = not source.startswith((".", "/", "~", "$")) and not _DRIVE.match(source)
         kind = "volume" if named else "bind"
     else:
         return None
@@ -94,13 +98,18 @@ def _merged(base: dict, overlay: dict) -> dict:
     return services
 
 
+# The one tree whose sub-mounts (the writable sample and upload directories)
+# legitimately differ between the launchers: no launch resolves into them.
+PER_SERVICE_BELOW = "/app/data/"
+
+
 def _trees(service: dict) -> set[tuple[str, str, str]]:
-    """The ``/app`` trees a service mounts, by kind and source, a mount below another left out."""
-    mounts = {
-        m for m in map(_mount, service.get("volumes") or []) if m and m[2].startswith("/app/")
+    """The ``/app`` trees a service mounts, by kind and source; one below ``/app/data`` left out."""
+    return {
+        m
+        for m in map(_mount, service.get("volumes") or [])
+        if m and m[2].startswith("/app/") and not m[2].startswith(PER_SERVICE_BELOW)
     }
-    targets = {m[2] for m in mounts}
-    return {m for m in mounts if not any(m[2].startswith(f"{o}/") for o in targets)}
 
 
 def _targets(service: dict) -> set[str]:
@@ -156,6 +165,7 @@ def test_a_mount_s_mode_is_not_read_and_its_source_and_target_are_normalised() -
     assert _mount("${X:-../x}:/app/x:ro") == ("bind", "${X:-../x}", "/app/x")
     assert _mount("/home/u/x:/app/x") == ("bind", "/home/u/x", "/app/x")
     assert _mount("cache:/app/x") == ("volume", "cache", "/app/x")
+    assert _mount("C:\\x:/app/x:ro") == ("bind", "C:\\x", "/app/x")
     assert _mount("/app/x") == ("anonymous", "", "/app/x")
     assert _mount({"type": "volume", "source": "cache", "target": "/app/x"}) == (
         "volume",
@@ -180,6 +190,9 @@ LAUNCHING = {name: {"volumes": ["../src:/app/src:ro"]} for name in LAUNCHERS}
         ["${X:-../x}:/app/x"],
         ["src:/app/src"],
         ["/app/src"],
+        ["../evil:/app/src/maljan"],
+        ["../evil:/app/services/x:ro"],
+        ["C:\\x:/app/x"],
     ],
     ids=[
         "swapped-source",
@@ -192,12 +205,20 @@ LAUNCHING = {name: {"volumes": ["../src:/app/src:ro"]} for name in LAUNCHERS}
         "interpolated-source",
         "named-volume",
         "anonymous-volume",
+        "sub-mount-under-src",
+        "sub-mount-under-services",
+        "windows-drive-source",
     ],
 )
 def test_an_overlay_that_changes_a_tree_in_one_launcher_only_is_caught(overlay: list) -> None:
     merged = _merged(LAUNCHING, {"backend-api": {"volumes": overlay}})
     with pytest.raises(AssertionError):
         _assert_same_trees("one", merged)
+
+
+def test_a_writable_directory_below_the_data_tree_is_left_to_each_service() -> None:
+    merged = _merged(LAUNCHING, {"backend-api": {"volumes": ["../data/samples:/app/data/samples"]}})
+    _assert_same_trees("data", merged)
 
 
 def test_an_overlay_that_changes_only_a_mode_holds() -> None:
