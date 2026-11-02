@@ -575,6 +575,10 @@ def test_an_untrusted_server_s_vendor_keyword_that_looks_like_a_schema_fails_clo
         {"type": ["slider", "knob"]},
         {"widget": {"type": "slider"}},
         {"form": {"rows": [{"widget": {"type": "slider"}}]}},
+        {"widget": "select", "items": ["a", "b"]},
+        {"fields": [{"type": "string", "label": "x"}]},
+        {"examples": [{"a": i, "b": "c"} for i in range(600)]},
+        {"order": ["a", "b"], "not": "shown", "properties": ["a"], "$ref": 3},
         [{"type": "slider"}],
         {"a": 1},
         "path",
@@ -587,6 +591,10 @@ def test_an_untrusted_server_s_vendor_keyword_that_looks_like_a_schema_fails_clo
         "ui-type-list",
         "map-of-ui-hints",
         "deep-ui-hints",
+        "select-items",
+        "typed-fields",
+        "many-examples",
+        "signs-in-other-shapes",
         "list-of-ui-hints",
         "data",
         "text",
@@ -604,14 +612,16 @@ def test_a_vendor_value_that_does_not_look_like_a_schema_is_no_schema_whoever_li
 
 
 def test_a_vendor_value_too_large_to_look_through_is_read_as_a_schema() -> None:
-    wide = {f"k{i}": {"a": i} for i in range(dd._MAX_ARGUMENTS + 1)}
+    # Only a list or map that holds further ones counts toward the cap.
+    wide = {f"k{i}": {"a": [i]} for i in range(dd._MAX_ARGUMENTS + 1)}
     assert dd._vendor_schema(wide)
     deep: Any = {"a": 1}
     for _level in range(dd._MAX_ARGUMENTS + 1):
         deep = {"next": deep}
     assert dd._vendor_schema(deep)
-    # Below the cap, plain data is still none.
-    assert not dd._vendor_schema({f"k{i}": {"a": i} for i in range(16)})
+    # Below the cap, plain data is still none, and flat records never count.
+    assert not dd._vendor_schema({f"k{i}": {"a": [i]} for i in range(16)})
+    assert not dd._vendor_schema([{"a": i} for i in range(dd._MAX_ARGUMENTS * 4)])
 
 
 def test_a_vendor_schema_is_read_once_per_listing_and_lifted_only_for_a_trusted_server() -> None:

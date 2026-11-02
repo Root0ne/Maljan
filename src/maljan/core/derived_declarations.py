@@ -469,33 +469,45 @@ def _names_beside(form: Mapping[str, Any]) -> Iterator[str]:
             yield from (value for value in held if isinstance(value, str))
 
 
-# The keywords that make a vendor's ``x-`` value read as a schema; ``type``
-# does only with a JSON Schema type name (:data:`_JSON_TYPES`).
-_SCHEMA_SIGNS = frozenset(
-    {
-        *_HOLDERS,
-        *_SAME_ARGUMENT_LISTS,
-        "items",
-        "prefixItems",
-        "additionalProperties",
-        "patternProperties",
-        "not",
-        _REF,
-        _DYNAMIC_REF,
-    }
+# The keywords that make a vendor's ``x-`` value read as a schema, each only
+# when it holds what a schema's keyword holds: one schema (a mapping or a
+# flag), a list of them, or a map of them by name; a reference only as text.
+_SIGNS_OF_ONE = frozenset({*_SAME_ARGUMENT_ONES, *_UNLISTED_ARGUMENTS, "items", "not"})
+_SIGNS_OF_LIST = frozenset({*_SAME_ARGUMENT_LISTS, "items"})
+_SIGNS_OF_MAP = frozenset(
+    {"properties", "patternProperties", "dependentSchemas", "dependencies", "$defs"}
 )
 _JSON_TYPES = frozenset({"string", "number", "integer", "boolean", "object", "array", "null"})
 
 
-def _schema_like(value: Any) -> bool:
-    """Whether a mapping holds a schema's keyword, or a ``type`` naming a JSON Schema type."""
+def _holds_a_schema(key: Any, held: Any) -> bool:
+    """Whether ``held`` has the shape a schema's keyword ``key`` gives what it holds."""
+    if key in (_REF, _DYNAMIC_REF):
+        return isinstance(held, str)
+    if key in _SIGNS_OF_ONE and isinstance(held, (Mapping, bool)):
+        return True
+    if key in _SIGNS_OF_LIST and isinstance(held, list):
+        return any(isinstance(member, Mapping) for member in held)
+    if key in _SIGNS_OF_MAP and isinstance(held, Mapping):
+        return any(isinstance(member, Mapping) for member in held.values())
+    return False
+
+
+def _schema_like(value: Any, named: bool) -> bool:
+    """Whether a mapping looks like a schema.
+
+    It holds a schema's keyword in that keyword's shape
+    (:func:`_holds_a_schema`), or, where it has a name an argument could take
+    (the vendor keyword's own, or its key in a map), a ``type`` naming a JSON
+    Schema type: a typed list member names no argument.
+    """
     if not isinstance(value, Mapping):
         return False
-    if any(key in _SCHEMA_SIGNS for key in value):
+    if any(_holds_a_schema(key, held) for key, held in value.items()):
         return True
     held = value.get("type")
     types = [held] if isinstance(held, str) else held if isinstance(held, list) else []
-    return any(isinstance(t, str) and t in _JSON_TYPES for t in types)
+    return named and any(isinstance(t, str) and t in _JSON_TYPES for t in types)
 
 
 def _vendor_schema(value: Any) -> bool:
@@ -503,22 +515,32 @@ def _vendor_schema(value: Any) -> bool:
 
     A mapping that looks like one (:func:`_schema_like`), or a list or a map
     holding one, however deep through further lists and maps. A UI hint such
-    as ``{"type": "slider"}`` names no JSON Schema type and is not one. At
-    most :data:`_MAX_ARGUMENTS` lists and maps are looked into; a value with
-    more is read as one, since what is left could hold a schema.
+    as ``{"type": "slider"}``, ``{"items": ["a", "b"]}`` or a list of typed
+    fields is not one. At most :data:`_MAX_ARGUMENTS` lists and maps that
+    hold further ones are looked into; a value with more is read as one,
+    since what is left could hold a schema. A list or map holding none is
+    read whole and never counts toward that.
     """
-    waiting = [value]
+    waiting: list[tuple[Any, bool]] = [(value, True)]
     looked = 0
     while waiting:
-        held = waiting.pop()
+        held, named = waiting.pop()
         if not isinstance(held, (Mapping, list)):
             continue
-        if _schema_like(held):
+        if _schema_like(held, named):
             return True
+        members = (
+            [(member, True) for member in held.values()]
+            if isinstance(held, Mapping)
+            else [(member, False) for member in held]
+        )
+        inner = [(m, n) for m, n in members if isinstance(m, (Mapping, list))]
+        if not inner:
+            continue
         looked += 1
         if looked > _MAX_ARGUMENTS:
             return True
-        waiting.extend(held.values() if isinstance(held, Mapping) else held)
+        waiting.extend(inner)
     return False
 
 
