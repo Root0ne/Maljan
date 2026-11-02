@@ -1270,8 +1270,8 @@ def behaviour_units(
     it is not so ("does not delete itself", "was not run") is marked
     ``negated``: it stays a candidate, losing a tie to one that says the
     behaviour is so; the units naming ``tid`` stand alone only when one of them
-    is not negated. A claim that names neither keeps its first sentence that
-    says no "not".
+    is not negated. A claim that names neither offers its first sentence, and
+    its first sentence that says no "not" where that is another.
     """
     units = _claim_units(claim)
     if not units:
@@ -1298,8 +1298,11 @@ def behaviour_units(
         return tuple(by_id)
     if by_name or by_id:
         return (*by_name, *by_id)
-    plain = [unit for unit in units if not _NEGATION.search(unit)]
-    return (_Unit((plain or units)[0]),)
+    # The first sentence, and the first saying no "not" where that is another:
+    # a "cannot" in a subordinate clause never pushes the first one out.
+    first = _Unit(units[0], 0, 0, bool(_NEGATION.search(units[0])))
+    plain = next((unit for unit in units if not _NEGATION.search(unit)), None)
+    return (first, *([_Unit(plain, 0, 1)] if plain is not None and plain != units[0] else []))
 
 
 def behaviour_sentence(tid: str, name: str, claim: str, published: Collection[str] = ()) -> str:

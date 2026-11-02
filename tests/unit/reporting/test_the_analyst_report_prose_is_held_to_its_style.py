@@ -1036,6 +1036,17 @@ class TestAProcedureIsHeldToItsOwnBehaviour:
         firsts = self._firsts(_cell("T1027", "Obfuscated Files or Information", claim))
         assert self._asked(firsts, "T1027", "Routine 0x3100 decodes strings.") == []
 
+    def test_a_subordinate_cannot_does_not_push_out_the_first_sentence(self) -> None:
+        # No unit names the technique: the first sentence stays a candidate beside the
+        # first one without a "not", and a procedure carrying it stands (A7).
+        claim = (
+            "Routine 0x4000 kills `MsMpEng.exe` so the scanner cannot run. "
+            "The sample registers `svc.exe`."
+        )
+        firsts = self._firsts(_cell("T1562.001", "Impair Defenses: Disable or Modify Tools", claim))
+        assert self._asked(firsts, "T1562.001", "Routine 0x4000 terminates MsMpEng.exe.") == []
+        assert self._asked(firsts, "T1562.001", "It registers svc.exe.") == []
+
     # A3: every claim is read, each as the unit the procedure shares most with.
     def test_a_procedure_showing_another_claim_of_its_technique_stands(self) -> None:
         cell = CapabilityCell(
