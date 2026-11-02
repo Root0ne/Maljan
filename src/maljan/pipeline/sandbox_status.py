@@ -141,3 +141,28 @@ def observed_report(report: Any) -> dict[str, Any] | None:
     if sandbox_status(report).status == NOT_RUN:
         return None
     return report if isinstance(report, dict) else None
+
+
+def sample_file_identity(report: Any, sample_path: Any, expected: str) -> dict[str, Any]:
+    """The md5, sha1 and size the judge is given as the sample's own; ``{}`` with none.
+
+    From the report's own file block, as the sandbox gave it, when the report
+    carries no target mark. A marked report's block is of the target its
+    sandbox named, not of the sample, so none of it is given as the sample's:
+    the values are read from the sample's own bytes instead, and only where
+    that copy still reads ``expected``, the intake SHA-256
+    (``analysis.sample_integrity.sample_fingerprints``).
+    """
+    if isinstance(report, dict) and isinstance(report.get(TARGET_KEY), Mapping):
+        from maljan.analysis.sample_integrity import sample_fingerprints
+
+        return sample_fingerprints(sample_path, expected)
+    target = report.get("target") if isinstance(report, dict) else None
+    sandbox_file = target.get("file") if isinstance(target, dict) else None
+    if not isinstance(sandbox_file, dict):
+        return {}
+    return {
+        "md5": str(sandbox_file.get("md5") or ""),
+        "sha1": str(sandbox_file.get("sha1") or ""),
+        "size_bytes": sandbox_file.get("size") or "",
+    }

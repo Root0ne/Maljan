@@ -67,7 +67,7 @@ ALLOWED = {
     ("src/maljan/providers/sandbox/triage.py", "TriageSandboxProvider._post_sample"): TRANSFER,
     ("src/maljan/providers/sandbox/triage.py", "TriageSandboxProvider._sha256_of"): HASH,
     ("src/maljan/loaders/mock_sandbox_client.py", "MockSandboxClient._sha256"): HASH,
-    ("src/maljan/analysis/sample_integrity.py", "file_sha256"): HASH,
+    ("src/maljan/analysis/sample_integrity.py", "_file_digests"): HASH,
     ("src/maljan/reporting/ledger_projection.py", "_hashes_of"): HASH,
     ("src/maljan/app.py", "MaljanApp._infer_sample_platform"): HASH,
     ("src/maljan/providers/sandbox/formats.py", "detect_sample_format"): HASH,

@@ -1,0 +1,3 @@
+### Fixed
+
+- **The judge is never given another target's md5, sha1 or size as the sample's (T-510).** The judge's sample identity block took the md5, sha1 and size from the sandbox report's own file block, as facts about the sample with no caveat, also where the run had marked the report as naming a target that is not the sample (T-322). A marked report's file block is now left out of the identity, and the md5, sha1 and size are read from the sample's own bytes in one pass, given only where that pass still reads the intake SHA-256; a copy that is not the intake bytes, or none on disk, gives no hash. An unmarked report gives the judge the same block, byte for byte.
