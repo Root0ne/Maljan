@@ -59,6 +59,11 @@ class _KnownJobConfig(BaseModel):
     # route stores the config as sent and the worker reads only ``true``, so
     # a "true" or a 1 would leave the switch off without a word.
     ignore_earlier_runs: StrictBool | None = None
+    # File the job's long-term memory under the job alone
+    # (``long_term_memory.memory_owner_for``): no case, similar sample or
+    # function-hash family another job of its owner stored is read for it, and
+    # its own case never replaces its owner's. Strict, for the same reason.
+    isolated_memory: StrictBool | None = None
     static_provider: str | None = None
     sandbox_provider: str | None = None
     # An uploaded report to attach; build_job_settings forces sandbox.provider="upload".

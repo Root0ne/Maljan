@@ -231,10 +231,35 @@ differences:
   `earlier_runs_ignored: true` nor states this, under `EARLIER RUNS NOT RULED
   OUT`. The console's job form cannot set the switch, so a benchmark run is
   submitted through the API (`POST /api/v1/jobs` with the printed config).
-  Each run still stores its own case when it completes, replacing the case of
-  the sample held by the account that submitted it (memory belongs to a job's
-  creator), so a series is best submitted under an account of its own, which
-  leaves the operators' case memory as it was.
+  Each run still stores its own case when it completes; with the printed
+  config it is stored under the run's job alone (below), so the case of the
+  sample held by the account that submitted it is left as it was. A run
+  submitted without `isolated_memory` replaces that case (memory belongs to a
+  job's creator).
+- **Isolated memory.** The earlier-run switch covers the same sample only:
+  the judge's similar cases, the attribution's similar samples and the
+  function-hash families read every case the account stored, so run k of a
+  series would still read what runs 1..k-1 stored for the other samples.
+  Every benchmark run is therefore also submitted with the job option
+  `isolated_memory` (the printed config carries both): its long-term memory is
+  filed under the job alone, so it reads nothing from the long-term memory
+  that any other job stored, for any sample, and its own case never replaces
+  the account's case of the sample.
+  Its run summary says `isolated_memory: true`. `--with-earlier-runs` leaves
+  out both switches, since a job with memory of its own reads no earlier run
+  either. A case corpus mined from the memory
+  (`scripts/knowledge/build_attck_case_kb.py`, read through the knowledge
+  server's `similar_cases`) is not owner-scoped: a run reads it whatever its
+  switches. It is built from unscoped cases alone, so no benchmark run's case
+  is copied into it. Each isolated job
+  still stores its case and its function hashes, under its own key, where no
+  later job reads them: every benchmark run adds one case plus its function
+  hashes to the store, and no purge by owner exists yet. `score` and `gate`
+  count a run as independent only when its run summary says both
+  `earlier_runs_ignored: true` and `isolated_memory: true`, or when its score
+  states, on a line of its own, `**Memory:** fresh account` (a run on an
+  empty store of its own); every other run is named under `EARLIER RUNS NOT
+  RULED OUT`, with the switch its summary does not say.
 
 ## Results
 

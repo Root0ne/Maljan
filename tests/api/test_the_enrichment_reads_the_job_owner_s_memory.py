@@ -11,24 +11,29 @@ import pytest
 from app.worker import enrich_worker
 
 
+def _db(row: Any) -> MagicMock:
+    """A session whose one query answers ``row`` (``(created_by, config)``), or raises it."""
+    db = MagicMock()
+    if isinstance(row, Exception):
+        db.execute = AsyncMock(side_effect=row)
+        return db
+    result = MagicMock()
+    result.first = MagicMock(return_value=row)
+    db.execute = AsyncMock(return_value=result)
+    return db
+
+
 @pytest.mark.asyncio
-async def test_the_owner_is_the_job_s_creator() -> None:
+@pytest.mark.parametrize("config", [None, {}, {"profile": "p"}])
+async def test_the_owner_is_the_job_s_creator(config: Any) -> None:
     owner = uuid.uuid4()
-    db = MagicMock()
-    db.scalar = AsyncMock(return_value=owner)
-    assert await enrich_worker._job_owner(db, uuid.uuid4()) == str(owner)
+    assert await enrich_worker._job_owner(_db((owner, config)), uuid.uuid4()) == str(owner)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("answer", [None, RuntimeError("db gone")])
+@pytest.mark.parametrize("answer", [None, (None, None), (None, {}), RuntimeError("db gone")])
 async def test_an_owner_that_cannot_be_read_is_none(answer: Any) -> None:
-    db = MagicMock()
-    db.scalar = (
-        AsyncMock(side_effect=answer)
-        if isinstance(answer, Exception)
-        else AsyncMock(return_value=answer)
-    )
-    assert await enrich_worker._job_owner(db, uuid.uuid4()) is None
+    assert await enrich_worker._job_owner(_db(answer), uuid.uuid4()) is None
 
 
 @pytest.mark.asyncio

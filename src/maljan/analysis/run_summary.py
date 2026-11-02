@@ -72,6 +72,19 @@ EARLIER_RUNS_IGNORED_SENTENCE = (
     "not read; this job started without what an earlier run on this sample stored"
 )
 
+# The run summary's key for a job whose long-term memory was its own
+# (``ServiceContainer.isolated_memory``): no case, similar sample or
+# function-hash family another job stored was read for it, and its own case
+# was filed under the job's key (``long_term_memory.memory_owner_for``).
+ISOLATED_MEMORY_KEY = "isolated_memory"
+
+
+def with_isolated_memory(summary: dict[str, Any], isolated: bool) -> dict[str, Any]:
+    """``summary`` saying the job's memory was isolated, in place; unchanged when it was not."""
+    if isolated is True:
+        summary[ISOLATED_MEMORY_KEY] = True
+    return summary
+
 
 @dataclass
 class NegotiationMetrics:
@@ -1330,6 +1343,12 @@ class RunSummary:
     # prompt. Written to the dict only when it did, so a summary of a job
     # that read its earlier runs reads as it always has.
     earlier_runs_ignored: bool = False
+    # Whether the job's long-term memory was its own
+    # (``ServiceContainer.isolated_memory``). Written to the dict only when it
+    # was, so every other summary reads as it always has. Not rendered in the
+    # Markdown: only the command line renders it, and its runs are never
+    # isolated.
+    isolated_memory: bool = False
     # Each model's measured generation rate and each per-call timeout it
     # produced (``llm.generation_rate.GenerationRates.snapshot``). ``None`` on
     # a run that measured no answer and sized no call.
@@ -1830,6 +1849,7 @@ class RunSummary:
             result["sandbox_run_limit"] = dict(self.sandbox_run_limit)
         if self.earlier_runs_ignored:
             result["earlier_runs_ignored"] = True
+        with_isolated_memory(result, self.isolated_memory)
 
         if self.validation:
             result["validation"] = {
@@ -1973,6 +1993,7 @@ class RunSummaryBuilder:
         self._sandbox: dict[str, str] | None = None
         self._sandbox_run_limit: dict[str, Any] | None = None
         self._earlier_runs_ignored: bool = False
+        self._isolated_memory: bool = False
         self._nudge: dict[str, Any] | None = None
         self._budget: dict[str, Any] | None = None
         self._tool_latency: dict[str, Any] | None = None
@@ -2196,6 +2217,11 @@ class RunSummaryBuilder:
     def set_earlier_runs_ignored(self, ignored: bool) -> RunSummaryBuilder:
         """Whether the job started without an earlier run's memory of its sample."""
         self._earlier_runs_ignored = ignored is True
+        return self
+
+    def set_isolated_memory(self, isolated: bool) -> RunSummaryBuilder:
+        """Whether the job's long-term memory was its own (``isolated_memory``)."""
+        self._isolated_memory = isolated is True
         return self
 
     def set_token_usage(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
@@ -2663,6 +2689,7 @@ class RunSummaryBuilder:
             sandbox=self._sandbox,
             sandbox_run_limit=self._sandbox_run_limit,
             earlier_runs_ignored=self._earlier_runs_ignored,
+            isolated_memory=self._isolated_memory,
             generation=self._generation,
             spend=self._spend,
         )

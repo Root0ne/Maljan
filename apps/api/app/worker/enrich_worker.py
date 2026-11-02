@@ -305,17 +305,32 @@ async def _get_memory_store() -> MemoryStore | None:
 
 
 async def _job_owner(db: Any, job_id: Any) -> str | None:
-    """Who queued the analysis job, as its long-term memory is filed; ``None`` when unread."""
+    """Whose long-term memory the analysis job read and wrote; ``None`` when unread.
+
+    Its creator's, or the job's own when its config asks for memory of its
+    own (``isolated_memory``): the owner the analysis worker handed the job's
+    container (``app.worker.job_memory``), so the similar samples are read
+    from the same memory the run read.
+    """
     try:
         from sqlalchemy import select
 
         from app.models.job import AnalysisJob
 
-        owner = await db.scalar(select(AnalysisJob.created_by).where(AnalysisJob.id == job_id))
+        row = (
+            await db.execute(
+                select(AnalysisJob.created_by, AnalysisJob.config).where(AnalysisJob.id == job_id)
+            )
+        ).first()
     except Exception as exc:  # noqa: BLE001 — no owner, no memory
         logger.warning("enrich: the job's owner could not be read (%s).", type(exc).__name__)
         return None
-    return str(owner) if isinstance(owner, (uuid.UUID, str)) and str(owner) else None
+    owner, config = (row[0], row[1]) if row is not None else (None, None)
+    if not (isinstance(owner, (uuid.UUID, str)) and str(owner)):
+        return None
+    from app.worker.job_memory import job_memory_owner
+
+    return job_memory_owner(owner, job_id, config if isinstance(config, dict) else None)
 
 
 async def enrich_threat_intel(

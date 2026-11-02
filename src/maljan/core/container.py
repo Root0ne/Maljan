@@ -512,6 +512,7 @@ class ServiceContainer:
         resolved_mode: Any = None,
         memory_owner: str | None = None,
         ignore_earlier_runs: bool = False,
+        isolated_memory: bool = False,
     ) -> None:
         self.config = config
         self.mock = mock
@@ -528,6 +529,17 @@ class ServiceContainer:
         # read for it; once it completes, its own case is stored as any job's
         # is (``remember_the_run``), replacing its owner's case of the sample.
         self.ignore_earlier_runs: bool = ignore_earlier_runs is True
+        # Whether ``memory_owner`` is this job's own key rather than its
+        # creator's (``long_term_memory.memory_owner_for``): the caller derives
+        # the owner, and this says so in the run summary (``isolated_memory``).
+        # Only with an owner: a job with none reads the whole unscoped memory,
+        # and its summary must not claim otherwise.
+        self.isolated_memory: bool = isolated_memory is True and self.memory_owner is not None
+        if isolated_memory is True and self.memory_owner is None:
+            logger.warning(
+                "Isolated memory was asked for a job with no memory owner: the job reads the "
+                "unscoped memory, and its run summary does not say isolated_memory."
+            )
         # The job's analyst mode as the caller resolved it off its event loop
         # (``pipeline.analyst_mode.resolve_for``), or ``None`` to resolve it
         # here on first use.

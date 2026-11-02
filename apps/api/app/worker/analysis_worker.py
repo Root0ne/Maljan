@@ -52,6 +52,8 @@ from app.config import get_settings, settings
 from app.logging_config import get_logger, setup_logging
 from app.runtime_config import runtime_config
 from app.services.job_events import STREAM_TTL_SECONDS, stream_key
+from app.worker.job_memory import isolated as memory_is_isolated
+from app.worker.job_memory import job_memory_owner
 from app.worker.queues import ANALYSIS_QUEUE, build_redis_settings
 from app.worker.sample_integrity import (
     SampleIntegrity,
@@ -2273,6 +2275,7 @@ async def keep_the_built_report(
             scale_record=scale_record,
             sample_integrity=await ended_record(sample_integrity),
             sandbox_target=sandbox_target_of(container),
+            isolated_memory=getattr(container, "isolated_memory", False) is True,
         )
         _end_the_token_ledger(container)
         run_summary["degraded_mode"] = True
@@ -2414,6 +2417,7 @@ async def keep_the_stopped_run(
             scale_record=recorded_signature_scale(container),
             sample_integrity=await ended_record(sample_integrity),
             sandbox_target=sandbox_target_of(container),
+            isolated_memory=getattr(container, "isolated_memory", False) is True,
         )
         _end_the_token_ledger(container)
         async with db_session() as db:
@@ -3065,8 +3069,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             analyst_mode=_analyst_mode,
             # The job's secrets are registered above (``remember_configured_secrets``).
             remember_secrets=False,
-            # Long-term memory is the job owner's alone.
-            memory_owner=str(job.created_by),
+            # Long-term memory is the job owner's alone, or the job's own when
+            # its config says so (``isolated_memory``): the same owner the
+            # enrichment of its report reads (``enrich_worker._job_owner``).
+            memory_owner=job_memory_owner(job.created_by, job.id, job_config),
+            isolated_memory=memory_is_isolated(job_config),
             # A job may start without an earlier run's memory of its sample;
             # its config says so (``ignore_earlier_runs``), and nothing else.
             ignore_earlier_runs=job_config.get("ignore_earlier_runs") is True,
@@ -3616,6 +3623,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             scale_record=recorded_signature_scale(getattr(app, "container", None)),
             sample_integrity=await ended_record(_integrity),
             sandbox_target=sandbox_target_of(getattr(app, "container", None)),
+            isolated_memory=getattr(getattr(app, "container", None), "isolated_memory", False)
+            is True,
             enrichment=(
                 await enrichment_plan(core_settings)
                 if pipeline_result.get("malware_report")
@@ -4902,6 +4911,7 @@ def _report_inputs(
     enrichment: list[dict[str, Any]] | None = None,
     sample_integrity: Mapping[str, Any] | None = None,
     sandbox_target: Mapping[str, Any] | None = None,
+    isolated_memory: bool = False,
 ) -> tuple[dict | None, dict[str, Any]]:
     """The STIX bundle and the run summary a stored report carries.
 
@@ -4909,6 +4919,8 @@ def _report_inputs(
     its report was built: both store the report the same way. ``enrichment``
     is where the enrichment job queued after the report may send its
     indicators (:func:`enrichment_plan`), ``None`` when none is queued.
+    ``isolated_memory`` is whether the job's long-term memory was its own
+    (``ServiceContainer.isolated_memory``), said on both summaries when it was.
     """
     # Prefer the rich extended bundle produced by ``report_node``
     # (54+ objects with Identity/Indicator/ObservedData/Note/Report
@@ -4993,6 +5005,16 @@ def _report_inputs(
     with_record(
         _run_summary, pipeline_result.get("malware_report"), sandbox_target, key=SANDBOX_KEY
     )
+    # A job whose memory was its own says so on the stored summary and on the
+    # report's (``run_summary.ISOLATED_MEMORY_KEY``); every other is unchanged.
+    from maljan.analysis.run_summary import with_isolated_memory
+
+    with_isolated_memory(_run_summary, isolated_memory)
+    _malware_report = pipeline_result.get("malware_report")
+    if isolated_memory is True and isinstance(_malware_report, dict):
+        held = _malware_report.get("run_summary")
+        if isinstance(held, dict):
+            _malware_report["run_summary"] = with_isolated_memory(dict(held), True)
     return stix_bundle_for_persist, _run_summary
 
 

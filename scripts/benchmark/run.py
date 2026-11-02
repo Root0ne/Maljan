@@ -19,13 +19,16 @@ of a key score with its stored run beside it, whether the run found it by its
 own analysis or by a lookup (``scripts.benchmark.provenance``), and count each
 arm's items both ways, and name first, under ``EARLIER RUNS NOT RULED OUT``,
 every key score whose stored run summary does not say the run started without
-an earlier run's memory and which does not state that it used one
+an earlier run's memory and with memory of its own (or whose score does not
+state a fresh account's memory in place of the latter), and which does not
+state that it used one
 (``scripts.benchmark.earlier_runs``). ``intel-off`` writes the arm that withholds every lookup
 server from a profile (``scripts.benchmark.intel_off``), from the stored
 settings in ``--settings`` (dotted keys) or the defaults; it exits 2 when the
 arm cannot be derived. ``job-config`` prints the config a benchmark run is
 submitted with: every run starts without an earlier run's memory of its sample
-(``scripts.benchmark.jobs``) unless ``--with-earlier-runs`` says otherwise.
+and with memory of its own, reading nothing another run stored for any sample
+(``scripts.benchmark.jobs``), unless ``--with-earlier-runs`` says otherwise.
 Nothing here starts a run or asks a model: it reads scores already written.
 """
 
@@ -109,7 +112,8 @@ def _parser() -> argparse.ArgumentParser:
     j.add_argument(
         "--with-earlier-runs",
         action="store_true",
-        help="keep an earlier run's memory of the sample (the score must then state it)",
+        help="keep the account's memory, earlier runs on the sample included "
+        "(the score must then state it)",
     )
     return parser
 
