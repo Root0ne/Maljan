@@ -216,3 +216,62 @@ def test_an_app_registers_the_values_of_its_settings():
     _remember_the_secrets_of(settings)
 
     assert value in sm.held_values()
+
+
+PROFILES = "core.agents.profiles"
+
+
+def _team_rows(token: str) -> list[RuntimeSetting]:
+    """A stored team whose stage keys are also a server's and an agent's names (T-506)."""
+    stages = [
+        {"key": "triage", "kind": "triage"},
+        {"key": "analysis", "kind": "analysis", "agents": ["static"]},
+        {
+            "key": "reversing",
+            "kind": "analysis",
+            "agents": ["reverser"],
+            "depends_on": ["analysis"],
+        },
+        {"key": "android_static", "kind": "analysis", "agents": ["android_static"]},
+    ]
+    server = {"enabled": False, "transport": "stdio", "command": "tool", "cwd": "/opt/analysis"}
+    env = json.dumps({"A_TOKEN": token})
+    return [
+        RuntimeSetting(key=PROFILES, value={"team": {"stages": stages}}, is_secret=False),
+        RuntimeSetting(key=SERVERS, value={"analysis": server}, is_secret=False),
+        RuntimeSetting(key=server_env_key("analysis"), value=env, is_secret=True),
+    ]
+
+
+def test_the_console_read_shows_every_name_a_stored_team_gives_in_clear():
+    token = _value(9)
+
+    answer = _console_read(_team_rows(token))
+
+    assert token not in answer.text
+    values = answer.json()["values"]
+    stages = values[PROFILES]["value"]["team"]["stages"]
+    assert [stage["key"] for stage in stages] == [
+        "triage",
+        "analysis",
+        "reversing",
+        "android_static",
+    ]
+    assert stages[2]["depends_on"] == ["analysis"]
+    assert values[SERVERS]["value"]["analysis"]["cwd"] == "/opt/analysis"
+    assert TOKEN_MASK not in json.dumps(values[PROFILES])
+
+
+def test_a_team_edited_after_the_console_read_saves_without_a_mask():
+    """The read sent back with a stage added (the lists no longer line up, so nothing
+    is read back by position) is saved as sent: no mask is left in it, none refused."""
+    rows = _team_rows(_value(10))
+    shown = _console_read(rows).json()["values"][PROFILES]["value"]
+    edited = {"team": {"stages": [*shown["team"]["stages"], {"key": "report", "kind": "report"}]}}
+
+    restored = svc.unmasked_changes({PROFILES: edited}, {PROFILES: rows[0].value}, catalog_index())
+
+    assert restored[PROFILES] == edited
+    assert not sm.mask_left_in(restored, TOKEN_MASK)
+    keys = [stage["key"] for stage in restored[PROFILES]["team"]["stages"]]
+    assert keys == ["triage", "analysis", "reversing", "android_static", "report"]
