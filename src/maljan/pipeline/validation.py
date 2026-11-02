@@ -7321,6 +7321,33 @@ _STATE_UNDECIDED_WORDS = frozenset(
         "investigated",
     }
 )
+# The platform's own words for what it publishes and why, which an opening
+# negation states a state with ("not an IOC", "not in the indicator table",
+# "not for publication", "no attribution", "no process attributed"): read in
+# the first two words after one of ``_STATE_PUBLISH_LEADS``.
+_STATE_PUBLISH_WORDS = frozenset(
+    {
+        "publication",
+        "public",
+        "ioc",
+        "iocs",
+        "indicator",
+        "indicators",
+        "table",
+        "attributed",
+        "attribution",
+    }
+)
+# The words that may stand between the negation and a publish word, one lead
+# at most: an article, "in the", "part of the", "for".
+_STATE_PUBLISH_LEADS = (
+    ("part", "of", "the"),
+    ("in", "the"),
+    ("a",),
+    ("an",),
+    ("the",),
+    ("for",),
+)
 # A named state that says the value is published.
 _STATE_AFFIRMS_RE = re.compile(r"^\W*(?:yes|published)\b", re.IGNORECASE)
 # The platform's own words for a value it does not publish, written by the model.
@@ -7409,8 +7436,10 @@ def _reads_withheld(said: str) -> bool:
     It opens with a negation or a withholding word (``_STATE_WITHHELD_RE``), a
     negation that stands bare ("no", "no;", "no —") or governs a participle
     that states a state ("not attributed", "never seen", "not yet
-    attributed"), never an article, a noun, an adverb or a word of indecision
-    ("not a concern", "not yet decided", ``_STATE_UNDECIDED_WORDS``);
+    attributed") or one of the platform's publish words ("not an IOC", "not in
+    the indicator table", ``_STATE_PUBLISH_WORDS``), never another article,
+    noun or adverb, or a word of indecision ("not a concern", "not yet
+    decided", ``_STATE_UNDECIDED_WORDS``);
     it names "publish" nowhere but in its own "not (yet) published" opening; and no
     negation stands within ``_WITHHOLDING_NEGATION_WINDOW`` words before a
     withholding word ("not withheld", "no longer withheld"), the opening's own
@@ -7438,17 +7467,25 @@ def _negation_states_a_state(after: str) -> bool:
     The negation stands bare (nothing, or a mark, follows it) or governs a
     participle that is no word of indecision; after "yet" the word that
     follows is read the same way ("not yet attributed" is a state, "not yet
-    decided" is not).
+    decided" is not). A negation of the platform's own publish words is a
+    state too ("not an IOC", "not in the IOC table", "no process
+    attributed", ``_STATE_PUBLISH_WORDS``).
     """
     tail = after.lstrip()
     if not tail or not tail[0].isalnum():
         return True
-    words = re.findall(r"[A-Za-z]+", tail)[:2]
-    if words and words[0].lower() == "yet":
+    words = [word.lower() for word in re.findall(r"[A-Za-z]+", tail)[:5]]
+    if words and words[0] == "yet":
         words = words[1:]
-    if not words or words[0].lower() in _STATE_UNDECIDED_WORDS:
+    if not words or words[0] in _STATE_UNDECIDED_WORDS:
         return False
-    return _STATE_PARTICIPLE_RE.fullmatch(words[0]) is not None
+    if _STATE_PARTICIPLE_RE.fullmatch(words[0]) is not None:
+        return True
+    for lead in _STATE_PUBLISH_LEADS:
+        if tuple(words[: len(lead)]) == lead:
+            words = words[len(lead) :]
+            break
+    return bool(_STATE_PUBLISH_WORDS & set(words[:2]))
 
 
 def _restates_reason(after: str, answer: str, *, slack: float = 0.0) -> bool:

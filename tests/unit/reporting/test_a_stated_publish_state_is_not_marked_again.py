@@ -93,6 +93,17 @@ class TestAStatedState:
             "(publish state: not bought)",
             "(publish state: not meant for the table)",
             "(publish state: not told apart from other hosts)",
+            # A negation of the platform's own publish words.
+            "(publish state: not an IOC)",
+            "(publish state: not an indicator)",
+            "(publish state: no IOC)",
+            "(publish state: not in the IOC table)",
+            "(publish state: not part of the indicator table)",
+            "(publish state: not for publication)",
+            "(publish state: no publication)",
+            "(publish state: not public)",
+            "(publish state: no process attributed)",
+            "(publish state: no attribution)",
             # "yet" is read past: the word after it decides.
             "(publish state: not yet attributed to the sample in the capture)",
             "(publish state: not yet published)",
