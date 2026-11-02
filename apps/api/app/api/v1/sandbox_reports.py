@@ -47,7 +47,12 @@ from maljan.core.report_formats import (
     sniff,
 )
 from maljan.core.safe_json import loads
-from maljan.providers.sandbox.readers import mapping_refusal, report_reader, sandbox_formats
+from maljan.providers.sandbox.readers import (
+    mapping_refusal,
+    named_reader_refusal,
+    report_reader,
+    sandbox_formats,
+)
 from pydantic import ValidationError
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -357,6 +362,8 @@ async def upload_sandbox_report(
         )
     elif mapping_refusal(fmt):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, mapping_refusal(fmt))
+    elif named_reader_refusal(fmt.reader):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, named_reader_refusal(fmt.reader))
     else:
         row_format = fmt.name
     report_id = uuid.uuid4()
@@ -755,8 +762,10 @@ async def accept_report_format(
                 if fmt is not None
                 else "The declaration does not recognise this report; nothing was saved.",
             )
-        refusal = mapping_refusal(declaration) or await asyncio.to_thread(
-            _trial_read, payload, declaration, sandbox.rest.mapping
+        refusal = (
+            named_reader_refusal(declaration.reader)
+            or mapping_refusal(declaration)
+            or await asyncio.to_thread(_trial_read, payload, declaration, sandbox.rest.mapping)
         )
         if refusal:
             raise HTTPException(

@@ -74,7 +74,8 @@ class ReportReader(ABC):
     # reader sets itself on what it reads. Only a reader of the platform's own
     # stand-ins and fixtures sets one; a mark any other reader's report holds
     # came from the sandbox's document and is taken out at intake
-    # (``app.MaljanApp``).
+    # (``app.MaljanApp``). Honoured for the built-in readers alone
+    # (:func:`earned_marks`): a plug-in that declares marks earns none.
     platform_marks: ClassVar[frozenset[str]] = frozenset()
 
     def builtin_format(self) -> ReportFormat | None:
@@ -559,3 +560,43 @@ class UnreadReportReader(ReportReader):
         from maljan.schemas.sandbox_report import Reading
 
         return Reading(frozenset({"channels"}))
+
+
+# The built-in reader instances, as this module registered them at import:
+# before any entry point is read and before anything registers at run time.
+_BUILTIN_READERS: dict[str, ReportReader] = dict(_READERS)
+
+
+def earned_marks(reader: Any) -> frozenset[str]:
+    """The platform marks ``reader`` may set on what it reads (``ReportReader.platform_marks``).
+
+    Honoured only for the very built-in instance this module registered at
+    import, compared by identity: a reader registered later under the same id
+    (a plug-in that replaces ``mock``), or one that declares marks of its own,
+    sets none, so its report's marks are taken out at intake like a
+    sandbox's.
+    """
+    builtin = _BUILTIN_READERS.get(str(getattr(reader, "id", "") or ""))
+    if builtin is None or builtin is not reader:
+        return frozenset()
+    return frozenset(builtin.platform_marks)
+
+
+def named_reader_refusal(reader_id: str) -> str:
+    """Why an operator may not name the reader ``reader_id``, in words; empty where they may.
+
+    A reader that is not ``choosable`` reads only what the platform hands it
+    (the mock sandbox's fixtures and stand-in): named for a sandbox's reports,
+    it would read a live report as a recorded fixture. The unread reader is
+    named by the upload's own allow-list (``sandbox.upload.allowed_formats``)
+    and stays allowed there. An id no reader is registered under is refused
+    where it is read, in its own words.
+    """
+    reader = report_reader(reader_id)
+    if reader is None or reader.choosable or reader.id == UNREAD_FORMAT:
+        return ""
+    return (
+        f"The sandbox report reader {reader.id!r} reads only the platform's own fixtures and "
+        f"cannot be named for a sandbox's reports; name one of "
+        f"{', '.join(choosable_reader_ids())}."
+    )

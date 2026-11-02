@@ -159,10 +159,13 @@ CONTAINERS: frozenset[Path] = frozenset(
 # keys, written by the readers and the providers, never by a sandbox.
 SYNTHETIC_KEY = "synthetic"
 FIXTURE_KEY = "recorded_fixture"
-# Every platform mark a document can carry at its top level. A sandbox's own
-# report holding a key under one of these words is not the platform's mark,
-# and a reader that does not set the mark itself never passes it on
-# (:func:`unearned_marks_removed`).
+# Every platform mark a document can carry at its top level: the one list. A
+# sandbox's own report holding a key under one of these words is not the
+# platform's mark, and a reader that does not set the mark itself never passes
+# it on (:func:`unearned_marks_removed`). A later mark joins here, and is then
+# taken out of every provider's report at intake with no code of its own: the
+# run's mark for a report naming another target than the sample
+# (``target_not_the_sample``, set after intake) is the next.
 PLATFORM_MARKS: tuple[str, ...] = (SYNTHETIC_KEY, FIXTURE_KEY)
 
 

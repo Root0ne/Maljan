@@ -370,15 +370,17 @@ class MaljanApp:
         (``synthetic``, ``recorded_fixture``), and read as written it would
         turn an observation into a stand-in or a recorded fixture
         (``pipeline.sandbox_status``). The marks the reader sets itself
-        (``ReportReader.platform_marks``) are kept, so the mock sandbox's
-        stand-in and fixtures read as before.
+        (``ReportReader.platform_marks``) are kept only for the built-in
+        reader that set them (``readers.earned_marks``), so the mock
+        sandbox's stand-in and fixtures read as before and a plug-in reader
+        earns none.
         """
-        from maljan.providers.sandbox.readers import report_reader
+        from maljan.providers.sandbox.readers import earned_marks, report_reader
         from maljan.schemas.sandbox_document import unearned_marks_removed
 
         report = run.report
         reader = report_reader(str(getattr(report, "source_format", "") or ""))
-        unearned_marks_removed(report, getattr(reader, "platform_marks", frozenset()))
+        unearned_marks_removed(report, earned_marks(reader))
 
     async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:
         """Submit sample to sandbox and return the neutral report's document.
