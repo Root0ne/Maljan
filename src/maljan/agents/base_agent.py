@@ -2512,20 +2512,22 @@ class ClaimRead:
         return own + (self.after_disputes if not self.claims else 0)
 
 
-def _is_field_line(claim_text: str) -> bool:
+def _is_field_line(claim_text: str, *, on_heading_line: bool) -> bool:
     """Whether a claim's sentence as read is a field line: its heading wrote none.
 
-    It is when it opens with a label always taken as a field, with a field
-    label in any casing whose value cites a ledger id anywhere, or with a
-    label in another casing followed by nothing or by a field's value
-    as its first word (a ledger id, a number, a technique id, NONE, a plain
-    confidence word). Any other text after a label in another casing is the
-    claim's sentence.
+    A text that begins on a line below its heading and opens with a field
+    label in any casing is one: the heading wrote nothing. A text written on
+    the heading line is one when it opens with a label always taken as a
+    field, with a field label in any casing whose value cites a ledger id
+    anywhere, or with a label in another casing followed by nothing or by a
+    field's value as its first word (a ledger id, a number, a technique id,
+    NONE, a plain confidence word). Any other text after a label in another
+    casing on the heading line is the claim's sentence.
     """
     opening = _FIELD_LINE_RE.match(claim_text)
     if opening is None:
         return False
-    if _FIELD_LABEL_AS_TAIL_RE.match(claim_text):
+    if not on_heading_line or _FIELD_LABEL_AS_TAIL_RE.match(claim_text):
         return True
     if _LEDGER_ID_ANYWHERE_RE.search(claim_text, opening.end()):
         return True
@@ -2575,7 +2577,8 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         if not claim_match:
             continue
         claim_text = strip_tool_call_scaffolding(claim_match.group(1)).strip()
-        if _is_field_line(claim_text):
+        on_heading_line = "\n" not in block[claim_match.start() : claim_match.start(1)]
+        if _is_field_line(claim_text, on_heading_line=on_heading_line):
             # The heading wrote no sentence: the block is begun and not read,
             # as a block with no claim marker is, and counted as unread.
             continue

@@ -162,3 +162,22 @@ def test_a_title_case_block_with_no_sentence_stores_no_technique() -> None:
     assert read.claims == []
     assert read.begun == 1
     assert read.unread == 1
+
+
+@pytest.mark.parametrize("field", ["Evidence: capa output", "Confidence: probable"])
+def test_a_label_line_below_a_bare_heading_is_no_sentence(field: str) -> None:
+    read = read_claim_blocks(
+        f"CLAIM:\n{field}\nCONFIDENCE: 0.8\nTECHNIQUE: T1027\n", require_evidence=False
+    )
+    assert read.claims == []
+    assert read.begun == 1
+    assert read.unread == 1
+
+
+@pytest.mark.parametrize("field", ["Evidence: capa output", "Confidence: probable"])
+def test_the_same_label_on_the_heading_line_is_the_sentence(field: str) -> None:
+    read = read_claim_blocks(
+        f"CLAIM: {field}\nCONFIDENCE: 0.8\nTECHNIQUE: T1027\n", require_evidence=False
+    )
+    assert [claim.claim for claim in read.claims] == [field]
+    assert read.unread == 0
