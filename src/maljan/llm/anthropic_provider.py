@@ -452,6 +452,25 @@ class AnthropicProvider(LLMProvider):
         return True
 
     @classmethod
+    def native_json_schema_output(cls, llm: Any) -> bool:
+        # The API takes ``output_config.format`` beside tools, but the pinned
+        # langchain-anthropic's ``json_schema`` method replaces the model's
+        # bound tools with the format, and its parser refuses a reply that
+        # calls a tool: ``read_evidence`` would be lost, and a reply that
+        # reads could not be read.
+        return False
+
+    @classmethod
+    def schema_tool_answered_as_text(cls, llm: Any) -> bool:
+        # No tool choice is ever sent for a schema (``with_unforced_structured_output``),
+        # and a model that thinks by default (the vendored table's
+        # ``fixed_sampling`` rows: the Thinking page's models) cannot be made
+        # to call one: offered beside ``read_evidence`` it writes the JSON as
+        # text (every one of haiku7's 17 and haiku8's 22 structured calls).
+        model = getattr(llm, "model", None) or getattr(llm, "model_name", None) or ""
+        return bool(model) and bool(fixed_sampling_source(model))
+
+    @classmethod
     def window_probes(cls, endpoint: object, model: str) -> tuple[Any, ...]:
         from urllib.parse import quote
 

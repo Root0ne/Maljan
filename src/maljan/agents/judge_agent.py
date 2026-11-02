@@ -4724,7 +4724,13 @@ class JudgeAgent(BudgetMeter):
             questions, {i: e._replace(text="") for i, e in entries.items()}, cards=False
         )
         empty_head = lead + technique_question_head("", decided, carried)
-        structured = self._supports_structured_output()
+        from maljan.llm.registry import schema_tool_worth_offering
+
+        # Not where the read is offered beside the schema on a model that
+        # writes such a schema as text: the answer is then asked for in text.
+        structured = self._supports_structured_output() and (
+            not ledger or schema_tool_worth_offering(self.llm)
+        )
         # ``read_evidence`` over the run's ledger from the first turn, beside
         # the answer's schema on the structured path, where the model binds
         # it; else the question as it always was, its system text saying so.

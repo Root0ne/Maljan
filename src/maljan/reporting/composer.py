@@ -35,7 +35,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
-from maljan.agents.ledger_reads import StructuredReads, reading_model
+from maljan.agents.ledger_reads import LedgerReads, StructuredReads, reading_model
 from maljan.agents.tool_fence import (
     QUOTED_VALUE_STATEMENT,
     fenced_text,
@@ -58,7 +58,7 @@ from maljan.core.spend import (
 from maljan.core.token_ledger import read_structured_reply, say_structured_reply
 from maljan.llm.answer_text import structured_answer_text
 from maljan.llm.anthropic_history import SHARED_HEAD
-from maljan.llm.registry import structured_output_supported_for_llm
+from maljan.llm.registry import schema_tool_worth_offering, structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     CHANNEL_BINDING_CODE,
     KEPT_WITH_A_FINDING,
@@ -1874,6 +1874,17 @@ class ReportComposer:
             index: key for key, indexes in members.items() if len(indexes) > 1 for index in indexes
         }
 
+    def _schema_tool_offered(self) -> bool:
+        """Whether a section's structured call offers its schema as a tool.
+
+        Not where ``read_evidence`` is offered beside it on a model that writes
+        such a schema as text (``registry.schema_tool_worth_offering``): every
+        section is then asked for its JSON in text, the manual path, where no
+        section sends a schema and all share one cached head.
+        """
+        reads = isinstance(getattr(self, "ledger_reads", None), LedgerReads)
+        return not reads or schema_tool_worth_offering(getattr(self, "llm", None))
+
     def _bundle(
         self, section: str, report: MalwareReport, isr_reports: dict[str, Any] | None
     ) -> dict[str, Any]:
@@ -2364,6 +2375,7 @@ class ReportComposer:
             # its held cap is sent with it.
             if (
                 not structured_output_supported_for_llm(self.llm)
+                or not self._schema_tool_offered()
                 or spend_ceiling_set(getattr(self, "token_ledger", None))
                 or self._call_bound(messages)
             ):

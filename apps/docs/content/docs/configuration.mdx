@@ -2375,6 +2375,20 @@ before, with no breakpoint, and pays no cache write. On DeepSeek and other OpenA
 caching is automatic and the request is unchanged: the head is already the
 same leading text on every section.
 
+### A schema offered beside `read_evidence` is asked for in text where the model writes it so
+
+No tool choice is sent for a schema on Anthropic, and a model that thinks by
+default cannot be made to call one: offered beside `read_evidence`, Claude
+Haiku 5.5 wrote the JSON as text in every structured call of haiku7 and
+haiku8. The provider says so for such a model, and says it asks for no
+JSON-schema answer natively (the pinned langchain-anthropic's `json_schema`
+method replaces a model's bound tools and cannot read a reply that reads).
+The composer's sections, the narrative round and the judge's technique
+question are then asked for their JSON in text from the first call, with
+`read_evidence` and no schema tool, and the model says so once in the log; the
+answer is read by the same parser that read it from the text before. A schema offered alone (the
+mediation's extraction) and every other provider keep the tool.
+
 ### The judge's tool loop is cached as an analyst's is
 
 Each turn of the mediator's tool loop after its first tool round is noted as a

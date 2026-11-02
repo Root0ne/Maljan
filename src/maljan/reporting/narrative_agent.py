@@ -33,7 +33,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
-from maljan.agents.ledger_reads import StructuredReads, reading_model
+from maljan.agents.ledger_reads import LedgerReads, StructuredReads, reading_model
 from maljan.agents.tool_fence import QUOTED_VALUE_STATEMENT, quoted_value
 from maljan.analysis.sandbox_sections import ItemIndex
 from maljan.core.config import REPORTER_AGENT_KEY
@@ -49,7 +49,7 @@ from maljan.core.spend import (
 )
 from maljan.core.token_ledger import read_structured_reply, say_structured_reply
 from maljan.llm.answer_text import structured_answer_text
-from maljan.llm.registry import structured_output_supported_for_llm
+from maljan.llm.registry import schema_tool_worth_offering, structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     CapabilityGrounding,
@@ -740,7 +740,19 @@ class NarrativeAgent:
         to the window and so go by the manual path: the wait is then one call
         longer than needed, which errs on the side of waiting.
         """
-        return NARRATIVE_ATTEMPTS + (1 if structured_output_supported_for_llm(self.llm) else 0)
+        return NARRATIVE_ATTEMPTS + (1 if self._structured_path() else 0)
+
+    def _structured_path(self) -> bool:
+        """Whether the round is asked on the structured path first.
+
+        Not where ``read_evidence`` is offered beside the schema on a model
+        that writes such a schema as text (``registry.schema_tool_worth_offering``):
+        the round is then asked for its JSON in text from its first call.
+        """
+        if not structured_output_supported_for_llm(self.llm):
+            return False
+        reads = isinstance(getattr(self, "ledger_reads", None), LedgerReads)
+        return not reads or schema_tool_worth_offering(self.llm)
 
     def round_timeout(self, configured: float | None, prompt_chars: int = 0) -> float | None:
         """This round's wait: configured, or what its calls need at the model's pace.
@@ -943,7 +955,7 @@ class NarrativeAgent:
         kept: Any = None
         structured: Any = None
         if (
-            structured_output_supported_for_llm(self.llm)
+            self._structured_path()
             and not spend_ceiling_set(getattr(self, "token_ledger", None))
             and self._call_bound(messages) is None
         ):
