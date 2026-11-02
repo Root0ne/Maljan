@@ -612,6 +612,19 @@ class Process(_Observable):
     child_refs: list[str] = Field(default_factory=list)
 
 
+# What the sample's lineage rule says of a process observable of the export it
+# leaves out of the sample's tree (``reporting.renderers.stix_renderer``), as
+# the report's network rows say it of a flow's process: ``false`` under
+# ``SAMPLE_TREE_PROPERTY`` for one outside the tree
+# (``sandbox_report.SAMPLE_TREE_KEY``), and under ``LINEAGE_DISPUTED_PROPERTY``
+# the one fact that alone names a disputed one as the sample's (``marked`` or
+# ``file``, ``sandbox_report.LINEAGE_DISPUTED_KEY``). A process of the tree
+# carries neither. The platform's own: a judge's object never carries them
+# (``judge_postprocess.PLATFORM_ONLY_PROPERTIES``).
+SAMPLE_TREE_PROPERTY = "x_maljan_sample_process_tree"
+LINEAGE_DISPUTED_PROPERTY = "x_maljan_lineage_disputed"
+
+
 def undefined_properties(obj: dict[str, Any]) -> list[str]:
     """The properties a judge-written object carries that its type does not define.
 
