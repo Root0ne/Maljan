@@ -436,7 +436,8 @@ class MaljanApp:
                 if not (run.report.synthetic or run.report.recorded_fixture):
                     # The target the attached report names, as its reader put
                     # it in the neutral report: told to the analysts and the
-                    # judge (``_tell_the_target``) as a live one's is.
+                    # judge (``_tell_the_target``) and recorded by the worker
+                    # as a live one's is.
                     self.container.attached_target_claim = {
                         "provider": str(provider.id),
                         "task_id": str(run.task_id),

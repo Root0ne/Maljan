@@ -695,10 +695,9 @@ class ServiceContainer:
         # without a report, or no sandbox.
         self.sandbox_target_claim: dict[str, str] | None = None
         # The same, for an attached report: the target its reader put in the
-        # neutral report, set by ``app._submit_to_sandbox`` only for the run
-        # to tell the analysts and the judge (``app._tell_the_target``). The
-        # worker compared the report with the sample at its upload, and keeps
-        # that comparison; it reads no record from this. ``None`` otherwise.
+        # neutral report, set by ``app._submit_to_sandbox``: told to the
+        # analysts and the judge (``app._tell_the_target``) and recorded by the
+        # worker as a live one's is (``sandbox_target_of``). ``None`` otherwise.
         self.attached_target_claim: dict[str, str] | None = None
         # Each submission of the sample to the job's sandbox provider
         # (``analysis.disclosure.upload_record``), set by ``app.arun`` as it

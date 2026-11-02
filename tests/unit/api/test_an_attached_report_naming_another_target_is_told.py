@@ -66,6 +66,8 @@ def _overview(sha256: str) -> dict[str, Any]:
 
 
 SHAPES = [_nested, _flat, _overview]
+# A target value that is not a SHA-256: a line break, markup and a ledger id.
+NOT_A_SHA256 = "not\na-hash `x` ev_0003"
 
 
 def _recorded(payload: dict[str, Any]) -> tuple[str, bool]:
@@ -116,8 +118,13 @@ class TestAnAttachedReport:
             f"intake SHA-256 `{INTAKE}`: what it observed may be of other bytes. The run was "
             "not failed for it; which findings it touches is the analyst's call."
         )
-        # The worker's run record still comes from the upload's own comparison.
-        assert app.container.sandbox_target_claim is None
+        # The worker records it from the attached claim, as it does a live one's.
+        from app.worker.sample_integrity import sandbox_target_of
+
+        app.container.sample_sha256 = INTAKE
+        record = sandbox_target_of(app.container)
+        assert record is not None
+        assert record["sandbox_sha256"] == OTHER
         json.dumps(handed)
 
     @pytest.mark.parametrize("shape", SHAPES)
@@ -132,7 +139,7 @@ class TestAnAttachedReport:
         assert status.sandbox_status(handed).statement == ""
 
     @pytest.mark.parametrize("shape", SHAPES)
-    @pytest.mark.parametrize("target", [OTHER, INTAKE, ""])
+    @pytest.mark.parametrize("target", [OTHER, INTAKE, "", NOT_A_SHA256])
     def test_the_mark_agrees_with_the_upload_s_comparison(
         self, shape: Any, target: str, tmp_path: Path
     ) -> None:
@@ -141,8 +148,23 @@ class TestAnAttachedReport:
 
         handed, _, _ = _handed(payload, tmp_path)
 
-        # No target at all is no mismatch to tell, though the row says no match.
+        # The documented gap: no target at all is no mismatch to tell, though
+        # the row says no match.
         assert (status.TARGET_KEY in handed) is (not matches and bool(target))
+
+    @pytest.mark.parametrize("shape", SHAPES)
+    def test_a_target_that_is_not_a_sha256_is_marked_as_one_line(
+        self, shape: Any, tmp_path: Path
+    ) -> None:
+        handed, _, _ = _handed(shape(NOT_A_SHA256), tmp_path)
+
+        mark = handed[status.TARGET_KEY]
+        assert mark["sandbox_sha256_valid"] is False
+        assert "\n" not in mark["sandbox_sha256"]
+        statement = status.sandbox_status(handed).statement
+        assert "names its target with a value that is not a SHA-256" in statement
+        assert "\n" not in statement
+        assert "ev_0003" not in statement
 
     def test_a_forged_mark_in_the_upload_is_taken_out(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
