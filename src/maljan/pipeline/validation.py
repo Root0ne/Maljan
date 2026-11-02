@@ -7284,9 +7284,12 @@ _STATE_WITHHELD_RE = re.compile(
 # A named state's opening negation.
 _STATE_NEGATION_OPENING_RE = re.compile(r"^\W*(?:no|not|never)\b", re.IGNORECASE)
 # A participle an opening negation governs to state a state ("not attributed",
-# "never seen"): a regular one, or one of the common irregular ones.
+# "never seen"): a regular one, or one of the common irregular ones, named
+# whole (an "-en" or "-wn" ending alone also ends "even", "often", "own").
 _STATE_PARTICIPLE_RE = re.compile(
-    r"[a-z]{2,}ed|seen|shown|kept|held|sent|found|given|taken|written", re.IGNORECASE
+    r"[a-z]{2,}ed|seen|shown|kept|held|sent|found|given|taken|written|made|built|put|set"
+    r"|done|run|left|drawn|chosen|bought|meant|told",
+    re.IGNORECASE,
 )
 # The words after an opening negation, or after its "yet", that leave the
 # state undecided ("not decided", "not yet decided", "not clear"): plain
