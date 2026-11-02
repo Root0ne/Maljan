@@ -39,17 +39,35 @@ _ROLES: dict[str, tuple[str, ...]] = {
 }
 
 
+# The servers a capability resolves to, as ``composition.capability_servers`` reads them.
+_CAPABILITIES: dict[str, tuple[str, ...]] = {"reputation": ("lookup",), "capture": ("pcaps",)}
+
+
 def _roles(server: str) -> Sequence[str] | None:
     return _ROLES.get(server)
 
 
-def _reads(definition: AgentDefinition | None, *, sandbox: bool = False) -> Reads:
+def _servers(definition: AgentDefinition | None, also: Sequence[str] = ()) -> set[str]:
+    """The servers the definition reaches: its references, its capabilities' servers, ``also``."""
+    out = set(also)
+    for ref in definition.tools if definition is not None else []:
+        if ref.kind == "mcp" and ref.server:
+            out.add(ref.server)
+        elif ref.kind == "capability" and ref.capability:
+            out.update(_CAPABILITIES.get(ref.capability, ()))
+    return out
+
+
+def _reads(
+    definition: AgentDefinition | None, *, sandbox: bool = False, also: Sequence[str] = ()
+) -> Reads:
     role = str(definition.role) if definition is not None else ""
     return agent_reads(
         definition,
         role,
         sample_fed=role in ("static", "generic", "lead"),
         sandbox_report=sandbox,
+        servers=_servers(definition, also),
         server_roles=_roles,
     )
 
@@ -189,6 +207,27 @@ class TestMixedAndUndeclaredTools:
 
     def test_an_analyst_with_no_definition_is_never_skipped(self) -> None:
         assert _missing(None, _NO_STORED) is None
+
+    def test_a_server_bound_by_its_own_agents_list_counts(self) -> None:
+        """Bound by ``mcp.servers.<x>.agents`` rather than a reference: still the agent's."""
+        network = AgentDefinition(role="network", tools=[ToolRef(kind="mcp", server="pcaps")])
+        job = job_data(_REPORT)
+        assert missing_kinds(_reads(network, sandbox=True, also=["lookup"]), job, "a") is None
+        assert missing_kinds(_reads(network, sandbox=True), job, "a") == frozenset(
+            {NETWORK, CAPTURE}
+        )
+
+    def test_servers_that_cannot_be_read_keep_the_analyst_running(self) -> None:
+        dynamic = AgentDefinition(role="dynamic", tools=[ToolRef(kind="sandbox")])
+        reads = agent_reads(
+            dynamic,
+            "dynamic",
+            sample_fed=False,
+            sandbox_report=False,
+            servers=None,
+            server_roles=_roles,
+        )
+        assert reads.untied
 
 
 class TestTheReason:

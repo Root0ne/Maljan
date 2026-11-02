@@ -24,6 +24,8 @@ from maljan.core.config import AgentDefinition, StageDefinition, ToolRef
 from maljan.pipeline.data_needs import SANDBOX_REPORT, STORED
 from maljan.pipeline.nodes import (
     DATALESS_STAGE_KEY,
+    NO_AGENT_DATA_REASON,
+    SYNTHETIC_SANDBOX_REASON,
     _agents_that_ran,
     dataless_stage_reason,
     dataless_stages,
@@ -48,7 +50,13 @@ _DEFINITIONS = {
         ],
     ),
 }
-_SERVER_ROLES = {"knowledge": ("reference",), "network": ("capture",)}
+_SERVER_ROLES = {
+    "knowledge": ("reference",),
+    "network": ("capture",),
+    "threatintel": ("reputation",),
+}
+# The servers a capability resolves to, as ``composition.capability_servers`` reads them.
+_CAPABILITIES = {"reputation": ("threatintel",)}
 
 _STATIC = StageDefinition(key="static", kind="analysis", agents=["static"])
 
@@ -80,6 +88,23 @@ def _declared_roles(monkeypatch: pytest.MonkeyPatch) -> None:
         return real(settings)
 
     monkeypatch.setattr(declared_reading, "declarations", declarations)
+
+    import maljan.agents.composition as composition
+
+    bound = composition.servers_bound_to
+
+    def servers_bound_to(settings: Any, key: str) -> set[str]:
+        if not isinstance(settings, MagicMock):
+            return bound(settings, key)
+        out: set[str] = set()
+        for ref in settings.agents.definitions[key].tools:
+            if ref.kind == "mcp":
+                out.add(str(ref.server))
+            elif ref.kind == "capability":
+                out.update(_CAPABILITIES.get(str(ref.capability), ()))
+        return out
+
+    monkeypatch.setattr(composition, "servers_bound_to", servers_bound_to)
 
 
 class _Built(Exception):
@@ -128,7 +153,8 @@ class TestTheDatalessStageIsSkipped:
         assert record["ran"] is False
         assert record[DATALESS_STAGE_KEY] is True
         assert SANDBOX_REPORT in record["reason"] and STORED in record["reason"]
-        assert record["agent_reasons"] == {"dynamic": record["reason"]}
+        # The analyst's own reason is the no-data guard's; the kinds are the stage's.
+        assert record["agent_reasons"] == {"dynamic": NO_AGENT_DATA_REASON}
 
     def test_the_console_is_told_the_stage_was_skipped_and_why(self) -> None:
         stage = _stage(["dynamic"])
@@ -151,7 +177,9 @@ class TestTheDatalessStageIsSkipped:
         stage = _stage(["dynamic"])
         _c, _e, out = _run(stage, "dynamic", _state())
 
-        assert out["reports"]["dynamic"].startswith("[WARN] dynamic: the job holds none")
+        assert out["reports"]["dynamic"] == (
+            "[WARN] dynamic: no dynamic data available for this sample — analyst skipped."
+        )
         assert out["isr_reports"]["dynamic"].claims == []
 
     def test_every_analyst_of_a_parallel_stage_is_skipped_and_the_records_merge(self) -> None:
@@ -193,7 +221,10 @@ class TestAStageWithAnyDataRuns:
         stage = _stage(["dynamic"])
         container, _e, out = _run(stage, "dynamic", _state(sandbox_report=report))
         container.get_agent.assert_not_called()
-        assert out["stage_results"]["dynamic"][DATALESS_STAGE_KEY] is True
+        record = out["stage_results"]["dynamic"]
+        assert record[DATALESS_STAGE_KEY] is True
+        assert record["agent_reasons"] == {"dynamic": SYNTHETIC_SANDBOX_REASON}
+        assert SYNTHETIC_SANDBOX_REASON in out["reports"]["dynamic"]
 
     def test_stored_data_for_the_sample_is_data(self) -> None:
         stage = _stage(["dynamic"])
@@ -272,9 +303,14 @@ class TestWhatIsLeftAsItWas:
 
 
 class TestTheVerdictSaysTheAnalystWasSkipped:
-    """The degradation reasons name a dataless stage's analysts as skipped, by what they lacked."""
+    """The degradation reasons name a dataless stage's analysts as skipped, in team order.
 
-    def _reasons(self) -> list[str]:
+    The same run with the dynamic analyst skipped by its own guard inside a
+    stage that ran (the shape before the stage was skipped) gives the same
+    sentence: the analysts are placed where their stages stand in the team.
+    """
+
+    def _reasons(self, *, dataless_stage: bool) -> list[str]:
         import asyncio
         from unittest.mock import AsyncMock
 
@@ -292,33 +328,47 @@ class TestTheVerdictSaysTheAnalystWasSkipped:
 
         stages = stages_from_analysts(["static"])
         at = next(i for i, s in enumerate(stages) if s.key == "analysis") + 1
-        stages.insert(at, StageDefinition(key="dynamic", kind="analysis", agents=["dynamic"]))
-        profile = ProfileDefinition(label="t", stages=stages, analysts=["static", "dynamic"])
+        stages[at:at] = [
+            StageDefinition(key="dynamic", kind="analysis", agents=["dynamic"]),
+            StageDefinition(key="network", kind="analysis", agents=["network"]),
+        ]
+        team = ["static", "dynamic", "network"]
+        profile = ProfileDefinition(label="t", stages=stages, analysts=team)
 
         class _Container(_TeamContainer):
             def analyst_keys(self) -> list[str]:
-                return ["static", "dynamic"]
+                return team
 
             def active_profile(self) -> Any:
                 return profile
 
         state = judge_state([])
-        reason = "the job holds none of the data its analysts read (a sandbox report)"
-        state["isr_reports"] = {
-            **state["isr_reports"],
-            "dynamic": AgentISR(agent_id="dynamic", domain="dynamic", claims=[]),
+        empty = {name: AgentISR(agent_id=name, domain=name, claims=[]) for name in team[1:]}
+        state["isr_reports"] = {**state["isr_reports"], **empty}
+        state["reports"] = {
+            **state["reports"],
+            "dynamic": f"[WARN] dynamic: {SYNTHETIC_SANDBOX_REASON} — analyst skipped.",
+            "network": f"[WARN] network: {SYNTHETIC_SANDBOX_REASON} — analyst skipped.",
         }
-        state["reports"] = {**state["reports"], "dynamic": f"[WARN] dynamic: {reason}"}
-        state["sandbox_report"] = None
+        # The mock sandbox's stand-in for a detonation that never ran.
+        state["sandbox_report"] = {"synthetic": True, "signatures": []}
+        own_guard = {"ran": True, "agent_reasons": {"network": SYNTHETIC_SANDBOX_REASON}}
+        dynamic: dict[str, Any] = {
+            "ran": True,
+            "agents": ["dynamic"],
+            "agent_reasons": {"dynamic": SYNTHETIC_SANDBOX_REASON},
+        }
+        if dataless_stage:
+            dynamic = {
+                **dynamic,
+                "ran": False,
+                "reason": "the job holds none of the data its analysts read (a sandbox report)",
+                DATALESS_STAGE_KEY: True,
+            }
         state["stage_results"] = {
             "analysis": {"ran": True, "claim_count": 1, "agents": ["static"]},
-            "dynamic": {
-                "ran": False,
-                "reason": reason,
-                "agents": ["dynamic"],
-                "agent_reasons": {"dynamic": reason},
-                DATALESS_STAGE_KEY: True,
-            },
+            "dynamic": dynamic,
+            "network": {**own_guard, "agents": ["network"]},
         }
         container = _Container(EvidenceCounter())
         judge = container.get_judge_agent(role="judge")
@@ -329,7 +379,10 @@ class TestTheVerdictSaysTheAnalystWasSkipped:
         )
         return list(asyncio.run(make_judge_node(container)(state))["degradation_reasons"])
 
-    def test_the_analyst_is_named_skipped_for_no_sandbox_data(self) -> None:
-        reasons = self._reasons()
-        assert "analysts skipped (no sandbox data): dynamic" in reasons
+    def test_the_analysts_are_named_skipped_for_no_sandbox_data_in_team_order(self) -> None:
+        reasons = self._reasons(dataless_stage=True)
+        assert "analysts skipped (no sandbox data): dynamic, network" in reasons
         assert not any(r.startswith("analysts produced no claims:") for r in reasons)
+
+    def test_the_reasons_are_those_of_the_analyst_skipped_by_its_own_guard(self) -> None:
+        assert self._reasons(dataless_stage=True) == self._reasons(dataless_stage=False)

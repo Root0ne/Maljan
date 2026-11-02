@@ -13,11 +13,21 @@ The decision reads declarations only, never an agent's or a tool's name:
   (``container.load_data_for_agent``). A role handed the sample itself
   (``nodes.SAMPLE_FED_ROLES``) always holds data: the sample always exists.
 * **What its tools read** is declared by their source. The job's sandbox
-  report source (``ToolRef(kind="sandbox")``) reads the sandbox report. A tool
-  server or a capability reads only job data when every role its declaration
-  names is one :data:`ROLE_READS` ties to a kind; any other role, no role at
-  all, a static provider and an ask of another agent are read as reading data
-  the job may hold, so the analyst holding one is never skipped.
+  report source (``ToolRef(kind="sandbox")``) reads the sandbox report. The
+  tool servers are every server the agent reaches, however it is bound: a
+  reference by key, a capability resolved to the servers that serve it, and a
+  server whose own ``agents`` list names it, less what its profile withholds
+  (``agents.composition.servers_bound_to``). A server reads only job data
+  when every role its declaration names is one :data:`ROLE_READS` ties to a
+  kind; any other role, no role at all, a static provider and an ask of
+  another agent are read as reading data the job may hold, so the analyst
+  holding one is never skipped.
+
+``reference`` is read as no job data: such a server answers lookups over what
+the caller hands it (a technique, an API name, a command line, a text), and
+none of its tools takes a path. It may be told the sample's hash, but only to
+leave the sample's own record out of a similarity answer, which is no reading
+of the sample.
 
 An analyst holds data when anything it is handed or any tool it holds reads a
 kind the job has. A stage is skipped only when every one of its analysts holds
@@ -148,13 +158,16 @@ def agent_reads(
     *,
     sample_fed: bool,
     sandbox_report: bool,
+    servers: Iterable[str] | None,
     server_roles: Callable[[str], Sequence[str] | None],
 ) -> Reads:
-    """What the analyst of ``definition`` reads, from its declaration alone.
+    """What the analyst of ``definition`` reads, from its declarations alone.
 
-    ``server_roles`` answers a tool server's declared roles, ``None`` where its
-    declaration cannot be read (read as untied). A definition that cannot be
-    read is untied.
+    ``servers`` is every tool server the agent reaches (``None`` where that
+    cannot be read: untied), and ``server_roles`` answers a server's declared
+    roles, ``None`` where its declaration cannot be read (untied). The
+    definition's own server and capability references are among ``servers``
+    and are not read again here. A definition that cannot be read is untied.
     """
     if definition is None:
         return Reads(untied=True)
@@ -170,21 +183,19 @@ def agent_reads(
             kinds.add(kind)
     elif not sample_fed:
         kinds.add(_role_slice(role, sandbox_report))
+    if servers is None:
+        return Reads(kinds=frozenset(kinds), untied=True)
     for ref in getattr(definition, "tools", None) or ():
         ref_kind = str(getattr(ref, "kind", "") or "")
         if ref_kind == "sandbox":
             kinds.add(SANDBOX_REPORT)
-            continue
-        if ref_kind == "capability":
-            capability = str(getattr(ref, "capability", "") or "")
-            tied, untied = _source_reads([capability] if capability else [])
-        elif ref_kind == "mcp":
-            roles = server_roles(str(getattr(ref, "server", "") or ""))
-            tied, untied = _source_reads(roles) if roles is not None else (frozenset(), True)
-        else:
+        elif ref_kind not in ("mcp", "capability"):
             # A static provider reads the sample; an ask reaches an agent of
             # its own, whose data this one cannot see.
-            tied, untied = frozenset(), True
+            return Reads(kinds=frozenset(kinds), untied=True)
+    for server in sorted(str(name) for name in servers):
+        roles = server_roles(server)
+        tied, untied = _source_reads(roles) if roles is not None else (frozenset(), True)
         if untied:
             return Reads(kinds=frozenset(kinds), untied=True)
         kinds.update(tied)

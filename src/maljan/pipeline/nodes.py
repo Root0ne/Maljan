@@ -3184,6 +3184,16 @@ def dataless_stage_reason(stage: Any, state: AnalysisState, container: Any) -> s
                 held[server] = None if declared is None else tuple(declared.roles)
             return held[server]
 
+        def servers_of(name: str) -> set[str] | None:
+            # Every server the agent reaches, by reference, capability or the
+            # server's own binding; ``None`` (untied) where that is not read.
+            from maljan.agents.composition import servers_bound_to
+
+            try:
+                return set(servers_bound_to(container.config, name))
+            except Exception:  # noqa: BLE001 — servers not read are untied
+                return None
+
         missing: dict[str, frozenset[str]] = {}
         for name in agents:
             definition = container.config.agents.definitions.get(name)
@@ -3193,6 +3203,7 @@ def dataless_stage_reason(stage: Any, state: AnalysisState, container: Any) -> s
                 role,
                 sample_fed=role in SAMPLE_FED_ROLES,
                 sandbox_report=job.sandbox_report,
+                servers=servers_of(name) if definition is not None else None,
                 server_roles=server_roles,
             )
             lacking = missing_kinds(reads, job, name)
@@ -3207,6 +3218,30 @@ def dataless_stage_reason(stage: Any, state: AnalysisState, container: Any) -> s
         )
         return ""
     return dataless_reason(missing)
+
+
+def _analysis_roster(container: Any, fallback: Sequence[str]) -> list[str]:
+    """Every analysis-stage agent of the active profile, in stage order, else ``fallback``."""
+    try:
+        return [
+            str(name)
+            for stage in container.active_profile().stages
+            if stage.kind == "analysis"
+            for name in stage.agents
+        ]
+    except Exception:  # noqa: BLE001 — a double without a profile keeps what it had
+        return list(fallback)
+
+
+def _dataless_absence(container: Any, agent_name: str, state: AnalysisState) -> str:
+    """The no-data guard's reason for an analyst of a stage skipped for want of data."""
+    try:
+        role = container.agent_role(agent_name)
+    except Exception:  # noqa: BLE001 — an unread role is no sandbox-fed one
+        role = ""
+    if _sandbox_fed(str(role)) and _sandbox_report_is_synthetic(state):
+        return SYNTHETIC_SANDBOX_REASON
+    return NO_AGENT_DATA_REASON
 
 
 def dataless_stages(state: AnalysisState) -> list[tuple[str, str, list[str]]]:
@@ -4262,7 +4297,16 @@ def make_stage_agent_node(
             logger.info("stage %s skipped for %s: %s", stage.key, agent_name, dataless)
             if announces:
                 announce_skipped(container, stage, dataless)
-            skipped_text = f"[WARN] {agent_name}: {dataless} — analyst skipped."
+            # The analyst's own reason and line are the no-data guard's words
+            # below, so the report keeps the specific cause (a sandbox that
+            # never ran); the kinds the stage lacked are the stage's reason.
+            absence = _dataless_absence(container, agent_name, state)
+            skipped_text = (
+                f"[WARN] {agent_name}: {SYNTHETIC_SANDBOX_REASON} — analyst skipped."
+                if absence == SYNTHETIC_SANDBOX_REASON
+                else f"[WARN] {agent_name}: no {agent_name} data available "
+                "for this sample — analyst skipped."
+            )
             emit_agent_message(
                 container.event_sink,
                 speaker=agent_name,
@@ -4280,7 +4324,7 @@ def make_stage_agent_node(
                     ran=False,
                     reason=dataless,
                     agents=(agent_name,),
-                    agent_reasons={agent_name: dataless},
+                    agent_reasons={agent_name: absence},
                     dataless=True,
                 ),
             }
@@ -6865,6 +6909,21 @@ def make_judge_node(
                     ]
                 )
             )
+            # The analysts of a stage skipped for want of data had no input of
+            # their own either: each is placed where its stage stands in the
+            # team, as it stood when its own guard skipped it, so the reasons
+            # read the same.
+            _dataless_agents = {n for _k, _w, names in dataless_stages(state) for n in names}
+            if _dataless_agents:
+                _empty_set = set(_empty_analysts) | _dataless_agents
+                _empty_analysts = [
+                    name
+                    for name in dict.fromkeys(
+                        _analysis_roster(container, [*_empty_analysts, *sorted(_dataless_agents)])
+                    )
+                    if name in _empty_set
+                ]
+                _no_data_analysts |= _dataless_agents
             # D10: surface anti-emulation / anti-VM / sandbox-detection
             # signatures so the existing DEGRADED RUN banner can explain
             # the empty dynamic tab (sandbox traced nothing because the
@@ -7017,13 +7076,6 @@ def make_judge_node(
                 if name in _no_data_analysts:
                     cause = _skip_cause(container, name, container.agent_role(name), state)
                     _skipped_by_cause.setdefault(cause, []).append(name)
-            # The analysts of a stage skipped for want of data did not run
-            # either, and are said with them, by what they lacked.
-            for _key, _why, _names in dataless_stages(state):
-                for name in _names:
-                    cause = _skip_cause(container, name, container.agent_role(name), state)
-                    if name not in _skipped_by_cause.get(cause, []):
-                        _skipped_by_cause.setdefault(cause, []).append(name)
             for cause, names in _skipped_by_cause.items():
                 _degradation_reasons.append(skipped_analysts_reason(cause, names))
             if _ran_empty:
