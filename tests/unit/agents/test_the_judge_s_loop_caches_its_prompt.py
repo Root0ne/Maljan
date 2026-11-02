@@ -15,11 +15,17 @@ from __future__ import annotations
 import asyncio
 import copy
 from typing import Any
+from unittest.mock import MagicMock
 
+from langchain_core.messages import HumanMessage
 from langchain_core.outputs import ChatResult
 
+from maljan.agents.technique_facts import STANDING_FACTS_CHARS
 from maljan.llm.anthropic_history import TOOL_LOOP_TURN, Memory, prepared
 from maljan.llm.anthropic_provider import cache_control
+from maljan.pipeline.run_state import RUN_STATE_BEGIN
+from tests.unit.agents.test_standing_blocks_reach_the_prompts import FACTS
+from tests.unit.agents.test_standing_blocks_reach_the_prompts import _judge as _standing_judge
 from tests.unit.agents.test_the_judge_s_loop_is_budgeted import (
     PROMPT,
     _budget,
@@ -99,3 +105,63 @@ class TestTheJudgeLoopIsNoted:
         assert text(three, 3) == text(two, 3)
         assert three["messages"][2]["content"][-1].get("cache_control") == marker
         assert three["messages"][4]["content"][-1].get("cache_control") == marker
+
+
+class TestEachRoundReadsThePack:
+    """The mediation's turn leads with the pack and the identity, and notes how long they are.
+
+    Every round sends the same tools, system prompt and head; only the run
+    state, the reports and the history change. With the run state first,
+    haiku8's five mediations shared about 920 characters; with the head
+    first and noted (``STANDING_FACTS_CHARS``), the provider gives it a
+    breakpoint of its own (``anthropic_history``) that each later round reads.
+    """
+
+    def _turns(self, run_state: str, report: str) -> list[Any]:
+        seen: list[Any] = []
+        judge = _standing_judge([])
+
+        class _Model:
+            async def ainvoke(self, messages: Any) -> Any:
+                seen.append(list(messages))
+                return MagicMock(content="No contradictions.")
+
+        judge.llm = _Model()
+        asyncio.run(
+            judge.mediate(
+                reports={"static": report},
+                history=[],
+                isr_reports={},
+                reputation_asked=True,
+                facts_block=FACTS,
+                run_state=run_state,
+            )
+        )
+        return seen[0]
+
+    def test_two_rounds_share_the_noted_head_and_differ_after_it(self) -> None:
+        heads = []
+        for run_state, report in (("round 1 state", "first text"), ("round 2 state", "second")):
+            human = next(m for m in self._turns(run_state, report) if isinstance(m, HumanMessage))
+            size = human.response_metadata[STANDING_FACTS_CHARS]
+            text = str(human.content)
+            assert text.startswith(FACTS)
+            assert text[size:].lstrip().startswith(RUN_STATE_BEGIN)
+            heads.append(text[:size])
+        assert heads[0] == heads[1]
+
+    def test_the_first_request_writes_only_the_pack_for_an_hour(self) -> None:
+        text = "Facts established before analysis\n" + "[ev_0001] x\n" * 300
+        rest = "\n\n=== RUN STATE ===\nround 1\n=== END RUN STATE ===\n\nExpert Reports: r"
+        hour = {"type": "ephemeral", "ttl": "1h"}
+        sent = prepared(
+            {"system": "You mediate.", "messages": [{"role": "user", "content": text + rest}]},
+            Memory(),
+            bound=False,
+            cache_marker=cache_control("5m"),
+            standing={text + rest: len(text)},
+            standing_marker=hour,
+        )
+        content = sent["messages"][0]["content"]
+        assert content[0] == {"type": "text", "text": text, "cache_control": hour}
+        assert content[1] == {"type": "text", "text": rest}

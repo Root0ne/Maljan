@@ -220,9 +220,11 @@ class TestTheJudgesPrompts:
         assert seen
         assert PACK_HEADING in seen[0]
         assert RUN_STATE_BEGIN in seen[0]
+        # The pack first, the run state after it: every round sends the same
+        # head, which a provider caching a prefix reads in each later round.
         assert (
-            seen[0].index(RUN_STATE_BEGIN)
-            < seen[0].index(PACK_HEADING)
+            seen[0].index(PACK_HEADING)
+            < seen[0].index(RUN_STATE_BEGIN)
             < seen[0].index("Expert Reports:")
         )
 
