@@ -461,8 +461,14 @@ class TestRootedCommand:
         monkeypatch.setattr("mcp.StdioServerParameters", recorder)
         monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _toolkit_factory())
         (project / "srv").mkdir()
+        monkeypatch.setenv("ZQ_TOOL_HOME", "/opt/zq")
+        monkeypatch.setenv("ZQ_NOT_ASKED", "kept-back")
         config = MCPServerConfig(
-            enabled=True, transport="stdio", command="scripts/run.sh", args=["scripts/run.sh"]
+            enabled=True,
+            transport="stdio",
+            command="scripts/run.sh",
+            args=["scripts/run.sh"],
+            env_allow=["ZQ_TOOL_HOME"],
         )
         GhidraStaticProvider(config, PreprocessingConfig(), MemoryConfig()).open(StaticJobContext())
         started = recorder.call_args.kwargs
@@ -470,6 +476,9 @@ class TestRootedCommand:
         assert started["command"] == rooted
         assert started["args"] == [rooted]
         assert started["cwd"] is None
+        # The names the block lets through reach the child, as its grant holds.
+        assert started["env"]["ZQ_TOOL_HOME"] == "/opt/zq"
+        assert "ZQ_NOT_ASKED" not in started["env"]
         resolved = td._resolved_launch(config)
         assert resolved is not None
         assert resolved["command"] == os.path.realpath(started["command"])
