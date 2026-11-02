@@ -1,0 +1,3 @@
+### Fixed
+
+- **The check that every backend service which starts a tool server mounts the same trees now also reads the development overlay merged over the production file (T-459).** Each compose file was checked on its own, so an overlay that remounted a tree in one service and not in another passed although `make dev-up` would start the stack with a trust grant that holds in one service and not in the next. The overlay is now merged per service, volumes by their container path as compose merges them, and the merged stack must mount the same `/app` trees in every launching service; the per-file check stays. The current files pass unchanged.
