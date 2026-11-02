@@ -527,6 +527,10 @@ def test_annotations_flags_and_vendor_keywords_are_no_schema() -> None:
         [[{"path": {"type": "string"}}]],
         [PATH_OBJECT],
         {"type": "slider", "properties": PATH_LEAF},
+        [{"name": "path", "type": "string"}],
+        {"parameters": [{"name": "path", "schema": {"format": "uri"}}]},
+        [{"in": "query", "type": "string"}],
+        [{"label": "x", "schema": {}}],
     ],
     ids=[
         "type",
@@ -549,6 +553,10 @@ def test_annotations_flags_and_vendor_keywords_are_no_schema() -> None:
         "list-of-lists",
         "list-of-schemas",
         "ui-type-beside-properties",
+        "parameter-list-named",
+        "parameter-list-schema",
+        "parameter-list-in",
+        "member-with-schema",
     ],
 )
 @pytest.mark.parametrize("depth", [1, 3, 5])

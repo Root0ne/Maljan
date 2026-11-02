@@ -478,6 +478,9 @@ _SIGNS_OF_MAP = frozenset(
     {"properties", "patternProperties", "dependentSchemas", "dependencies", "$defs"}
 )
 _JSON_TYPES = frozenset({"string", "number", "integer", "boolean", "object", "array", "null"})
+# The keys that give a parameter list's member (``[{"name": "path", ...}]``)
+# the name of the argument it declares.
+_PARAMETER_NAMES = ("name", "in")
 
 
 def _holds_a_schema(key: Any, held: Any) -> bool:
@@ -497,14 +500,19 @@ def _schema_like(value: Any, named: bool) -> bool:
     """Whether a mapping looks like a schema.
 
     It holds a schema's keyword in that keyword's shape
-    (:func:`_holds_a_schema`), or, where it has a name an argument could take
-    (the vendor keyword's own, or its key in a map), a ``type`` naming a JSON
-    Schema type: a typed list member names no argument.
+    (:func:`_holds_a_schema`); or a parameter's ``schema`` mapping; or, where
+    it has a name an argument could take (the vendor keyword's own, its key
+    in a map, or a parameter's own ``name`` or ``in``), a ``type`` naming a
+    JSON Schema type. A typed list member that names nothing, a form field
+    with a label, names no argument.
     """
     if not isinstance(value, Mapping):
         return False
     if any(_holds_a_schema(key, held) for key, held in value.items()):
         return True
+    if isinstance(value.get("schema"), Mapping):
+        return True
+    named = named or any(key in value for key in _PARAMETER_NAMES)
     held = value.get("type")
     types = [held] if isinstance(held, str) else held if isinstance(held, list) else []
     return named and any(isinstance(t, str) and t in _JSON_TYPES for t in types)
