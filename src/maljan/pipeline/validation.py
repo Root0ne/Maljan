@@ -1341,10 +1341,12 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
     and in no more technique families' names than the rarest family stem of the
     word it would set aside ("strings XOR-encoded; not packed": "encod", two
     families, beside "pack", two). The rarest stem of the technique's own name
-    affirms whatever its count ("strings obfuscated; not packed": "obfusc",
-    three families, beside "pack", two); its commoner ones ("file", "inform")
-    never do by that alone. Read from the catalogue's names and the vendored
-    data, for every parent and child, with no number of its own."""
+    affirms whatever its count when it is written as the act
+    (:func:`_writes_the_act`): "strings obfuscated; not packed" ("obfusc",
+    three families, beside "pack", two), never "the input box" (the bare
+    stem); its commoner ones ("file", "inform") never affirm by that alone.
+    Read from the catalogue's names and the vendored data, for every parent
+    and child, with no number of its own."""
     own, others = _family_name_stems(technique_id)
     families = _name_stem_families()
     parent = "." not in str(technique_id or "")
@@ -1366,7 +1368,11 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
                 match.start()
             ):
                 affirmed.append(families.get(stem, 0))
-                own_rarest_affirmed |= stem in own and families.get(stem, 0) == own_rarest
+                own_rarest_affirmed |= (
+                    stem in own
+                    and families.get(stem, 0) == own_rarest
+                    and _writes_the_act(match.group(0), stem)
+                )
         if not affirmed:
             return lambda _mention: False
 
@@ -1380,6 +1386,20 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
         return own_rarest_affirmed or any(count <= rarest for count in affirmed)
 
     return another_s
+
+
+# The endings that write a stem as an act or its doing: "obfuscated",
+# "obfuscation", "injecting". A stem written bare ("input", "indicator") or
+# as a plural names a thing, not the technique's act.
+_ACT_ENDINGS = frozenset(
+    {"ed", "ing", "ings", "ion", "ions", "ation", "ations", "ated", "ating", "ates"}
+)
+
+
+def _writes_the_act(word: str, stem: str) -> bool:
+    """Whether ``word`` writes ``stem`` with one of the ``_ACT_ENDINGS``."""
+    lowered = word.lower()
+    return lowered.startswith(stem) and lowered[len(stem) :] in _ACT_ENDINGS
 
 
 CLAIM_DOES_NOT_DESCRIBE_CODE = "attck.claim_does_not_describe"
