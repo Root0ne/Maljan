@@ -89,6 +89,10 @@ def test_the_rarest_word_of_the_parent_s_own_name_sets_a_child_s_word_aside(text
         ("Not packed; information is collected.", "T1027"),
         # The parent's rarest own word, negated, affirms nothing.
         ("Not packed; nothing is obfuscated.", "T1027"),
+        ("Not packed; free of obfuscation.", "T1027"),
+        ("Not packed; obfuscation-free.", "T1027"),
+        ("Not packed; obfuscation is unlikely.", "T1027"),
+        ("Not packed; obfuscated strings: none.", "T1027"),
         # The parent's rarest own word written bare names a thing, not the act.
         ("No keylogging; the input box is shown.", "T1056"),
         ("No keylogging; the input file is read.", "T1056"),

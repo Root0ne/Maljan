@@ -1342,11 +1342,12 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
     word it would set aside ("strings XOR-encoded; not packed": "encod", two
     families, beside "pack", two). The rarest stem of the technique's own name
     affirms whatever its count when it is written as the act
-    (:func:`_writes_the_act`): "strings obfuscated; not packed" ("obfusc",
-    three families, beside "pack", two), never "the input box" (the bare
-    stem); its commoner ones ("file", "inform") never affirm by that alone.
-    Read from the catalogue's names and the vendored data, for every parent
-    and child, with no number of its own."""
+    (:func:`_writes_the_act`) and no negating word follows it in its clause
+    (:func:`_negated_after`): "strings obfuscated; not packed" ("obfusc", three
+    families, beside "pack", two), never "the input box" (the bare stem) or
+    "obfuscation is unlikely"; its commoner ones ("file", "inform") never
+    affirm by that alone. Read from the catalogue's names and the vendored
+    data, for every parent and child, with no number of its own."""
     own, others = _family_name_stems(technique_id)
     families = _name_stem_families()
     parent = "." not in str(technique_id or "")
@@ -1372,6 +1373,7 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
                     stem in own
                     and families.get(stem, 0) == own_rarest
                     and _writes_the_act(match.group(0), stem)
+                    and not _negated_after(text, match.start(), match.end())
                 )
         if not affirmed:
             return lambda _mention: False
@@ -1394,12 +1396,34 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
 _ACT_ENDINGS = frozenset(
     {"ed", "ing", "ings", "ion", "ions", "ation", "ations", "ated", "ating", "ates"}
 )
+# The words after a word in its clause that deny it ("obfuscation is
+# unlikely", "obfuscation-free", "obfuscated strings: none"), beside the
+# negations (``_NEGATIONS``).
+_FOLLOWING_NEGATIONS = frozenset({"free", "none", "unlikely", "absent"})
+# Where a clause that follows a word ends; a colon does not end it, so
+# "obfuscated strings: none" is one clause.
+_FOLLOWING_CLAUSE_END_RE = re.compile(
+    r"[.;!?,(\n]|\b(?:and|but|while|whereas|although|though)\b", re.IGNORECASE
+)
+# "free of" or "free from" just before a word denies it ("free of obfuscation").
+_FREE_OF_BEFORE_RE = re.compile(r"\bfree\s+(?:of|from)\s+(?:\w+\s+)?$", re.IGNORECASE)
 
 
 def _writes_the_act(word: str, stem: str) -> bool:
     """Whether ``word`` writes ``stem`` with one of the ``_ACT_ENDINGS``."""
     lowered = word.lower()
     return lowered.startswith(stem) and lowered[len(stem) :] in _ACT_ENDINGS
+
+
+def _negated_after(text: str, start: int, end: int) -> bool:
+    """Whether a negating word follows ``text[start:end]`` in its clause, or
+    "free of" stands just before it."""
+    if _FREE_OF_BEFORE_RE.search(text[:start]):
+        return True
+    tail = text[end:]
+    cut = _FOLLOWING_CLAUSE_END_RE.search(tail)
+    words = re.findall(r"[A-Za-z]+", tail[: cut.start()] if cut else tail)
+    return bool({word.lower() for word in words} & (_NEGATIONS | _FOLLOWING_NEGATIONS))
 
 
 CLAIM_DOES_NOT_DESCRIBE_CODE = "attck.claim_does_not_describe"
