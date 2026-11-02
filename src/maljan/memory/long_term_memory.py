@@ -295,6 +295,12 @@ class FunctionHashIndex(Protocol):
 ISOLATED_JOB_SCOPE = "/job/"
 
 
+# The separator of an owner key's path segments: a job's own key is filed
+# below its account's (``<account>/job/<job id>``), and a purge by owner
+# prefix reads the segments (:func:`owner_under`).
+OWNER_PATH_SEPARATOR = "/"
+
+
 def owner_key(owner: Any) -> str | None:
     """The owner as entries are filed under it, or ``None`` for unscoped."""
     text = str(owner).strip() if owner is not None else ""
@@ -318,6 +324,35 @@ def memory_owner_for(created_by: Any, job_id: Any, isolated: bool) -> str:
     if not job:
         raise ValueError("an isolated job's memory owner needs the job's id")
     return f"{created_by}{ISOLATED_JOB_SCOPE}{job}"
+
+
+def owner_prefix_key(prefix: Any) -> str | None:
+    """``prefix`` as the owner path a purge by owner reads (:func:`owner_under`).
+
+    ``None`` when it names no owner path: empty, or separators alone. One
+    trailing separator is not part of the path: ``<uid>/job/`` and
+    ``<uid>/job`` name the same owners.
+    """
+    text = str(prefix).strip() if prefix is not None else ""
+    if text.endswith(OWNER_PATH_SEPARATOR):
+        text = text[: -len(OWNER_PATH_SEPARATOR)]
+    return text if text.strip(OWNER_PATH_SEPARATOR) else None
+
+
+def owner_under(owner: Any, prefix: Any) -> bool:
+    """Whether ``owner`` is the owner path ``prefix`` names, or one filed below it.
+
+    Read a path segment at a time, never as a bare string prefix: ``<uid>/job/``
+    names ``<uid>/job/<job id>`` and never ``<uid>`` itself, ``<uid>/jobs`` or
+    another account whose key merely begins with the same characters. An
+    unscoped entry (no owner) is under no prefix, and a prefix that names no
+    owner path (:func:`owner_prefix_key`) names nothing.
+    """
+    key = owner_key(owner)
+    base = owner_prefix_key(prefix)
+    if key is None or base is None:
+        return False
+    return key == base or key.startswith(base + OWNER_PATH_SEPARATOR)
 
 
 def keeps_owners(store: Any) -> bool:

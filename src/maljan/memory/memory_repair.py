@@ -284,6 +284,51 @@ def repair_memory(store: Any) -> str:
     return str(repair())
 
 
+def purge_owned_points(client: Any, collection: str, prefix: str, *, dry_run: bool) -> int:
+    """Delete every point of ``collection`` filed under an owner at or below ``prefix``.
+
+    The number of such points; with ``dry_run`` they are counted and kept. The
+    owned points are read a page at a time, their owner alone, and each is
+    matched by the one prefix rule (``long_term_memory.owner_under``), so an
+    owner that only shares characters with the prefix and every unscoped point
+    stay. Deleted a page at a time; a failure raises, with the points of the
+    pages before it already gone. A collection that does not exist holds none.
+    """
+    from qdrant_client.models import Filter, IsEmptyCondition, PayloadField, PointIdsList
+
+    from maljan.memory.long_term_memory import owner_prefix_key, owner_under
+    from maljan.memory.qdrant_store import OWNER_KEY
+
+    if owner_prefix_key(prefix) is None:
+        raise ValueError("an owner prefix is required to purge by owner")
+    if collection not in _collections(client):
+        return 0
+    owned = Filter(must_not=[IsEmptyCondition(is_empty=PayloadField(key=OWNER_KEY))])
+    doomed: list[Any] = []
+    offset: Any = None
+    while True:
+        points, offset = client.scroll(
+            collection_name=collection,
+            scroll_filter=owned,
+            limit=_PAGE,
+            offset=offset,
+            with_payload=[OWNER_KEY],
+            with_vectors=False,
+        )
+        doomed.extend(p.id for p in points if owner_under((p.payload or {}).get(OWNER_KEY), prefix))
+        if offset is None:
+            break
+    if not dry_run:
+        # After the walk, so a deleted page never moves the scroll's offset.
+        for start in range(0, len(doomed), _PAGE):
+            client.delete(
+                collection_name=collection,
+                points_selector=PointIdsList(points=doomed[start : start + _PAGE]),
+                wait=True,
+            )
+    return len(doomed)
+
+
 def _ownerless_pages(client: Any, collection: str) -> Any:
     """Every ownerless point of ``collection`` with payload and vector, a page at a time."""
     from qdrant_client.models import Filter, IsEmptyCondition, PayloadField

@@ -25,7 +25,13 @@ When to upgrade to QdrantStore:
 from __future__ import annotations
 
 from maljan.memory.embeddings import cosine, encode_with_backend, model_backend_id
-from maljan.memory.long_term_memory import MemoryStoreDefaults, StoredCase, owner_key
+from maljan.memory.long_term_memory import (
+    MemoryStoreDefaults,
+    StoredCase,
+    owner_key,
+    owner_prefix_key,
+    owner_under,
+)
 
 
 class InMemoryStore(MemoryStoreDefaults):
@@ -170,6 +176,21 @@ class InMemoryStore(MemoryStoreDefaults):
         before = len(self._cases)
         self._cases = [entry for entry in self._cases if not _low_quality(entry[0])]
         return before - len(self._cases)
+
+    def purge_owners(self, prefix: str, *, dry_run: bool = False) -> dict[str, int]:
+        """Drop every case filed under an owner at or below ``prefix`` (``owner_under``).
+
+        ``function_hashes`` is always 0: this store keeps none. ``dry_run``
+        only counts. A prefix that names no owner path is refused.
+        """
+        if owner_prefix_key(prefix) is None:
+            raise ValueError("an owner prefix is required to purge by owner")
+        doomed = [entry for entry in self._cases if owner_under(entry[0].owner, prefix)]
+        if not dry_run and doomed:
+            self._cases = [
+                entry for entry in self._cases if not owner_under(entry[0].owner, prefix)
+            ]
+        return {"cases": len(doomed), "function_hashes": 0}
 
     def __repr__(self) -> str:
         return f"InMemoryStore(count={self.count()})"

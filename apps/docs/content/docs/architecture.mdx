@@ -4004,6 +4004,20 @@ already holds the same case the newer copy by `created_at` is kept, and a
 sample's function hashes are kept from one side only. Run it while no jobs are
 running.
 
+Memory filed under an owner key nothing reads again (a job's own key below its
+account's, `<account>/job/<job id>`) is removed with
+`POST /system/ltm/purge-owners` (`{"owner_prefix": ..., "dry_run": ...}`,
+admin, like the low-quality purge): every case and function hash filed under
+an owner at or below the prefix goes, from the in-memory store, from Qdrant and
+from the function-hash collection beside it, and the answer gives the counts
+per kind; a dry run counts and removes nothing. The prefix is read a path
+segment at a time (`long_term_memory.owner_under`): `<uid>/job/` names that
+account's job memory and never the account's own key, `<uid>/jobs`, another
+account whose id begins with the same characters, or an unscoped entry. A
+prefix that names no owner path and a backend that cannot purge by owner are
+refused. The call leaves an `ltm.purge` audit row with the prefix and the
+counts, or `outcome=failed` with the error class and what the store lost.
+
 ## The evidence ledger
 
 Every tool call an analysis makes is written down as it happens. The tool loop
