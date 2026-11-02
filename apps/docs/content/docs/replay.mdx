@@ -28,6 +28,9 @@ written), `events.json` and `job.json`. Several runs may be named at once.
 `--work` or `--job-dir`) is refused. The exit status is 0 when every part
 replayed or was named as not replayable, and 2 when a part raised: a crash is
 not a decision, and the part that raised is printed first, marked `[raised]`.
+A replay over many runs can be held to a memory cap with
+`python scripts/dev/run_capped.py -- python scripts/replay/run.py …` (see
+[Development](/development/#heavy-local-runs-in-a-capped-scope)).
 
 `--job ID` reads a job from the database instead (`--database-url`, else
 `DATABASE_URL`, else the API's bootstrap setting), in one transaction set

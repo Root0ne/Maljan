@@ -20,7 +20,8 @@ Maljan/
 ├── services/          stdio MCP sidecars, one server.py each
 ├── scripts/
 │   ├── ci/            the uv.lock dependency-graph submission the workflow runs
-│   ├── dev/           fetch_external.sh and the Ghidra image manager
+│   ├── dev/           fetch_external.sh, the Ghidra image manager and
+│   │                  run_capped.py, the capped scope for heavy local runs
 │   ├── goldens/       capture scripts that write tests/fixtures/golden/, plus
 │   │                  render_team_graphs.py, which draws the team-*.svg diagrams
 │   └── knowledge/     builders for the data/ assets
@@ -104,6 +105,54 @@ on loopback port 8080.
 
 The evaluation harness behind the earlier measurements is no longer part of
 this tree; the [benchmark](/benchmark/) holds the current results.
+
+### Heavy local runs in a capped scope
+
+A benchmark or observation run against the local model, a replay over many
+stored runs or a large test suite can fill the host's memory, and when it runs
+out the whole desktop session goes with it, not only the run. On a host with
+the systemd user manager, run such a command through
+`scripts/dev/run_capped.py`; nothing runs this way unless asked:
+
+```bash
+python scripts/dev/run_capped.py -- python scripts/replay/run.py runs/haiku7 runs/haiku8
+python scripts/dev/run_capped.py --memory 8G --floor 4G -- uv run pytest tests/unit -q
+```
+
+It starts the command with `systemd-run --user --scope` in a transient scope
+whose unit name it prints, under a hard memory cap (`--memory`, default
+`12G`, refused at or above the host's memory), no swap (`MemorySwapMax=0`), a
+task ceiling (`--tasks`, default 4096) and a CPU quota (`--cpu`, a percentage,
+default three quarters of the host's CPUs). `--unit` names the scope (default
+`maljan-capped-<pid>-<time>`); it must not name a unit that is already loaded,
+and such a name is refused rather than shared.
+
+A watcher polls the scope, and acts only once it has seen the command's own
+process in it. On that first poll it reads the caps back from the scope's
+control group (`memory.max`, `memory.swap.max`, `pids.max`, `cpu.max`) and,
+when one was accepted but not enforced, kills the scope and exits 2. On every
+poll it keeps the scope's memory events and stops the scope when the host's
+`MemAvailable` falls below `--floor` (default `3G`; a floor at or above what is
+available at start is refused), which holds the host against everything that
+runs beside the command, a local model server included; `--no-watch` turns the
+floor off. A watcher that fails says so. SIGTERM or SIGHUP to the wrapper
+stops the scope too. When the command ends the wrapper prints its exit status,
+systemd's result for a scope that failed (`oom-kill`, for one), whether the
+watcher stopped it, and the memory events at the watcher's last poll (`high`,
+`max`, `oom`, `oom_kill`). `--dry-run` prints the `systemd-run` line and starts
+nothing.
+
+The wrapper follows the command's main process. When that process exits but
+leaves children running in the background, the scope stays alive after the
+wrapper has returned: still under its caps, but with no floor and no report.
+Stop it with `systemctl --user stop <unit>.scope` (the name is printed at start).
+
+Where the caps cannot be enforced (no `systemd-run`, no user manager, a
+`memory`, `pids` or `cpu` controller not delegated to it, or no swap
+accounting, where systemd would accept the cap and enforce nothing) the
+wrapper exits 2 and says why, without running the command. Only
+`--allow-uncapped` skips that requirement: it runs the command anyway, with a
+line on standard error that it runs uncapped.
 
 ### Native runs pin `LC_CTYPE`
 
