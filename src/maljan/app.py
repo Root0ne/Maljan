@@ -84,6 +84,7 @@ class MaljanApp:
         remember_secrets: bool = True,
         memory_owner: str | None = None,
         ignore_earlier_runs: bool = False,
+        isolated_memory: bool = False,
     ) -> None:
         self.config = config or Settings()
         # The secrets these settings hold are masked by value wherever the
@@ -108,6 +109,9 @@ class MaljanApp:
             # Whether the job starts without an earlier run's memory of its
             # sample (``long_term_memory.earlier_case_of``).
             ignore_earlier_runs=ignore_earlier_runs,
+            # Whether ``memory_owner`` is the job's own key, which the caller
+            # derived (``long_term_memory.memory_owner_for``).
+            isolated_memory=isolated_memory,
         )
         self.graph = build_graph(self.container)
         # Whether the caller already listed the servers this run reads as its

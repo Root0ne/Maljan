@@ -282,12 +282,42 @@ class FunctionHashIndex(Protocol):
 # - A backend that cannot keep owners (``keeps_owners`` false) is neither
 #   written to nor read from by a job with an owner.
 # - A read with no job behind it (no container) reads nothing (``NO_MEMORY``).
+# - A job submitted with isolated memory (the job option ``isolated_memory``)
+#   has an owner of its own, the account's key with the job's id after it
+#   (:func:`memory_owner_for`): every reader above reads only what that job
+#   wrote, which is nothing before it completes, and its own case is filed
+#   under that key, so it never replaces the account's case of the sample.
+
+# What joins the account's key and the job's id in an isolated job's owner.
+# Never the stores' owner/sample separator (``\x1f``, ``qdrant_store._case_id``
+# and ``function_hash_store._point_id``), and never in an account's key (a
+# UUID), so no account's key is an isolated job's.
+ISOLATED_JOB_SCOPE = "/job/"
 
 
 def owner_key(owner: Any) -> str | None:
     """The owner as entries are filed under it, or ``None`` for unscoped."""
     text = str(owner).strip() if owner is not None else ""
     return text or None
+
+
+def memory_owner_for(created_by: Any, job_id: Any, isolated: bool) -> str:
+    """The owner a job's long-term memory is filed under, for the job's creator.
+
+    Off, the creator's key exactly as it always was (``str(created_by)``). On,
+    a key owned by this job alone (``<created_by>/job/<job_id>``): what the
+    account's other jobs stored, for this sample or any other, is never read
+    for it. Strict, as the job option is: anything but a bool is refused, and
+    so is an isolated job without an id, whose key every such job would share.
+    """
+    if not isinstance(isolated, bool):
+        raise TypeError(f"isolated must be a bool, not {type(isolated).__name__}")
+    if not isolated:
+        return str(created_by)
+    job = str(job_id if job_id is not None else "").strip()
+    if not job:
+        raise ValueError("an isolated job's memory owner needs the job's id")
+    return f"{created_by}{ISOLATED_JOB_SCOPE}{job}"
 
 
 def keeps_owners(store: Any) -> bool:

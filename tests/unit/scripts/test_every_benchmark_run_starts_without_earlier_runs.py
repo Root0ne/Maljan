@@ -17,36 +17,47 @@ from typing import Any
 
 import pytest
 from scripts.benchmark import earlier_runs
-from scripts.benchmark.jobs import IGNORE_EARLIER_RUNS, job_config
+from scripts.benchmark.jobs import IGNORE_EARLIER_RUNS, ISOLATED_MEMORY, SWITCHES, job_config
 from scripts.benchmark.run import main
 from scripts.benchmark.scores import read_key_score
 
 from app.schemas.job import JobCreateRequest, _KnownJobConfig
 
 
-def test_the_option_is_the_one_the_submit_schema_knows() -> None:
-    assert IGNORE_EARLIER_RUNS in _KnownJobConfig.model_fields
+def test_the_options_are_the_ones_the_submit_schema_knows() -> None:
+    assert SWITCHES == (IGNORE_EARLIER_RUNS, ISOLATED_MEMORY)
+    assert set(SWITCHES) <= set(_KnownJobConfig.model_fields)
     body = JobCreateRequest(
         sample_id="00000000-0000-0000-0000-000000000001", config=job_config({"profile": "x"})
     )
-    assert body.config == {"profile": "x", "ignore_earlier_runs": True}
+    assert body.config == {"profile": "x", "ignore_earlier_runs": True, "isolated_memory": True}
 
 
 @pytest.mark.parametrize(
-    "options", [None, {}, {"profile": "all_tools"}, {"ignore_earlier_runs": False}]
+    "options",
+    [
+        None,
+        {},
+        {"profile": "all_tools"},
+        {"ignore_earlier_runs": False},
+        {"isolated_memory": False},
+        {"ignore_earlier_runs": False, "isolated_memory": False, "profile": "p"},
+    ],
 )
-def test_every_run_s_config_sets_the_switch(options: dict | None) -> None:
+def test_every_run_s_config_sets_both_switches(options: dict | None) -> None:
     config = job_config(options)
     assert config[IGNORE_EARLIER_RUNS] is True
-    assert {k: v for k, v in config.items() if k != IGNORE_EARLIER_RUNS} == {
-        k: v for k, v in (options or {}).items() if k != IGNORE_EARLIER_RUNS
+    assert config[ISOLATED_MEMORY] is True
+    assert {k: v for k, v in config.items() if k not in SWITCHES} == {
+        k: v for k, v in (options or {}).items() if k not in SWITCHES
     }
 
 
 def test_only_an_explicit_choice_keeps_the_earlier_runs() -> None:
-    assert job_config({"profile": "p", "ignore_earlier_runs": True}, earlier_runs=True) == {
-        "profile": "p"
-    }
+    # A job with memory of its own reads no earlier run either: both go.
+    assert job_config(
+        {"profile": "p", "ignore_earlier_runs": True, "isolated_memory": True}, earlier_runs=True
+    ) == {"profile": "p"}
 
 
 def test_the_options_handed_in_are_not_changed() -> None:
@@ -60,9 +71,13 @@ def test_the_command_line_prints_the_config(capsys: pytest.CaptureFixture[str]) 
     assert json.loads(capsys.readouterr().out) == {
         "profile": "all_tools",
         "ignore_earlier_runs": True,
+        "isolated_memory": True,
     }
     assert main(["job-config"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"ignore_earlier_runs": True}
+    assert json.loads(capsys.readouterr().out) == {
+        "ignore_earlier_runs": True,
+        "isolated_memory": True,
+    }
     assert main(["job-config", "--with-earlier-runs"]) == 0
     assert json.loads(capsys.readouterr().out) == {}
 

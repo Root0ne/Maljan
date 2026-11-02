@@ -323,8 +323,13 @@ def test_the_intel_off_arm_withholds_every_server_declaring_a_lookup() -> None:
     assert "plain" not in derived["withheld"]
     assert derived["withheld_with_them"]["oracle"] == ["peek"]
     assert derived["definition"]["exclude_servers"] == sorted(derived["withheld"])
-    # A benchmark arm starts without an earlier run's memory, as every benchmark run does.
-    assert derived["job_config"] == {"profile": "default_intel_off", "ignore_earlier_runs": True}
+    # A benchmark arm starts without an earlier run's memory and with memory of
+    # its own, as every benchmark run does.
+    assert derived["job_config"] == {
+        "profile": "default_intel_off",
+        "ignore_earlier_runs": True,
+        "isolated_memory": True,
+    }
     assert derived["settings_key"] == "agents.profiles.default_intel_off"
     assert derived["not_withheld"] == []
     # A profile that already withholds every server withholds the lookups too.

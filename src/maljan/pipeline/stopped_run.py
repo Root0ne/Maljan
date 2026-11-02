@@ -184,6 +184,7 @@ def _built_summary(
             )
             .set_operator_choices(list(state.get("operator_choices") or []))
             .set_earlier_runs_ignored(getattr(container, "ignore_earlier_runs", False) is True)
+            .set_isolated_memory(getattr(container, "isolated_memory", False) is True)
         ),
     )
     _part("profile", _profile)
