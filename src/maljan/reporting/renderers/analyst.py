@@ -39,6 +39,7 @@ from maljan.reporting.composer_pro import (
 )
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.defang import defang
+from maljan.reporting.detection_signatures import analyst_print_gate, precision_line
 from maljan.reporting.judge_reasons import judge_reasons_shown
 from maljan.reporting.models import MalwareReport, TechnicalSubsection, outcome_words
 from maljan.reporting.renderers.layout import BUNDLE_HTML, BUNDLE_JSON
@@ -1191,8 +1192,11 @@ class _Analyst:
         lines = [_heading(8, "Detection"), ""]
         lines.extend(self._indicators())
         lines.extend(self._rules())
+        from maljan.reporting.detection_signatures import hunting_query
+
         hunting = [rec for rec in self.report.defensive_recommendations if rec.detection]
-        if hunting:
+        query = hunting_query(self.report)
+        if hunting or query:
             lines.extend(["### 8.3 Hunting guidance", ""])
             lines.extend(
                 _item(
@@ -1201,7 +1205,22 @@ class _Analyst:
                 )
                 for rec in hunting
             )
-            lines.append("")
+            if hunting:
+                lines.append("")
+        if query:
+            lines.extend(
+                [
+                    "Hunting query: the requests the sample's code sends, to any host but the "
+                    "ones published above; a match is a candidate for more of its "
+                    "infrastructure. Built from the published user agents and URL paths, in "
+                    "neutral field names to map to a web proxy's log, and not run against any "
+                    "log.",
+                    "",
+                ]
+            )
+            fenced = _fenced("\n".join(query), "text")
+            fenced[1] = self.ctx.keep(fenced[1])
+            lines.extend([*fenced, ""])
         return "\n".join([*lines, _behind("detection")])
 
     def _indicators(self) -> list[str]:
@@ -1231,10 +1250,14 @@ class _Analyst:
                 if ioc.kind in _NETWORK_KINDS
                 else ctx.plain(ioc.value)
             )
+            # A value the code passes to an API argument publishes with the
+            # chain that binds it, printed after the row's context.
+            chain = _bound_chain(ioc) if exported else ""
             role = "; ".join(
                 part
                 for part in (
                     ctx.inline(ioc.context) if ioc.context else "",
+                    self._line(chain) if chain else "",
                     f"recovered by {ctx.inline(ioc.recovered_by)}" if ioc.recovered_by else "",
                 )
                 if part
@@ -1292,9 +1315,12 @@ class _Analyst:
         """Each drafted rule by name and what checking it against the sample found.
 
         A rule a file engine ran against the sample prints its body in the
-        appendix only where it matched; one no engine runs on a file (a
-        behaviour or traffic rule) prints its body there too. A rule that did
-        not match, or did not compile, is named here and printed in the bundle.
+        appendix only where its strings matched it; one no engine runs on a
+        file (a behaviour or traffic rule) prints its body there too. Each
+        printed rule carries a Precision line (``precision_line``). A rule that
+        matched by its hash alone, was not checked, did not match or did not
+        compile is named here with the reason (``analyst_print_gate``) and
+        printed in the bundle.
         """
         from maljan.reporting.renderers.markdown import _RULE_SECTIONS
 
@@ -1322,11 +1348,18 @@ class _Analyst:
         for rule in rules:
             kind = _one_line(rule.kind).upper()
             status = "does not compile" if rule.compile_error else "compiles"
-            said = f"**{kind}** {_code_span(_one_line(rule.name))} — {status}"
+            said = f"**{kind}** {_code_span(_one_line(rule.name))} — {status}."
             checked = _sample_check_line(rule, self.ctx)
             if checked:
-                said += f". {checked}"
-            lines.append(_item(said + ("" if self._printed(rule) else " Printed in the bundle.")))
+                said += f" {checked}"
+            # A body printed here carries what it was measured on; one that is
+            # not says why, and the bundle prints it.
+            why = analyst_print_gate(rule)
+            if why is None:
+                said += f" {precision_line(rule)}"
+            else:
+                said += f" Not printed here: {why}; its body is in the bundle."
+            lines.append(_item(said))
         if any(self._printed(rule) for rule in rules):
             lines.extend(
                 ["", "The rule bodies are in the appendix. Test a rule before deploying it."]
@@ -1335,9 +1368,7 @@ class _Analyst:
 
     @staticmethod
     def _printed(rule: Any) -> bool:
-        if rule.compile_error:
-            return False
-        return rule.matches_sample is not False
+        return analyst_print_gate(rule) is None
 
     # -- 9. recommendations ------------------------------------------------
 
@@ -1622,3 +1653,18 @@ class _Analyst:
             ]
         )
         return "\n".join(lines)
+
+
+def _bound_chain(ioc: Any) -> str:
+    """The chain a value the code passes to an API argument publishes with, or ``""``.
+
+    The publish answer's reason on a row of the call-binding source
+    (``reporting.call_bindings``): the call, the argument and every link that
+    binds the decoded text to it. Any other row gives ``""``.
+    """
+    from maljan.reporting.call_bindings import BOUND_SOURCE
+
+    if str(getattr(ioc, "source", "") or "") != BOUND_SOURCE:
+        return ""
+    answer = str(getattr(ioc, "published", "") or "")
+    return answer.split(":", 1)[1].strip() if ":" in answer else ""

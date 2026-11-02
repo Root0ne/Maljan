@@ -1256,6 +1256,29 @@ class EmulatedStrings(BaseModel):
     spelled: dict[str, str] = Field(default_factory=dict)
 
 
+class CodeConstant(BaseModel):
+    """A 32-bit value the sample stores in its own bytes that a tool read and named.
+
+    Built from the ledger at build time (``reporting.code_constants``): a
+    decoder's stated seed, kept in the header of each string it decoded, or a
+    value the code compares with a computed hash to find a function by name.
+    ``value`` is the number as the tool wrote it (``0x33629d40``), stored
+    little-endian; ``meaning`` says what the tool read it as, in a few words;
+    ``entry`` and ``tool`` are the answer that states it; ``first_offset`` is
+    the first file offset that answer gives for it and ``places`` how many it
+    gives. A drafted YARA rule matches on these bytes (``detection_signatures``).
+    """
+
+    model_config = _STRICT_CONFIG
+
+    value: str
+    meaning: str
+    entry: str = ""
+    tool: str = ""
+    first_offset: str = ""
+    places: int = 0
+
+
 class BoundValue(BaseModel):
     """A decoded text the code passes whole to an API argument of a known role.
 
@@ -1795,6 +1818,14 @@ class MalwareReport(BaseModel):
     # (``reporting.call_bindings``). Empty, and left out of the dump, on a
     # report stored before it existed or a run that bound none.
     bound_values: list[BoundValue] = Field(default_factory=list, exclude_if=lambda value: not value)
+    # Each 32-bit value the sample stores that a tool read as a decoder's seed
+    # or a function-name hash, built from the ledger at build time
+    # (``reporting.code_constants``): what a drafted YARA rule matches on
+    # beside the published indicators. Empty, and left out of the dump, on a
+    # report stored before it existed or a run whose tools read none.
+    code_constants: list[CodeConstant] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
     # For every value an analyst's artifact lists, lower-cased: the tool
     # answers of the run that hold it whole, as ``(entry id, tool)``, and an
     # empty list when the ledger search found none. Built at build time from
