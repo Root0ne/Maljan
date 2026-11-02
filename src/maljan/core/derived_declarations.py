@@ -469,7 +469,18 @@ def _names_beside(form: Mapping[str, Any]) -> Iterator[str]:
             yield from (value for value in held if isinstance(value, str))
 
 
-def _children(form: Mapping[str, Any], name: str | None) -> Iterator[_Child]:
+# The keywords that make a vendor's ``x-`` value read as a schema.
+_SCHEMA_SIGNS = ("type", "properties", "items", _REF)
+
+
+def _vendor_schema(value: Any) -> bool:
+    """Whether a vendor's ``x-`` value looks like a schema: a mapping holding a schema's keyword."""
+    return isinstance(value, Mapping) and any(sign in value for sign in _SCHEMA_SIGNS)
+
+
+def _children(
+    form: Mapping[str, Any], name: str | None, *, trusted: bool = False
+) -> Iterator[_Child]:
     """The schemas a form holds, each with the argument it belongs to and how it is named.
 
     Its alternatives, items (``items``, ``prefixItems``, ``additionalItems``,
@@ -484,7 +495,9 @@ def _children(form: Mapping[str, Any], name: str | None) -> Iterator[_Child]:
     (an empty schema), a ``false`` one none; any other value where a schema
     belongs is yielded as ``None``, which the walk cannot read, and so is a
     mapping or a flag under a keyword not in :data:`_KNOWN_KEYWORDS` nor a
-    vendor's ``x-`` one. The values of a free-form map
+    vendor's ``x-`` one, and, unless the server is ``trusted``, a vendor's
+    value that looks like a schema (:func:`_vendor_schema`): an untrusted
+    server could hide an argument there. The values of a free-form map
     (``additionalProperties`` or ``unevaluatedProperties`` of ``true`` or
     ``{}``) are read by their object's name instead. Each argument the form
     names only outside ``properties`` (:func:`_names_beside`) is one of its
@@ -554,13 +567,15 @@ def _children(form: Mapping[str, Any], name: str | None) -> Iterator[_Child]:
         if named not in listed:
             yield named, _ANY, True, False
     # A keyword the walk does not know that holds a schema or a map of them
-    # could hold an argument it cannot read.
+    # could hold an argument it cannot read; so could an untrusted server's
+    # vendor keyword whose value looks like a schema.
     for key, value in form.items():
-        if (
-            isinstance(value, (Mapping, bool))
-            and key not in _KNOWN_KEYWORDS
-            and not str(key).startswith("x-")
-        ):
+        if key in _KNOWN_KEYWORDS:
+            continue
+        if str(key).startswith("x-"):
+            if not trusted and _vendor_schema(value):
+                yield name, None, False, False
+        elif isinstance(value, (Mapping, bool)):
             yield name, None, False, False
 
 
@@ -578,7 +593,9 @@ def _carries(child_name: str | None, child: Mapping[str, Any] | None, unnamed: b
     return _could_carry(child_name, child)
 
 
-def _walk(input_schema: Any) -> tuple[list[tuple[str, Mapping[str, Any]]], bool]:
+def _walk(
+    input_schema: Any, *, trusted: bool = False
+) -> tuple[list[tuple[str, Mapping[str, Any]]], bool]:
     """Every argument, by its name and each schema it may take, and whether the rest could carry.
 
     Nested objects are read at any depth (:func:`_children`). Local
@@ -599,7 +616,9 @@ def _walk(input_schema: Any) -> tuple[list[tuple[str, Mapping[str, Any]]], bool]
     argument's name is kept among the arguments, so the name rules still read
     it); or a value where a schema belongs is no schema; or an
     argument with no name of its own (:func:`_children`) has a schema whose
-    type does not say it holds no path and no bytes (:func:`_carries`).
+    type does not say it holds no path and no bytes (:func:`_carries`); or,
+    unless the server is ``trusted``, a vendor's ``x-`` value looks like a
+    schema (:func:`_children`). The arguments are the same either way.
     """
     refs = _References(input_schema)
     out: list[tuple[str, Mapping[str, Any]]] = []
@@ -658,7 +677,7 @@ def _walk(input_schema: Any) -> tuple[list[tuple[str, Mapping[str, Any]]], bool]
             out.append((name, schema))
         opens = id(schema) not in expanded
         expanded.add(id(schema))
-        children = _children(schema, name)
+        children = _children(schema, name, trusted=trusted)
         for child_name, child, starts, unnamed in children:
             if starts and not opens:
                 continue
@@ -760,6 +779,9 @@ class _Listed:
     # Whether the walk stopped at a cap with something unread that could take
     # a path or the file's content (``_walk``): the tool is read as sending.
     unread: bool
+    # Whether only an untrusted server's reading leaves something unread: a
+    # vendor's ``x-`` value that looks like a schema (``_children``).
+    vendor_unread: bool
     props: Mapping[str, Mapping[str, Any]]
     roles: Mapping[str, str]
     required: tuple[str, ...]
@@ -784,12 +806,16 @@ def _listed(definition: Any) -> _Listed:
     words = _tokens(name)
     input_schema = _get(definition, "inputSchema")
     roles, required = _roles(input_schema)
-    arguments, unread = _walk(input_schema)
+    arguments, vendor_unread = _walk(input_schema)
+    # A trusted server's reading leaves no more unread than an untrusted one's,
+    # so it is walked again only where the untrusted reading left something.
+    unread = vendor_unread and _walk(input_schema, trusted=True)[1]
     return _Listed(
         name=name,
         hints=_plain(_get(definition, "annotations")),
         arguments=tuple(arguments),
         unread=unread,
+        vendor_unread=vendor_unread and not unread,
         props=_properties(input_schema),
         roles=roles,
         required=required,
@@ -800,7 +826,7 @@ def _listed(definition: Any) -> _Listed:
 
 
 def _discloses(tool: _Listed, *, trusted: bool = False) -> bool:
-    if tool.unread:
+    if tool.unread or (not trusted and tool.vendor_unread):
         return True
     # A name an untrusted server spells with letters its words cannot be read
     # by could name a path or the file's content (``_foreign``).
@@ -836,7 +862,8 @@ def discloses(definition: Any, *, trusted: bool = False) -> bool:
     to read whole, whose unread rest could take a path or the file's
     content, or an argument whose reference cannot be followed, is read as
     sending, whatever its hints; so is an untrusted server's argument whose
-    name holds letters outside ASCII even NFKC-normalised.
+    name holds letters outside ASCII even NFKC-normalised, and an untrusted
+    server's tool with a vendor ``x-`` keyword whose value looks like a schema.
     """
     return _discloses(_listed(definition), trusted=trusted)
 

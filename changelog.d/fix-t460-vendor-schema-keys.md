@@ -1,0 +1,3 @@
+### Security
+
+- **An untrusted server's vendor keyword that holds a schema is read as hiding an argument (T-460).** The disclosure reading skipped every unknown keyword starting with `x-`, so an untrusted server could list a path or content argument under, say, `x-args` and have the tool read as sending nothing. A vendor value that looks like a schema (a mapping holding `type`, `properties`, `items` or `$ref`) is now left unread for an untrusted server, at any depth, and its tool is read as sending the sample whatever its hints; other vendor values stay annotations. A trusted server's vendor keywords, the program reading and the shipped Ghidra, radare2 and VirusTotal readings are unchanged.

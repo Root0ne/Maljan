@@ -11,7 +11,8 @@ array items and every other keyword that holds a schema, to any depth:
 * where it stops at a cap, the tool is read as sending whenever what it left
   unread could take a path or the file's content, never as safe; so is an
   argument whose reference cannot be followed, and an untrusted server's
-  argument named in letters NFKC does not bring to ASCII;
+  argument named in letters NFKC does not bring to ASCII, and an untrusted
+  server's vendor ``x-`` keyword whose value looks like a schema;
 * the shipped Ghidra, radare2 and VirusTotal listings read as they did.
 """
 
@@ -500,6 +501,56 @@ def test_annotations_flags_and_vendor_keywords_are_no_schema() -> None:
     }
     assert not dd._walk(_object(opts=opts))[1]
     assert not discloses(_tool(_object(opts=opts)))
+
+
+@pytest.mark.parametrize(
+    "hidden",
+    [
+        {"type": "string"},
+        PATH_OBJECT,
+        {"items": PATH_OBJECT},
+        {"$ref": "#/$defs/Hidden"},
+    ],
+    ids=["type", "properties", "items", "ref"],
+)
+@pytest.mark.parametrize("depth", [1, 3, 5])
+def test_an_untrusted_server_s_vendor_keyword_that_looks_like_a_schema_fails_closed(
+    hidden: dict[str, Any], depth: int
+) -> None:
+    schema = _by_properties(depth, {**QUIET_LEAF, "opts": {"type": "object", "x-args": hidden}})
+    schema["$defs"] = {"Hidden": PATH_OBJECT}
+    closed = {"readOnlyHint": True, "openWorldHint": False}
+    assert dd._walk(schema)[1]
+    assert discloses(_tool(schema, **closed))
+    # A trusted server's vendor keywords stay what they were: no schema.
+    assert not dd._walk(schema, trusted=True)[1]
+    assert not discloses(_tool(schema, **closed), trusted=True)
+    assert not discloses(_tool(schema, readOnlyHint=True), trusted=True)
+    # The arguments read are the same either way.
+    assert dd._walk(schema)[0] == dd._walk(schema, trusted=True)[0]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [{"path": {"type": "string"}}, {"a": 1}, "path", ["type"], True, {}],
+    ids=["map-of-schemas", "data", "text", "list", "flag", "empty"],
+)
+def test_a_vendor_value_that_does_not_look_like_a_schema_is_no_schema_whoever_lists_it(
+    value: Any,
+) -> None:
+    schema = _object(opts={"type": "object", "x-vendor": value})
+    assert not dd._walk(schema)[1]
+    assert not discloses(_tool(schema))
+
+
+def test_a_vendor_schema_is_read_once_per_listing_and_lifted_only_for_a_trusted_server() -> None:
+    schema = _object(opts={"type": "object", "x-args": PATH_OBJECT})
+    definition = _tool(schema, readOnlyHint=True, openWorldHint=False)
+    read, lifted = dd.derived_readings([definition])
+    assert read["scan"].discloses_sample is True
+    assert lifted["scan"].discloses_sample is not True
+    # The program reading, which knows no trust, reads it as it did.
+    assert dd._listed(definition).unread is False
 
 
 @pytest.mark.parametrize(
