@@ -217,6 +217,17 @@ def validate_definitions(
         if has_provider_ref and model.role not in PROMPT_ROLES:
             errors[name] = f"{name!r}: {PROVIDER_REFERENCE_RULE}"
             continue
+        # A provider a reference names is judged as the definition's own is.
+        for ref in model.tools:
+            if ref.kind != "provider" or ref.provider is None:
+                continue
+            refused = id_refusal("static", ref.provider, plugins_allowed or [])
+            if refused:
+                errors[f"{name}.tools"] = (
+                    f"unknown static provider {ref.provider!r} on a provider tool reference. "
+                    f"Available: {', '.join(sorted(shipped_ids('static')))}; {refused}"
+                )
+                break
         for ref in model.tools:
             if ref.kind != "mcp":
                 continue
@@ -450,7 +461,8 @@ def _reads_the_static_provider(definition: Any) -> bool:
     tools, own_provider = pair
     if own_provider not in (None, NO_STATIC_PROVIDER):
         return False
-    return any(t.get("kind") == "provider" for t in tools)
+    # A reference that names its provider reads that one, never the configured one.
+    return any(t.get("kind") == "provider" and not t.get("provider") for t in tools)
 
 
 def _only_provider_tools(definition: Any) -> bool:

@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.provider_readiness import refusal_sentence, unready_static_providers
-from maljan.core.config import Settings
+from maljan.core.config import Settings, ToolRef
 
 
 class _Schema(BaseHTTPRequestHandler):
@@ -151,6 +151,28 @@ class TestTheCheck:
         assert refusals == [
             "agent 'reverser_ghidra' needs static provider 'ghidra', which is switched off"
         ]
+
+    def test_a_provider_named_on_a_reference_is_checked_as_a_given_one(self) -> None:
+        """An agent holding a second provider by a named reference needs it as much."""
+        settings = _team_settings(_closed_port(), enabled=False)
+        reverser = settings.agents.definitions["reverser_ghidra"]
+        reverser.static_provider = "r2"
+        reverser.tools = [
+            ToolRef(kind="provider"),
+            ToolRef(kind="provider", provider="ghidra"),
+        ]
+        assert _check(settings) == [
+            "agent 'reverser_ghidra' needs static provider 'ghidra', which is switched off"
+        ]
+
+    def test_a_named_provider_that_answers_lets_the_job_through(self, ghidra) -> None:
+        url, handler = ghidra
+        settings = _team_settings(url)
+        reverser = settings.agents.definitions["reverser_ghidra"]
+        reverser.static_provider = None
+        reverser.tools = [ToolRef(kind="provider", provider="ghidra")]
+        assert _check(settings) == []
+        assert handler.seen == [("/mcp/schema", "Bearer tok")]
 
     def test_the_shipped_default_is_not_refused(self) -> None:
         """Ghidra, switched off, as the global provider nobody set up: the run

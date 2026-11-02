@@ -358,7 +358,10 @@ export interface ToolFactsEntry {
  * `maljan.core.config.ToolRef`. `kind: "mcp"` names a server and, optionally,
  * one of its tools — `name: null` means the server's whole allow-listed set.
  * `kind: "provider"` means "this agent's static provider's tools" and carries
- * nothing else. `kind: "sandbox"` means the job's sandbox report, read through
+ * nothing else, unless it names a provider by id (`provider: "r2"`): then it
+ * means that provider's tools, so one agent may hold several. The API writes
+ * `provider` only on a provider reference that names one.
+ * `kind: "sandbox"` means the job's sandbox report, read through
  * the in-process sandbox tool set, and likewise carries nothing else.
  * `kind: "agent"` names another definition: the agent gets a tool
  * `ask_<agent>` that hands that agent a task and returns its answer. The API
@@ -373,6 +376,7 @@ export interface ToolRefEntry {
   name: string | null;
   agent?: string | null;
   capability?: string | null;
+  provider?: string | null;
 }
 
 /**

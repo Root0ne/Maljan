@@ -3173,11 +3173,19 @@ def selected_static_providers(settings: Settings) -> set[str]:
     """The static providers this deployment selects: the global one, any agent's and any team's.
 
     A team's choice outranks its members' own at run time, so it is selected too.
+    A provider an enabled agent names on a ``provider`` tool reference is
+    that agent's as much as its own is.
     """
     chosen = {str(settings.static.provider)}
     for definition in settings.agents.definitions.values():
         if definition.enabled and definition.static_provider:
             chosen.add(str(definition.static_provider))
+        if definition.enabled:
+            chosen.update(
+                str(ref.provider)
+                for ref in definition.tools
+                if ref.kind == "provider" and ref.provider
+            )
     for team in settings.agents.profiles.values():
         if team.static_provider:
             chosen.add(str(team.static_provider))

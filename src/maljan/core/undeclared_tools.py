@@ -631,13 +631,19 @@ def declared_auto_name_pattern(settings: Any = None) -> re.Pattern[str]:
 
 
 def _resolved_static_providers(settings: Any) -> set[str]:
-    """The static provider each agent definition resolves to (team, own, or global)."""
-    try:
-        from maljan.agents.composition import static_provider_id_for
+    """The static provider each agent definition resolves to (team, own, or global).
 
-        return {static_provider_id_for(settings, key) for key in settings.agents.definitions} | {
-            str(settings.static.provider)
-        }
+    And every provider a definition names on a ``provider`` reference.
+    """
+    try:
+        from maljan.agents.composition import static_provider_id_for, static_provider_ids_for
+
+        keys = list(settings.agents.definitions)
+        return (
+            {static_provider_id_for(settings, key) for key in keys}
+            | {pid for key in keys for pid in static_provider_ids_for(settings, key)}
+            | {str(settings.static.provider)}
+        )
     except Exception:  # noqa: BLE001 — an unreadable team resolves nothing more
         return set()
 

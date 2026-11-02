@@ -134,9 +134,23 @@ def declared_set(settings: Any, key: str, definition: Any) -> frozenset[str]:
             held.update(str(t) for t in server.tools)
         else:
             held.update(_facts_names(server))
-    if any(ref.kind == "provider" for ref in definition.tools):
-        provider = definition.static_provider or str(settings.static.provider)
-        held.update(_facts_names(provider_declaration(provider)))
+    # Each provider a ``provider`` reference stands for: the definition's own
+    # for one that names none, the named one otherwise. A later provider's
+    # tool whose name an earlier one holds is offered as ``<provider>__<name>``
+    # (``composition._claim_provider_tools``), and is held under both.
+    own = definition.static_provider or str(settings.static.provider)
+    providers = list(
+        dict.fromkeys(
+            str(ref.provider or own) for ref in definition.tools if ref.kind == "provider"
+        )
+    )
+    claimed: set[str] = set()
+    for provider in providers:
+        names = _facts_names(provider_declaration(provider))
+        held.update(names)
+        if len(providers) > 1:
+            held.update(f"{provider}__{name}" for name in names if name in claimed)
+            claimed.update(names)
     return frozenset(held)
 
 
