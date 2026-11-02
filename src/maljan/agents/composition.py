@@ -19,7 +19,9 @@ Two halves of an agent's tools live in two places on purpose:
 
 A ``generic`` or ``lead`` agent has no class of its own to open a provider, so
 an explicit ``ToolRef(kind="provider")`` is the one way it gets provider tools,
-and that path *is* resolved here (``opens_provider_by_reference``).
+and that path *is* resolved here (``opens_provider_by_reference``). A
+reference that names its provider opens that one, so one agent may hold
+several providers (``referenced_provider_ids``).
 
 ``ToolRef(kind="sandbox")`` is the third half and the simplest: the job's
 sandbox report is already on the container, so the tools over it are closures
@@ -65,6 +67,11 @@ class ResolvedAgent:
     static_provider_id: str
     llm: Any | None
     degradation_reasons: tuple[str, ...] = ()
+    # Every static provider resolution opened for the agent's ``provider``
+    # references, in reference order (``referenced_provider_ids``); the first
+    # is ``static_provider_id``. Empty for an agent that opens none here: a
+    # built-in role opens its own inside its class.
+    provider_ids: tuple[str, ...] = ()
     # Where each tool server was handed the sample, for the servers that were
     # handed it at all (``agents.sample_staging``). Empty on the common case:
     # every server is a local stdio sidecar reading the same filesystem the
@@ -266,6 +273,73 @@ def reads_static_provider(definition: AgentDefinition | None) -> bool:
     return opens_provider_by_reference(definition)
 
 
+def referenced_provider_ids(
+    settings: Settings,
+    definition: AgentDefinition,
+    own_provider: str,
+    *,
+    profile: ProfileDefinition | None = None,
+) -> list[str]:
+    """Every static provider the definition's ``provider`` references open, in reference order.
+
+    A reference that names no provider stands for ``own_provider``, the one
+    ``static_provider_id_for`` answers for the agent; one that names a
+    provider stands for that one. A team that forces a static provider of its
+    own (``measurement`` forces ``none``) forces it on every reference, named
+    or not, so a baseline stays one. Each provider once, where it is first
+    referenced. Empty where ``opens_provider_by_reference`` is false.
+    """
+    if not opens_provider_by_reference(definition):
+        return []
+    team = profile if profile is not None else active_profile(settings)
+    out: list[str] = []
+    for ref in definition.tools:
+        if ref.kind != "provider":
+            continue
+        provider_id = (
+            str(ref.provider) if ref.provider and not team.static_provider else own_provider
+        )
+        if provider_id not in out:
+            out.append(provider_id)
+    return out
+
+
+def static_provider_ids_for(
+    settings: Settings,
+    key: str,
+    *,
+    profile: ProfileDefinition | None = None,
+    global_provider: str | None = None,
+) -> list[str]:
+    """Every static provider a run opens for agent ``key``, the one it reads the sample through first.
+
+    The ``static`` role's own (``static_provider_id_for``); a ``generic`` or
+    ``lead`` agent's ``provider`` references (``referenced_provider_ids``);
+    nothing for any other role or an unknown key. The worker's mirror, the
+    readiness check and the servers a job calls all read this, so a provider
+    an agent names on a reference is mirrored, checked and counted as its own
+    provider is.
+    """
+    definition = settings.agents.definitions.get(key)
+    if definition is None:
+        return []
+    own = static_provider_id_for(settings, key, profile=profile, global_provider=global_provider)
+    if definition.role == "static":
+        return [own]
+    return referenced_provider_ids(settings, definition, own, profile=profile)
+
+
+def _opened_provider_ids(settings: Settings, definition: AgentDefinition, key: str) -> list[str]:
+    """``static_provider_ids_for`` for a resolution: the references' providers, or the own one.
+
+    The first is the provider the agent reads the sample through
+    (``ResolvedAgent.static_provider_id``). An agent that opens none here
+    keeps ``static_provider_id_for``'s answer, as it always did.
+    """
+    own = static_provider_id_for(settings, key)
+    return referenced_provider_ids(settings, definition, own) or [own]
+
+
 NOT_MIRRORED_REASON = "sample not mirrored for {provider}"
 # A capability reference no server serves (``unresolved_capability_reasons``).
 UNRESOLVED_CAPABILITY_REASON = "capability '{capability}' resolves to no server"
@@ -292,7 +366,19 @@ def pin_provider_sample(agent: Any, mirrored: Mapping[str, str] | None) -> None:
         return
     if PROVIDER_FAMILY not in tool_families(list(getattr(agent, "tools", None) or [])):
         return
-    provider_id = str(resolved.static_provider_id)
+    # An agent holding several providers (named ``provider`` references) has
+    # each of them pinned to its own mirror.
+    provider_ids = getattr(resolved, "provider_ids", None)
+    if not isinstance(provider_ids, tuple) or not provider_ids:
+        provider_ids = (resolved.static_provider_id,)
+    for provider_id in provider_ids:
+        _pin_one_provider(agent, container, resolved, str(provider_id), mirrored)
+
+
+def _pin_one_provider(
+    agent: Any, container: Any, resolved: Any, provider_id: str, mirrored: Mapping[str, str] | None
+) -> None:
+    """``pin_provider_sample`` for one of the agent's providers."""
     try:
         provider = container.get_static_provider(provider_id)
     except Exception as exc:  # noqa: BLE001 — a pin is never worth a failed stage
@@ -489,6 +575,7 @@ def _agent_prompt(
     *,
     provider_expected: bool = False,
     for_a_clone: bool = False,
+    provider_ids: Sequence[str] = (),
 ) -> str:
     """An agent's prompt for ``tools``: its own text, or its role's built-in one.
 
@@ -508,7 +595,9 @@ def _agent_prompt(
         )
     if definition.role == "judge" or for_a_clone:
         return definition.prompt
-    parts = _provider_parts(definition, container, provider_id, tools, provider_expected)
+    parts = _provider_parts(
+        definition, container, provider_id, tools, provider_expected, provider_ids
+    )
     return "\n\n".join([definition.prompt.rstrip(), *(part for part in parts if part)])
 
 
@@ -518,6 +607,7 @@ def _provider_parts(
     provider_id: str,
     tools: Sequence[Any],
     provider_expected: bool,
+    provider_ids: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """What the platform adds after an operator's prompt: provider text, then the tool sentence.
 
@@ -527,9 +617,15 @@ def _provider_parts(
     are in the request, exactly as the built-in assembly does. The dynamic
     role carries its sandbox's workflow on the same rule. An agent with no
     provider gets the sentence about tools alone.
+
+    An agent holding several providers (``provider_ids``, from its named
+    ``provider`` references) carries each provider's text in turn, each read
+    against that provider's own tools, and one sentence about the whole list.
     """
     from maljan.agents.prompt_fragments import tools_statement
 
+    if len(provider_ids) > 1 and opens_provider_by_reference(definition):
+        return _several_provider_parts(definition, container, provider_ids, tools)
     if definition.role == "static" or opens_provider_by_reference(definition):
         from maljan.agents.static_analyst import static_provider_parts
 
@@ -561,6 +657,100 @@ def _provider_parts(
     return (tools_statement(tools),)
 
 
+# On each tool of an agent that holds several providers: the id of the
+# provider it came from, so each provider's text is read against its own tools
+# (``_several_provider_parts``). Not written for an agent with one provider,
+# whose tools stay the objects they always were.
+PROVIDER_ID_METADATA_KEY = "maljan_provider_id"
+
+
+def _of_provider(tools: Sequence[Any], provider_id: str, first: bool) -> list[Any]:
+    """``tools`` without the other providers' tools: what ``provider_id``'s text is read against.
+
+    A provider tool that carries no provider id (one that could not be
+    marked) is read as the first provider's.
+    """
+    from maljan.agents.prompt_fragments import PROVIDER_FAMILY, tool_family
+
+    out: list[Any] = []
+    for tool in tools:
+        if tool_family(tool) != PROVIDER_FAMILY:
+            out.append(tool)
+            continue
+        owner = (getattr(tool, "metadata", None) or {}).get(PROVIDER_ID_METADATA_KEY)
+        if owner == provider_id or (owner is None and first):
+            out.append(tool)
+    return out
+
+
+def _several_provider_parts(
+    definition: AgentDefinition,
+    container: Any,
+    provider_ids: Sequence[str],
+    tools: Sequence[Any],
+) -> tuple[str, ...]:
+    """``_provider_parts`` for an agent holding several static providers.
+
+    Each provider says what it says alone (``static_provider_parts``), read
+    against its own tools and every tool that is no provider's, so a provider
+    whose tools did not attach says so while the other's workflow stands. The
+    sentence about tools is one, over the whole list, naming every provider.
+    """
+    from maljan.agents.prompt_fragments import tools_statement
+    from maljan.agents.static_analyst import static_provider_parts
+
+    texts: list[str] = []
+    labels: list[str] = []
+    for index, provider_id in enumerate(provider_ids):
+        provider = container.get_static_provider(provider_id)
+        own = _of_provider(tools, provider_id, index == 0)
+        text, _statement = static_provider_parts(provider, own)
+        if not definition.attck_techniques:
+            from maljan.providers.base import without_attck_focus
+
+            text = without_attck_focus(text)
+        # A provider's text names its tools as it declares them; one of its
+        # tools whose name an earlier provider holds reaches the model as
+        # ``<provider>__<tool>``, and the text says that name.
+        texts.append(_with_offered_names(text, _renamed_tools(own, provider_id)))
+        labels.append(
+            str(getattr(provider, "label", "") or getattr(provider, "id", "") or provider_id)
+        )
+    joined = ", ".join(labels[:-1]) + " and " + labels[-1]
+    statement = tools_statement(tools, provider_label=f"the {joined} static providers")
+    return (*texts, statement)
+
+
+def _renamed_tools(tools: Sequence[Any], provider_id: str) -> dict[str, str]:
+    """Each of ``provider_id``'s tools in ``tools`` offered under another name, declared to offered."""
+    from maljan.agents.tool_pinning import declared_name_of
+
+    out: dict[str, str] = {}
+    for tool in tools:
+        if (getattr(tool, "metadata", None) or {}).get(PROVIDER_ID_METADATA_KEY) != provider_id:
+            continue
+        declared, offered = declared_name_of(tool), str(getattr(tool, "name", "") or "")
+        if declared and offered and declared != offered:
+            out[declared] = offered
+    return out
+
+
+def _with_offered_names(text: str, renamed: Mapping[str, str]) -> str:
+    """``text`` with each declared tool name it writes as code replaced by the name offered.
+
+    The forms a workflow names a tool in: set off in backticks (`` `name` ``)
+    and called (``name(``). A word that only happens to be spelled like a tool
+    is prose and stays.
+    """
+    import re
+
+    for declared, offered in renamed.items():
+        name = re.escape(declared)
+        text = re.sub(rf"`{name}`", f"`{offered}`", text)
+        text = re.sub(rf"(?<![\w.]){name}(?=\s*\()", offered, text)
+    return text
+
+
 def prompt_for(resolved: ResolvedAgent, container: Any, tools: Sequence[Any]) -> str:
     """The prompt agent ``resolved.key`` sends with a request carrying ``tools``.
 
@@ -572,7 +762,13 @@ def prompt_for(resolved: ResolvedAgent, container: Any, tools: Sequence[Any]) ->
     definition = container.config.agents.definitions.get(resolved.key)
     if definition is None:
         return resolved.prompt
-    return _agent_prompt(definition, container, resolved.static_provider_id, tools)
+    return _agent_prompt(
+        definition,
+        container,
+        resolved.static_provider_id,
+        tools,
+        provider_ids=tuple(getattr(resolved, "provider_ids", ()) or ()),
+    )
 
 
 def _check_prompt_role(definition: AgentDefinition) -> None:
@@ -611,6 +807,184 @@ def _dedupe(tools: list[BaseTool]) -> list[BaseTool]:
         seen.add(name)
         out.append(tool)
     return out
+
+
+# What the run says of one of several providers an agent holds that would not
+# open (``_providers_tools``).
+PROVIDER_NOT_OPENED_REASON = "static provider '{provider}' did not open"
+
+
+def _providers_tools(
+    container: Any, definition: AgentDefinition, provider_ids: Sequence[str]
+) -> tuple[list[tuple[str, list[Any]]], list[str]]:
+    """Each referenced provider's tools, by provider id, in reference order, and the reasons.
+
+    Every provider is opened on its own (``_provider_tools``): the container
+    holds one object per id and closes each at the end of the job
+    (``ServiceContainer.aclose``), so an agent holding several leaves nothing
+    open behind it. With one provider a failed open fails the resolution, as
+    it always did. With several, a provider that will not open is logged,
+    named in a degradation reason (also on the job's registry, which the run
+    summary reads) and gives no tools, so the prompt carries its absent
+    text; the others are opened all the same.
+    """
+    if not opens_provider_by_reference(definition):
+        return [], []
+    if len(provider_ids) <= 1:
+        return [
+            (str(provider_id), _provider_tools(container, definition, str(provider_id)))
+            for provider_id in provider_ids
+        ], []
+    out: list[tuple[str, list[Any]]] = []
+    reasons: list[str] = []
+    for provider_id in provider_ids:
+        try:
+            out.append((str(provider_id), _provider_tools(container, definition, str(provider_id))))
+        except Exception as exc:  # noqa: BLE001 — the agent's other providers still serve
+            logger.warning("static provider '%s' did not open: %s", provider_id, type(exc).__name__)
+            reason = PROVIDER_NOT_OPENED_REASON.format(provider=provider_id)
+            reasons.append(reason)
+            try:
+                held = getattr(container.get_server_registry(), "degradation_reasons", None)
+            except Exception:  # noqa: BLE001 — the reason is still on the agent
+                held = None
+            if isinstance(held, list) and reason not in held:
+                held.append(reason)
+            out.append((str(provider_id), []))
+    return out, reasons
+
+
+def _failing_as_a_call(tool: Any, provider_id: str) -> dict[str, Any]:
+    """``tool``'s callables, a :class:`SampleNotOpened` they raise filed as an ordinary failure.
+
+    For an agent holding several providers: a provider that cannot open the
+    sample answers each call with its sentence, as a failed call
+    (:class:`SampleNotOpenedOnOneProvider`), so the loop goes on with the
+    agent's other providers. Empty for a tool with no callable to wrap.
+    """
+    import functools
+
+    from maljan.core.exceptions import SampleNotOpened, SampleNotOpenedOnOneProvider
+
+    def _said(exc: SampleNotOpened) -> SampleNotOpenedOnOneProvider:
+        sentence = str(getattr(exc, "remediation", "") or exc)
+        return SampleNotOpenedOnOneProvider(
+            sentence, provider=exc.provider or provider_id, sent_args=exc.sent_args
+        )
+
+    out: dict[str, Any] = {}
+    func = getattr(tool, "func", None)
+    if callable(func):
+
+        @functools.wraps(func)
+        def run(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(*args, **kwargs)
+            except SampleNotOpened as exc:
+                raise _said(exc) from exc
+
+        out["func"] = run
+    coroutine = getattr(tool, "coroutine", None)
+    if callable(coroutine):
+
+        @functools.wraps(coroutine)
+        async def arun(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await coroutine(*args, **kwargs)
+            except SampleNotOpened as exc:
+                raise _said(exc) from exc
+
+        out["coroutine"] = arun
+    return out
+
+
+def _claim_provider_tools(
+    by_provider: list[tuple[str, list[Any]]], tools: list[Any], seen: dict[str, str]
+) -> None:
+    """Put each provider's tools into ``tools``, a later provider's clashing name namespaced.
+
+    The servers' collision rule (``providers.servers.offered_name``): the
+    first provider to claim a name keeps it, and a later provider's tool of
+    the same name is offered as ``<provider id>__<name>``, its declared name
+    kept beside it, as a server's is; where another source already holds that
+    name too, ``provider__<provider id>__<name>``. With one provider this is
+    ``_claim_in_process_tools`` exactly; with several, each tool is marked
+    with the provider it came from (``PROVIDER_ID_METADATA_KEY``) and a
+    sample its provider cannot open fails that call rather than the loop
+    (``_failing_as_a_call``).
+    """
+    if len(by_provider) <= 1:
+        for provider_id, incoming in by_provider:
+            _claim_in_process_tools(incoming, f"provider:{provider_id}", tools, seen)
+        return
+    from maljan.agents.tool_pinning import DECLARED_NAME_METADATA_KEY
+
+    for provider_id, incoming in by_provider:
+        source = f"provider:{provider_id}"
+        renamed = 0
+        for tool in incoming:
+            name = str(getattr(tool, "name", ""))
+            owner = seen.get(name)
+            if owner == source:
+                continue
+            metadata = {
+                **(getattr(tool, "metadata", None) or {}),
+                PROVIDER_ID_METADATA_KEY: provider_id,
+            }
+            update: dict[str, Any] = {"metadata": metadata, **_failing_as_a_call(tool, provider_id)}
+            offered = name
+            if owner is not None:
+                offered = f"{provider_id}__{name}"
+                if offered in seen:
+                    # Another source holds the namespaced name as well.
+                    fallback = f"provider__{provider_id}__{name}"
+                    logger.warning(
+                        "static provider '%s': %r is taken by %s; offered as %r.",
+                        provider_id,
+                        offered,
+                        seen[offered],
+                        fallback,
+                    )
+                    offered = fallback
+                if offered in seen:
+                    logger.warning(
+                        "static provider '%s': tool %r has no free name and is left out.",
+                        provider_id,
+                        name,
+                    )
+                    continue
+                metadata[DECLARED_NAME_METADATA_KEY] = name
+                update["name"] = offered
+            copy = getattr(tool, "model_copy", None)
+            try:
+                marked = copy(update=update) if callable(copy) else None
+            except Exception:  # noqa: BLE001 — handled below
+                marked = None
+            if marked is None:
+                if offered != name:
+                    # Offered under its own name it would clash; it cannot be renamed.
+                    logger.warning(
+                        "static provider '%s': tool %r could not be renamed and is left out.",
+                        provider_id,
+                        name,
+                    )
+                    continue
+                logger.info(
+                    "static provider '%s': tool %r could not be marked; offered as it is.",
+                    provider_id,
+                    name,
+                )
+                marked = tool
+            renamed += offered != name
+            seen[offered] = source
+            tools.append(marked)
+        if renamed:
+            logger.info(
+                "static provider '%s': %d tool name(s) already taken, prefixed with '%s__'.",
+                provider_id,
+                renamed,
+                provider_id,
+            )
 
 
 def _provider_tools(container: Any, definition: AgentDefinition, provider_id: str) -> list[Any]:
@@ -1318,7 +1692,8 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     """Everything agent ``key`` gets under this container's settings."""
     settings: Settings = container.config
     definition = _definition(settings, key)
-    provider_id = static_provider_id_for(settings, key)
+    provider_ids = _opened_provider_ids(settings, definition, key)
+    provider_id = provider_ids[0]
     _check_prompt_role(definition)
 
     reasons: list[str] = []
@@ -1328,12 +1703,9 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     # dropped as a duplicate of a tool it has nothing to do with.
     seen: dict[str, str] = {}
     tools: list[Any] = []
-    _claim_in_process_tools(
-        _provider_tools(container, definition, provider_id),
-        f"provider:{provider_id}",
-        tools,
-        seen,
-    )
+    by_provider, provider_reasons = _providers_tools(container, definition, provider_ids)
+    reasons.extend(provider_reasons)
+    _claim_provider_tools(by_provider, tools, seen)
     _claim_in_process_tools(
         _sandbox_tools(container, definition), "in-process:sandbox", tools, seen
     )
@@ -1364,10 +1736,18 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     hold_sample_paths(registry, deduped, staged)
     reasons.extend(staging_reasons)
     note_for_resolved(settings, definition, key, deduped)
+    opened = tuple(provider_ids) if opens_provider_by_reference(definition) else ()
     return ResolvedAgent(
         key=key,
         role=definition.role,
-        prompt=_agent_prompt(definition, container, provider_id, deduped, provider_expected=True),
+        prompt=_agent_prompt(
+            definition,
+            container,
+            provider_id,
+            deduped,
+            provider_expected=True,
+            provider_ids=opened,
+        ),
         authored_prompt=_agent_prompt(
             definition,
             container,
@@ -1378,6 +1758,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
         ),
         tools=deduped,
         static_provider_id=provider_id,
+        provider_ids=opened,
         llm=_agent_llm(container, key),
         degradation_reasons=tuple(dict.fromkeys(reasons)),
         path_by_server=staged,
@@ -1394,7 +1775,8 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     """
     settings: Settings = container.config
     definition = _definition(settings, key)
-    provider_id = static_provider_id_for(settings, key)
+    provider_ids = _opened_provider_ids(settings, definition, key)
+    provider_id = provider_ids[0]
     _check_prompt_role(definition)
 
     reasons: list[str] = []
@@ -1405,12 +1787,11 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     # loop. Awaited callers (the judge's node, the settings probe) keep serving
     # everything else, and the probe's ``asyncio.wait`` budget can actually
     # preempt a wedged provider.
-    _claim_in_process_tools(
-        await asyncio.to_thread(_provider_tools, container, definition, provider_id),
-        f"provider:{provider_id}",
-        tools,
-        seen,
+    by_provider, provider_reasons = await asyncio.to_thread(
+        _providers_tools, container, definition, provider_ids
     )
+    reasons.extend(provider_reasons)
+    _claim_provider_tools(by_provider, tools, seen)
     # Off the loop for the same reason, and before the registry asks for it:
     # learning the window is a metadata request, and the first caller to build
     # the budget pays for it. For every role but ``generic`` the provider call
@@ -1447,10 +1828,18 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     hold_sample_paths(registry, deduped, staged)
     reasons.extend(staging_reasons)
     note_for_resolved(settings, definition, key, deduped)
+    opened = tuple(provider_ids) if opens_provider_by_reference(definition) else ()
     return ResolvedAgent(
         key=key,
         role=definition.role,
-        prompt=_agent_prompt(definition, container, provider_id, deduped, provider_expected=True),
+        prompt=_agent_prompt(
+            definition,
+            container,
+            provider_id,
+            deduped,
+            provider_expected=True,
+            provider_ids=opened,
+        ),
         authored_prompt=_agent_prompt(
             definition,
             container,
@@ -1461,6 +1850,7 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         ),
         tools=deduped,
         static_provider_id=provider_id,
+        provider_ids=opened,
         llm=_agent_llm(container, key),
         degradation_reasons=tuple(dict.fromkeys(reasons)),
         path_by_server=staged,
@@ -1554,6 +1944,9 @@ def servers_a_job_calls(
         str(static_provider_id_for(settings, key, global_provider=global_provider))
         for key in agents
     }
+    # And every provider an agent names on a ``provider`` reference.
+    for key in agents:
+        providers |= set(static_provider_ids_for(settings, key, global_provider=global_provider))
     for provider in providers:
         used |= static_provider_servers(provider, settings)
     return used

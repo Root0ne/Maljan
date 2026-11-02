@@ -2366,9 +2366,16 @@ class ToolRef(BaseModel):
 
     ``kind="mcp"`` names an entry of ``mcp.servers``; ``name=None`` means that
     server's whole allow-listed set, and a name means one tool of it.
-    ``kind="provider"`` means "the tools of this agent's static provider" and
-    carries nothing else — the provider is already chosen by
-    ``AgentDefinition.static_provider``, so naming it twice could disagree.
+    ``kind="provider"`` with no ``provider`` means "the tools of this agent's
+    static provider" and carries nothing else — the provider is already chosen
+    by ``AgentDefinition.static_provider``, so naming it twice could disagree.
+    With ``provider`` set it names one static provider by id
+    (``provider="r2"``) and means that provider's tools, whatever the
+    definition's own provider is; one definition may hold several, each
+    opened for the agent and each exposing its own tools
+    (``agents.composition.referenced_provider_ids``). A profile that forces a
+    static provider of its own forces it on these too, as it does on the
+    definition's own.
 
     ``kind="sandbox"`` is the one in-process tool source: the job's sandbox
     report, read through ``providers.sandbox_tools``. It carries nothing else
@@ -2399,14 +2406,17 @@ class ToolRef(BaseModel):
     name: str | None = None
     agent: str | None = None
     capability: str | None = None
+    provider: str | None = None
 
     @model_serializer(mode="wrap")
     def _agent_only_when_named(self, handler: SerializerFunctionWrapHandler) -> Any:
         """Dump ``agent`` only on an agent reference, ``capability`` only on a capability one.
 
-        Every stored definition, every export and every pinned dump was
-        written before the fields existed; a reference of any other kind dumps
-        exactly as it always did, so none of them reads as changed.
+        ``provider`` only on a provider reference that names one. Every stored
+        definition, every export and every pinned dump was written before the
+        fields existed; a reference of any other kind, and a provider reference
+        that names none, dumps exactly as it always did, so none of them reads
+        as changed.
         """
         dumped = handler(self)
         if isinstance(dumped, dict):
@@ -2414,12 +2424,18 @@ class ToolRef(BaseModel):
                 dumped.pop("agent", None)
             if self.kind != "capability":
                 dumped.pop("capability", None)
+            if self.kind != "provider" or self.provider is None:
+                dumped.pop("provider", None)
         return dumped
 
     @model_validator(mode="after")
     def _shape_matches_the_kind(self) -> "ToolRef":
         if self.kind != "capability" and self.capability is not None:
             raise ValueError(f"a {self.kind} tool reference names no capability")
+        if self.kind != "provider" and self.provider is not None:
+            raise ValueError(f"a {self.kind} tool reference names no provider")
+        if self.kind == "provider" and self.provider is not None and not self.provider.strip():
+            raise ValueError("a provider tool reference names a provider id, or none")
         if self.kind == "capability":
             if not self.capability or not re.fullmatch(VOCABULARY_PATTERN, self.capability):
                 raise ValueError("a capability tool reference names a tool kind: a lowercase word")
@@ -5207,6 +5223,19 @@ class Settings(BaseSettings):
                         definition.static_provider,
                     )
             for index, ref in enumerate(definition.tools):
+                if ref.kind == "provider" and ref.provider is not None:
+                    # A provider named on a reference is judged as the
+                    # definition's own is, at the reference's own place.
+                    refused = id_refusal("static", ref.provider, self.plugins.allowed)
+                    if refused:
+                        available = ", ".join(sorted(shipped_ids("static")))
+                        _refuse_at(
+                            ("agents", "definitions", key, "tools", index),
+                            f"{key!r}: unknown static provider {ref.provider!r} on a "
+                            f"provider tool reference. Available: {available}; {refused}",
+                            ref.provider,
+                        )
+                    continue
                 if ref.kind != "mcp":
                     continue
                 try:

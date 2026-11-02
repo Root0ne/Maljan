@@ -165,6 +165,65 @@ def test_a_provider_tool_reference_on_a_built_in_role_is_refused():
     )
 
 
+def test_an_unknown_provider_named_on_a_provider_reference_is_reported_on_its_tools():
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(
+            _defs(
+                strings={
+                    "role": "generic",
+                    "prompt": "p",
+                    "tools": [{"kind": "provider", "provider": "idapro"}],
+                }
+            ),
+            stored={},
+        )
+    message = exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.strings.tools"]
+    assert "unknown static provider 'idapro' on a provider tool reference" in message
+
+
+def test_two_named_provider_references_round_trip_and_an_unnamed_one_stays_bare():
+    tools = [
+        {"kind": "provider"},
+        {"kind": "provider", "provider": "ghidra"},
+        {"kind": "provider", "provider": "r2"},
+    ]
+    out = validate_agent_map(
+        _defs(both={"role": "generic", "prompt": "p", "tools": tools}), stored={}
+    )
+    stored = out[AGENT_DEFINITIONS_KEY]["both"]["tools"]
+    assert stored == [
+        {"kind": "provider", "server": None, "name": None},
+        {"kind": "provider", "server": None, "name": None, "provider": "ghidra"},
+        {"kind": "provider", "server": None, "name": None, "provider": "r2"},
+    ]
+    # What the API stores loads into the settings and dumps back unchanged.
+    cfg = Settings(_env_file=None, agents={"definitions": out[AGENT_DEFINITIONS_KEY]})
+    assert [r.model_dump(mode="json") for r in cfg.agents.definitions["both"].tools] == stored
+
+
+def test_a_named_provider_reference_does_not_read_the_configured_provider():
+    """The warning about a deployment on ``none`` is for a reference reading the configured one."""
+    from app.services.agent_map import profile_warnings
+
+    warnings = profile_warnings(
+        {
+            "team": {
+                "label": "Team",
+                "stages": [{"key": "reversing", "kind": "analysis", "agents": ["reverser"]}],
+            }
+        },
+        definitions={
+            "reverser": {
+                "role": "generic",
+                "prompt": "reverse",
+                "tools": [{"kind": "provider", "provider": "r2"}],
+            }
+        },
+        overrides={"core.static.provider": "none"},
+    )
+    assert warnings == {}
+
+
 def test_a_disabled_built_in_profile_member_is_allowed_while_another_profile_is_active():
     """The exemption ``AgentsConfig`` gives a built-in profile: disabling a
 

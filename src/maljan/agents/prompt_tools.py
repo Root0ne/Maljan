@@ -44,7 +44,6 @@ def known_tool_names(settings: Any) -> frozenset[str]:
     """Every tool name the platform knows, across all configured servers and shipped declarations."""
     from maljan.core.builtin_declarations import (
         builtin_server_names,
-        provider_declaration,
         provider_names,
     )
     from maljan.core.declared_reading import builtin_tools, tools_in_force
@@ -58,8 +57,28 @@ def known_tool_names(settings: Any) -> frozenset[str]:
     for key in builtin_server_names():
         names.update(str(tool) for tool in builtin_tools(key))
     for provider in provider_names():
-        names.update(_facts_names(provider_declaration(provider)))
+        names.update(_provider_tool_names(provider))
     return frozenset(names)
+
+
+def _provider_tool_names(provider: str) -> set[str]:
+    """The tool names a static provider declares, and what it declared of itself when listed."""
+    from types import SimpleNamespace
+
+    from maljan.core.builtin_declarations import provider_declaration
+    from maljan.core.declared_reading import tools_in_force
+
+    block = provider_declaration(provider)
+    names = set(_facts_names(block))
+    # What was listed is read from this process's record, so before a listing
+    # the advisory warning knows the declared names only; accepted as advisory.
+    try:
+        facts = block.get("tool_facts") if isinstance(block, dict) else None
+        listed = tools_in_force(f"provider:{provider}", SimpleNamespace(tool_facts=facts or {}))
+        names.update(str(tool) for tool in listed)
+    except Exception as exc:  # noqa: BLE001 - advisory, the declared names stand
+        logger.debug("provider %s listing not read: %s", provider, type(exc).__name__)
+    return names
 
 
 def names_in(prompt: str, known: frozenset[str]) -> list[str]:
@@ -123,7 +142,6 @@ def note_for_resolved(settings: Any, definition: Any, key: str, tools: Iterable[
 def declared_set(settings: Any, key: str, definition: Any) -> frozenset[str]:
     """The tool names agent ``key`` would hold, from declarations alone (no server is opened)."""
     from maljan.agents.composition import servers_bound_to
-    from maljan.core.builtin_declarations import provider_declaration
 
     held: set[str] = set()
     for name in servers_bound_to(settings, key):
@@ -134,9 +152,21 @@ def declared_set(settings: Any, key: str, definition: Any) -> frozenset[str]:
             held.update(str(t) for t in server.tools)
         else:
             held.update(_facts_names(server))
-    if any(ref.kind == "provider" for ref in definition.tools):
-        provider = definition.static_provider or str(settings.static.provider)
-        held.update(_facts_names(provider_declaration(provider)))
+    # Each provider a ``provider`` reference stands for, as resolution reads
+    # them (``composition.referenced_provider_ids``, a team's forced provider
+    # included). A later provider's tool whose name an earlier one holds is
+    # offered as ``<provider>__<name>`` (``composition._claim_provider_tools``),
+    # and is held under both.
+    from maljan.agents.composition import referenced_provider_ids, static_provider_id_for
+
+    providers = referenced_provider_ids(settings, definition, static_provider_id_for(settings, key))
+    claimed: set[str] = set()
+    for provider in providers:
+        names = _provider_tool_names(provider)
+        held.update(names)
+        if len(providers) > 1:
+            held.update(f"{provider}__{name}" for name in names if name in claimed)
+            claimed.update(names)
     return frozenset(held)
 
 

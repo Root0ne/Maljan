@@ -67,6 +67,27 @@ class SampleNotOpened(AnalystError):
         self.sent_args: dict[str, object] | None = None
 
 
+class SampleNotOpenedOnOneProvider(Exception):  # noqa: N818 — named for what the caller reads
+    """One of several static providers an agent holds could not open the job's sample.
+
+    :class:`SampleNotOpened` ends the loop of an agent whose provider cannot
+    read the sample. An agent holding several providers (named ``provider``
+    tool references) still has the others, so a call to the provider that
+    failed is filed as an ordinary failed call carrying that provider's
+    sentence, and the loop goes on (``agents.composition``). Not an
+    :class:`AnalystError`, so nothing that ends a loop on one reads it as such.
+    ``sent_args`` are, as on :class:`SampleNotOpened`, the arguments the call
+    was actually sent with when the platform held them to its own path.
+    """
+
+    def __init__(
+        self, sentence: str, *, provider: str = "", sent_args: dict[str, object] | None = None
+    ) -> None:
+        super().__init__(sentence)
+        self.provider = provider
+        self.sent_args = sent_args
+
+
 class LLMError(MaljanError):
     """Raised when the LLM service returns an invalid or empty response."""
 

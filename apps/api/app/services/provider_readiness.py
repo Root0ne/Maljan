@@ -74,8 +74,8 @@ async def unready_static_providers(
     """
     from maljan.agents.composition import (
         reachable_agents,
-        reads_static_provider,
         static_provider_id_for,
+        static_provider_ids_for,
     )
 
     team = settings.agents.profiles.get(profile)
@@ -83,19 +83,35 @@ async def unready_static_providers(
         return []
     named = [agent for stage in team.stages for agent in stage.agents]
     by_provider: dict[str, list[str]] = {}
-    chosen: set[str] = set()
+    # Each (provider, agent) pair where the agent was given that provider by name.
+    chosen: set[tuple[str, str]] = set()
     # Not the agents only the mediator may ask: an ask of one whose provider is
     # not ready is a failed call on the ledger, never a reason to refuse the job.
     for key in reachable_agents(settings, named, mediated=False):
         definition = settings.agents.definitions.get(key)
-        if not reads_static_provider(definition):
-            continue
-        provider_id = static_provider_id_for(
+        provider_ids = static_provider_ids_for(
             settings, key, profile=team, global_provider=global_provider
         )
-        by_provider.setdefault(provider_id, []).append(key)
-        if team.static_provider or getattr(definition, "static_provider", None) or global_provider:
-            chosen.add(key)
+        if not provider_ids:
+            continue
+        own = static_provider_id_for(settings, key, profile=team, global_provider=global_provider)
+        # A provider named on a ``provider`` reference was given by name too.
+        named_on_refs = {
+            str(ref.provider)
+            for ref in getattr(definition, "tools", None) or []
+            if ref.kind == "provider" and ref.provider
+        }
+        for provider_id in provider_ids:
+            by_provider.setdefault(provider_id, []).append(key)
+            if provider_id in named_on_refs or (
+                provider_id == own
+                and (
+                    team.static_provider
+                    or getattr(definition, "static_provider", None)
+                    or global_provider
+                )
+            ):
+                chosen.add((provider_id, key))
 
     checks: list[tuple[str, Any, list[str]]] = []
     refusals: list[str] = []
@@ -117,7 +133,7 @@ async def unready_static_providers(
             refusals.extend(
                 f"agent {key!r} needs static provider {provider_id!r}, which is switched off"
                 for key in agents
-                if key in chosen
+                if (provider_id, key) in chosen
             )
             continue
         checks.append((provider_id, provider, agents))

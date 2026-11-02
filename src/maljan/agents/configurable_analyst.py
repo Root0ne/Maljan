@@ -19,6 +19,7 @@ this morning.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -167,7 +168,11 @@ class ConfigurableAnalyst(BaseAnalyst):
         from maljan.providers.base import prepare_sample
 
         path = self._analysis_file_path or _analysis_path_in(data) or ""
-        hint = prepare_sample(self._own_static_provider(), path, self.logger)
+        held = self._held_providers()
+        if held:
+            hint = self._prepare_on_each(held, path)
+        else:
+            hint = prepare_sample(self._own_static_provider(), path, self.logger)
         if hint and not self.asks_for_techniques():
             # The follow-up's clause pointing the reading at a technique is
             # left out for an agent not asked for one.
@@ -175,6 +180,90 @@ class ConfigurableAnalyst(BaseAnalyst):
 
             hint = hint.replace(ATTCK_PURPOSE, "")
         return f"{hint}\n" if hint else ""
+
+    def _held_providers(self) -> list[tuple[str, Any]]:
+        """Each static provider this agent holds, by id, when its references name several.
+
+        Empty for an agent with one provider or none, which keeps the one
+        provider's path (``BaseAnalyst._own_static_provider``) exactly.
+        """
+        resolved = getattr(self, "_resolved", None)
+        provider_ids = getattr(resolved, "provider_ids", None)
+        container = getattr(self, "_container", None)
+        if not isinstance(provider_ids, tuple) or len(provider_ids) < 2 or container is None:
+            return []
+        out: list[tuple[str, Any]] = []
+        for provider_id in provider_ids:
+            try:
+                out.append((str(provider_id), container.get_static_provider(str(provider_id))))
+            except Exception as exc:  # noqa: BLE001 — a lookup is never worth a lost loop
+                self.logger.debug("%s: no static provider %s (%s).", self.name, provider_id, exc)
+        return out
+
+    def _note_unopened(self, provider_id: str, failure: SampleNotOpened) -> None:
+        """Say that one of the agent's several providers could not open the sample; the loop goes on."""
+        reason = f"agent '{self.name}': static provider '{provider_id}' could not open the sample"
+        self.logger.warning("%s: %s; its other providers go on.", reason, failure)
+        if reason not in self.degradation_reasons:
+            self.degradation_reasons.append(reason)
+
+    def _prepare_on_each(self, held: list[tuple[str, Any]], path: str) -> str:
+        """``prepare_sample`` on each of the agent's providers, their hints in reference order.
+
+        A provider that cannot open the sample is said (``_note_unopened``)
+        while another one could; only when none could is the first failure
+        raised, which ends the loop as it does for an agent with one provider.
+        """
+        from maljan.agents.composition import _renamed_tools, _with_offered_names
+        from maljan.providers.base import prepare_sample
+
+        hints: list[str] = []
+        failures: list[tuple[str, SampleNotOpened]] = []
+        for provider_id, provider in held:
+            try:
+                hint = prepare_sample(provider, path, self.logger)
+            except SampleNotOpened as exc:
+                failures.append((provider_id, exc))
+                continue
+            # A provider's hint names its tools as it declares them; a tool
+            # offered under a namespaced name is named as it is offered.
+            hints.append(
+                _with_offered_names(
+                    hint, _renamed_tools(getattr(self, "tools", None) or [], provider_id)
+                )
+            )
+        if failures and len(failures) == len(held):
+            raise failures[0][1]
+        for provider_id, failure in failures:
+            self._note_unopened(provider_id, failure)
+        return "\n".join(hint for hint in hints if hint)
+
+    def _stop_if_the_sample_did_not_open(self) -> None:
+        """The base check, over every provider of an agent that holds several.
+
+        The loop is not started only when every provider met a failure opening
+        the job's sample; while one of them opened it, each that did not is
+        said and the loop goes on with the others (their calls fail on their
+        own, ``composition._failing_as_a_call``).
+        """
+        held = self._held_providers()
+        if not held:
+            super()._stop_if_the_sample_did_not_open()
+            return
+        failures: list[tuple[str, SampleNotOpened]] = []
+        for provider_id, provider in held:
+            known = getattr(provider, "sample_failure", None)
+            failure = known() if callable(known) else None
+            if isinstance(failure, SampleNotOpened):
+                failures.append((provider_id, failure))
+        if len(failures) < len(held):
+            for provider_id, failure in failures:
+                self._note_unopened(provider_id, failure)
+            return
+        first = failures[0][1]
+        first.stopped_agent = self.name
+        self.logger.error("%s: %s; its loop is not started.", self.name, first)
+        raise first
 
     def _load_hint(self, data: str) -> str:
         """The static role's load line, for an agent given a server's declared open tool.

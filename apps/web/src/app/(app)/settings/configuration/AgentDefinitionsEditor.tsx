@@ -34,6 +34,8 @@ import {
   capabilityRef,
   holdsServer,
   offeredCapabilities,
+  offeredProviders,
+  providerRef,
   sameToolRef,
   withoutServer,
   type CapabilityServers,
@@ -815,33 +817,54 @@ export function AgentDetail({
                 locked, as every other reference of a built-in is. */}
             {PROVIDER_ROLES.has(agent.role) &&
               agent.role !== "static" &&
-              (!locked || hasRef(agentKey, { kind: "provider", server: null, name: null })) && (
-              <li
-                role="treeitem"
-                aria-selected={hasRef(agentKey, {
-                  kind: "provider",
-                  server: null,
-                  name: null,
-                })}
-              >
+              (!locked || hasRef(agentKey, providerRef(null))) && (
+              <li role="treeitem" aria-selected={hasRef(agentKey, providerRef(null))}>
                 <label className="text-xs text-text-secondary flex items-center gap-1">
                   <input
                     type="checkbox"
                     aria-label={`${agentKey} provider tools`}
                     disabled={locked}
-                    checked={hasRef(agentKey, { kind: "provider", server: null, name: null })}
-                    onChange={(e) =>
-                      toggleRef(
-                        agentKey,
-                        { kind: "provider", server: null, name: null },
-                        e.target.checked
-                      )
-                    }
+                    checked={hasRef(agentKey, providerRef(null))}
+                    onChange={(e) => toggleRef(agentKey, providerRef(null), e.target.checked)}
                   />
                   its static provider&rsquo;s tools
                 </label>
               </li>
             )}
+            {/* A provider named by id, beside the agent's own: one row per
+                provider the deployment offers, so one agent can hold the
+                tools of several. A later provider's tool whose name an
+                earlier one holds reaches the model as `<provider>__<tool>`. */}
+            {PROVIDER_ROLES.has(agent.role) &&
+              agent.role !== "static" &&
+              offeredProviders(agent.tools, staticProviders)
+                .filter((p) => !locked || hasRef(agentKey, providerRef(p)))
+                .map((p) => (
+                  <li key={`provider:${p}`} role="treeitem" aria-selected={hasRef(agentKey, providerRef(p))}>
+                    <label className="text-xs text-text-secondary flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        aria-label={`${agentKey} provider ${p} tools`}
+                        disabled={locked}
+                        checked={hasRef(agentKey, providerRef(p))}
+                        onChange={(e) => toggleRef(agentKey, providerRef(p), e.target.checked)}
+                      />
+                      <span>
+                        the <span className="font-mono">{p}</span> static provider&rsquo;s tools
+                      </span>
+                    </label>
+                  </li>
+                ))}
+            {/* The served choices do not say which providers offer tools, so
+                the rows say it of themselves rather than guessing. */}
+            {PROVIDER_ROLES.has(agent.role) &&
+              agent.role !== "static" &&
+              !locked &&
+              offeredProviders(agent.tools, staticProviders).length > 0 && (
+                <li role="none" className="text-xs text-text-muted ml-5">
+                  A provider that offers no tools adds none.
+                </li>
+              )}
             {/* The job's sandbox report, read through in-process tools. Any
                 role may hold it, a judge cross-checking a claim as much as a
                 dynamic analyst. */}

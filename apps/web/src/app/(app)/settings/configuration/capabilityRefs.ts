@@ -20,8 +20,40 @@ export function sameToolRef(a: ToolRefEntry, b: ToolRefEntry): boolean {
     a.server === b.server &&
     a.name === b.name &&
     (a.agent ?? null) === (b.agent ?? null) &&
-    (a.capability ?? null) === (b.capability ?? null)
+    (a.capability ?? null) === (b.capability ?? null) &&
+    (a.provider ?? null) === (b.provider ?? null)
   );
+}
+
+/** One provider reference, in the shape the API stores it: `null` is the
+ *  agent's own static provider, an id names that provider. */
+export function providerRef(provider: string | null): ToolRefEntry {
+  return provider === null
+    ? { kind: "provider", server: null, name: null }
+    : { kind: "provider", server: null, name: null, provider };
+}
+
+/** The providers a list names on its provider references, each once, in order. */
+export function namedProviders(tools: readonly ToolRefEntry[]): string[] {
+  const out: string[] = [];
+  for (const t of tools) {
+    if (t.kind === "provider" && t.provider && !out.includes(t.provider)) out.push(t.provider);
+  }
+  return out;
+}
+
+/** The provider id that opens no provider (`providers.base.NO_STATIC_PROVIDER`). */
+const NO_STATIC_PROVIDER = "none";
+
+/** Every provider a definition can be given by name: the deployment's (but
+ *  `none`, which has no tools to give), then any it already names that the
+ *  deployment no longer offers, so that one can still be taken off. */
+export function offeredProviders(
+  tools: readonly ToolRefEntry[],
+  available: readonly string[],
+): string[] {
+  const offered = available.filter((p) => p !== NO_STATIC_PROVIDER);
+  return [...offered, ...namedProviders(tools).filter((p) => !offered.includes(p))];
 }
 
 /** One capability reference, in the shape the API stores it. */

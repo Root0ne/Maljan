@@ -2622,6 +2622,11 @@ def _record_tool(
         waited_ms: int = 0,
     ) -> str:
         message = f"{type(exc).__name__}: {exc}"
+        if sent is None:
+            # A failure that says what the call was actually sent with (a
+            # path the platform held it to) is recorded with those arguments.
+            carried = getattr(exc, "sent_args", None)
+            sent = carried if isinstance(carried, dict) else None
         raw = _was_repaired(kwargs)
         noted: list[str] = []
         entry = recorder.record(
