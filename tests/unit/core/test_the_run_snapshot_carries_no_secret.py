@@ -848,6 +848,8 @@ def test_masking_is_never_weaker_than_before_on_fuzzed_words():
     from maljan.core.settings_catalog import _bare_secrets
     from maljan.core.settings_masking import (
         _CLOSERS,
+        _NO_PASSWORD_BACKSLASH,
+        _VALUE_SEPARATORS,
         TOKEN_OPENERS,
         _address_in,
         _left_unclosed,
@@ -881,10 +883,17 @@ def test_masking_is_never_weaker_than_before_on_fuzzed_words():
                     assert names_a_port_or_a_path(word[now:]), word
         elif now is not None:
             if "\\" in word[now:].rpartition("@")[0]:
-                # A JSON escape is read only before a port or a path.
-                assert names_a_port_or_a_path(word[now:]), word
+                # A JSON escape is read only before a port or a path, or in a
+                # user name and password where no escaped quote and no path
+                # start stands (``u:p\x@h``).
+                head = word[now:].rpartition("@")[0]
+                assert names_a_port_or_a_path(word[now:]) or (
+                    ":" in head and _NO_PASSWORD_BACKSLASH.search(head) is None
+                ), word
                 assert bare_userinfo(word[now:]) is not None, word
-            elif "\\" in word[:now] and word[:now].rstrip(TOKEN_OPENERS + "\\")[-1:] in (",", ";"):
+            elif "\\" in word[:now] and word[:now].rstrip(TOKEN_OPENERS + "\\")[-1:] in tuple(
+                _VALUE_SEPARATORS
+            ):
                 # Or a user name and a password, or a quoted token alone,
                 # after a separator that ends a backslashed value before them
                 # in the same word.

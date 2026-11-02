@@ -119,11 +119,14 @@ def _masked_one_url(url: str, mask: str) -> str:
 # What follows the last "@" of an address written with no scheme: a host or a
 # bracketed IPv6 address, an optional port, then an optional path, query or
 # fragment; punctuation that closes a sentence, a quote or a JSON object may
-# trail a bare host, a quote also as JSON text inside a JSON string escapes it
-# (``{"a":"{\"u\":\"user:pw@h:8080\"}"}``).
+# trail a bare host, a quote also behind the backslashes JSON text, or JSON
+# text inside a JSON string, escapes it with (``{"a":"{\"u\":\"user:pw@h:8080\"}"}``).
+# After a separator, a closer or a quote anything may follow in the same word
+# (``u:pw@h:8080,x``, ``u:pw@h:8080','b':1}``): the address ends there.
+# Possessive, so linear in the tail.
 _BARE_AUTHORITY_TAIL = re.compile(
-    r"(?:\[[0-9A-Fa-f:.%]+\]|[A-Za-z0-9][A-Za-z0-9.-]*)(?P<port>:\d{1,5})?"
-    r"(?:(?P<path>[/?#]\S*)|(?:\\(?=[\"'])|[)\]}>\"'.,;:])*)"
+    r"(?:\[[0-9A-Fa-f:.%]++\]|[A-Za-z0-9][A-Za-z0-9.-]*+)(?P<port>:\d{1,5})?"
+    r"(?:(?P<path>[/?#]\S*)|(?:\\++(?=[\"'])|[)\]}>\"'.,;:])*+(?:(?<=[,;)\]}>\"'])\S*)?)"
 )
 # What may open a token before an address's first character: a quote, a
 # bracket, or a JSON object's brace (``{"u":"user:pw@host"}``).
@@ -155,8 +158,21 @@ _PATH_START = re.compile(
 # separator too; ``C:/`` only at the start, as in :data:`_PATH_START`), or any
 # other colon.
 _DRIVE_OR_COLON = re.compile(r"\A[A-Za-z]:[\\/]|(?<=[\"'(<\[{=,;])[A-Za-z]:\\|:")
-# What ends a path's value before an address after it in the same word.
-_VALUE_SEPARATORS = ",;"
+# What ends a path's value before an address after it in the same word: a
+# separator, an assignment's ``=`` or a closer (``C:\x,u:pw@h``,
+# ``C:\x=u:pw@h``, ``[C:\x]u:pw@h``). A list's separators alone are read too.
+_LIST_SEPARATORS = ",;"
+_VALUE_SEPARATORS = _LIST_SEPARATORS + "=)]}>|"
+# Before a host with no port or path, what marks a backslash in the userinfo
+# as no password's: a quote JSON text escapes (``{"to":"\"bob\"@corp.com"}``,
+# a mail address's quoted name) or a path's start anywhere in it (a drive, a
+# UNC share's server, a relative path, an environment variable:
+# ``file:C:\Users\bob@corp``). Possessive, so each start costs time linear in
+# what it reads.
+_NO_PASSWORD_BACKSLASH = re.compile(
+    r"\\[\"']|[A-Za-z]:\\|\\\\[\w.$@-]++\\|(?<![\w.])\.{1,2}\\"
+    r"|%[A-Za-z_][A-Za-z0-9_() ]*+%\\|\$env:"
+)
 # What may open the value a path stands in (``{"a":"C:\x``, ``--out=C:\x``).
 _PATH_VALUE_OPENERS = "\"'([{=,;"
 # Openers, each behind any run of backslashes that escapes it, that open a
@@ -235,8 +251,9 @@ def _user_colon(text: str) -> int:
 def _after_a_path(word: str, start: int, last_at: int) -> int | None:
     """Where an address after a path in the same word begins, or ``None`` for none.
 
-    A path ends at a separator (:data:`_VALUE_SEPARATORS`), so a user name
-    and password after it (``C:\\x,u:pw@h:8080``, ``'C:\\x','u:pw@h:8080'``)
+    A path ends at a separator, an ``=`` or a closer (:data:`_VALUE_SEPARATORS`),
+    so a user name and password after it (``C:\\x,u:pw@h:8080``,
+    ``C:\\x=u:pw@h:8080``, ``[C:\\x]u:pw@h:8080``, ``'C:\\x','u:pw@h:8080'``)
     are read from the last separator before the first colon that is no
     drive's (:func:`_user_colon`), and a token alone from the last separator
     before the ``@`` where an opener follows it (``('C:\\x','tok@h:8080')``);
@@ -261,21 +278,27 @@ def _after_a_path(word: str, start: int, last_at: int) -> int | None:
         begin
         for value in starts
         for escaped in (True, False)
-        if (begin := _after_a_path_from(word, value, last_at, escaped)) is not None
+        for separators in (_LIST_SEPARATORS, _VALUE_SEPARATORS)
+        if (begin := _after_a_path_from(word, value, last_at, escaped, separators)) is not None
     ]
     return min(found, default=None)
 
 
-def _after_a_path_from(word: str, start: int, last_at: int, escaped: bool) -> int | None:
+def _after_a_path_from(
+    word: str, start: int, last_at: int, escaped: bool, separators: str
+) -> int | None:
     """One reading of :func:`_after_a_path`: its colons read from ``start``.
 
     With ``escaped``, the opener after the separator may stand behind
     backslashes (:data:`_ESCAPED_OPENERS`); otherwise only openers as written
-    are passed over. Linear in the word.
+    are passed over. The path ends at the last of ``separators`` before the
+    colon: a list's alone (:data:`_LIST_SEPARATORS`), or every character that
+    ends a value (:data:`_VALUE_SEPARATORS`), which may cut later and so
+    never stands in for the list's reading. Linear in the word.
     """
     colon = _user_colon(word[start:last_at])
     end = start + colon if colon >= 0 else last_at
-    cut = max(word.rfind(sep, start, end) for sep in _VALUE_SEPARATORS)
+    cut = max(word.rfind(sep, start, end) for sep in separators)
     if cut < start:
         return None
     if escaped:
@@ -322,14 +345,16 @@ def bare_userinfo(token: str) -> tuple[str, str] | None:
     path only where the userinfo ends in one (:func:`_reads_as_a_windows_path`),
     so a password JSON text escapes (``{"password":"p\\"ss@h:8080"}``,
     ``{"password":"p\\\\ss@h:8080"}``) is masked and ``C:\\Users\\bob@h:8080``
-    is kept; before a mail address's host (``{"to":"\\"bob\\"@corp.com"}``)
-    any backslash refuses it. A known residual: a one-letter user name whose
+    is kept; before a host with no port or path, a backslash refuses it only
+    where it escapes a quote, as JSON text writes a mail address's quoted name
+    (``{"to":"\\"bob\\"@corp.com"}``), or where a path begins anywhere in the
+    userinfo (:data:`_NO_PASSWORD_BACKSLASH`, ``file:C:\\Users\\bob@corp``), so
+    ``u:p\\x@h`` is masked. A known residual: a one-letter user name whose
     password begins with ``/`` and holds a backslash (``u:/p\\x@h``, with or
     without a port) is written as a drive and a path are (``C:/Users\\x``)
-    and is kept; so is any password holding a backslash before a host with no
-    port or path (``u:p\\x@h``), which reads as such a mail address does. A
-    password the platform holds is masked in each of them by value
-    (:func:`masked_values`).
+    and is kept; so is a password before a host with no port or path that
+    holds such a quote or path start. A password the platform holds is masked
+    in each of them by value (:func:`masked_values`).
     """
     head, at, tail = token.rpartition("@")
     if not at or not head or not tail:
@@ -338,7 +363,11 @@ def bare_userinfo(token: str) -> tuple[str, str] | None:
     if found is None:
         return None
     if "\\" in head and (
-        _reads_as_a_windows_path(head) or not (found.group("port") or found.group("path"))
+        _reads_as_a_windows_path(head)
+        or (
+            not (found.group("port") or found.group("path"))
+            and _NO_PASSWORD_BACKSLASH.search(head) is not None
+        )
     ):
         return None
     slash = head.find("/")
