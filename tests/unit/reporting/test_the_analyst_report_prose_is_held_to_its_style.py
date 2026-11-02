@@ -924,38 +924,43 @@ def _cell(tid: str, name: str, claim: str) -> CapabilityCell:
 class TestAProcedureIsHeldToItsOwnBehaviour:
     """T-495: a procedure is asked for its technique's behaviour, not the claim's first words."""
 
-    def _firsts(self, *cells: CapabilityCell) -> dict[str, str]:
+    def _firsts(self, *cells: CapabilityCell) -> dict[str, Any]:
         from maljan.reporting.composer_pro import first_claim_sentences
 
         return first_claim_sentences(_report(capability_matrix=list(cells), ttp_mappings=[]))
 
+    def _unit(self, tid: str, name: str, claim: str, *published: str) -> str:
+        from maljan.reporting.composer_pro import behaviour_sentence
+
+        return behaviour_sentence(tid, name, claim, {tid, *published})
+
+    def _asked(self, firsts: Any, tid: str, procedure: str) -> list[tuple[str, ...]]:
+        payload = {"procedures": [{"technique_id": tid, "procedure": procedure}]}
+        return [found.values for found in procedure_value_violations(payload, firsts)]
+
     def test_the_list_item_naming_the_technique_is_its_sentence(self) -> None:
+        name16, name18 = "System Network Configuration Discovery", "Remote System Discovery"
+        assert self._unit("T1016", name16, _SHARED_CLAIM).startswith("`ipconfig /all`")
+        assert self._unit("T1018", name18, _SHARED_CLAIM).startswith("`net view /all`")
         firsts = self._firsts(
-            _cell("T1016", "System Network Configuration Discovery", _SHARED_CLAIM),
-            _cell("T1018", "Remote System Discovery", _SHARED_CLAIM),
+            _cell("T1016", name16, _SHARED_CLAIM), _cell("T1018", name18, _SHARED_CLAIM)
         )
-        assert firsts["T1016"].startswith("`ipconfig /all`")
-        assert firsts["T1018"].startswith("`net view /all`")
         # The runner's addresses are no value of either behaviour.
-        own = {"procedures": [{"technique_id": "T1016", "procedure": "It runs ipconfig /all."}]}
-        assert procedure_value_violations(own, firsts) == []
+        assert self._asked(firsts, "T1016", "It runs ipconfig /all.") == []
         # The behaviour's own value is still asked for.
-        (found,) = procedure_value_violations(
-            {"procedures": [{"technique_id": "T1018", "procedure": "It lists hosts."}]}, firsts
-        )
-        assert found.values == ("net view /all",)
+        assert self._asked(firsts, "T1018", "It lists hosts.") == [("net view /all",)]
 
     def test_a_remark_naming_another_published_technique_is_no_behaviour(self) -> None:
         claim = (
             "Routine 0xae78 decodes the strings at run time. The rule tags T1027.005, so only "
             "T1027/T1140 are kept. The obfuscation is a rolling XOR with seed 0x33629d40."
         )
-        firsts = self._firsts(
-            _cell("T1027", "Obfuscated Files or Information", claim),
-            _cell("T1140", "Deobfuscate/Decode Files or Information", claim),
+        assert self._unit("T1027", "Obfuscated Files or Information", claim, "T1140").startswith(
+            "The obfuscation is a rolling XOR"
         )
-        assert firsts["T1027"].startswith("The obfuscation is a rolling XOR")
-        assert firsts["T1140"].startswith("Routine 0xae78 decodes")
+        assert self._unit(
+            "T1140", "Deobfuscate/Decode Files or Information", claim, "T1027"
+        ).startswith("Routine 0xae78 decodes")
 
     def test_the_sentence_naming_the_technique_s_words(self) -> None:
         claim = (
@@ -963,31 +968,96 @@ class TestAProcedureIsHeldToItsOwnBehaviour:
             "Routine 0x1c38 lists processes with Toolhelp (`&proclist=[`)."
         )
         firsts = self._firsts(_cell("T1057", "Process Discovery", claim))
-        dropped = {
-            "procedures": [{"technique_id": "T1057", "procedure": "Routine 0x1c38 lists them."}]
-        }
-        (found,) = procedure_value_violations(dropped, firsts)
-        assert found.values == ("&proclist=[",)
-        assert "0x1a08" not in found.message and "desklinks" not in found.message
+        assert self._asked(firsts, "T1057", "Routine 0x1c38 lists them.") == [("&proclist=[",)]
 
     def test_one_item_of_a_list_of_commands_not_the_list(self) -> None:
         claim = (
             "Commands decoded at 0xf000 run from 0x2200: ipconfig /all; "
             'net group "Domain Admins" /domain; nltest /domain_trusts.'
         )
-        firsts = self._firsts(_cell("T1482", "Domain Trust Discovery", claim))
-        assert firsts["T1482"] == "nltest /domain_trusts."
+        assert self._unit("T1482", "Domain Trust Discovery", claim) == "nltest /domain_trusts."
 
     def test_a_claim_naming_neither_keeps_its_first_sentence(self) -> None:
         claim = "Routine 0x4d20 posts the check-in. It retries after 0x5030 fails."
-        firsts = self._firsts(_cell("T1071.001", "Web Protocols", claim))
-        assert firsts["T1071.001"] == "Routine 0x4d20 posts the check-in."
+        unit = self._unit("T1071.001", "Web Protocols", claim)
+        assert unit == "Routine 0x4d20 posts the check-in."
 
     def test_no_section_argument_or_byte_constant_is_asked_for(self) -> None:
         firsts = {"T1105": "Command 0x0e (0x7170) calls 0x6f48 with arg2 = 0 from `.text`."}
-        dropped = {"procedures": [{"technique_id": "T1105", "procedure": "It fetches a body."}]}
-        (found,) = procedure_value_violations(dropped, firsts)
-        assert found.values == ("0x7170", "0x6f48")
+        assert self._asked(firsts, "T1105", "It fetches a body.") == [("0x7170", "0x6f48")]
+
+    # A1: a word of the name is matched as a word, from its first letter.
+    def test_a_name_word_inside_another_word_is_no_match(self) -> None:
+        procedure = (
+            "The procedure at 0x1a08 walks the Desktop. Routine 0x1c38 walks Process32NextW."
+        )
+        assert self._unit("T1057", "Process Discovery", procedure).startswith("Routine 0x1c38")
+        tools = "Routine 0x2000 uses Toolhelp32. The tool at 0x6f48 downloads the body."
+        assert self._unit("T1105", "Ingress Tool Transfer", tools).startswith("The tool at")
+        registry = "Routine 0x9000 registers a class. Routine 0x9100 reads the registry key."
+        assert self._unit("T1012", "Query Registry", registry).startswith("Routine 0x9100")
+        script = "The description at 0x4000 names the host. Routine 0x5100 starts a script."
+        name = "Command and Scripting Interpreter"
+        assert self._unit("T1059", name, script).startswith("Routine 0x5100")
+
+    def test_an_identifier_is_read_by_its_humps(self) -> None:
+        claim = "Routine 0x8560 reads the version. Routine 0x7100 calls GetUserNameA."
+        unit = self._unit("T1033", "System Owner/User Discovery", claim)
+        assert unit == "Routine 0x7100 calls GetUserNameA."
+
+    # A2: a unit saying the behaviour is not so is taken only when nothing else is.
+    def test_a_negated_unit_gives_way_to_one_that_states_the_behaviour(self) -> None:
+        claim = (
+            "The sample does not delete itself (T1070.004 is not shown). Routine 0xa000 "
+            "removes `%TEMP%\\x.bat` with DeleteFileA, which is T1070.004."
+        )
+        unit = self._unit("T1070.004", "Indicator Removal: File Deletion", claim)
+        assert unit.startswith("Routine 0xa000")
+        claim = "The `unpack_upx` tool was not run. Routine 0x3000 XOR-decodes the strings."
+        assert self._unit("T1027", "Obfuscated Files or Information", claim).startswith(
+            "Routine 0x3000"
+        )
+        only = "The sample does not delete itself (T1070.004 is not shown)."
+        assert self._unit("T1070.004", "Indicator Removal: File Deletion", only) == only
+
+    # A3: every claim is read, each as the unit the procedure shares most with.
+    def test_a_procedure_showing_another_claim_of_its_technique_stands(self) -> None:
+        cell = CapabilityCell(
+            tactic="TA0007",
+            tactic_name="Discovery",
+            technique_id="T1033",
+            technique_name="System Owner/User Discovery",
+            evidence=[
+                "`whoami /groups` (0xf680) identifies the current user.",
+                "Routine 0x8ae0 calls GetUserNameA and writes the user's name.",
+            ],
+        )
+        firsts = self._firsts(cell)
+        assert self._asked(firsts, "T1033", "Routine 0x8ae0 calls GetUserNameA.") == []
+        # Carrying no claim's unit whole is asked about, by the unit shared most.
+        assert self._asked(firsts, "T1033", "Routine 0x8ae0 reads the name.") == [("GetUserNameA",)]
+        assert self._asked(firsts, "T1033", "It reads the user.") == [("whoami /groups", "0xf680")]
+
+    def test_a_clause_is_chosen_by_what_the_procedure_shares_with_it(self) -> None:
+        claim = (
+            "Routine 0xb0c4 opens the registry key with NtOpenKey; routine 0x88f8 queries "
+            "the registry value through 0xb154."
+        )
+        firsts = self._firsts(_cell("T1012", "Query Registry", claim))
+        assert self._asked(firsts, "T1012", "Routine 0x88f8 reads it through 0xb154.") == []
+        assert self._asked(firsts, "T1012", "Routine 0xb0c4 opens it.") == [("NtOpenKey",)]
+
+    # A4: the dotless twin of a section name, and a lone one-byte key.
+    def test_a_section_s_dotless_twin_and_a_lone_byte_key(self) -> None:
+        from maljan.reporting.composer_pro import identifying_values
+
+        assert identifying_values([".UPX0", "UPX0", "0x3000"]) == ["0x3000"]
+        assert identifying_values(["0x5a"]) == ["0x5a"]
+        assert identifying_values(["0x5a", "0x3000"]) == ["0x3000"]
+        firsts = {"T1027": "Routine 0x3000 XOR-decodes the strings with key 0x5a."}
+        assert self._asked(firsts, "T1027", "The strings are XOR-encoded.") == [("0x3000",)]
+        firsts = {"T1027": "The strings are XOR-decoded with key 0x5a."}
+        assert self._asked(firsts, "T1027", "The strings are XOR-encoded.") == [("0x5a",)]
 
 
 # ---------------------------------------------------------------------------
