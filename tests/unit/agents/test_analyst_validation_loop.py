@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.technique_facts import TECHNIQUE_FACTS_ATTACHED
 from maljan.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING,
     ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
@@ -108,7 +109,7 @@ class TestTheAnalystGetsOneTurnToFixIt:
 
         analyst.safe_analyze_isr("raw data")
 
-        feedback = str(analyst.seen_turns[0][-1].content)
+        feedback = _question(analyst.seen_turns[0][-1])
         assert feedback.startswith(FEEDBACK_PREAMBLE)
         assert "T9999" in feedback
         assert "T1055" in feedback
@@ -240,6 +241,20 @@ class _WrittenAnalyst(_Analyst):
         return self._text_to_isr(self._capture_findings(self._written), 0)
 
 
+def _question(turn: Any) -> str:
+    """A question turn's text without the catalogue facts that ride after it.
+
+    The facts of the ids the turn names (``technique_facts``) close the turn;
+    the question itself ends on its closing.
+    """
+    text = str(turn.content)
+    note = (turn.response_metadata or {}).get(TECHNIQUE_FACTS_ATTACHED) or ""
+    if note:
+        assert text.endswith(f"\n\n{note}")
+        text = text[: -len(note) - 2]
+    return text
+
+
 def _replayed(analyst: _Analyst) -> list[str]:
     """The answers the retry's conversation carries as the analyst's own turns."""
     return [
@@ -263,7 +278,7 @@ class TestTheRetryIsShownTheAnswerAsWritten:
 
         analyst.safe_analyze_isr("raw data")
 
-        closing = str(analyst.seen_turns[0][-1].content).splitlines()[-1]
+        closing = _question(analyst.seen_turns[0][-1]).splitlines()[-1]
         assert closing == ANALYST_FEEDBACK_CLOSING_BY_NUMBER
         for word in (
             "CLAIM 7:",
