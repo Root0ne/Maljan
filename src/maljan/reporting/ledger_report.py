@@ -1102,8 +1102,9 @@ def _sandbox_status(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) ->
     """The pack's one sentence on what the sandbox report is, as its own section.
 
     Written where no live sandbox observed the run — none ran, or the report is
-    a recorded fixture — and filed with the sandbox views, so the report and
-    the console's dynamic tab say it where a reader looks for the behaviour.
+    a recorded fixture — or where the live sandbox names a target that is not
+    the sample, and filed with the sandbox views, so the report and the
+    console's dynamic tab say it where a reader looks for the behaviour.
     """
     statement = _text(data.get("statement"))
     if not statement:

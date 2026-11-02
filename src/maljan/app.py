@@ -313,6 +313,49 @@ class MaljanApp:
             scale = None
         self.container.sandbox_signature_scale = scale.record() if scale is not None else None
 
+    def _tell_the_target(
+        self, report: dict[str, Any] | None, file_hash: str
+    ) -> dict[str, Any] | None:
+        """``report``, marked where its sandbox names a target that is not the sample.
+
+        The comparison the worker records after the graph
+        (``sandbox_target_record``), made here as well so the analysts and the
+        judge are told before they read the behaviour: the mark is what the
+        pack's sandbox sentence is written from (``pipeline.sandbox_status``).
+        Only the neutral report's target hash is read, whichever sandbox ran.
+        A report whose target is the sample, or that names none, is returned
+        as it came. The mark is the platform's: one a sandbox published under
+        its word is not the run's finding, and is taken out, with a warning.
+        """
+        from maljan.analysis.sample_integrity import sandbox_target_record
+        from maljan.pipeline.sandbox_status import TARGET_KEY, target_mark
+
+        if not isinstance(report, dict):
+            return report
+        claim = self.container.sandbox_target_claim
+        record = (
+            sandbox_target_record(
+                file_hash,
+                claim.get("sha256"),
+                provider=str(claim.get("provider") or ""),
+                task_id=str(claim.get("task_id") or ""),
+            )
+            if isinstance(claim, dict)
+            else None
+        )
+        if TARGET_KEY in report:
+            report.pop(TARGET_KEY)
+            logger.warning(
+                "The sandbox report carries a top-level %r block; that word is the "
+                "platform's mark for a report naming another target, so the block was "
+                "taken out%s.",
+                TARGET_KEY,
+                " and the run's own mark set in its place" if record is not None else "",
+            )
+        if record is not None:
+            report[TARGET_KEY] = target_mark(record)
+        return report
+
     async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:
         """Submit sample to sandbox and return the neutral report's document.
 
@@ -684,7 +727,9 @@ class MaljanApp:
     ) -> dict[str, Any]:
         """The sandbox submission and the graph, for ``arun``."""
         # Submit to sandbox if sample_path is provided
-        sandbox_report = await self._submit_to_sandbox(sample_path)
+        sandbox_report = self._tell_the_target(
+            await self._submit_to_sandbox(sample_path), file_hash
+        )
 
         # Compute file_type + canonical platform up front. It routes the
         # analysis (which prompt fragment an analyst is given, which rules the

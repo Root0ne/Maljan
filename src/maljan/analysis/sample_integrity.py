@@ -157,7 +157,8 @@ def sandbox_target_record(
     provider's reader put it in the neutral report. No claim, or the intake
     digest in any case, is no record. A claim that is not a SHA-256 is the
     sandbox's own text: it is kept as :func:`_shown` keeps it, marked
-    ``sandbox_sha256_valid: False``.
+    ``sandbox_sha256_valid: False``; one that holds no printable character is
+    kept empty, still marked, and said as such (:func:`sandbox_target_lines`).
     """
     claim = str(claimed or "").strip().lower()
     if not claim or not expected or claim == expected.lower():
@@ -176,6 +177,16 @@ def sandbox_target_record(
         "provider": provider,
         "task_id": task_id,
     }
+
+
+def kept_hash(value: str) -> str:
+    """``value`` as a record keeps the intake hash: a SHA-256 as given, else as :func:`_shown`.
+
+    A SHA-256 is not lower-cased: the run summary and the disclosure record
+    spell the intake digest as the job gave it.
+    """
+    given = str(value or "").strip()
+    return given if _SHA256.fullmatch(given.lower()) else _shown(given)
 
 
 def _shown(value: str) -> str:
@@ -260,14 +271,21 @@ def sandbox_target_lines(record: Any, code: Callable[[str], str]) -> list[str]:
         return []
     claim = str(record.get("sandbox_sha256") or "")
     expected = str(record.get("expected_sha256") or "")
-    if not claim or not expected:
+    invalid = record.get("sandbox_sha256_valid") is False
+    if not expected or not (claim or invalid):
         return []
     provider = str(record.get("provider") or "")
     task_id = str(record.get("task_id") or "")
     which = f"The report of the sandbox {code(provider)}" if provider else "The sandbox report"
     if task_id:
         which += f" (task {code(task_id)})"
-    if record.get("sandbox_sha256_valid") is False:
+    if invalid and not claim:
+        said = (
+            f"{which} names its target with a value that holds no printable character, "
+            f"so what it observed cannot be tied to the sample's intake SHA-256 "
+            f"{code(expected)}."
+        )
+    elif invalid:
         said = (
             f"{which} names its target with a value that is not a SHA-256, {code(claim)}, "
             f"so what it observed cannot be tied to the sample's intake SHA-256 "
