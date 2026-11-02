@@ -34,13 +34,13 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from maljan.analysis.technique_ids import is_technique_id
+from maljan.analysis.technique_ids import ID_BODY, is_technique_id
 from maljan.memory.attck_loader import TACTIC_ID_RE
 from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
@@ -1088,43 +1088,274 @@ def summary_value_violations(
 
 
 def procedure_value_violations(
-    payload: Any, firsts: Mapping[str, str], reader: ValueReader | None = None
+    payload: Any,
+    firsts: Mapping[str, str | BehaviourUnits],
+    reader: ValueReader | None = None,
 ) -> list[Violation]:
-    """A procedure that drops a value its technique's first claim sentence names.
+    """A procedure that carries the identifying values of none of its technique's claims.
 
-    ``firsts`` is each published technique's first claim sentence, the one the
-    procedure replaces in the ATT&CK table.
+    ``firsts`` holds, for each published technique, the units of each of its
+    claims that name the technique's behaviour (:func:`first_claim_sentences`;
+    a plain text is one claim of one unit). Each claim is read as the unit that
+    shares the most identifying values with the procedure, then names most of
+    the technique, then says it is so, then stands first. The procedure stands when it carries every
+    identifying value (:func:`identifying_values`) of one claim's unit; else it
+    is asked for what it drops of the unit it shares the most with, the
+    earliest claim on a tie. A claim whose unit names no identifying value
+    grounds nothing, unless no claim's unit names one.
     """
     out: list[Violation] = []
     for index, row in enumerate(_rows(payload, "procedures")):
         tid = str(row.get("technique_id") or "").strip().upper()
-        first = firsts.get(tid, "")
-        dropped = values_not_carried(carried_values(first, reader), str(row.get("procedure") or ""))
-        if dropped:
-            out.append(
-                Violation(
-                    code=VALUE_NOT_CARRIED_CODE,
-                    message=(
-                        f"The procedure for {safe_finding_value(tid)} drops "
-                        f"{safe_finding_value(', '.join(dropped[:6]))}, which the first claim "
-                        "names. Carry the value that shows the procedure."
-                    ),
-                    path=f"procedures[{index}].procedure",
-                    values=tuple(dropped),
-                )
+        units = firsts.get(tid, "")
+        claims = units.claims if isinstance(units, BehaviourUnits) else ((_Unit(units),),)
+        held = carrying_form(str(row.get("procedure") or ""))
+        read: list[tuple[list[str], list[str]]] = []
+        for candidates in claims:
+            best: tuple[tuple[int, int, int, int], list[str], list[str]] | None = None
+            for unit in candidates:
+                named = identifying_values(carried_values(unit.text, reader))
+                dropped = values_not_carried(named, held, formed=True)
+                # A part that says the behaviour is not so loses a tie, never
+                # a procedure that carries its values.
+                rank = (len(named) - len(dropped), not unit.negated, unit.score, -unit.index)
+                if best is None or rank > best[0]:
+                    best = (rank, named, dropped)
+            if best is not None:
+                read.append((best[1], best[2]))
+        grounded = [(named, dropped) for named, dropped in read if named]
+        if not grounded or any(not dropped for _named, dropped in grounded):
+            continue
+        _named, dropped = max(grounded, key=lambda pair: len(pair[0]) - len(pair[1]))
+        out.append(
+            Violation(
+                code=VALUE_NOT_CARRIED_CODE,
+                message=(
+                    f"The procedure for {safe_finding_value(tid)} drops "
+                    f"{safe_finding_value(', '.join(dropped[:6]))}, which its claim names "
+                    "of the technique's behaviour. Carry the value that shows the procedure."
+                ),
+                path=f"procedures[{index}].procedure",
+                values=tuple(dropped),
+            )
+        )
+    return out
+
+
+@dataclass(frozen=True)
+class _Unit:
+    """One part of a claim a procedure may be held to: its text, how many words of the
+    technique's name it names, and its place in the claim."""
+
+    text: str
+    score: int = 0
+    index: int = 0
+    # Whether its sentences naming the behaviour all say it is not so.
+    negated: bool = False
+
+
+@dataclass(frozen=True)
+class BehaviourUnits:
+    """A technique's claims, each as the units of it that name the technique's behaviour."""
+
+    claims: tuple[tuple[_Unit, ...], ...]
+
+
+def first_claim_sentences(report: MalwareReport) -> dict[str, BehaviourUnits]:
+    """Each published technique's claims, each as the units that name its behaviour.
+
+    A claim often covers several behaviours, and several techniques can share
+    one, so a procedure is held to the part of a claim that is its own
+    (:func:`behaviour_units`), never to whatever the claim states first; and a
+    procedure may show the technique by any of its claims.
+    """
+    published = published_techniques(report)
+    ids = {tid.upper() for tid in published}
+    out: dict[str, BehaviourUnits] = {}
+    for tid, (name, claims, _refs) in published.items():
+        if claims:
+            out[tid.upper()] = BehaviourUnits(
+                tuple(behaviour_units(tid, name, claim, ids) for claim in claims)
             )
     return out
 
 
-def first_claim_sentences(report: MalwareReport) -> dict[str, str]:
-    """Each published technique's first claim sentence, as the ATT&CK table picks it."""
-    out: dict[str, str] = {}
-    for tid, (_name, claims, _refs) in published_techniques(report).items():
-        if claims:
-            text = _CITATIONS.sub("", claims[0])
-            text = re.sub(r"^\s*\d{1,3}\.\s+", "", " ".join(text.split()))
-            out[tid.upper()] = (sentences(text) or [""])[0]
+# A technique name's words that name no behaviour of their own.
+_NAME_FILLER = frozenset(
+    {"and", "or", "the", "of", "for", "with", "from", "via", "to", "a", "an", "in", "on", "by"}
+    | {"information", "file", "files", "system", "data", "windows", "protocol", "protocols"}
+    | {"name", "names", "match", "legitimate", "location", "discovery", "execution"}
+)
+_BULLET = re.compile(r"^\s*[-*•]\s+")
+# The endings a word of a technique's name and a word of a claim may differ by and
+# still be one word ("process" and "processes", "deletion" and "deletes").
+_ENDINGS = frozenset(
+    {"", "s", "es", "d", "ed", "r", "er", "ers", "ing", "ings", "e", "y", "ies", "ied"}
+    | {"ion", "ions", "ation", "ations"}
+)
+# A sentence that says a thing is not so: the behaviour it names is not the
+# technique's procedure while another unit names one.
+# A verb's negation only: "with no visible window" says how the behaviour is done.
+_NEGATION = re.compile(r"\b(?:not|never|cannot)\b|n't\b", re.IGNORECASE)
+
+
+def _claim_units(claim: str) -> list[str]:
+    """``claim``'s units, without citations or its number: each list item whole, the
+    text between them by sentence."""
+    text = re.sub(r"^\s*\d{1,3}\.\s+", "", _CITATIONS.sub("", str(claim or "")))
+    out: list[str] = []
+    prose: list[str] = []
+    for line in [*text.splitlines(), "- "]:
+        if not _BULLET.match(line):
+            prose.append(line)
+            continue
+        out.extend(sentences(" ".join(" ".join(prose).split())))
+        prose = []
+        # A list item is one behaviour with the words that name it ("... That is T1018.").
+        item = " ".join(_BULLET.sub("", line).split())
+        if item:
+            out.append(item)
     return out
+
+
+def _words(text: str) -> list[str]:
+    """``text``'s words in lower case, an identifier split at its humps (``GetUserNameA``
+    is get, user, name, a)."""
+    out: list[str] = []
+    for token in re.findall(r"[A-Za-z0-9]+", str(text or "")):
+        out.extend(part.lower() for part in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", token))
+    return out
+
+
+def _same_word(word: str, other: str) -> bool:
+    """Whether a word of a claim is a word of the technique's name: the two agree from
+    their first letter on (at least five letters, or the whole of a shorter name word)
+    and differ only by an ending ("Toolhelp" is no "tool", "procedure" no "process")."""
+    common = 0
+    for a, b in zip(word, other, strict=False):
+        if a != b:
+            break
+        common += 1
+    if common < min(5, len(word)):
+        return False
+    return word[common:] in _ENDINGS and other[common:] in _ENDINGS
+
+
+def _name_words(name: str) -> list[str]:
+    return list(dict.fromkeys(w for w in _words(name) if len(w) >= 4 and w not in _NAME_FILLER))
+
+
+def _name_score(text: str, words: Sequence[str]) -> int:
+    """How many of the technique name's ``words`` ``text`` names."""
+    said = set(_words(text))
+    return sum(1 for word in words if any(_same_word(word, other) for other in said))
+
+
+def _negated(unit: str, names: Callable[[str], bool]) -> bool:
+    """Whether every sentence of ``unit`` that ``names`` the behaviour says it is not so."""
+    naming = [s for s in sentences(unit) or [unit] if names(s)]
+    return bool(naming) and all(_NEGATION.search(s) for s in naming)
+
+
+def behaviour_units(
+    tid: str, name: str, claim: str, published: Collection[str] = ()
+) -> tuple[_Unit, ...]:
+    """The units of ``claim`` that name technique ``tid``'s behaviour, best first.
+
+    The units naming ``tid`` itself, unless one names another published
+    technique too (``published``): that is a remark on the mapping ("only
+    T1027/T1140 are kept"). Else the clauses (:func:`_clauses`) naming words of
+    the technique's name (:func:`_same_word`), most first: one item of a list of
+    commands, not the list. A unit whose sentences naming the behaviour all say
+    it is not so ("does not delete itself", "was not run") is marked
+    ``negated``: it stays a candidate, losing a tie to one that says the
+    behaviour is so; the units naming ``tid`` stand alone only when one of them
+    is not negated. A claim that names neither offers its first sentence, and
+    its first sentence that says no "not" where that is another.
+    """
+    units = _claim_units(claim)
+    if not units:
+        return ()
+    own = tid.upper()
+    others = {str(t).upper() for t in published} - {own}
+
+    def _names_id(text: str) -> bool:
+        return own in {m.upper() for m in _TECHNIQUE_IN_TEXT.findall(text)}
+
+    by_id = [
+        _Unit(unit, 0, at, _negated(unit, _names_id))
+        for at, unit in enumerate(units)
+        if _names_id(unit) and not {m.upper() for m in _TECHNIQUE_IN_TEXT.findall(unit)} & others
+    ]
+    words = _name_words(name)
+    clauses = [clause for unit in units for clause in _clauses(unit)]
+    by_name = [
+        _Unit(clause, score, at, _negated(clause, lambda s: _name_score(s, words) > 0))
+        for at, clause in enumerate(clauses)
+        if (score := _name_score(clause, words))
+    ]
+    if any(not unit.negated for unit in by_id):
+        return tuple(by_id)
+    if by_name or by_id:
+        return (*by_name, *by_id)
+    # The first sentence, and the first saying no "not" where that is another:
+    # a "cannot" in a subordinate clause never pushes the first one out.
+    first = _Unit(units[0], 0, 0, bool(_NEGATION.search(units[0])))
+    plain = next((unit for unit in units if not _NEGATION.search(unit)), None)
+    return (first, *([_Unit(plain, 0, 1)] if plain is not None and plain != units[0] else []))
+
+
+def behaviour_sentence(tid: str, name: str, claim: str, published: Collection[str] = ()) -> str:
+    """The unit of ``claim`` :func:`behaviour_units` puts first, read with no procedure:
+    one saying the behaviour is so, then most words of the name, then the earliest."""
+    units = behaviour_units(tid, name, claim, published)
+    if not units:
+        return ""
+    return max(units, key=lambda unit: (not unit.negated, unit.score, -unit.index)).text
+
+
+def _clauses(unit: str) -> list[str]:
+    """``unit`` split at each semicolon outside parentheses, quotes and code spans."""
+    out: list[str] = []
+    depth, code, quoted, start = 0, False, False, 0
+    for at, char in enumerate(unit):
+        if char == "`":
+            code = not code
+        elif char == '"' and not code:
+            quoted = not quoted
+        elif char in "([{" and not (code or quoted):
+            depth += 1
+        elif char in ")]}" and not (code or quoted):
+            depth = max(0, depth - 1)
+        elif char == ";" and not (depth or code or quoted):
+            out.append(unit[start:at])
+            start = at + 1
+    out.append(unit[start:])
+    return [clause.strip() for clause in out if clause.strip()]
+
+
+_TECHNIQUE_IN_TEXT = re.compile(rf"(?i)(?<![\w.]){ID_BODY}(?![\w]|\.\d)")
+_SECTION_NAME = re.compile(r"^\.[A-Za-z0-9_$]{1,8}$")
+_ARGUMENT_NAME = re.compile(r"(?i)^(?:arg|param|var|local)_?\d+$")
+_BYTE_CONSTANT = re.compile(r"(?i)^0x[0-9a-f]{1,2}$")
+
+
+def identifying_values(values: Sequence[str]) -> list[str]:
+    """The values of ``values`` that identify a behaviour, in order.
+
+    Never a section name or an extension (``.text``, ``.exe``) nor the same name
+    without its dot when that is asked too (``UPX0`` beside ``.UPX0``), nor an
+    argument name (``arg2``). A one-byte constant (``0x0e``) only where it is the
+    unit's one identifying value (an XOR key ``0x5a`` alone stays).
+    """
+    dotted = {v[1:].lower() for v in values if _SECTION_NAME.match(v)}
+    kept = [
+        v
+        for v in values
+        if not _SECTION_NAME.match(v) and not _ARGUMENT_NAME.match(v) and v.lower() not in dotted
+    ]
+    wide = [v for v in kept if not _BYTE_CONSTANT.match(v)]
+    return wide or kept
 
 
 def held_text(report: MalwareReport) -> str:
