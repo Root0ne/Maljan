@@ -17,8 +17,9 @@ agreement question reads them, ``agreement_facts``, T-396):
   that function whole: a decompiled listing holding it, or a disassembly of the
   whole function. A read of some instructions from the address is no redo.
 
-The answering call must hold its answer (``holds_its_answer``), and a listing
-that is error text answers nothing. A call asked for no address (a scan, a
+The answering call must hold its answer whole (``holds_its_answer``, and
+nothing cut by the byte budget or the tool-output guardrail), and an answer
+that is error text answers nothing, a listing or not. A call asked for no address (a scan, a
 lookup, an emulation by candidate names) has nothing to be matched by, and
 stays a failure. The rows are the platform's own ids and the tool's name,
 cleaned to one capped line; the failure itself is still counted and listed
@@ -89,16 +90,22 @@ def _whole_listings(answering: Any, bases: Sequence[int]) -> set[int]:
 
 
 def _answers(answering: Any) -> bool:
-    """Whether a later entry is an answer at all: a call that ran, worked and holds its answer."""
+    """Whether a later entry is an answer: a call that ran, worked and holds its answer whole.
+
+    An answer the byte budget or the tool-output guardrail cut holds part of
+    what was asked, and one whose text is an error answered nothing, listing
+    or not.
+    """
     from maljan.agents.function_callees import listing_is_error
-    from maljan.core.undeclared_tools import entry_lists_any_code
     from maljan.schemas.evidence import answer_not_shown, holds_its_answer
 
     if not getattr(answering, "ok", True) or getattr(answering, "repeated_of", None):
         return False
+    if getattr(answering, "truncated", False) or int(getattr(answering, "chars_dropped", 0) or 0):
+        return False
     if answer_not_shown(answering) or not holds_its_answer(answering):
         return False
-    return not (entry_lists_any_code(answering) and listing_is_error(answering))
+    return not listing_is_error(answering)
 
 
 def redone_failures(ledger: Iterable[Any]) -> list[dict[str, Any]]:

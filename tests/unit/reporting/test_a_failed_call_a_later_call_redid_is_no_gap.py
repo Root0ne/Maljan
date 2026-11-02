@@ -199,6 +199,31 @@ def test_an_answer_that_holds_nothing_redoes_nothing() -> None:
     assert redone_failures([_failed("ev_0001", GATE), empty, blanked]) == []
 
 
+def test_an_answer_the_guardrail_or_the_budget_cut_redoes_nothing() -> None:
+    cut = _lifted("ev_0002", GATE).model_copy(update={"truncated": True, "chars_dropped": 500})
+    trimmed = _lifted("ev_0003", GATE).model_copy(update={"truncated": True})
+    assert redone_failures([_failed("ev_0001", GATE), cut, trimmed]) == []
+    whole = _lifted("ev_0004", GATE)
+    assert redone_failures([_failed("ev_0001", GATE), cut, trimmed, whole])[0]["answered_by"] == [
+        "ev_0004"
+    ]
+
+
+def test_a_worked_answer_that_is_error_text_redoes_nothing_listing_or_not() -> None:
+    # The same tool, for the same address, answered ok with only an error.
+    failed = LedgerEntry(
+        id="ev_0001",
+        tool="trace_value",
+        args={"address": hex(GATE), "variable": "a"},
+        ok=False,
+        error="the call timed out",
+    )
+    erred = failed.model_copy(
+        update={"id": "ev_0002", "ok": True, "error": None, "output": "Error: no function there"}
+    )
+    assert redone_failures([failed, erred]) == []
+
+
 # -- the run's bounds --------------------------------------------------------
 
 
