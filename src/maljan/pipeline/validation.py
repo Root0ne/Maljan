@@ -437,7 +437,7 @@ def _asks_about_techniques(violation: Violation) -> bool:
     )
 
 
-def _technique_fact(attck: Any, tid: str) -> str:
+def technique_fact_line(attck: Any, tid: str) -> str:
     """One id's catalogue line: its name, its parent and its tactics, or why it is no technique."""
     row = attck.attck_lookup(tid) or {}
     name = str(row.get("name") or "")
@@ -501,7 +501,7 @@ def technique_facts_note(violations: Sequence[Violation], claims: Iterable[Any],
     lines: list[str] = []
     for tid in technique_ids_in([text for text in written if text]):
         try:
-            lines.append(_technique_fact(attck, tid))
+            lines.append(technique_fact_line(attck, tid))
         except Exception as exc:  # noqa: BLE001 — an id the catalogue cannot answer is left out
             logger.debug("technique facts: %s was not read (%s)", tid, exc)
     return "\n".join([TECHNIQUE_FACTS_LEAD, *lines]) if lines else ""
