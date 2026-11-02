@@ -157,6 +157,132 @@ def test_a_request_rereads_the_store_at_most_every_few_seconds(
     asyncio.run(store.refresh(_maker(db)))  # never fails the request
 
 
+def test_stored_settings_that_cannot_be_read_are_said_once_and_leave_the_reading_in_force(
+    db: _Awaited, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failing settings read is said once per distinct failure, not every few seconds (T-437)."""
+    import logging
+
+    from app.services import settings_service
+    from maljan.core import declared_reading
+
+    held = object()
+    monkeypatch.setattr(declared_reading, "_READ_THROUGH", [held])
+    monkeypatch.setattr(store, "_REFRESH_FAILURE", [None])
+
+    async def _load(session: Any) -> int:
+        return 0
+
+    failures: list[Exception] = [ValueError("bad"), ValueError("bad again"), KeyError("x")]
+
+    async def _stored(session: Any) -> Any:
+        if failures:
+            raise failures.pop(0)
+        return "the settings read"
+
+    monkeypatch.setattr(store, "load", _load)
+    monkeypatch.setattr(settings_service, "effective_core_settings", _stored)
+
+    def _refresh() -> None:
+        monkeypatch.setattr(store, "_READ_AT", [float("-inf")])
+        asyncio.run(store.refresh(_maker(db)))  # never fails the request
+
+    def _said() -> list[str]:
+        return [r.getMessage() for r in caplog.records if "were not read" in r.getMessage()]
+
+    with caplog.at_level(logging.INFO):
+        _refresh()
+        _refresh()
+        # The same failure twice: said once, the reading before still in force.
+        assert _said() == [
+            "The stored settings (ValueError) were not read; the reading before stays "
+            "in force until a read succeeds."
+        ]
+        assert declared_reading._READ_THROUGH[0] is held
+        assert store.refresh_failure() == "the stored settings (ValueError)"
+        # Another failure is said in its turn.
+        _refresh()
+        assert len(_said()) == 2
+        assert store.refresh_failure() == "the stored settings (KeyError)"
+        # A read that succeeds says so, ends the failure and takes over.
+        _refresh()
+        assert store.refresh_failure() is None
+        assert declared_reading._READ_THROUGH[0] == "the settings read"
+        assert any("are read again" in r.getMessage() for r in caplog.records)
+        _refresh()
+        assert len(_said()) == 2
+
+
+def test_kept_declarations_that_cannot_be_read_are_a_failure_of_the_refresh_each_outage(
+    db: _Awaited, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Load says -1 rather than raising: still a failure, said again after a recovery (T-437)."""
+    import logging
+
+    from app.services import settings_service
+    from maljan.core import declared_reading
+
+    class _Gone(_Awaited):
+        """The database, unreachable while ``down`` holds."""
+
+        down = True
+
+        async def execute(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
+            if self.down:
+                raise OperationalError("select", {}, Exception("gone"))
+            return await super().execute(statement, *args, **kwargs)
+
+    gone = _Gone(db.session)
+    settings_read: list[Exception | None] = [None]
+
+    async def _stored(session: Any) -> Any:
+        if settings_read[0] is not None:
+            raise settings_read[0]
+        return None
+
+    monkeypatch.setattr(declared_reading, "_READ_THROUGH", [object()])
+    monkeypatch.setattr(settings_service, "effective_core_settings", _stored)
+    monkeypatch.setattr(store, "_SAID_UNREAD", [False])
+
+    def _refresh() -> None:
+        monkeypatch.setattr(store, "_READ_AT", [float("-inf")])
+        asyncio.run(store.refresh(_maker(gone)))  # never fails the request
+
+    def _said(text: str) -> int:
+        return sum(text in r.getMessage() for r in caplog.records)
+
+    refreshed = "were not read; the reading before stays in force"
+    loaded = "The servers' kept declarations were not read (OperationalError)"
+    with caplog.at_level(logging.INFO):
+        assert asyncio.run(store.load(gone)) == -1
+        assert _said(loaded) == 1
+        _refresh()
+        _refresh()
+        # The outage is the refresh's failure, said once, though load raised nothing.
+        assert store.refresh_failure() == "the servers' kept declarations (OperationalError)"
+        assert _said(refreshed) == 1
+        assert _said(loaded) == 1
+        assert _said("are read again") == 0
+        # Both reads succeed: said, and the failure is over.
+        gone.down = False
+        _refresh()
+        assert store.refresh_failure() is None
+        assert _said("are read again") == 1
+        # A second outage after the recovery is said again, by load and by the refresh.
+        gone.down = True
+        _refresh()
+        assert _said(loaded) == 2
+        assert _said(refreshed) == 2
+        # And with the settings failing as well, both reads are named.
+        settings_read[0] = ValueError("bad")
+        _refresh()
+        assert store.refresh_failure() == (
+            "the servers' kept declarations (OperationalError) and the stored settings (ValueError)"
+        )
+        assert _said(refreshed) == 3
+        assert _said("are read again") == 1
+
+
 def test_a_store_not_migrated_yet_is_said_once(caplog: pytest.LogCaptureFixture) -> None:
     import logging
 
