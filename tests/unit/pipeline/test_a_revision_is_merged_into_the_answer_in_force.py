@@ -228,7 +228,7 @@ class TestTheHaiku8ShapeKeepsWhatTheRevisionLeftOut:
         assert said.startswith(
             "The static analyst's round-4 revision wrote 10 claim(s) against 69 in force: "
             "by what they state, they restate 10 of those and add 0; it withdrew 0, and the "
-            "other 59 stand carried forward unchanged (claims 2, 3, 4, 5, 6, 7, 9,"
+            "other 59 stand carried forward unchanged (claims 2-7, 9-14, 16-21, 23-28, 30-35,"
         )
 
     def test_the_input_answers_are_not_changed(self) -> None:
@@ -311,7 +311,7 @@ class TestTheRevisionNodeMerges:
         assert report.count("carried forward: the round-1 revision") == 3
         assert "DISPUTES: NONE" in report
         [said] = out["revision_replacements"]
-        assert "the other 3 stand carried forward unchanged (claims 1, 3, 4" in said
+        assert "the other 3 stand carried forward unchanged (claims 1, 3-4 of" in said
         record = out["revision_rounds"][0]
         assert record["made"] == 1 and not record["identical"] and not record["reworded"]
 
@@ -337,3 +337,287 @@ class TestTheRevisionNodeMerges:
         out = _node_run(_isr(FIRST), _isr(answer), answer)
 
         assert out["revision_rounds"][0]["reworded"] is True
+
+
+class TestOnlyARealRestatementReplacesAClaim:
+    def test_a_small_number_in_common_restates_nothing(self) -> None:
+        debugger = "Init returns 0 when the PEB BeingDebugged byte at 0x309c is set."
+        first = _block(debugger) + _block(PERSIST)
+        answer = _block("The export returns 0 when its init routine fails.") + _block(PERSIST)
+
+        merge = merge_revision(_isr(first), _isr(answer), answer, 1)
+
+        assert merge.merged is not None
+        assert [n for n, _s in merge.carried] == [1]
+
+    def test_words_are_never_pooled_over_blocks(self) -> None:
+        claim = "No persistence mechanism is established by the sample code."
+        first = _block(claim) + _block(PERSIST)
+        # Every word of the claim is written, but spread over three blocks.
+        answer = (
+            _block("No packer is named.")
+            + _block("The persistence key is read at run time.")
+            + _block("The mechanism is established by the sample code path.")
+            + _block(PERSIST)
+        )
+
+        merge = merge_revision(_isr(first), _isr(answer), answer, 1)
+
+        assert merge.merged is not None
+        assert [n for n, _s in merge.carried] == [1]
+
+    def test_one_block_with_four_fifths_of_the_words_restates_it(self) -> None:
+        claim = "No persistence mechanism is established by the sample code."
+        first = _block(claim) + _block(PERSIST)
+        answer = _block("No persistence mechanism is established by the sample's code.")
+        answer += _block(PERSIST)
+
+        assert merge_revision(_isr(first), _isr(answer), answer, 1).merged is None
+
+    def test_a_third_of_the_values_with_the_technique_restates_a_correction(self) -> None:
+        first = _block("0x405000 runs net view through 0x1030 into net_view.", "T1018")
+        first += _block(PERSIST)
+        answer = _block("0x405000 runs nltest and ipconfig through a hidden runner.", "T1018")
+        answer += _block(PERSIST)
+
+        assert merge_revision(_isr(first), _isr(answer), answer, 1).merged is None
+
+    def test_a_number_that_restates_only_small_values_is_not_trusted(self) -> None:
+        first = _block("Init returns 0 at 0x309c.") + _block(PERSIST)
+        answer = _block("The export returns 0 on failure.", number=1) + _block(PERSIST, number=2)
+
+        merge = merge_revision(_isr(first), _isr(answer), answer, 1)
+
+        assert merge.placed_by == "statement"
+
+
+THREE = _block(MUTEX) + _block(BEACON, "T1071.001") + _block(CRYPTO)
+
+
+class TestAContestedClaimLeftUnansweredIsNamed:
+    def test_a_claim_a_blocking_line_named_is_withdrawn_by_rule(self) -> None:
+        answer = _block(MUTEX)
+
+        merge = merge_revision(_isr(THREE), _isr(answer), answer, 3, {2: [(4, True)]})
+
+        assert merge.merged is not None
+        assert _sentences(merge.merged) == [MUTEX, CRYPTO]
+        assert merge.withdrawn_by_rule == (
+            (
+                2,
+                BEACON,
+                "named by blocking line L4 of the round-3 mediation; the revision did not "
+                "restate it",
+            ),
+        )
+        assert [c.claim for c in merge.ruled_claims] == [BEACON]
+        said = merge.sentences("static", 3)
+        assert "withdrew 0 and 1 were withdrawn by rule" in said[0]
+        assert said[-1].startswith("Claim 2 of the static analyst's answer in force")
+
+    def test_a_claim_only_a_line_that_does_not_block_named_is_carried_with_it(self) -> None:
+        answer = _block(MUTEX)
+
+        merge = merge_revision(_isr(THREE), _isr(answer), answer, 3, {3: [(5, False)]})
+
+        assert merge.merged is not None
+        crypto = merge.merged.claims[-1]
+        assert crypto.carried_contested_by == ["L5"]
+        assert "contested by L5 and not answered" in claim_summary_line(3, crypto)
+
+    def test_a_claim_the_revision_restates_is_never_withdrawn_by_rule(self) -> None:
+        answer = _block(MUTEX) + _block(FIXED_BEACON, "T1071.001")
+
+        merge = merge_revision(_isr(THREE), _isr(answer), answer, 1, {2: [(1, True)]})
+
+        assert merge.withdrawn_by_rule == ()
+
+    def test_the_lines_name_claims_by_name_by_field_and_by_short_form(self) -> None:
+        from maljan.pipeline.debate_facts import claims_named_by_lines
+
+        names = ["static", "all_tools_static_r2", "all_tools_reverser_ghidra", "dynamic"]
+        lines = [
+            "[analysts: ALL_TOOLS_STATIC_R2 ANALYST] Claims 30 and 62 say a thing, versus "
+            "DYNAMIC ANALYST claim 32. [blocking: the cited listing does not contain it.] [new]",
+            "[analysts: ALL_TOOLS_STATIC_R2 ANALYST, ALL_TOOLS_REVERSER_GHIDRA ANALYST] Static R2 "
+            "claim 3 and Reverser claims 1 and 9 say a gate tests a return. [blocking: the "
+            "listing shows another call.] [new]",
+            "[analysts: STATIC ANALYST] STATIC ANALYST claim 7 is loose. "
+            "[not blocking: the reading is the same.]",
+        ]
+
+        named = claims_named_by_lines(lines, names)
+
+        assert named["all_tools_static_r2"] == {30: [(1, True)], 62: [(1, True)], 3: [(2, True)]}
+        assert named["all_tools_reverser_ghidra"] == {1: [(2, True)], 9: [(2, True)]}
+        assert named["static"] == {7: [(3, False)]}
+        # Dynamic is not in the first line's field: no question was put to it.
+        assert "dynamic" not in named
+
+    def test_the_node_withdraws_by_rule_and_records_the_values(self) -> None:
+        from maljan.core.config import MEDIATOR_AGENT_NAME
+        from maljan.pipeline.state import AgentArgument
+
+        answer = _block(MUTEX)
+        container = MagicMock()
+        container.is_mock = False
+        container.agent_registry.list_agents.return_value = ["static"]
+        container.analyst_keys.return_value = ["static"]
+        container.agent_role.side_effect = lambda n: n
+        container.config.llm.parallel_analysts = False
+        agent = MagicMock()
+        agent.safe_revise_isr.return_value = (answer, _isr(answer))
+        container.get_agent.return_value = agent
+        container.load_chunked.return_value = [MagicMock(content="data")]
+        container.load_data.return_value = "data"
+        mediation = AgentArgument(
+            agent_name=MEDIATOR_AGENT_NAME,
+            finding="revise",
+            contradictions=[
+                "[analysts: STATIC ANALYST] Claim 2 says the beacon waits 600 s, versus the "
+                "listing. [blocking: the listing shows 900 s.]",
+                "[analysts: STATIC ANALYST] Claim 3 names the key loosely. "
+                "[not blocking: the reading is the same.]",
+            ],
+            revise=["static"],
+        )
+        state = {
+            "file_hash": "abc",
+            "iteration_count": 2,
+            "discussion_history": [mediation],
+            "reports": {"static": THREE},
+            "isr_reports": {"static": _isr(THREE)},
+        }
+
+        out = asyncio.run(make_revision_node(container)(state))
+
+        stands = out["isr_reports"]["static"].claims
+        assert [c.claim for c in stands] == [MUTEX, CRYPTO]
+        assert stands[1].carried_contested_by == ["L2"]
+        [row] = [r for r in out["dropped_claims"] if r["claim"] == BEACON]
+        assert row["missing"] and "withdrawn by rule" in row["sentence"]
+        assert any("blocking line L1" in s for s in out["revision_replacements"])
+
+
+def _carried_claim() -> ClaimEvidence:
+    claim = ClaimEvidence(claim="A.", evidence_ref="[ev_0001]", confidence=0.5)
+    claim.carried_since_round = 2
+    claim.carried_contested_by = ["L3"]
+    return claim
+
+
+class TestACarriedClaimSaysSoOnEverySurface:
+    def test_the_event_payload_carries_it(self) -> None:
+        from maljan.pipeline.events import claims_to_payload
+
+        [row] = claims_to_payload([_carried_claim()])
+
+        assert row["carried_since_round"] == 2
+        assert row["carried_note"].endswith("contested by L3 and not answered")
+
+    def test_an_unmarked_claim_s_payload_is_unchanged(self) -> None:
+        from maljan.pipeline.events import claims_to_payload
+
+        claim = ClaimEvidence(claim="A.", evidence_ref="[ev_0001]", confidence=0.5)
+
+        assert set(claims_to_payload([claim])[0]) == {
+            "claim",
+            "evidence_ref",
+            "confidence",
+            "technique_id",
+        }
+
+    def test_the_upstream_findings_carry_it(self) -> None:
+        from types import SimpleNamespace
+
+        from maljan.pipeline.nodes import upstream_findings
+
+        container = MagicMock()
+        container.active_profile.return_value = SimpleNamespace(
+            stages=[SimpleNamespace(key="static", agents=["static"])]
+        )
+        container.config.reporting.upstream_findings_max_chars = 100_000
+        stage = SimpleNamespace(inject_upstream="findings", depends_on=["static"])
+        isr = AgentISR(agent_id="static", domain="static", claims=[_carried_claim()])
+
+        text = upstream_findings(stage, {"isr_reports": {"static": isr}}, container)
+
+        assert "carried forward: the round-2 revision" in text
+
+    def test_the_claims_in_force_carry_the_round_for_the_report(self) -> None:
+        from maljan.reporting.claim_coverage import claims_in_force
+
+        isr = AgentISR(agent_id="static", domain="static", claims=[_carried_claim()])
+
+        [row] = claims_in_force({"static": isr})
+
+        assert row.carried_since_round == 2
+
+
+class TestTheReportCountsCarriedClaims:
+    def test_carried_claims_are_one_count_line_per_analyst_and_others_are_listed(self) -> None:
+        from maljan.reporting.claim_coverage import claims_not_discussed
+        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        own = ClaimEvidence(
+            claim="Routine 0x33ac copies the file.", evidence_ref="[ev_0004]", confidence=0.7
+        )
+        kept = [
+            ClaimEvidence(
+                claim=f"Routine 0x{0x7B00 + n:x} reads a path.",
+                evidence_ref="[ev_0004]",
+                confidence=0.7,
+            )
+            for n in range(3)
+        ]
+        for claim in kept:
+            claim.carried_since_round = 2
+        isrs = {"reverser": AgentISR(agent_id="reverser", domain="reverser", claims=[own, *kept])}
+        report = MalwareReport(identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)))
+        report.claims_not_discussed = claims_not_discussed(report, isrs)
+
+        markdown = MarkdownRenderer().render(report)
+
+        assert "0x33ac" in markdown
+        assert "0x7b01" not in markdown
+        assert (
+            "3 claims carried forward unwritten by a revision (from round 2) are not "
+            "discussed in the body" in markdown
+        )
+
+    def test_a_technique_only_carried_claims_name_says_so_in_the_matrix(self) -> None:
+        from maljan.extractors.capability_matrix import build_capability_matrix
+
+        claim = ClaimEvidence(
+            claim="Persists through the Run key.",
+            evidence_ref="[ev_0001]",
+            confidence=0.7,
+            technique_id="T1547.001",
+        )
+        claim.carried_since_round = 3
+        cells, _maps = build_capability_matrix(
+            stix_output=None,
+            isr_reports={"static": AgentISR(agent_id="static", domain="static", claims=[claim])},
+            ledger=[],
+        )
+
+        [cell] = [c for c in cells if c.technique_id == "T1547.001"]
+        assert "carried forward: the round-3 revision" in cell.note
+
+
+class TestTwoRoundsInARow:
+    def test_the_earliest_round_is_kept_and_a_restated_claim_loses_the_mark(self) -> None:
+        once = _block(FIXED_BEACON, "T1071.001", number=2)
+        first = merge_revision(_isr(FIRST), _isr(once), once, 1).merged
+        assert first is not None
+        local = MUTEX.replace("Global", "Local")
+        twice = _block(local, number=1) + _block(CRYPTO, number=3)
+
+        second = merge_revision(first, _isr(twice), twice, 2).merged
+
+        assert second is not None
+        marks = {c.claim: c.carried_since_round for c in second.claims}
+        # Claim 4 carried since round 1; claim 2, restated in round 1, carried
+        # from round 2; claims 1 and 3, restated in round 2, unmarked.
+        assert marks == {local: None, FIXED_BEACON: 2, CRYPTO: None, PERSIST: 1}

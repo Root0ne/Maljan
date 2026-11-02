@@ -302,6 +302,7 @@ def _row(
         named=named,
         counted=counted,
         added_by_retry_in_round=claim.added_by_retry_in_round,
+        carried_since_round=claim.carried_since_round,
         technique_ids=list(claim.technique_ids),
         unverified_technique_ids=list(claim.unverified_technique_ids),
         absence_kept_technique_ids=list(claim.absence_kept_technique_ids),

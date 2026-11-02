@@ -57,6 +57,7 @@ from maljan.schemas.isr_models import (
     FAILED_CALLS_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
+    carried_marker,
     judge_and_findings_note,
     judge_dropped_reason,
     judge_kept_note,
@@ -265,6 +266,12 @@ def build_capability_matrix(
             # cites nothing its analyst's own calls read. Published all the
             # same: the analyst decided; the row says so.
             notes.append(retry_added_marker(min(retried)))
+        carried = info.get("carried") or []
+        if carried and all(isinstance(r, int) for r in carried):
+            # Every analyst claim naming it stands only because a revision
+            # carried it forward unwritten. Published all the same; the row
+            # says so.
+            notes.append(carried_marker(min(carried)))
         if tid.upper() in earlier and _no_source_of_this_run(row, bool(rows)):
             # An earlier run on this sample also reported it, and nothing of
             # this run stands behind it. Published by the same rules as any
@@ -753,6 +760,9 @@ def _collect_techniques(
                 row.setdefault("retry_unbacked", []).append(
                     getattr(claim, "added_by_retry_in_round", None) if unbacked else None
                 )
+                # The round from which a revision carried each claim naming it
+                # forward unwritten, or ``None``: a note on the row.
+                row.setdefault("carried", []).append(getattr(claim, "carried_since_round", None))
                 # An id the catalogue does not have stays in the matrix and is
                 # marked. Dropping it deleted the analyst's answer from the one
                 # surface a reader looks at, which is the behaviour this whole

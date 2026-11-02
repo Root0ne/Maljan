@@ -2524,20 +2524,30 @@ A revision round's answer passes the same consistency gate and validation turn
 a first answer passes, with the first answer's loop deadline and nudge flag
 cleared before it is made. A revision is merged into the answer in force by
 claim (`pipeline.revision_merge`): a claim it writes again replaces its
-predecessor, a claim it withdraws (a `WITHDRAW CLAIM <n>: <reason>` line, or a
+predecessor; a claim it withdraws (a `WITHDRAW CLAIM <n>: <reason>` line, or a
 block under the claim's number that declares the withdrawal) is removed with
-its reason, and a claim it neither writes again nor withdraws stands unchanged,
-marked carried forward from that round (`ClaimEvidence.carried_since_round`,
-shown beside the claim in every summary and in the evidence bundle). A revision
-whose every block writes a number that names a claim in force it shares a value
-with, or a number after the last one, is placed by those numbers; any other is
-placed by what its claims state (a claim in force is restated when the
-revision's claims state at least half of its values or four fifths of its
-content words, or half of its content words when it states no value). A revision that restates or withdraws every claim in
-force stands as written. `run_summary.negotiation.revision_replacements` states
-each merge that carried claims, with their numbers, and each withdrawal with its
-reason; a revision with fewer claims that carried nothing is still stated ("The
-X analyst's round-N revision replaced N claim(s) with M."). The DISPUTES section opens at its label,
+its reason; a claim a blocking line of the round's mediation named that the
+revision neither writes again nor withdraws is withdrawn by rule, the line
+being its reason (`debate_facts.claims_named_by_lines` reads the claim numbers
+each line names per analyst); and any other claim it neither writes again nor
+withdraws stands unchanged, marked carried forward from that round
+(`ClaimEvidence.carried_since_round`, with `carried_contested_by` when a line
+that does not block named it), shown beside the claim in every summary, the
+transcript event, the upstream findings, the evidence bundle and the ATT&CK
+table's note, and counted per analyst in the report's list of claims the body
+does not discuss. A revision whose every block writes a number that names a
+claim in force the block restates, or a number after the last one, is placed by
+those numbers; any other is placed by what its claims state. A block restates a
+claim when it states four fifths of the claim's content words, or half of the
+claim's values of three characters or more (one of them four or more, or a
+technique id), or a third of them with the claim's technique id; values may be
+pooled over blocks that each state one of them, words never. A revision that
+restates or withdraws every claim in force stands as written.
+`run_summary.negotiation.revision_replacements` states each merge that carried
+claims, with their numbers, and each withdrawal with its reason (a withdrawal by
+rule also among `dropped_claims`, with the claim's values); a revision with
+fewer claims that carried nothing is still stated ("The X analyst's round-N
+revision replaced N claim(s) with M."). The DISPUTES section opens at its label,
 case-sensitive, with its colon (`DISPUTES:`) or as a Markdown heading; a label
 that says there is none on its own line (`DISPUTES: NONE`, `N/A`, a dash)
 opens no section, and prose beginning "Disputes …" is prose. Claims under the

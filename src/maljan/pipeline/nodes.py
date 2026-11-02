@@ -85,6 +85,7 @@ from maljan.pipeline.claim_drops import (
     dropped_values,
     dropped_values_sentence,
     unchanged_in_substance,
+    values_as_written,
 )
 from maljan.pipeline.conditions import (
     PACK_LEFT_OUT,
@@ -99,6 +100,7 @@ from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
     analysts_to_revise,
     carried_marks,
+    claims_named_by_lines,
     contested_input,
     facts_naming,
     ledger_count_facts,
@@ -140,7 +142,7 @@ from maljan.pipeline.outcome import (
     verdict_for_run,
     verdict_reading,
 )
-from maljan.pipeline.revision_merge import RevisionMerge, merge_revision
+from maljan.pipeline.revision_merge import RevisionMerge, merge_revision, rule_sentence
 from maljan.pipeline.routing import (
     revised_in,
     revision_round_before,
@@ -196,6 +198,7 @@ from maljan.schemas.isr_models import (
     FAILED_CALLS_MARKER,
     AgentISR,
     ClaimEvidence,
+    carried_note,
     retry_added_marker,
 )
 from maljan.schemas.stix_models import Bundle, SimilarCases
@@ -3400,6 +3403,9 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
             retried = getattr(claim, "added_by_retry_in_round", None)
             if isinstance(retried, int) and not isinstance(retried, bool):
                 reference = f"{reference}, {retry_added_marker(retried)}"
+            carried = carried_note(claim)
+            if carried:
+                reference = f"{reference}, {carried}"
             confidence = float(getattr(claim, "confidence", 0.0) or 0.0)
             text = " ".join(str(getattr(claim, "claim", "") or "").split())
             lines.append(f"- {text} [{technique}, confidence {confidence:.2f}, {reference}]")
@@ -6140,6 +6146,14 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 display_name=label,
             )
 
+        # Per analyst, the claims each line of the round's mediation named, and
+        # whether the line blocks (``revision_merge``: a blocking line's claim
+        # the revision leaves unanswered is withdrawn by rule).
+        try:
+            named_by_lines = claims_named_by_lines(contested, list(agent_names))
+        except Exception as exc:  # noqa: BLE001 — no lines read is no claim named
+            logger.debug("revision: the lines' claim numbers were not read (%s).", exc)
+            named_by_lines = {}
         # An analyst the mediation did not name keeps its answer in force.
         for name in agent_names:
             if name not in asked:
@@ -6275,7 +6289,13 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 # forward (``revision_merge``). A revision that wrote again or
                 # withdrew every claim stands as written.
                 merge = (
-                    merge_revision(kept_isrs.get(name), isr, revised_text, iteration)
+                    merge_revision(
+                        kept_isrs.get(name),
+                        isr,
+                        revised_text,
+                        iteration,
+                        named_by_lines.get(name),
+                    )
                     if noted is not None and name not in not_asked
                     else RevisionMerge()
                 )
@@ -6310,7 +6330,33 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                         sum(len(d.missing) for d in dropped_here),
                         len(dropped_here),
                     )
+                # A claim withdrawn by rule is recorded with its values and
+                # the rule's sentence, never in silence.
+                ruled_sentences = {
+                    sentence: rule_sentence(name, iteration, number, sentence, reason)
+                    for number, sentence, reason in merge.withdrawn_by_rule
+                }
+                for claim in merge.ruled_claims:
+                    said_claim = " ".join(str(claim.claim or "").split())
+                    if said_claim not in ruled_sentences:
+                        continue
+                    dropped_rows.append(
+                        {
+                            "agent": name,
+                            "round": int(iteration),
+                            "claim": str(claim.claim or ""),
+                            "missing": list(
+                                values_as_written(
+                                    str(claim.claim or ""), claim.technique_id
+                                ).values()
+                            ),
+                            "sentence": ruled_sentences.pop(said_claim),
+                        }
+                    )
+                ruled_texts = {str(c.claim or "") for c in merge.ruled_claims}
                 for dropped in dropped_here:
+                    if dropped.claim in ruled_texts:
+                        continue
                     sentence = dropped_values_sentence(name, iteration, dropped)
                     logger.debug("%s", sentence)
                     dropped_rows.append(

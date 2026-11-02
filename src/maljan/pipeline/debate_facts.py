@@ -1589,3 +1589,95 @@ def carried_unmoved(
         if fact.get("changed"):
             return False
     return True
+
+
+# Claim numbers written right after a line's [analysts: ...] field, with no
+# name before them ("[analysts: X ANALYST] Claims 30 and 62 say ...").
+_BARE_CLAIMS = re.compile(
+    r"[\s*_`]*+claims?\s*+#?\s*+(\d++(?:\s*+(?:/|,|&|and|\+)\s*+#?\d++)*+)", re.IGNORECASE
+)
+
+
+# "claim(s) N" anywhere on a line, with the words written before it read
+# apart (``_short_named``).
+_CLAIM_REFERENCE = re.compile(
+    r"\bclaims?\s*+#?\s*+(\d++(?:\s*+(?:/|,|&|and|\+)\s*+#?\d++)*+)", re.IGNORECASE
+)
+_WORD_BEFORE = re.compile(r"[A-Za-z][A-Za-z0-9]*+")
+# Words a short form of a name may carry that are no part of the name.
+_FILLER_WORDS = frozenset({"analyst", "analysts", "the", "s"})
+
+
+def _short_named(text: str, start: int, field_names: Sequence[str]) -> str | None:
+    """The one field analyst the words just before ``start`` name in a short form, or ``None``.
+
+    The mediator writes a peer's claim as "Static R2 claim 3" or "Reverser
+    claims 1 and 9": the one, two or three words right before "claim" (the
+    nearest that read) each open a part of exactly one of the line's field
+    analysts' names (two letters at least). Only the field's analysts are
+    read, so the form is never taken for an analyst the line did not ask.
+    """
+    before = text[max(0, start - 80) : start]
+    tail = re.split(r"[^A-Za-z0-9'\s]", before)[-1]
+    words = [w.lower() for w in _WORD_BEFORE.findall(tail) if w.lower() not in _FILLER_WORDS]
+    parts = {name: [p for p in re.split(r"[_\-\s]+", name.lower()) if p] for name in field_names}
+    for size in (3, 2, 1):
+        if len(words) < size:
+            continue
+        chosen = words[-size:]
+        if any(len(w) < 2 for w in chosen):
+            continue
+        fits = [
+            name
+            for name, pieces in parts.items()
+            if all(any(piece.startswith(w) for piece in pieces) for w in chosen)
+        ]
+        if len(fits) == 1:
+            return fits[0]
+    return None
+
+
+def claims_named_by_lines(
+    lines: Sequence[str], participants: Sequence[str]
+) -> dict[str, dict[int, list[tuple[int, bool]]]]:
+    """``{analyst: {claim number: [(line number, blocking), ...]}}`` for the lines given.
+
+    A line names an analyst's claim where it writes the analyst's name and
+    then "claim(s) N" (``_claims_named``), and, when its ``[analysts: ...]``
+    field names one analyst alone, where "claim(s) N" follows that field
+    directly, and where a short form of a field analyst's name stands before
+    "claim(s) N" (``_short_named``). A line whose field names analysts
+    counts only for them: a
+    claim number it writes for another is no question put to that one. The
+    line number counts from 1 in the order given; ``blocking`` is the
+    mediator's mark (``read_marks``). Linear in the lines.
+    """
+    names = [str(p) for p in participants if str(p).strip()]
+    out: dict[str, dict[int, list[tuple[int, bool]]]] = {}
+    for number, (line, mark) in enumerate(zip(lines, read_marks(lines), strict=True), 1):
+        text = without_line_mark(str(line))
+        field_names = _named_in(text, names)
+        found: list[tuple[str, list[str]]] = list(_claims_named(text, names))
+        if field_names is not None and len(field_names) == 1:
+            opened = _ANALYSTS_FIELD.search(text)
+            bare = _BARE_CLAIMS.match(text, opened.end()) if opened is not None else None
+            if bare is not None:
+                found.append((field_names[0], re.findall(r"\d+", bare.group(1))))
+        if field_names:
+            # A short form of a field analyst's name before "claim(s) N".
+            for reference in _CLAIM_REFERENCE.finditer(text):
+                short = _short_named(text, reference.start(), field_names)
+                if short is not None:
+                    found.append((short, re.findall(r"\d+", reference.group(1))))
+        for name, digits in found:
+            if field_names is not None and name not in field_names:
+                continue
+            claims = out.setdefault(name, {})
+            for written in digits:
+                stripped = written.lstrip("0")
+                if not stripped or len(stripped) > 6:
+                    continue
+                rows = claims.setdefault(int(stripped), [])
+                if (number, mark.blocking) not in rows:
+                    rows.append((number, mark.blocking))
+    return out

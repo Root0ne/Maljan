@@ -4472,7 +4472,26 @@ def _claims_not_discussed_lines(report: MalwareReport, ctx: _Context) -> list[st
     if not rows:
         return []
     lines = ["", _subheading("13.1", CLAIMS_NOT_DISCUSSED_TITLE, MEASURED), "", COVERAGE_RULE, ""]
+    # A claim a revision carried forward unwritten is counted per analyst,
+    # not listed: each is in the run summary and the evidence bundle.
+    carried: dict[str, list[int]] = {}
+    listed = []
     for row in rows:
+        since = getattr(row, "carried_since_round", None)
+        if isinstance(since, int) and not isinstance(since, bool):
+            carried.setdefault(row.agent, []).append(since)
+        else:
+            listed.append(row)
+    for agent, rounds in carried.items():
+        lines.append(
+            _item(
+                f"**{ctx.plain(agent)}**: {len(rounds)} claim{'s' if len(rounds) != 1 else ''} "
+                f"carried forward unwritten by a revision (from round {min(rounds)}) "
+                f"{'is' if len(rounds) == 1 else 'are'} not discussed in the body; each is "
+                "listed in the evidence bundle."
+            )
+        )
+    for row in listed:
         stated = (
             f"confidence {row.confidence:.2f}; " if isinstance(row.confidence, int | float) else ""
         )

@@ -46,7 +46,7 @@ def retry_added_marker(revision_round: int) -> str:
     return f"added by a tool-less retry, round {int(revision_round)}"
 
 
-def carried_marker(revision_round: int) -> str:
+def carried_marker(revision_round: int, contested_by: Sequence[str] = ()) -> str:
     """The note on a claim in force a revision neither wrote again nor withdrew.
 
     The revision is merged into the answer in force by claim
@@ -55,10 +55,23 @@ def carried_marker(revision_round: int) -> str:
     (``ClaimEvidence.carried_since_round``) to the judge's summary, the
     transcript and the report.
     """
-    return (
+    said = (
         f"carried forward: the round-{int(revision_round)} revision neither wrote it "
         "again nor withdrew it"
     )
+    if contested_by:
+        # A line of the round's mediation that named it, not blocking: the
+        # claim stands, and the reader is told it was contested.
+        said += f"; contested by {', '.join(contested_by)} and not answered"
+    return said
+
+
+def carried_note(claim: Any) -> str:
+    """The carried-forward note of ``claim`` (:func:`carried_marker`), or ``""``."""
+    since = getattr(claim, "carried_since_round", None)
+    if not isinstance(since, int) or isinstance(since, bool):
+        return ""
+    return carried_marker(since, list(getattr(claim, "carried_contested_by", None) or []))
 
 
 # The note on a technique the judge named in its bundle and no analyst claimed.
@@ -204,6 +217,16 @@ class ClaimEvidence(BaseModel):
             "so it stands as the answer in force wrote it."
         ),
         exclude_if=lambda value: value is None,
+    )
+    # The lines of the mediation before that round that named the claim, not
+    # blocking, while the revision left it unanswered ("L3"). Left out of the
+    # serialised claim when empty.
+    carried_contested_by: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The non-blocking lines of the round's mediation that named this carried claim."
+        ),
+        exclude_if=lambda value: not value,
     )
     # The entries a debate showed this claim's analyst from another agent's
     # calls, when they are every entry the claim cites
@@ -454,11 +477,7 @@ def claim_summary_line(
         if claim.added_by_retry_in_round is not None
         else ""
     )
-    carried = (
-        f" ({carried_marker(claim.carried_since_round)})"
-        if claim.carried_since_round is not None
-        else ""
-    )
+    carried = f" ({carried_note(claim)})" if claim.carried_since_round is not None else ""
     return (
         f"Claim {number}{noted}: {claim.claim}{tech}"
         f" | Evidence: {claim.evidence_ref}{failed}{retried}{carried}"
