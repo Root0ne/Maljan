@@ -122,11 +122,15 @@ def _masked_one_url(url: str, mask: str) -> str:
 # trail a bare host, a quote also behind the backslashes JSON text, or JSON
 # text inside a JSON string, escapes it with (``{"a":"{\"u\":\"user:pw@h:8080\"}"}``).
 # After a separator, a closer or a quote anything may follow in the same word
-# (``u:pw@h:8080,x``, ``u:pw@h:8080','b':1}``): the address ends there.
-# Possessive, so linear in the tail.
+# (``u:pw@h:8080,x``, ``u:pw@h:8080','b':1}``), and after a port any character
+# but an ASCII letter or digit (``u:pw@h:8080|jq``, ``u:pw@h:8080=x``): the
+# address ends there. The closing bracket of an IPv6 host counts as a closer,
+# deliberately, so anything may follow it too (``u:pw@[::1]x``). Possessive,
+# so linear in the tail.
 _BARE_AUTHORITY_TAIL = re.compile(
     r"(?:\[[0-9A-Fa-f:.%]++\]|[A-Za-z0-9][A-Za-z0-9.-]*+)(?P<port>:\d{1,5})?"
-    r"(?:(?P<path>[/?#]\S*)|(?:\\++(?=[\"'])|[)\]}>\"'.,;:])*+(?:(?<=[,;)\]}>\"'])\S*)?)"
+    r"(?:(?P<path>[/?#]\S*)|(?:\\++(?=[\"'])|[)\]}>\"'.,;:])*+"
+    r"(?:(?<=[,;)\]}>\"'])\S*|(?(port)[^\sA-Za-z0-9_]\S*))?)"
 )
 # What may open a token before an address's first character: a quote, a
 # bracket, or a JSON object's brace (``{"u":"user:pw@host"}``).

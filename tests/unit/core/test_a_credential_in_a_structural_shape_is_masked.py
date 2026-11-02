@@ -65,6 +65,30 @@ def test_a_credential_in_each_structural_shape_is_masked(written, masked):
     assert any(secret in address for address in bare_addresses(text))
 
 
+# Words each part of the reading decides on its own, with what is left: ``>``
+# and ``|`` ending a path's value, the list separators' own reading kept beside
+# every value separator's, and any character but a letter or digit after a port.
+_PINNED = [
+    ("C:\\x>admin:{pw}:@[::1]]#f", "C:\\x>***@[::1]]#f"),
+    ("PS C:\\>:/{pw}\\x@[::1]:;x'", "PS C:\\>***@[::1]:;x'"),
+    (".\\,a/|:a{pw}@h/v1", ".\\,a/|***@h/v1"),
+    ("..\\a;{pw}|@h:8080@x;x", "..\\a;***@x;x"),
+    *(
+        (f"u:{{pw}}@h.example:8080{after}", f"***@h.example:8080{after}")
+        for after in ("|jq", "=x", "&x", "+x", "!", "*", "^", "~", "`", "\\x", "é")
+    ),
+]
+
+
+@pytest.mark.parametrize(("written", "masked"), _PINNED)
+def test_each_part_of_the_reading_masks_its_own_words(written, masked):
+    secret = _token()
+    text = written.replace("{pw}", secret)
+
+    assert masked_text(text, by_value=False) == masked
+    assert secret not in masked_text(f"Error: {text}", by_value=False)
+
+
 @pytest.mark.parametrize(("written", "masked"), _SHAPES)
 def test_the_event_scrub_registers_the_credential_of_each_shape(written, masked):
     secret = _token()
@@ -114,7 +138,26 @@ _ORDINARY = [
     "https://h.example/v1,x",
     "v1.2.3,v2.0",
     "release 2.4.1 (build 77) ok",
+    # The characters a port may be followed by, after no port or in a path.
+    "bob@corp.com|jq",
+    "ops@example.com=x",
+    "ops@example.com&x",
+    "mailto:ops@example.com^",
+    "pkg@1.2.3+build",
+    "git@github.com:org/repo.git!",
+    "image@sha256:0123abcd~",
+    "a@b:12x",
+    "C:\\Users\\bob@h:8080|x",
+    "C:\\dir\\bob@h:8080=x",
+    "%APPDATA%\\dir\\bob@h:8080&x",
 ]
+
+
+# A word with no password whose token alone stands before a port is masked, as
+# it is with nothing after the port (``sent@12:00``), whatever follows it.
+@pytest.mark.parametrize("text", ["msg=sent@12:00,ok=true", "user@host:22!", "user@host:22|x"])
+def test_a_token_alone_before_a_port_is_masked_whatever_follows(text):
+    assert masked_text(text, by_value=False) == "***@" + text.rpartition("@")[2]
 
 
 @pytest.mark.parametrize("text", _ORDINARY)
@@ -144,5 +187,7 @@ def test_masking_the_structural_shapes_costs_time_linear_in_the_text():
         lambda size: "C:\\x" + "=)]" * size + "u:p@h:8080",
         lambda size: "C:\\x" + ")D:\\y" * size + ",u:p@h:8080,z",
         lambda size: "u:" + "\\\\" * size + "@h",
+        lambda size: "u:p@h:8080" + "|!" * size,
+        lambda size: "u:p@" + "a:1" * size + "!",
     ):
         assert_scales(build, 2_000, masking)
