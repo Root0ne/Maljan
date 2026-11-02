@@ -69,6 +69,7 @@ from maljan.analysis.technique_ids import ID_BODY
 from maljan.analysis.tool_effects import INTRO_SENTENCE as EFFECTS_INTRO
 from maljan.analysis.tool_effects import effects_lines
 from maljan.core.logger import logger
+from maljan.core.rule_matches import is_rule_fact
 from maljan.core.undeclared_tools import (
     CODE_LISTING_KINDS,
     DECOMPILE_KINDS,
@@ -2342,7 +2343,9 @@ class MarkdownRenderer:
             for sentence in negotiation.get("unread_marks") or []:
                 lines.append(_item(f"A mark that was not read; the line blocked: {sentence}"))
             for sentence in negotiation.get("ledger_facts") or []:
-                lines.append(_item(str(sentence)))
+                # The rule-match fact was the mediator's; the report prints counts.
+                if not is_rule_fact(sentence):
+                    lines.append(_item(str(sentence)))
             for sentence in negotiation.get("ledger_stated") or []:
                 lines.append(_item(str(sentence)))
         # A model's configured endpoint prints as configured, set aside where

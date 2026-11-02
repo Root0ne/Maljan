@@ -36,6 +36,7 @@ from maljan.analysis.corroboration import (
     technique_label,
 )
 from maljan.core.config import MEDIATOR_AGENT_NAME
+from maljan.core.rule_matches import is_rule_fact
 from maljan.core.token_ledger import CALL_PARTS
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -2507,6 +2508,9 @@ class RunSummaryBuilder:
                     for arg in discussion_history
                     if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                     for fact in getattr(arg, "ledger_facts", None) or []
+                    # The rule-match fact is the mediator's, not a count:
+                    # the run's record keeps the counts only.
+                    if not is_rule_fact(fact)
                 )
             ),
             dropped_claims=[
