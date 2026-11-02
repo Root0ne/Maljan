@@ -508,3 +508,54 @@ def test_a_signal_is_a_shell_exit_status() -> None:
     assert rc.exit_status(0) == 0
     assert rc.exit_status(3) == 3
     assert rc.exit_status(-15) == 143
+
+
+def test_a_failed_scope_kill_falls_back_to_killing_the_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    directory = _scope(tmp_path, monkeypatch)
+    (directory / "pids.max").write_text("max\n", encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _done(1, stderr="Access denied"))
+    killed: list[bool] = []
+    watcher = _watcher()
+    watcher.kill_command = lambda: killed.append(True)
+    assert watcher.check_once() is True
+    assert killed == [True]
+    err = capsys.readouterr().err
+    assert "systemctl kill failed (Access denied)" in err
+    assert "killed the command's own process instead" in err
+
+
+def test_a_failed_stop_of_a_scope_already_gone_is_not_a_watcher_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _scope(tmp_path, monkeypatch)
+    cgroup_file = tmp_path / "proc" / "4242" / "cgroup"
+
+    def stop_after_it_ended(*_a: Any, **_k: Any) -> SimpleNamespace:
+        cgroup_file.unlink()
+        return _done(5, stderr="Unit u1.scope not loaded.")
+
+    monkeypatch.setattr(subprocess, "run", stop_after_it_ended)
+    gone = _watcher(floor=4 * 1024**3, available=1024**3)
+    assert gone.check_once() is True
+    assert gone.error is None and gone.stopped_at is None
+
+    _scope(tmp_path / "again", monkeypatch)
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _done(1, stderr="Access denied"))
+    still_there = _watcher(floor=4 * 1024**3, available=1024**3)
+    with pytest.raises(RuntimeError, match="systemctl stop failed: Access denied"):
+        still_there.check_once()
+
+
+def test_sigterm_kills_the_command_when_the_scope_stop_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _scope(tmp_path, monkeypatch)
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _done(1, stderr="Access denied"))
+    child = _Child([], code=-9, during=lambda: os.kill(os.getpid(), signal.SIGTERM))
+    assert rc._wait(child, "u1") == 137
+    assert child.signals == [signal.SIGKILL]
+    assert "stopping u1.scope failed (Access denied); killing the command" in (
+        capsys.readouterr().err
+    )

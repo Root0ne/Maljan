@@ -142,6 +142,11 @@ watcher stopped it, and the memory events at the watcher's last poll (`high`,
 `max`, `oom`, `oom_kill`). `--dry-run` prints the `systemd-run` line and starts
 nothing.
 
+The wrapper follows the command's main process. When that process exits but
+leaves children running in the background, the scope stays alive after the
+wrapper has returned: still under its caps, but with no floor and no report.
+Stop it with `systemctl --user stop <unit>.scope` (the name is printed at start).
+
 Where the caps cannot be enforced (no `systemd-run`, no user manager, a
 `memory`, `pids` or `cpu` controller not delegated to it, or no swap
 accounting, where systemd would accept the cap and enforce nothing) the

@@ -300,6 +300,7 @@ class Watcher(threading.Thread):
         floor: int | None,
         interval: float = DEFAULT_INTERVAL,
         available: Callable[[], int] | None = None,
+        kill_command: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(daemon=True, name=f"watch-{unit}")
         self.unit = unit
@@ -310,6 +311,8 @@ class Watcher(threading.Thread):
         self.floor = floor
         self.interval = interval
         self.available = available or (lambda: mem_available())
+        # Kills the command's own process when systemd cannot kill the scope.
+        self.kill_command = kill_command
         self.done = threading.Event()
         self.group: str | None = None
         self.events: dict[str, int] | None = None
@@ -332,10 +335,18 @@ class Watcher(threading.Thread):
             reason = check_caps(directory, self.memory, self.tasks, self.cpu_percent)
             if reason:
                 self.cap_error = reason
-                _systemctl("kill", self.unit, "--signal=SIGKILL")
+                killed = _systemctl("kill", self.unit, "--signal=SIGKILL")
+                if killed.returncode == 0:
+                    how = f"killed {self.unit}.scope"
+                else:
+                    how = (
+                        f"systemctl kill failed ({killed.stderr.strip() or killed.returncode}); "
+                        "killed the command's own process instead"
+                    )
+                    if self.kill_command is not None:
+                        self.kill_command()
                 print(
-                    f"run_capped: a cap was accepted but not enforced ({reason}); "
-                    f"killed {self.unit}.scope",
+                    f"run_capped: a cap was accepted but not enforced ({reason}); {how}",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -349,6 +360,9 @@ class Watcher(threading.Thread):
         if free >= self.floor:
             return False
         stop = _systemctl("stop", self.unit)
+        if stop.returncode != 0 and scope_group(self.pid, self.unit) is None:
+            # The scope ended on its own between the poll and the stop.
+            return True
         if stop.returncode != 0:
             raise RuntimeError(f"systemctl stop failed: {stop.stderr.strip() or stop.returncode}")
         self.stopped_at = free
@@ -477,9 +491,15 @@ def _wait(child: subprocess.Popen[bytes], unit: str) -> int:
             return
         print(f"run_capped: {name} received; stopping {unit}.scope", file=sys.stderr)
         try:
-            _systemctl("stop", unit)
+            stop = _systemctl("stop", unit)
+            failure = (stop.stderr.strip() or f"exit {stop.returncode}") if stop.returncode else ""
         except subprocess.SubprocessError as exc:
-            print(f"run_capped: stopping {unit}.scope failed: {exc}", file=sys.stderr)
+            failure = str(exc)
+        if failure:
+            print(
+                f"run_capped: stopping {unit}.scope failed ({failure}); killing the command",
+                file=sys.stderr,
+            )
             child.kill()
 
     previous = {sig: signal.signal(sig, on_signal) for sig in (signal.SIGTERM, signal.SIGHUP)}
@@ -537,14 +557,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         cpu_percent=args.cpu_percent,
         floor=floor,
         interval=args.interval,
+        kill_command=child.kill,
     )
     watcher.start()
     code = _wait(child, unit)
     watcher.done.set()
     watcher.join(timeout=args.interval + 35)
 
-    if watcher.error:
-        print(f"run_capped: watcher failed: {watcher.error}", file=sys.stderr)
+    # A watcher error was printed by the watcher when it happened.
     if watcher.cap_error:
         print(
             f"run_capped: {unit}.scope was killed: a cap was not enforced ({watcher.cap_error})",
