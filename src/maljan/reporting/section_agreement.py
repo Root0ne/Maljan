@@ -25,7 +25,13 @@ So, after every section is written, the reporter's model is shown, once:
 - section 5's passages written from the code: each prose subsection and each
   row of the configuration, command and flag tables, with the ids it cites;
 - the debate's mediations, in round order, as the mediator wrote them;
-- every passage written without the code, under an id naming where it stands.
+- every passage written without the code, under an id naming where it stands;
+  the composed limitations paragraph among them where a sentence of it says a
+  call failed or a reading could not be made and the ledger says otherwise
+  (a later call redid the call, or an entry lists the code), with the facts it
+  rests on: the failed calls and the later calls that answered them, the tools
+  not run, the recorded limitations and the open questions
+  (``reporting.limitation_facts``, T-526).
 
 It lists each sentence of a passage written without the code that calls
 absent, unknown or open, or states the opposite of, what a section 5 passage,
@@ -47,12 +53,13 @@ its sentence cites, cites at least one id its sources cite (sources citing no
 id ground no rewrite) and no id that neither they nor the passage cite;
 and it reads each rewrite as the report rounds read their prose (its
 citations, a value beside an entry that does not hold it, an entry said to
-hold nothing, an absence the ledger contradicts). The model is told what is
-wrong and asked once more. A rewrite that passes takes its sentence's place,
-read against the passage as it was written, its new ids added to the record's
-own list, and what it replaced is recorded as the model's answer; a sentence
-kept, or a rewrite that still fails, stays as written, and the finding is
-recorded.
+hold nothing, an absence the ledger contradicts); a rewrite of a limitations
+sentence that still says a call failed that a later call redid is not one. The
+model is told what is wrong and asked once more. A rewrite that passes takes
+its sentence's place, read against the passage as it was written, its new ids
+added to the record's own list, and what it replaced is recorded as the model's
+answer; a sentence kept, or a rewrite that still fails, stays as written, and
+the finding is recorded.
 
 Every step is one pass over the passages and the answer's rows.
 """
@@ -63,7 +70,7 @@ import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cached_property
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -105,6 +112,10 @@ from maljan.reporting.models import (
 from maljan.schemas.evidence import entry_ids_in
 from maljan.utils.written_forms import pack_escaped, pack_reads
 
+if TYPE_CHECKING:
+    from maljan.reporting.agreement_facts import LedgerFacts
+    from maljan.reporting.limitation_facts import FailedCall
+
 # The producer the round's unresolved findings are recorded under.
 AGREEMENT_PRODUCER = "agreement"
 # The token ledger's name for the round's calls (``core.spend.TAIL_CALLS``).
@@ -137,6 +148,9 @@ REWRITTEN_CODE = "agreement.rewritten"
 # record's value field), listed as saying otherwise than its sources and kept
 # as written: the model's answer, recorded where a reader finds it.
 LISTED_CODE = "agreement.listed"
+# A rewrite of a limitations sentence that still says a call failed, or a
+# reading could not be made, where a later call redid it (T-526).
+FAILURE_REDONE_CODE = "agreement.failure_redone"
 
 
 # The kinds of passage the round is shown, by who wrote them from what.
@@ -194,6 +208,9 @@ class Passage:
     # rewrite before it is put in (an ATT&CK procedure: one sentence, carrying
     # its technique's values); none for a passage held to the round's alone.
     check: Callable[[str], list[Violation]] | None = None
+    # The same, for a check that reads the sources the row names beside the
+    # rewrite (the limitations paragraph: a failure a later call redid).
+    sourced_check: Callable[[str, Sequence[str], str], list[Violation]] | None = None
 
 
 def _ids(*sources: Any) -> frozenset[str]:
@@ -455,8 +472,32 @@ def passages_of(
                 write=_setter(report, "intro_background"),
             )
         )
+    held = list(entries or ())
+    found = None
+    if held:
+        from maljan.reporting.agreement_facts import ledger_facts
+
+        found = ledger_facts(held)
     shown = [*facts, *coded, *debate, *uncoded]
-    facts.extend(_ledger_passages(entries, shown))
+    facts.extend(_ledger_passages(held, shown, found))
+    # The limitations paragraph joins only where a sentence of it says a call
+    # failed that the ledger says otherwise of (T-526), its facts after the
+    # ledger's own, which it leaves as they were: every other request stays
+    # as it was.
+    limitations, limitation_facts, limited = _limitation_passages(report, held, found, facts)
+    if limitations:
+        # A false failure is wrong in any section: while the limitation facts
+        # are shown, a rewrite of any other passage adds none. A section 5
+        # rewrite is the platform's own (``_qualified``), whose fact clauses
+        # write kind words ("decompiled or disassembled"): it is read by its
+        # citations alone.
+        added = _failure_added_check(limited)
+        cited = _failure_cited_check(limited)
+        for passage in (*coded, *uncoded):
+            if _writable(passage) and passage.sourced_check is None:
+                passage.sourced_check = cited if passage.kind == SECTION_5 else added
+    uncoded.extend(limitations)
+    facts.extend(limitation_facts)
     return [*facts, *coded, *debate, *uncoded]
 
 
@@ -675,7 +716,9 @@ def unread_callee_clause(routine: str, callers: str, plural: str) -> str:
     )
 
 
-def _ledger_passages(entries: Iterable[Any], shown: Sequence[Passage]) -> list[Passage]:
+def _ledger_passages(
+    entries: Sequence[Any], shown: Sequence[Passage], found: LedgerFacts | None = None
+) -> list[Passage]:
     """The ledger's facts as passages: the unread callees, the listed routines, then each
     failed call answered later.
 
@@ -689,14 +732,15 @@ def _ledger_passages(entries: Iterable[Any], shown: Sequence[Passage]) -> list[P
     (T-494) and on no other, and every read routine a passage names would be
     most of the prompt. Which passage a fact bears on is the model's call. The addresses are the
     platform's own; a tool's name is the run's record of a server's word, one
-    quoted value.
+    quoted value. ``found`` is what the ledger's facts were read as, read here
+    when not given.
     """
     from maljan.reporting.agreement_facts import ledger_facts, spelled
 
-    held = list(entries or ())
-    if not held:
+    if not entries:
         return []
-    found = ledger_facts(held)
+    if found is None:
+        found = ledger_facts(entries)
     bases = found.image_bases
     named = _named_addresses(shown)
     out: list[Passage] = []
@@ -777,6 +821,539 @@ def _ledger_passages(entries: Iterable[Any], shown: Sequence[Passage]) -> list[P
                     # Read only where the answer is a listing of the code there.
                     + (", so the address was not left unread" if link.answered_lists_code else "")
                 ),
+            )
+        )
+    return out
+
+
+# Words that say a call failed or a reading could not be made: what holds a
+# sentence of the limitations paragraph to the ledger's failed calls (T-526).
+# Which sentence a fact contradicts is still the model's call.
+_SAYS_FAILED = re.compile(
+    r"\b(?:failed|fails|failing|errored|impossible)\b"
+    r"|\b(?:was|were|is|are)\s+not\s+possible\b"
+    r"|\b(?:could|can)\s*not\s+(?:be\s+)?(?:read|run|decompiled?|disassembled?|emulated?|"
+    r"listed|lifted|loaded|opened|reached)\b"
+    r"|\bdid\s+not\s+(?:run|complete|succeed|answer)\b",
+    re.IGNORECASE,
+)
+# Words that say the call was redone. Read only where no negation stands within
+# the three words before it ("never redone", "no later call answered it"), and
+# only to tell which sentences are held: a rewrite is decided by what it cites.
+_SAYS_REDONE = re.compile(
+    r"\b(?:redone|redid|re-?ran|re-?run|retried|re-?read|re-?issued|later\s+calls?|"
+    r"answered\s+later)\b",
+    re.IGNORECASE,
+)
+_NEGATION = frozenset({"no", "not", "never", "without"})
+# The words before a redo word read for a negation.
+_NEGATION_REACH = 3
+# What a call's kind is called in prose, by the start of a word: a sentence
+# naming one names every call of that kind.
+_KIND_WORDS = {
+    "decompil": re.compile(r"\bdecompil\w*", re.IGNORECASE),
+    "disassembl": re.compile(r"\bdisassembl\w*", re.IGNORECASE),
+    "emulat": re.compile(r"\bemulat\w*", re.IGNORECASE),
+}
+# A listing named as one of code, which is what a call that lists code is: a
+# "process listing" or a "listing of the server's commands" is none.
+_CODE_LISTING = re.compile(
+    r"\b(?:routine|function|decompiler|disassembly|code)\s+listings?\b"
+    r"|\blistings?\s+of\s+(?:the\s+|its\s+|a\s+)?(?:routine|function|code)",
+    re.IGNORECASE,
+)
+# Any listing or lister, which the rewrite check reads as naming a call that
+# lists code (``_names_call`` with ``broad``).
+_ANY_LISTING = re.compile(r"\blist(?:ing|er)s?\b", re.IGNORECASE)
+# Words that deny a call was ever redone, whatever the rewrite cites; read, like
+# a redo word, only where no negation stands before them ("did not fail for good").
+_SAYS_FOR_GOOD = re.compile(r"\bfor\s+good\b|\bpermanently\b|\bnever\s+succeeded\b", re.I)
+# A tool's name shorter than this is never read as named by a sentence.
+_TOOL_NAME_FLOOR = 3
+# What a fact quotes of a tool's message or an analyst's question, at most.
+_QUOTED_CHARS = 200
+
+
+def _capped(text: Any, limit: int = _QUOTED_CHARS) -> str:
+    """Text on one line, cut at ``limit`` characters with the cut marked."""
+    line = " ".join(str(text or "").split())
+    return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
+
+
+def _negated(text: str, at: int) -> bool:
+    """Whether a negation stands within the few words before ``at``."""
+    before = re.findall(r"[a-z']+", text[:at].lower())[-_NEGATION_REACH:]
+    return bool(_NEGATION.intersection(before))
+
+
+def _says_redone(sentence: str) -> bool:
+    """Whether the sentence says a call was redone, in words no negation stands before."""
+    return any(not _negated(sentence, m.start()) for m in _SAYS_REDONE.finditer(sentence))
+
+
+def _denies_redo(text: str) -> bool:
+    """Whether the text says a call was never redone: a redo word under a negation, or a
+    failure "for good", "permanently", "never succeeded" no negation stands before."""
+    return any(_negated(text, m.start()) for m in _SAYS_REDONE.finditer(text)) or any(
+        not _negated(text, m.start()) for m in _SAYS_FOR_GOOD.finditer(text)
+    )
+
+
+def _sentences_of(text: str) -> list[str]:
+    """The sentences of ``text`` in the order they stand."""
+    starts, _ends = _sentence_units(text)
+    return [s for _at, s in sorted((at, s) for s, ats in starts.items() for at in ats)]
+
+
+def _names_call(
+    text: str,
+    call: FailedCall,
+    bases: Sequence[int],
+    *,
+    broad: bool = False,
+    words_only: bool = False,
+) -> bool:
+    """Whether the text names a failed call: an address it was asked for, its tool's name
+    as a whole word, or the kind its entry stored (never read off the tool's name), a
+    call that lists code by a listing of code.
+
+    ``broad`` is the rewrite check's reading, where naming a call too often only
+    keeps a sentence as written: any word starting "listing" or "lister" names
+    every call that lists code ("the listing tool"). The gate reads narrowly, as
+    a sentence held too often costs the prompt: only a listing of code does.
+    ``words_only`` reads its tool's name alone, as the rewrite check reads a
+    clause, which reads the kind words itself.
+    """
+    if not words_only and set(_addresses_named(text)) & _spelled_both(call.asked, bases):
+        return True
+    tool = call.tool.lower()
+    if len(tool) >= _TOOL_NAME_FLOOR:
+        for spelling in dict.fromkeys((tool, tool.replace("_", " "))):
+            if re.search(r"(?<![\w-])" + re.escape(spelling) + r"(?![\w-])", text, re.I):
+                return True
+    if words_only:
+        return False
+    kind = call.kind.lower()
+    if any(stem in kind and word.search(text) for stem, word in _KIND_WORDS.items()):
+        return True
+    listing = _ANY_LISTING if broad else _CODE_LISTING
+    return call.lists_code and bool(listing.search(text))
+
+
+def _stale_citations(sentence: str, redone: Sequence[FailedCall]) -> list[FailedCall]:
+    """The redone calls a sentence cites without citing a call that redid them."""
+    cited = entry_ids_in(sentence)
+    return [
+        call
+        for call in redone
+        if call.entry.lower() in cited and not cited & {by.lower() for by in call.redone_by}
+    ]
+
+
+def held_limitation_sentences(
+    text: str, failed: Sequence[FailedCall], listed: Iterable[int], bases: Sequence[int]
+) -> list[str]:
+    """The sentences of a limitations paragraph held to the ledger's failed calls.
+
+    A sentence that says a call failed or a reading could not be made is held
+    where it cites a failed call a later call redid and none of the calls that
+    redid it, whatever else it says; and, where it does not say the call was
+    redone, where it names a redone call (:func:`_names_call`: an address it
+    was asked for, its tool, its kind) or an address whose code an entry
+    lists, whatever it cites. A sentence of a sample's behaviour ("the beacon
+    failed to connect", "the process listing failed") names none. One pass
+    over the sentences.
+    """
+    redone = [call for call in failed if call.redone]
+    listed = _spelled_both(listed, bases)
+    if not redone and not listed:
+        return []
+    held: list[str] = []
+    for sentence in _sentences_of(text):
+        if not _SAYS_FAILED.search(sentence):
+            continue
+        if _stale_citations(sentence, redone):
+            held.append(sentence)
+            continue
+        if _says_redone(sentence):
+            continue
+        if set(_addresses_named(sentence)) & listed or any(
+            _names_call(sentence, call, bases) for call in redone
+        ):
+            held.append(sentence)
+    return held
+
+
+def _clauses_of(text: str) -> list[str]:
+    """The clauses of ``text``: its sentences, each cut at its semicolons."""
+    return [part for sentence in _sentences_of(text) for part in sentence.split(";") if part]
+
+
+def _stems_of(call: FailedCall) -> set[str]:
+    """The kind words a call answers to: its stored kind's stems, and a listing where it
+    lists code."""
+    kind = call.kind.lower()
+    stems = {stem for stem in _KIND_WORDS if stem in kind}
+    if call.lists_code:
+        stems.add("listing")
+    return stems
+
+
+def _stale_calls(
+    text: str,
+    failed: Sequence[FailedCall],
+    bases: Sequence[int],
+    *,
+    broad: bool,
+    sourced: Sequence[FailedCall] = (),
+) -> list[FailedCall]:
+    """The redone calls ``text`` says failed for good, clause by clause.
+
+    In each clause a redone call is named where the clause cites it or a call
+    that redid it, writes its tool's name whole, or (``broad`` only) an address
+    it was asked for; and by a kind word ("decompiling", or with ``broad`` any
+    "listing"), every redone call of that kind, unless the clause, or a fact the
+    row rests on (``sourced``), already accounts for a call of that kind. A
+    named call is stale where no call that redid it is cited anywhere in the
+    text, or where its own clause denies the redo (:func:`_denies_redo`). With
+    ``broad``, each redone call of ``sourced`` is named too.
+    """
+    redone = [call for call in failed if call.redone]
+    if not redone:
+        return []
+    cited_all = entry_ids_in(text)
+
+    def _ids_of(call: FailedCall) -> set[str]:
+        return {call.entry.lower(), *(by.lower() for by in call.redone_by)}
+
+    def _redo_cited(call: FailedCall) -> bool:
+        return bool(cited_all & {by.lower() for by in call.redone_by})
+
+    sourced_stems = set().union(*(_stems_of(call) for call in sourced)) if sourced else set()
+    stale: list[FailedCall] = []
+    before: list[FailedCall] = []
+    for clause in _clauses_of(text):
+        cited = entry_ids_in(clause)
+        named = [
+            call
+            for call in redone
+            if cited & _ids_of(call)
+            or _names_call(clause, call, (), words_only=True)
+            or (broad and bool(set(_addresses_named(clause)) & _spelled_both(call.asked, bases)))
+        ]
+        # A kind word names its kind's calls, unless the clause or the row's
+        # facts account for a call of that kind already.
+        accounted: set[str] = set()
+        for call in failed:
+            if cited & _ids_of(call):
+                accounted |= _stems_of(call)
+        said = {stem for stem, word in _KIND_WORDS.items() if word.search(clause)}
+        if broad and _ANY_LISTING.search(clause):
+            said.add("listing")
+        for stem in said - accounted:
+            # The facts the row rests on account for their calls of the kind,
+            # which the clause then speaks of; else it names every one.
+            of_kind = [c for c in sourced if stem in _stems_of(c)] if stem in sourced_stems else []
+            pool = of_kind or [c for c in redone if stem in _stems_of(c)]
+            named.extend(c for c in pool if c.redone and c not in named)
+        denied = _denies_redo(clause)
+        if denied and not named:
+            # A denial of its own ("; it was never redone", ". It never
+            # succeeded") is about the calls the clause before it named.
+            stale.extend(call for call in before if call not in stale)
+        for call in named:
+            if (denied or not _redo_cited(call)) and call not in stale:
+                stale.append(call)
+        before = named
+    if broad:
+        for call in sourced:
+            if call.redone and not _redo_cited(call) and call not in stale:
+                stale.append(call)
+    return stale
+
+
+def _failure_cited_check(
+    failed: Sequence[FailedCall],
+) -> Callable[[str, Sequence[str], str], list[Violation]]:
+    """What a section 5 rewrite is held to while the limitation facts are shown: by its
+    citations alone, it cites no failed call a later call redid that the sentence it
+    replaces did not cite, unless it cites a call that redid it. No kind word and no
+    address is read: the platform's own fact clauses write them."""
+    redone = [call for call in failed if call.redone]
+
+    def _check(rewrite: str, sources: Sequence[str], sentence: str = "") -> list[Violation]:
+        cited, had = entry_ids_in(rewrite), entry_ids_in(sentence)
+        stale = [
+            call
+            for call in redone
+            if call.entry.lower() in cited
+            and call.entry.lower() not in had
+            and not cited & {by.lower() for by in call.redone_by}
+        ]
+        return _failure_redone_violation(stale) if stale else []
+
+    return _check
+
+
+def _failure_redone_violation(stale: Sequence[FailedCall]) -> list[Violation]:
+    said = "; ".join(f"{call.entry} by {', '.join(call.redone_by)}" for call in stale)
+    return [
+        Violation(
+            code=FAILURE_REDONE_CODE,
+            message=(
+                "the rewrite still says a call failed or a reading could not be made, but "
+                f"a later call redid it ({safe_finding_value(said)}). Cite the call that "
+                "redid it and say what it answered, or keep the sentence."
+            ),
+            path="rewrite",
+        )
+    ]
+
+
+def _failure_redone_check(
+    failed: Sequence[FailedCall], facts: Sequence[Passage], bases: Sequence[int]
+) -> Callable[[str, Sequence[str], str], list[Violation]]:
+    """What a rewrite of the limitations paragraph is held to: it says no call failed for
+    good that a later call redid.
+
+    A rewrite that says a call failed fails for each redone call it cites,
+    rests on (a fact among its sources citing that call: a failed-call fact,
+    an answered-later fact, an open question) or names, read clause by clause
+    and broadly (:func:`_stale_calls`), unless it cites a call that redid it
+    and the clause naming it does not deny the redo. Its words for a redo
+    never pass it alone. ``facts`` are the facts shown, read when the check
+    runs.
+    """
+    by_entry = {call.entry.lower(): call for call in failed}
+
+    def _check(rewrite: str, sources: Sequence[str], sentence: str = "") -> list[Violation]:
+        if not _SAYS_FAILED.search(rewrite):
+            return []
+        by_id = {fact.id: fact for fact in facts}
+        sourced: list[FailedCall] = []
+        for source in sources:
+            fact = by_id.get(_form(source))
+            for entry in sorted(fact.cites & by_entry.keys()) if fact is not None else ():
+                if by_entry[entry] not in sourced:
+                    sourced.append(by_entry[entry])
+        stale = _stale_calls(rewrite, failed, bases, broad=True, sourced=sourced)
+        return _failure_redone_violation(stale) if stale else []
+
+    return _check
+
+
+def _failure_added_check(
+    failed: Sequence[FailedCall],
+) -> Callable[[str, Sequence[str], str], list[Violation]]:
+    """What a rewrite of any other passage is held to while the limitation facts are
+    shown: it adds no failure of a call a later call redid.
+
+    Read narrowly (:func:`_stale_calls` without ``broad``: the ids it cites, a
+    tool's name, a kind word; never an address or a bare listing, which a
+    sentence of the sample's behaviour writes), and only for what the rewrite
+    adds: a failure the sentence it replaces did not claim, or a redone call
+    it did not name. A rewrite that keeps what the sentence said passes.
+    """
+
+    def _check(rewrite: str, sources: Sequence[str], sentence: str = "") -> list[Violation]:
+        if not _SAYS_FAILED.search(rewrite):
+            return []
+        stale = _stale_calls(rewrite, failed, (), broad=False)
+        if not stale:
+            return []
+        if _SAYS_FAILED.search(sentence):
+            before = _stale_calls(sentence, failed, (), broad=False)
+            stale = [call for call in stale if call not in before]
+        return _failure_redone_violation(stale) if stale else []
+
+    return _check
+
+
+def _limitation_passages(
+    report: MalwareReport,
+    entries: Sequence[Any],
+    found: LedgerFacts | None,
+    shown_facts: Sequence[Passage] = (),
+) -> tuple[list[Passage], list[Passage], list[FailedCall]]:
+    """The limitations paragraph, the facts it rests on and the failed calls, or none.
+
+    Shown only where a sentence of the composed paragraph is held to the
+    ledger (:func:`held_limitation_sentences`): a paragraph that agrees with
+    the ledger, or one written where no call failed, leaves the request as it
+    was. The facts are each failed call with the later calls that redid it
+    (``redone_calls.redone_failures``), or, where none did, the ones that
+    answered for some of its addresses,
+    each tool not run, the count of tools withheld, each limitation the run
+    recorded, each open question filed on a failed call or a missing tool
+    (marked where a later call answered a failed call for an address it names
+    or an entry it cites) and the count of the others by why they are open.
+    A tool's message and a model's question are each one quoted value, cut at
+    :data:`_QUOTED_CHARS` characters with the cut marked. ``shown_facts`` are the
+    facts shown before these, which a rewrite may rest on too.
+    """
+    from maljan.reporting.limitation_facts import limitation_facts
+
+    ta = report.technical_analysis
+    sub = ta.analyst_limitations if ta is not None else None
+    if not isinstance(sub, TechnicalSubsection) or not sub.body.strip() or found is None:
+        return [], [], []
+    if not _SAYS_FAILED.search(sub.body):
+        return [], [], []
+    bases = found.image_bases
+    read = limitation_facts(report, entries, found.answered, bases)
+    listed = [routine.address for routine in found.listed]
+    if not held_limitation_sentences(sub.body, read.failed, listed, bases):
+        return [], [], []
+
+    facts: list[Passage] = []
+    for index, call in enumerate(read.failed, 1):
+        if call.redone:
+            ids = ", ".join(call.redone_by)
+            after = (
+                f"the later call{'s' if len(call.redone_by) > 1 else ''} {ids} answered for "
+                f"every address it asked ({_offsets(list(call.asked), bases)}), so it did not "
+                "fail for good"
+            )
+        elif call.answered:
+            answered = dict(call.answered)
+            missing = [a for a in call.asked if a not in answered]
+            by = ", ".join(dict.fromkeys(answered.values()))
+            after = f"later calls answered for {_offsets(list(answered), bases)} ({by})" + (
+                f"; none for {_offsets(missing, bases)}"
+                if missing
+                else "; none asked the same question whole, so it is not read as redone"
+            )
+        elif call.asked:
+            after = f"no later call answered for {_offsets(list(call.asked), bases)}"
+        else:
+            after = "it asked for no address, so no later call is read as its redo"
+        fact = Passage(
+            id=f"failed.{index}",
+            label="tool call that failed, and whether a later call redid it",
+            text=(
+                f"{call.entry} ({quoted_value(call.tool)}) failed: "
+                f"{quoted_value(_capped(call.error))}; {after}"
+            ),
+            kind=FACT,
+            cites=_ids([call.entry, *call.redone_by]),
+            addresses=_spelled_both(call.asked, bases),
+        )
+        facts.append(fact)
+    for index, tool in enumerate(read.not_run, 1):
+        facts.append(
+            Passage(
+                id=f"not_run.{index}",
+                label="tool the run could not offer",
+                text=f"{quoted_value(tool.tool)} was not run: {quoted_value(_capped(tool.reason))}",
+                kind=FACT,
+            )
+        )
+    if read.withheld:
+        facts.append(
+            Passage(
+                id=f"not_run.{len(read.not_run) + 1}",
+                label="tools withheld from the agents",
+                text=(
+                    f"{read.withheld} {'tool' if read.withheld == 1 else 'tools'} a server "
+                    "offers, withheld from the agents by the job, not run"
+                ),
+                kind=FACT,
+            )
+        )
+    for index, reason in enumerate(read.recorded, 1):
+        facts.append(
+            Passage(
+                id=f"recorded.{index}",
+                label="limitation the run recorded",
+                text=quoted_value(_capped(reason)),
+                kind=FACT,
+            )
+        )
+    facts.extend(_open_question_facts(read.questions, read.failed, bases))
+    paragraph = Passage(
+        id="limitations",
+        label=(
+            "11. Limitations, the composed paragraph (each sentence saying a call failed or a "
+            "reading could not be made is held to the failed calls, the tools not run, the "
+            "recorded limitations and the open questions among the facts)"
+        ),
+        text=sub.body,
+        kind=CLAIM_LED,
+        cites=_ids(sub.evidence_refs, sub.body),
+        write=_setter(sub, "body"),
+        sourced_check=_failure_redone_check(read.failed, [*shown_facts, *facts], bases),
+    )
+    return [paragraph], facts, list(read.failed)
+
+
+def _open_question_facts(
+    questions: Sequence[Any], failed: Sequence[FailedCall], bases: Sequence[int]
+) -> list[Passage]:
+    """Each open question filed on a failed call or a missing tool, then the others counted.
+
+    A question is marked where a later call redid a failed call for an
+    address it names, or a failed call it cites: an analyst may have
+    filed it on that failure, which did not stand. Whether the question is
+    answered is the model's reading; the mark says only what the ledger says.
+    It is shown, never dropped.
+    """
+    from maljan.reporting.limitation_facts import FAILURE_REASONS
+
+    redid: dict[int, tuple[str, str]] = {}
+    for call in failed:
+        if not call.redone:
+            continue
+        for address in call.asked:
+            for spelling in _spelled_both([address], bases):
+                redid.setdefault(spelling, (call.entry, ", ".join(call.redone_by)))
+    by_entry = {call.entry.lower(): call for call in failed if call.redone}
+    out: list[Passage] = []
+    others: dict[str, int] = {}
+    for question in questions:
+        if question.reason not in FAILURE_REASONS:
+            others[question.reason] = others.get(question.reason, 0) + 1
+            continue
+        marks: dict[str, tuple[str, str]] = {}
+        for address in question.addresses:
+            if address in redid:
+                failed_id, by = redid[address]
+                marks.setdefault(
+                    f"the failed call {failed_id} for {_offsets([address], bases)}, an address "
+                    "it names,",
+                    (failed_id, by),
+                )
+        for cited in question.cites:
+            redone = by_entry.get(cited.lower())
+            if redone is not None:
+                marks.setdefault(
+                    f"the failed call {redone.entry} it cites",
+                    (redone.entry, ", ".join(redone.redone_by)),
+                )
+        said = "; ".join(f"{what} was answered by {by}" for what, (_id, by) in marks.items())
+        out.append(
+            Passage(
+                id=f"open.{len(out) + 1}",
+                label="open question an analyst filed on a failed call or a missing tool",
+                text=(
+                    f"{quoted_value(_capped(question.question))}, filed as {question.reason}"
+                    + (f"; redone: {said}" if said else "")
+                ),
+                kind=FACT,
+                cites=_ids([*question.cites, *(i for pair in marks.values() for i in pair)]),
+                addresses=_spelled_both(question.addresses, bases),
+            )
+        )
+    if others:
+        count = sum(others.values())
+        out.append(
+            Passage(
+                id=f"open.{len(out) + 1}",
+                label="the other open questions",
+                text=(
+                    f"{count} more open {'question' if count == 1 else 'questions'}, filed as "
+                    + ", ".join(f"{reason} ({n})" for reason, n in sorted(others.items()))
+                ),
+                kind=FACT,
             )
         )
     return out
@@ -1024,6 +1601,19 @@ def _row_violations(
                 path=f"{path}.rewrite",
             )
             for violation in passage.check(row.rewrite)
+        )
+    if row.decision == "rewrite" and passage.sourced_check is not None:
+        out.extend(
+            replace(
+                violation,
+                message=(
+                    f"row {safe_finding_value(index + 1)}: the rewrite of "
+                    f"{safe_finding_value(passage.id)}: {safe_finding_value(violation.message)}"
+                ),
+                sentence="",
+                path=f"{path}.rewrite",
+            )
+            for violation in passage.sourced_check(row.rewrite, row.sources, row.sentence)
         )
     if row.decision == "rewrite" and _writable(passage):
         # Only a source the passage may rest on grounds its rewrite: a section
