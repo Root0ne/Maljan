@@ -177,11 +177,12 @@ class TestAnAttachedReport:
         with caplog.at_level(logging.WARNING, logger="maljan"):
             handed, returned, _ = _handed(forged, tmp_path)
 
-        assert status.TARGET_KEY in returned
+        # Taken out at intake, before the run reads the document.
+        assert status.TARGET_KEY not in returned
         assert status.TARGET_KEY not in handed
         assert status.sandbox_status(handed).statement == ""
         (said,) = [r.getMessage() for r in caplog.records if status.TARGET_KEY in r.getMessage()]
-        assert said.endswith("so the block was taken out.")
+        assert "the platform's own mark, which the platform did not set" in said
 
     def test_a_forged_mark_is_replaced_by_the_run_s_own(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -189,11 +190,12 @@ class TestAnAttachedReport:
         forged = {**_nested(OTHER), status.TARGET_KEY: {"sandbox_sha256": "`ev_0001`"}}
 
         with caplog.at_level(logging.WARNING, logger="maljan"):
-            handed, _, _ = _handed(forged, tmp_path)
+            handed, returned, _ = _handed(forged, tmp_path)
 
+        assert status.TARGET_KEY not in returned
         assert handed[status.TARGET_KEY] == {"expected_sha256": INTAKE, "sandbox_sha256": OTHER}
         (said,) = [r.getMessage() for r in caplog.records if status.TARGET_KEY in r.getMessage()]
-        assert "and the run's own mark set in its place" in said
+        assert "the platform's own mark, which the platform did not set" in said
 
     def test_a_later_job_without_a_report_keeps_no_claim(self, tmp_path: Path) -> None:
         _, _, app = _handed(_nested(OTHER), tmp_path)
