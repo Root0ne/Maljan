@@ -8,10 +8,13 @@ disassembly that failed had been answered by a later call (T-526). Read here,
 from the ledger and the report alone:
 
 * **The failed calls**: each call that ran and failed (a repeat answered from
-  an earlier entry is not one), with the addresses it was asked for and, for
-  each, the later call that answered for it (``agreement_facts.answered_later``,
-  T-396). A call every address of which a later call answered was redone; a
-  call asked for no address has nothing to be matched by, and stays a failure.
+  an earlier entry is not one), with the addresses it was asked for. Whether a
+  later call redid it is read by the one rule the run summary reads
+  (``redone_calls.redone_failures``, T-494 D6: the same question asked again
+  and answered whole); a call asked for no address has nothing to be matched
+  by, and stays a failure. A call no later call redid keeps the later calls
+  that answered for some of its addresses (``agreement_facts.answered_later``,
+  T-396), so the fact can say which ones.
 * **The tools not run**: each ``server.<key>.<tool>_unavailable(<reason>)`` the
   run recorded as a limitation or an operator choice, and how many of a
   server's tools the job withheld from the agents.
@@ -20,17 +23,10 @@ from the ledger and the report alone:
   one filed on a failed call or a missing tool names the addresses it is
   about, and a question a later call answered is marked so, never dropped.
 
-Each is a value read once; the text it carries (a tool's message, a model's
-question) is shown quoted by the caller. Linear in the ledger and the report.
-
-A redo is read here by the agreement round's own rule (``answered_later``: a
-later call of the same tool, or any later listing of the code, that answered
-for the address). The run summary's list of redone calls, once it is read off
-the ledger by a rule of its own (a redo asks the same question: the same tool
-and arguments, or the whole function listed), is the one rule both should
-read: ``failed_calls`` then takes its redone set from there, and reads
-``agreement_facts._asked`` by the public name that change gives it
-(``asked_addresses``).
+Each is a value read once; the text it carries (a tool's message, a reason, a
+model's question) is shown quoted by the caller, a tool's message and a reason
+scrubbed first as an event payload is (paths to their last segment) and every
+URL left out. Linear in the ledger and the report.
 """
 
 from __future__ import annotations
@@ -42,8 +38,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from maljan.agents.function_map import one_spelling
+from maljan.pipeline.events import scrub
 from maljan.pipeline.validation import _addresses_written
-from maljan.reporting.agreement_facts import AnsweredLater, _asked
+from maljan.reporting.agreement_facts import AnsweredLater, asked_addresses
 from maljan.schemas.evidence import entry_ids_in
 
 __all__ = [
@@ -64,28 +61,36 @@ _UNAVAILABLE = re.compile(r"server\.[\w-]+\.([\w.-]+?)_unavailable\(")
 # A tool a server offers that the job withheld from the agents, as the server's
 # registry writes it among the operator choices.
 _WITHHELD = re.compile(r"\bis withheld:")
+# A URL as it stands in a message, which the scrub leaves as its scheme and host.
+_URL = re.compile(r"\b[a-zA-Z][\w+.-]*://[^\s,;()]*")
+
+
+def _plain(text: str) -> str:
+    """A tool's message or a reason as a fact quotes it: scrubbed as an event payload is
+    (a path to its last segment, a credential masked), and every URL left out."""
+    return _URL.sub("a URL", scrub(text))
 
 
 @dataclass(frozen=True)
 class FailedCall:
-    """A call that failed, the addresses it was asked for, and which a later call answered."""
+    """A call that failed, the addresses it was asked for, and the later calls that redid it."""
 
     entry: str
     tool: str
     error: str
     asked: tuple[int, ...] = ()
-    # Each address a later call answered for, with that call's id.
+    # Each address a later call answered for, with that call's id, by the
+    # agreement round's address rule: what a call no later call redid says.
     answered: tuple[tuple[int, str], ...] = ()
+    # The later calls that redid it (``redone_calls.redone_failures``).
+    redone_by: tuple[str, ...] = ()
+    # Whether the call lists code (decompiled or disassembled).
+    lists_code: bool = False
 
     @property
     def redone(self) -> bool:
-        """Whether a later call answered for every address it was asked for."""
-        return bool(self.asked) and len(self.answered) == len(self.asked)
-
-    @property
-    def redone_by(self) -> tuple[str, ...]:
-        """The later calls that answered for it, each once, in the order first named."""
-        return tuple(dict.fromkeys(by for _address, by in self.answered))
+        """Whether later calls redid it for every address it was asked for."""
+        return bool(self.redone_by)
 
 
 @dataclass(frozen=True)
@@ -136,7 +141,15 @@ def _error(entry: Any) -> str:
 def failed_calls(
     entries: Iterable[Any], answered: Sequence[AnsweredLater], bases: Sequence[int]
 ) -> list[FailedCall]:
-    """Each call that ran and failed, in ledger order, with the later calls that answered it."""
+    """Each call that ran and failed, in ledger order, with the later calls that redid it."""
+    from maljan.core.undeclared_tools import entry_lists_any_code
+    from maljan.reporting.redone_calls import redone_failures
+
+    entries = list(entries)
+    redid = {
+        str(row["entry_id"]): tuple(str(i) for i in row["answered_by"])
+        for row in redone_failures(entries)
+    }
     by_failed: dict[str, dict[int, str]] = {}
     for link in answered:
         by_failed.setdefault(link.failed, {}).setdefault(link.address, link.answered)
@@ -145,15 +158,17 @@ def failed_calls(
         if getattr(entry, "ok", True) or getattr(entry, "repeated_of", None):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
-        asked = tuple(dict.fromkeys(one_spelling(a, bases) for a in _asked(entry)))
+        asked = tuple(dict.fromkeys(one_spelling(a, bases) for a in asked_addresses(entry)))
         linked = by_failed.get(entry_id, {})
         out.append(
             FailedCall(
                 entry=entry_id,
                 tool=str(getattr(entry, "tool", "") or ""),
-                error=_error(entry),
+                error=_plain(_error(entry)),
                 asked=asked,
                 answered=tuple((a, linked[a]) for a in asked if a in linked),
+                redone_by=redid.get(entry_id, ()),
+                lists_code=entry_lists_any_code(entry),
             )
         )
     return out
@@ -181,7 +196,7 @@ def _not_run(lines: Iterable[str]) -> tuple[list[NotRun], int, list[str]]:
         found = _UNAVAILABLE.match(line.strip())
         if found:
             reason = _parenthesised(line.strip(), found.end())
-            not_run.append(NotRun(tool=found.group(1), reason=reason))
+            not_run.append(NotRun(tool=found.group(1), reason=_plain(reason)))
         elif _WITHHELD.search(line):
             withheld += 1
         else:
@@ -233,7 +248,7 @@ def limitation_facts(
     not_run, withheld, rest = _not_run(dict.fromkeys([*reasons, *choices]))
     # An operator choice that is no tool left out is the operator's, not the run's limitation.
     held = set(reasons)
-    recorded = [line for line in rest if line in held]
+    recorded = [_plain(line) for line in rest if line in held]
     return LimitationFacts(
         failed=tuple(failed_calls(entries, answered, bases)),
         not_run=tuple(not_run),

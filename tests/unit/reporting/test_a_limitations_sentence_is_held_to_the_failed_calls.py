@@ -188,17 +188,42 @@ def test_a_sentence_calling_a_redone_call_failed_is_asked_with_the_failed_calls(
     assert "[failed.1] tool call that failed" in prompt
 
 
-def test_only_the_sentence_the_ledger_says_otherwise_of_is_held() -> None:
-    passages = _by_id(_report(f"{FALSE} {TRUE} {OTHER}"), _ledger())
+def _held(body: str, ledger: list[LedgerEntry] | None = None) -> list[str]:
+    """The sentences held, read with what production reads: the listed routines and bases."""
     from maljan.reporting.agreement_facts import ledger_facts
     from maljan.reporting.limitation_facts import limitation_facts
 
-    ledger = _ledger()
+    ledger = ledger if ledger is not None else _ledger()
     found = ledger_facts(ledger)
     read = limitation_facts(_report(), ledger, found.answered, found.image_bases)
-    body = passages["limitations"].text
+    listed = [routine.address for routine in found.listed]
+    return held_limitation_sentences(body, read.failed, listed, found.image_bases)
+
+
+def test_only_the_sentence_the_ledger_says_otherwise_of_is_held() -> None:
+    passages = _by_id(_report(f"{FALSE} {TRUE} {OTHER}"), _ledger())
     # The emulation sentence rests on a failure no later call redid: it agrees.
-    assert held_limitation_sentences(body, read.failed, [], ()) == [FALSE]
+    assert _held(passages["limitations"].text) == [FALSE]
+
+
+@pytest.mark.parametrize(
+    ("sentence", "held"),
+    [
+        # A sample's behaviour names no tool and no kind of call.
+        ("The beacon failed to connect to its server in the sandbox.", False),
+        ("The beacon failed to connect to its server [ev_0001].", False),
+        # A redone call cited without its redo is held, whatever the words say.
+        ("The listing tool failed, so the routine was re-read from the index [ev_0002].", True),
+        # A negated redo word says no redo.
+        ("The listing tool failed and no later call answered it [ev_0001].", True),
+        ("The listing tool failed and was not redone [ev_0001].", True),
+        ("The listing tool failed and was never redone [ev_0001].", True),
+        # A redo said and cited agrees.
+        ("The listing tool failed once and was redone [ev_0002][ev_0003].", False),
+    ],
+)
+def test_a_sentence_is_held_by_the_call_it_names_or_cites(sentence: str, held: bool) -> None:
+    assert _held(sentence) == ([sentence] if held else [])
 
 
 def test_a_correct_paragraph_is_not_asked_and_the_request_is_unchanged() -> None:
@@ -224,12 +249,18 @@ def test_a_paragraph_is_byte_identical_where_no_call_failed() -> None:
     assert report.model_dump_json() == before
 
 
-def test_a_rewrite_saying_the_later_call_answered_is_put_in() -> None:
-    report = _report()
-    rewrite = (
+@pytest.mark.parametrize(
+    "rewrite",
+    [
         "The listing tool failed once and a later call listed the routine, so the control "
-        "flow was read from that listing [ev_0001][ev_0003]."
-    )
+        "flow was read from that listing [ev_0001][ev_0003].",
+        # Decided by citation, not vocabulary: no redo word, the redo cited.
+        "The first listing call failed, and a second call listed the routine, so the control "
+        "flow was read from it [ev_0001][ev_0003].",
+    ],
+)
+def test_a_rewrite_citing_the_call_that_redid_it_is_put_in(rewrite: str) -> None:
+    report = _report()
     done, _ = _ask(report, _ledger(), {"sentences": [_row(FALSE, ["failed.1"], rewrite)]})
     body = report.technical_analysis.analyst_limitations.body
     assert body == f"{rewrite} {OTHER}"
@@ -239,19 +270,48 @@ def test_a_rewrite_saying_the_later_call_answered_is_put_in() -> None:
 
 
 @pytest.mark.parametrize(
-    "rewrite",
+    ("rewrite", "sources"),
     [
         # Cites the failed call a later call redid, and still calls it failed.
-        "The listing tool failed, so the control flow was read from the function index "
-        "[ev_0001][ev_0002].",
-        # Cites the later call, and still calls the tool failed for good.
-        "The listing tool failed, so the control flow was read from the function index "
-        "[ev_0001][ev_0003].",
+        (
+            "The listing tool failed, so the control flow was read from the function index "
+            "[ev_0001][ev_0002].",
+            ["failed.1"],
+        ),
+        # One failure that stands cited beside it is no cover.
+        (
+            "The listing tool failed, so the control flow was read from the function index "
+            "[ev_0001][ev_0002][ev_0004].",
+            ["failed.1", "failed.2"],
+        ),
+        (
+            "The listing and emulation tools failed, so the control flow was read from the "
+            "function index [ev_0001][ev_0004].",
+            ["failed.1", "failed.2"],
+        ),
+        # A negated redo word is no redo, and a redo word alone is never enough.
+        (
+            "The listing tool failed and was never redone, so the control flow was read from "
+            "the function index [ev_0001][ev_0002].",
+            ["failed.1"],
+        ),
+        (
+            "The listing tool failed and no later call answered it, so the control flow was "
+            "read from the function index [ev_0001][ev_0002].",
+            ["failed.1"],
+        ),
+        (
+            "The listing tool failed and was redone, so the control flow was read from the "
+            "function index [ev_0001][ev_0002].",
+            ["failed.1"],
+        ),
     ],
 )
-def test_a_rewrite_repeating_the_false_claim_is_not_put_in(rewrite: str) -> None:
+def test_a_rewrite_repeating_the_false_claim_is_not_put_in(
+    rewrite: str, sources: list[str]
+) -> None:
     report = _report()
-    row = _row(FALSE, ["failed.1"], rewrite)
+    row = _row(FALSE, sources, rewrite)
     done, reporter = _ask(report, _ledger(), {"sentences": [row]}, {"sentences": [row]})
     assert report.technical_analysis.analyst_limitations.body == f"{FALSE} {OTHER}"
     assert done.summary["rewritten"] == 0 and done.summary["not_applied"] == 1
@@ -259,6 +319,16 @@ def test_a_rewrite_repeating_the_false_claim_is_not_put_in(rewrite: str) -> None
     assert len(reporter.asked) == 2
     assert FAILURE_REDONE_CODE in str(reporter.asked[1][-1].content)
     assert FAILURE_REDONE_CODE in [r["code"] for r in done.tally.unresolved]
+
+
+def test_a_quoted_message_carries_no_path_and_no_url() -> None:
+    ledger = _ledger()
+    ledger[1] = ledger[1].model_copy(
+        update={"error": "rules at /opt/tools/data/rules are missing on http://10.0.0.5:8089/api"}
+    )
+    text = _by_id(_report(), ledger)["failed.1"].text
+    assert "/opt/tools" not in text and "10.0.0.5" not in text and "8089" not in text
+    assert '"rules at rules are missing on a URL"' in text
 
 
 def test_a_question_filed_on_a_redone_call_is_marked_and_kept() -> None:
@@ -282,18 +352,55 @@ HAIKU8_SENTENCE = (
 )
 
 
-def _haiku8() -> tuple[MalwareReport, list[LedgerEntry]]:
+def _stored(name: str) -> tuple[MalwareReport, list[LedgerEntry]]:
     from maljan.reporting.follow_up import stored_ledger
 
     root = stored_runs()
-    if root is None or not (root / "haiku8" / "report.json").is_file():
+    if root is None or not (root / name / "report.json").is_file():
         pytest.skip("the stored benchmark runs are not on this machine")
-    run = root / "haiku8"
+    run = root / name
     report = MalwareReport.model_validate(json.loads((run / "report.json").read_text()))
     document = json.loads((run / "evidence.json").read_text())
     rows = document.get("items") or document.get("entries") if isinstance(document, dict) else []
     ledger, _unread = stored_ledger(rows)
     return report, ledger
+
+
+def _haiku8() -> tuple[MalwareReport, list[LedgerEntry]]:
+    return _stored("haiku8")
+
+
+def _stored_names() -> list[str]:
+    root = stored_runs()
+    if root is None:
+        return ["haiku8"]
+    return sorted(
+        run.name
+        for run in root.iterdir()
+        if (run / "report.json").is_file() and (run / "evidence.json").is_file()
+    )
+
+
+@pytest.mark.parametrize("name", _stored_names())
+def test_no_stored_run_but_haiku8_asks_its_limitations(name: str) -> None:
+    report, ledger = _stored(name)
+    shown = [p.id for p in passages_of(report, entries=ledger) if p.id == "limitations"]
+    assert shown == (["limitations"] if name == "haiku8" else [])
+
+
+def test_a_call_a_later_call_answered_but_did_not_redo_is_not_redone() -> None:
+    # run3's ev_0182 (no function at 0x1360bc08690) is answered for its address
+    # by ev_0270, which asked another question: it stands, and its fact says so.
+    from maljan.reporting.agreement_facts import ledger_facts
+    from maljan.reporting.limitation_facts import failed_calls
+
+    report, ledger = _stored("run3")
+    found = ledger_facts(ledger)
+    (call,) = [
+        c for c in failed_calls(ledger, found.answered, found.image_bases) if c.entry == "ev_0182"
+    ]
+    assert not call.redone and call.redone_by == ()
+    assert [by for _address, by in call.answered] == ["ev_0270"]
 
 
 def test_the_stored_run_s_reversing_tools_sentence_is_asked() -> None:
@@ -315,6 +422,10 @@ def test_the_stored_run_s_reversing_tools_sentence_is_asked() -> None:
         "ev_0169": ("ev_0170",),
         "ev_0187": ("ev_0191",),
     }
+    # Citing the emulation call that stands does not release the sentence: it
+    # still names decompiling and disassembling, which later calls redid.
+    cited = HAIKU8_SENTENCE.replace("[ev_0025]", "[ev_0025][ev_0122]")
+    assert held_limitation_sentences(cited, read.failed, listed, found.image_bases) == [cited]
     # The emulation and the capa call stand: no later call redid them.
     assert {call.entry for call in read.failed if not call.redone} == {"ev_0008", "ev_0122"}
     said = [p.text for p in passages.values() if p.id.startswith("failed.")]
@@ -329,6 +440,9 @@ def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> Non
     body = report.technical_analysis.analyst_limitations.body
     facts = {p.id: p for p in passages_of(report, entries=ledger)}
     batch = next(i for i, p in facts.items() if p.text.startswith('ev_0168 ("batch_decompile")'))
+    # The earlier facts come first: the answered-later fact for ev_0168 is the one
+    # found, and a rewrite resting on it is held as one resting on failed.N is.
+    assert batch.startswith("answered.")
     emulation = next(
         i for i, p in facts.items() if p.text.startswith('ev_0122 ("emulate_hash_batch")')
     )
@@ -337,6 +451,16 @@ def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> Non
         "flow was read from the function index [ev_0025][ev_0168]."
     )
     row = _row(HAIKU8_SENTENCE, [batch], false)
+    done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
+    assert report.technical_analysis.analyst_limitations.body == body
+    assert done.summary["not_applied"] == 1
+    # The same claim covered by the emulation call that stands is not put in either.
+    covered = (
+        "The reversing tools for emulation, batch decompilation and disassembly failed, so the "
+        "control flow of the dispatch routines was read from the function index "
+        "[ev_0025][ev_0122]."
+    )
+    row = _row(HAIKU8_SENTENCE, [emulation, batch], covered)
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
     assert report.technical_analysis.analyst_limitations.body == body
     assert done.summary["not_applied"] == 1
