@@ -336,7 +336,13 @@ def test_a_rewrite_citing_the_call_that_redid_it_is_put_in(rewrite: str) -> None
             "the function index [ev_0001][ev_0002][ev_0003].",
             ["failed.1"],
         ),
-        # R2: naming the redone call is enough, with a standing failure the only source.
+        # R2: naming the redone call is enough, with a standing failure the only source;
+        # the check reads a bare "listing" as naming every call that lists code.
+        (
+            "The listing and emulation tools failed, so the control flow was read from the "
+            "function index [ev_0001][ev_0004].",
+            ["failed.2"],
+        ),
         (
             "The decompiler and emulation tools failed, so the control flow was read from the "
             "function index [ev_0001][ev_0004].",
@@ -361,6 +367,18 @@ def test_a_rewrite_repeating_the_false_claim_is_not_put_in(
     # The model was told why, and asked once more.
     assert len(reporter.asked) == 2
     assert FAILURE_REDONE_CODE in str(reporter.asked[1][-1].content)
+    assert FAILURE_REDONE_CODE in [r["code"] for r in done.tally.unresolved]
+
+
+def test_a_bare_listing_is_not_held_by_the_gate_but_rejects_a_rewrite() -> None:
+    # The gate reads narrowly (a sentence held too often costs the prompt); the
+    # check broadly (a rewrite refused only keeps the sentence as written).
+    sentence = "The listing tool failed, so the control flow came from the index [ev_0001]."
+    assert _held(sentence) == []
+    report = _report()
+    row = _row(FALSE, ["failed.2"], sentence)
+    done, _ = _ask(report, _ledger(), {"sentences": [row]}, {"sentences": [row]})
+    assert done.summary["rewritten"] == 0
     assert FAILURE_REDONE_CODE in [r["code"] for r in done.tally.unresolved]
 
 
@@ -536,7 +554,7 @@ def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> Non
     true = (
         "The emulation call by candidate names failed [ev_0122]; the decompiles that failed "
         "were redone by later calls, so the dispatch routines' control flow was read from "
-        "their listings [ev_0025][ev_0171][ev_0191]."
+        "their decompiled code [ev_0025][ev_0171][ev_0191]."
     )
     single = next(i for i, p in facts.items() if i.startswith("failed.") and "ev_0187" in p.cites)
     row = _row(HAIKU8_SENTENCE, [emulation, batch, single], true)

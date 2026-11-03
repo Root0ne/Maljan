@@ -857,6 +857,9 @@ _CODE_LISTING = re.compile(
     r"|\blistings?\s+of\s+(?:the\s+|its\s+|a\s+)?(?:routine|function|code)",
     re.IGNORECASE,
 )
+# Any listing or lister, which the rewrite check reads as naming a call that
+# lists code (``_names_call`` with ``broad``).
+_ANY_LISTING = re.compile(r"\blist(?:ing|er)s?\b", re.IGNORECASE)
 # Words that deny a call was ever redone, whatever the rewrite cites; read, like
 # a redo word, only where no negation stands before them ("did not fail for good").
 _SAYS_FOR_GOOD = re.compile(r"\bfor\s+good\b|\bpermanently\b|\bnever\s+succeeded\b", re.I)
@@ -897,10 +900,16 @@ def _sentences_of(text: str) -> list[str]:
     return [s for _at, s in sorted((at, s) for s, ats in starts.items() for at in ats)]
 
 
-def _names_call(text: str, call: FailedCall, bases: Sequence[int]) -> bool:
+def _names_call(text: str, call: FailedCall, bases: Sequence[int], *, broad: bool = False) -> bool:
     """Whether the text names a failed call: an address it was asked for, its tool's name
     as a whole word, or the kind its entry stored (never read off the tool's name), a
-    call that lists code by a listing of code."""
+    call that lists code by a listing of code.
+
+    ``broad`` is the rewrite check's reading, where naming a call too often only
+    keeps a sentence as written: any word starting "listing" or "lister" names
+    every call that lists code ("the listing tool"). The gate reads narrowly, as
+    a sentence held too often costs the prompt: only a listing of code does.
+    """
     if set(_addresses_named(text)) & _spelled_both(call.asked, bases):
         return True
     tool = call.tool.lower()
@@ -911,7 +920,8 @@ def _names_call(text: str, call: FailedCall, bases: Sequence[int]) -> bool:
     kind = call.kind.lower()
     if any(stem in kind and word.search(text) for stem, word in _KIND_WORDS.items()):
         return True
-    return call.lists_code and bool(_CODE_LISTING.search(text))
+    listing = _ANY_LISTING if broad else _CODE_LISTING
+    return call.lists_code and bool(listing.search(text))
 
 
 def _stale_citations(sentence: str, redone: Sequence[FailedCall]) -> list[FailedCall]:
@@ -987,7 +997,7 @@ def _failure_redone_check(
                 if redone[entry] not in named:
                     named.append(redone[entry])
         for call in redone.values():
-            if call not in named and _names_call(rewrite, call, bases):
+            if call not in named and _names_call(rewrite, call, bases, broad=True):
                 named.append(call)
         denied = _denies_redo(rewrite)
         stale = [
