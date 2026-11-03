@@ -91,6 +91,7 @@ def test_such_a_label_inside_the_sentence_stays_in_the_sentence(sentence: str) -
 @pytest.mark.parametrize(
     "name",
     [
+        "_BLOCK_CLAIM_RE",
         "_TAIL_START_RE",
         "_BLOCK_EVIDENCE_LABEL_RE",
         "_EVIDENCE_ENDS_AT_LINE_START_RE",
@@ -109,8 +110,6 @@ def test_a_long_run_of_spaces_after_a_label_is_read_in_linear_time(name: str) ->
 
 
 def test_the_sentence_reads_many_label_lines_in_linear_time() -> None:
-    # The sentence's own reading of a long run of whitespace inside it is no
-    # part of the label: each line's label is read once, after its newline.
     def build(rows: int) -> str:
         return "CLAIM: a" + "\n**TECHNIQUE  **  x" * rows
 
@@ -122,3 +121,33 @@ def test_a_long_run_of_spaced_labels_is_read_in_linear_time() -> None:
         return f"CLAIM: {SENTENCE}\n" + "EVIDENCE   **   x\n" * rows + "CONFIDENCE: 0.8\n"
 
     assert_scales(build, 2000, read_claim_blocks)
+
+
+@pytest.mark.parametrize("run", ["\n", "\n  ", " ", "\t\n"])
+def test_a_long_run_of_whitespace_in_the_sentence_is_read_in_linear_time(run: str) -> None:
+    # A model stuck repeating newlines writes one; the sentence's end is
+    # looked for where the run begins, not at every character of it.
+    def build(size: int) -> str:
+        return "CLAIM: a" + run * size + "b"
+
+    assert_scales(build, 4000, base_agent._BLOCK_CLAIM_RE.search)
+
+
+@pytest.mark.parametrize(
+    ("name", "label"),
+    [("_LINE_TECHNIQUE_RE", "**Technique**:"), ("_BLOCK_TECHNIQUE_LINE_RE", " TECHNIQUE:")],
+)
+def test_a_long_run_of_spaces_in_a_technique_value_is_read_in_linear_time(
+    name: str, label: str
+) -> None:
+    pattern: re.Pattern[str] = getattr(base_agent, name)
+
+    def build(size: int) -> str:
+        return label + "a" + " " * size + "b"
+
+    assert_scales(build, 4000, pattern.search)
+
+
+def test_a_technique_value_still_ends_at_a_label_after_spaces() -> None:
+    text = f"CLAIM: {SENTENCE}\nTECHNIQUE: T1027   CONFIDENCE: 0.8 EVIDENCE: [ev_0002]\n"
+    assert _read(text) == [(SENTENCE, "[ev_0002]", 0.8, "T1027")]

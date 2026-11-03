@@ -1732,9 +1732,11 @@ _BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULT
 # "EVIDENCE :"). Read possessively, so a long run of spaces is read once.
 _LABEL_COLON = r"[ \t]*+(?:\*\*)?+[ \t]*+:"
 # The sentence ends where ``_TAIL_START_RE`` begins the fields, in the same
-# casing, so a line read as the technique is never also the sentence's.
+# casing, so a line read as the technique is never also the sentence's. Its
+# end is tried where a run of whitespace begins, so a long run is read once,
+# not once per character of it.
 _BLOCK_CLAIM_RE = re.compile(
-    r"CLAIM:\s*(.+?)(?=\s*\n"
+    r"CLAIM:\s*(.+?)(?=(?<!\s)\s*\n"
     + LINE_PREFIX
     + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE))"
     + _LABEL_COLON
@@ -1823,17 +1825,18 @@ UNREADABLE_CONFIDENCE_MARK = "(empty)"
 # The whole TECHNIQUE value as written: one id is a claimed technique, and
 # anything more (a qualifier, a negation, a second id) is the analyst's line,
 # kept and asked about rather than read for the first id in it. It ends at the
-# line's end or at a CONFIDENCE or EVIDENCE label written after it.
+# line's end or at a CONFIDENCE or EVIDENCE label written after it, tried
+# where a run of spaces begins, so a long run is read once.
 _LINE_TECHNIQUE_RE = re.compile(
     r"^"
     + LINE_PREFIX
     + r"(?i:TECHNIQUE)"
     + _LABEL_COLON
-    + r"[ \t]*(.*?)(?=[ \t]+(?:CONFIDENCE|EVIDENCE):|$)",
+    + r"[ \t]*(.*?)(?=(?<![ \t])[ \t]+(?:CONFIDENCE|EVIDENCE):|$)",
     re.MULTILINE,
 )
 _BLOCK_TECHNIQUE_LINE_RE = re.compile(
-    _INLINE + r"TECHNIQUE:[ \t]*(.*?)(?=[ \t]+(?:CONFIDENCE|EVIDENCE):|$)", re.MULTILINE
+    _INLINE + r"TECHNIQUE:[ \t]*(.*?)(?=(?<![ \t])[ \t]+(?:CONFIDENCE|EVIDENCE):|$)", re.MULTILINE
 )
 
 
