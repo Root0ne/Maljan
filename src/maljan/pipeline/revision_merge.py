@@ -16,7 +16,11 @@ before and after. Here a revision changes only what it states:
   a list or inside a bounded range ("claims 32-34",
   ``debate_facts.read_claim_numbers``); a reference that names no claim (a
   longer range, or a number no analyst is named for) withdraws nothing and
-  is stated, one sentence per reference (``unplaced_sentence``);
+  is stated, one sentence per reference (``unplaced_sentence``). A claim a
+  blocking line reaches only through a range or a list (no number of its
+  own on the line, as the earlier reading read it) is withdrawn by rule only
+  when it shares a ledger id or an address with the line; otherwise it is
+  carried with the line, and that is stated (``range_carried_sentence``);
 - a claim it writes under a new number, or one that writes again no claim in
   force, is added;
 - every other claim in force stays as the answer in force wrote it, marked
@@ -66,7 +70,12 @@ from maljan.pipeline.claim_drops import (
     content_words,
     defanged,
 )
-from maljan.pipeline.debate_facts import UnplacedClaims, read_claim_numbers
+from maljan.pipeline.debate_facts import (
+    ExpandedNaming,
+    UnplacedClaims,
+    line_tokens,
+    read_claim_numbers,
+)
 from maljan.pipeline.retry_merge import (
     _WITHDRAW_OR_RETRACT_RE,
     _WITHDRAW_WORD_RE,
@@ -289,7 +298,10 @@ class RevisionMerge:
     force carried forward, ``unread`` how many withdrawing lines were not read
     exactly (the claims they may name are carried), ``unplaced`` the round's
     claim references that name no claim and may mean this analyst's
-    (``debate_facts.UnplacedClaims``): no claim is withdrawn by rule on them.
+    (``debate_facts.UnplacedClaims``): no claim is withdrawn by rule on them;
+    ``range_carried`` ``(number, sentence, line, reference)`` per claim a
+    blocking line reached only through a range or a list, sharing no ledger
+    id or address with it, and carried for that.
     """
 
     merged: Any | None = None
@@ -304,6 +316,7 @@ class RevisionMerge:
     before: int = 0
     after: int = 0
     unplaced: tuple[UnplacedClaims, ...] = ()
+    range_carried: tuple[tuple[int, str, int, str], ...] = ()
 
     def sentences(self, name: str, revision_round: int) -> list[str]:
         """The run summary's sentences: the merge, each withdrawal, each unplaced reference."""
@@ -340,9 +353,32 @@ class RevisionMerge:
             )
         for number, sentence, reason in self.withdrawn_by_rule:
             out.append(rule_sentence(name, r, number, sentence, reason))
-        for reference in self.unplaced:
-            out.append(unplaced_sentence(name, r, reference))
+        for number, sentence, line, reference in self.range_carried:
+            out.append(range_carried_sentence(name, r, number, sentence, line, reference))
+        for unread_reference in self.unplaced:
+            out.append(unplaced_sentence(name, r, unread_reference))
         return out
+
+
+def range_carried_sentence(
+    name: str, revision_round: int, number: int, sentence: str, line: int, reference: str
+) -> str:
+    """The sentence for a claim a blocking line reached only through a range, and carried."""
+    return defanged(
+        f"Blocking line L{int(line)} of the round-{int(revision_round)} mediation names "
+        f"{reference} of the {name} analyst; claim {number} of its answer in force "
+        f'("{sentence}") shares no ledger id or address with it, so it is carried.'
+    )
+
+
+def _tokens_of(block: _Block) -> frozenset[str]:
+    """The ledger ids and addresses a claim block writes (``debate_facts.line_tokens``)."""
+    return line_tokens(
+        "\n".join(
+            f"{getattr(c, 'claim', '') or ''}\n{getattr(c, 'evidence_ref', '') or ''}"
+            for c in block.claims
+        )
+    )
 
 
 def unplaced_sentence(name: str, revision_round: int, reference: UnplacedClaims) -> str:
@@ -424,6 +460,7 @@ def merge_revision(
     revision_round: int,
     named: Mapping[int, Sequence[NamingLine]] | None = None,
     unplaced: Sequence[UnplacedClaims] = (),
+    expanded: Mapping[int, Sequence[ExpandedNaming]] | None = None,
 ) -> RevisionMerge:
     """``revision`` merged into ``in_force`` by claim (:class:`RevisionMerge`).
 
@@ -432,7 +469,12 @@ def merge_revision(
     round's mediation that named it (``debate_facts.claims_named_by_lines``),
     and ``unplaced`` each reference of those lines that names no claim and
     may mean this analyst's (``ClaimReferences.unplaced_for``): it withdraws
-    nothing and is stated. ``in_force`` is not changed.
+    nothing and is stated. ``expanded`` is, per claim number, each line that
+    reaches it only through a range or a list going on
+    (``ClaimReferences.expanded_for``): such a blocking line withdraws the
+    claim by rule only when the claim shares a ledger id or an address with
+    it; otherwise the claim is carried with the line, and that is stated.
+    ``in_force`` is not changed.
     """
     first_claims = list(getattr(in_force, "claims", None) or [])
     revision_claims = list(getattr(revision, "claims", None) or [])
@@ -443,6 +485,7 @@ def merge_revision(
     if not first_claims or not revision_claims:
         return RevisionMerge(unplaced=unplaced)
     named = named or {}
+    expanded = expanded or {}
     revised = _blocks(revision_claims)
     known = {block.number for block in first}
     read = read_withdrawals(answer)
@@ -490,22 +533,36 @@ def merge_revision(
     # forward otherwise.
     ruled: dict[int, str] = {}
     contested: dict[int, list[int]] = {}
+    range_carried: list[tuple[int, str, int, str]] = []
     for block in first:
         if block.number in written_again or block.number in withdrawn:
             continue
         lines = list(named.get(block.number, ()))
         blocking = sorted({line for line, blocks in lines if blocks})
+        # A blocking line that reaches the claim only through a range or a
+        # list, and shares no ledger id or address with it, does not speak
+        # to it: it never withdraws it by rule.
+        reaching = {e.line: e for e in expanded.get(block.number, ())}
+        unspoken = (
+            [n for n in blocking if n in reaching and not reaching[n].tokens & _tokens_of(block)]
+            if reaching
+            else []
+        )
+        spoken = [n for n in blocking if n not in unspoken]
         if blocking and _disputed(block, disputes):
             # The revision did not restate it but argued for it in its
             # disputes: an answer, carried with the line that contested it.
             contested[block.number] = sorted({line for line, _b in lines})
-        elif blocking:
+        elif spoken:
             ruled[block.number] = (
-                f"named by blocking line {_lines(blocking)} of the round-{int(revision_round)} "
+                f"named by blocking line {_lines(spoken)} of the round-{int(revision_round)} "
                 "mediation; the revision did not restate it"
             )
         elif lines:
             contested[block.number] = sorted({line for line, _b in lines})
+            range_carried.extend(
+                (block.number, block.sentence, n, reaching[n].reference) for n in unspoken
+            )
     carried_blocks = [
         block
         for block in first
@@ -537,6 +594,7 @@ def merge_revision(
             before=len(first),
             after=len(kept_blocks),
             unplaced=unplaced,
+            range_carried=tuple(range_carried),
         )
 
     # In the order of the answer in force: each claim carried where it stood,
@@ -579,4 +637,5 @@ def merge_revision(
         before=len(first),
         after=len(kept_blocks) + len(carried_blocks),
         unplaced=unplaced,
+        range_carried=tuple(range_carried),
     )

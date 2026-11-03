@@ -2533,7 +2533,10 @@ the round is read) (`debate_facts.read_claim_references` reads the claim numbers
 each line names per analyst, a list, a "claim" written again and a range of up
 to 20 claims, "claims 32-34" or "17 to 19", naming the analyst its first number
 names; a longer range, or a "claim N" no analyst is named for, names no claim,
-withdraws nothing and is stated in a sentence of the merge); and any other claim it neither writes again nor
+withdraws nothing and is stated in a sentence of the merge; a claim a blocking line
+reaches only through a range or a list is withdrawn by rule only when it shares a
+ledger id or an address with the line, and is otherwise carried with the line and
+stated); and any other claim it neither writes again nor
 withdraws stands unchanged, marked carried forward from that round
 (`ClaimEvidence.carried_since_round`, with `carried_contested_by` when a line
 that does not block named it), shown beside the claim in every summary, the

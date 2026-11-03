@@ -48,7 +48,7 @@ from __future__ import annotations
 import bisect
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from maljan.core.config import AGENT_KEY_PATTERN
@@ -1812,10 +1812,52 @@ class ClaimReferences:
 
     named: dict[str, dict[int, list[tuple[int, bool]]]]
     unplaced: tuple[UnplacedClaims, ...] = ()
+    expanded: dict[str, dict[int, tuple[ExpandedNaming, ...]]] = field(default_factory=dict)
 
     def unplaced_for(self, analyst: str) -> tuple[UnplacedClaims, ...]:
         """The unplaced references that may mean ``analyst``'s claims, in line order."""
         return tuple(u for u in self.unplaced if analyst in u.analysts)
+
+    def expanded_for(self, analyst: str) -> dict[int, tuple[ExpandedNaming, ...]]:
+        """Per claim number of ``analyst``, the lines that reach it only by a range or a list."""
+        return dict(self.expanded.get(analyst, {}))
+
+
+# A ledger id or an address a line and a claim may share: a hex value of three
+# digits or more once its leading zeros are dropped (a small value such as
+# 0x1 is no evidence the two are about the same thing).
+_LINE_ID = re.compile(r"\bev_\d++\b", re.IGNORECASE)
+_LINE_ADDRESS = re.compile(r"\b0x0*+([0-9a-f]{3,})\b", re.IGNORECASE)
+
+
+def line_tokens(text: str) -> frozenset[str]:
+    """The ledger ids and addresses ``text`` writes, lower-cased (``ev_0012``, ``0x401000``)."""
+    return frozenset(
+        [
+            *(m.group(0).lower() for m in _LINE_ID.finditer(text)),
+            *("0x" + m.group(1).lower() for m in _LINE_ADDRESS.finditer(text)),
+        ]
+    )
+
+
+@dataclass(frozen=True)
+class ExpandedNaming:
+    """A line that names a claim only through a range or a list going on.
+
+    The earlier reading read a reference's first numbers alone ("claims
+    32-34" as claim 32); a claim the line reaches only by reading the rest,
+    and cites nowhere else by its own number, is named here. ``line`` counts
+    from 1, ``reference`` is the platform's rendering of the reference's
+    numbers ("claims 32-34"), ``tokens`` the ledger ids and addresses the line
+    writes (:func:`line_tokens`). A blocking line that names a claim only so
+    withdraws it by rule only when the claim shares one of them
+    (``revision_merge``): a range drawn wider than its point never withdraws
+    a claim it does not speak to.
+    """
+
+    line: int
+    reference: str
+    tokens: frozenset[str]
 
 
 def _range_rendering(first: str, last: str) -> str:
@@ -1851,33 +1893,44 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
     names = [str(p) for p in participants if str(p).strip()]
     out: dict[str, dict[int, list[tuple[int, bool]]]] = {}
     unplaced: dict[UnplacedClaims, None] = {}
+    expanded: dict[str, dict[int, list[ExpandedNaming]]] = {}
     for number, (line, mark) in enumerate(zip(lines, read_marks(lines), strict=True), 1):
         text = without_line_mark(str(line))
         field_names = _named_in(text, names)
-        # (analyst, where the reference's numbers start).
-        found: list[tuple[str, int]] = [
-            (name, numbers.start(1)) for name, numbers in _claim_numbers_named(text, names)
-        ]
+        # (analyst, the match whose number group the reference starts at).
+        found: list[tuple[str, re.Match[str]]] = list(_claim_numbers_named(text, names))
         if field_names is not None and len(field_names) == 1:
             opened = _ANALYSTS_FIELD.search(text)
             bare = _BARE_CLAIMS.match(text, opened.end()) if opened is not None else None
             if bare is not None:
-                found.append((field_names[0], bare.start(1)))
+                found.append((field_names[0], bare))
         if field_names:
             # A short form of a field analyst's name before "claim(s) N".
             for reference in _CLAIM_REFERENCE.finditer(text):
                 short = _short_named(text, reference.start(), names)
                 if short is not None:
-                    found.append((short, reference.start(1)))
+                    found.append((short, reference))
         # Where each reference read above stands in the line.
         read: list[tuple[int, int]] = []
-        for name, at in found:
+        # Per analyst, the numbers the line cites as the earlier reading read
+        # them, and those only a range or a list going on reaches.
+        cited: dict[str, set[int]] = {}
+        reached: dict[str, dict[int, str]] = {}
+        for name, match in found:
+            at = match.start(1)
             numbers = read_claim_numbers(text, at)
             if numbers is None:
                 continue
             read.append((at, numbers.end))
             if field_names is not None and name not in field_names:
                 continue
+            before = {n for n in map(_as_claim_number, re.findall(r"\d+", match.group(1))) if n}
+            cited.setdefault(name, set()).update(before)
+            counted = [n for n in map(_as_claim_number, numbers.numbers) if n is not None]
+            rendering = ("claim " if len(counted) == 1 else "claims ") + _claim_spans(counted)
+            for claim in counted:
+                if claim not in before:
+                    reached.setdefault(name, {}).setdefault(claim, rendering)
             for first, last in numbers.unplaced:
                 said = UnplacedClaims(
                     number,
@@ -1898,6 +1951,14 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
                 rows = claims.setdefault(int(stripped), [])
                 if (number, mark.blocking) not in rows:
                     rows.append((number, mark.blocking))
+        tokens = line_tokens(str(line))
+        for name, claims_reached in reached.items():
+            for claim, rendering in claims_reached.items():
+                if claim in cited.get(name, set()):
+                    continue
+                expanded.setdefault(name, {}).setdefault(claim, []).append(
+                    ExpandedNaming(number, rendering, tokens)
+                )
         # A "claim(s) N" no reference above read: no analyst is named for it.
         candidates = tuple(field_names) if field_names else tuple(names)
         for reference in _CLAIM_REFERENCE.finditer(text):
@@ -1928,7 +1989,11 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
                 min(lows) if lows else 0,
             )
             unplaced.setdefault(said, None)
-    return ClaimReferences(named=out, unplaced=tuple(unplaced))
+    return ClaimReferences(
+        named=out,
+        unplaced=tuple(unplaced),
+        expanded={k: {n: tuple(v) for n, v in c.items()} for k, c in expanded.items()},
+    )
 
 
 def claims_named_by_lines(

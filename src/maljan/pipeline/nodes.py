@@ -6299,6 +6299,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                         iteration,
                         named_by_lines.get(name),
                         references.unplaced_for(name),
+                        references.expanded_for(name),
                     )
                     if noted is not None and name not in not_asked
                     else RevisionMerge()

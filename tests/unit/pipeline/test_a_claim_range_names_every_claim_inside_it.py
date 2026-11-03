@@ -200,15 +200,22 @@ FOUR = _block(MUTEX) + _block(BEACON) + _block(CRYPTO) + _block(PERSIST)
 def _merge(line: str, answer: str) -> Any:
     refs = read_claim_references([line], PARTICIPANTS)
     return merge_revision(
-        _isr(FOUR), _isr(answer), answer, 3, refs.named.get("static"), refs.unplaced_for("static")
+        _isr(FOUR),
+        _isr(answer),
+        answer,
+        3,
+        refs.named.get("static"),
+        refs.unplaced_for("static"),
+        refs.expanded_for("static"),
     )
 
 
 class TestTheMergeReadsARangeAsItReadsASingleClaim:
     def test_a_blocked_claim_inside_a_range_is_withdrawn_by_rule_as_a_single_one_is(self) -> None:
+        # Claim 3 is reached only through the range, and shares 0x403000 with the line.
         answer = _block(MUTEX)
-        ranged = _merge(f"{STATIC} Claims 2-3 say X. {BLOCKS}", answer)
-        single = _merge(f"{STATIC} Claims 2 and 3 say X. {BLOCKS}", answer)
+        ranged = _merge(f"{STATIC} Claims 2-3 say X of 0x403000. {BLOCKS}", answer)
+        single = _merge(f"{STATIC} Claims 2 and 3 say X of 0x403000. {BLOCKS}", answer)
 
         assert ranged.withdrawn_by_rule == single.withdrawn_by_rule
         assert [n for n, _s, _r in ranged.withdrawn_by_rule] == [2, 3]
@@ -216,6 +223,51 @@ class TestTheMergeReadsARangeAsItReadsASingleClaim:
         assert ranged.merged is not None
         assert [c.claim for c in ranged.merged.claims] == [MUTEX, PERSIST]
         assert ranged.sentences("static", 3) == single.sentences("static", 3)
+        assert ranged.range_carried == ()
+
+    def test_a_ledger_id_shared_with_the_line_withdraws_a_claim_inside_a_range(self) -> None:
+        # Every claim of FOUR cites ev_0001.
+        merge = _merge(f"{STATIC} Claims 2 to 4 rest on ev_0001 alone. {BLOCKS}", _block(MUTEX))
+
+        assert [n for n, _s, _r in merge.withdrawn_by_rule] == [2, 3, 4]
+
+    def test_a_claim_inside_a_range_sharing_nothing_with_the_line_is_carried_and_stated(
+        self,
+    ) -> None:
+        merge = _merge(f"{STATIC} Claims 2-4 say X of 0x402000. {BLOCKS}", _block(MUTEX))
+
+        # Claim 2 is cited by its own number, as dev read it; claim 3 and 4
+        # are reached through the range and share no id or address with it.
+        assert [n for n, _s, _r in merge.withdrawn_by_rule] == [2]
+        assert merge.merged is not None
+        assert [c.claim for c in merge.merged.claims] == [MUTEX, CRYPTO, PERSIST]
+        crypto = merge.merged.claims[1]
+        assert crypto.carried_contested_by == ["L1 (round 3)"]
+        assert [(n, line, ref) for n, _s, line, ref in merge.range_carried] == [
+            (3, 1, "claims 2-4"),
+            (4, 1, "claims 2-4"),
+        ]
+        said = merge.sentences("static", 3)
+        assert (
+            "Blocking line L1 of the round-3 mediation names claims 2-4 of the static analyst; "
+            "claim 3 of its answer in force (" in said[-2]
+        )
+        assert said[-2].endswith("shares no ledger id or address with it, so it is carried.")
+
+    def test_a_list_going_on_is_guarded_as_a_range_is(self) -> None:
+        # The earlier reading read "2, 3" and stopped at ", and 4".
+        merge = _merge(f"{STATIC} Claims 2, 3, and 4 say X. {BLOCKS}", _block(MUTEX))
+
+        assert [n for n, _s, _r in merge.withdrawn_by_rule] == [2, 3]
+        assert [n for n, *_rest in merge.range_carried] == [4]
+
+    def test_a_claim_the_line_also_cites_by_its_own_number_is_not_guarded(self) -> None:
+        merge = _merge(
+            f"{STATIC} Claims 2-4 say X, STATIC ANALYST claim 4 most. {BLOCKS}", _block(MUTEX)
+        )
+
+        assert [n for n, _s, _r in merge.withdrawn_by_rule] == [2, 4]
+        assert [n for n, *_rest in merge.range_carried] == [3]
 
     def test_a_range_the_disputes_argue_answers_the_line(self) -> None:
         answer = _block(MUTEX)
@@ -277,7 +329,8 @@ class TestTheMergeReadsARangeAsItReadsASingleClaim:
             finding="revise",
             contradictions=[
                 "[analysts: STATIC ANALYST] Claims 2 to 3 say the beacon waits 600 s and the "
-                "key is 0x5a, versus the listing. [blocking: the listing shows 900 s.]",
+                "key 0x403000 uses is 0x5a, versus the listing. [blocking: the listing shows "
+                "900 s.]",
                 "[analysts: STATIC ANALYST] The analyst's own claim 4 names the key loosely. "
                 "[blocking: the listing names another value.]",
             ],
