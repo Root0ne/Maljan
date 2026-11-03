@@ -128,9 +128,9 @@ class TestOnlyAContentMatchPrintsItsBody:
 
         assert BODY not in analyst
         assert line.endswith(
-            "Not printed here: "
+            "Not printed in the analyst report: "
             + NOT_PRINTED_HASH_ONLY.format(clauses="sha256 and imphash")
-            + "; its body is in the bundle."
+            + "; its body is in the evidence bundle."
         )
         assert "Precision:" not in line
         # Nothing is dropped: the bundle prints the body and the check.
@@ -172,7 +172,10 @@ class TestOnlyAContentMatchPrintsItsBody:
         analyst = _analyst(_report(_yara(**check)))
 
         assert BODY not in analyst
-        assert f"Not printed here: {reason}; its body is in the bundle." in analyst
+        assert (
+            f"Not printed in the analyst report: {reason}; its body is in the evidence bundle."
+            in analyst
+        )
 
     def test_a_behaviour_and_a_traffic_rule_print_with_their_precision(self) -> None:
         sigma = DetectionRule(kind="sigma", name="Maljan_AutoGen_Sigma_loader", body="title: s")
@@ -651,8 +654,8 @@ def test_a_stored_run_s_hash_only_draft_is_named_and_its_facts_stay(run: str) ->
 
     assert yara.body.rstrip() not in analyst
     assert (
-        "Not printed here: it matches the sample by its sha256 and imphash only, not by its "
-        "content; its body is in the bundle." in analyst
+        "Not printed in the analyst report: it matches the sample by its sha256 and imphash "
+        "only, not by its content; its body is in the evidence bundle." in analyst
     )
     table = analyst.split("### 8.1", 1)[1].split("### 8.2", 1)[0]
     assert "loaded at 0x3935 in the function at 0x3868" in table
@@ -670,3 +673,53 @@ def test_the_stored_ledger_s_seed_and_hashes_are_read() -> None:
     assert constants[0].value == SEED
     assert constants[0].entry == "ev_0021"
     assert {c.value for c in constants} >= {"0x2ec21d6c", "0xc24fa5f4"}
+
+
+class TestTheRecordCarriesWhatTheAnalystReportSays:
+    """Each drafted rule's record carries the analyst report's sentence for it, so the console
+    shows the report's own words (``printed`` and ``standing``), not a copy of them."""
+
+    def test_every_drafted_rule_carries_its_standing(self) -> None:
+        rules = build_detection_rules(_report(), None)
+
+        assert rules
+        for rule in rules:
+            assert (rule.printed, rule.standing) == drafts.rule_standing(rule)
+            assert _rule_line(_analyst(_report(rule)), rule.kind.upper()).endswith(
+                str(rule.standing)
+            )
+
+    def test_a_hash_only_record_says_it_is_not_printed(self) -> None:
+        printed, standing = drafts.rule_standing(_yara(**HASH_ONLY))
+
+        assert printed is False
+        assert standing == (
+            "Not printed in the analyst report: it matches the sample by its sha256 and imphash "
+            "only, not by its content; its body is in the evidence bundle."
+        )
+
+    def test_a_rule_stored_before_the_field_dumps_as_it_did(self) -> None:
+        dumped = _yara(**HASH_ONLY).model_dump(mode="json")
+
+        assert "printed" not in dumped and "standing" not in dumped
+
+
+@pytest.mark.parametrize("run", ["haiku7", "haiku8"])
+def test_a_stored_run_s_rule_records_carry_what_the_analyst_report_prints(run: str) -> None:
+    """Over the stored runs: each rule given its standing where a record is built, read back
+    from the report's JSON, carries the sentence the analyst report prints beside its name."""
+    directory = _stored(run)
+    stored = json.loads((directory / "report.json").read_text())
+    report = MalwareReport.model_validate(stored)
+    for rule in report.detection_signatures:
+        rule.printed, rule.standing = drafts.rule_standing(rule)
+    report = MalwareReport.model_validate(report.model_dump(mode="json"))
+    analyst = _analyst(report)
+
+    assert report.detection_signatures
+    for rule in report.detection_signatures:
+        assert rule.standing is not None
+        assert rule.standing in _rule_line(analyst, rule.kind.upper())
+    (yara,) = [rule for rule in report.detection_signatures if rule.kind == "yara"]
+    assert yara.printed is False
+    assert "by its sha256 and imphash only, not by its content" in str(yara.standing)

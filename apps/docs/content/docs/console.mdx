@@ -329,7 +329,11 @@ run on its sample", muted. The report's own §10.2 sentence is under the rule:
 which clauses held, each string found at its first offset, the strings found
 nowhere, or why the rule was not checked
 (`apps/web/src/components/analysis/sampleMatch.ts`). A Sigma or Suricata draft,
-and a rule stored before the check, carries no such badge.
+and a rule stored before the check, carries no such badge. Every drafted
+rule's row and side panel also show the analyst report's §8.2 sentence for it,
+read from the record's `printed` and `standing`: the Precision line in muted
+text, or why its body is not printed there; a rule stored before those fields
+shows the badge alone.
 
 A DYNAMIC signature's number is the sandbox's own, and its scale depends on
 which sandbox produced it: a CAPEv2 signature declares 1 to 3 (low, medium,

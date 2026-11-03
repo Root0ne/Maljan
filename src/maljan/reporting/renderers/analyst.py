@@ -38,7 +38,7 @@ from maljan.reporting.composer_pro import (
     values_not_carried,
 )
 from maljan.reporting.defang import defang
-from maljan.reporting.detection_signatures import analyst_print_gate, precision_line
+from maljan.reporting.detection_signatures import analyst_print_gate, rule_standing
 from maljan.reporting.judge_reasons import judge_reasons_shown
 from maljan.reporting.models import MalwareReport, TechnicalSubsection, outcome_words
 from maljan.reporting.renderers.layout import BUNDLE_HTML, BUNDLE_JSON
@@ -1321,7 +1321,8 @@ class _Analyst:
         printed rule carries a Precision line (``precision_line``). A rule that
         matched by its hash alone, was not checked, did not match or did not
         compile is named here with the reason (``analyst_print_gate``) and
-        printed in the bundle.
+        printed in the bundle. Either sentence is the one the rule's record
+        carries (``rule_standing``).
         """
         from maljan.reporting.renderers.markdown import _RULE_SECTIONS
 
@@ -1354,12 +1355,9 @@ class _Analyst:
             if checked:
                 said += f" {checked}"
             # A body printed here carries what it was measured on; one that is
-            # not says why, and the bundle prints it.
-            why = analyst_print_gate(rule)
-            if why is None:
-                said += f" {precision_line(rule)}"
-            else:
-                said += f" Not printed here: {why}; its body is in the bundle."
+            # not says why, and the bundle prints it. The sentence is the one
+            # the rule's record carries (``rule_standing``).
+            said += f" {rule_standing(rule)[1]}"
             if rule.kind == "yara":
                 said += _stored_left_out(self.report)
             lines.append(_item(said))

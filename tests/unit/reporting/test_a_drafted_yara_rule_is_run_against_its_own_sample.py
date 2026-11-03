@@ -181,6 +181,13 @@ class TestTheEngineSaysWhichClauseHeld:
         assert f"`{_slot(rule, SECOND)}` at 0x28" in said
         assert "Found nowhere" not in said
 
+    def test_a_rule_whose_strings_match_carries_that_it_prints(self, tmp_path: Path) -> None:
+        path = _sample(tmp_path, BOTH)
+        rule = _yara(_report(), OwnSample(path=str(path), budget_seconds=BUDGET))
+
+        assert rule.printed is True
+        assert str(rule.standing).startswith("Precision: its strings match")
+
     def test_strings_and_the_sha256_holding_together_are_both_said(self, tmp_path: Path) -> None:
         path = _sample(tmp_path, BOTH)
         report = _drafted(

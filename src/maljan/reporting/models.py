@@ -906,6 +906,12 @@ class DetectionRule(BaseModel):
         default=None, exclude_if=lambda value: value is None
     )
     sample_not_checked: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # What the analyst report says of the draft beside its name, set where the
+    # record is built (``detection_signatures.rule_standing``): whether it
+    # prints the body, and the sentence it prints, the Precision line or why
+    # the body is left out. Absent on a rule stored before the field existed.
+    printed: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    standing: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class DefensiveRecommendation(BaseModel):

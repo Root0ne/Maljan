@@ -9,7 +9,7 @@ import CodeBlock from "@/components/ui/CodeBlock";
 import Drawer from "@/components/ui/Drawer";
 import ShowMoreRows from "@/components/ui/ShowMoreRows";
 import type { DetectionKind, DetectionRule } from "@/types/malware-report";
-import { sampleMatchBadge, type SampleMatchTone } from "./sampleMatch";
+import { ruleStanding, sampleMatchBadge, type RuleStanding, type SampleMatchTone } from "./sampleMatch";
 
 const KIND_ORDER: DetectionKind[] = ["yara", "sigma", "suricata", "snort"];
 const KIND_EXT: Record<DetectionKind, string> = {
@@ -46,13 +46,24 @@ const SAMPLE_FOOTER: Record<SampleMatchTone, string> = {
   neutral: "text-text-secondary",
 };
 
+/* A printed rule's Precision line is muted. A rule the analyst report leaves
+ * out says why in the compile error's red when it does not compile or does
+ * not match its sample, and in the hash-only amber otherwise (a hash-only
+ * match, not checked, stored before the check). */
+function standingTone(rule: DetectionRule, standing: RuleStanding): string {
+  if (standing.printed) return "text-text-muted";
+  if (rule.compile_error || rule.matches_sample === false) return "text-status-red";
+  return "text-status-orange";
+}
+
 /** How many rules the list draws before offering more. */
 const RULES_FIRST = 10;
 
 /**
  * Every rule the run wrote, in one list: its kind, its name, whether it
- * compiles and matches the sample it was drafted from, and a copy and a
- * download on each row. A rule's name opens its body in the side panel.
+ * compiles and matches the sample it was drafted from, what the analyst
+ * report says of it (its Precision line, or why it is not printed there), and
+ * a copy and a download on each row. A rule's name opens its body in the side panel.
  */
 export default function GeneratedRulesPanel() {
   const { report, loading } = useReport();
@@ -125,6 +136,7 @@ function KindTag({ kind }: { kind: DetectionKind }) {
 function RuleRow({ rule, onOpen }: { rule: DetectionRule; onOpen: (opener: HTMLElement) => void }) {
   const filename = `${rule.name}.${KIND_EXT[rule.kind]}`;
   const sample = sampleMatchBadge(rule);
+  const standing = ruleStanding(rule);
   return (
     <li className="flex flex-wrap items-center gap-2 px-3 py-2">
       <KindTag kind={rule.kind} />
@@ -160,12 +172,16 @@ function RuleRow({ rule, onOpen }: { rule: DetectionRule; onOpen: (opener: HTMLE
           .{KIND_EXT[rule.kind]}
         </button>
       </span>
+      {standing && (
+        <p className={`basis-full text-[11px] ${standingTone(rule, standing)}`}>{standing.sentence}</p>
+      )}
     </li>
   );
 }
 
 function RuleBody({ rule }: { rule: DetectionRule }) {
   const sample = sampleMatchBadge(rule);
+  const standing = ruleStanding(rule);
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -176,6 +192,7 @@ function RuleBody({ rule }: { rule: DetectionRule }) {
         <p className="rounded bg-status-red/5 px-2 py-1.5 text-[11px] text-status-red">{rule.compile_error}</p>
       )}
       {sample && <p className={`rounded px-2 py-1.5 text-[11px] ${SAMPLE_FOOTER[sample.tone]}`}>{sample.detail}</p>}
+      {standing && <p className={`px-2 text-[11px] ${standingTone(rule, standing)}`}>{standing.sentence}</p>}
     </div>
   );
 }

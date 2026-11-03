@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DetectionRule } from "@/types/malware-report";
-import { sampleMatchBadge } from "../sampleMatch";
+import { ruleStanding, sampleMatchBadge } from "../sampleMatch";
 
 const SAID = "Run against the sample it was drafted from: ";
 
@@ -148,5 +148,43 @@ describe("a drafted rule checked against its own sample", () => {
         sample_not_checked: null,
       } as unknown as DetectionRule),
     ).toBeNull();
+  });
+});
+
+// The haiku8 YARA draft as its record now carries it: its sha256 and import
+// hash held, none of its five strings, and the analyst report's sentence for it.
+const HAIKU8_STANDING =
+  "Not printed in the analyst report: it matches the sample by its sha256 and imphash only, " +
+  "not by its content; its body is in the evidence bundle.";
+const HAIKU8 = rule({
+  name: "Maljan_AutoGen_Latrodectus",
+  matches_sample: true,
+  matched_by: ["sha256", "imphash"],
+  sample_strings: ["$s0", "$s1", "$s2", "$s3", "$s4"].map((identifier) => ({ identifier, offset: null })),
+  printed: false,
+  standing: HAIKU8_STANDING,
+});
+
+describe("what the analyst report says of a drafted rule", () => {
+  it("is the sentence the record carries, as it carries it", () => {
+    expect(ruleStanding(HAIKU8)).toEqual({ printed: false, sentence: HAIKU8_STANDING });
+    const precision =
+      "Precision: it selects on values this run publishes or a sandbox recorded; not run against " +
+      "any other log (no retro-hunt), so how often it fires elsewhere is not measured.";
+    expect(ruleStanding(rule({ kind: "sigma", printed: true, standing: precision }))).toEqual({
+      printed: true,
+      sentence: precision,
+    });
+  });
+
+  it("keeps only the badge on a rule stored before the record carried it", () => {
+    const stored = { ...HAIKU8, printed: undefined, standing: undefined };
+    expect(ruleStanding(stored)).toBeNull();
+    expect(sampleMatchBadge(stored)?.label).toBe("matches its sample by hash only");
+    expect(ruleStanding(rule({ kind: "sigma" }))).toBeNull();
+    // A stored report served with explicit nulls, or a half-written record, reads the same way.
+    expect(ruleStanding({ ...rule(), printed: null, standing: null } as unknown as DetectionRule)).toBeNull();
+    expect(ruleStanding(rule({ printed: true }))).toBeNull();
+    expect(ruleStanding(rule({ printed: true, standing: "" }))).toBeNull();
   });
 });

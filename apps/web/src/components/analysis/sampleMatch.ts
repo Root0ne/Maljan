@@ -8,7 +8,9 @@
  * matched it at or none, or why the rule was not checked. Nothing here
  * re-derives the draft's threshold: the clauses are read as recorded. The
  * sentence is the report's own §10.2 line, so the card and the report say the
- * same thing.
+ * same thing. `ruleStanding` reads the report's §8.2 line beside the rule's
+ * name from the record: its Precision line, or why the analyst report does not
+ * print it.
  */
 
 import type { DetectionRule, RuleClause, SampleString } from "@/types/malware-report";
@@ -105,4 +107,21 @@ export function sampleMatchBadge(rule: DetectionRule): SampleMatchBadge | null {
     said.push(`Found nowhere in the sample: ${nowhere.map((s) => s.identifier).join(", ")}.`);
   }
   return { label: held.label, tone: held.tone, detail: said.join(" ") };
+}
+
+/** What the analyst report says of a draft beside its name (§8.2). */
+export interface RuleStanding {
+  printed: boolean;
+  sentence: string;
+}
+
+/** The rule's §8.2 sentence as its record carries it (`printed`, `standing`):
+ *  the Precision line, or why the analyst report leaves the body out. `null`
+ *  for a rule stored before the record carried it, which keeps only its badge;
+ *  the sentence is never re-derived here. */
+export function ruleStanding(rule: DetectionRule): RuleStanding | null {
+  if (typeof rule.printed !== "boolean" || typeof rule.standing !== "string" || !rule.standing) {
+    return null;
+  }
+  return { printed: rule.printed, sentence: rule.standing };
 }
