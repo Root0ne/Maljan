@@ -138,8 +138,10 @@ REWRITE_DROPS_CITATION_CODE = "agreement.rewrite_drops_citation"
 # sources that cite none; for a section 5 sentence, one resting only on facts
 # about nothing the sentence names (the routine or its caller, the address, the
 # value or the call), or, for a routine or bound-value fact on a sentence
-# stating that something is not established, read or shown and naming no
-# address, nothing its passage names, or with no clause of their own.
+# stating that the run's own reading (the ledger, its entries, the listings or
+# the function index) does not establish, show, settle, trace or list something
+# and naming no address, nothing its passage names, or with no clause of their
+# own.
 REWRITE_UNGROUNDED_CODE = "agreement.rewrite_ungrounded"
 # A sentence the agreement question rewrote: what stood, what replaced it and
 # on which sources, recorded as the model's answer.
@@ -202,8 +204,8 @@ class Passage:
     qualifier: str = ""
     # A fact about a routine (one whose code no entry lists, or one an entry
     # lists) or a decoded value bound to a call: it grounds a section 5 sentence
-    # stating that something is not established, read or shown wherever the
-    # sentence's passage names it (``_grounds``).
+    # stating that the run's own reading does not establish, show, settle, trace
+    # or list something wherever the sentence's passage names it (``_grounds``).
     on_absence: bool = False
     # The checks the field a passage stands in holds its text to, run on a
     # rewrite before it is put in (an ATT&CK procedure: one sentence, carrying
@@ -1638,9 +1640,10 @@ def _row_violations(
                             "section 5 sentence only where the sentence names the routine, "
                             "the address, the value or the call it is about, or, for a "
                             "fact about a routine or a bound value, where the sentence "
-                            "states that something is not established, read or shown, "
-                            "names no address and its passage names what the fact is "
-                            "about. Keep the sentence."
+                            "states that the run's own reading (the ledger, its entries, "
+                            "the listings or the function index) does not establish, "
+                            "show, settle, trace or list something, names no address and "
+                            "its passage names what the fact is about. Keep the sentence."
                         ),
                         path=f"{path}.rewrite",
                     )
@@ -1658,10 +1661,11 @@ def _grounds_section_5(fact: Passage, reading: _Reading) -> bool:
     """Whether a fact grounds a rewrite of a section 5 sentence: where the sentence names
     what the fact is about (a routine whose code no entry lists or its caller, the address
     of an answered call, a bound value, its call or where it is passed), or, for a
-    fact about a routine or a bound value, where the sentence states that something is not
-    established, read or shown, names no address and its passage names what the fact is
-    about. The platform writes the rewrite (``_qualified``); a fact with no clause of its
-    own grounds none."""
+    fact about a routine or a bound value, where the sentence states that the run's own
+    reading (the ledger, its entries, the listings or the function index) does not
+    establish, show, settle, trace or list something, names no address and its passage
+    names what the fact is about. The platform writes the rewrite (``_qualified``); a fact
+    with no clause of its own grounds none."""
     return _grounds(fact, reading)
 
 
@@ -1684,20 +1688,20 @@ class _Reading:
 
     @cached_property
     def unestablished(self) -> bool:
-        return _UNESTABLISHED.search(self.sentence) is not None and _states_an_absence(
-            self.sentence
-        )
+        return _unsettled_by_reading(self.sentence) and _states_an_absence(self.sentence)
 
 
 def _grounds(fact: Passage, reading: _Reading) -> bool:
     """:func:`_grounds_section_5` for a sentence as copied: a fact with a clause of its
     own, whose clause the sentence does not already carry, about what the sentence
     names; or a fact about a routine or a bound value, about what the passage names,
-    where the sentence states that something is not established, read or shown and
-    names no address of its own ("No environment check is established.", T-404; "The
-    mutex name is not established.", T-398). An absence naming an address is about
-    that address ("The call at 0x3808 was not read"); an absence the run recorded
-    ("The sandbox recorded no API call trace.") is about no routine (T-537).
+    where the sentence states that the run's own reading does not establish, show,
+    settle, trace or list something (:func:`_unsettled_by_reading`) and names no
+    address of its own ("No environment check is established.", T-404; "The mutex name
+    is not established.", T-398; "The ledger does not show whether the gate passed.").
+    An absence naming an address is about that address ("The call at 0x3808 was not
+    read"); an absence the run recorded ("The sandbox recorded no API call trace.") is
+    about no routine (T-537).
 
     Any other fact is about the sentence alone: a section names many routines, and
     a failed call answered later is not about every sentence beside the one naming
@@ -1717,16 +1721,59 @@ def _grounds(fact: Passage, reading: _Reading) -> bool:
 
 
 # An absence a routine or bound-value fact bears on without the sentence naming its
-# address: one the code read leaves unsettled, in a clause whose negation the reading word
-# follows ("No environment check is established.", "The mutex name is not established.",
-# "No listed call path selects Startup."). An absence the run recorded ("The sandbox
-# recorded no API call trace.") or a word read before the negation ("all packets read,
-# contains no DNS query") is not about code a routine fact is about (T-537).
+# address: one the run's own reading (the ledger, its entries, the listings or the
+# function index) leaves unsettled. It is said by a negation and a reading word in one
+# clause ("No environment check is established.", "The mutex name is not established.",
+# "No listed call path selects Startup."); by that reading as the subject of a negated
+# reading verb ("The ledger does not show whether the gate passed.", "This run did not
+# trace the key assembly.", "we do not settle that question"); by a negation beside the
+# code read ("No row of the function index lists them."); or by a routine, a caller or a
+# call site not in that reading ("That caller trace is not in the ledger."). An absence
+# the run recorded ("The sandbox recorded no API call trace."), a reading word before the
+# negation ("all packets read, contains no DNS query") or a reading word in another clause
+# ("carries no api_calls section [ev_0026], so the test is established from static
+# reading") is not about code a routine fact is about (T-537).
+_IN_CLAUSE = r"[^.;:()\u2014\u2013]*?"
+_NEGATION = r"\b(?:no|not|never|none)\b"
+_NOT_DONE = r"(?:\b(?:does|do|did|can|could)\s+not\s+|\bcannot\s+|\b(?:doesn|don|didn)'t\s+)"
+_READ_VERB = (
+    r"\b(?:establish|show|settle|trace|list|read|identify|recover|decompile|disassemble|"
+    r"examine|name|link|sustain)(?:e?s)?\b"
+)
+_CODE_READ = r"\b(?:(?:function\s+)?index|these\s+functions|code\s+reads?|traced\s+(?:path|code))\b"
 _UNESTABLISHED = re.compile(
-    r"\b(?:no|not|never|none)\b[^.;:()\u2014\u2013]*?\b(?:established|shown|read|listed|traced|"
-    r"identified|recovered|decompiled|disassembled|examined)\b|\bunread\b",
+    "|".join(
+        (
+            _NEGATION
+            + _IN_CLAUSE
+            + r"\b(?:established|shown|read|listed|traced|identified|recovered|decompiled|"
+            r"disassembled|examined|settled)\b",
+            r"\bunread\b",
+            r"\b(?:ledger|entries|this\s+record|this\s+run|listings?|decompiles?|"
+            r"(?:function\s+)?index|code\s+reads?)\b" + _IN_CLAUSE + _NOT_DONE + _READ_VERB,
+            r"\bwe\s+" + _NOT_DONE + _READ_VERB,
+            _NEGATION + _IN_CLAUSE + _CODE_READ,
+            _CODE_READ + _IN_CLAUSE + _NEGATION,
+            r"\b(?:caller|callee|call\s+(?:site|path)|routine)s?\b"
+            + _IN_CLAUSE
+            + _NEGATION
+            + r"\s+in\s+the\s+(?:ledger|listings?|index|entries)\b",
+        )
+    ),
     re.IGNORECASE,
 )
+# Where a negation's clause ends for :data:`_UNESTABLISHED`: a joined clause or a citation.
+_CLAUSE_JOIN = re.compile(
+    r",\s*(?:so|but|and)\s|\b(?:while|though|although|which|because)\b|\[[^\]]*\bev_\w+[^\]]*\]",
+    re.IGNORECASE,
+)
+
+
+def _unsettled_by_reading(sentence: str) -> bool:
+    """Whether a clause of the sentence says the run's own reading left something
+    unsettled (:data:`_UNESTABLISHED`), read clause by clause."""
+    return any(_UNESTABLISHED.search(part) for part in _CLAUSE_JOIN.split(sentence))
+
 
 # A word an absence may be stated of.
 _A_WORD = re.compile(r"[A-Za-z][\w-]*")
@@ -1984,9 +2031,10 @@ SYSTEM_PROMPT = (
     "decision rewrite only asks that it be qualified, and the platform adds the fact's own "
     "words and its ids to the sentence as it stands; it is qualified only where the "
     "sentence names the routine, the address, the value or the call the fact is about, or, "
-    "for a fact about a routine or a bound value, where the sentence states that something is "
-    "not established, read or shown, names no address and its passage names what the fact "
-    "is about.\n"
+    "for a fact about a routine or a bound value, where the sentence states that the run's own "
+    "reading (the ledger, its entries, the listings or the function index) does not "
+    "establish, show, settle, trace or list something, names no address and its passage "
+    "names what the fact is about.\n"
     "Leave out every sentence no source states otherwise than. List each sentence once. "
     "Answer with exactly this JSON object, with an empty list when no sentence disagrees:\n"
     + EXPECTED_OBJECT

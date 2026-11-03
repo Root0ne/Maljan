@@ -591,6 +591,11 @@ def test_an_absence_is_qualified_on_a_routine_its_passage_names_anywhere(body: s
         "Whether the gate is open in the analysed sample is not established.",
         "The routine's caller is not identified.",
         "The call site was not recovered.",
+        "The ledger does not show whether the gate passed.",
+        "This run did not trace the key assembly.",
+        "Which text is used is not settled by the entries here.",
+        "No row of the function index lists them.",
+        "That caller trace is not in the ledger.",
     ],
 )
 def test_an_absence_the_code_read_leaves_unsettled_is_qualified_on_a_routine(
@@ -612,6 +617,14 @@ def test_an_absence_the_code_read_leaves_unsettled_is_qualified_on_a_routine(
         # A reading word before the negation is not what the sentence says is absent.
         "The capture, all packets read, contains no DNS query [ev_0107].",
         "Text whose bytes already read as printable is not decoded [ev_0107].",
+        "The import table does not show the API surface.",
+        "The sandbox entries do not tie it to a sample process.",
+        "No process listing is observed.",
+        "Process attribution for the dumps is not in the ledger.",
+        # A reading word in another clause than the negation.
+        "The sandbox report carries no api_calls section, so the test is established from "
+        "static reading.",
+        "The tool runs returned no findings [ev_0107], but the decompiled code holds gates.",
     ],
 )
 def test_an_absence_the_run_recorded_is_not_qualified_on_a_routine(sentence: str) -> None:
