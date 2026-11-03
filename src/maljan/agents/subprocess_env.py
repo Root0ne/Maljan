@@ -49,6 +49,7 @@ def child_env(
     allow: Iterable[str] = (),
     source: Mapping[str, str] | None = None,
     server: str = "",
+    say: bool = True,
 ) -> dict[str, str]:
     """Build the environment for an MCP sidecar subprocess.
 
@@ -57,25 +58,29 @@ def child_env(
     documented to read a specific credential), then applies ``extra`` (the
     server's own explicit ``mcp.<server>.env`` mapping) on top. A name in
     ``allow`` or ``extra`` that is one of the platform's own bootstrap
-    variables is left out, and ``server`` is the name the warning gives.
+    variables is left out, and ``server`` is the name the warning gives;
+    ``say=False`` leaves the warning to the launch itself, for a reading of
+    the environment that starts nothing (a trust grant's).
     """
     src = os.environ if source is None else source
     env = {k: src[k] for k in BASE_KEYS if k in src}
     for name in allow:
-        if _withheld(name, server):
+        if _withheld(name, server, say):
             continue
         if name in src:
             env[name] = src[name]
     for name, value in (extra or {}).items():
-        if not _withheld(name, server):
+        if not _withheld(name, server, say):
             env[name] = value
     return env
 
 
-def _withheld(name: str, server: str) -> bool:
-    """Whether ``name`` is kept from the child, said in a warning when it is."""
+def _withheld(name: str, server: str, say: bool = True) -> bool:
+    """Whether ``name`` is kept from the child, said in a warning when it is (and ``say``)."""
     if not is_platform_secret(name):
         return False
+    if not say:
+        return True
     logger.warning(
         "Tool server %s is started without %s: the platform's own bootstrap variables, "
         "which open its stores, never reach a tool server's environment.",
@@ -133,31 +138,63 @@ def launch_cwd(cwd: str | None) -> str | None:
     return str(resolved)
 
 
-def stdio_launch(config: Any, *, server: str = "") -> StdioLaunch:
+def _inside(cwd: str, value: str, root: Path) -> bool:
+    """Whether ``value``, read from ``cwd``, names a real path inside ``root``."""
+    try:
+        return Path(os.path.realpath(os.path.join(cwd, value))).is_relative_to(root)
+    except (OSError, ValueError):
+        return False
+
+
+def stdio_launch(config: Any, *, server: str = "", say: bool = True) -> StdioLaunch:
     """How ``config``'s child is started: :func:`child_env`, rooted command and arguments, cwd.
 
-    Its arguments as ``core.paths.resolve_mcp_args`` roots them; its
-    environment the block's ``env`` and ``env_allow`` give
-    (:func:`child_env`), before what a job adds; its working directory as
-    :func:`launch_cwd` reads it (:class:`LaunchCwdError` for one it refuses).
-    Its command, where the block names no working directory, as
-    ``core.paths.resolve_mcp_command`` roots it: a relative path into the
-    project is rooted there rather than at whatever directory the parent runs
-    in, and a bare program name (``npx``, ``uvx``), an absolute path or one
-    that leaves the project is left as written. A block with a working
-    directory has a relative command run from that directory, already
-    rooted, and keeps it as written.
+    Its arguments as ``core.paths.resolve_mcp_args`` roots them, by the rule
+    its command is rooted by; its environment the block's ``env`` and
+    ``env_allow`` give (:func:`child_env`), before what a job adds; its
+    working directory as :func:`launch_cwd` reads it (:class:`LaunchCwdError`
+    for one it refuses). Its command, where the block names no working
+    directory, as ``core.paths.resolve_mcp_command`` roots it: a relative path
+    into the project is rooted there rather than at whatever directory the
+    parent runs in, and a bare program name (``npx``, ``uvx``), an absolute
+    path or one that leaves the project is left as written. A block with a
+    working directory has a relative command run from that directory, already
+    rooted, and keeps it as written. A command or argument left as written
+    because it is a relative path that leaves the project (``../x``) is said in
+    a warning naming the server, unless the block's working directory, which
+    the child reads it from, keeps it inside the project
+    (``../shared/util.py`` beside ``cwd: services/foo``). ``say=False`` reads
+    the launch without its warnings, for a reading that starts nothing (a
+    trust grant's), so the launch alone says them.
     """
-    from maljan.core.paths import resolve_mcp_args, resolve_mcp_command
+    from maljan.core.paths import (
+        get_project_root,
+        mcp_paths_leaving_project,
+        resolve_mcp_args,
+        resolve_mcp_command,
+    )
 
     env = child_env(
         getattr(config, "env", None) or {},
         allow=tuple(getattr(config, "env_allow", None) or ()),
         server=server,
+        say=say,
     )
     cwd = launch_cwd(getattr(config, "cwd", None))
     command = str(getattr(config, "command", None) or "")
+    written = [str(arg) for arg in getattr(config, "args", None) or ()]
+    leaving = mcp_paths_leaving_project(([command] if cwd is None else []) + written)
+    if leaving and cwd is not None:
+        root = Path(get_project_root()).resolve()
+        leaving = [value for value in leaving if not _inside(cwd, value, root)]
+    if leaving and say:
+        logger.warning(
+            "Tool server %s: %s left as written, not rooted at the project: a relative path "
+            "that leaves the project is read from the directory the child runs in.",
+            server or "(unnamed)",
+            ", ".join(repr(value[:200]) for value in leaving),
+        )
     if cwd is None:
         command = resolve_mcp_command(command)
-    args = resolve_mcp_args([str(arg) for arg in getattr(config, "args", None) or ()])
+    args = resolve_mcp_args(written)
     return StdioLaunch(command=command, args=args, env=env, cwd=cwd)
