@@ -589,6 +589,10 @@ def test_an_absence_is_qualified_on_a_routine_its_passage_names_anywhere(body: s
         # States no absence: the routine fact is about the sentence alone.
         "The sample also writes a Run key for persistence [ev_0107].",
         "Routine 0x7c40 returns early.",
+        # States an absence of an address it names: it is about that address.
+        "Routine 0x7c40 performs no check.",
+        "The call at 0x7c40 was not read [ev_0107].",
+        "The other caller of 0x7c40 is not shown.",
     ],
 )
 def test_a_routine_fact_qualifies_no_other_sentence_its_passage_does_not_name_it_in(
