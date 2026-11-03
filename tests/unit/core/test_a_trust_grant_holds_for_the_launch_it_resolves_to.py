@@ -285,3 +285,49 @@ def test_a_server_started_away_from_its_grant_does_not_trust_its_declaration(
     moved._build_toolkit(None, 0, None)
     assert moved.config.trusts_served_declaration is False
     assert moved.config.trust_granted_for is None
+
+
+def test_the_grant_reads_a_relative_command_rooted_as_the_launch_starts_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from maljan.core.config import MCPServerConfig
+
+    # The parent's directory holds a file under the same relative path; the
+    # launch runs the project's, and so does the grant, from either directory.
+    root = tmp_path / "project"
+    ours = _program(root / "bin" / "zq-server")
+    _program(tmp_path / "elsewhere" / "bin" / "zq-server")
+    monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: root)
+    config = MCPServerConfig(enabled=True, command="bin/zq-server")
+    monkeypatch.chdir(tmp_path / "elsewhere")
+    resolved = td._resolved_launch(config)
+    assert resolved is not None
+    assert resolved["command"] == os.path.realpath(ours)
+    grant = granted_launch(config)
+    monkeypatch.chdir(root)
+    assert granted_launch(config) == grant
+
+
+@pytest.mark.parametrize("bare", [True, False], ids=["bare-name", "absolute"])
+def test_a_grant_for_a_bare_name_or_absolute_command_is_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bare: bool
+) -> None:
+    import dataclasses
+
+    import maljan.agents.subprocess_env as subprocess_env
+
+    program = _program(tmp_path / "bin" / "zq-server")
+    monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: tmp_path)
+    command = "zq-server" if bare else str(program)
+    block = _block(command=command, env={"PATH": str(program.parent)})
+    grant = granted_launch(block)
+    assert grant
+    # The grant recorded before the command was rooted read it as written.
+    rooted = subprocess_env.stdio_launch
+    monkeypatch.setattr(
+        subprocess_env,
+        "stdio_launch",
+        lambda cfg, **kw: dataclasses.replace(rooted(cfg, **kw), command=cfg.command),
+    )
+    assert granted_launch(block) == grant
+    assert _trusted(block, grant)

@@ -572,17 +572,20 @@ class GhidraStaticProvider(StaticProvider):
         from mcp import StdioServerParameters
 
         from maljan.agents.mcp_client import MCPLangChainToolkit
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.paths import resolve_mcp_args
+        from maljan.agents.subprocess_env import LaunchCwdError, stdio_launch
+        from maljan.providers.errors import ProviderConfigurationError
 
-        command = self._cfg.command
-        args = self._cfg.args
-
-        env = child_env(self._cfg.env, server=self.id)
+        # One reading of the launch, the one a trust grant holds for
+        # (``tool_declarations.granted_launch``), as every stdio server's.
+        try:
+            launch = stdio_launch(self._cfg, server=self.id)
+        except LaunchCwdError as exc:
+            raise ProviderConfigurationError(f"mcp server {self.id!r}: {exc}") from exc
+        env = launch.env
         env.setdefault("PYTHONIOENCODING", "utf-8")
-
-        args = resolve_mcp_args(args)
-        server_params = StdioServerParameters(command=command, args=args, env=env)
+        server_params = StdioServerParameters(
+            command=launch.command, args=launch.args, env=env, cwd=launch.cwd
+        )
 
         toolkit = MCPLangChainToolkit(
             server_params,

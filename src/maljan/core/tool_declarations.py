@@ -2798,9 +2798,10 @@ def _resolved_launch(cfg: Any) -> dict[str, Any] | None:
 
     Read from the launch as the server is started
     (``subprocess_env.stdio_launch``): its working directory, rooted at the
-    project as the launch roots it; its command, as the real file it runs (a
-    path, relative ones from that directory, or a bare name found on the
-    ``PATH`` the child is given); and each argument as the launch roots it,
+    project as the launch roots it; its command, as the launch roots it, as
+    the real file it runs (a path, relative ones the launch left as written
+    from that directory, or a bare name found on the ``PATH`` the child is
+    given); and each argument as the launch roots it,
     written as a path that names an existing file or directory (an
     interpreter's script), or an option's value after ``=`` that does
     (``--script=./x.py``, keyed ``<index>=``), as its real path. An argument
@@ -2814,8 +2815,8 @@ def _resolved_launch(cfg: Any) -> dict[str, Any] | None:
         base = Path(launch.cwd) if launch.cwd else Path.cwd()
         if launch.cwd:
             out["cwd"] = os.path.realpath(launch.cwd)
-        command = getattr(cfg, "command", None)
-        if isinstance(command, str) and command:
+        command = launch.command
+        if command:
             if _named_path(command):
                 path = Path(command).expanduser()
                 path = path if path.is_absolute() else base / path

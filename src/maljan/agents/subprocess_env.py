@@ -10,8 +10,8 @@ a child, whatever its block asks for: settings validation refuses a block that
 names one, and a block that reached a spawn some other way, built in code say,
 has the name dropped here, with a warning naming the variable and the server.
 
-How a stdio block's child is started as a whole, its rooted arguments and
-working directory beside that environment, is read once here
+How a stdio block's child is started as a whole, its rooted command,
+arguments and working directory beside that environment, is read once here
 (:func:`stdio_launch`), by the launch and by what a trust grant holds for.
 """
 
@@ -91,13 +91,14 @@ class LaunchCwdError(ValueError):
 
 @dataclass(frozen=True)
 class StdioLaunch:
-    """How a stdio block's child is started: its arguments, environment and working directory.
+    """How a stdio block's child is started: its command, arguments, environment and directory.
 
     Read by the launch itself (``providers.servers``) and by what a console
     trust grant is recorded with (``tool_declarations.granted_launch``), so
     both read one launch.
     """
 
+    command: str
     args: list[str]
     env: dict[str, str]
     cwd: str | None
@@ -133,19 +134,30 @@ def launch_cwd(cwd: str | None) -> str | None:
 
 
 def stdio_launch(config: Any, *, server: str = "") -> StdioLaunch:
-    """How ``config``'s child is started: :func:`child_env`, rooted arguments, :func:`launch_cwd`.
+    """How ``config``'s child is started: :func:`child_env`, rooted command and arguments, cwd.
 
     Its arguments as ``core.paths.resolve_mcp_args`` roots them; its
     environment the block's ``env`` and ``env_allow`` give
     (:func:`child_env`), before what a job adds; its working directory as
     :func:`launch_cwd` reads it (:class:`LaunchCwdError` for one it refuses).
+    Its command, where the block names no working directory, as
+    ``core.paths.resolve_mcp_command`` roots it: a relative path into the
+    project is rooted there rather than at whatever directory the parent runs
+    in, and a bare program name (``npx``, ``uvx``), an absolute path or one
+    that leaves the project is left as written. A block with a working
+    directory has a relative command run from that directory, already
+    rooted, and keeps it as written.
     """
-    from maljan.core.paths import resolve_mcp_args
+    from maljan.core.paths import resolve_mcp_args, resolve_mcp_command
 
     env = child_env(
         getattr(config, "env", None) or {},
         allow=tuple(getattr(config, "env_allow", None) or ()),
         server=server,
     )
+    cwd = launch_cwd(getattr(config, "cwd", None))
+    command = str(getattr(config, "command", None) or "")
+    if cwd is None:
+        command = resolve_mcp_command(command)
     args = resolve_mcp_args([str(arg) for arg in getattr(config, "args", None) or ()])
-    return StdioLaunch(args=args, env=env, cwd=launch_cwd(getattr(config, "cwd", None)))
+    return StdioLaunch(command=command, args=args, env=env, cwd=cwd)
