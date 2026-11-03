@@ -165,3 +165,23 @@ class TestEachRoundReadsThePack:
         content = sent["messages"][0]["content"]
         assert content[0] == {"type": "text", "text": text, "cache_control": hour}
         assert content[1] == {"type": "text", "text": rest}
+
+
+class TestTheNotedText:
+    """The mediation's turn text carries its note through a copy, a deep copy and a pickle."""
+
+    def test_the_note_survives_copy_deepcopy_and_pickle(self) -> None:
+        import pickle
+
+        from maljan.agents.judge_agent import NotedText
+
+        text = NotedText("head and rest", {STANDING_FACTS_CHARS: 4})
+        for again in (
+            copy.copy(text),
+            copy.deepcopy(text),
+            pickle.loads(pickle.dumps(text)),  # noqa: S301 — our own object, just made
+        ):
+            assert isinstance(again, NotedText)
+            assert str(again) == "head and rest"
+            assert again.notes == {STANDING_FACTS_CHARS: 4}
+        assert NotedText("plain").notes == {}

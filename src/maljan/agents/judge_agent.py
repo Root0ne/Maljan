@@ -1809,14 +1809,21 @@ def _identity_prefix(sample: Any) -> str:
 
 
 class NotedText(str):
-    """A turn's text with the notes its message carries (``response_metadata``)."""
+    """A turn's text with the notes its message carries (``response_metadata``).
+
+    A string everywhere a string is read; copied, deep-copied and pickled with
+    its notes. Any string operation gives back a plain string, without them.
+    """
 
     notes: dict[str, Any]
 
-    def __new__(cls, text: str, notes: Mapping[str, Any]) -> NotedText:
+    def __new__(cls, text: str = "", notes: Mapping[str, Any] | None = None) -> NotedText:
         made = super().__new__(cls, text)
-        made.notes = dict(notes)
+        made.notes = dict(notes or {})
         return made
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (type(self), (str(self), dict(self.notes)))
 
 
 def _notes_of(text: Any) -> dict[str, Any]:
@@ -1829,6 +1836,9 @@ def _standing_blocks(run_state: str, facts_block: str) -> str:
 
     The run state first, between its markers, because it is the shorter and
     the one a reader orients by; the pack after it, under its own heading.
+    The verdict and the technique question are built so. The mediation calls
+    it twice instead, the pack alone and then the run state alone, so every
+    round's turn leads with the same head (``standing_head`` in the mediation).
     """
     from maljan.pipeline.run_state import with_run_state
 
