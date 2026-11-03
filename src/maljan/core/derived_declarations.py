@@ -469,7 +469,92 @@ def _names_beside(form: Mapping[str, Any]) -> Iterator[str]:
             yield from (value for value in held if isinstance(value, str))
 
 
-def _children(form: Mapping[str, Any], name: str | None) -> Iterator[_Child]:
+# The keywords that make a vendor's ``x-`` value read as a schema, each only
+# when it holds what a schema's keyword holds: one schema (a mapping or a
+# flag), a list of them, or a map of them by name; a reference only as text.
+_SIGNS_OF_ONE = frozenset({*_SAME_ARGUMENT_ONES, *_UNLISTED_ARGUMENTS, "items", "not"})
+_SIGNS_OF_LIST = frozenset({*_SAME_ARGUMENT_LISTS, "items"})
+_SIGNS_OF_MAP = frozenset(
+    {"properties", "patternProperties", "dependentSchemas", "dependencies", "$defs"}
+)
+_JSON_TYPES = frozenset({"string", "number", "integer", "boolean", "object", "array", "null"})
+# The keys that give a parameter list's member (``[{"name": "path", ...}]``)
+# the name of the argument it declares.
+_PARAMETER_NAMES = ("name", "in")
+
+
+def _holds_a_schema(key: Any, held: Any) -> bool:
+    """Whether ``held`` has the shape a schema's keyword ``key`` gives what it holds."""
+    if key in (_REF, _DYNAMIC_REF):
+        return isinstance(held, str)
+    if key in _SIGNS_OF_ONE and isinstance(held, (Mapping, bool)):
+        return True
+    if key in _SIGNS_OF_LIST and isinstance(held, list):
+        return any(isinstance(member, Mapping) for member in held)
+    if key in _SIGNS_OF_MAP and isinstance(held, Mapping):
+        return any(isinstance(member, Mapping) for member in held.values())
+    return False
+
+
+def _schema_like(value: Any, named: bool) -> bool:
+    """Whether a mapping looks like a schema.
+
+    It holds a schema's keyword in that keyword's shape
+    (:func:`_holds_a_schema`); or a parameter's ``schema`` mapping; or, where
+    it has a name an argument could take (the vendor keyword's own, its key
+    in a map, or a parameter's own ``name`` or ``in``), a ``type`` naming a
+    JSON Schema type. A typed list member that names nothing, a form field
+    with a label, names no argument.
+    """
+    if not isinstance(value, Mapping):
+        return False
+    if any(_holds_a_schema(key, held) for key, held in value.items()):
+        return True
+    if isinstance(value.get("schema"), Mapping):
+        return True
+    named = named or any(key in value for key in _PARAMETER_NAMES)
+    held = value.get("type")
+    types = [held] if isinstance(held, str) else held if isinstance(held, list) else []
+    return named and any(isinstance(t, str) and t in _JSON_TYPES for t in types)
+
+
+def _vendor_schema(value: Any) -> bool:
+    """Whether a vendor's ``x-`` value looks like a schema, or holds schemas at any depth.
+
+    A mapping that looks like one (:func:`_schema_like`), or a list or a map
+    holding one, however deep through further lists and maps. A UI hint such
+    as ``{"type": "slider"}``, ``{"items": ["a", "b"]}`` or a list of typed
+    fields is not one. At most :data:`_MAX_ARGUMENTS` lists and maps that
+    hold further ones are looked into; a value with more is read as one,
+    since what is left could hold a schema. A list or map holding none is
+    read whole and never counts toward that.
+    """
+    waiting: list[tuple[Any, bool]] = [(value, True)]
+    looked = 0
+    while waiting:
+        held, named = waiting.pop()
+        if not isinstance(held, (Mapping, list)):
+            continue
+        if _schema_like(held, named):
+            return True
+        members = (
+            [(member, True) for member in held.values()]
+            if isinstance(held, Mapping)
+            else [(member, False) for member in held]
+        )
+        inner = [(m, n) for m, n in members if isinstance(m, (Mapping, list))]
+        if not inner:
+            continue
+        looked += 1
+        if looked > _MAX_ARGUMENTS:
+            return True
+        waiting.extend(inner)
+    return False
+
+
+def _children(
+    form: Mapping[str, Any], name: str | None, *, trusted: bool = False
+) -> Iterator[_Child]:
     """The schemas a form holds, each with the argument it belongs to and how it is named.
 
     Its alternatives, items (``items``, ``prefixItems``, ``additionalItems``,
@@ -484,7 +569,9 @@ def _children(form: Mapping[str, Any], name: str | None) -> Iterator[_Child]:
     (an empty schema), a ``false`` one none; any other value where a schema
     belongs is yielded as ``None``, which the walk cannot read, and so is a
     mapping or a flag under a keyword not in :data:`_KNOWN_KEYWORDS` nor a
-    vendor's ``x-`` one. The values of a free-form map
+    vendor's ``x-`` one, and, unless the server is ``trusted``, a vendor's
+    value that looks like a schema (:func:`_vendor_schema`): an untrusted
+    server could hide an argument there. The values of a free-form map
     (``additionalProperties`` or ``unevaluatedProperties`` of ``true`` or
     ``{}``) are read by their object's name instead. Each argument the form
     names only outside ``properties`` (:func:`_names_beside`) is one of its
@@ -554,13 +641,15 @@ def _children(form: Mapping[str, Any], name: str | None) -> Iterator[_Child]:
         if named not in listed:
             yield named, _ANY, True, False
     # A keyword the walk does not know that holds a schema or a map of them
-    # could hold an argument it cannot read.
+    # could hold an argument it cannot read; so could an untrusted server's
+    # vendor keyword whose value looks like a schema.
     for key, value in form.items():
-        if (
-            isinstance(value, (Mapping, bool))
-            and key not in _KNOWN_KEYWORDS
-            and not str(key).startswith("x-")
-        ):
+        if key in _KNOWN_KEYWORDS:
+            continue
+        if str(key).startswith("x-"):
+            if not trusted and _vendor_schema(value):
+                yield name, None, False, False
+        elif isinstance(value, (Mapping, bool)):
             yield name, None, False, False
 
 
@@ -578,7 +667,9 @@ def _carries(child_name: str | None, child: Mapping[str, Any] | None, unnamed: b
     return _could_carry(child_name, child)
 
 
-def _walk(input_schema: Any) -> tuple[list[tuple[str, Mapping[str, Any]]], bool]:
+def _walk(
+    input_schema: Any, *, trusted: bool = False
+) -> tuple[list[tuple[str, Mapping[str, Any]]], bool]:
     """Every argument, by its name and each schema it may take, and whether the rest could carry.
 
     Nested objects are read at any depth (:func:`_children`). Local
@@ -599,7 +690,9 @@ def _walk(input_schema: Any) -> tuple[list[tuple[str, Mapping[str, Any]]], bool]
     argument's name is kept among the arguments, so the name rules still read
     it); or a value where a schema belongs is no schema; or an
     argument with no name of its own (:func:`_children`) has a schema whose
-    type does not say it holds no path and no bytes (:func:`_carries`).
+    type does not say it holds no path and no bytes (:func:`_carries`); or,
+    unless the server is ``trusted``, a vendor's ``x-`` value looks like a
+    schema (:func:`_children`). The arguments are the same either way.
     """
     refs = _References(input_schema)
     out: list[tuple[str, Mapping[str, Any]]] = []
@@ -658,7 +751,7 @@ def _walk(input_schema: Any) -> tuple[list[tuple[str, Mapping[str, Any]]], bool]
             out.append((name, schema))
         opens = id(schema) not in expanded
         expanded.add(id(schema))
-        children = _children(schema, name)
+        children = _children(schema, name, trusted=trusted)
         for child_name, child, starts, unnamed in children:
             if starts and not opens:
                 continue
@@ -760,6 +853,9 @@ class _Listed:
     # Whether the walk stopped at a cap with something unread that could take
     # a path or the file's content (``_walk``): the tool is read as sending.
     unread: bool
+    # Whether only an untrusted server's reading leaves something unread: a
+    # vendor's ``x-`` value that looks like a schema (``_children``).
+    vendor_unread: bool
     props: Mapping[str, Mapping[str, Any]]
     roles: Mapping[str, str]
     required: tuple[str, ...]
@@ -784,12 +880,16 @@ def _listed(definition: Any) -> _Listed:
     words = _tokens(name)
     input_schema = _get(definition, "inputSchema")
     roles, required = _roles(input_schema)
-    arguments, unread = _walk(input_schema)
+    arguments, vendor_unread = _walk(input_schema)
+    # A trusted server's reading leaves no more unread than an untrusted one's,
+    # so it is walked again only where the untrusted reading left something.
+    unread = vendor_unread and _walk(input_schema, trusted=True)[1]
     return _Listed(
         name=name,
         hints=_plain(_get(definition, "annotations")),
         arguments=tuple(arguments),
         unread=unread,
+        vendor_unread=vendor_unread and not unread,
         props=_properties(input_schema),
         roles=roles,
         required=required,
@@ -800,7 +900,7 @@ def _listed(definition: Any) -> _Listed:
 
 
 def _discloses(tool: _Listed, *, trusted: bool = False) -> bool:
-    if tool.unread:
+    if tool.unread or (not trusted and tool.vendor_unread):
         return True
     # A name an untrusted server spells with letters its words cannot be read
     # by could name a path or the file's content (``_foreign``).
@@ -836,7 +936,8 @@ def discloses(definition: Any, *, trusted: bool = False) -> bool:
     to read whole, whose unread rest could take a path or the file's
     content, or an argument whose reference cannot be followed, is read as
     sending, whatever its hints; so is an untrusted server's argument whose
-    name holds letters outside ASCII even NFKC-normalised.
+    name holds letters outside ASCII even NFKC-normalised, and an untrusted
+    server's tool with a vendor ``x-`` keyword whose value looks like a schema.
     """
     return _discloses(_listed(definition), trusted=trusted)
 
@@ -921,10 +1022,12 @@ def derived_readings(
     """What is read of every tool of a listing, and what of it a trusted server's hints lift.
 
     The first map is the reading of every tool, by the name it is listed
-    under; the second, for each tool whose disclosure only its server's own
-    hints could lift (bytes it takes, marked read-only and closed), the
-    reading a block that trusts its server keeps instead (empty for nothing
-    read). Each definition is read once. A definition whose name no tool can
+    under, as an untrusted server's; the second, for each tool read as
+    sending only as an untrusted server's (bytes it takes, marked read-only
+    and closed, which only its server's own hints lift; an argument named in
+    letters outside ASCII; a vendor ``x-`` keyword that looks like a schema),
+    the reading a block that trusts its server keeps instead (empty for
+    nothing read). Each definition is read once. A definition whose name no tool can
     have, and one nothing is read of, are left out; one that cannot be read
     is read as sending the sample (``discloses_sample``), with a warning.
     """
@@ -1016,11 +1119,11 @@ def program_readings_of(definitions: Iterable[Any], where: str = "") -> dict[str
 
 
 def closed_by_hints(definitions: Iterable[Any]) -> dict[str, ToolFacts]:
-    """The tools of a listing whose disclosure only their server's own hints could lift.
+    """The tools of a listing read as sending only when their server is not trusted.
 
-    Each takes the file's content as bytes and is marked read-only and
-    closed: read as sending it from any server, and from one its block trusts
-    read as the reading given here (:func:`lay_under`).
+    Each is read as sending from an untrusted server, and from one its block
+    trusts as the reading given here (:func:`lay_under`); see
+    :func:`derived_readings`.
     """
     return derived_readings(definitions)[1]
 

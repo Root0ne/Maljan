@@ -11,7 +11,8 @@ array items and every other keyword that holds a schema, to any depth:
 * where it stops at a cap, the tool is read as sending whenever what it left
   unread could take a path or the file's content, never as safe; so is an
   argument whose reference cannot be followed, and an untrusted server's
-  argument named in letters NFKC does not bring to ASCII;
+  argument named in letters NFKC does not bring to ASCII, and an untrusted
+  server's vendor ``x-`` keyword whose value looks like a schema;
 * the shipped Ghidra, radare2 and VirusTotal listings read as they did.
 """
 
@@ -493,13 +494,152 @@ def test_annotations_flags_and_vendor_keywords_are_no_schema() -> None:
         "deprecated": False,
         "uniqueItems": True,
         "nullable": True,
-        "x-vendor": {"path": {"type": "string"}},
+        "x-vendor": {"widget": "slider", "rows": 3},
+        "x-ui": {"type": "slider"},
         "$defs": {"Unused": PATH_OBJECT},
         "not": PATH_OBJECT,
         "items": {"type": "integer"},
     }
     assert not dd._walk(_object(opts=opts))[1]
     assert not discloses(_tool(_object(opts=opts)))
+
+
+@pytest.mark.parametrize(
+    "hidden",
+    [
+        {"type": "string"},
+        {"type": ["null", "string"]},
+        PATH_OBJECT,
+        {"items": PATH_OBJECT},
+        {"prefixItems": [PATH_OBJECT]},
+        {"$ref": "#/$defs/Hidden"},
+        {"$dynamicRef": "#meta"},
+        {"anyOf": [PATH_OBJECT]},
+        {"oneOf": [PATH_OBJECT]},
+        {"allOf": [PATH_OBJECT]},
+        {"not": PATH_OBJECT},
+        {"additionalProperties": {"type": "string"}},
+        {"patternProperties": {"^path$": {"type": "string"}}},
+        {"if": PATH_OBJECT},
+        {"path": {"type": "string"}},
+        {"group": {"inner": {"path": {"type": "string"}}}},
+        {"group": [{"tag": "a"}, PATH_OBJECT]},
+        [[{"path": {"type": "string"}}]],
+        [PATH_OBJECT],
+        {"type": "slider", "properties": PATH_LEAF},
+        [{"name": "path", "type": "string"}],
+        {"parameters": [{"name": "path", "schema": {"format": "uri"}}]},
+        [{"in": "query", "type": "string"}],
+        [{"label": "x", "schema": {}}],
+    ],
+    ids=[
+        "type",
+        "type-list",
+        "properties",
+        "items",
+        "prefix-items",
+        "ref",
+        "dynamic-ref",
+        "any-of",
+        "one-of",
+        "all-of",
+        "not",
+        "additional-properties",
+        "pattern-properties",
+        "if",
+        "map-of-schemas",
+        "map-of-maps-of-schemas",
+        "list-in-a-map",
+        "list-of-lists",
+        "list-of-schemas",
+        "ui-type-beside-properties",
+        "parameter-list-named",
+        "parameter-list-schema",
+        "parameter-list-in",
+        "member-with-schema",
+    ],
+)
+@pytest.mark.parametrize("depth", [1, 3, 5])
+def test_an_untrusted_server_s_vendor_keyword_that_looks_like_a_schema_fails_closed(
+    hidden: Any, depth: int
+) -> None:
+    schema = _by_properties(depth, {**QUIET_LEAF, "opts": {"type": "object", "x-args": hidden}})
+    schema["$defs"] = {"Hidden": PATH_OBJECT}
+    closed = {"readOnlyHint": True, "openWorldHint": False}
+    assert dd._walk(schema)[1]
+    assert discloses(_tool(schema, **closed))
+    # A trusted server's vendor keywords stay what they were: no schema.
+    assert not dd._walk(schema, trusted=True)[1]
+    assert not discloses(_tool(schema, **closed), trusted=True)
+    assert not discloses(_tool(schema, readOnlyHint=True), trusted=True)
+    # The arguments read are the same either way.
+    assert dd._walk(schema)[0] == dd._walk(schema, trusted=True)[0]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"type": "slider"},
+        {"type": ["slider", "knob"]},
+        {"widget": {"type": "slider"}},
+        {"form": {"rows": [{"widget": {"type": "slider"}}]}},
+        {"widget": "select", "items": ["a", "b"]},
+        {"fields": [{"type": "string", "label": "x"}]},
+        {"examples": [{"a": i, "b": "c"} for i in range(600)]},
+        {"order": ["a", "b"], "not": "shown", "properties": ["a"], "$ref": 3},
+        [{"type": "slider"}],
+        {"a": 1},
+        "path",
+        ["type"],
+        True,
+        {},
+    ],
+    ids=[
+        "ui-type",
+        "ui-type-list",
+        "map-of-ui-hints",
+        "deep-ui-hints",
+        "select-items",
+        "typed-fields",
+        "many-examples",
+        "signs-in-other-shapes",
+        "list-of-ui-hints",
+        "data",
+        "text",
+        "list",
+        "flag",
+        "empty",
+    ],
+)
+def test_a_vendor_value_that_does_not_look_like_a_schema_is_no_schema_whoever_lists_it(
+    value: Any,
+) -> None:
+    schema = _object(opts={"type": "object", "x-vendor": value})
+    assert not dd._walk(schema)[1]
+    assert not discloses(_tool(schema))
+
+
+def test_a_vendor_value_too_large_to_look_through_is_read_as_a_schema() -> None:
+    # Only a list or map that holds further ones counts toward the cap.
+    wide = {f"k{i}": {"a": [i]} for i in range(dd._MAX_ARGUMENTS + 1)}
+    assert dd._vendor_schema(wide)
+    deep: Any = {"a": 1}
+    for _level in range(dd._MAX_ARGUMENTS + 1):
+        deep = {"next": deep}
+    assert dd._vendor_schema(deep)
+    # Below the cap, plain data is still none, and flat records never count.
+    assert not dd._vendor_schema({f"k{i}": {"a": [i]} for i in range(16)})
+    assert not dd._vendor_schema([{"a": i} for i in range(dd._MAX_ARGUMENTS * 4)])
+
+
+def test_a_vendor_schema_is_read_once_per_listing_and_lifted_only_for_a_trusted_server() -> None:
+    schema = _object(opts={"type": "object", "x-args": PATH_OBJECT})
+    definition = _tool(schema, readOnlyHint=True, openWorldHint=False)
+    read, lifted = dd.derived_readings([definition])
+    assert read["scan"].discloses_sample is True
+    assert lifted["scan"].discloses_sample is not True
+    # The program reading, which knows no trust, reads it as it did.
+    assert dd._listed(definition).unread is False
 
 
 @pytest.mark.parametrize(
