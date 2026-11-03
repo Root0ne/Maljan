@@ -3180,6 +3180,7 @@ class JudgeAgent(BudgetMeter):
                     settings,
                     counted_window_tokens(room),
                     ended_why=why,
+                    refused=ended["window_full"],
                 )
             # The graph's own sentence at its step limit is not the judge's
             # reasoning, and what reads the reasoning next is a model. The
@@ -3318,6 +3319,7 @@ class JudgeAgent(BudgetMeter):
         window_tokens: int = 0,
         *,
         ended_why: str = "",
+        refused: bool = False,
     ) -> str:
         """The judge's reasoning, asked for once from what its loop gathered.
 
@@ -3345,7 +3347,7 @@ class JudgeAgent(BudgetMeter):
         keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
         sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
         # The loop's tool definitions go with kept turns, outside what the trim measures.
-        room, room_how = synthesis_budget(settings, "judge", window_tokens)
+        room, room_how = synthesis_budget(settings, "judge", window_tokens, refused=refused)
         beside = self._definitions_sent() if keeps_turns else 0
         if beside:
             room_how += f", less {beside} characters sent beside the turns"

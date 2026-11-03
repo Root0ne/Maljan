@@ -308,7 +308,9 @@ def _model_context_tokens(cfg: Any, agent_name: str) -> int:
         return 0
 
 
-def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) -> int:
+def synthesis_budget_chars(
+    cfg: Any, agent_name: str, window_tokens: int = 0, *, refused: bool = False
+) -> int:
     """How many characters of conversation the salvage may re-send.
 
     ``window_tokens`` is the window the job's context budget counts on — the
@@ -318,27 +320,31 @@ def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) ->
     full window at close to the conversation the server had just refused, and
     a fallback model with a smaller window must still be able to read it.
     """
-    return synthesis_budget(cfg, agent_name, window_tokens)[0]
+    return synthesis_budget(cfg, agent_name, window_tokens, refused=refused)[0]
 
 
-def synthesis_budget(cfg: Any, agent_name: str, window_tokens: int = 0) -> tuple[int, str]:
+def synthesis_budget(
+    cfg: Any, agent_name: str, window_tokens: int = 0, *, refused: bool = False
+) -> tuple[int, str]:
     """``(characters, how)`` of conversation the salvage may re-send.
 
     Derived from the window by the context budget's own rules, at the
     characters a token it counts in (``CHARS_PER_TOKEN``), rather than from a
-    share and a ratio of its own. Two parts of the window are kept back. The
-    reply reserve the one rule sets (``reply_reserve_tokens`` over the
-    deployment's generation cap) is where the salvage writes its answer, as the
-    loop's own room keeps it (``ContextBudget.tool_budget_chars``), and never
-    less than the quarter the rule keeps uncapped: an operator's smaller
-    generation cap shortens the answer, and it does not hand the salvage the
-    margin its measure needs. A further
-    quarter of the window (``REPLY_RESERVE_DIVISOR``) is the room for what the
-    character measure gets wrong: the loop floors its measure on the server's
-    own count of each request, and a trimmed conversation was never counted,
-    so its characters are all the salvage has — and a conversation that
-    tokenises denser than they say, re-sent after the server refused it as
-    over the window, would be refused again. The tool definitions a salvage
+    share and a ratio of its own. The reply reserve the one rule sets
+    (``reply_reserve_tokens`` over the deployment's generation cap) is kept
+    back for the answer, as the loop's own room keeps it
+    (``ContextBudget.tool_budget_chars``), and never less than the quarter the
+    rule keeps uncapped: an operator's smaller generation cap shortens the
+    answer and does not widen the conversation re-sent.
+
+    ``refused`` is a loop the server ended by refusing its conversation as
+    over the window. Its salvage keeps a further quarter of the window
+    (``REPLY_RESERVE_DIVISOR``) back for what the character measure got wrong:
+    the server has just shown that this conversation tokenises denser than
+    its characters say, and a trimmed one re-sent at the same measure would
+    be refused again. A loop a step, time or repeat cap ended was sending a
+    conversation the server had just accepted, and its salvage keeps no such
+    margin. The tool definitions a salvage
     sends beside the turns are its caller's to take off, as the loop's own
     measure charges them. No window to derive from is the floor, and the
     floor is stated as such; a known window too small for the floor holds it
@@ -359,16 +365,23 @@ def synthesis_budget(cfg: Any, agent_name: str, window_tokens: int = 0) -> tuple
             f"{_SYNTHESIS_MIN_CHARS} characters — the floor: no window was declared or learned"
         )
     reply = reply_reserve_tokens(tokens, generation_reserve(cfg))
-    margin = tokens // REPLY_RESERVE_DIVISOR
-    kept = max(reply, margin)
+    quarter = tokens // REPLY_RESERVE_DIVISOR
+    kept = max(reply, quarter)
+    margin = quarter if refused else 0
     derived = chars_for_tokens(max(0, tokens - kept - margin))
     capped = f" (the {reply}-token generation cap does not shrink it)" if reply < kept else ""
-    how = (
-        f"the {tokens}-token window less {kept} tokens of reply room{capped} and {margin} "
-        f"for the measure's error, at {CHARS_PER_TOKEN} characters a token"
+    error = (
+        f" and {margin} for the measure's error, the server having refused the conversation "
+        "as over the window"
+        if refused
+        else ", the server having accepted the conversation"
     )
-    if derived < _SYNTHESIS_MIN_CHARS:
-        floor = min(_SYNTHESIS_MIN_CHARS, chars_for_tokens(max(0, tokens - kept)))
+    how = (
+        f"the {tokens}-token window less {kept} tokens of reply room{capped}{error}, "
+        f"at {CHARS_PER_TOKEN} characters a token"
+    )
+    floor = min(_SYNTHESIS_MIN_CHARS, chars_for_tokens(max(0, tokens - kept)))
+    if derived < floor:
         held = (
             "" if floor == _SYNTHESIS_MIN_CHARS else ", held to the window's room before the reply"
         )
@@ -7697,7 +7710,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # 1,530 s cap, and zero techniques out the other side.
             if time_capped and timeout is not None:
                 self._give_the_final_turn(final_reserve, float(timeout) - elapsed)
-            synthesized = self._force_final_synthesis(msgs, timeout, elapsed)
+            synthesized = self._force_final_synthesis(msgs, timeout, elapsed, refused=window_full)
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
                 content = synthesized
                 msgs = [*msgs, AIMessage(content=synthesized)]
@@ -8326,7 +8339,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         return [entry.to_captured() for entry in self._evidence_entries]
 
     def _force_final_synthesis(
-        self, msgs: list, timeout: float | None, elapsed: float = 0.0
+        self, msgs: list, timeout: float | None, elapsed: float = 0.0, *, refused: bool = False
     ) -> str:
         """Salvage a ReAct loop that hit its step budget without answering.
 
@@ -8394,7 +8407,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # loop's tool definitions where the turns are kept whole, both outside
         # the messages the trim measures, so the window holds them first.
         room, room_how = synthesis_budget(
-            get_settings(), self.name, counted_window_tokens(self._context_budget())
+            get_settings(),
+            self.name,
+            counted_window_tokens(self._context_budget()),
+            refused=refused,
         )
         beside = self._replayed_run_state_chars() + (self._definitions_sent() if keeps_turns else 0)
         window_budget = max(0, room - beside)

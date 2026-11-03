@@ -245,7 +245,7 @@ class TestTheWindowSizesItAndTheRecordSaysHow:
         agent = _Analyst(_Rates(None, None))
         conversation = _conversation(9_000, 19, 2_500)
 
-        agent._force_final_synthesis(conversation, 1500, 1500 - SECONDS_LEFT)
+        agent._force_final_synthesis(conversation, 1500, 1500 - SECONDS_LEFT, refused=True)
 
         record = _salvage(agent)
         # The window less its quarter of reply room and its quarter for the
@@ -253,9 +253,40 @@ class TestTheWindowSizesItAndTheRecordSaysHow:
         room = (32_768 - 8_192 - 8_192) * CHARS_PER_TOKEN
         assert record["sized_by"] == "window"
         assert record["budget_chars"] == room
-        assert record["window_budget"] == synthesis_budget(settings, "static")[1]
+        assert record["window_budget"] == synthesis_budget(settings, "static", refused=True)[1]
         assert record["sent_chars"] <= room < record["conversation_chars"]
         assert record["messages_dropped"] >= 1
+
+    @pytest.mark.parametrize("refused", [False, True], ids=["step-cap", "window-full"])
+    def test_only_a_window_refusal_trims_what_the_server_accepted(
+        self, monkeypatch: pytest.MonkeyPatch, refused: bool
+    ) -> None:
+        """A conversation of 1.55 windows' worth of characters, sent whole before.
+
+        At the step cap the server had just accepted it, and it is sent whole;
+        after the server refused it as over the window it is trimmed to at
+        most 1.5 windows' worth.
+        """
+        from maljan.core.config import Settings
+
+        window = 32_768
+        settings = Settings(_env_file=None, llm={"openai": {"context_size": window}})
+        monkeypatch.setattr("maljan.agents.base_agent.synthesis_budget", synthesis_budget)
+        monkeypatch.setattr("maljan.agents.base_agent.get_settings", lambda: settings)
+        agent = _Analyst(_Rates(None, None))
+        conversation = _conversation(1_000, 20, 2_470)
+        size = sum(len(str(m.content)) for m in conversation)
+        assert int(1.54 * window) < size < int(1.56 * window)
+
+        agent._force_final_synthesis(conversation, 1500, 1500 - SECONDS_LEFT, refused=refused)
+
+        record = _salvage(agent)
+        if refused:
+            assert record["sent_chars"] <= 1.5 * window < record["conversation_chars"]
+            assert record["messages_dropped"] >= 1
+        else:
+            assert record["sent_chars"] == record["conversation_chars"]
+            assert "messages_dropped" not in record
 
 
 class TestTheSummaryCarriesIt:

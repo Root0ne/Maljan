@@ -283,23 +283,59 @@ class TestTheSynthesisBudget:
 
         assert synthesis_budget_chars(settings, "static") == _SYNTHESIS_MIN_CHARS
 
-    def test_a_known_context_gives_the_loop_s_room_less_a_quarter(self) -> None:
-        # The loop's own room — the window less the reply reserve, at the
-        # characters a token the context budget counts in — less a further
-        # quarter of the window for what the character measure gets wrong.
+    def test_a_known_context_gives_the_loop_s_own_room(self) -> None:
+        # The window less the reply reserve, at the characters a token the
+        # context budget counts in: the room the loop's own answers come out of.
         settings = Settings(_env_file=None, llm={"openai": {"context_size": 131072}})
         loop_room = ContextBudget(WindowFact(131072, DECLARED, "test")).tool_budget_chars()
 
-        assert synthesis_budget_chars(settings, "static") == (131072 - 2 * 32768) * CHARS_PER_TOKEN
-        assert synthesis_budget_chars(settings, "static") == loop_room - 32768 * CHARS_PER_TOKEN
+        chars, how = synthesis_budget(settings, "static")
 
-    def test_a_configured_generation_cap_is_the_reply_room(self) -> None:
+        assert chars == (131072 - 32768) * CHARS_PER_TOKEN == loop_room
+        assert how == (
+            f"{chars} characters — the 131072-token window less 32768 tokens of reply room, "
+            f"the server having accepted the conversation, at {CHARS_PER_TOKEN} characters a token"
+        )
+
+    def test_after_a_window_refusal_a_further_quarter_is_kept(self) -> None:
+        # The server has shown the conversation tokenises denser than its
+        # characters say; the salvage keeps a quarter of the window for that.
+        settings = Settings(_env_file=None, llm={"openai": {"context_size": 131072}})
+
+        chars, how = synthesis_budget(settings, "static", refused=True)
+
+        assert chars == (131072 - 2 * 32768) * CHARS_PER_TOKEN
+        assert how == (
+            f"{chars} characters — the 131072-token window less 32768 tokens of reply room "
+            "and 32768 for the measure's error, the server having refused the conversation "
+            f"as over the window, at {CHARS_PER_TOKEN} characters a token"
+        )
+
+    def test_without_a_refusal_it_is_never_below_what_was_sent_before(self) -> None:
+        # Two fifths of the window at four characters a token was the budget
+        # before; a salvage a step, time or repeat cap ended keeps at least
+        # that. The one exception is a floor the window could not hold
+        # (16,000 characters on 4,096 tokens), which is now held to its room.
+        for window in (4096, 8192, 32768, 65536, 131072, 1_000_000, 1_048_576):
+            for cap in (0, 8192, 32768):
+                settings = Settings(
+                    _env_file=None,
+                    llm={"openai": {"context_size": window}, "expert_max_tokens": cap},
+                )
+                before = max(_SYNTHESIS_MIN_CHARS, int(window * 4 * 0.4))
+                room = (window - window // 4) * CHARS_PER_TOKEN
+                assert synthesis_budget_chars(settings, "static") >= min(before, room), (
+                    window,
+                    cap,
+                )
+
+    def test_a_configured_generation_cap_never_enlarges_it(self) -> None:
         settings = Settings(
             _env_file=None,
             llm={"openai": {"context_size": 131072}, "expert_max_tokens": 8192},
         )
 
-        chars, how = synthesis_budget(settings, "static")
+        chars, how = synthesis_budget(settings, "static", refused=True)
 
         # A smaller generation cap shortens the answer; it never enlarges the
         # salvage past what the uncapped quarter leaves.
@@ -307,13 +343,15 @@ class TestTheSynthesisBudget:
         assert how == (
             f"{chars} characters — the 131072-token window less 32768 tokens of reply room "
             "(the 8192-token generation cap does not shrink it) and 32768 for the measure's "
-            f"error, at {CHARS_PER_TOKEN} characters a token"
+            "error, the server having refused the conversation as over the window, "
+            f"at {CHARS_PER_TOKEN} characters a token"
         )
+        assert synthesis_budget_chars(settings, "static") == (131072 - 32768) * CHARS_PER_TOKEN
 
     def test_the_floor_says_it_is_the_floor(self) -> None:
         settings = Settings(_env_file=None, llm={"openai": {"context_size": 8192}})
 
-        chars, how = synthesis_budget(settings, "static")
+        chars, how = synthesis_budget(settings, "static", refused=True)
 
         assert chars == _SYNTHESIS_MIN_CHARS
         assert how.startswith(f"{_SYNTHESIS_MIN_CHARS} characters — the floor, above the ")
@@ -323,12 +361,16 @@ class TestTheSynthesisBudget:
         # the floor is held to the window's room before the reply, and says so.
         settings = Settings(_env_file=None, llm={"openai": {"context_size": 4096}})
 
-        chars, how = synthesis_budget(settings, "static")
+        chars, how = synthesis_budget(settings, "static", refused=True)
 
         assert chars == (4096 - 1024) * CHARS_PER_TOKEN
         assert how.startswith(
             f"{chars} characters — the floor, held to the window's room before the reply, "
             f"above the {(4096 - 2048) * CHARS_PER_TOKEN} of the 4096-token window"
+        )
+        # Without a refusal that room is the budget itself, and is not called a floor.
+        assert synthesis_budget(settings, "static")[1].startswith(
+            f"{chars} characters — the 4096-token window"
         )
         assert synthesis_budget(Settings(_env_file=None), "static")[1].endswith(
             "no window was declared or learned"
@@ -337,7 +379,7 @@ class TestTheSynthesisBudget:
     def test_a_small_context_does_not_drop_below_the_floor(self) -> None:
         settings = Settings(_env_file=None, llm={"openai": {"context_size": 8192}})
 
-        assert synthesis_budget_chars(settings, "static") == _SYNTHESIS_MIN_CHARS
+        assert synthesis_budget_chars(settings, "static", refused=True) == _SYNTHESIS_MIN_CHARS
 
     def test_an_ollama_agent_reads_its_own_window(self) -> None:
         settings = Settings(
@@ -345,7 +387,7 @@ class TestTheSynthesisBudget:
             llm={"provider": "ollama", "ollama": {"num_ctx": 65536}},
         )
 
-        assert synthesis_budget_chars(settings, "static") == (65536 - 2 * 16384) * CHARS_PER_TOKEN
+        assert synthesis_budget_chars(settings, "static") == (65536 - 16384) * CHARS_PER_TOKEN
 
     def test_settings_that_cannot_be_read_hold_the_floor(self) -> None:
         assert synthesis_budget_chars(object(), "static") == _SYNTHESIS_MIN_CHARS
