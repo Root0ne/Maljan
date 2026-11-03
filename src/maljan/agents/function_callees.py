@@ -413,10 +413,14 @@ def named_unread(
     a call site's) is none, and a read routine is never unread. ``found`` is
     the map of ``entries``; ``said`` the claims' texts.
 
-    The ones a claim names come first; within each part, the ones fewer read
-    routines call first (a routine many call is a shared helper, one a single
-    routine calls stands behind it), then by address. Linear: each entry and each claim is read once, and
-    each lookup reads an address's spellings in a set.
+    Ordered by what the map does not already say: first the ones no other
+    line of the map carries (a row of the function index, or a function
+    reaching artefacts, is on the not-visited line), then the ones more of
+    what was read points at (each read routine that calls it, and a claim
+    naming it, counts one), then by address. A claim counts no more than a
+    caller: during the loop its claims are not parsed yet. Linear: each entry
+    and each claim is read once, and each lookup reads an address's
+    spellings in a set.
     """
     entries = list(entries)
     bases = tuple(found.image_bases)
@@ -446,5 +450,8 @@ def named_unread(
                 named[key] = None
     out = [NamedUnread(a, u.callers, a in named) for a, u in unread.items()]
     out.extend(NamedUnread(a, (), True) for a in named if a not in unread)
-    out.sort(key=lambda n: (not n.named, len(n.callers), n.address))
+    on_map = {one_spelling(a, bases) for a, _rest in found.index_unvisited} | {
+        one_spelling(a, bases) for a, _rest in found.unvisited
+    }
+    out.sort(key=lambda n: (n.address in on_map, -(len(n.callers) + n.named), n.address))
     return out

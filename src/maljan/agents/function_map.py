@@ -865,9 +865,14 @@ def function_map_block(found: FunctionMap, room: int | None = None) -> str:
         # A visit with nothing but its entry id: the transcript already
         # stamps the id on the listing, so the address is enough here.
         lines.append("also visited: " + ", ".join(_folded(e) for e in bare))
-    named = _named_unread_line(
-        found, None if room is None else room - sum(len(line) + 1 for line in lines)
-    )
+    # The named line shares the room left with the not-visited line after it:
+    # when that line has rows to list, half of what its fixed clauses leave,
+    # so its rows keep half the room they had; all of it when it has none.
+    left = None if room is None else room - sum(len(line) + 1 for line in lines)
+    fixed = _rows_line_fixed(found)
+    if left is not None and fixed:
+        left = max(0, left - fixed) // 2
+    named = _named_unread_line(found, left)
     if named:
         lines.append(named)
     if found.indexed:
@@ -880,6 +885,26 @@ def function_map_block(found: FunctionMap, room: int | None = None) -> str:
         left = None if room is None else room - sum(len(line) + 1 for line in lines)
         lines.append(_unvisited_line(found, left))
     return "\n".join(lines)
+
+
+def _rows_line_fixed(found: FunctionMap) -> int:
+    """The characters the not-visited line takes besides its rows, ``0`` when it lists none.
+
+    Its head and its closing clause at their longest, as the line itself keeps
+    room for them (:func:`_index_line`, :func:`_unvisited_line`).
+    """
+    if found.indexed:
+        if not found.index_unvisited:
+            return 0
+        head = f"not visited, holding artefacts in the function index ({found.index_entry}): "
+        closing = f"; and {len(found.index_unvisited)} more; " + INDEX_ELSEWHERE.format(
+            entry=found.index_entry
+        )
+        return len(head) + len(closing) + 1
+    if not found.unvisited:
+        return 0
+    closing = f"; and {len(found.unvisited)} more not listed here for want of room"
+    return len("not visited, reaching artefacts: ") + len(closing) + 1
 
 
 def _unvisited_line(found: FunctionMap, room: int | None) -> str:
@@ -922,15 +947,23 @@ NAMED_UNREAD_SHOWN = 24
 _CALLERS_SHOWN = 2
 
 
+# The closing clause naming the listed ones the analyst's claims name.
+NAMED_IN_CLAIMS = "named in your claims: "
+
+
 def _named_unread_item(item: NamedUnread) -> str:
-    said: list[str] = []
-    if item.callers:
-        callers = ", ".join(hex(c) for c in item.callers[:_CALLERS_SHOWN])
-        more = len(item.callers) - _CALLERS_SHOWN
-        said.append(f"called by {callers}" + (f" and {more} more" if more > 0 else ""))
-    if item.named:
-        said.append("named in your claims")
-    return f"{hex(item.address)} ({'; '.join(said)})"
+    if not item.callers:
+        return hex(item.address)
+    callers = ", ".join(hex(c) for c in item.callers[:_CALLERS_SHOWN])
+    more = len(item.callers) - _CALLERS_SHOWN
+    return f"{hex(item.address)} (called by {callers}" + (f" and {more} more)" if more > 0 else ")")
+
+
+def _named_unread_text(items: Sequence[NamedUnread], cut: str = "") -> str:
+    """The line for ``items``: each item, the cut clause, then the ones the claims name."""
+    text = NAMED_UNREAD_HEAD + "; ".join(_named_unread_item(n) for n in items) + cut
+    named = [hex(n.address) for n in items if n.named]
+    return f"{text}; {NAMED_IN_CLAIMS}{', '.join(named)}" if named else text
 
 
 def _named_unread_line(found: FunctionMap, room: int | None) -> str:
@@ -940,35 +973,43 @@ def _named_unread_line(found: FunctionMap, room: int | None) -> str:
     none. Addresses only, written by the platform, so no sample text rides
     it. At most :data:`NAMED_UNREAD_SHOWN` of them, fewer when the room is
     smaller; a list cut says how many there are in all, and when none fits
-    the count stands alone, as the index line's does.
+    the count stands alone, as the index line's does. The ones the claims
+    name are said once, in a closing clause, not on each item.
     """
     from maljan.agents.function_callees import named_unread
 
-    found_unread = named_unread(found.read_from, found, found.said)
+    try:
+        found_unread = named_unread(found.read_from, found, found.said)
+    except Exception:  # noqa: BLE001 — a fact left out never costs the map
+        return ""
     if not found_unread:
         return ""
     total = len(found_unread)
-    items = [_named_unread_item(n) for n in found_unread[:NAMED_UNREAD_SHOWN]]
-    whole = NAMED_UNREAD_HEAD + "; ".join(items)
+    items = found_unread[:NAMED_UNREAD_SHOWN]
+    whole = _named_unread_text(items)
     if total == len(items) and (room is None or len(whole) <= room):
         return whole
-    unlisted = f"; {{shown}} of {total} listed"
-    # Room is kept for the closing clause at its longest.
-    budget = None if room is None else room - len(unlisted.format(shown=total))
-    shown: list[str] = []
-    used = len(NAMED_UNREAD_HEAD)
+    # The longest the line may be with ``shown`` items: they, the cut clause
+    # at its longest, and the claims clause over them. One pass, each item's
+    # length added once.
+    cut = f"; {{shown}} of {total} listed"
+    fixed = len(NAMED_UNREAD_HEAD) + len(cut.format(shown=total))
+    shown = 0
+    body = claims = 0
     for item in items:
-        cost = len(item) + (2 if shown else 0)
-        if budget is not None and used + cost > budget:
+        body_next = body + len(_named_unread_item(item)) + (2 if shown else 0)
+        claims_next = claims + (len(hex(item.address)) + (2 if claims else 0) if item.named else 0)
+        claims_cost = len(f"; {NAMED_IN_CLAIMS}") + claims_next if claims_next else 0
+        if room is not None and fixed + body_next + claims_cost > room:
             break
-        shown.append(item)
-        used += cost
+        shown += 1
+        body, claims = body_next, claims_next
     if not shown:
         return (
             f"{NAMED_UNREAD_HEAD}{_count(total, 'function', 'functions')}, "
             "not listed here for want of room"
         )
-    return NAMED_UNREAD_HEAD + "; ".join(shown) + unlisted.format(shown=len(shown))
+    return _named_unread_text(items[:shown], cut.format(shown=shown))
 
 
 # Where the whole index is, said after the rows the room left out.
