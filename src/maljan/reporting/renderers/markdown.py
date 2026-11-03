@@ -78,7 +78,11 @@ from maljan.core.undeclared_tools import (
     names_itself,
 )
 from maljan.reporting import tool_kinds
-from maljan.reporting.dedupe import distinct_processes, distinct_signatures
+from maljan.reporting.dedupe import (
+    distinct_processes,
+    distinct_signatures,
+    signature_identity_without_processes,
+)
 from maljan.reporting.defang import ProseDefanger, defang
 from maljan.reporting.judge_reasons import (
     JUDGE_REASON_WIDTH,
@@ -906,7 +910,9 @@ class MarkdownRenderer:
                 measured.extend(["", *table])
         evasive = [
             sig
-            for sig in distinct_signatures(dynamic.sandbox_signatures if dynamic else [])
+            for sig in distinct_signatures(
+                dynamic.sandbox_signatures if dynamic else [], signature_identity_without_processes
+            )
             if _names_any(sig.name + " " + sig.description, _EVASION_WORDS)
         ]
         if evasive:
@@ -1358,7 +1364,10 @@ class MarkdownRenderer:
             lines.extend(_left_out(len(dyn.notable_apis), 20, "notable APIs"))
             lines.append("")
 
-        signatures = distinct_signatures(dyn.sandbox_signatures)
+        # Told apart by what the table prints: the processes are not among it.
+        signatures = distinct_signatures(
+            dyn.sandbox_signatures, signature_identity_without_processes
+        )
         if signatures:
             lines.extend(
                 [

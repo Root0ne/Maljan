@@ -181,44 +181,26 @@ def _many(count: int) -> dict[str, Any]:
     return _report({"name": "enumerates", "severity": 2, "data": marks})
 
 
-def _cut_and_whole() -> tuple[dict[str, Any], dict[str, Any]]:
-    """An analyst's answer, its list cut, and the pack's, every pid listed."""
-    return sandbox_signatures(_many(14)), sandbox_signatures(_many(14), pids_shown=None)
-
-
 class TestTheCap:
-    def test_an_analyst_s_answer_lists_the_first_pids_and_counts_them_all(self) -> None:
-        cut, whole = _cut_and_whole()
-        row = cut["signatures"][0]
+    def test_an_answer_lists_the_first_pids_and_counts_them_all(self) -> None:
+        row = sandbox_signatures(_many(14))["signatures"][0]
         assert row["pids"] == [str(100 + n) for n in range(SIGNATURE_PIDS_SHOWN)]
         assert row["pids_total"] == 14
-        assert whole["signatures"][0]["pids"] == [str(100 + n) for n in range(14)]
-        assert "pids_total" not in whole["signatures"][0]
 
     def test_a_list_at_the_cap_is_not_cut(self) -> None:
         row = sandbox_signatures(_many(SIGNATURE_PIDS_SHOWN))["signatures"][0]
         assert len(row["pids"]) == SIGNATURE_PIDS_SHOWN
         assert "pids_total" not in row
 
-    def test_the_pack_reads_every_pid(self) -> None:
+    def test_the_pack_answers_as_the_analysts_do(self) -> None:
         view = _SANDBOX_VIEWS["sandbox_signatures"]
-        assert view(_many(14))["signatures"][0]["pids"] == [str(100 + n) for n in range(14)]
+        row = view(_many(14))["signatures"][0]
+        assert len(row["pids"]) == SIGNATURE_PIDS_SHOWN
+        assert row["pids_total"] == 14
 
-    def test_the_report_keeps_the_whole_list_whichever_answer_came_first(self) -> None:
-        cut, whole = _cut_and_whole()
-        for order in ((cut, whole), (whole, cut)):
-            counter = EvidenceCounter()
-            ledger = [entry("sandbox_signatures", data, counter, agent="dynamic") for data in order]
-            dynamic = dynamic_from_ledger(ledger)
-            assert dynamic is not None
-            assert [(len(s.pids), s.pids_total) for s in dynamic.sandbox_signatures] == [(14, 0)]
-            table = next(s for s in build_sections(ledger) if s.key == "sandbox_signatures")
-            assert len(table.rows) == 1
-            assert table.rows[0][-1] == ", ".join(str(100 + n) for n in range(14))
-
-    def test_a_cut_answer_read_alone_says_so(self) -> None:
-        cut, _whole = _cut_and_whole()
-        ledger = [entry("sandbox_signatures", cut, EvidenceCounter(), agent="dynamic")]
+    def test_the_report_states_the_count_beside_the_listed_pids(self) -> None:
+        answer = sandbox_signatures(_many(14))
+        ledger = [entry("sandbox_signatures", answer, EvidenceCounter(), agent="dynamic")]
         dynamic = dynamic_from_ledger(ledger)
         assert dynamic is not None
         (signature,) = dynamic.sandbox_signatures
@@ -238,8 +220,10 @@ class TestTheDedupe:
         other = one.model_copy(update={"pids": ["9"]})
         assert distinct_signatures([one, other]) == [one, other]
 
-    def test_a_cut_row_gives_way_only_to_a_whole_row_it_begins(self) -> None:
-        whole = SandboxSignature(name="x", description="d", severity=3, pids=["1", "2", "3"])
-        cut = whole.model_copy(update={"pids": ["1", "2"], "pids_total": 3})
-        stranger = whole.model_copy(update={"pids": ["7", "8"], "pids_total": 3})
-        assert distinct_signatures([cut, whole, stranger]) == [whole, stranger]
+    def test_the_markdown_table_prints_rows_differing_only_in_pids_once(self) -> None:
+        report = rich_report()
+        assert report.dynamic is not None
+        one = SandboxSignature(name="inject", description="d", severity=3, pids=["4"])
+        report.dynamic.sandbox_signatures = [one, one.model_copy(update={"pids": ["9"]})]
+        table = MarkdownRenderer().render(report).split("### Sandbox signatures", 1)[1]
+        assert table.split("\n\n", 2)[1].count("| inject |") == 1

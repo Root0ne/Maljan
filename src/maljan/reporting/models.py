@@ -385,7 +385,7 @@ class SandboxSignature(BaseModel):
     # before the field existed.
     pids: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
     # How many processes the hit was seen in, where ``pids`` lists only the
-    # first of them (an analyst's answer read alone, ``sandbox_signatures``);
+    # first of them (``sandbox_tools.SIGNATURE_PIDS_SHOWN``);
     # 0, and left out of the dump, where ``pids`` lists them all.
     pids_total: int = Field(default=0, exclude_if=lambda value: not value)
 

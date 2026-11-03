@@ -2059,9 +2059,7 @@ _FORMAT_CALLS: dict[str, str] = {
 _SANDBOX_VIEWS: dict[str, Callable[..., dict[str, Any]]] = {
     "sandbox_processes": sandbox_tools.sandbox_processes,
     "sandbox_network": sandbox_tools.sandbox_network,
-    # Every pid of a signature: the pack's entry is what the report is built
-    # from, and an analyst's answer, which lists the first few, is cut from it.
-    "sandbox_signatures": partial(sandbox_tools.sandbox_signatures, pids_shown=None),
+    "sandbox_signatures": sandbox_tools.sandbox_signatures,
     "sandbox_dropped_files": sandbox_tools.sandbox_dropped_files,
     "sandbox_channels": sandbox_tools.sandbox_channels,
 }

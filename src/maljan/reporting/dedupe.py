@@ -28,6 +28,7 @@ is a fact removed from a report with nothing saying it happened.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from maljan.schemas.stix_pattern import Comparison, canonical_pattern, read_comparisons
@@ -473,42 +474,35 @@ def _distinct_level(nodes: list[Any]) -> list[Any]:
 def signature_identity(signature: Any) -> tuple[Any, ...]:
     """A sandbox signature row by everything it states; the same row read twice is one."""
     return (
-        str(getattr(signature, "name", "") or ""),
-        str(getattr(signature, "description", "") or ""),
-        getattr(signature, "severity", None),
-        tuple(getattr(signature, "technique_ids", None) or ()),
-        tuple(getattr(signature, "marks", None) or ()),
+        *signature_identity_without_processes(signature),
         tuple(getattr(signature, "pids", None) or ()),
         getattr(signature, "pids_total", 0) or 0,
     )
 
 
-def _cut_pids(signature: Any) -> bool:
-    """Whether the row lists only the first of the pids it counts (``pids_total``)."""
-    return (getattr(signature, "pids_total", 0) or 0) > len(getattr(signature, "pids", None) or ())
+def signature_identity_without_processes(signature: Any) -> tuple[Any, ...]:
+    """A sandbox signature row by what it states but the processes it was seen in.
 
-
-def distinct_signatures(signatures: list[Any]) -> list[Any]:
-    """``signatures`` with each row once, at its first place.
-
-    A row whose pid list was cut (an analyst's answer lists the first few) is
-    the same row as one that lists them all and starts with those, and is
-    dropped where that row is listed. Linear in the rows and their pids.
+    What a surface that does not print the processes tells two rows apart by:
+    two rows that differ only in their pids read there as one.
     """
-    whole: dict[tuple[Any, ...], list[tuple[str, ...]]] = {}
-    for signature in signatures:
-        if not _cut_pids(signature):
-            whole.setdefault(signature_identity(signature)[:5], []).append(
-                tuple(getattr(signature, "pids", None) or ())
-            )
+    return (
+        str(getattr(signature, "name", "") or ""),
+        str(getattr(signature, "description", "") or ""),
+        getattr(signature, "severity", None),
+        tuple(getattr(signature, "technique_ids", None) or ()),
+        tuple(getattr(signature, "marks", None) or ()),
+    )
+
+
+def distinct_signatures(
+    signatures: list[Any], identity: Callable[[Any], tuple[Any, ...]] = signature_identity
+) -> list[Any]:
+    """``signatures`` with each row once by ``identity``, at its first place."""
     seen: set[tuple[Any, ...]] = set()
     out: list[Any] = []
     for signature in signatures:
-        key = signature_identity(signature)
-        if _cut_pids(signature):
-            shown = key[5]
-            if any(pids[: len(shown)] == shown for pids in whole.get(key[:5], ())):
-                continue
+        key = identity(signature)
         if key not in seen:
             seen.add(key)
             out.append(signature)

@@ -816,8 +816,8 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
                     # The processes the hit was seen in, under the key the
                     # tool writes them; each a whole number, or not read.
                     pids=(pids := signature_pids({"pids": row.get("pids")})),
-                    # Where the answer listed the first of them only: a row
-                    # that lists them all replaces it (``distinct_signatures``).
+                    # Where the answer listed the first of them only, their
+                    # count is kept beside them (``SandboxSignature.pids_total``).
                     pids_total=_cut_total(row.get("pids_total"), len(pids)),
                 )
             )
