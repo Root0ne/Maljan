@@ -86,6 +86,9 @@ class FailedCall:
     redone_by: tuple[str, ...] = ()
     # Whether the call lists code (decompiled or disassembled).
     lists_code: bool = False
+    # The kind its entry stored (``tool_kinds.kind_of``), else the kind its code
+    # is read as (``tool_kinds.code_family_kind``); ``""`` for neither.
+    kind: str = ""
 
     @property
     def redone(self) -> bool:
@@ -144,6 +147,7 @@ def failed_calls(
     """Each call that ran and failed, in ledger order, with the later calls that redid it."""
     from maljan.core.undeclared_tools import entry_lists_any_code
     from maljan.reporting.redone_calls import redone_failures
+    from maljan.reporting.tool_kinds import code_family_kind, kind_of
 
     entries = list(entries)
     redid = {
@@ -169,6 +173,7 @@ def failed_calls(
                 answered=tuple((a, linked[a]) for a in asked if a in linked),
                 redone_by=redid.get(entry_id, ()),
                 lists_code=entry_lists_any_code(entry),
+                kind=kind_of(entry) or code_family_kind(entry),
             )
         )
     return out

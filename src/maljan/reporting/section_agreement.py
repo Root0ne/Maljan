@@ -868,10 +868,11 @@ def _sentences_of(text: str) -> list[str]:
 
 
 def _kind_words(call: FailedCall) -> set[str]:
-    """What a sentence may call the failed call by: its tool's name, and its kind's stems."""
+    """What a sentence may call the failed call by: its tool's name, and the stems of the
+    kind its entry stored (never read off the tool's name)."""
     tool = call.tool.lower()
     words = {tool, tool.replace("_", " ")} if len(tool) >= _TOOL_NAME_FLOOR else set()
-    words.update(stem for stem in _KIND_STEMS if stem in tool)
+    words.update(stem for stem in _KIND_STEMS if stem in call.kind.lower())
     if call.lists_code:
         words.add("listing")
     return words
