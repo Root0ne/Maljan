@@ -268,10 +268,25 @@ class TestBuildQuery:
         ]
         q = _build_query({"dynamic": {"sandbox_signatures": sigs}})
         assert "Signatures: inject, antivm, persist, beacon, unsigned" in q
-        # A row that tells more than its processes is another signature.
+        # The query prints the name alone: a row of the same name with another
+        # description adds no term either.
         other = [{"name": "inject"}, {"name": "inject", "description": "into explorer"}, "bad"]
         q = _build_query({"dynamic": {"sandbox_signatures": other}})
-        assert "Signatures: inject, inject" in q
+        assert q == "Signatures: inject"
+
+    def test_a_malformed_signature_row_does_not_raise(self) -> None:
+        sigs: list[Any] = [
+            {"name": "inject", "technique_ids": 5, "marks": [{"a": 1}]},
+            {"name": "inject", "technique_ids": [["T1055"]]},
+            {"name": None},
+            {"name": 7},
+            {},
+            "bad",
+            None,
+            {"name": "antivm"},
+        ]
+        q = _build_query({"dynamic": {"sandbox_signatures": sigs}})
+        assert q == "Signatures: inject"
 
     def test_empty_inputs_yield_empty_string(self) -> None:
         assert _build_query({}) == ""

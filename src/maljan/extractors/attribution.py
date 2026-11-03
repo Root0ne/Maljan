@@ -241,30 +241,21 @@ def _build_query(malware_report: dict[str, Any]) -> str:
 
 
 def _distinct_signature_rows(rows: list[Any]) -> list[Any]:
-    """``rows`` with each signature once, at its first place, whatever processes it was seen in.
+    """``rows`` with each signature name once, at its first place.
 
-    Two rows of one signature from two sandbox reports of a run differ only in
-    their processes; the query names a signature by its name, so the second is
-    no further term. The rows are told apart by the five fields
-    ``reporting.dedupe.signature_identity`` reads, here read off the dumped
-    dicts; once the processes are part of that identity (T-475), these five
-    are ``signature_identity_without_processes``, which this should then call.
-    A row that is no dict is kept where it is.
+    The query names a signature by its name alone, so a later row of the same
+    name (the same signature seen in other processes, or stored twice) is no
+    further term and takes no slot of the five. A row that is no dict, or names
+    nothing, is kept where it is.
     """
-    seen: set[tuple[Any, ...]] = set()
+    seen: set[str] = set()
     out: list[Any] = []
     for row in rows:
-        if isinstance(row, dict):
-            key = (
-                str(row.get("name") or ""),
-                str(row.get("description") or ""),
-                str(row.get("severity")),
-                tuple(str(i) for i in row.get("technique_ids") or ()),
-                tuple(str(m) for m in row.get("marks") or ()),
-            )
-            if key in seen:
+        name = row.get("name") if isinstance(row, dict) else None
+        if isinstance(name, str) and name:
+            if name in seen:
                 continue
-            seen.add(key)
+            seen.add(name)
         out.append(row)
     return out
 
