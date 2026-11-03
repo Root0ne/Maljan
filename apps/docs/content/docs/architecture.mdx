@@ -2529,8 +2529,16 @@ block under the claim's number that declares the withdrawal) is removed with
 its reason; a claim a blocking line of the round's mediation named that the
 revision neither writes again, withdraws nor argues in its disputes is
 withdrawn by rule, the line being its reason (only the mediation right before
-the round is read) (`debate_facts.claims_named_by_lines` reads the claim numbers
-each line names per analyst); and any other claim it neither writes again nor
+the round is read) (`debate_facts.read_claim_references` reads the claim numbers
+each line names per analyst, a list, a "claim" written again and a range of up
+to 20 claims, "claims 32-34" or "17 to 19", naming the analyst its first number
+names, every number the earlier reading read named as before; the rest of a
+longer range, or a "claim N" no analyst is read for, names no claim, withdraws
+nothing and, on a line that blocks by a mark that was read or by having none, is
+stated once in a sentence of the merge; a claim a blocking line reaches only by
+the newer reading is withdrawn by rule only when its reference's clause shares a
+ledger id or an address with it, and is otherwise carried with the line and
+stated); and any other claim it neither writes again nor
 withdraws stands unchanged, marked carried forward from that round
 (`ClaimEvidence.carried_since_round`, with `carried_contested_by` when a line
 that does not block named it), shown beside the claim in every summary, the
