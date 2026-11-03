@@ -1266,12 +1266,15 @@ class CodeConstant(BaseModel):
     little-endian; ``meaning`` says what the tool read it as, in a few words;
     ``entry`` and ``tool`` are the answer that states it; ``first_offset`` is
     the first file offset that answer gives for it and ``places`` how many it
-    gives. A drafted YARA rule matches on these bytes (``detection_signatures``).
+    gives. ``role`` says which of the two it is: a drafted YARA rule matches on
+    these bytes, a function-name hash only together with a seed
+    (``detection_signatures``).
     """
 
     model_config = _STRICT_CONFIG
 
     value: str
+    role: Literal["seed", "hash"]
     meaning: str
     entry: str = ""
     tool: str = ""

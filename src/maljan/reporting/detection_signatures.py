@@ -30,6 +30,7 @@ import hashlib
 import os
 import re
 import stat
+import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -76,16 +77,22 @@ LEFT_OUT_COMMENT = (
     "{rest} more published {what} are not in this draft; the report's IOC table carries every one."
 )
 # How many of the values the sample stores (``report.code_constants``) one
-# draft matches on: a decoder's seeds first, then function-name hashes. A draft
-# that leaves any out says so; the report's JSON carries every one.
-_MAX_YARA_CONSTANTS = 12
-CONSTANTS_LEFT_OUT_COMMENT = (
-    "{rest} more stored values the run read are not in this draft; the report's JSON "
+# draft matches on: a decoder's seeds (``$dN``), and the function-name hashes
+# (``$hN``) that count only beside them. A function-name hash is how a program
+# finds its imports, which programs resolving by the same public algorithm
+# share; a seed with no hash beside it is four bytes. So the stored group holds
+# only with every seed and enough hashes, and a run with no seed, or fewer than
+# two hashes, drafts none. A draft that leaves any value out says how many; the
+# report's JSON carries every one.
+_MAX_YARA_SEEDS = 4
+_MAX_YARA_HASHES = 12
+_LEAST_HASHES = 2
+STORED_LEFT_OUT_COMMENT = (
+    "{rest} stored value{s} the run read {are} not in this draft{why}; the report's JSON "
     "(code_constants) carries every one."
 )
-# Fewer stored values than this make no group of the draft: one four-byte value
-# alone stands in too many files by chance.
-_LEAST_CONSTANTS = 2
+NO_STORED_GROUP_NO_SEED = "no decoder seed was read, and a function-name hash alone is no match"
+NO_STORED_GROUP_FEW_HASHES = "a decoder seed counts only beside two function-name hashes"
 _SAFE_RULE_NAME_RE = re.compile(r"[^A-Za-z0-9_]+")
 
 
@@ -319,10 +326,18 @@ def precision_line(rule: DetectionRule) -> str:
     """
     if rule.kind == "yara":
         strings = rule.sample_strings or []
-        found = sum(1 for item in strings if item.offset is not None)
+        published = [item for item in strings if item.identifier.startswith("$s")]
+        stored = [item for item in strings if not item.identifier.startswith("$s")]
+        counts = [
+            f"{_found(published)} of {len(published)} published strings"
+            + ("" if stored else " found"),
+        ]
+        if stored:
+            counts.append(f"{_found(stored)} of {len(stored)} stored values found")
         return (
-            f"Precision: its strings match the sample it was drafted from ({found} of "
-            f"{len(strings)} found), not its hash alone; "
+            "Precision: its strings match the sample it was drafted from ("
+            + ", ".join(counts)
+            + "), not its hash alone; "
             + _NOT_RETRO_HUNTED.format(what="file")
             + "."
         )
@@ -339,6 +354,10 @@ def precision_line(rule: DetectionRule) -> str:
     )
 
 
+def _found(strings: list[SampleString]) -> int:
+    return sum(1 for item in strings if item.offset is not None)
+
+
 # ---------------------------------------------------------------------------
 # Hunting query
 # ---------------------------------------------------------------------------
@@ -349,6 +368,9 @@ def precision_line(rule: DetectionRule) -> str:
 _HUNT_VALUES = 20
 _HUNT_VALUE_CHARS = 200
 _HUNT_LEAST_PATH = 3
+# The characters a quoted value never carries: format characters (a bidi
+# override, a zero-width joiner) and line and paragraph separators.
+_HUNT_DROPPED = frozenset({"Cf", "Zl", "Zp"})
 
 
 def hunting_query(report: MalwareReport) -> list[str] | None:
@@ -416,8 +438,10 @@ def _hunt_condition(field_name: str, values: list[str]) -> str:
 
 
 def _hunt_quoted(value: str) -> str:
-    """A value in double quotes on one line: control characters dropped, length capped."""
-    cleaned = "".join(c for c in value if c >= " ")[:_HUNT_VALUE_CHARS]
+    """A value in double quotes on one line: control, format and separator characters dropped."""
+    cleaned = "".join(
+        c for c in value if c >= " " and unicodedata.category(c) not in _HUNT_DROPPED
+    )[:_HUNT_VALUE_CHARS]
     return '"' + cleaned.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
@@ -571,9 +595,10 @@ def _build_yara(report: MalwareReport, sample: OwnSample | None = None) -> Detec
     - ``N of them`` when at least two string IOCs are collected
 
     The strings are the published rows of the IOC table (``$sN``) and the
-    values the sample stores that a tool read as a decoder's seed or a
-    function-name hash (``$cN``, ``report.code_constants``), each group with a
-    quantifier of its own, and nothing else. The import names the pack's
+    values the sample stores that a tool read as a decoder's seed (``$dN``) or
+    a function-name hash (``$hN``, ``report.code_constants``, chosen by
+    :func:`stored_selection`), each group with a quantifier of its own, and
+    nothing else. The import names the pack's
     technique rules fired on used to be strings here too, and ``8 of them``
     over common API names matches a great deal of ordinary software: an import
     name is not an indicator this run publishes. A published value the sample
@@ -603,14 +628,15 @@ def _build_yara(report: MalwareReport, sample: OwnSample | None = None) -> Detec
 
     # The values the sample stores as they are, which a draft matches the
     # file's own bytes on where the published values are kept encoded.
-    stored = _stored_values(report)
-    constants: list[tuple[str, bytes]] = []
-    if len(stored) >= _LEAST_CONSTANTS:
-        for item, raw in stored[:_MAX_YARA_CONSTANTS]:
-            slot = f"$c{len(constants)}"
-            constants.append((slot, raw))
-            reasons[slot] = _why_stored(item)
-            sources.append(f"constant:{item.value}:{item.entry}")
+    chosen = stored_selection(report)
+    seeds: list[tuple[str, bytes]] = []
+    hashes: list[tuple[str, bytes]] = []
+    for item, raw in chosen.used:
+        group, prefix = (seeds, "$d") if item.role == "seed" else (hashes, "$h")
+        slot = f"{prefix}{len(group)}"
+        group.append((slot, raw))
+        reasons[slot] = _why_stored(item)
+        sources.append(f"constant:{item.value}:{item.entry}")
 
     # Gated above when the seed is a placeholder, so this normally uses the real
     # family; _rule_name_component keeps the name honest anyway should the gate
@@ -626,7 +652,8 @@ def _build_yara(report: MalwareReport, sample: OwnSample | None = None) -> Detec
         verdict=report.verdict,
         generated_at_iso=report.generated_at.isoformat(),
         reasons=reasons,
-        constants=constants,
+        seeds=seeds,
+        hashes=hashes,
     )
     body = rendered.draft
 
@@ -634,15 +661,15 @@ def _build_yara(report: MalwareReport, sample: OwnSample | None = None) -> Detec
         body += "\n// " + LEFT_OUT_COMMENT.format(
             rest=len(eligible) - _MAX_YARA_STRINGS, what="strings"
         )
-    if constants and len(stored) > _MAX_YARA_CONSTANTS:
-        body += "\n// " + CONSTANTS_LEFT_OUT_COMMENT.format(rest=len(stored) - _MAX_YARA_CONSTANTS)
+    if chosen.left_out:
+        body += "\n// " + chosen.comment()
     compiled, compile_error = _compile_yara(body)
     if compiled is None:
         check = _SampleCheck(
             not_checked=NOT_CHECKED_UNCOMPILED if _YARA_AVAILABLE else NOT_CHECKED_NO_ENGINE
         )
     else:
-        slots = [slot for slot, _value in strings] + [slot for slot, _raw in constants]
+        slots = [slot for slot, _value in strings] + [slot for slot, _raw in [*seeds, *hashes]]
         check = _run_on_sample(rendered, slots, sample)
     if check.not_checked:
         logger.info(
@@ -672,7 +699,8 @@ def _render_yara(
     verdict: str,
     generated_at_iso: str,
     reasons: dict[str, str] | None = None,
-    constants: list[tuple[str, bytes]] | None = None,
+    seeds: list[tuple[str, bytes]] | None = None,
+    hashes: list[tuple[str, bytes]] | None = None,
 ) -> _YaraSources:
     """The drafted rule and its probe ruleset, written from the same declarations.
 
@@ -682,15 +710,18 @@ def _render_yara(
     apart. The probe's strings clause is the draft's quantifier over the probe
     string rules where the draft has it over ``them``.
 
-    ``constants`` are the values the sample stores (``$cN``), each declared as
-    its bytes: a group of its own in the strings clause, with a quantifier of
-    its own, beside the published strings' group (``$sN``). A draft with no
-    such value is written as it always was.
+    ``seeds`` (``$dN``) and ``hashes`` (``$hN``) are the values the sample
+    stores, each declared as its bytes. Together they are one group of the
+    strings clause, beside the published strings' group (``$sN``): every seed
+    and a quantifier of the hashes, ``all of ($d*) and k of ($h*)``. The group
+    is written only with a seed and a hash both; a draft with no such group is
+    written as it always was.
     """
     imports = ['import "hash"']
     if imphash:
         imports.append('import "pe"')
-    stored = list(constants or [])
+    seeds, hashes = list(seeds or []), list(hashes or [])
+    stored = [*seeds, *hashes] if seeds and hashes else []
     declared = [
         (slot, f'"{_escape_yara(value)}" {_YARA_STRING_MODIFIERS}') for slot, value in strings
     ] + [(slot, f"{{ {raw.hex(' ')} }}") for slot, raw in stored]
@@ -703,17 +734,24 @@ def _render_yara(
     # Each group of the strings clause: its quantifier, its slots in the draft
     # and the probe's string rules standing for them, in the declared order.
     string_rules = tuple(f"{_PROBE_STRING}{index}" for index in range(len(declared)))
-    groups: list[tuple[str, str, tuple[str, ...]]] = []
+    # Each group as the draft writes it and as the probe writes it over the
+    # probe's string rules standing for the same strings.
+    drafted: list[str] = []
+    probed: list[str] = []
     if strings:
-        groups.append((quantifier, "$s*", string_rules[: len(strings)]))
+        drafted.append(f"({quantifier} of ($s*))")
+        probed.append(f"({quantifier} of ({', '.join(string_rules[: len(strings)])}))")
     if stored:
-        groups.append((_constants_quantifier(len(stored)), "$c*", string_rules[len(strings) :]))
+        need = _hashes_quantifier(len(hashes))
+        first = len(strings)
+        on_seeds = string_rules[first : first + len(seeds)]
+        on_hashes = string_rules[first + len(seeds) :]
+        drafted.append(f"(all of ($d*) and {need} of ($h*))")
+        probed.append(f"(all of ({', '.join(on_seeds)}) and {need} of ({', '.join(on_hashes)}))")
     if strings and not stored:
         clauses.append(("strings", f"{quantifier} of them"))
     elif stored:
-        clauses.append(
-            ("strings", " or ".join(f"({need} of ({slots}))" for need, slots, _r in groups))
-        )
+        clauses.append(("strings", " or ".join(drafted)))
 
     lines: list[str] = [*imports, ""]
     lines.append(f"rule {rule_name}")
@@ -743,9 +781,7 @@ def _render_yara(
     )
     over_probes = f"{quantifier} of ({', '.join(string_rules)})"
     if stored:
-        over_probes = " or ".join(
-            f"({need} of ({', '.join(rules)}))" for need, _slots, rules in groups
-        )
+        over_probes = " or ".join(probed)
     for part, condition in clauses:
         written = over_probes if part == "strings" else condition
         probe.append(f"rule {_PROBE_PART}{part} {{ condition: {written} }}")
@@ -759,21 +795,61 @@ def _render_yara(
     )
 
 
-def _constants_quantifier(count: int) -> str:
-    """How many of a draft's stored values must stand in a file: every one of a few, else half."""
+def _hashes_quantifier(count: int) -> str:
+    """How many of a draft's function-name hashes must stand in a file: all of a few, else half."""
     return "all" if count <= 3 else str(max(3, count // 2))
 
 
-def _stored_values(report: MalwareReport) -> list[tuple[Any, bytes]]:
-    """The values the sample stores (``report.code_constants``), each with its four bytes."""
+@dataclass(frozen=True)
+class StoredSelection:
+    """Which of the values the sample stores a draft matches on, and how many it leaves out.
+
+    ``used`` holds each drafted value with its four bytes, seeds first; ``read``
+    is how many the report holds; ``why`` says why none is drafted, when none is.
+    """
+
+    used: tuple[tuple[Any, bytes], ...]
+    read: int
+    why: str = ""
+
+    @property
+    def left_out(self) -> int:
+        return self.read - len(self.used)
+
+    def comment(self) -> str:
+        """The draft's closing comment on the values it leaves out."""
+        rest = self.left_out
+        return STORED_LEFT_OUT_COMMENT.format(
+            rest=rest,
+            s="s" if rest != 1 else "",
+            are="are" if rest != 1 else "is",
+            why=f" ({self.why})" if self.why else "",
+        )
+
+
+def stored_selection(report: MalwareReport) -> StoredSelection:
+    """The stored values (``report.code_constants``) one YARA draft of ``report`` matches on.
+
+    Every seed up to its cap and the function-name hashes up to theirs, when
+    there is a seed and at least two hashes; none otherwise, and why.
+    """
     from maljan.reporting.code_constants import little_endian
 
-    out: list[tuple[Any, bytes]] = []
+    seeds: list[tuple[Any, bytes]] = []
+    hashes: list[tuple[Any, bytes]] = []
+    read = 0
     for item in getattr(report, "code_constants", None) or []:
         raw = little_endian(item.value)
-        if raw is not None:
-            out.append((item, raw))
-    return out
+        if raw is None:
+            continue
+        read += 1
+        (seeds if item.role == "seed" else hashes).append((item, raw))
+    if not seeds:
+        return StoredSelection((), read, NO_STORED_GROUP_NO_SEED if read else "")
+    if len(hashes) < _LEAST_HASHES:
+        return StoredSelection((), read, NO_STORED_GROUP_FEW_HASHES)
+    used = (*seeds[:_MAX_YARA_SEEDS], *hashes[:_MAX_YARA_HASHES])
+    return StoredSelection(used, read)
 
 
 def _why_stored(item: Any) -> str:

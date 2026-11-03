@@ -1250,14 +1250,15 @@ class _Analyst:
                 if ioc.kind in _NETWORK_KINDS
                 else ctx.plain(ioc.value)
             )
-            # A value the code passes to an API argument publishes with the
-            # chain that binds it, printed after the row's context.
-            chain = _bound_chain(ioc) if exported else ""
+            # A value the code passes to an API argument: where the code
+            # decoded and loaded it, which its context (the call) does not say.
+            # The whole chain is the bundle's.
+            origin = self._bound_origin(ioc) if exported else ""
             role = "; ".join(
                 part
                 for part in (
                     ctx.inline(ioc.context) if ioc.context else "",
-                    self._line(chain) if chain else "",
+                    origin,
                     f"recovered by {ctx.inline(ioc.recovered_by)}" if ioc.recovered_by else "",
                 )
                 if part
@@ -1359,12 +1360,45 @@ class _Analyst:
                 said += f" {precision_line(rule)}"
             else:
                 said += f" Not printed here: {why}; its body is in the bundle."
+            if rule.kind == "yara":
+                said += _stored_left_out(self.report)
             lines.append(_item(said))
         if any(self._printed(rule) for rule in rules):
             lines.extend(
                 ["", "The rule bodies are in the appendix. Test a rule before deploying it."]
             )
         return [*lines, ""]
+
+    def _bound_origin(self, ioc: Any) -> str:
+        """Where the code decoded and loaded a value it passes to an API argument, or ``""``.
+
+        Read from the report's binding record (``reporting.call_bindings``) on
+        a row of the call-binding source: the blob's file offset, the place
+        that loads it, the function it is in, the routine it is given to and
+        the import or slot the call is made through, with a note for the
+        decoder's entry. Any other row gives ``""``.
+        """
+        from maljan.reporting.call_bindings import BOUND_SOURCE, bound_value
+
+        if str(getattr(ioc, "source", "") or "") != BOUND_SOURCE:
+            return ""
+        bound = bound_value(self.report, str(ioc.kind or ""), ioc.value)
+        if bound is None or not bound.site:
+            return ""
+        said = "decoded" + (f" from the blob at file offset {bound.offset}" if bound.offset else "")
+        said += f", loaded at {bound.site}"
+        said += f" in the function at {bound.function}" if bound.function else ""
+        said += (
+            f" and given to the routine called at {bound.decoder_call}"
+            if bound.decoder_call
+            else ""
+        )
+        # How the call is named, which the context's API name does not say.
+        if bound.imported_as:
+            said += f", the call made through the import {bound.imported_as}"
+        elif bound.slot:
+            said += f", the call made through the slot {bound.slot}"
+        return self.ctx.inline(said) + self.notes.marker([bound.entry] if bound.entry else [])
 
     @staticmethod
     def _printed(rule: Any) -> bool:
@@ -1655,16 +1689,17 @@ class _Analyst:
         return "\n".join(lines)
 
 
-def _bound_chain(ioc: Any) -> str:
-    """The chain a value the code passes to an API argument publishes with, or ``""``.
+def _stored_left_out(report: MalwareReport) -> str:
+    """`` N stored values … left out …``: the stored values the YARA draft does not match on."""
+    from maljan.reporting.detection_signatures import stored_selection
 
-    The publish answer's reason on a row of the call-binding source
-    (``reporting.call_bindings``): the call, the argument and every link that
-    binds the decoded text to it. Any other row gives ``""``.
-    """
-    from maljan.reporting.call_bindings import BOUND_SOURCE
-
-    if str(getattr(ioc, "source", "") or "") != BOUND_SOURCE:
+    chosen = stored_selection(report)
+    rest = chosen.left_out
+    if not rest:
         return ""
-    answer = str(getattr(ioc, "published", "") or "")
-    return answer.split(":", 1)[1].strip() if ":" in answer else ""
+    why = f" ({chosen.why})" if chosen.why else ""
+    return (
+        f" {rest} stored value{'s' if rest != 1 else ''} the run read "
+        f"{'are' if rest != 1 else 'is'} left out of the draft{why}; the report's JSON lists "
+        "every one."
+    )

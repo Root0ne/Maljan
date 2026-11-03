@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,8 @@ from maljan.reporting import detection_signatures as drafts
 from maljan.reporting.builder import build_consolidated_iocs
 from maljan.reporting.code_constants import code_constants_from_ledger, little_endian
 from maljan.reporting.detection_signatures import (
+    NO_STORED_GROUP_FEW_HASHES,
+    NO_STORED_GROUP_NO_SEED,
     NOT_PRINTED_HASH_ONLY,
     NOT_PRINTED_NOT_CHECKED,
     NOT_PRINTED_STORED_BEFORE,
@@ -43,6 +46,7 @@ from maljan.reporting.detection_signatures import (
     precision_line,
 )
 from maljan.reporting.models import (
+    BoundValue,
     CodeConstant,
     DetectionRule,
     FileHashes,
@@ -109,8 +113,9 @@ BY_CONTENT = {
     "matches_sample": True,
     "matched_by": ["strings"],
     "sample_strings": [
-        SampleString(identifier="$s0", offset=16),
-        SampleString(identifier="$c0", offset=64),
+        SampleString(identifier="$s0"),
+        SampleString(identifier="$d0", offset=64),
+        SampleString(identifier="$h0", offset=96),
     ],
 }
 
@@ -139,10 +144,19 @@ class TestOnlyAContentMatchPrintsItsBody:
 
         assert BODY in analyst.split("## Appendix", 1)[1]
         assert line.endswith(
-            "Precision: its strings match the sample it was drafted from (2 of 2 found), not "
-            "its hash alone; not run against any other file (no retro-hunt), so how often it "
-            "fires elsewhere is not measured."
+            "Precision: its strings match the sample it was drafted from (0 of 1 published "
+            "strings, 2 of 2 stored values found), not its hash alone; not run against any other "
+            "file (no retro-hunt), so how often it fires elsewhere is not measured."
         )
+
+    def test_a_rule_of_published_strings_alone_counts_them_alone(self) -> None:
+        rule = _yara(
+            matches_sample=True,
+            matched_by=["strings"],
+            sample_strings=[SampleString(identifier="$s0", offset=3)],
+        )
+
+        assert "(1 of 1 published strings found), not its hash alone" in precision_line(rule)
 
     @pytest.mark.parametrize(
         ("check", "reason"),
@@ -176,8 +190,26 @@ class TestOnlyAContentMatchPrintsItsBody:
 
         assert BODY in full
 
+    def test_the_stored_values_the_draft_leaves_out_are_counted_on_its_line(self) -> None:
+        report = _report(_yara(**HASH_ONLY))
+        report.code_constants = _seeds(SEED) + _hashes(*_many(15))
+        line = _rule_line(_analyst(report), "YARA")
 
-def _decoder(*seeds: str, entry: str = "ev_0021", **args: Any) -> LedgerEntry:
+        assert line.endswith(
+            " 3 stored values the run read are left out of the draft; the report's JSON lists "
+            "every one."
+        )
+        report.code_constants = _hashes(*HASHES)
+        assert _rule_line(_analyst(report), "YARA").endswith(
+            f" 3 stored values the run read are left out of the draft ({NO_STORED_GROUP_NO_SEED})"
+            "; the report's JSON lists every one."
+        )
+
+
+ALGORITHM = "crc32_ascii"
+
+
+def _decoder(*seeds: Any, entry: str = "ev_0021", **args: Any) -> LedgerEntry:
     rows = [
         {
             "text": f"text {n}",
@@ -196,11 +228,20 @@ def _decoder(*seeds: str, entry: str = "ev_0021", **args: Any) -> LedgerEntry:
     )
 
 
-def _resolver(*values: str, names: tuple[str, ...] = (), entry: str = "ev_0020") -> LedgerEntry:
+def _resolver(
+    *values: str,
+    names: tuple[str, ...] = ("InternetOpenW",),
+    algorithms: tuple[str, ...] | None = None,
+    entry: str = "ev_0020",
+) -> LedgerEntry:
     hits = [
         {
             "value": value,
-            "readings": [{"set": "exports", "name": name} for name in names] or [],
+            "readings": [
+                {"set": "exports", "name": name, "algorithm": algorithm}
+                for name in names
+                for algorithm in ([algorithms[n]] if algorithms else [ALGORITHM])
+            ],
             "occurrences": [{"offset": hex(0x8400 + 0x20 * n), "section": ".text"}],
         }
         for n, value in enumerate(values)
@@ -220,11 +261,12 @@ def _resolver(*values: str, names: tuple[str, ...] = (), entry: str = "ev_0020")
 
 class TestTheStoredValuesAreReadByTheAnswersKind:
     def test_a_seed_is_read_once_with_its_count_then_each_hash(self) -> None:
-        constants = code_constants_from_ledger(
-            [_resolver(*HASHES, names=("InternetOpenW",)), _decoder(SEED, SEED, SEED)]
-        )
+        constants = code_constants_from_ledger([_resolver(*HASHES), _decoder(SEED, SEED, SEED)])
 
-        assert [c.value for c in constants] == [SEED, *HASHES]
+        assert [(c.value, c.role) for c in constants] == [
+            (SEED, "seed"),
+            *((value, "hash") for value in HASHES),
+        ]
         seed = constants[0]
         assert (seed.entry, seed.places, seed.first_offset) == ("ev_0021", 3, "0xce00")
         assert seed.meaning == (
@@ -232,24 +274,62 @@ class TestTheStoredValuesAreReadByTheAnswersKind:
         )
         assert constants[1].meaning == "a function-name hash (InternetOpenW)"
 
-    def test_a_lone_hit_a_carved_file_a_failed_call_and_a_plain_value_are_not_read(
-        self,
-    ) -> None:
+    def test_a_carved_file_a_failed_call_and_a_plain_value_are_not_read(self) -> None:
         failed = _decoder("0x5a17c0de", entry="ev_0030").model_copy(update={"ok": False})
         constants = code_constants_from_ledger(
             [
                 _decoder("0x11223344", entry="ev_0031", carved_path="carved/0.bin"),
                 failed,
                 _decoder("0x00001234", "0x01000100", "0x0000ffff", entry="ev_0032"),
-                _resolver("0x2ec21d6c"),
+                _resolver(*HASHES[:2]),
             ]
         )
 
-        assert [c.value for c in constants] == ["0x2ec21d6c"]
+        assert [c.value for c in constants] == list(HASHES[:2])
+
+    def test_a_hash_its_algorithm_resolves_alone_in_the_answer_is_not_read(self) -> None:
+        # Asked about given values, the resolver lists no lone hits of its own:
+        # a value is read only when one of its algorithms resolves another.
+        alone = code_constants_from_ledger(
+            [_resolver(*HASHES, algorithms=("crc32_ascii", "ror13", "djb2"))]
+        )
+        paired = code_constants_from_ledger(
+            [_resolver(*HASHES, algorithms=("crc32_ascii", "ror13", "crc32_ascii"))]
+        )
+
+        assert alone == []
+        assert [c.value for c in paired] == [HASHES[0], HASHES[2]]
+
+    def test_a_value_is_read_as_an_int_as_hexadecimal_or_as_decimal(self) -> None:
+        constants = code_constants_from_ledger(
+            [_decoder(0x33629D40, entry="ev_0021"), _decoder("0x5a17c0de", entry="ev_0022")]
+            + [_decoder(str(0x7B3D1E2F), entry="ev_0023"), _decoder("deadbeef", entry="ev_0024")]
+        )
+
+        assert [c.value for c in constants] == [SEED, "0x5a17c0de", "0x7b3d1e2f"]
+
+    def test_the_declared_pointers_are_read_where_a_declaration_points_them(self) -> None:
+        entry = LedgerEntry(
+            id="ev_0040",
+            agent="static",
+            tool="unpack_strings",
+            source="mcp:foreign",
+            args={"path": "sample.exe"},
+            facts={
+                "v": 1,
+                "kind": "decoded_strings",
+                "rows": "/found/*",
+                "values": {"text": "/plain", "seed": "/header/key"},
+                "arguments": {"path": "path"},
+            },
+            structured={"found": [{"plain": "x", "header": {"key": "0x5a17c0de"}}]},
+        )
+
+        assert [c.value for c in code_constants_from_ledger([entry])] == ["0x5a17c0de"]
 
     def test_a_hostile_name_is_one_clean_capped_line(self) -> None:
         name = "Evil`|name\n**x**" + "A" * 200
-        (constant,) = code_constants_from_ledger([_resolver(HASHES[0], names=(name,))])
+        constant = code_constants_from_ledger([_resolver(*HASHES[:2], names=(name,))])[0]
 
         assert "\n" not in constant.meaning and "`" not in constant.meaning
         assert "|" not in constant.meaning and "*" not in constant.meaning
@@ -260,8 +340,16 @@ class TestTheStoredValuesAreReadByTheAnswersKind:
         assert little_endian("not a number") is None
 
 
-def _constants(*values: str) -> list[CodeConstant]:
-    return [CodeConstant(value=value, meaning="m", entry="ev_0021") for value in values]
+def _seeds(*values: str) -> list[CodeConstant]:
+    return [CodeConstant(value=v, role="seed", meaning="m", entry="ev_0021") for v in values]
+
+
+def _hashes(*values: str) -> list[CodeConstant]:
+    return [CodeConstant(value=v, role="hash", meaning="h", entry="ev_0020") for v in values]
+
+
+def _many(count: int) -> list[str]:
+    return [f"{0x10203040 + n * 0x01010101:#010x}" for n in range(count)]
 
 
 def _sample(tmp_path: Path, blob: bytes) -> OwnSample:
@@ -275,35 +363,48 @@ def _drafted_yara(report: MalwareReport, sample: OwnSample | None) -> DetectionR
 
 
 class TestTheDraftMatchesTheStoredValues:
-    def test_each_value_is_declared_as_its_bytes_in_a_group_of_its_own(self) -> None:
+    def test_the_seed_and_the_hashes_are_one_group_every_seed_with_the_hashes(self) -> None:
         report = _report()
-        report.code_constants = _constants(SEED, *HASHES)
+        report.code_constants = _seeds(SEED) + _hashes(*HASHES)
         rule = _drafted_yara(report, None)
 
-        assert "$c0 = { 40 9d 62 33 }  // 0x33629d40: m; ev_0021" in rule.body
-        assert "or ((2 of ($s*)) or (3 of ($c*)))\n" in rule.body
+        assert "$d0 = { 40 9d 62 33 }  // 0x33629d40: m; ev_0021" in rule.body
+        assert "$h2 = { 6b 08 7d 44 }  // 0x447d086b: h; ev_0020" in rule.body
+        assert "or ((2 of ($s*)) or (all of ($d*) and all of ($h*)))\n" in rule.body
         assert "constant:0x33629d40:ev_0021" in rule.source_evidence
 
-    def test_one_value_alone_makes_no_group_and_a_draft_without_any_reads_as_before(
-        self,
+    @pytest.mark.parametrize(
+        ("constants", "why"),
+        [
+            (_hashes(*HASHES), NO_STORED_GROUP_NO_SEED),
+            (_seeds(SEED) + _hashes(HASHES[0]), NO_STORED_GROUP_FEW_HASHES),
+        ],
+        ids=["hashes-without-a-seed", "a-seed-with-one-hash"],
+    )
+    def test_without_a_seed_and_two_hashes_no_group_is_drafted_and_the_draft_says_so(
+        self, constants: list[CodeConstant], why: str
     ) -> None:
-        bare = _report()
-        alone = _report()
-        alone.code_constants = _constants(SEED)
+        bare = _drafted_yara(_report(), None).body
+        report = _report()
+        report.code_constants = constants
+        body = _drafted_yara(report, None).body
 
-        assert _drafted_yara(alone, None).body == _drafted_yara(bare, None).body
-        assert "$c" not in _drafted_yara(bare, None).body
+        assert "$d" not in body and "$h" not in body
+        rest = len(constants)
+        assert body == bare + (
+            f"\n// {rest} stored values the run read are not in this draft ({why}); the "
+            "report's JSON (code_constants) carries every one."
+        )
 
     def test_values_past_the_draft_s_room_are_said_to_be_left_out(self) -> None:
         report = _report()
-        report.code_constants = _constants(
-            *(f"{0x10203040 + n * 0x01010101:#010x}" for n in range(15))
-        )
+        report.code_constants = _seeds(SEED) + _hashes(*_many(15))
         body = _drafted_yara(report, None).body
 
-        assert "$c11 = " in body and "$c12 = " not in body
+        assert "$h11 = " in body and "$h12 = " not in body
+        assert "(all of ($d*) and 6 of ($h*))" in body
         assert body.rstrip().endswith(
-            "// 3 more stored values the run read are not in this draft; the report's JSON "
+            "// 3 stored values the run read are not in this draft; the report's JSON "
             "(code_constants) carries every one."
         )
 
@@ -312,35 +413,58 @@ class TestTheDraftMatchesTheStoredValues:
         self, tmp_path: Path
     ) -> None:
         # The published names are nowhere in the bytes; the seed and the hashes are.
-        values = (SEED, *HASHES)
-        blob = b"\x90" * 32 + b"".join(little_endian(v) + b"\xcc" * 9 for v in values)
+        blob = b"\x90" * 32 + b"".join(little_endian(v) + b"\xcc" * 9 for v in (SEED, *HASHES))
         report = _report()
         report.identity.hashes.sha256 = hashlib.sha256(blob).hexdigest()
-        report.code_constants = _constants(*values)
+        report.code_constants = _seeds(SEED) + _hashes(*HASHES)
         report.detection_signatures = [_drafted_yara(report, _sample(tmp_path, blob))]
         (rule,) = report.detection_signatures
 
         assert rule.matched_by == ["sha256", "strings"]
         assert analyst_print_gate(rule) is None
         found = {s.identifier for s in rule.sample_strings or [] if s.offset is not None}
-        assert found == {"$c0", "$c1", "$c2", "$c3"}
+        assert found == {"$d0", "$h0", "$h1", "$h2"}
         analyst = _analyst(report)
         assert rule.body.rstrip() in analyst
-        assert "Precision: its strings match the sample it was drafted from (4 of " in analyst
+        assert "(0 of 2 published strings, 4 of 4 stored values found)" in analyst
+
+    @needs_engine
+    def test_a_file_holding_the_hashes_without_the_seed_does_not_match(
+        self, tmp_path: Path
+    ) -> None:
+        # Any program resolving the same functions by the same public algorithm
+        # holds the hashes; without the seed they are no match by content.
+        blob = b"\x90" * 32 + b"".join(little_endian(v) + b"\xcc" * 9 for v in HASHES)
+        report = _report()
+        report.identity.hashes.sha256 = hashlib.sha256(blob).hexdigest()
+        report.code_constants = _seeds(SEED) + _hashes(*HASHES)
+        rule = _drafted_yara(report, _sample(tmp_path, blob))
+
+        assert rule.matched_by == ["sha256"]
+        assert analyst_print_gate(rule) == NOT_PRINTED_HASH_ONLY.format(clauses="sha256")
 
     @needs_engine
     def test_the_probe_answers_as_the_draft_does_over_both_groups(self, tmp_path: Path) -> None:
+        import yara
+
         rng = random.Random(11)
         names = ("gate9.example.org", "relay4.example.net", "Global\\MtxQ7")
-        values = (SEED, *HASHES, "0x8a749fa7")
+        seeds = (SEED, "0x5a17c0de")
+        hashes = (*HASHES, "0x8a749fa7", "0xe5191d24")
         path = tmp_path / "sample.bin"
-        for trial in range(120):
+        for trial in range(160):
             strings = [(f"$s{n}", v) for n, v in enumerate(rng.sample(names, rng.randint(0, 3)))]
-            stored = rng.sample(values, rng.randint(2, 5))
-            raws = [(f"$c{n}", little_endian(v) or b"") for n, v in enumerate(stored)]
+            on_seeds = [
+                (f"$d{n}", little_endian(v) or b"")
+                for n, v in enumerate(rng.sample(seeds, rng.randint(1, 2)))
+            ]
+            on_hashes = [
+                (f"$h{n}", little_endian(v) or b"")
+                for n, v in enumerate(rng.sample(hashes, rng.randint(2, 5)))
+            ]
             chunks = [rng.randbytes(rng.randint(0, 24))]
-            for _slot, raw in raws:
-                if rng.random() < 0.6:
+            for _slot, raw in [*on_seeds, *on_hashes]:
+                if rng.random() < 0.75:
                     chunks.extend([raw, rng.randbytes(rng.randint(0, 8))])
             for _slot, text in strings:
                 if rng.random() < 0.6:
@@ -355,17 +479,69 @@ class TestTheDraftMatchesTheStoredValues:
                 family="loader",
                 verdict="Malware",
                 generated_at_iso="2000-01-01T00:00:00+00:00",
-                constants=raws,
+                seeds=on_seeds,
+                hashes=on_hashes,
             )
-            slots = [slot for slot, _v in strings] + [slot for slot, _r in raws]
+            slots = [slot for slot, _v in [*strings, *on_seeds, *on_hashes]]
             check = drafts._run_on_sample(
                 rendered, slots, OwnSample(path=str(path), budget_seconds=BUDGET)
             )
-            import yara
-
             whole = yara.compile(source=rendered.draft, includes=False).match(data=blob)
-            assert check.matches is bool(whole), (trial, strings, stored, blob)
+            assert check.matches is bool(whole), (trial, strings, blob)
             assert check.matched_by == (["strings"] if whole else []), trial
+
+
+class TestABoundValueSaysWhereTheCodeLoadsIt:
+    MUTEX = "runnung"
+    CONTEXT = "argument 3 (lpName) of CreateMutexW at 0x3962"
+
+    def _report(self) -> MalwareReport:
+        report = _report(_yara(**HASH_ONLY))
+        report.overall_confidence = 0.9
+        report.bound_values = [
+            BoundValue(
+                value=self.MUTEX,
+                kind="mutex",
+                role="mutex_name",
+                role_words="the name of the mutex the call creates or opens",
+                api="CreateMutexW",
+                argument=3,
+                parameter="lpName",
+                entry="ev_0021",
+                tool="decode_string_blobs",
+                offset="0xd800",
+                site="0x3935",
+                function="0x3868",
+                decoder_call="0x3939",
+                call_at="0x3962",
+                slot="0x10c60",
+                named_by="ev_0025",
+                fall_through=True,
+            )
+        ]
+        report.consolidated_iocs = build_consolidated_iocs(report)
+        return report
+
+    def test_its_cell_adds_only_what_its_context_does_not_say(self) -> None:
+        analyst = _analyst(self._report())
+        row = next(line for line in analyst.splitlines() if f"`{self.MUTEX}`" in line)
+        cell = row.split(" | ")[2]
+
+        assert re.fullmatch(
+            re.escape(
+                f"{self.CONTEXT}; decoded from the blob at file offset 0xd800, loaded at 0x3935 "
+                "in the function at 0x3868 and given to the routine called at 0x3939, the call "
+                "made through the slot 0x10c60"
+            )
+            + r"\[\[\d+\]\]\(evidence-bundle\.html#cite-\d+\) \|",
+            cell,
+        ), cell
+        assert "the frame slot" not in row and "CreateMutexW as argument" not in row
+
+    def test_a_row_bound_to_no_call_reads_as_before(self) -> None:
+        analyst = _analyst(self._report())
+
+        assert "| Domain | `gate9[.]example[.]org` | - |" in analyst.splitlines()
 
 
 class TestTheHuntingQuery:
@@ -403,6 +579,11 @@ class TestTheHuntingQuery:
         assert any(line.startswith("url_path = ") for line in query)
         assert all("\n" not in line for line in query)
         assert '\\"' in query[0] and "\\\\" in query[0]
+
+    def test_a_format_or_separator_character_is_dropped(self) -> None:
+        quoted = drafts._hunt_quoted("/li‮ve‍/x y z")
+
+        assert quoted == '"/live/xyz"'
 
     def test_a_run_that_drafted_no_rule_asks_nothing(self) -> None:
         assert hunting_query(_report()) is None

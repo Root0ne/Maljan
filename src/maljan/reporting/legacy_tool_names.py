@@ -192,6 +192,9 @@ TECHNIQUE_HIT_TOOLS = ("capa",)
 # ``call_bindings``: the static decoder and the function index whose slot
 # names bind a decoded text to an API argument.
 CALL_BINDING_TOOLS = (DECODER_TOOL, "function_index")
+# ``code_constants``: the static decoder, whose seeds, and the hash resolver,
+# whose hashes, a drafted YARA rule matches the sample's bytes on.
+CODE_CONSTANT_TOOLS = (DECODER_TOOL, "resolve_api_hashes")
 # A recovery recorded with no kind (a record stored before kinds were) is read
 # by the tool it names: the tool each recovering kind's stored records name,
 # and the word a partial reason names each kind's entries by.
@@ -258,6 +261,7 @@ TABLES: dict[str, Callable[[str], bool]] = {
     ),
     "stix_renderer.DECODER_TOOL": _names((DECODER_TOOL,)),
     "call_bindings": _names(CALL_BINDING_TOOLS),
+    "code_constants": _names(CODE_CONSTANT_TOOLS),
     "stix_renderer._STRING_SWEEP_TOOLS": _names(STRING_SWEEP_TOOLS),
     "figures.code_listing": _names((CODE_LISTING_TOOL,)),
     "ledger_projection.technique_hits": _names(TECHNIQUE_HIT_TOOLS),

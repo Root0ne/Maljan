@@ -325,14 +325,20 @@ _DECODED_STRINGS: dict[str, Any] = {
     "kind": "decoded_strings",
     "rows": "/results/*",
     "places": {"rva": "/rva"},
-    "values": {"text": "/text"},
+    # ``seed``: the seed a seed-and-length header stores in front of the text.
+    "values": {"text": "/text", "seed": "/parameters/seed"},
     "arguments": _PATH,
 }
 _API_HASHES: dict[str, Any] = {
     "kind": "api_hash_resolution",
     "rows": "/hits/*",
     "places": {"rva": "/occurrences/*/rva"},
-    "values": {"name": "/readings/*/name"},
+    # ``value``: the stored value itself; ``algorithm``: the hash of each reading.
+    "values": {
+        "name": "/readings/*/name",
+        "value": "/value",
+        "algorithm": "/readings/*/algorithm",
+    },
     "arguments": _PATH,
 }
 
@@ -635,6 +641,8 @@ CONSUMER_KINDS: dict[str, dict[str, Any]] = {
     },
     "stix_renderer.DECODER_TOOL": {"kinds": ["decoded_strings"]},
     "call_bindings": {"kinds": ["decoded_strings", "function_index"]},
+    # The answers whose stored values a drafted YARA rule matches on.
+    "code_constants": {"kinds": ["decoded_strings", "api_hash_resolution"]},
     "stix_renderer._STRING_SWEEP_TOOLS": {"kinds": ["strings", "file_iocs", "text_iocs"]},
     "figures.code_listing": {"kinds": ["decompile"]},
     "ledger_projection.technique_hits": {"kinds": ["capability_rules"]},
