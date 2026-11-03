@@ -3,7 +3,8 @@
 Where a model keeps its turns as received, the salvage re-sends the loop's
 history with the loop's tools withheld, so the tool definitions go with the
 request outside the messages the trim measures; they come off the room. Where
-the turns are rebuilt, the request goes without tools and nothing comes off.
+the turns are rebuilt, the request goes without tools and they do not. The
+question the salvage asks after the turns comes off either way.
 Either way the salvage's row on the loop record names the room, how it was
 derived, what the trim dropped and how the call ended — the judge's as well as
 the analysts'.
@@ -20,13 +21,21 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 import maljan.agents.judge_agent as judge_agent
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.judge_agent import JudgeAgent
+from maljan.agents.base_agent import _SYNTHESIS_DIRECTIVE, BaseAnalyst, _citable_sentence
+from maljan.agents.judge_agent import MEDIATION_SALVAGE_QUESTION, JudgeAgent
 from maljan.core.spend import SpendCeilingStop
 
 ROOM = 40_000
 DEFINITIONS = 7_000
 HOW = f"{ROOM} characters — pinned"
+# What each salvage asks after the turns: the analysts' directive with its
+# sentence on the ids (the conversations here carry none), and the judge's question.
+DIRECTIVE = len(_SYNTHESIS_DIRECTIVE) + len(_citable_sentence([]))
+QUESTION = len(MEDIATION_SALVAGE_QUESTION)
+
+
+def _less(chars: int) -> str:
+    return f"{HOW}, less {chars} characters sent beside the turns"
 
 
 class _KeepsTurns:
@@ -92,16 +101,14 @@ class TestTheAnalystSalvage:
     def test_kept_turns_take_the_definitions_off_the_room(self) -> None:
         salvage = _analyst_salvage(_KeepsTurns())
 
-        assert salvage["budget_chars"] == ROOM - DEFINITIONS
-        assert salvage["window_budget"] == (
-            f"{HOW}, less {DEFINITIONS} characters sent beside the turns"
-        )
+        assert salvage["budget_chars"] == ROOM - DEFINITIONS - DIRECTIVE
+        assert salvage["window_budget"] == _less(DEFINITIONS + DIRECTIVE)
 
     def test_rebuilt_turns_take_nothing_off(self) -> None:
         salvage = _analyst_salvage(_RebuildsTurns())
 
-        assert salvage["budget_chars"] == ROOM
-        assert salvage["window_budget"] == HOW
+        assert salvage["budget_chars"] == ROOM - DIRECTIVE
+        assert salvage["window_budget"] == _less(DIRECTIVE)
 
 
 def _judge_salvage(
@@ -124,8 +131,8 @@ class TestTheJudgeSalvage:
         row = judge._salvage_row
         assert said == "CONTRADICTIONS: NONE"
         assert row is not None and row["outcome"] == "answered"
-        assert row["budget_chars"] == ROOM - DEFINITIONS
-        assert row["window_budget"] == f"{HOW}, less {DEFINITIONS} characters sent beside the turns"
+        assert row["budget_chars"] == ROOM - DEFINITIONS - QUESTION
+        assert row["window_budget"] == _less(DEFINITIONS + QUESTION)
         assert "messages_dropped" not in row
 
     def test_rebuilt_turns_take_nothing_off(self) -> None:
@@ -133,8 +140,8 @@ class TestTheJudgeSalvage:
 
         row = judge._salvage_row
         assert row is not None
-        assert row["budget_chars"] == ROOM
-        assert row["window_budget"] == HOW
+        assert row["budget_chars"] == ROOM - QUESTION
+        assert row["window_budget"] == _less(QUESTION)
 
     def test_a_cut_is_counted_and_said(self, caplog: pytest.LogCaptureFixture) -> None:
         msgs = _conversation(8, 9_000)
@@ -144,11 +151,11 @@ class TestTheJudgeSalvage:
 
         row = judge._salvage_row
         assert row is not None
-        assert row["sent_chars"] <= ROOM < row["conversation_chars"]
+        assert row["sent_chars"] <= ROOM - QUESTION < row["conversation_chars"]
         assert row["messages_dropped"] >= 2
         assert (
             f"JudgeAgent reasoning salvage: trimmed {row['messages_dropped']} of {len(msgs)} "
-            f"messages to fit {ROOM} chars."
+            f"messages to fit {ROOM - QUESTION} chars."
         ) in caplog.text
 
     def test_a_call_the_spend_ceiling_refuses_is_not_sent(self) -> None:

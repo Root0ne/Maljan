@@ -417,10 +417,10 @@ class TestTheSalvageIsSizedFromTheCountedWindow:
         refused = synthesis_budget_chars(cfg, "static", counted_window_tokens(budget), refused=True)
 
         assert declared_only > budget.tool_budget_chars(), "the stale declaration overshoots"
-        # The loop's own room, from the same window, reserve and ratio; after
-        # the server refused the conversation, less the quarter of the window
-        # kept for what the character measure got wrong.
-        assert counted == budget.tool_budget_chars()
+        # The loop's own room, from the same window, reserve and ratio, less an
+        # eighth of the window for what the character measure gets wrong, and a
+        # quarter after the server refused the conversation.
+        assert counted == budget.tool_budget_chars() - cw.chars_for_tokens(WINDOW // 8)
         assert refused == budget.tool_budget_chars() - cw.chars_for_tokens(WINDOW // 4)
 
     def test_a_budget_that_derives_nothing_leaves_the_declaration_in_charge(self) -> None:

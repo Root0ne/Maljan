@@ -3346,11 +3346,11 @@ class JudgeAgent(BudgetMeter):
         # unparsed call as not run.
         keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
         sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
-        # The loop's tool definitions go with kept turns, outside what the trim measures.
+        # The loop's tool definitions go with kept turns, and the question after
+        # them, outside what the trim measures.
         room, room_how = synthesis_budget(settings, "judge", window_tokens, refused=refused)
-        beside = self._definitions_sent() if keeps_turns else 0
-        if beside:
-            room_how += f", less {beside} characters sent beside the turns"
+        beside = (self._definitions_sent() if keeps_turns else 0) + len(MEDIATION_SALVAGE_QUESTION)
+        room_how += f", less {beside} characters sent beside the turns"
         fits = max(0, room - beside)
         trimmed = _trim_for_synthesis(sendable, fits)
         dropped = len(sendable) - len(trimmed)

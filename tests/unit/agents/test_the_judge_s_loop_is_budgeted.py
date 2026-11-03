@@ -262,7 +262,11 @@ class TestAGenuineOverflowAfterGathering:
         # The salvage is on the loop's record: what it was sized to and how.
         salvage = records[-1]["salvage"]
         assert salvage["outcome"] == "answered"
-        assert salvage["budget_chars"] == (WINDOW - REPLY - WINDOW // 4) * cw.CHARS_PER_TOKEN
+        from maljan.agents.judge_agent import MEDIATION_SALVAGE_QUESTION
+
+        assert salvage["budget_chars"] == (
+            (WINDOW - REPLY - WINDOW // 4) * cw.CHARS_PER_TOKEN - len(MEDIATION_SALVAGE_QUESTION)
+        )
         assert f"the {WINDOW}-token window less {REPLY} tokens" in salvage["window_budget"]
         assert salvage["sent_chars"] <= salvage["budget_chars"]
         ended = [d for kind, d in judge._container.events if kind == "stage_ended_at_cap"]

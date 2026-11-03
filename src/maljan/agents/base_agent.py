@@ -308,6 +308,13 @@ def _model_context_tokens(cfg: Any, agent_name: str) -> int:
         return 0
 
 
+def _citable_sentence(visible: list[str]) -> str:
+    """What the salvage's directive says of the evidence ids still in front of the model."""
+    if not visible:
+        return "Cite only evidence ids that appear above."
+    return "The evidence still in front of you is " + ", ".join(visible) + ". Cite only these ids."
+
+
 def synthesis_budget_chars(
     cfg: Any, agent_name: str, window_tokens: int = 0, *, refused: bool = False
 ) -> int:
@@ -343,10 +350,12 @@ def synthesis_budget(
     the server has just shown that this conversation tokenises denser than
     its characters say, and a trimmed one re-sent at the same measure would
     be refused again. A loop a step, time or repeat cap ended was sending a
-    conversation the server had just accepted, and its salvage keeps no such
-    margin. The tool definitions a salvage
-    sends beside the turns are its caller's to take off, as the loop's own
-    measure charges them. No window to derive from is the floor, and the
+    conversation the server had just accepted, and its salvage keeps an eighth
+    of the window: the tool answers appended after the server's last count
+    were never counted, and a dense tail among them (hex, base64) tokenises
+    well under the measure's ratio. The tool definitions and the question a
+    salvage sends beside the turns are its caller's to take off, as the loop's
+    own measure charges them. No window to derive from is the floor, and the
     floor is stated as such; a known window too small for the floor holds it
     to the window's room before the reply.
     """
@@ -367,17 +376,13 @@ def synthesis_budget(
     reply = reply_reserve_tokens(tokens, generation_reserve(cfg))
     quarter = tokens // REPLY_RESERVE_DIVISOR
     kept = max(reply, quarter)
-    margin = quarter if refused else 0
+    margin = quarter if refused else tokens // (2 * REPLY_RESERVE_DIVISOR)
     derived = chars_for_tokens(max(0, tokens - kept - margin))
     capped = f" (the {reply}-token generation cap does not shrink it)" if reply < kept else ""
-    error = (
-        f" and {margin} for the measure's error, the server having refused the conversation "
-        "as over the window"
-        if refused
-        else ", the server having accepted the conversation"
-    )
+    server = "refused the conversation as over the window" if refused else "accepted it"
     how = (
-        f"the {tokens}-token window less {kept} tokens of reply room{capped}{error}, "
+        f"the {tokens}-token window less {kept} tokens of reply room{capped} and {margin} "
+        f"for the measure's error, the server having {server}, "
         f"at {CHARS_PER_TOKEN} characters a token"
     )
     floor = min(_SYNTHESIS_MIN_CHARS, chars_for_tokens(max(0, tokens - kept)))
@@ -8403,19 +8408,26 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The same transcript rule the nudge follows: a tool call whose
         # arguments never parsed is not sent back to the server.
         keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
-        # The earlier run-state blocks go out with the kept turns, and so do the
-        # loop's tool definitions where the turns are kept whole, both outside
-        # the messages the trim measures, so the window holds them first.
+        sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
+        # The earlier run-state blocks go out with the kept turns, the loop's
+        # tool definitions where the turns are kept whole, and the directive
+        # after them, all outside the messages the trim measures, so the window
+        # holds them first. The directive names the ids the trim leaves, so it
+        # is charged at the ids of the whole conversation, which it never exceeds.
         room, room_how = synthesis_budget(
             get_settings(),
             self.name,
             counted_window_tokens(self._context_budget()),
             refused=refused,
         )
-        beside = self._replayed_run_state_chars() + (self._definitions_sent() if keeps_turns else 0)
+        beside = (
+            self._replayed_run_state_chars()
+            + (self._definitions_sent() if keeps_turns else 0)
+            + len(_SYNTHESIS_DIRECTIVE)
+            + len(_citable_sentence(ledger_ids_in(sendable)))
+        )
         window_budget = max(0, room - beside)
-        if beside:
-            room_how += f", less {beside} characters sent beside the turns"
+        room_how += f", less {beside} characters sent beside the turns"
         # What the time left can hold at this model's measured pace, when both
         # of its rates are known; the window's bound applies either way.
         paced = (
@@ -8429,7 +8441,6 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
         )
         budget = window_budget if paced is None else min(window_budget, paced)
-        sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
         conversation = _chars_of(sendable)
         framing = _chars_of(_framing_of(sendable))
         rates = self._rates_sentence(generation_rate, prompt_rate)
@@ -8468,11 +8479,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # not be any more, and an analyst citing one it can no longer read is
         # how "referenced but not displayed" got into a report.
         visible = ledger_ids_in(trimmed)
-        citable = (
-            "The evidence still in front of you is " + ", ".join(visible) + ". Cite only these ids."
-            if visible
-            else "Cite only evidence ids that appear above."
-        )
+        citable = _citable_sentence(visible)
         directive = HumanMessage(content=_SYNTHESIS_DIRECTIVE + citable)
         record = {
             "seconds_left": remaining,
