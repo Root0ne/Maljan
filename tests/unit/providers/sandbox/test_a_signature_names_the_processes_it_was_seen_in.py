@@ -19,6 +19,7 @@ from maljan.reporting.dedupe import distinct_signatures
 from maljan.reporting.ledger_projection import dynamic_from_ledger
 from maljan.reporting.ledger_report import SIGNATURE_PROCESSES_COLUMN, build_sections
 from maljan.reporting.models import SandboxSignature
+from maljan.reporting.narrative_agent import build_prompt_text
 from maljan.reporting.renderers.markdown import MarkdownRenderer
 from maljan.schemas.evidence import EvidenceCounter
 from maljan.schemas.sandbox_document import pid_of, sandbox_document, signature_pids
@@ -227,3 +228,11 @@ class TestTheDedupe:
         report.dynamic.sandbox_signatures = [one, one.model_copy(update={"pids": ["9"]})]
         table = MarkdownRenderer().render(report).split("### Sandbox signatures", 1)[1]
         assert table.split("\n\n", 2)[1].count("| inject |") == 1
+
+    def test_the_narrative_prompt_gives_rows_differing_only_in_pids_one_line(self) -> None:
+        report = rich_report()
+        assert report.dynamic is not None
+        one = SandboxSignature(name="inject", description="d", severity=3, pids=["4"])
+        report.dynamic.sandbox_signatures = [one, one.model_copy(update={"pids": ["9"]})]
+        block = build_prompt_text(report).split("Sandbox signatures:\n", 1)[1].split("\n\n", 1)[0]
+        assert block.splitlines() == ['  - "inject" (severity 3, ATT&CK=-)']
