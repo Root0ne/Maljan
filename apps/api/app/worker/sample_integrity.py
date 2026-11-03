@@ -138,16 +138,18 @@ class SampleIntegrity:
 def sandbox_target_of(container: Any) -> dict[str, Any] | None:
     """The record of the job's sandbox report naming another target, ``None`` otherwise.
 
-    Read off what ``app._submit_to_sandbox`` kept of the live report the
-    provider's reader filled (``container.sandbox_target_claim``), whichever
-    sandbox it was, against the hash the job ran the sample under. An attached
-    report is checked at its upload instead, and a stand-in or a recorded
-    fixture ran nothing during the run: neither keeps a claim. A report that
-    names no target hash, or the sample's, is no record. Never raises.
+    Read off what ``app._submit_to_sandbox`` kept of the report the provider's
+    reader filled, live (``container.sandbox_target_claim``) or attached
+    (``container.attached_target_claim``), whichever sandbox it was, against
+    the hash the job ran the sample under. A stand-in or a recorded fixture
+    ran nothing during the run and keeps no claim. A report that names no
+    target hash, or the sample's, is no record. Never raises.
     """
     from maljan.analysis.sample_integrity import sandbox_target_record
 
-    claim = getattr(container, "sandbox_target_claim", None)
+    claim = getattr(container, "sandbox_target_claim", None) or getattr(
+        container, "attached_target_claim", None
+    )
     if not isinstance(claim, Mapping):
         return None
     record = sandbox_target_record(

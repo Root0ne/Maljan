@@ -694,6 +694,11 @@ class ServiceContainer:
         # attached report, a stand-in, a recorded fixture, a task that ended
         # without a report, or no sandbox.
         self.sandbox_target_claim: dict[str, str] | None = None
+        # The same, for an attached report: the target its reader put in the
+        # neutral report, set by ``app._submit_to_sandbox``: told to the
+        # analysts and the judge (``app._tell_the_target``) and recorded by the
+        # worker as a live one's is (``sandbox_target_of``). ``None`` otherwise.
+        self.attached_target_claim: dict[str, str] | None = None
         # Each submission of the sample to the job's sandbox provider
         # (``analysis.disclosure.upload_record``), set by ``app.arun`` as it
         # submits and read by the run's disclosure block. Empty outside a job.

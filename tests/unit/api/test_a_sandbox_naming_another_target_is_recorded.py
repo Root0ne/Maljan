@@ -241,9 +241,20 @@ class TestEachProviderShape:
         assert container.sandbox_target_claim is None
         assert sandbox_target_of(container) is None
 
-    def test_an_attached_report_keeps_no_claim(self, tmp_path: Path) -> None:
+    def test_an_attached_report_is_recorded_as_a_live_one_is(self, tmp_path: Path) -> None:
         container = _container_after(_Uploaded("upload", "cape2", _cape(OTHER)), tmp_path)
         assert container.sandbox_target_claim is None
+        record = sandbox_target_of(container)
+        assert record is not None
+        assert record["sandbox_sha256"] == OTHER
+        assert record["expected_sha256"] == INTAKE
+        assert record["provider"] == "upload"
+
+    @pytest.mark.parametrize("target", [INTAKE, INTAKE.upper(), ""])
+    def test_an_attached_report_naming_the_sample_or_none_is_no_record(
+        self, tmp_path: Path, target: str
+    ) -> None:
+        container = _container_after(_Uploaded("upload", "cape2", _cape(target)), tmp_path)
         assert sandbox_target_of(container) is None
 
     def test_a_job_without_a_sandbox_keeps_no_claim(self) -> None:
@@ -325,6 +336,30 @@ class TestTheStoredRun:
         markdown = _markdown(state)
         assert f"names its target SHA-256 as `{OTHER}`, not the sample's intake" in markdown
         assert "The report of the sandbox `cape2` (task `7`)" in markdown
+
+    def test_an_attached_report_is_the_same_run_fact_beside_the_upload_s_reason(
+        self, tmp_path: Path
+    ) -> None:
+        container = _container_after(_Uploaded("upload", "cape2", _cape(OTHER)), tmp_path)
+        record = sandbox_target_of(container)
+        assert record is not None
+        reason = "uploaded sandbox report's target hash differs from the sample"
+        state = _state()
+        _, summary = _report_inputs(
+            state,
+            core_settings=Settings(_env_file=None),
+            override_keys=(),
+            hash_mismatch_reason=reason,
+            sandbox_target=record,
+        )
+
+        assert summary[SANDBOX_KEY] == record
+        assert summary["disclosure"]["isolation"][SANDBOX_KEY] == record
+        assert reason in summary["degradation_reasons"]
+        markdown = _markdown(state)
+        assert f"names its target SHA-256 as `{OTHER}`, not the sample's intake" in markdown
+        assert f"`{INTAKE}`" in markdown
+        assert "The report of the sandbox `upload`" in markdown
 
     @pytest.mark.parametrize("claimed", [INTAKE, INTAKE.upper(), ""])
     def test_the_samples_hash_or_none_stores_and_renders_as_before(self, claimed: str) -> None:

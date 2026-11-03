@@ -159,7 +159,7 @@ CONTAINERS: frozenset[Path] = frozenset(
 # keys, written by the readers and the providers, never by a sandbox.
 SYNTHETIC_KEY = "synthetic"
 FIXTURE_KEY = "recorded_fixture"
-# The mark the run sets on a live report whose sandbox names a target SHA-256
+# The mark the run sets on a live or attached report whose sandbox names a target SHA-256
 # that is not the sample's intake SHA-256: the two hashes, as
 # ``analysis.sample_integrity.sandbox_target_record`` keeps them. A report
 # whose target is the sample, or that names none, carries no mark. Set after

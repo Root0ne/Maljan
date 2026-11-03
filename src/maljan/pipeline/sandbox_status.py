@@ -12,8 +12,8 @@ each says the same true thing: no sandbox ran, or the report is a recorded
 fixture and not a live detonation, or nothing is added to what a sandbox
 observed.
 
-A live report whose sandbox names a target SHA-256 that is not the sample's
-is still an observation, and reads as one everywhere; the run marks it before
+A live or attached report whose sandbox names a target SHA-256 that is not
+the sample's is still an observation, and reads as one everywhere; the run marks it before
 the graph runs (``app.MaljanApp``), and its status carries the sentence that
 says so, for the pack to hand the analysts and the judge. What it touches is
 theirs to decide.
@@ -28,8 +28,8 @@ from typing import Any
 
 # The marks are the document's (``schemas.sandbox_document.PLATFORM_MARKS``):
 # the mock sandbox's stand-in carries ``SYNTHETIC_KEY`` (``MockSandboxClient``),
-# a report it read from a fixture file ``FIXTURE_KEY``, and a live report whose
-# sandbox names another target than the sample ``TARGET_KEY`` (set by the run,
+# a report it read from a fixture file ``FIXTURE_KEY``, and a live or attached
+# report whose sandbox names another target than the sample ``TARGET_KEY`` (set by the run,
 # ``app.MaljanApp._tell_the_target``). Named here as every reader of the status
 # has always imported them.
 from maljan.schemas.sandbox_document import FIXTURE_KEY, SYNTHETIC_KEY, TARGET_KEY

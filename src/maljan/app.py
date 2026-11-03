@@ -326,7 +326,9 @@ class MaljanApp:
         (``sandbox_target_record``), made here as well so the analysts and the
         judge are told before they read the behaviour: the mark is what the
         pack's sandbox sentence is written from (``pipeline.sandbox_status``).
-        Only the neutral report's target hash is read, whichever sandbox ran.
+        Only the neutral report's target hash is read, whichever sandbox ran,
+        and an attached report's as a live one's: the worker compared that one
+        with the sample at its upload, but nothing told the agents.
         A report whose target is the sample, or that names none, is returned
         as it came. The mark is the platform's: one a sandbox published under
         its word is not the run's finding. The intake already takes it out of
@@ -340,7 +342,7 @@ class MaljanApp:
 
         if not isinstance(report, dict):
             return report
-        claim = self.container.sandbox_target_claim
+        claim = self.container.sandbox_target_claim or self.container.attached_target_claim
         record = (
             sandbox_target_record(
                 file_hash,
@@ -401,6 +403,7 @@ class MaljanApp:
         self.container.sandbox_failure = None
         self.container.artefact_fetch_failures = []
         self.container.sandbox_target_claim = None
+        self.container.attached_target_claim = None
         if not sample_path or self.container.is_mock:
             return None
 
@@ -429,7 +432,18 @@ class MaljanApp:
                     return None
                 self._without_unearned_marks(run)
                 self._note_the_reader(provider, run)
-                return sandbox_document(run.report)
+                attached = sandbox_document(run.report)
+                if not (run.report.synthetic or run.report.recorded_fixture):
+                    # The target the attached report names, as its reader put
+                    # it in the neutral report: told to the analysts and the
+                    # judge (``_tell_the_target``) and recorded by the worker
+                    # as a live one's is.
+                    self.container.attached_target_claim = {
+                        "provider": str(provider.id),
+                        "task_id": str(run.task_id),
+                        "sha256": str(run.report.target.sha256 or ""),
+                    }
+                return attached
             logger.info("Submitting sample to sandbox: %s", sample_path)
 
             # Every provider call below is synchronous: the Triage provider
