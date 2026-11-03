@@ -1733,9 +1733,10 @@ _BLOCK_SPLIT_RE = re.compile(
     r"(?:\A|(?<!\s))(?:[^\S\n]*+\n|\A)\s*+-{3,}+(?:[^\S\n]*+\n\s*+-{3,}+)*\s*(?:\r?\n|$)",
     flags=re.MULTILINE,
 )
-# The colon after a field label that begins a line, as ``_FIELD_LINE_RE``
-# reads it: closing emphasis or spaces may stand before it ("**TECHNIQUE**:",
-# "EVIDENCE :"). Read possessively, so a long run of spaces is read once.
+# The colon after a field label, as ``_FIELD_LINE_RE`` reads it: closing
+# emphasis or spaces may stand before it ("**TECHNIQUE**:", "EVIDENCE :"),
+# at a line start and after whitespace alike. Read possessively, so a long
+# run of spaces is read once.
 _LABEL_COLON = r"[ \t]*+(?:\*\*)?+[ \t]*+:"
 # The sentence ends where ``_TAIL_START_RE`` begins the fields, in the same
 # casing, so a line read as the technique is never also the sentence's. Its
@@ -1797,24 +1798,27 @@ _INLINE = r"(?:^|(?<=[\s*_>#]))"
 # id written after them stays cited. Only when no such line follows does it
 # end at a label written later on its own line, spelled in capitals as the
 # labels are ("EVIDENCE: [ev_0309]. CONFIDENCE: 0.65 TECHNIQUE: T1071.001").
-# A label that begins a line is read in the spellings ``_LABEL_COLON`` reads.
+# Every label is read in the spellings ``_LABEL_COLON`` reads.
 _BLOCK_EVIDENCE_LABEL_RE = re.compile(
-    r"(?:^" + LINE_PREFIX + r"EVIDENCE" + _LABEL_COLON + r"|" + _INLINE + r"EVIDENCE:)[ \t]*",
-    re.MULTILINE,
+    _INLINE + r"EVIDENCE" + _LABEL_COLON + r"[ \t]*", re.MULTILINE
 )
 _EVIDENCE_ENDS_AT_LINE_START_RE = re.compile(
     r"\n" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE))" + _LABEL_COLON
 )
 # A run of whitespace is read from its start and possessively, so a long run
 # is read once, not once per character of it.
-_EVIDENCE_ENDS_INLINE_RE = re.compile(r"(?<!\s)\s++" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):")
+_EVIDENCE_ENDS_INLINE_RE = re.compile(
+    r"(?<!\s)\s++" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE)" + _LABEL_COLON
+)
 # The CONFIDENCE value as written: what follows the label on its line, read
 # by ``_stated_confidence``. A label present with nothing readable after it is
 # a confidence the reader could not read, not one the analyst left out.
 _LINE_CONFIDENCE_RE = re.compile(
     r"^" + LINE_PREFIX + r"CONFIDENCE" + _LABEL_COLON + r"[ \t]*(.*)$", re.MULTILINE
 )
-_BLOCK_CONFIDENCE_RE = re.compile(_INLINE + r"CONFIDENCE:[ \t]*(.*)$", re.MULTILINE)
+_BLOCK_CONFIDENCE_RE = re.compile(
+    _INLINE + r"CONFIDENCE" + _LABEL_COLON + r"[ \t]*(.*)$", re.MULTILINE
+)
 # The number that opens the value: digits with at most one decimal point, and
 # a percent sign after it where one is written. What follows the number (a
 # full stop, a comma, a bracketed note, words) is the sentence around it, and
@@ -1833,16 +1837,12 @@ UNREADABLE_CONFIDENCE_MARK = "(empty)"
 # kept and asked about rather than read for the first id in it. It ends at the
 # line's end or at a CONFIDENCE or EVIDENCE label written after it, tried
 # where a run of spaces begins, so a long run is read once.
+_TECHNIQUE_VALUE = r"[ \t]*(.*?)(?=(?<![ \t])[ \t]+(?:CONFIDENCE|EVIDENCE)" + _LABEL_COLON + r"|$)"
 _LINE_TECHNIQUE_RE = re.compile(
-    r"^"
-    + LINE_PREFIX
-    + r"(?i:TECHNIQUE)"
-    + _LABEL_COLON
-    + r"[ \t]*(.*?)(?=(?<![ \t])[ \t]+(?:CONFIDENCE|EVIDENCE):|$)",
-    re.MULTILINE,
+    r"^" + LINE_PREFIX + r"(?i:TECHNIQUE)" + _LABEL_COLON + _TECHNIQUE_VALUE, re.MULTILINE
 )
 _BLOCK_TECHNIQUE_LINE_RE = re.compile(
-    _INLINE + r"TECHNIQUE:[ \t]*(.*?)(?=(?<![ \t])[ \t]+(?:CONFIDENCE|EVIDENCE):|$)", re.MULTILINE
+    _INLINE + r"TECHNIQUE" + _LABEL_COLON + _TECHNIQUE_VALUE, re.MULTILINE
 )
 
 
