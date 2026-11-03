@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from stix2validator import ValidationOptions, validate_instance
 
 from maljan.agents.judge_postprocess import PROPERTY_NOT_CARRIED_CODE, lift_misplaced_extensions
@@ -293,6 +294,68 @@ def test_a_root_naming_another_image_on_a_tree_pid_is_outside() -> None:
     assert names["cmd.exe"] is None
     assert names["C:\\Windows\\System32\\CMD.EXE (re-read)"] is None
     assert unnamed == [None]
+
+
+@pytest.mark.parametrize(
+    ("tree_image", "root_image"),
+    [
+        ('"C:\\Program Files\\Foo\\foo.exe"', '"C:\\Program Files\\Evil\\x.exe"'),
+        ("C:\\Program Files\\Foo\\foo.exe", "C:\\Program Files\\Evil\\x.exe"),
+    ],
+    ids=["quoted-paths-with-spaces", "unquoted-paths-with-spaces"],
+)
+def test_a_path_with_spaces_is_read_whole(tree_image: str, root_image: str) -> None:
+    # Cut at its first space, each path read as "program", and a different
+    # process under Program Files passed for a re-reading.
+    tree = [
+        ProcessNode(
+            pid=10,
+            name="sample.exe",
+            command_line="sample.exe",
+            children=[ProcessNode(pid=11, name=tree_image, command_line="foo -a")],
+        ),
+        ProcessNode(pid=11, name=root_image),
+    ]
+
+    assert _labels(tree)[root_image] is False
+
+
+def test_a_quoted_and_an_unquoted_name_of_one_image_match() -> None:
+    tree = [
+        ProcessNode(
+            pid=10,
+            name="sample.exe",
+            command_line="sample.exe",
+            children=[
+                ProcessNode(
+                    pid=11,
+                    name='"C:\\Program Files\\Foo\\foo.exe" -a',
+                    command_line="foo -a",
+                )
+            ],
+        ),
+        ProcessNode(pid=11, name="C:\\Program Files\\Foo\\FOO.EXE"),
+    ]
+
+    assert _labels(tree)["C:\\Program Files\\Foo\\FOO.EXE"] is None
+
+
+@pytest.mark.parametrize(
+    ("name", "image"),
+    [
+        ("C:\\Windows\\system32\\rundll32.exe", "rundll32.exe"),
+        # run4's stored readings of the sample's rundll32 processes.
+        ("C:\\Windows\\system32\\rundll32.exe (cmdline: ...6091f2....dll,#1)", "rundll32.exe"),
+        ("C:\\Windows\\system32\\rundll32.exe (byte-identical cmdline, parent 83)", "rundll32.exe"),
+        ('"C:\\Program Files\\Foo\\foo.exe" -a', "foo.exe"),
+        ("C:\\Program Files\\Foo\\foo.exe", "foo.exe"),
+        ("", ""),
+    ],
+)
+def test_the_image_a_listed_name_names(name: str, image: str) -> None:
+    from maljan.schemas.sandbox_report import _image_of
+
+    assert _image_of(name) == image
 
 
 def test_the_commands_table_places_each_process_as_the_export_does() -> None:

@@ -1036,17 +1036,21 @@ PLACED_UNSTATED = ""
 # placed. A reading that names another image is another process, outside.
 PLACED_UNSETTLED = "unsettled"
 
-_IMAGE_TOKEN = re.compile(r"[^\s()]+")
+_QUOTED = re.compile(r'"([^"]*)"')
 
 
 def _image_of(name: str) -> str:
-    """The image a listed name names: its first token's file name, lower case; ``""`` for none.
+    """The image a listed name names: its path's file name, lower case; ``""`` for none.
 
-    The first token delimited by whitespace or a parenthesis, so a listing's
-    note after the image (``rundll32.exe (cmdline: ...)``) is not part of it.
+    The path is the text inside the first pair of quotes of a quoted name, and
+    otherwise the text before the first ``(``: a listing's note after the
+    image (``rundll32.exe (cmdline: ...)``) is not part of it, and a path with
+    spaces (``C:\\Program Files\\Foo\\foo.exe``) keeps them.
     """
-    token = _IMAGE_TOKEN.search(name or "")
-    return token.group(0).replace("\\", "/").rsplit("/", 1)[-1].lower() if token else ""
+    text = name or ""
+    quoted = _QUOTED.search(text)
+    path = quoted.group(1) if quoted else text.split("(", 1)[0]
+    return path.strip().replace("\\", "/").rsplit("/", 1)[-1].strip().lower()
 
 
 def process_placement(
