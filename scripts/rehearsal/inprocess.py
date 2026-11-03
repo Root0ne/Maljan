@@ -361,8 +361,11 @@ async def _held_from_first_call(run: Any, state: StubState, deadline_s: float | 
             await asyncio.sleep(0.05)
     except asyncio.CancelledError:
         # Cancelled from outside while waiting: the run goes with it, as
-        # ``wait_for`` would take it, before the app is closed under it.
+        # ``wait_for`` would take it, and has wound down before the app is
+        # closed under it. The bare ``raise`` re-raises the caught cancellation.
         task.cancel()
+        with contextlib.suppress(BaseException):
+            await task
         raise
     return await asyncio.wait_for(task, timeout=deadline_s)
 

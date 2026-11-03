@@ -121,6 +121,8 @@ def test_every_check_passes_but_a_known_defect(tmp_path: Path, scenario: str, wi
         loop_steps=8 if scenario == "long_loop" else None,
     )
     record = asyncio.run(rehearse(rehearsal))
+    if scenario == "deadline_hit":
+        assert record.scenario_params.get("deadline_from") == "first_model_call"
     failed = {c.name: c.detail for c in check_run(record) if not c.ok}
     known = KNOWN_DEFECTS.get((scenario, wire), {})
     for name, pinned in known.items():
@@ -184,6 +186,7 @@ def test_a_deadline_aimed_at_the_report_stage_lands_there(tmp_path: Path, wire: 
         scenario="deadline_hit", provider=wire, deadline_in="report", work_dir=tmp_path / "dl"
     )
     record = asyncio.run(rehearse(rehearsal))
+    assert record.scenario_params.get("deadline_from") == "first_model_call"
     failed = {c.name: c.detail for c in check_run(record) if not c.ok}
     assert failed == {}
     held = [e for e in record.stub_log if e.get("waiting")]

@@ -36,13 +36,15 @@ class _Stub:
 class _Run:
     """A run that calls the model after ``first_call_after`` seconds, then waits.
 
-    ``cancelled`` says whether the run was cancelled.
+    ``cancelled`` says whether the run was cancelled, ``wound_down`` whether
+    it then finished the cleanup it takes a moment over.
     """
 
     def __init__(self, stub: _Stub, first_call_after: float | None) -> None:
         self.stub = stub
         self.first_call_after = first_call_after
         self.cancelled = False
+        self.wound_down = False
 
     async def __call__(self) -> None:
         try:
@@ -52,6 +54,8 @@ class _Run:
             await asyncio.sleep(3600)
         except asyncio.CancelledError:
             self.cancelled = True
+            await asyncio.sleep(0.05)  # closing what it holds
+            self.wound_down = True
             raise
 
 
@@ -134,9 +138,10 @@ def test_a_wait_cancelled_from_outside_takes_the_run_with_it(
         waiting.cancel()
         with pytest.raises(asyncio.CancelledError):
             await waiting
-        # Let the run's own cancellation be delivered, and read it while the
-        # loop still runs: ``asyncio.run`` cancels whatever is left as it ends.
-        await asyncio.sleep(0.05)
+        # Read at once, while the loop still runs (``asyncio.run`` cancels
+        # whatever is left as it ends): the run was cancelled and had wound
+        # down before the wait raised, so nothing is closed under it.
         assert run.cancelled, "the run kept going after its wait was cancelled"
+        assert run.wound_down, "the wait raised before the run had wound down"
 
     asyncio.run(main())
