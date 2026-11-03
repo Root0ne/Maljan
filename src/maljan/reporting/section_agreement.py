@@ -119,8 +119,9 @@ REWRITE_CITES_ELSEWHERE_CODE = "agreement.rewrite_cites_elsewhere"
 REWRITE_DROPS_CITATION_CODE = "agreement.rewrite_drops_citation"
 # A rewrite that cites none of the ids its sources cite, or rests only on
 # sources that cite none; for a section 5 sentence, one resting only on facts
-# about nothing the sentence or its passage names (the routine or its caller,
-# the address, the value or the call), or with no clause of their own.
+# about nothing the sentence names, or, naming no address, the sentence before
+# it in its paragraph (the routine or its caller, the address, the value or the
+# call), or with no clause of their own.
 REWRITE_UNGROUNDED_CODE = "agreement.rewrite_ungrounded"
 # A sentence the agreement question rewrote: what stood, what replaced it and
 # on which sources, recorded as the model's answer.
@@ -974,10 +975,11 @@ def _row_violations(
                         message=(
                             f"row {safe_finding_value(index + 1)}: "
                             f"{safe_finding_value(', '.join(s.id for s in grounds))} "
-                            "is about nothing the sentence or its passage names. A fact "
-                            "qualifies a section 5 sentence only where the sentence or its "
-                            "passage names the routine, the address, the value or the call "
-                            "it is about. Keep the sentence."
+                            "is about nothing the sentence names. A fact qualifies a "
+                            "section 5 sentence only where the sentence names the routine, "
+                            "the address, the value or the call it is about, or, naming no "
+                            "address, the sentence before it in its paragraph does. Keep "
+                            "the sentence."
                         ),
                         path=f"{path}.rewrite",
                     )
@@ -992,23 +994,46 @@ def _row_violations(
 
 
 def _grounds_section_5(fact: Passage, row: AgreementRow, passage: Passage) -> bool:
-    """Whether a fact grounds a rewrite of a section 5 sentence: where the sentence or its
-    passage names what the fact is about (a routine whose code no entry lists or its
-    caller, the address of an answered call, a bound value, its call or where it is
-    passed). The platform writes the rewrite (``_qualified``); a fact with no clause of
-    its own grounds none."""
+    """Whether a fact grounds a rewrite of a section 5 sentence: where the sentence names
+    what the fact is about (a routine whose code no entry lists or its caller, the address
+    of an answered call, a bound value, its call or where it is passed), or, naming no
+    address, the sentence before it in its paragraph does. The platform writes the
+    rewrite (``_qualified``); a fact with no clause of its own grounds none."""
     return _grounds(fact, row.sentence, passage)
 
 
 def _grounds(fact: Passage, sentence: str, passage: Passage) -> bool:
     """:func:`_grounds_section_5` for a sentence as copied: a fact with a clause of its
-    own, about what the sentence or its passage names, whose clause the sentence does not
-    already carry."""
+    own, about what the sentence names (:func:`_named_near`), whose clause the sentence
+    does not already carry."""
     return (
         bool(fact.qualifier)
         and fact.qualifier.lower() not in sentence.lower()
-        and _about(fact, sentence, passage.text)
+        and _about(fact, *_named_near(sentence, passage.text))
     )
+
+
+def _named_near(sentence: str, text: str) -> tuple[str, ...]:
+    """What a sentence of ``text`` is about: the sentence, and where it names no address
+    ("No environment check is established."), the sentence before it in its paragraph.
+
+    Never the rest of the passage: a section names many routines, and a fact about
+    one of them is not about every sentence beside it (a sentence on dropped files
+    gained a clause on a download routine two paragraphs on).
+    """
+    if _addresses_written(sentence):
+        return (sentence,)
+    sentences = _Sentences(text)
+    span = sentences.span(sentence)
+    if span is None:
+        return (sentence,)
+    before = max(
+        ((at, words) for words, ats in sentences.starts.items() for at in ats if at < span[0]),
+        default=None,
+    )
+    if before is None or "\n" in text[before[0] + len(before[1]) : span[0]]:
+        return (sentence,)
+    return (sentence, before[1])
 
 
 def _qualified(sentence: str, facts: Sequence[Passage]) -> str:
@@ -1256,8 +1281,8 @@ SYSTEM_PROMPT = (
     "a debate round says. A section 5 sentence answered by a fact is not reworded: the "
     "decision rewrite only asks that it be qualified, and the platform adds the fact's own "
     "words and its ids to the sentence as it stands; it is qualified only where the "
-    "sentence or its passage names the routine, the address, the value or the call the "
-    "fact is about.\n"
+    "sentence names the routine, the address, the value or the call the fact is about, or, "
+    "naming no address, the sentence before it in its paragraph does.\n"
     "Leave out every sentence no source states otherwise than. List each sentence once. "
     "Answer with exactly this JSON object, with an empty list when no sentence disagrees:\n"
     + EXPECTED_OBJECT

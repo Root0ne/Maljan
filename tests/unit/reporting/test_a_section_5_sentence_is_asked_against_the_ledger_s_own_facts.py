@@ -569,6 +569,44 @@ def test_a_sentence_already_carrying_the_fact_s_clause_is_not_qualified_again() 
 
 
 @pytest.mark.parametrize(
+    "body",
+    [
+        # The routine named a paragraph on, and named only after the sentence.
+        f"{ABSENT}\n\nThe gate at 0x5a10 returns early [ev_0107].",
+        f"{ABSENT} The gate at 0x5a10 returns early [ev_0107].",
+        # The sentence before it names the caller, a paragraph back.
+        f"The gate at 0x5a10 returns early [ev_0107].\n\n{ABSENT}",
+    ],
+)
+def test_a_fact_the_passage_names_away_from_the_sentence_qualifies_nothing(body: str) -> None:
+    out, done = _qualify("anything", body=body)
+    assert out == body
+    assert done.summary["rewritten"] == 0
+    assert done.tally.by_code[REWRITE_UNGROUNDED_CODE] == 2
+
+
+def test_a_sentence_naming_another_address_is_not_read_as_the_one_before() -> None:
+    sentence = "Routine 0x7c40 performs no check."
+    body = f"The gate at 0x5a10 returns early [ev_0107]. {sentence}"
+    out, done = _qualify("anything", sentence, body)
+    assert out == body
+    assert done.summary["rewritten"] == 0
+
+
+def test_an_answered_failure_qualifies_no_sentence_on_dropped_files_beside_it() -> None:
+    # A section on dropped files names, paragraphs on, the address a failed call
+    # was asked for: the sentence on the files names none of it.
+    dropped = "One file was dropped, files/0x00020000000003ba-104.dat [ev_0107]."
+    report = _report()
+    report.technical_analysis.string_resolution.body = f"{dropped}\n\n{FAILED}"
+    row = _row("string_resolution", dropped, ["answered.1"], "anything")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.string_resolution.body == f"{dropped}\n\n{FAILED}"
+    assert done.summary["rewritten"] == 0
+    assert done.tally.by_code[REWRITE_UNGROUNDED_CODE] == 2
+
+
+@pytest.mark.parametrize(
     ("sentence", "qualified"),
     [
         ('Routine 0x5a10 maps "it."', 'Routine 0x5a10 maps "it"; Q [ev_0107].'),
