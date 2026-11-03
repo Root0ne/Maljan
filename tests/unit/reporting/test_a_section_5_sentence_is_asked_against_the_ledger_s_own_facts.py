@@ -31,16 +31,19 @@ from maljan.reporting.models import (
     TechnicalSubsection,
 )
 from maljan.reporting.section_agreement import (
+    _CLAUSE_JOIN,
     FACT,
     LISTED_CODE,
     REWRITE_UNGROUNDED_CODE,
     REWRITTEN_CODE,
     UNKNOWN_SOURCE_CODE,
+    _Reading,
     ask_section_agreement,
     passages_of,
     prompt_text,
 )
 from maljan.schemas.evidence import LedgerEntry
+from tests.linear_cost import assert_scales
 
 BASE = 0x2470000
 GATE, CHECK = BASE + 0x5A10, BASE + 0x5A38
@@ -633,6 +636,24 @@ def test_an_absence_the_run_recorded_is_not_qualified_on_a_routine(sentence: str
     assert out == body
     assert done.summary["rewritten"] == 0
     assert done.tally.by_code[REWRITE_UNGROUNDED_CODE] == 2
+
+
+@pytest.mark.parametrize(
+    ("unit", "small"),
+    [
+        # A negation repeated: each one reaches its reading word within the clause bound.
+        ("no ", 2_000),
+        # An unclosed citation repeated: no citation spans another's bracket.
+        ("[ev_1 ", 64_000),
+    ],
+)
+def test_whether_a_sentence_is_unsettled_is_read_in_linear_time(unit: str, small: int) -> None:
+    # A section 5 sentence may quote the sample's own text at any length.
+    def flood(size: int) -> str:
+        return (unit * (size // len(unit) + 1))[:size]
+
+    assert_scales(flood, small, lambda text: _Reading(text, "").unestablished, factor=4)
+    assert_scales(flood, 256_000, _CLAUSE_JOIN.split, factor=4)
 
 
 def test_a_bound_value_qualifies_no_absence_the_run_recorded_beside_its_call() -> None:

@@ -1733,7 +1733,13 @@ def _grounds(fact: Passage, reading: _Reading) -> bool:
 # negation ("all packets read, contains no DNS query") or a reading word in another clause
 # ("carries no api_calls section [ev_0026], so the test is established from static
 # reading") is not about code a routine fact is about (T-537).
-_IN_CLAUSE = r"[^.;:()\u2014\u2013]*?"
+#
+# A negation reaches its reading word across at most this many characters of its
+# clause: the longest reach in the stored runs' prose is 118. The bound keeps the read
+# linear on a sentence quoting the sample's own text ("no no no ..."); a negation
+# farther from its verb than this, within one clause, is not read as one.
+_CLAUSE_REACH = 240
+_IN_CLAUSE = rf"[^.;:()\u2014\u2013]{{0,{_CLAUSE_REACH}}}?"
 _NEGATION = r"\b(?:no|not|never|none)\b"
 _NOT_DONE = r"(?:\b(?:does|do|did|can|could)\s+not\s+|\bcannot\s+|\b(?:doesn|don|didn)'t\s+)"
 _READ_VERB = (
@@ -1763,8 +1769,9 @@ _UNESTABLISHED = re.compile(
     re.IGNORECASE,
 )
 # Where a negation's clause ends for :data:`_UNESTABLISHED`: a joined clause or a citation.
+# A citation holds no bracket of its own, so an unclosed "[ev_..." is read once.
 _CLAUSE_JOIN = re.compile(
-    r",\s*(?:so|but|and)\s|\b(?:while|though|although|which|because)\b|\[[^\]]*\bev_\w+[^\]]*\]",
+    r",\s*(?:so|but|and)\s|\b(?:while|though|although|which|because)\b|\[[^\[\]]*\bev_\w+[^\[\]]*\]",
     re.IGNORECASE,
 )
 
