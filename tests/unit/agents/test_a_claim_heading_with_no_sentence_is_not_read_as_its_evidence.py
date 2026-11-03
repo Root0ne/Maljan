@@ -193,3 +193,12 @@ def test_a_technique_line_in_any_casing_ends_the_sentence_it_is_read_for(label: 
     assert [(claim.claim, claim.technique_id) for claim in read.claims] == [
         ("Routine 0x4100 decodes its strings at run time.", "T1140")
     ]
+
+
+def test_a_technique_label_inside_the_sentence_stays_in_the_sentence() -> None:
+    read = read_claim_blocks(
+        "CLAIM: The sample uses the technique: XOR [ev_1].\nTECHNIQUE: T1140\nCONFIDENCE: 0.8\n"
+    )
+    assert [(claim.claim, claim.technique_id) for claim in read.claims] == [
+        ("The sample uses the technique: XOR [ev_1].", "T1140")
+    ]
