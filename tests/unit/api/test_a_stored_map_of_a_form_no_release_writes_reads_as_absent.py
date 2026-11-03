@@ -229,11 +229,11 @@ def test_reading_a_hostile_unreadable_map_is_linear() -> None:
 
     def timed(n: int) -> float:
         stored = {CHANGES_MARK: "Changes", **{f"t{i}": DECLARED for i in range(n)}}
-        start = time.perf_counter()
+        start = time.process_time()
         svc.served_tool_facts(stored, {})
         tool_declarations.stored_in_force({}, stored, "x")
         tool_declarations.kept_stored_changes(stored, stored, {})
-        return time.perf_counter() - start
+        return time.process_time() - start
 
     small, large = timed(2_000), timed(20_000)
     assert large < max(small, 0.001) * 40

@@ -298,9 +298,9 @@ def test_an_operator_tool_of_a_built_in_kind_in_another_shape_is_still_reported(
 
 def _operator_build_seconds(n: int) -> float:
     ledger = [_entry(i, "who", {"elsewhere": f"thing {i}"}, "mcp:mine") for i in range(1, n + 1)]
-    started = time.perf_counter()
+    started = time.process_time()
     build_sections(ledger)
-    return time.perf_counter() - started
+    return time.process_time() - started
 
 
 def test_building_an_operator_tool_s_sections_is_linear(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -379,9 +379,9 @@ def test_a_lineage_dispute_names_the_sandbox_that_marked_it() -> None:
 
 def _routing_seconds(n: int) -> float:
     outputs = [_output("mcp:myrev", name, i) for i in range(n) for name in ("pseudo_c", "texts")]
-    started = time.perf_counter()
+    started = time.process_time()
     _filter_tool_outputs({"static": outputs}, "command_and_control")
-    return time.perf_counter() - started
+    return time.process_time() - started
 
 
 def test_routing_outputs_by_kind_is_linear(declared: ToolDeclarations) -> None:

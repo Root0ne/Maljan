@@ -927,10 +927,10 @@ def test_masking_a_ten_times_longer_text_costs_about_ten_times_as_much():
     def cost(text: str) -> float:
         best = float("inf")
         for _ in range(3):
-            began = time.perf_counter()
+            began = time.process_time()
             masked_text(text)
             bare_addresses(text)
-            best = min(best, time.perf_counter() - began)
+            best = min(best, time.process_time() - began)
         return best
 
     word = '("' * 200 + "p'ss" * 200 + "@h:8080"

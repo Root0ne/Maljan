@@ -189,9 +189,9 @@ def test_an_undeclared_decompile_is_placed_by_it() -> None:
 def test_many_offered_names_are_read_in_linear_time() -> None:
     def _timed(n: int) -> float:
         names = [f"arg_{i}" for i in range(n)] + ["name_or_address"]
-        start = time.perf_counter()
+        start = time.process_time()
         assert address_arguments(None, names)[-1] == "name_or_address"
-        return time.perf_counter() - start
+        return time.process_time() - start
 
     small, large = _timed(2_000), _timed(20_000)
     assert large < max(small * 30, 0.5)

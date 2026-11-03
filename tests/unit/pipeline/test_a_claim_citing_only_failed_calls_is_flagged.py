@@ -102,9 +102,9 @@ def test_marking_stays_linear() -> None:
     def took(size: int) -> float:
         ledger = [_entry(f"ev_{n:05d}", n % 2 == 0) for n in range(size)]
         isr = _isr(*(_claim("c", f"ev_{n:05d}") for n in range(size)))
-        start = time.perf_counter()
+        start = time.process_time()
         mark_claims_citing_only_failed_calls({"a": isr}, ledger)
-        return time.perf_counter() - start
+        return time.process_time() - start
 
     small, large = took(500), took(5_000)
     assert large < small * 30, (small, large)

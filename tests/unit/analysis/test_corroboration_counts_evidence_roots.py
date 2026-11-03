@@ -277,9 +277,9 @@ class TestLinear:
         timings = []
         for n in (2_000, 16_000):
             led = ledger(n)
-            start = time.perf_counter()
+            start = time.process_time()
             run_roots(led).of_statement('the string "s5"', ["ev_0002"])
-            timings.append(time.perf_counter() - start)
+            timings.append(time.process_time() - start)
         assert timings[1] < timings[0] * 8 * 4 + 0.5
 
 
@@ -645,11 +645,11 @@ class TestAStatedRangeIsCheckedAgainstTheImage:
         def timed(n: int) -> float:
             # Nested and overlapping: every range holds the place looked up.
             ranges = [(0x1000 + i % 0x100, 0x5000 - i % 0x100, 0x1000 + i) for i in range(n)]
-            start = time.perf_counter()
+            start = time.process_time()
             layout = self._with(*ranges)
             for rva in range(0x1000, 0x5000, 0x10):
                 layout.function_at(rva)
-            return time.perf_counter() - start
+            return time.process_time() - start
 
         small, large = timed(10_000), timed(100_000)
         assert large < small * 10 * 3 + 0.5
@@ -673,12 +673,12 @@ class TestHostileScaling:
                 ),
             ]
             said = " ".join(f'"s{k}" 0x{0x1000 + k:x} Name{k}' for k in range(100))
-            start = time.perf_counter()
+            start = time.process_time()
             roots = run_roots(led)
             counted = RootCount()
             for _ in range(statements):
                 counted.add(*roots.of_statement(said, ["ev_0002"]))
-            return time.perf_counter() - start
+            return time.process_time() - start
 
         small, large = timed(10_000, 100), timed(100_000, 1_000)
         assert large < small * 10 * 3 + 0.5
@@ -693,11 +693,11 @@ class TestHostileScaling:
                 )
                 for i in range(n)
             ]
-            start = time.perf_counter()
+            start = time.process_time()
             roots = run_roots(led)
             for i in range(0, n, 7):
                 roots.of_statement("the function", [f"ev_{i + 2:05d}"])
-            return time.perf_counter() - start
+            return time.process_time() - start
 
         small, large = timed(1_000), timed(10_000)
         assert large < small * 10 * 3 + 0.5
@@ -950,11 +950,11 @@ class TestManyImageBases:
                 )
                 for k in range(n)
             ]
-            start = time.perf_counter()
+            start = time.process_time()
             roots = run_roots(led)
             for k in range(0, n, 10):
                 roots.of_statement(f"at {hex(0x10000 * (k + 1) + 0x1000 + k)}", [f"ev_{k:05d}"])
-            return time.perf_counter() - start
+            return time.process_time() - start
 
         small, large = timed(2_000), timed(16_000)
         assert large < small * 8 * 4 + 0.5

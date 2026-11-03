@@ -216,11 +216,11 @@ def test_the_analyst_mode_reads_a_transition_address_by_the_ipv4_address_it_carr
 
 def test_the_rule_stays_linear_on_a_hostile_host() -> None:
     def took(host: str) -> float:
-        started = time.perf_counter()
+        started = time.process_time()
         for _ in range(20):
             locality(host)
             host_of(f"http://{host}/v1")
-        return time.perf_counter() - started
+        return time.process_time() - started
 
     small = took("a" * 6_000 + ".example")
     large = took("a" * 60_000 + ".example")

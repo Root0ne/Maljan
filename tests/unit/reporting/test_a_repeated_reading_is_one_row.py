@@ -298,9 +298,9 @@ class TestAHostileStoredTree:
         stored = TestAHostileStoredTree._chain(count)
         took = []
         for _ in range(3):
-            started = time.perf_counter()
+            started = time.process_time()
             roots = distinct_processes(stored)
-            took.append(time.perf_counter() - started)
+            took.append(time.process_time() - started)
         tracemalloc.start()
         distinct_processes(stored)
         peak = tracemalloc.get_traced_memory()[1]

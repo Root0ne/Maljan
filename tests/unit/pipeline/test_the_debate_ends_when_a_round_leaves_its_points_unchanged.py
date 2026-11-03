@@ -116,9 +116,9 @@ class TestAPointIsWhatItIsAbout:
         timings = []
         for n in (2000, 20000):
             line = "[analysts: a] " + " ".join(f"{i} 0x{i:x} ev_{i:04d}" for i in range(n))
-            start = time.perf_counter()
+            start = time.process_time()
             point_key(line)
-            timings.append(time.perf_counter() - start)
+            timings.append(time.process_time() - start)
         assert timings[1] < timings[0] * 10 * 4 + 0.5
 
 

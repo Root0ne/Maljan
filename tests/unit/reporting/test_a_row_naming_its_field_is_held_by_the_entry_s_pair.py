@@ -204,9 +204,9 @@ def _timed(scale: int) -> float:
         "seed" + " " * scale + "=" + "x" * scale,
     )
     gc.collect()
-    began = time.perf_counter()
+    began = time.process_time()
     found = stated_value_violations(payload, texts)
-    seconds = time.perf_counter() - began
+    seconds = time.process_time() - began
     assert [v.code for v in found] == [STATED_VALUE_UNHELD_CODE]
     return seconds
 

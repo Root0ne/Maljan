@@ -211,9 +211,9 @@ class TestItsRuleHits:
             held = rows(n)
             times = []
             for _ in range(3):
-                start = time.perf_counter()
+                start = time.process_time()
                 rule_match_hits(held)
-                times.append(time.perf_counter() - start)
+                times.append(time.process_time() - start)
             return min(times)
 
         small, large = best(400), best(4000)

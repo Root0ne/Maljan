@@ -79,9 +79,9 @@ class TestTheRenaming:
     def test_linear_in_the_text(self) -> None:
         def timed(n: int) -> float:
             text = "ev_0007net:4 ev_" * n + "e" * n + "net:" * n
-            started = time.perf_counter()
+            started = time.process_time()
             foreign_ids_written_out(text)
-            return time.perf_counter() - started
+            return time.process_time() - started
 
         timed(1_000)
         small, large = timed(20_000), timed(200_000)

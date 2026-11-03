@@ -549,9 +549,9 @@ class TestLinearTime:
                 for n in range(1, scale + 1)
             ]
             told = ledger_count_facts(lines, {}, ledger, AGENTS)
-            start = time.perf_counter()
+            start = time.process_time()
             ledger_stated(lines, {}, ledger, AGENTS, told)
-            return time.perf_counter() - start
+            return time.process_time() - start
 
         cost(10)
         small = cost(100)

@@ -194,9 +194,9 @@ def test_a_hostile_line_of_names_and_labels_is_read_in_linear_time() -> None:
 
     def took(copies: int) -> float:
         text = piece * copies
-        started = time.perf_counter()
+        started = time.process_time()
         scrub(text)
-        return time.perf_counter() - started
+        return time.process_time() - started
 
     small, large = took(500), took(5000)
     assert large < 20, large

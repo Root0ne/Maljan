@@ -97,9 +97,9 @@ def test_counting_stays_linear() -> None:
         rows = [{"api": f"Api{n}"} for n in range(size)]
         called = _entry(1, "api_reading", "sandbox_api_calls", {"apis": rows})
         catalogue = _catalogue(2, [(f"Api{n}", f"cat{n % 7}") for n in range(size)])
-        start = time.perf_counter()
+        start = time.process_time()
         dynamic_from_ledger([called, catalogue])
-        return time.perf_counter() - start
+        return time.process_time() - start
 
     small, large = took(1_000), took(10_000)
     assert large < small * 30, (small, large)

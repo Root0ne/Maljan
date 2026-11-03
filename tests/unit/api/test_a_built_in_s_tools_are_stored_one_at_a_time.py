@@ -185,11 +185,11 @@ def test_merging_and_storing_grow_linearly() -> None:
         stored.update({f"n{i}": {"kind": "strings"} for i in range(size // 4)})
         best = float("inf")
         for _ in range(2):
-            start = time.perf_counter()
+            start = time.process_time()
             in_force = merge_tool_facts(shipped, stored)
             tool_facts_changes(in_force, shipped)
             stored_in_force(shipped, with_mark(stored))
-            best = min(best, time.perf_counter() - start)
+            best = min(best, time.process_time() - start)
         return best
 
     small, large = timed(2_000), timed(20_000)

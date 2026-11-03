@@ -601,9 +601,9 @@ def _answers(count: int) -> tuple[AgentISR, AgentISR, str]:
 def _seconds(call: Callable[[], Any]) -> float:
     best = float("inf")
     for _ in range(3):
-        started = time.perf_counter()
+        started = time.process_time()
         call()
-        best = min(best, time.perf_counter() - started)
+        best = min(best, time.process_time() - started)
     return best
 
 

@@ -142,9 +142,9 @@ class TestTheCostIsLinear:
 
         best = float("inf")
         for _ in range(2):
-            started = time.perf_counter()
+            started = time.process_time()
             call()
-            best = min(best, time.perf_counter() - started)
+            best = min(best, time.process_time() - started)
         return best
 
     @staticmethod

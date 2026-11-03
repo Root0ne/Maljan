@@ -178,9 +178,9 @@ class TestTheReadStream:
 
         def took(size: int) -> float:
             line = ("{x\r" * size) + "{" * size
-            started = time.perf_counter()
+            started = time.process_time()
             asyncio.run(_read_all([_refused(line)]))
-            return time.perf_counter() - started
+            return time.process_time() - started
 
         small, large = took(20_000), took(200_000)
         assert large < 20, large

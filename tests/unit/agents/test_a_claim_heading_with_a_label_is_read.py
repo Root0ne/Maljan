@@ -151,12 +151,12 @@ class TestLinearTime:
     )
     def test_ten_times_the_line_costs_at_most_ten_times_the_time(self, line: str) -> None:
         def cost(text: str) -> float:
-            start = time.perf_counter()
+            start = time.process_time()
             for _ in range(20):
                 CLAIM_HEAD_RE.match(text)
                 reader = ClaimRepeatReader(None)
                 reader.feed(text)
-            return time.perf_counter() - start
+            return time.process_time() - start
 
         small = cost(line)
         large = cost(line * 10)

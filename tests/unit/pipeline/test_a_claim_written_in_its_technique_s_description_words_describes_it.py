@@ -201,9 +201,9 @@ def _timed(claims: int, *, long: int = 4) -> float:
         ],
     )
     gc.collect()
-    began = time.perf_counter()
+    began = time.process_time()
     found = validate_isr(isr, attck=knowledge, sample=PE)
-    seconds = time.perf_counter() - began
+    seconds = time.process_time() - began
     assert sum(v.code == CLAIM_DOES_NOT_DESCRIBE_CODE for v in found) == claims
     return seconds
 
@@ -231,9 +231,9 @@ class TestTheCheckStaysLinear:
 
         def timed(text: str) -> float:
             gc.collect()
-            start = time.perf_counter()
+            start = time.process_time()
             words(text, "T1027")
-            return time.perf_counter() - start
+            return time.process_time() - start
 
         low = min(timed(unit * 400) for _ in range(2))
         high = min(timed(unit * 4000) for _ in range(2))

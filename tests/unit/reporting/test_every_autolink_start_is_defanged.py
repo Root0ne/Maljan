@@ -140,9 +140,9 @@ def test_a_value_holding_every_private_use_character_keeps_every_section() -> No
     report.static.interesting_strings.append(
         StringIOC(value=_PRIVATE_USE + "x_www.evil.com", kind="path", notes=_PRIVATE_USE)
     )
-    started = time.monotonic()
+    started = time.process_time()
     markdown = MarkdownRenderer().render(report)
-    elapsed = time.monotonic() - started
+    elapsed = time.process_time() - started
 
     assert "rendering failed" not in markdown
     assert re.search(r"^## 1\. ", markdown, re.M)
@@ -152,9 +152,9 @@ def test_a_value_holding_every_private_use_character_keeps_every_section() -> No
 
 
 def _timed(text: str) -> float:
-    started = time.perf_counter()
+    started = time.process_time()
     _defanged_text(text)
-    return time.perf_counter() - started
+    return time.process_time() - started
 
 
 def test_long_text_is_read_in_linear_time() -> None:

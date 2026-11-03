@@ -158,9 +158,9 @@ def test_a_large_wrapped_answer_is_read_in_linear_time() -> None:
 
     def _timed(n: int) -> float:
         answer = {"result": json.dumps({**RECORD, "rows": [{"name": "x"}] * n})}
-        start = time.perf_counter()
+        start = time.process_time()
         propose_tool(_definition(_wrapper()), answer=answer)
-        return time.perf_counter() - start
+        return time.process_time() - start
 
     small, large = _timed(2_000), _timed(20_000)
     assert large < max(small * 30, 0.5)

@@ -404,9 +404,9 @@ class TestWhereAValueHolds:
             body = " ".join(f"{MAIN_VA} calls CreateMutexW;" for _ in range(n))
             best = float("inf")
             for _ in range(3):
-                started = time.perf_counter()
+                started = time.process_time()
                 named_values(body)
-                best = min(best, time.perf_counter() - started)
+                best = min(best, time.process_time() - started)
             return best
 
         small, large = spent(2_000), spent(16_000)

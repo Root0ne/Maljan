@@ -681,9 +681,9 @@ def _seconds(work: Callable[[], object]) -> float:
     """The least of two timed runs of ``work``."""
     best = float("inf")
     for _ in range(2):
-        started = time.perf_counter()
+        started = time.process_time()
         work()
-        best = min(best, time.perf_counter() - started)
+        best = min(best, time.process_time() - started)
     return best
 
 

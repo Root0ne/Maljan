@@ -160,9 +160,9 @@ class TestAutoNames:
             text = "FUN_ " * n + "proc_" * n
             times = []
             for _ in range(3):
-                start = time.perf_counter()
+                start = time.process_time()
                 list(pattern.finditer(text))
-                times.append(time.perf_counter() - start)
+                times.append(time.process_time() - start)
             return min(times)
 
         assert best(20000) <= best(2000) * 10 * 2.5 + 0.05

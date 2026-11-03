@@ -181,9 +181,9 @@ def test_a_run_record_counts_a_call_handed_the_sample_path() -> None:
 def test_finding_the_readers_is_linear_in_the_entries() -> None:
     def timed(count: int) -> float:
         entries = [_reads(f"mcp:s{i % 50}") for i in range(count)]
-        started = time.perf_counter()
+        started = time.process_time()
         sample_readers(STDIO, entries, lambda source: None)
-        return time.perf_counter() - started
+        return time.process_time() - started
 
     small, large = timed(2_000), timed(20_000)
     assert large < max(small, 1e-3) * 40

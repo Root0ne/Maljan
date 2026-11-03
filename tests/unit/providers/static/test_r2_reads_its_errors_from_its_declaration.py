@@ -111,9 +111,9 @@ def test_two_hundred_thousand_random_replies_are_decided_as_before() -> None:
 def test_a_hostile_envelope_is_read_in_linear_time() -> None:
     def timed(n: int) -> float:
         reply = "<log>" + "[INFO] [ERROR] x\n" * n + "not a line"
-        started = time.perf_counter()
+        started = time.process_time()
         assert r2._r2_logged_error(reply) is None
-        return time.perf_counter() - started
+        return time.process_time() - started
 
     timed(1_000)
     small, large = timed(5_000), timed(50_000)

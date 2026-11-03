@@ -148,6 +148,6 @@ def test_the_publish_checks_read_a_long_text_in_linear_time() -> None:
     hosts = " ".join(f"h{i}.example{i % 97}.com" for i in range(10_000))
     objects = " ".join(f"Global\\h{i}.example.com" for i in range(12_500))
     for text in (hosts, objects):
-        started = time.perf_counter()
+        started = time.process_time()
         _unstated_values(text, _no_row)
-        assert time.perf_counter() - started < 10, len(text)
+        assert time.process_time() - started < 10, len(text)

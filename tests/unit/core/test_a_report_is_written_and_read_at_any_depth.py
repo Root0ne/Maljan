@@ -248,9 +248,9 @@ def _seconds(make: Callable[[int], Any], run: Callable[[Any], Any], n: int) -> f
         gc.collect()
         gc.disable()
         try:
-            started = time.perf_counter()
+            started = time.process_time()
             run(subject)
-            best = min(best, time.perf_counter() - started)
+            best = min(best, time.process_time() - started)
         finally:
             gc.enable()
     return best
@@ -454,9 +454,9 @@ chunk = "[" * depth + "]" * depth
 text = "[" + ",".join([chunk] * max(1, size // (2 * depth + 1))) + "]"
 read = json.loads if mode == "json" else loads
 base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-started = time.perf_counter()
+started = time.process_time()
 value = read(text)
-seconds = time.perf_counter() - started
+seconds = time.process_time() - started
 print((resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - base) * 1024, seconds)
 """
 

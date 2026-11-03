@@ -22,9 +22,9 @@ def _seconds(work: Callable[[], Any]) -> float:
     gc.collect()
     gc.disable()
     try:
-        began = time.perf_counter()
+        began = time.process_time()
         work()
-        return time.perf_counter() - began
+        return time.process_time() - began
     finally:
         gc.enable()
 
