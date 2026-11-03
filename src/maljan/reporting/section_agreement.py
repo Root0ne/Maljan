@@ -62,6 +62,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from typing import Any, Literal
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -76,11 +77,16 @@ from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
 from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
+    _BARE_ADDRESS,
+    _HEX_ADDRESS,
+    _SUFFIXED_ADDRESS,
     EntryTexts,
     ValidationTally,
     Violation,
-    _addresses_written,
+    _NegationReader,
+    _read_dashes,
     citation_violations,
+    generic_function_name,
     ledger_absence_contradictions,
     misstated_entry_contents,
     retry_with_feedback,
@@ -119,8 +125,10 @@ REWRITE_CITES_ELSEWHERE_CODE = "agreement.rewrite_cites_elsewhere"
 REWRITE_DROPS_CITATION_CODE = "agreement.rewrite_drops_citation"
 # A rewrite that cites none of the ids its sources cite, or rests only on
 # sources that cite none; for a section 5 sentence, one resting only on facts
-# about nothing the sentence or its passage names (the routine or its caller,
-# the address, the value or the call), or with no clause of their own.
+# about nothing the sentence names (the routine or its caller, the address, the
+# value or the call), or, for a routine or bound-value fact on a sentence
+# stating an absence and naming no address, nothing its passage names, or with
+# no clause of their own.
 REWRITE_UNGROUNDED_CODE = "agreement.rewrite_ungrounded"
 # A sentence the agreement question rewrote: what stood, what replaced it and
 # on which sources, recorded as the model's answer.
@@ -178,6 +186,10 @@ class Passage:
     # the model chose to qualify on it (``_qualified``); none for a fact that
     # grounds no rewrite.
     qualifier: str = ""
+    # A fact about a routine (one whose code no entry lists, or one an entry
+    # lists) or a decoded value bound to a call: it grounds a section 5 sentence
+    # stating an absence wherever the sentence's passage names it (``_grounds``).
+    on_absence: bool = False
     # The checks the field a passage stands in holds its text to, run on a
     # rewrite before it is put in (an ATT&CK procedure: one sentence, carrying
     # its technique's values); none for a passage held to the round's alone.
@@ -288,6 +300,7 @@ def passages_of(
                 ),
                 value=str(bound.value or ""),
                 call=str(bound.api or ""),
+                on_absence=True,
                 qualifier=(
                     f'the code passes "{_sample_text(bound.value)}" to '
                     f"{_sample_text(bound.api)} as argument {bound.argument}"
@@ -495,12 +508,65 @@ def _hex_address(where: str) -> int | None:
     return int(found.group(1), 16) if found else None
 
 
+# Where a word ends, for reading an address a text names: a space, a bracket, a
+# quote, a list or clause mark, an operator, an arrow. A path, a file name, a URL
+# or a registry key is one word, and a longer identifier is one word.
+_WORD_BREAK = re.compile(
+    r"(?:->|<-|=>|[\s()\[\]{}<>\"'`,;:!?=*+&@|~#%"
+    r"\u2014\u2018\u2019\u201c\u201d\u2190-\u21ff])+"
+)
+# What joins addresses into one word: a range or a pair (``0x10-0x40``,
+# ``0x10..0x40``, ``0x7504/0xd1c8``). Every part of such a word is an address,
+# or none is.
+_ADDRESS_JOIN = re.compile(r"\.\.|[/\\\-\u2013]")
+
+
+# A decompiler's name for a function written with ``0x`` before its address
+# (``fcn.0x33ac``): the word before the address is read as a declared one.
+_NAMED_HEX = re.compile(r"([A-Za-z]\w*?)([_.])0x([0-9a-f]{1,16})", re.IGNORECASE)
+
+
+def _whole_address(part: str, function: re.Pattern[str]) -> int | None:
+    """The address ``part`` is, written whole in a spelling the absence check reads, or
+    ``None``. ``function`` is the declared decompiler names' pattern."""
+    for pattern in (_HEX_ADDRESS, function, _SUFFIXED_ADDRESS, _BARE_ADDRESS):
+        found = pattern.fullmatch(part)
+        if found:
+            return int(found.group(1), 16)
+    named = _NAMED_HEX.fullmatch(part)
+    if named and function.fullmatch(f"{named.group(1)}{named.group(2)}0"):
+        return int(named.group(3), 16)
+    return None
+
+
+def _addresses_named(text: str) -> list[int]:
+    """Every address ``text`` names as an address: a word that is one (``0x6f48``,
+    ``FUN_00406f48``, ``6f48h``, bare hex), or a range or pair of them.
+
+    A hex run inside a path, a file name, a URL, a registry key or a longer
+    identifier (``files/0x00020000000003ba-104.dat``) names no address: it is
+    part of a word that is not one. A slash with nothing on its other side
+    (``0x401000/``, ``/0x5a10``) joins no path segment. One pass over the text.
+    """
+    function = generic_function_name()
+    out: list[int] = []
+    for word in _WORD_BREAK.split(text):
+        word = word.rstrip(".\u2026").strip("/")
+        if not word:
+            continue
+        found = [_whole_address(part, function) for part in _ADDRESS_JOIN.split(word)]
+        if all(value is not None for value in found):
+            out.extend(value for value in found if value is not None)
+    return out
+
+
 def _named_addresses(passages: Iterable[Passage]) -> set[int]:
-    """Every address the passages write, as the absence check reads one (``0x…``, a
-    decompiler's name, ``…h``, bare hex). One pass over each text."""
+    """Every address the passages name, in a spelling the absence check reads (``0x…``,
+    a decompiler's name, ``…h``, bare hex), as a word of its own (:func:`_addresses_named`).
+    One pass over each text."""
     named: set[int] = set()
     for passage in passages:
-        named.update(_addresses_written(passage.text))
+        named.update(_addresses_named(passage.text))
     return named
 
 
@@ -554,9 +620,9 @@ _UNREAD_CLAUSE = re.compile(
 
 
 def _addresses_before(text: str) -> set[int]:
-    """The last address ``text`` writes, read word by word from its end."""
+    """The last address ``text`` names, read word by word from its end."""
     for word in reversed(text.split()):
-        found = _addresses_written(word)
+        found = _addresses_named(word)
         if found:
             return set(found)
     return set()
@@ -581,7 +647,7 @@ def _said_unread(passages: Iterable[Passage]) -> set[int]:
                 breaks = [m.end() for m in _CLAUSE_BREAK.finditer(before)]
                 after = _CLAUSE_BREAK.search(sentence, match.end())
                 clause = sentence[breaks[-1] if breaks else 0 : after.start() if after else None]
-                found = set(_addresses_written(clause)) or _addresses_before(before)
+                found = set(_addresses_named(clause)) or _addresses_before(before)
                 if not found and index:
                     found = _addresses_before(ordered[index - 1])
                 out.update(found)
@@ -652,6 +718,7 @@ def _ledger_passages(entries: Iterable[Any], shown: Sequence[Passage]) -> list[P
                     kind=FACT,
                     cites=cites,
                     addresses=_spelled_both([unread.address, *unread.callers], bases),
+                    on_absence=True,
                     qualifier=unread_callee_clause(
                         _offsets([unread.address], bases), _offsets(unread.callers, bases), plural
                     ),
@@ -688,6 +755,7 @@ def _ledger_passages(entries: Iterable[Any], shown: Sequence[Passage]) -> list[P
                 kind=FACT,
                 cites=cites,
                 addresses=_spelled_both([listed.address], bases),
+                on_absence=True,
                 qualifier=listed_routine_clause(_offsets([listed.address], bases), ids, verb),
             )
         )
@@ -962,7 +1030,8 @@ def _row_violations(
         # 5 sentence's, a fact about what the sentence or its rewrite names.
         grounds = [s for s in sources if s is not None and s.kind in allowed]
         if passage.kind == SECTION_5:
-            about = [s for s in grounds if _grounds_section_5(s, row, passage)]
+            reading = _Reading(row.sentence, passage.text)
+            about = [s for s in grounds if _grounds_section_5(s, reading)]
             if about and span is not None and row.rewrite != _qualified(span[2], about):
                 # Every section 5 rewrite is the platform's (``_platform_rewrites``):
                 # a row carrying other words is not one.
@@ -974,10 +1043,12 @@ def _row_violations(
                         message=(
                             f"row {safe_finding_value(index + 1)}: "
                             f"{safe_finding_value(', '.join(s.id for s in grounds))} "
-                            "is about nothing the sentence or its passage names. A fact "
-                            "qualifies a section 5 sentence only where the sentence or its "
-                            "passage names the routine, the address, the value or the call "
-                            "it is about. Keep the sentence."
+                            "is about nothing the sentence names. A fact qualifies a "
+                            "section 5 sentence only where the sentence names the routine, "
+                            "the address, the value or the call it is about, or, for a "
+                            "fact about a routine or a bound value, where the sentence "
+                            "states an absence, names no address and its passage names "
+                            "what the fact is about. Keep the sentence."
                         ),
                         path=f"{path}.rewrite",
                     )
@@ -991,24 +1062,74 @@ def _row_violations(
     return out
 
 
-def _grounds_section_5(fact: Passage, row: AgreementRow, passage: Passage) -> bool:
-    """Whether a fact grounds a rewrite of a section 5 sentence: where the sentence or its
-    passage names what the fact is about (a routine whose code no entry lists or its
-    caller, the address of an answered call, a bound value, its call or where it is
-    passed). The platform writes the rewrite (``_qualified``); a fact with no clause of
-    its own grounds none."""
-    return _grounds(fact, row.sentence, passage)
+def _grounds_section_5(fact: Passage, reading: _Reading) -> bool:
+    """Whether a fact grounds a rewrite of a section 5 sentence: where the sentence names
+    what the fact is about (a routine whose code no entry lists or its caller, the address
+    of an answered call, a bound value, its call or where it is passed), or, for a
+    fact about a routine or a bound value, where the sentence states an absence, names no
+    address and its passage names what the fact is about. The platform writes the rewrite
+    (``_qualified``); a fact with no clause of its own grounds none."""
+    return _grounds(fact, reading)
 
 
-def _grounds(fact: Passage, sentence: str, passage: Passage) -> bool:
+class _Reading:
+    """What a section 5 sentence and its passage name, read once for every fact asked
+    about the sentence."""
+
+    def __init__(self, sentence: str, passage: str) -> None:
+        self.sentence = sentence
+        self.lowered = sentence.lower()
+        self.passage = passage
+
+    @cached_property
+    def named(self) -> frozenset[int]:
+        return frozenset(_addresses_named(self.sentence))
+
+    @cached_property
+    def passage_named(self) -> frozenset[int]:
+        return frozenset(_addresses_named(self.passage))
+
+    @cached_property
+    def absence(self) -> bool:
+        return _states_an_absence(self.sentence)
+
+
+def _grounds(fact: Passage, reading: _Reading) -> bool:
     """:func:`_grounds_section_5` for a sentence as copied: a fact with a clause of its
-    own, about what the sentence or its passage names, whose clause the sentence does not
-    already carry."""
+    own, whose clause the sentence does not already carry, about what the sentence
+    names; or a fact about a routine or a bound value, about what the passage names,
+    where the sentence states an absence and names no address of its own ("No
+    environment check is established.", T-404; "The mutex name is not
+    established.", T-398). An absence naming an address is about that address
+    ("The call at 0x3808 was not read").
+
+    Any other fact is about the sentence alone: a section names many routines, and
+    a failed call answered later is not about every sentence beside the one naming
+    it (a sentence on dropped files gained a clause on a download routine two
+    paragraphs on).
+    """
+    if not fact.qualifier or fact.qualifier.lower() in reading.lowered:
+        return False
+    if _about(fact, reading.sentence, reading.named):
+        return True
     return (
-        bool(fact.qualifier)
-        and fact.qualifier.lower() not in sentence.lower()
-        and _about(fact, sentence, passage.text)
+        fact.on_absence
+        and reading.absence
+        and not reading.named
+        and _about(fact, reading.passage, reading.passage_named)
     )
+
+
+# A word an absence may be stated of.
+_A_WORD = re.compile(r"[A-Za-z][\w-]*")
+
+
+def _states_an_absence(sentence: str) -> bool:
+    """Whether the sentence names something to say it is absent: a word of it the absence
+    question reads as named absent (``validation.states_absence``'s reading of a
+    mention)."""
+    reader = _NegationReader(_read_dashes(sentence))
+    return any(reader.named_as_absent(m.start(), m.end()) for m in _A_WORD.finditer(sentence))
 
 
 def _qualified(sentence: str, facts: Sequence[Passage]) -> str:
@@ -1049,15 +1170,13 @@ def _platform_rewrites(payload: Any, by_id: dict[str, Passage]) -> Any:
         ):
             named = row.get("sources")
             standing = located(passage.text, str(row.get("sentence") or ""))
+            reading = _Reading(standing or "", passage.text)
             facts = [
                 fact
                 for fact in (
                     by_id.get(_form(n)) for n in (named if isinstance(named, list) else [])
                 )
-                if fact is not None
-                and fact.kind == FACT
-                and standing
-                and _grounds(fact, standing, passage)
+                if fact is not None and fact.kind == FACT and standing and _grounds(fact, reading)
             ]
             if standing and facts:
                 row = {**row, "rewrite": _qualified(standing, facts)}
@@ -1070,19 +1189,19 @@ def _platform_rewrites(payload: Any, by_id: dict[str, Passage]) -> Any:
 _VALUE_FLOOR = 3
 
 
-def _about(fact: Passage, *texts: str) -> bool:
-    """Whether a fact is about what the texts name: an address it names, in any spelling
-    the absence check reads, or the value it binds or the call it is passed to, written
-    whole in one of them."""
-    joined = " ".join(texts)
+def _about(fact: Passage, text: str, named: frozenset[int] | None = None) -> bool:
+    """Whether a fact is about what the text names: an address it names, in any spelling
+    the absence check reads, as a word of its own (:func:`_addresses_named`; ``named``
+    when already read), or the value it binds or the call it is passed to, written
+    whole."""
     for word in (fact.value, fact.call):
         if len(word) >= _VALUE_FLOOR and re.search(
-            r"(?<!\w)" + re.escape(word) + r"(?!\w)", joined, re.IGNORECASE
+            r"(?<!\w)" + re.escape(word) + r"(?!\w)", text, re.IGNORECASE
         ):
             return True
-    return bool(fact.addresses) and any(
-        address in fact.addresses for address in _addresses_written(joined)
-    )
+    if not fact.addresses:
+        return False
+    return not fact.addresses.isdisjoint(_addresses_named(text) if named is None else named)
 
 
 def _grounding_violations(
@@ -1256,8 +1375,9 @@ SYSTEM_PROMPT = (
     "a debate round says. A section 5 sentence answered by a fact is not reworded: the "
     "decision rewrite only asks that it be qualified, and the platform adds the fact's own "
     "words and its ids to the sentence as it stands; it is qualified only where the "
-    "sentence or its passage names the routine, the address, the value or the call the "
-    "fact is about.\n"
+    "sentence names the routine, the address, the value or the call the fact is about, or, "
+    "for a fact about a routine or a bound value, where the sentence states an absence, names "
+    "no address and its passage names what the fact is about.\n"
     "Leave out every sentence no source states otherwise than. List each sentence once. "
     "Answer with exactly this JSON object, with an empty list when no sentence disagrees:\n"
     + EXPECTED_OBJECT

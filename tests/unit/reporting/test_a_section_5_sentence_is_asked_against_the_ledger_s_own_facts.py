@@ -569,6 +569,140 @@ def test_a_sentence_already_carrying_the_fact_s_clause_is_not_qualified_again() 
 
 
 @pytest.mark.parametrize(
+    "body",
+    [
+        # The caller named after the absence, a paragraph on or a paragraph back.
+        f"{ABSENT}\n\nThe gate at 0x5a10 returns early [ev_0107].",
+        f"{ABSENT} The gate at 0x5a10 returns early [ev_0107].",
+        f"The gate at 0x5a10 returns early [ev_0107].\n\n{ABSENT}",
+    ],
+)
+def test_an_absence_is_qualified_on_a_routine_its_passage_names_anywhere(body: str) -> None:
+    out, done = _qualify("anything", body=body)
+    assert out == body.replace(ABSENT, f"No environment check is established; {CLAUSE}.")
+    assert done.summary["rewritten"] == 1
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        # States no absence: the routine fact is about the sentence alone.
+        "The sample also writes a Run key for persistence [ev_0107].",
+        "Routine 0x7c40 returns early.",
+        # States an absence of an address it names: it is about that address.
+        "Routine 0x7c40 performs no check.",
+        "The call at 0x7c40 was not read [ev_0107].",
+        "The other caller of 0x7c40 is not shown.",
+    ],
+)
+def test_a_routine_fact_qualifies_no_other_sentence_its_passage_does_not_name_it_in(
+    sentence: str,
+) -> None:
+    body = f"The gate at 0x5a10 returns early [ev_0107]. {sentence}"
+    out, done = _qualify("anything", sentence, body)
+    assert out == body
+    assert done.summary["rewritten"] == 0
+    assert done.tally.by_code[REWRITE_UNGROUNDED_CODE] == 2
+
+
+def test_a_bound_value_qualifies_no_sentence_stating_no_absence_beside_its_call() -> None:
+    other = "The gate then sleeps for a while [ev_0107]."
+    report = _bound_report(f"{GATED} {other}")
+    row = _row("evasion_antiforensics", other, ["bound.1"], "x")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.evasion_antiforensics.body == f"{GATED} {other}"
+    assert done.summary["rewritten"] == 0
+
+
+def test_an_answered_failure_is_about_the_sentence_naming_it_alone() -> None:
+    dropped = "One file was dropped, files/0x5a10-104.dat [ev_0107]."
+    report = _report()
+    body = f"{FAILED} {dropped}"
+    report.technical_analysis.string_resolution.body = body
+    row = _row("string_resolution", dropped, ["answered.1"], "anything")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.string_resolution.body == body
+    assert done.summary["rewritten"] == 0
+    assert done.tally.by_code[REWRITE_UNGROUNDED_CODE] == 2
+
+
+def test_an_answered_failure_is_not_about_an_absence_beside_it() -> None:
+    # A routine fact is read passage-wide on an absence; a failed call answered
+    # later never is.
+    report = _report()
+    body = f"{FAILED} {ABSENT}"
+    report.technical_analysis.string_resolution.body = body
+    row = _row("string_resolution", ABSENT, ["answered.1"], "anything")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.string_resolution.body == body
+    assert done.summary["rewritten"] == 0
+
+
+def test_an_answered_failure_qualifies_no_sentence_on_dropped_files_beside_it() -> None:
+    # A section on dropped files names, paragraphs on, the address a failed call
+    # was asked for: the sentence on the files names none of it.
+    dropped = "One file was dropped, files/0x00020000000003ba-104.dat [ev_0107]."
+    report = _report()
+    report.technical_analysis.string_resolution.body = f"{dropped}\n\n{FAILED}"
+    row = _row("string_resolution", dropped, ["answered.1"], "anything")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.string_resolution.body == f"{dropped}\n\n{FAILED}"
+    assert done.summary["rewritten"] == 0
+    assert done.tally.by_code[REWRITE_UNGROUNDED_CODE] == 2
+
+
+@pytest.mark.parametrize(
+    ("text", "named"),
+    [
+        ("Routine 0x5a10 returns.", [0x5A10]),
+        ("It calls FUN_02475a10(a) [ev_0107].", [0x2475A10]),
+        ("The callers (0x5a10, 0x5a38) and 5a10h.", [0x5A10, 0x5A38, 0x5A10]),
+        ("The region 0x5a10-0x5a38 and the pair 0x5a10/0x5a38.", [0x5A10, 0x5A38] * 2),
+        ("Routine 0x5a10's gate.", [0x5A10]),
+        # A decompiler's name written with 0x, a chain and an address taken.
+        (
+            "It runs fcn.0x5a10 -> FUN_0x5a38, then id 7\u2192sub_5a10 and &0x5a38.",
+            [0x5A10, 0x5A38] * 2,
+        ),
+        # A hex run inside a path, a file name, a URL, a registry key or a
+        # longer identifier is part of a word that is no address.
+        ("One file, files/0x00020000000003ba-104.dat [ev_0015].", []),
+        ("It reads C:\\Temp\\0x5a10.bin and HKCU\\Software\\5a10ab.", []),
+        ("It fetches http://host.test/0x5a10 and names mutex_0x5a10.", []),
+        ("The dump memory/3648-3a5f was kept.", []),
+        # A range with two dots, a trailing ellipsis, the marks ~ # %, and a
+        # slash with nothing on its other side.
+        ("The span 0x5a10..0x5a38 and 0x5a10\u2026", [0x5A10, 0x5A38, 0x5A10]),
+        ("Near ~0x5a10, item #0x5a38 and 0x5a10%.", [0x5A10, 0x5A38, 0x5A10]),
+        ("At 0x5a10/ and /0x5a38.", [0x5A10, 0x5A38]),
+        ("The path /0x5a38.bin and dir/0x5a10/.", []),
+    ],
+)
+def test_an_address_counts_only_as_a_word_of_its_own(text: str, named: list[int]) -> None:
+    from maljan.reporting.section_agreement import _addresses_named
+
+    assert _addresses_named(text) == named
+
+
+def test_an_address_inside_a_path_qualifies_no_sentence() -> None:
+    dropped = "One file was dropped, files/0x5a10-104.dat [ev_0107]."
+    report = _report()
+    report.technical_analysis.string_resolution.body = f"{dropped} {FAILED}"
+    row = _row("string_resolution", dropped, ["answered.1"], "anything")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.string_resolution.body == f"{dropped} {FAILED}"
+    assert done.summary["rewritten"] == 0
+
+
+def test_a_routine_named_only_inside_a_path_is_no_fact_of_its_own() -> None:
+    report = _report()
+    report.intro_background = "The gate writes files/0x5a38.dat [ev_0107]."
+    report.technical_analysis.evasion_antiforensics.body = "The gate returns early [ev_0107]."
+    facts = [p.text for p in passages_of(report, entries=_ledger()) if p.kind == FACT]
+    assert not any(text.startswith(hex(CHECK)) for text in facts)
+
+
+@pytest.mark.parametrize(
     ("sentence", "qualified"),
     [
         ('Routine 0x5a10 maps "it."', 'Routine 0x5a10 maps "it"; Q [ev_0107].'),
