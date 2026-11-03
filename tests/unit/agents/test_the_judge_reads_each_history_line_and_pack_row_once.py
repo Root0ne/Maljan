@@ -158,10 +158,10 @@ class TestTheHistoryShowsEachLineOnce:
                 confidence_score=0.5,
                 contradictions=[line],
             )
-            started = time.process_time()
+            started = time.thread_time()
             for _ in range(5):
                 assert _listed_in_order(argument) is not None
-            return time.process_time() - started
+            return time.thread_time() - started
 
         took(2_000)
         small, large = took(20_000), took(80_000)

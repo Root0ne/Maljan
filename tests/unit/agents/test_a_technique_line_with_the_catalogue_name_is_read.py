@@ -66,9 +66,9 @@ def test_it_is_asked_about(line: str) -> None:
 
 def test_a_long_none_line_is_read_in_linear_time() -> None:
     def cost(line: str) -> float:
-        start = time.process_time()
+        start = time.thread_time()
         read_technique_line(line)
-        return time.process_time() - start
+        return time.thread_time() - start
 
     unit = "none of these words names anything "
     cost(unit * 60)
@@ -79,10 +79,10 @@ def test_a_long_none_line_is_read_in_linear_time() -> None:
 
 def test_ten_times_the_line_costs_at_most_ten_times_the_time() -> None:
     def cost(line: str) -> float:
-        start = time.process_time()
+        start = time.thread_time()
         for _ in range(20):
             read_technique_line(line)
-        return time.process_time() - start
+        return time.thread_time() - start
 
     unit = "T1106 Native API word, "
     cost(unit)

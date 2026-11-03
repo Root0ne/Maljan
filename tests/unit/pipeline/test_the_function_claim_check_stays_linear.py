@@ -85,10 +85,10 @@ def _timed(claims: int) -> float:
             for n in range(claims)
         ]
     )
-    began = time.process_time()
+    began = time.thread_time()
     facts = function_facts(own, function_artefacts(pack), pack_entries=pack, bases=(BASE,))
     found = check_function_claims(isr, listed_functions(own), facts, (BASE,))
-    seconds = time.process_time() - began
+    seconds = time.thread_time() - began
     assert found.asked == claims
     return seconds
 
@@ -153,10 +153,10 @@ def _grown(scale: int) -> float:
     gc.collect()
     gc.disable()
     try:
-        began = time.process_time()
+        began = time.thread_time()
         facts = function_facts([listing], function_artefacts([index]), pack_entries=[index])
         found = check_function_claims(isr, listed_functions([listing]), facts, (BASE,))
-        seconds = time.process_time() - began
+        seconds = time.thread_time() - began
     finally:
         gc.enable()
     assert found.asked == 0 and found.checked == scale
@@ -247,9 +247,9 @@ def _paired(count: int) -> tuple[float, int]:
     gc.collect()
     gc.disable()
     try:
-        began = time.process_time()
+        began = time.thread_time()
         found = check_function_claims(isr, listed_functions(listings), facts, (BASE,))
-        seconds = time.process_time() - began
+        seconds = time.thread_time() - began
     finally:
         gc.enable()
     assert found.asked == 0 and found.checked == count
@@ -260,9 +260,9 @@ class TestASentenceIsReadInWindows:
     def test_a_text_of_dots_finds_its_sentences_in_well_under_a_second(self) -> None:
         for unit in ("x. ", "e.g. ", "a."):
             text = (unit * (200_000 // len(unit) + 1))[:200_000]
-            began = time.process_time()
+            began = time.thread_time()
             _clause_starts(text)
-            seconds = time.process_time() - began
+            seconds = time.thread_time() - began
             print("sentences of 200 KB of", repr(unit), round(seconds, 3))
             assert seconds < 1.0
 
@@ -277,9 +277,9 @@ class TestASentenceIsReadInWindows:
         text = " ".join(names[:4_000])
         assert len(text) > 60_000
         known = _catalogue_lower()
-        began = time.process_time()
+        began = time.thread_time()
         apis, _strings = named_values(text, known)
-        seconds = time.process_time() - began
+        seconds = time.thread_time() - began
         print("4,000 names in one sentence:", round(seconds, 3))
         assert len(apis) > 3_000
         assert seconds < 1.0
@@ -298,9 +298,9 @@ class TestASentenceIsReadInWindows:
         ):
             text = (head + joint.join(names * 4))[:200_000]
             assert not any(mark in text for mark in ".;:!?\n")
-            began = time.process_time()
+            began = time.thread_time()
             named_values(text, known)
-            seconds = time.process_time() - began
+            seconds = time.thread_time() - began
             print("one 200 KB clause opened by", repr(head + joint), round(seconds, 3))
             assert seconds < 1.0
 

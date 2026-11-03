@@ -510,9 +510,9 @@ class TestAnUpstreamBlockNearTheRoomAddsAtMostOneChunk:
         def timed(parsed: str) -> float:
             agent, node, state, _container_ = _hostile_node(parsed, block)
             with patch("maljan.pipeline.nodes.upstream_findings", lambda *_a: block):
-                began = time.process_time()
+                began = time.thread_time()
                 node(state)
-                return time.process_time() - began
+                return time.thread_time() - began
 
         timed(HOSTILE_INPUT)
         small = min(timed(HOSTILE_INPUT) for _ in range(2))

@@ -1109,9 +1109,9 @@ def test_the_work_stays_linear_on_a_tree_ten_times_the_size(tmp_path: Path) -> N
             gc.collect()
             gc.disable()
             try:
-                start = time.process_time()
+                start = time.thread_time()
                 register = build(root)
-                best = min(best, time.process_time() - start)
+                best = min(best, time.thread_time() - start)
             finally:
                 gc.enable()
         assert len(register.codes) == modules * 20 + 3

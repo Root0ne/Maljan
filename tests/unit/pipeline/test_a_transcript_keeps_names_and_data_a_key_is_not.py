@@ -141,9 +141,9 @@ class TestHostileAnswersCostLinearWork:
         import time
         import tracemalloc
 
-        started = time.process_time()
+        started = time.thread_time()
         scrub_keeping_layout(text)
-        took = time.process_time() - started
+        took = time.thread_time() - started
         tracemalloc.start()
         scrub_keeping_layout(text)
         peak = tracemalloc.get_traced_memory()[1]
@@ -265,9 +265,9 @@ def test_dotted_runs_cost_ten_times_a_tenth(unit: str) -> None:
         text = unit * (size // len(unit))
         best = float("inf")
         for _ in range(3):
-            started = time.process_time()
+            started = time.thread_time()
             scrub(text)
             scrub_keeping_layout(text)
-            best = min(best, time.process_time() - started)
+            best = min(best, time.thread_time() - started)
         took.append(best)
     assert took[1] <= max(took[0], 0.01) * 12, took

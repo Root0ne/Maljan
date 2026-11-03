@@ -209,10 +209,10 @@ def test_many_colliding_tools_are_claimed_in_linear_time(monkeypatch: pytest.Mon
         gc.collect()
         gc.disable()
         try:
-            start = time.process_time()
+            start = time.thread_time()
             registry.merge_tools("analysis", own, tools, seen)
             registry.merge_tools("kit", added, tools, seen)
-            took = time.process_time() - start
+            took = time.thread_time() - start
         finally:
             gc.enable()
         assert sum(1 for t in tools if t.name.startswith("kit__")) == n

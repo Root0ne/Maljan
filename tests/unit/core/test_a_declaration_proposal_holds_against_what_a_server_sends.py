@@ -153,9 +153,9 @@ def _wide(n: int) -> dict[str, Any]:
 
 
 def _seconds(definition: dict[str, Any]) -> float:
-    start = time.process_time()
+    start = time.thread_time()
     propose([definition])
-    return time.process_time() - start
+    return time.thread_time() - start
 
 
 def _peak(definition: dict[str, Any]) -> int:
@@ -189,9 +189,9 @@ def test_a_deep_schema_is_linear_in_time_and_memory() -> None:
 def test_a_huge_description_is_read_in_linear_time() -> None:
     def _timed(n: int) -> float:
         definition = {"name": "talk", "description": "a rule matched the path. " * n}
-        start = time.process_time()
+        start = time.thread_time()
         propose([definition])
-        return time.process_time() - start
+        return time.thread_time() - start
 
     _timed(10_000)
     once = min(_timed(20_000) for _ in range(3))
@@ -495,9 +495,9 @@ def test_auto_name_prefixes_are_proposed_beyond_the_defaults_only() -> None:
 def test_a_hostile_answer_text_is_read_in_linear_time() -> None:
     def _timed(n: int) -> float:
         text = "a_" * n + "proc_0040 " * n
-        start = time.process_time()
+        start = time.thread_time()
         auto_name_prefixes_in([text])
-        return time.process_time() - start
+        return time.thread_time() - start
 
     _timed(10_000)
     once = min(_timed(20_000) for _ in range(3))

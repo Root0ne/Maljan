@@ -277,9 +277,9 @@ _READERS["repeat_reader"] = _repeat_reader
 def _seconds(call: Callable[[], Any]) -> float:
     best = float("inf")
     for _ in range(2):
-        started = time.process_time()
+        started = time.thread_time()
         call()
-        best = min(best, time.process_time() - started)
+        best = min(best, time.thread_time() - started)
     return best
 
 

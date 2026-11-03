@@ -413,9 +413,9 @@ def _read_all(payload: dict[str, Any], formats: tuple[ReportFormat, ...]) -> Non
 def _seconds(payload: dict[str, Any], formats: tuple[ReportFormat, ...]) -> float:
     best = float("inf")
     for _ in range(3):
-        start = time.process_time()
+        start = time.thread_time()
         _read_all(payload, formats)
-        best = min(best, time.process_time() - start)
+        best = min(best, time.thread_time() - start)
     return best
 
 

@@ -51,9 +51,9 @@ def test_n1_a_hostile_version_table_costs_no_time_and_no_import_row(which: str) 
     if not LS.is_file():
         pytest.skip("no system ELF to read")
     clean = _parse_elf_imports(LS.read_bytes())
-    started = time.process_time()
+    started = time.thread_time()
     rows = _parse_elf_imports(_hostile_ls(which))
-    assert time.process_time() - started < 10
+    assert time.thread_time() - started < 10
     assert sum(1 for r in rows if r.function) == sum(1 for r in clean if r.function)
 
 
@@ -99,7 +99,7 @@ def test_n_a_version_table_naming_one_long_string_costs_the_sections_size() -> N
     struct.pack_into("<Q", base, header + 24, region)
     struct.pack_into("<Q", base, header + 32, 16 * n)
     struct.pack_into("<I", base, header + 44, n)
-    started = time.process_time()
+    started = time.thread_time()
     rows = _parse_elf_imports(bytes(base))
-    assert time.process_time() - started < 10
+    assert time.thread_time() - started < 10
     assert rows

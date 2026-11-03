@@ -168,10 +168,10 @@ def test_a_hostile_pattern_is_read_and_fingerprinted_in_linear_time(unit: str, t
     # noise on a loaded machine; the best of five runs each).
     def took(size: int) -> float:
         text = unit * size + tail
-        start = time.process_time()
+        start = time.thread_time()
         read_comparisons(text)
         pattern_fingerprint("stix", text)
-        return time.process_time() - start
+        return time.thread_time() - start
 
     small = min(took(5_000) for _ in range(5))
     large = min(took(50_000) for _ in range(5))

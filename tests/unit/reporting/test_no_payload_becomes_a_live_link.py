@@ -114,10 +114,10 @@ def test_no_payload_is_live_after_the_defanger(payload: str) -> None:
     ],
 )
 def test_text_nested_deep_renders_quickly_as_text(nested: str) -> None:
-    started = time.process_time()
+    started = time.thread_time()
     markdown = MarkdownRenderer().render(_report(nested))
     html = HtmlRenderer().render(_report(nested))
-    elapsed = time.process_time() - started
+    elapsed = time.thread_time() - started
 
     assert elapsed < 30
     assert "x" in markdown and "x" in html

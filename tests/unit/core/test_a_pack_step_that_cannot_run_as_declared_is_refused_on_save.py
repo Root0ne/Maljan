@@ -185,10 +185,10 @@ class TestAnArgumentTemplateAtAnyDepth:
         def seconds(n: int) -> float:
             template = deep(n)
             gc.collect()
-            began = time.process_time()
+            began = time.thread_time()
             PackStep(id="x", server="s", tool="t", arguments=template)
             placeholder_values(template, self.VALUES)
-            return time.process_time() - began
+            return time.thread_time() - began
 
         seconds(2_000)
         low = min(seconds(2_000) for _ in range(2))

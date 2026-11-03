@@ -153,9 +153,9 @@ def _timed(make: Callable[[int], tuple[Image, dict[str, Any]]], n: int) -> tuple
     gc.collect()
     gc.disable()
     try:
-        began = time.process_time()
+        began = time.thread_time()
         answer = artefact_index.index_image(image, **joined)
-        return time.process_time() - began, answer
+        return time.thread_time() - began, answer
     finally:
         gc.enable()
 

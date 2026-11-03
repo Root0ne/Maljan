@@ -183,9 +183,9 @@ def test_tb17_a_long_answer_of_prose_markers_is_read_in_linear_time() -> None:
         text = "x [1] " * (size // 6)
         times = []
         for _ in range(3):
-            started = time.process_time()
+            started = time.thread_time()
             extract_json(text)
-            times.append(time.process_time() - started)
+            times.append(time.thread_time() - started)
         return min(times)
 
     # Four times the text: a linear reading takes about four times as long, a

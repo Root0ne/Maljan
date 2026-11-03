@@ -139,9 +139,9 @@ class TestThePlacesALineNames:
         timings = []
         for n in (300, 3000):
             line = "[analysts: STATIC] " + " ".join(f"0x{1000 + i:x}" for i in range(n))
-            start = time.process_time()
+            start = time.thread_time()
             place_facts([line], _isrs(), _ledger(), NAMES)
-            timings.append(time.process_time() - start)
+            timings.append(time.thread_time() - start)
         assert timings[1] < timings[0] * 10 * 4 + 0.5
 
 

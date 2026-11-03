@@ -484,9 +484,9 @@ class TestBounds:
             gc.collect()
             gc.disable()
             try:
-                started = time.process_time()
+                started = time.thread_time()
                 call()
-                best = min(best, time.process_time() - started)
+                best = min(best, time.thread_time() - started)
             finally:
                 gc.enable()
         return best

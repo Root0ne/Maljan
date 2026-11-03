@@ -722,9 +722,9 @@ def test_ten_times_the_entries_cost_at_most_ten_times() -> None:
             _entry(f"mcp:s{i % 50}", f"t{i % 200}", {"v": 1, "effects": {"network": True}})
             for i in range(count)
         ]
-        start = time.process_time()
+        start = time.thread_time()
         effects_part(entries)
-        return time.process_time() - start
+        return time.thread_time() - start
 
     _timed(2_000)
     small = min(_timed(2_000) for _ in range(3))

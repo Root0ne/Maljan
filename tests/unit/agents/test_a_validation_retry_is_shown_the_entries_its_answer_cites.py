@@ -210,11 +210,11 @@ class TestTheEntriesText:
             isr.claims[0].evidence_ref = " ".join(f"[ev_{n:05d}]" for n in range(1, count + 1))
             best = float("inf")
             for _ in range(3):
-                started = time.process_time()
+                started = time.thread_time()
                 closing = analyst._with_cited_entries(
                     isr, [], "CLOSE", lambda text: [HumanMessage(content=text)], 16_384
                 )
-                best = min(best, time.process_time() - started)
+                best = min(best, time.thread_time() - started)
             assert closing.endswith("\nCLOSE")
             assert VALIDATION_ENTRIES_UNFIT in closing
             return best

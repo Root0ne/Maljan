@@ -233,10 +233,10 @@ class TestWhatIsNotRead:
             },
         )
 
-        started = time.process_time()
+        started = time.thread_time()
         answer = tool.document_info(str(path))
 
-        assert time.process_time() - started < 20
+        assert time.thread_time() - started < 20
         assert answer["relationship_parts_unread"] == [
             {
                 "part": "word/_rels/settings.xml.rels",
@@ -325,9 +325,9 @@ def _timed(path: Path) -> float:
     try:
         seconds = []
         for _ in range(3):
-            began = time.process_time()
+            began = time.thread_time()
             tool.document_info(str(path))
-            seconds.append(time.process_time() - began)
+            seconds.append(time.thread_time() - began)
         return min(seconds)
     finally:
         gc.enable()

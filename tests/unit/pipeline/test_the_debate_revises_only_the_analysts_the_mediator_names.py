@@ -715,9 +715,9 @@ class TestTheMentionsOfALineAreReadInLinearTime:
             line = "STATIC Claim 1 ALL_TOOLS_STATIC_R2 Claim 2 " * (count // 2)
             best = float("inf")
             for _ in range(3):
-                began = time.process_time()
+                began = time.thread_time()
                 found = _claims_named(line, NAMES)
-                best = min(best, time.process_time() - began)
+                best = min(best, time.thread_time() - began)
             assert len(found) == count
             return best
 
@@ -750,9 +750,9 @@ class TestAFieldOfManyNamesIsReadInLinearTime:
             line = self._line(count)
             best = float("inf")
             for _ in range(3):
-                began = time.process_time()
+                began = time.thread_time()
                 named, note = analysts_to_revise([line], NAMES)
-                best = min(best, time.process_time() - began)
+                best = min(best, time.thread_time() - began)
             assert named is None and f"{count} name(s)" in note
             return best
 

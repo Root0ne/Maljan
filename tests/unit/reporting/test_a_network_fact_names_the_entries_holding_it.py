@@ -126,9 +126,9 @@ def test_reading_the_holders_stays_linear() -> None:
             evidence_index=[_row(f"ev_{n + 1:04d}", "strings") for n in range(size)],
             technical_evidence={"static": texts},
         )
-        start = time.process_time()
+        start = time.thread_time()
         value_entries(report, [URL, HOST, *(f"h{n}.test" for n in range(size))])
-        return time.process_time() - start
+        return time.thread_time() - start
 
     small, large = took(200), took(2_000)
     assert large < small * 30, (small, large)

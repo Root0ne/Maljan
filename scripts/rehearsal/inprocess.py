@@ -65,7 +65,7 @@ JUDGE_EFFORT = {"anthropic": "medium", "openai": "max"}
 # take most of it on an idle machine, and all of it on a loaded one.
 DEADLINE_HIT_S = 12.0
 # How long a ``deadline_hit`` run may take to make its first model call.
-FIRST_CALL_WAIT_S = 300.0
+FIRST_CALL_WAIT_S = 120.0
 # How long a run stopped at its deadline is given for its in-flight work to see the stop.
 STRAGGLER_WAIT_S = 5.0
 # The transcript roles whose claims are an analyst's answer: its own answer
@@ -348,15 +348,22 @@ async def _held_from_first_call(run: Any, state: StubState, deadline_s: float | 
     """
     task = asyncio.ensure_future(run)
     ends = time.monotonic() + FIRST_CALL_WAIT_S
-    while not state.calls() and not task.done():
-        if time.monotonic() >= ends:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
-            raise NoModelCall(
-                f"no model call reached the stub within {FIRST_CALL_WAIT_S:.0f}s of the run's start"
-            )
-        await asyncio.sleep(0.05)
+    try:
+        while not state.calls() and not task.done():
+            if time.monotonic() >= ends:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+                raise NoModelCall(
+                    f"no model call reached the stub within {FIRST_CALL_WAIT_S:.0f}s "
+                    "of the run's start"
+                )
+            await asyncio.sleep(0.05)
+    except asyncio.CancelledError:
+        # Cancelled from outside while waiting: the run goes with it, as
+        # ``wait_for`` would take it, before the app is closed under it.
+        task.cancel()
+        raise
     return await asyncio.wait_for(task, timeout=deadline_s)
 
 
@@ -488,6 +495,11 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
             "slow_seconds": brain.slow_seconds,
             "job_timeout_s": rehearsal.deadline_s,
             "deadline_in": brain.deadline_in,
+            **(
+                {"deadline_from": "first_model_call"}
+                if rehearsal.scenario == "deadline_hit"
+                else {}
+            ),
             "slow_roles": sorted(brain.slow_roles),
             "mode": "in_process",
             "served_windows": {m: state.facts(m).window for m in served},

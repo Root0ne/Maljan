@@ -22,9 +22,9 @@ def test_a_long_run_with_no_quote_after_it_grows_linearly() -> None:
         text = '"' + "\\" * n
         best = float("inf")
         for _ in range(3):
-            started = time.process_time()
+            started = time.thread_time()
             quoted_backslashes_written_out(text)
-            best = min(best, time.process_time() - started)
+            best = min(best, time.thread_time() - started)
         return best
 
     small, large = spent(5_000), spent(40_000)

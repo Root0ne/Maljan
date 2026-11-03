@@ -74,9 +74,9 @@ def _report(text: str) -> MalwareReport:
 
 @pytest.mark.parametrize("shape", list(SHAPES))
 def test_an_adversarial_input_renders_quickly_and_keeps_every_section(shape: str) -> None:
-    started = time.process_time()
+    started = time.thread_time()
     markdown = MarkdownRenderer().render(_report(SHAPES[shape]))
-    elapsed = time.process_time() - started
+    elapsed = time.thread_time() - started
 
     assert "rendering failed" not in markdown
     assert re.search(r"^## 1\. ", markdown, re.M)
@@ -86,7 +86,7 @@ def test_an_adversarial_input_renders_quickly_and_keeps_every_section(shape: str
 
 @pytest.mark.parametrize("shape", list(SHAPES))
 def test_the_defanger_reads_a_whole_adversarial_input_in_seconds(shape: str) -> None:
-    started = time.process_time()
+    started = time.thread_time()
     _defanged_text(SHAPES[shape])
 
-    assert time.process_time() - started < 50, shape
+    assert time.thread_time() - started < 50, shape

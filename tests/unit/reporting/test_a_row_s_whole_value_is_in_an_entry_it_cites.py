@@ -361,9 +361,9 @@ class TestOddAndLargeInput:
             ]
         }
 
-        started = time.process_time()
+        started = time.thread_time()
         found = stated_value_violations(payload, texts)
-        elapsed = time.process_time() - started
+        elapsed = time.thread_time() - started
 
         (asked,) = found
         assert asked.message.startswith("identifiers 1, 2, 3, ")

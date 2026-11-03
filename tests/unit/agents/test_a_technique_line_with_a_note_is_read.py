@@ -221,9 +221,9 @@ def test_a_read_note_leaves_no_question() -> None:
 def test_a_line_of_notes_is_read_in_linear_time() -> None:
     def cost(repeats: int) -> float:
         line = "; ".join(["T1071.001 (configured channel as listed)"] * repeats)
-        start = time.process_time()
+        start = time.thread_time()
         read_technique_line(line)
-        return time.process_time() - start
+        return time.thread_time() - start
 
     cost(50)
     small = cost(280)

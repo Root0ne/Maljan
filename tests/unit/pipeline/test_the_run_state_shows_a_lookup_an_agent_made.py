@@ -130,9 +130,9 @@ def test_many_rows_are_read_in_one_pass() -> None:
             *(_agent_call(i, args={"query": f"q{i}"}) for i in range(2, n)),
             _agent_call(n),
         ]
-        start = time.process_time()
+        start = time.thread_time()
         assert f"[{format_entry_id(n)}]" in _block(rows)
-        return time.process_time() - start
+        return time.thread_time() - start
 
     small, large = _timed(200), _timed(2_000)
     assert large < max(small * 30, 1.0)

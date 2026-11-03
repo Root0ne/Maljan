@@ -83,9 +83,9 @@ class TestNoChunkHoldsNothing:
 
         def timed(size: int) -> float:
             text = "w" * size + " " * size
-            began = time.process_time()
+            began = time.thread_time()
             chunker.chunk("triage", text, room=_room(1_000))
-            return time.process_time() - began
+            return time.thread_time() - began
 
         timed(200_000)
         small = min(timed(200_000) for _ in range(3))

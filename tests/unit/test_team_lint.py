@@ -488,11 +488,11 @@ def _fan(n: int) -> dict[str, Any]:
 
 
 def _timed(team: dict[str, Any]) -> tuple[list[Any], float]:
-    started = time.process_time()
+    started = time.thread_time()
     findings = lint_team(TEAM, team, definitions=_definitions())
     stages, _ = team_stages(TEAM, team)
     layout_team(stages)
-    return findings, time.process_time() - started
+    return findings, time.thread_time() - started
 
 
 class TestALargeTeam:

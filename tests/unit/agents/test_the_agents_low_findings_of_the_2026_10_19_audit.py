@@ -236,9 +236,9 @@ class TestRw1TheReaderIsLinearInTheClaims:
         from maljan.agents.repeat_watch import ClaimRepeatReader
 
         text = "".join(f"CLAIM: c{i}\n---\n```json\n{{}}\n```\n" for i in range(claims))
-        started = time.process_time()
+        started = time.thread_time()
         ClaimRepeatReader(None).feed(text)
-        return time.process_time() - started
+        return time.thread_time() - started
 
     def test_four_times_the_claims_cost_about_four_times_the_time(self) -> None:
         small = self._seconds(8_000)

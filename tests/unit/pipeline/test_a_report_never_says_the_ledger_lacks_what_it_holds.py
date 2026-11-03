@@ -258,9 +258,9 @@ class TestLinearTime:
                 f"that are not confirmed by [ev_0004]. Its callers are not in the ledger."
                 for n in range(scale)
             )
-            start = time.process_time()
+            start = time.thread_time()
             ledger_absence_contradictions({"body": text}, entries)
-            return time.process_time() - start
+            return time.thread_time() - start
 
         cost(5)
         small = cost(50)

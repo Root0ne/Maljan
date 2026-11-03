@@ -201,9 +201,9 @@ def test_a_server_s_own_words_are_quoted_in_linear_time() -> None:
 
     def timed(n: int) -> float:
         hostile = ("<<x>> 〈 \r\n " * n) + "{{attached:a|b|c}}"
-        start = time.process_time()
+        start = time.thread_time()
         undeclared_server_text("mine", hostile, [tool])
-        return time.process_time() - start
+        return time.thread_time() - start
 
     timed(1_000)
     small = min(timed(10_000) for _ in range(3))
