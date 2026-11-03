@@ -380,6 +380,22 @@ class TestTheMediatorDecides:
         assert argument.contradictions == [line]
         assert argument.unread_marks == [line]
 
+    def test_a_line_marked_not_blocking_right_after_its_field_leaves_consensus(self) -> None:
+        line = "[analysts: GAMMA ANALYST] [not blocking: a tally] Claim 2 counts 41 [ev_0007]"
+        argument, is_consensus = _mediate(_Model(_block(line)))
+
+        assert is_consensus is True
+        assert argument.not_blocking == [line]
+        assert argument.unread_marks == []
+
+    def test_a_mark_after_the_field_against_one_ending_the_line_is_not_read(self) -> None:
+        line = "[analysts: GAMMA ANALYST] [not blocking: a tally] Claim 2 counts 41 [blocking: r]"
+        argument, is_consensus = _mediate(_Model(_block(line)))
+
+        assert is_consensus is False
+        assert argument.contradictions == [line]
+        assert argument.unread_marks == [line]
+
     def test_a_reason_citing_ledger_ids_in_brackets_is_honoured(self) -> None:
         line = f"{COUNT_LINE} [not blocking: the entries state both, see [ev_0007] and [ev_0008]]"
         argument, is_consensus = _mediate(_Model(_block(line)))

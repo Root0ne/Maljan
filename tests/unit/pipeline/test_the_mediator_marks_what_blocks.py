@@ -26,6 +26,7 @@ from maljan.pipeline.debate_facts import (
     LEDGER_FACTS_HEAD,
     facts_naming,
     ledger_count_facts,
+    read_claim_references,
     read_marks,
     with_ledger_facts,
 )
@@ -207,6 +208,101 @@ class TestTheMediatorsMarks:
         mark = read_marks(["A says the gate is blocking; B says it is not"])[0]
 
         assert mark.blocking is True and mark.unread is False
+
+    def test_a_mark_right_after_the_field_is_the_line_s_mark(self) -> None:
+        # The shape a mediator wrote: the mark after the field, the point after it.
+        line = (
+            "[analysts: GAMMA ANALYST] [not blocking: confidence wording only; the field "
+            "is read from the constant in ev_0124.] Claim 18 says the field is read from "
+            "the version calls, versus BETA_REVERSER claim 7."
+        )
+
+        mark = read_marks([line])[0]
+
+        assert mark.blocking is False and mark.marked is True and mark.unread is False
+        assert mark.reason.startswith("confidence wording only")
+
+    def test_a_mark_after_the_field_may_follow_the_carried_or_new_mark(self) -> None:
+        for line in (
+            "[analysts: GAMMA ANALYST] [carried: L6] [not blocking: a tally] Claim 3 vs 4.",
+            "[analysts: GAMMA ANALYST] [new] [blocking: open] Claim 3 vs BETA claim 4.",
+        ):
+            mark = read_marks([line])[0]
+
+            assert mark.marked is True and mark.unread is False
+            assert mark.blocking is ("[blocking" in line)
+
+    def test_a_mark_that_ends_the_line_is_read_as_before(self) -> None:
+        line = "[analysts: GAMMA ANALYST] Claim 3 vs BETA claim 4 [not blocking: a tally]"
+
+        mark = read_marks([line])[0]
+
+        assert (mark.blocking, mark.marked, mark.reason, mark.unread) == (
+            False,
+            True,
+            "a tally",
+            False,
+        )
+
+    def test_a_mark_after_the_field_and_one_of_the_other_kind_are_unread(self) -> None:
+        for line in (
+            "[analysts: GAMMA ANALYST] [not blocking: a tally] Claim 3 vs 4 [blocking: open]",
+            "[analysts: GAMMA ANALYST] [blocking: open] [not blocking: a tally] Claim 3 vs 4.",
+        ):
+            mark = read_marks([line])[0]
+
+            assert mark.blocking is True and mark.unread is True
+
+    def test_a_reasoned_mark_after_the_field_wins_over_a_bare_one_ending_the_line(self) -> None:
+        line = "[analysts: GAMMA ANALYST] [not blocking: a tally] Claim 3 vs 4 [not blocking]"
+
+        mark = read_marks([line])[0]
+
+        assert (mark.blocking, mark.marked, mark.reason, mark.unread) == (
+            False,
+            True,
+            "a tally",
+            False,
+        )
+
+    def test_emphasis_around_the_field_and_the_marks_after_it_is_no_part_of_them(self) -> None:
+        for line in (
+            "**[analysts: GAMMA ANALYST]** **[not blocking: a tally]** Claim 3 vs 4.",
+            "*[analysts: GAMMA ANALYST]* _[carried: L2]_ `[not blocking: a tally]` Claim 3.",
+        ):
+            mark = read_marks([line])[0]
+
+            assert (mark.blocking, mark.marked, mark.reason, mark.unread) == (
+                False,
+                True,
+                "a tally",
+                False,
+            )
+
+    def test_a_mark_after_the_field_beside_one_that_cannot_be_read_blocks_unread(self) -> None:
+        for line in (
+            "[analysts: A ANALYST] [not blocking: a tally] Claim 3 vs B claim 4 "
+            "[blocking: the count is",
+            "[analysts: A ANALYST] [not blocking: a tally] Claim 3 vs B claim 4 [blocking",
+        ):
+            mark = read_marks([line])[0]
+
+            assert mark.blocking is True and mark.unread is True
+
+    def test_a_mark_inside_the_text_after_the_field_is_still_unread(self) -> None:
+        line = "[analysts: GAMMA ANALYST] Claim 3 [not blocking: a tally] vs BETA claim 4."
+
+        mark = read_marks([line])[0]
+
+        assert mark.blocking is True and mark.unread is True
+
+    def test_the_claims_of_a_line_marked_after_its_field_do_not_block(self) -> None:
+        line = "[analysts: GAMMA ANALYST] [not blocking: a tally] Claims 3 and 4 vs BETA."
+
+        refs = read_claim_references([line], AGENTS)
+
+        assert refs.named == {"gamma": {3: [(1, False)], 4: [(1, False)]}}
+        assert refs.unplaced == ()
 
 
 def test_a_fact_goes_to_the_analysts_its_line_names() -> None:

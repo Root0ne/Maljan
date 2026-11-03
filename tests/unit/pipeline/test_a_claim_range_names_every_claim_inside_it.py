@@ -198,15 +198,14 @@ class TestWhatTheLineSaysAroundItsReferences:
 
         named = claims_named_by_lines([line], PARTICIPANTS)
 
-        # The mark stands mid-line and is not read: the line blocks with no
-        # claim only the newer reading reaches.
+        # The mark right after the field is the line's (T-533): it does not block.
         assert named == {"static": {18: [(1, False)]}}
 
     @pytest.mark.parametrize(
         "line",
         [
             f"{STATIC} The analyst's own claim 4 is loose. [not blocking: the same reading.]",
-            f"{STATIC} [blocking: x] The analyst's own claim 4 is loose.",
+            f"{STATIC} [blocking: x] The analyst's own claim 4 is loose. [not blocking: y]",
         ],
     )
     def test_a_line_that_does_not_block_or_whose_mark_is_unread_states_nothing(
@@ -215,6 +214,13 @@ class TestWhatTheLineSaysAroundItsReferences:
         refs = read_claim_references([line], PARTICIPANTS)
 
         assert refs.unplaced == ()
+
+    def test_a_line_marked_blocking_right_after_its_field_states_its_reference(self) -> None:
+        line = f"{STATIC} [blocking: x] The analyst's own claim 4 is loose."
+
+        refs = read_claim_references([line], PARTICIPANTS)
+
+        assert [(u.line, u.marked, u.claims) for u in refs.unplaced] == [(1, True, "claim 4")]
 
     def test_a_reference_is_stated_by_each_analyst_it_may_mean_and_kept_once(self) -> None:
         from maljan.analysis.run_summary import RunSummaryBuilder
