@@ -1030,10 +1030,23 @@ def sample_process_tree(roots: list[Any], file_name: str = "", sha256: str = "")
 PLACED_IN_TREE = "tree"
 PLACED_OUTSIDE = "outside"
 PLACED_UNSTATED = ""
-# A process outside the tree that carries a pid a process of the tree carries
-# and records no lineage of its own (no parent pid, listed as a root): another
-# reading of that process as much as another process, so not placed.
+# A process outside the tree that carries a pid a process of the tree carries,
+# records no lineage of its own (no parent pid, listed as a root) and names the
+# same image as that process, or none: another reading of that process, so not
+# placed. A reading that names another image is another process, outside.
 PLACED_UNSETTLED = "unsettled"
+
+_IMAGE_TOKEN = re.compile(r"[^\s()]+")
+
+
+def _image_of(name: str) -> str:
+    """The image a listed name names: its first token's file name, lower case; ``""`` for none.
+
+    The first token delimited by whitespace or a parenthesis, so a listing's
+    note after the image (``rundll32.exe (cmdline: ...)``) is not part of it.
+    """
+    token = _IMAGE_TOKEN.search(name or "")
+    return token.group(0).replace("\\", "/").rsplit("/", 1)[-1].lower() if token else ""
 
 
 def process_placement(
@@ -1048,19 +1061,27 @@ def process_placement(
     neither fact names any process, no process is placed
     (``PLACED_UNSTATED``): the listing says nothing either way. A process
     that records no lineage of its own and carries a pid a process of the
-    tree carries is a reading of that pid alone (``PLACED_UNSETTLED``).
+    tree carries, naming the same image as that process or none, is a reading
+    of it (``PLACED_UNSETTLED``); one naming another image is another process.
     """
     placed = _placed(roots, file_name, sha256)
-    tree_pids = {placed.nodes[i][1] for i in placed.tree if placed.nodes[i][1]}
+    tree_images: dict[str, set[str]] = {}
+    for i in placed.tree:
+        if placed.nodes[i][1]:
+            tree_images.setdefault(placed.nodes[i][1], set()).add(_image_of(placed.nodes[i][2]))
     out: list[tuple[Any, str]] = []
-    for index, (node, pid, _name) in enumerate(placed.nodes):
+    for index, (node, pid, name) in enumerate(placed.nodes):
         if not placed.stated:
             where = PLACED_UNSTATED
         elif index in placed.tree:
             where = PLACED_IN_TREE
         elif index in placed.disputed:
             where = LINEAGE_MARKED if index in placed.marked else LINEAGE_FILE
-        elif index not in placed.linked and pid in tree_pids:
+        elif (
+            index not in placed.linked
+            and pid in tree_images
+            and (not _image_of(name) or _image_of(name) in tree_images[pid])
+        ):
             where = PLACED_UNSETTLED
         else:
             where = PLACED_OUTSIDE

@@ -266,6 +266,35 @@ def test_a_reading_of_a_tree_pid_with_no_lineage_of_its_own_carries_nothing() ->
     }
 
 
+def test_a_root_naming_another_image_on_a_tree_pid_is_outside() -> None:
+    # explorer.exe listed as a bare root that carries the pid of the tree's
+    # cmd.exe: another process, not another reading of cmd.exe. A bare
+    # reading that names cmd.exe by its full path, or no image, stays unlabelled.
+    tree = [
+        ProcessNode(
+            pid=10,
+            name="sample.exe",
+            command_line="sample.exe",
+            children=[ProcessNode(pid=11, name="cmd.exe", command_line="cmd /c x")],
+        ),
+        ProcessNode(pid=11, name="explorer.exe"),
+        ProcessNode(pid=11, name="C:\\Windows\\System32\\CMD.EXE (re-read)"),
+        ProcessNode(pid=11, name=""),
+    ]
+
+    names = _labels(tree)
+    unnamed = [
+        o.get(SAMPLE_TREE_PROPERTY)
+        for o in _exported(_report(tree))["objects"]
+        if o["type"] == "process" and "image_ref" not in o
+    ]
+
+    assert names["explorer.exe"] is False
+    assert names["cmd.exe"] is None
+    assert names["C:\\Windows\\System32\\CMD.EXE (re-read)"] is None
+    assert unnamed == [None]
+
+
 def test_the_commands_table_places_each_process_as_the_export_does() -> None:
     from maljan.reporting.renderers.markdown import started_by_the_sample
 
