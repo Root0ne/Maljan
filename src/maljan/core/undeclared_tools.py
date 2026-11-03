@@ -968,6 +968,9 @@ def code_listing(answer: Any, path: str = "", rows: str = "") -> tuple[str, bool
     cut_field: str | None = None
     try:
         document: Any = json.loads(said)
+    except RecursionError:
+        # An answer nested past the decoder's depth is read as text.
+        return said, False
     except ValueError:
         if said[0] != "{":
             return said, False

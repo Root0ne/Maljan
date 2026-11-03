@@ -843,11 +843,12 @@ def _rule_table(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> Non
 # alone (``core.rule_matches``): kept apart from every declared kind's table,
 # since a shape says "rule matches" and never which kind (a byte signature's,
 # an event rule's, an indicator list's or a technique catalogue's rows read
-# alike). Each row names its tool and how it was read.
+# alike). Its title says how every row was read; each row names its tool. An
+# evidence section, never a detection section: the report's rule hits and the
+# rules that matched the sample list declared kinds' tables alone.
 SHAPE_RULE_SECTION = BY_SHAPE_KEY
-SHAPE_RULE_TITLE = "Rule matches read by their answer's shape"
-SHAPE_RULE_COLUMNS = ["Rule", "Tool", "Read"]
-SHAPE_READ_LABEL = "answer shape, no declaration"
+SHAPE_RULE_TITLE = "Rule matches read by their answer's shape (no declaration)"
+SHAPE_RULE_COLUMNS = ["Rule", "Tool"]
 
 
 def _shaped_rule_table(acc: _Sections, entry: LedgerEntry) -> None:
@@ -863,7 +864,7 @@ def _shaped_rule_table(acc: _Sections, entry: LedgerEntry) -> None:
     tool = f"{held.tool} ({held.server})" if held.server else held.tool or "?"
     table = acc.get(SHAPE_RULE_SECTION, SHAPE_RULE_TITLE, "table", columns=SHAPE_RULE_COLUMNS)
     for rule in held.rules:
-        acc.add_row(table, [rule, tool, SHAPE_READ_LABEL])
+        acc.add_row(table, [rule, tool])
     acc.credit(table, entry)
 
 

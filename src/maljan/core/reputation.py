@@ -258,7 +258,8 @@ def _document(output: str, structured: Any) -> Any:
         return None
     try:
         parsed = json.loads(text)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
+        # An answer nested past the decoder's depth is read as no document.
         return None
     return parsed if isinstance(parsed, dict | list) else None
 
