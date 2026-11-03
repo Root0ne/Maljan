@@ -37,7 +37,6 @@ from maljan.reporting.composer_pro import (
     sentences,
     values_not_carried,
 )
-from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.defang import defang
 from maljan.reporting.judge_reasons import judge_reasons_shown
 from maljan.reporting.models import MalwareReport, TechnicalSubsection, outcome_words
@@ -67,14 +66,15 @@ from maljan.reporting.renderers.markdown import (
     _resolved_only,
     _row,
     _sample_check_line,
-    _spawned,
     _states_ransomware,
     _step,
     _title_heading,
     _whole,
     confidence_word,
     is_carve_note,
+    not_started_by_the_sample_line,
     report_title,
+    started_by_the_sample,
 )
 from maljan.reporting.renderers.markdown import (
     _cell as _table_safe,
@@ -109,6 +109,8 @@ _OBSERVED_ONLY = frozenset({"sandbox", "strings"})
 _IDENTIFIER_NOT_EXPORTED = (
     "not exported: the report model's identifier table publishes nothing itself"
 )
+# Where a reader of this report finds every process the sandbox recorded.
+_BUNDLE_TREE = "the evidence bundle's process tree"
 # The entropy above which the single-file report flags a section [HIGH].
 _HIGH_ENTROPY = 7.0
 # Up to how many imports the metadata names one by one.
@@ -914,12 +916,9 @@ class _Analyst:
         return [*lines, ""]
 
     def _commands_started(self) -> list[str]:
-        dynamic = self.report.dynamic
-        commands = [
-            node
-            for node in _spawned(distinct_processes(dynamic.process_tree if dynamic else []))
-            if node.command_line
-        ]
+        # Only the sample's own processes, by the export's lineage rule; the ones
+        # left out are said under a table that has rows.
+        commands, others = started_by_the_sample(self.report)
         if not commands:
             return []
         lines = ["Commands the sample started _(observed)_:", "", _row("PID", "Command line")]
@@ -927,6 +926,7 @@ class _Analyst:
         for node in commands[:20]:
             lines.append(_row(node.pid, _code_span(_whole(self.ctx.plain(node.command_line)))))
         lines.extend(_left_out(len(commands), 20, "commands"))
+        lines.extend(not_started_by_the_sample_line(others, _BUNDLE_TREE))
         return [*lines, ""]
 
     def _payloads(self) -> list[str]:

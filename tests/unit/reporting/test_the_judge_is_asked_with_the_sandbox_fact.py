@@ -772,13 +772,13 @@ class TestTheFactsAreReadOnce:
                     for i in range(count)
                 ]
 
-        walk = stix_renderer._tree_processes
+        walk = stix_renderer.sample_process_tree
 
         def _counted(roots: list[Any], *args: str) -> Any:
             reads["tree"] += 1
             return walk(roots, *args)
 
-        monkeypatch.setattr(stix_renderer, "_tree_processes", _counted)
+        monkeypatch.setattr(stix_renderer, "sample_process_tree", _counted)
         dynamic = DynamicBehavior(
             process_tree=[ProcessNode(pid=1, name="s.exe")],
             file_operations=[{"operation": "mutex", "name": f"m{i}"} for i in range(count)],
@@ -1055,9 +1055,9 @@ class TestADeepLineageIsReadInLinearTime:
 
     @staticmethod
     def _tree_of(processes: list[Any]) -> Any:
-        from maljan.reporting.renderers.stix_renderer import _tree_processes
+        from maljan.schemas.sandbox_report import sample_process_tree
 
-        return _tree_processes(processes, "invoice.exe", SHA256)
+        return sample_process_tree(processes, "invoice.exe", SHA256)
 
     def test_every_step_of_the_chain_is_the_sample_s(self) -> None:
         tree = self._tree_of(self._chain(8000))

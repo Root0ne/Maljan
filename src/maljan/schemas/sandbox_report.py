@@ -869,6 +869,117 @@ def runs_the_submitted_file(image: str, command_line: str, file_name: str, sha25
     )
 
 
+@dataclass(frozen=True)
+class SampleTree:
+    """The sample's process tree among a listing's processes (:func:`sample_process_tree`).
+
+    ``pids`` and ``names`` (lower case) of its processes; ``unsettled`` the
+    pids whose attribution the listing does not settle: one the two lineage
+    facts disagree about, or one more than one listed process carries with
+    lineages that differ. A record naming an unsettled pid is unattributed.
+    ``reached`` is every pid a listed process of the tree carries, a pid
+    another listed process also carries outside it included: a process read
+    by its place in the listing, not a record read by its pid.
+    """
+
+    pids: frozenset[str]
+    names: frozenset[str]
+    unsettled: frozenset[str]
+    reached: frozenset[str] = frozenset()
+
+
+def _node_field(node: Any, name: str) -> Any:
+    return node.get(name) if isinstance(node, Mapping) else getattr(node, name, None)
+
+
+def pid_text(value: Any) -> str:
+    """A pid as a listing's records are matched by: its text, never ``0``, ``None`` or a bool."""
+    text = "" if value is None or isinstance(value, bool) else str(value).strip()
+    return "" if text in ("0", "None") else text
+
+
+def sample_process_tree(roots: list[Any], file_name: str = "", sha256: str = "") -> SampleTree:
+    """The sample's process tree among the listed processes, read from its lineage facts.
+
+    The facts the network block's flows are attributed by: the processes that
+    run the submitted file (its name or its digest,
+    :func:`runs_the_submitted_file`) and the processes the sandbox marks as the
+    sample's (``marked``). Each gives a tree, the listed processes whose parent
+    chain reaches one it names; where both name processes, a process in both
+    trees is the sample's and one in exactly one is disputed; where one alone
+    names any, its tree is the answer. A listed root that is neither is not
+    the sample's, nor is anything under it, whatever the listing calls a root.
+    A parent pid more than one listed process carries is no link: the chain
+    stops there. One rule for every surface that attributes a process: the
+    export's host values and the report's table of the commands the sample
+    started.
+    """
+    nodes: list[tuple[str, str, str, bool, bool]] = []
+    stack: list[tuple[Any, str]] = [(node, "") for node in roots]
+    while stack:
+        node, container = stack.pop()
+        pid = pid_text(_node_field(node, "pid"))
+        name = str(_node_field(node, "name") or "")
+        runs = bool(file_name or sha256) and runs_the_submitted_file(
+            name, str(_node_field(node, "command_line") or ""), file_name, sha256
+        )
+        nodes.append(
+            (
+                pid,
+                pid_text(_node_field(node, "ppid")) or container,
+                name,
+                runs,
+                _node_field(node, "marked") is True,
+            )
+        )
+        stack.extend((child, pid) for child in _node_field(node, "children") or [])
+    by_pid: dict[str, list[int]] = {}
+    for index, (pid, *_rest) in enumerate(nodes):
+        if pid:
+            by_pid.setdefault(pid, []).append(index)
+
+    def _reach(seeds: set[int]) -> set[int]:
+        # Each process settled once: a chain is walked to the first settled
+        # process, and every process on it takes that answer.
+        settled: dict[int, bool] = {}
+        for start in range(len(nodes)):
+            chain: list[int] = []
+            on_chain: set[int] = set()
+            current: int | None = start
+            reaches = False
+            while current is not None:
+                if current in settled:
+                    reaches = settled[current]
+                    break
+                if current in seeds:
+                    reaches = settled[current] = True
+                    break
+                if current in on_chain:
+                    break
+                on_chain.add(current)
+                chain.append(current)
+                parents = by_pid.get(nodes[current][1]) or []
+                current = parents[0] if len(parents) == 1 else None
+            for one in chain:
+                settled[one] = reaches
+        return {index for index, reaches in settled.items() if reaches}
+
+    by_file = _reach({i for i, node in enumerate(nodes) if node[3]})
+    by_mark = _reach({i for i, node in enumerate(nodes) if node[4]})
+    if by_file and by_mark:
+        tree, disputed = by_file & by_mark, by_file ^ by_mark
+    else:
+        tree, disputed = by_file | by_mark, set()
+    unsettled = {nodes[i][0] for i in disputed if nodes[i][0]}
+    unsettled.update(pid for pid, listed in by_pid.items() if len({i in tree for i in listed}) > 1)
+    return SampleTree(
+        pids=frozenset(nodes[i][0] for i in tree if nodes[i][0]) - unsettled,
+        names=frozenset(n for n in (nodes[i][2].strip().lower() for i in tree) if n),
+        unsettled=frozenset(unsettled),
+        reached=frozenset(nodes[i][0] for i in tree if nodes[i][0]),
+    )
+
+
 # Which of the two facts alone names a flow's process as the sample's, on a
 # row whose attribution is therefore not stated: ``"marked"`` when the sandbox
 # marks it as the sample's and it runs none of the submitted file's names and

@@ -71,6 +71,7 @@ __all__ = [
     "UnreadCallee",
     "call_edges",
     "listing_is_error",
+    "read_routines",
     "unread_callees",
 ]
 
@@ -298,7 +299,44 @@ def call_edges(entries: Iterable[Any]) -> CallEdges:
     return edges
 
 
-def unread_callees(entries: Iterable[Any], found: FunctionMap | None = None) -> list[UnreadCallee]:
+def _read_routines(found: FunctionMap, edges: CallEdges) -> dict[int, list[str]]:
+    """Each read routine, by the address it was read under, with the entries that list it."""
+    read: dict[int, list[str]] = {}
+    for visit in found.visited:
+        if visit.address is None:
+            continue
+        held = read.setdefault(visit.address, [])
+        held.extend(e for e in (*visit.decompiled, *visit.listed) if e not in held)
+    for address, listed in edges.listed.items():
+        held = read.setdefault(address, [])
+        held.extend(e for e in listed if e not in held)
+    return read
+
+
+def read_routines(
+    entries: Iterable[Any], found: FunctionMap | None = None, edges: CallEdges | None = None
+) -> dict[int, list[str]]:
+    """Each read routine with the entries whose listing holds its code, in ledger order.
+
+    The read routines :func:`unread_callees` reads a callee against, spelled
+    by the virtual address where exactly one image base was read; an entry
+    listed under both spellings is listed once. ``found`` and ``edges`` are
+    the map and the calls of ``entries`` when the caller read them already.
+    """
+    entries = list(entries)
+    if found is None:
+        found = build_function_map(entries, None, ())
+    bases = tuple(found.image_bases)
+    out: dict[int, list[str]] = {}
+    for address, listed in _read_routines(found, edges or call_edges(entries)).items():
+        held = out.setdefault(one_spelling(address, bases), [])
+        held.extend(e for e in listed if e and e not in held)
+    return {address: listed for address, listed in out.items() if listed}
+
+
+def unread_callees(
+    entries: Iterable[Any], found: FunctionMap | None = None, edges: CallEdges | None = None
+) -> list[UnreadCallee]:
     """The routines read routines call whose code no entry lists, by address.
 
     ``found`` is the map of ``entries`` when the caller built it already;
@@ -311,16 +349,8 @@ def unread_callees(entries: Iterable[Any], found: FunctionMap | None = None) -> 
     if found is None:
         found = build_function_map(entries, None, ())
     bases = tuple(found.image_bases)
-    edges = call_edges(entries)
-    read: dict[int, list[str]] = {}
-    for visit in found.visited:
-        if visit.address is None:
-            continue
-        held = read.setdefault(visit.address, [])
-        held.extend(e for e in (*visit.decompiled, *visit.listed) if e not in held)
-    for address, listed in edges.listed.items():
-        held = read.setdefault(address, [])
-        held.extend(e for e in listed if e not in held)
+    edges = edges or call_edges(entries)
+    read = _read_routines(found, edges)
 
     def _read_as(address: int) -> int | None:
         for key in address_spellings(address, bases):
