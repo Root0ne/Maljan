@@ -342,30 +342,79 @@ def test_a_call_of_the_same_name_for_another_program_redoes_nothing() -> None:
     assert redone_failures([failed, other, again])[0]["answered_by"] == ["ev_0003"]
 
 
-def test_a_call_of_another_name_for_another_program_redoes_nothing() -> None:
-    # T-542: another tool listing the address whole in another program answers
-    # of another file; the same program, or none named, is still a redo.
-    failed = _decompile("ev_0001", False, program="dropper.exe")
-    listing = {"v": 1, "kind": "function_disassembly", "reader": "listing"}
+def _declared_call(
+    entry_id: str, tool: str, kind: str, program_argument: str | None, ok: bool, **args: object
+) -> LedgerEntry:
+    # A code listing whose tool declares the argument that names the program
+    # (the role ``program`` of its ``arguments``), or none.
+    roles = {"address": "address"}
+    if program_argument is not None:
+        roles["program"] = program_argument
+    return LedgerEntry(
+        id=entry_id,
+        tool=tool,
+        args={"address": hex(GATE), **args},
+        ok=ok,
+        error=None if ok else "no function found there",
+        output=f"{GATE:#x}  mov rax, rcx\n" if ok else "",
+        facts={"v": 1, "kind": kind, "reader": "listing", "arguments": roles},
+    )
 
-    def whole(entry_id: str, **args: object) -> LedgerEntry:
-        return LedgerEntry(
-            id=entry_id,
-            tool="list_function",
-            args={"address": hex(GATE), **args},
-            output=f"{GATE:#x}  mov rax, rcx\n",
-            facts=listing,
-        )
 
-    assert redone_failures([failed, whole("ev_0002", program="payload.dll")]) == []
-    same = whole("ev_0003", program="dropper.exe", timeout=60)
+def _failed_listing(program_argument: str | None = "program", **args: object) -> LedgerEntry:
+    return _declared_call("ev_0001", "lift_routine", "decompile", program_argument, False, **args)
+
+
+def _other_tool(entry_id: str, program_argument: str | None = "binary", **args: object):
+    return _declared_call(
+        entry_id, "list_function", "function_disassembly", program_argument, True, **args
+    )
+
+
+def test_a_call_of_another_tool_for_another_declared_program_redoes_nothing() -> None:
+    # T-542: each tool declares the argument that names the program, by its own name.
+    failed = _failed_listing(program="dropper.exe")
+    assert redone_failures([failed, _other_tool("ev_0002", binary="payload.dll")]) == []
+    same = _other_tool("ev_0003", binary="dropper.exe")
     assert redone_failures([failed, same])[0]["answered_by"] == ["ev_0003"]
-    unnamed = whole("ev_0004")
-    assert redone_failures([failed, unnamed])[0]["answered_by"] == ["ev_0004"]
-    # The program the failure refused, replaced by another, is the refusal's fix.
-    refused = _decompile("ev_0001", False, "program='dropper' is not open", program="dropper")
-    fixed = whole("ev_0005", program="dropper.exe")
-    assert redone_failures([refused, fixed])[0]["answered_by"] == ["ev_0005"]
+    # A file name and a path that ends in it name one program.
+    path = _other_tool("ev_0004", binary="/samples/job/dropper.exe")
+    assert redone_failures([failed, path])[0]["answered_by"] == ["ev_0004"]
+    windows = _other_tool("ev_0005", binary="C:\\jobs\\dropper.exe")
+    assert redone_failures([failed, windows])[0]["answered_by"] == ["ev_0005"]
+    # The refused program the failure names, replaced by another, is the refusal's fix.
+    refused = _failed_listing(program="dropper").model_copy(
+        update={"error": "program='dropper' is not open"}
+    )
+    fixed = _other_tool("ev_0006", binary="dropper.exe")
+    assert redone_failures([refused, fixed])[0]["answered_by"] == ["ev_0006"]
+
+
+@pytest.mark.parametrize(
+    ("asked", "again"),
+    [
+        ({"mode": "c"}, {"mode": "pseudo"}),
+        ({"format": "json"}, {"format": "text"}),
+        ({"timeout": 30}, {"timeout": 5}),
+        ({"program": "dropper.exe"}, {"program": "/samples/job/dropper.exe"}),
+    ],
+)
+def test_a_call_of_another_tool_is_not_read_on_an_argument_it_may_mean_otherwise(
+    asked: dict[str, object], again: dict[str, object]
+) -> None:
+    # Another tool may give a shared name another meaning: only the argument
+    # both declare to name the program is read, as the last segment of its path.
+    failed = _failed_listing(**asked)
+    later = _other_tool("ev_0002", "program", **again)
+    assert redone_failures([failed, later])[0]["answered_by"] == ["ev_0002"]
+
+
+def test_a_program_one_side_does_not_declare_is_not_read_across_tools() -> None:
+    # Neither side, or only one, declares the argument: the call is read as before.
+    for failed_declares, later_declares in ((None, None), ("program", None), (None, "binary")):
+        failed = _failed_listing(failed_declares, program="dropper.exe")
+        later = _other_tool("ev_0002", later_declares, program="payload.dll", binary="payload.dll")
+        assert redone_failures([failed, later])[0]["answered_by"] == ["ev_0002"]
 
 
 def test_a_whole_listing_of_the_same_name_with_a_value_changed_or_narrowed() -> None:
