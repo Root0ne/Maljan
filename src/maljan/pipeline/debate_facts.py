@@ -790,8 +790,11 @@ def read_marks(lines: Iterable[str]) -> list[Mark]:
         match = _MARK.search(marked)
         if match is None or not (match.group("reason") or "").strip():
             # A reasoned mark after the field is the line's over a bare one
-            # ending it; a bare one is read as before.
-            match = _mark_after_field(text) or match
+            # ending it; a bare one is read as before. Not where the line also
+            # opens a mark that cannot be read: such a line blocks.
+            after = _mark_after_field(text)
+            if after is not None and _MARK_OPENING.search(_ANY_MARK.sub(" ", marked)) is None:
+                match = after
         reason = (match.group("reason") or "").strip() if match is not None else ""
         if len(kinds) > 1:
             marks.append(Mark(line=text, blocking=True, marked=True, unread=True))

@@ -279,6 +279,16 @@ class TestTheMediatorsMarks:
                 False,
             )
 
+    def test_a_mark_after_the_field_beside_one_that_cannot_be_read_blocks_unread(self) -> None:
+        for line in (
+            "[analysts: A ANALYST] [not blocking: a tally] Claim 3 vs B claim 4 "
+            "[blocking: the count is",
+            "[analysts: A ANALYST] [not blocking: a tally] Claim 3 vs B claim 4 [blocking",
+        ):
+            mark = read_marks([line])[0]
+
+            assert mark.blocking is True and mark.unread is True
+
     def test_a_mark_inside_the_text_after_the_field_is_still_unread(self) -> None:
         line = "[analysts: GAMMA ANALYST] Claim 3 [not blocking: a tally] vs BETA claim 4."
 
