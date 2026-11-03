@@ -146,10 +146,40 @@ def test_a_smaller_room_lists_fewer_and_still_states_the_total() -> None:
     assert len(cut) <= len(whole) - 1
     assert cut.endswith(f"{cut.count('(called by')} of 10 listed")
     assert 0 < cut.count("(called by") < 10
-    # No item fits: the count stands alone, never a silent cut.
-    assert _line(_many(10), room=10) == (
-        f"{NAMED_UNREAD_HEAD}10 functions, not listed here for want of room"
-    )
+    # A room smaller than the count alone gives no line, and the block keeps
+    # to its room.
+    assert _line(_many(10), room=10) == ""
+
+
+def test_no_item_fits_the_count_stands_alone_where_it_fits() -> None:
+    count = f"{NAMED_UNREAD_HEAD}10 functions, not listed here for want of room"
+    first_item = len(NAMED_UNREAD_HEAD) + len(f"{hex(BASE + 0x10000)} (called by {hex(GATE)})")
+    assert len(count) < first_item + len("; 1 of 10 listed")
+    found = build_function_map(_many(10), None, ())
+    # The room the other lines take, and the line's own newline.
+    rest = len(function_map_block(dataclasses.replace(found, read_from=()), None)) + 1
+    assert _line(_many(10), room=rest + len(count)) == count
+    assert _line(_many(10), room=rest + len(count) - 1) == ""
+
+
+def test_wherever_the_map_fitted_its_room_before_it_still_does() -> None:
+    """A sweep of rooms around the block's own size, from tight to ample."""
+    found = build_function_map(_indexed(60), None, ())
+    before = dataclasses.replace(found, read_from=())
+
+    def _index_rows(block: str) -> int:
+        line = next((ln for ln in block.splitlines() if ln.startswith("not visited")), "")
+        return len(re.findall(r"0x[0-9a-f]+ \(", line))
+
+    head = len(function_map_block(before, 0))
+    whole = len(function_map_block(found, None))
+    for room in range(max(0, head - 300), whole + 2000, 7):
+        was, block = function_map_block(before, room), function_map_block(found, room)
+        if len(was) <= room:
+            assert len(block) <= room, room
+        had = _index_rows(was)
+        if had >= 4:
+            assert _index_rows(block) >= 0.45 * had, room
 
 
 def test_the_line_carries_addresses_only_never_the_sample_s_or_the_claim_s_words() -> None:

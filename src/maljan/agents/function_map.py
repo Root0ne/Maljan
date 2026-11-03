@@ -973,7 +973,8 @@ def _named_unread_line(found: FunctionMap, room: int | None) -> str:
     none. Addresses only, written by the platform, so no sample text rides
     it. At most :data:`NAMED_UNREAD_SHOWN` of them, fewer when the room is
     smaller; a list cut says how many there are in all, and when none fits
-    the count stands alone, as the index line's does. The ones the claims
+    the count stands alone where it fits, and no line is given where it does
+    not, so the block stays inside its room. The ones the claims
     name are said once, in a closing clause, not on each item.
     """
     from maljan.agents.function_callees import named_unread
@@ -1005,10 +1006,13 @@ def _named_unread_line(found: FunctionMap, room: int | None) -> str:
         shown += 1
         body, claims = body_next, claims_next
     if not shown:
-        return (
+        # The count alone, where it fits; in a room smaller than that, no
+        # line: the not-visited line after it keeps the room it had.
+        count = (
             f"{NAMED_UNREAD_HEAD}{_count(total, 'function', 'functions')}, "
             "not listed here for want of room"
         )
+        return count if room is None or len(count) <= room else ""
     return _named_unread_text(items[:shown], cut.format(shown=shown))
 
 
