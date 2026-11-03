@@ -1670,8 +1670,33 @@ _BLOCK_CLAIM_RE = re.compile(
 # A field line, as a claim's sentence would begin if its heading wrote none:
 # ``CLAIM:`` with nothing after it and ``EVIDENCE: [ev_0001]`` on the next line
 # is a claim with no sentence, never one whose sentence is its evidence line.
+# A label in any casing begins one. ``_FIELD_LABEL_AS_TAIL_RE`` is a label
+# always taken as a field: EVIDENCE and CONFIDENCE in the casing
+# ``_TAIL_START_RE`` reads, TECHNIQUE and DISSENT in any casing (as the
+# heading readers take DISSENT). A label in another casing is a field when
+# nothing follows it or the first word after it is a field's value
+# (``_is_field_line``): "Evidence: [ev_0003] (strings output)" is a field,
+# "Evidence: the routine at 0x10 decodes strings." is a sentence.
 _FIELD_LINE_RE = re.compile(
     r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE|DISSENT)[ \t]*(?:\*\*)?[ \t]*:",
+    re.IGNORECASE,
+)
+_FIELD_LABEL_AS_TAIL_RE = re.compile(
+    r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE|DISSENT))[ \t]*(?:\*\*)?[ \t]*:"
+)
+# A ledger id anywhere after a field label: a field line in any casing,
+# whatever words sit around its ids.
+_LEDGER_ID_ANYWHERE_RE = re.compile(r"ev_\d", re.IGNORECASE)
+# The start of a field's value, past every mark, quote, bullet or sign before
+# it (anything but a letter or digit): nothing, or a ledger id, a number, a
+# technique id, NONE, TBD, a plain confidence word, "see" or a field label as
+# its first word.
+_FIELD_VALUE_START_RE = re.compile(
+    r"[\W_]*+(?:\Z|(?:ev_\d+|\d+(?:\.\d+)?%?|"
+    + ID_BODY
+    + r"|none|n[./]?a|tbd|very|high|medium|moderate|low|unknown|see"
+    r"|evidence|confidence|technique|dissent)"
+    r"(?![^\W_]))",
     re.IGNORECASE,
 )
 # The fields are read in a block's tail: from the first field label that
@@ -2487,6 +2512,28 @@ class ClaimRead:
         return own + (self.after_disputes if not self.claims else 0)
 
 
+def _is_field_line(claim_text: str, *, on_heading_line: bool) -> bool:
+    """Whether a claim's sentence as read is a field line: its heading wrote none.
+
+    A text that begins on a line below its heading and opens with a field
+    label in any casing is one: the heading wrote nothing. A text written on
+    the heading line is one when it opens with a label always taken as a
+    field, with a field label in any casing whose value cites a ledger id
+    anywhere, or with a label in another casing followed by nothing or by a
+    field's value as its first word (a ledger id, a number, a technique id,
+    NONE, a plain confidence word). Any other text after a label in another
+    casing on the heading line is the claim's sentence.
+    """
+    opening = _FIELD_LINE_RE.match(claim_text)
+    if opening is None:
+        return False
+    if not on_heading_line or _FIELD_LABEL_AS_TAIL_RE.match(claim_text):
+        return True
+    if _LEDGER_ID_ANYWHERE_RE.search(claim_text, opening.end()):
+        return True
+    return _FIELD_VALUE_START_RE.match(claim_text, opening.end()) is not None
+
+
 def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead:
     """The one reader of an analyst's ``CLAIM`` blocks, for every path that reads claims.
 
@@ -2530,7 +2577,8 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         if not claim_match:
             continue
         claim_text = strip_tool_call_scaffolding(claim_match.group(1)).strip()
-        if _FIELD_LINE_RE.match(claim_text):
+        on_heading_line = "\n" not in block[claim_match.start() : claim_match.start(1)]
+        if _is_field_line(claim_text, on_heading_line=on_heading_line):
             # The heading wrote no sentence: the block is begun and not read,
             # as a block with no claim marker is, and counted as unread.
             continue
