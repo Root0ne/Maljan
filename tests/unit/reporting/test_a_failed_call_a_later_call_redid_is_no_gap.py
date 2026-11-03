@@ -31,6 +31,9 @@ from tests.unit.reporting._report_inventory import stored_runs
 
 GATE, OTHER = 0x2475A10, 0x2475B20
 _DECOMPILE = {"v": 1, "kind": "decompile", "reader": "listing"}
+# A tool asked for an address whose answer is no code listing: its redo is the
+# same question, a listing of the function answering nothing more.
+_NOT_A_LISTING = {"v": 1, "kind": "xrefs"}
 # The lines a run with one failure and no redo printed before this change,
 # rendered by the base branch's code from the same summary.
 HEAD_LINE = "Evidence: 2 tool call(s), 1 failed (see §13)."
@@ -161,14 +164,14 @@ def test_the_same_tool_asked_another_question_for_the_address_redoes_nothing(
         args={"address": hex(GATE), **asked},
         ok=False,
         error="the call timed out",
-        facts=_DECOMPILE,
+        facts=_NOT_A_LISTING,
     )
     answer = LedgerEntry(
         id="ev_0002",
         tool=tool,
         args={"address": hex(GATE), **again},
-        output=f"int FUN_{GATE:x}(void)\n{{\n}}\n",
-        facts=_DECOMPILE,
+        output=f"From {GATE + 4:x} in FUN_{GATE:x} [READ]",
+        facts=_NOT_A_LISTING,
     )
     assert redone_failures([failed, answer]) == []
     # The same question again, a null or absent argument aside, is a redo.
@@ -182,15 +185,183 @@ def test_a_value_the_failure_names_may_change_in_the_redo() -> None:
         update={
             "args": {"address": hex(GATE), "program": "sample"},
             "error": "program='sample' is not a program this job opened",
+            "facts": _NOT_A_LISTING,
         }
     )
     redo = _lifted("ev_0002", GATE).model_copy(
-        update={"args": {"address": hex(GATE), "program": "sample.job.exe"}}
+        update={
+            "args": {"address": hex(GATE), "program": "sample.job.exe"},
+            "facts": _NOT_A_LISTING,
+        }
     )
     assert redone_failures([failed, redo])[0]["answered_by"] == ["ev_0002"]
     # A value the message does not name is the question, and must match.
     other = failed.model_copy(update={"error": "the call timed out"})
     assert redone_failures([other, redo]) == []
+
+
+def _code_call(
+    entry_id: str, ok: bool, error: str = "the call failed: count=4096 is too many", **args: object
+) -> LedgerEntry:
+    return LedgerEntry(
+        id=entry_id,
+        tool="lift_routine",
+        args={"address": hex(GATE), **args},
+        ok=ok,
+        error=None if ok else error,
+        output=f"From {GATE + 4:x} in FUN_{GATE:x} [READ]" if ok else "",
+        facts=_NOT_A_LISTING,
+    )
+
+
+def test_an_argument_only_the_redo_sets_makes_a_narrower_question_no_redo() -> None:
+    # The whole routine asked, some of it answered: the failure named no count,
+    # so the count the redo sets may narrow it, and it is no redo.
+    timed_out = "the call timed out after 30 s"
+    for value in (3, "3", 0):
+        failed = _code_call("ev_0001", False, timed_out)
+        redo = _code_call("ev_0002", True, count=value)
+        assert redone_failures([failed, redo]) == []
+        failed_null = _code_call("ev_0001", False, timed_out, count=None)
+        assert redone_failures([failed_null, redo]) == []
+    # A name inside another word is no naming of it: "counter" is not "count".
+    failed = _code_call("ev_0001", False, "counter overflow", count=None)
+    assert redone_failures([failed, _code_call("ev_0002", True, count=3)]) == []
+
+
+def test_an_argument_the_refusal_named_and_the_redo_sets_is_a_redo_unless_cut() -> None:
+    refused = "validation error\ntimeout\n  Input should be a valid integer [input_value=None]"
+    failed = _code_call("ev_0001", False, refused, timeout=None)
+    redo = _code_call("ev_0002", True, timeout=120)
+    assert redone_failures([failed, redo])[0]["answered_by"] == ["ev_0002"]
+    # The same redo with its answer cut by the budget, or blanked, is no answer
+    # at all (the ledger's answers are whole ones), so it redoes nothing.
+    for cut in ({"chars_dropped": 40}, {"truncated": True, "output": ""}):
+        cut_redo = redo.model_copy(update=cut)
+        assert redone_failures([failed, cut_redo]) == []
+
+
+@pytest.mark.parametrize(
+    ("message", "named"),
+    [
+        ("validation error\ntimeout\n  Input should be a valid integer", True),
+        ("the 'timeout' field must be an integer", True),
+        ("timeout=None is not an integer", True),
+        ("timeout: expected an integer", True),
+        ("the timeout was reached", False),
+        ("timeout_ms out of range", False),
+        ("--timeout is required", False),
+    ],
+)
+def test_an_argument_is_named_only_where_the_message_writes_it_as_one(
+    message: str, named: bool
+) -> None:
+    failed = _code_call("ev_0001", False, message, timeout=None)
+    redo = _code_call("ev_0002", True, timeout=120)
+    assert bool(redone_failures([failed, redo])) is named
+
+
+def test_a_word_of_ordinary_prose_names_no_argument() -> None:
+    for name in ("name", "type", "path", "size"):
+        message = f"Cannot read the {name} of the function"
+        failed = _code_call("ev_0001", False, message, **{name: None})
+        redo = _code_call("ev_0002", True, **{name: "x"})
+        assert redone_failures([failed, redo]) == []
+
+
+def test_a_refused_value_replaced_by_a_smaller_number_is_no_redo() -> None:
+    failed = _code_call("ev_0001", False, count=4096)
+    for smaller in (4, "4", "0x10", 4095.5):
+        assert redone_failures([failed, _code_call("ev_0002", True, count=smaller)]) == []
+    # Not smaller: the same number, or a larger one, however written.
+    for same_or_wider in (4096, "0x1000", "8192", 1e5):
+        redo = _code_call("ev_0002", True, count=same_or_wider)
+        assert redone_failures([failed, redo])[0]["answered_by"] == ["ev_0002"]
+
+
+def test_a_same_or_wider_redo_is_still_redone() -> None:
+    failed = _code_call("ev_0001", False, count=4096)
+    # The same question, an argument the redo leaves null or absent aside.
+    for redo in (
+        _code_call("ev_0002", True, count=4096),
+        _code_call("ev_0002", True, count=4096, mode=None),
+        _code_call("ev_0002", True),
+    ):
+        assert redone_failures([failed, redo])[0]["answered_by"] == ["ev_0002"]
+
+
+def test_a_call_of_the_same_name_listing_the_function_whole_redoes_a_failed_listing() -> None:
+    # Another question of the same tool (a timeout the failure never named),
+    # but its answer lists the function whole: the failed listing is redone.
+    failed = _failed("ev_0001", GATE).model_copy(update={"error": "no function found there"})
+    whole = _lifted("ev_0002", GATE).model_copy(
+        update={"args": {"address": hex(GATE), "timeout": 120}}
+    )
+    assert redone_failures([failed, whole])[0]["answered_by"] == ["ev_0002"]
+
+
+def test_a_call_of_the_same_name_listing_another_function_or_cut_redoes_nothing() -> None:
+    failed = _failed("ev_0001", GATE).model_copy(update={"error": "no function found there"})
+    other = _lifted("ev_0002", OTHER).model_copy(
+        update={"args": {"address": hex(OTHER), "timeout": 120}}
+    )
+    assert redone_failures([failed, other]) == []
+    cut = _lifted("ev_0003", GATE).model_copy(
+        update={"args": {"address": hex(GATE), "timeout": 120}, "chars_dropped": 64}
+    )
+    assert redone_failures([failed, cut]) == []
+    # Some instructions from the address, asked of the same instruction lister,
+    # list no function whole.
+    listing = {"v": 1, "kind": "disassembly", "reader": "listing"}
+    asked = failed.model_copy(update={"tool": "read_instructions", "facts": listing})
+    some = LedgerEntry(
+        id="ev_0004",
+        tool="read_instructions",
+        args={"address": hex(GATE), "num_instructions": 3},
+        output=f"{GATE:#x}  mov rax, rcx\n",
+        facts=listing,
+    )
+    assert redone_failures([asked, some]) == []
+
+
+def _decompile(entry_id: str, ok: bool, error: str = "no function found there", **args: object):
+    entry = _lifted(entry_id, GATE).model_copy(
+        update={"args": {"address": hex(GATE), **args}, "ok": ok}
+    )
+    if not ok:
+        entry = entry.model_copy(update={"error": error, "output": ""})
+    return entry
+
+
+def test_a_call_of_the_same_name_for_another_program_redoes_nothing() -> None:
+    failed = _decompile("ev_0001", False, program="dropper.exe")
+    other = _decompile("ev_0002", True, program="payload.dll")
+    assert redone_failures([failed, other]) == []
+    # The same program asked again, a timeout added, lists it whole: a redo.
+    again = _decompile("ev_0003", True, program="dropper.exe", timeout=120)
+    assert redone_failures([failed, other, again])[0]["answered_by"] == ["ev_0003"]
+
+
+def test_a_whole_listing_of_the_same_name_with_a_value_changed_or_narrowed() -> None:
+    # A value the failed call set and the redo changed asks another question.
+    changed = _decompile("ev_0001", False, mode="c")
+    assert redone_failures([changed, _decompile("ev_0002", True, mode="pseudo")]) == []
+    # A bound the redo set below the failed one, unnamed or refused, is narrower.
+    bound = _decompile("ev_0001", False, max_lines=400)
+    assert redone_failures([bound, _decompile("ev_0002", True, max_lines=3)]) == []
+    refused = _decompile("ev_0001", False, "max_lines=400 is too many", max_lines=400)
+    assert redone_failures([refused, _decompile("ev_0002", True, max_lines=3)]) == []
+    # The refused bound replaced by one not smaller is the refusal's fix.
+    wider = _decompile("ev_0002", True, max_lines=800)
+    assert redone_failures([refused, wider])[0]["answered_by"] == ["ev_0002"]
+
+
+def test_a_bound_only_the_redo_adds_is_read_by_the_listing_s_kind() -> None:
+    # Known limit: an argument only the same tool's redo adds is not checked on
+    # the whole-listing route; a decompile is read as whole by its kind.
+    failed = _decompile("ev_0001", False)
+    added = _decompile("ev_0002", True, max_lines=3)
+    assert redone_failures([failed, added])[0]["answered_by"] == ["ev_0002"]
 
 
 def test_an_answer_that_holds_nothing_redoes_nothing() -> None:
@@ -379,10 +550,22 @@ def test_run7_s_decompile_is_not_redone_by_a_read_of_seventy_instructions() -> N
     ledger = _stored_ledger("run7")
     redone = {row["entry_id"]: row["answered_by"] for row in redone_failures(ledger)}
     # ev_0055 disassembled 70 instructions from 0x...1030: no redo of the decompile.
-    # ev_0111, a later decompile of the whole function, is.
+    # ev_0111, ev_0123 and ev_0174 set a timeout the failed decompiles left out
+    # and their failures never named, but each lists the function whole, which
+    # redoes a failed listing of it (T-529).
     assert redone == {
         "ev_0050": ["ev_0111"],
         "ev_0067": ["ev_0123"],
         "ev_0069": ["ev_0123"],
         "ev_0095": ["ev_0174"],
     }
+
+
+def test_haiku5_s_calls_refused_for_a_null_are_redone_by_the_calls_that_set_it() -> None:
+    ledger = _stored_ledger("haiku5")
+    redone = {row["entry_id"]: row["answered_by"] for row in redone_failures(ledger)}
+    # A null timeout, offset or limit the tool refused, set by the next call,
+    # whose answer is whole (T-529).
+    assert redone["ev_0054"] == ["ev_0060"]
+    assert redone["ev_0109"] == ["ev_0114"]
+    assert len(redone) == 10
