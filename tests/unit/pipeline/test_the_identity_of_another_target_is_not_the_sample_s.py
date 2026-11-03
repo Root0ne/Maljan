@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -92,13 +93,20 @@ class TestAMarkedReport:
     def test_no_sample_on_disk_gives_no_hash_and_no_size(self) -> None:
         identity = _sample_identity(_state(_marked(), None))
 
-        assert set(identity) == {
-            "sha256",
-            "file_name",
-            "file_type",
-            "platform",
-            status.IDENTITY_SOURCE_KEY,
-        }
+        assert set(identity) == {"sha256", "file_name", "file_type", "platform"}
+
+    @pytest.mark.parametrize("copy_is", ["missing", "changed"])
+    def test_no_row_from_the_bytes_keeps_the_router_s_header(
+        self, tmp_path: Path, copy_is: str
+    ) -> None:
+        path = None if copy_is == "missing" else _sample(tmp_path, b"other bytes")
+        identity = _sample_identity(_state(_marked(), path))
+        block = sample_identity_block(identity)
+
+        assert status.IDENTITY_SOURCE_KEY not in identity
+        assert "size_bytes" not in identity
+        assert block.startswith(f"=== {SAMPLE_IDENTITY_HEADER} ===\n")
+        assert "own bytes" not in block
 
     def test_the_block_says_its_values_are_the_sample_s_own_bytes(self, tmp_path: Path) -> None:
         identity = _sample_identity(_state(_marked(), _sample(tmp_path)))
@@ -205,3 +213,52 @@ class TestTheFingerprints:
         link.symlink_to(real)
 
         assert sample_fingerprints(str(link), INTAKE) == {}
+
+
+# A report whose target file block and guest name a different format and system.
+WINDOWS_TARGET: dict[str, Any] = {
+    "target": {"os": "windows", "file": {"type": "application/x-dosexec", "size": 5}},
+    "behavior": {},
+}
+ANDROID_TARGET: dict[str, Any] = {
+    "target": {"file": {"type": "application/vnd.android.package-archive"}},
+    "behavior": {},
+}
+
+
+def _marked_as(report: dict[str, Any]) -> dict[str, Any]:
+    record = sandbox_target_record(INTAKE, OTHER)
+    assert record is not None
+    return {**copy.deepcopy(report), status.TARGET_KEY: status.target_mark(record)}
+
+
+def _route(path: Any, report: dict[str, Any]) -> tuple[str, str]:
+    from maljan.app import MaljanApp
+
+    return MaljanApp(mock=True)._infer_sample_platform(path, report)
+
+
+class TestTheRouting:
+    """The router reads the sample alone where the report names another target."""
+
+    @pytest.mark.parametrize(
+        ("report", "unmarked"), [(WINDOWS_TARGET, "windows"), (ANDROID_TARGET, "android")]
+    )
+    def test_the_target_s_type_and_guest_never_route_the_sample(
+        self, tmp_path: Path, report: dict[str, Any], unmarked: str
+    ) -> None:
+        path = _sample(tmp_path, b"plain words, no format of any kind\n")
+
+        assert _route(path, copy.deepcopy(report))[1] == unmarked
+        assert _route(path, _marked_as(report))[1] == "unknown"
+
+    def test_the_sample_s_own_format_still_routes_it(self, tmp_path: Path) -> None:
+        elf = b"\x7fELF\x02\x01\x01" + b"\x00" * 200
+
+        assert _route(_sample(tmp_path, elf), _marked_as(WINDOWS_TARGET)) == ("elf", "linux")
+
+    def test_the_reading_is_said(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING, logger="maljan"):
+            _route(_sample(tmp_path), _marked_as(WINDOWS_TARGET))
+
+        assert any("read from its own bytes only" in r.getMessage() for r in caplog.records)

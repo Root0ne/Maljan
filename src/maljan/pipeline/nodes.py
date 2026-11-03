@@ -150,9 +150,12 @@ from maljan.pipeline.routing import (
     with_debate_start,
 )
 from maljan.pipeline.run_state import render_run_state
-from maljan.pipeline.sandbox_status import IDENTITY_SOURCE_KEY as SAMPLE_IDENTITY_SOURCE
 from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
-from maljan.pipeline.sandbox_status import sample_file_identity, sandbox_status
+from maljan.pipeline.sandbox_status import (
+    names_another_target,
+    sample_file_identity,
+    sandbox_status,
+)
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import (
     convergence_flags,
@@ -2874,7 +2877,7 @@ def _sample_identity(state: AnalysisState) -> dict[str, Any]:
             state.get("sandbox_report"), state.get("sample_path"), identity["sha256"]
         )
     )
-    if not identity.get("size_bytes") and SAMPLE_IDENTITY_SOURCE not in identity:
+    if not identity.get("size_bytes") and not names_another_target(state.get("sandbox_report")):
         from pathlib import Path
 
         path = state.get("sample_path")

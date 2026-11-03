@@ -149,6 +149,15 @@ def observed_report(report: Any) -> dict[str, Any] | None:
     return report if isinstance(report, dict) else None
 
 
+def names_another_target(report: Any) -> bool:
+    """Whether ``report`` carries the run's mark: its sandbox named a target that is not the sample.
+
+    Nothing the report says of its target's file is then the sample's: not
+    its hashes and size, nor its file type or operating system.
+    """
+    return isinstance(report, dict) and isinstance(report.get(TARGET_KEY), Mapping)
+
+
 def sample_file_identity(report: Any, sample_path: Any, expected: str) -> dict[str, Any]:
     """The md5, sha1 and size the judge is given as the sample's own; ``{}`` with none.
 
@@ -157,17 +166,15 @@ def sample_file_identity(report: Any, sample_path: Any, expected: str) -> dict[s
     sandbox named, not of the sample, so none of it is given as the sample's:
     the values are read from the sample's own bytes instead, and only where
     that copy still reads ``expected``, the intake SHA-256
-    (``analysis.sample_integrity.sample_fingerprints``). A marked identity
-    carries :data:`IDENTITY_SOURCE_KEY`, whether or not the copy gave values:
-    no size is then taken from a copy that is not the intake bytes either.
+    (``analysis.sample_integrity.sample_fingerprints``). Values so read carry
+    :data:`IDENTITY_SOURCE_KEY`; a copy that gave none gives ``{}``, and the
+    caller takes no size from it either (:func:`names_another_target`).
     """
-    if isinstance(report, dict) and isinstance(report.get(TARGET_KEY), Mapping):
+    if names_another_target(report):
         from maljan.analysis.sample_integrity import sample_fingerprints
 
-        return {
-            **sample_fingerprints(sample_path, expected),
-            IDENTITY_SOURCE_KEY: FROM_SAMPLE_BYTES,
-        }
+        read = sample_fingerprints(sample_path, expected)
+        return {**read, IDENTITY_SOURCE_KEY: FROM_SAMPLE_BYTES} if read else {}
     target = report.get("target") if isinstance(report, dict) else None
     sandbox_file = target.get("file") if isinstance(target, dict) else None
     if not isinstance(sandbox_file, dict):
