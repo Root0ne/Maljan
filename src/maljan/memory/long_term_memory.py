@@ -295,6 +295,30 @@ class FunctionHashIndex(Protocol):
 ISOLATED_JOB_SCOPE = "/job/"
 
 
+# The separator of an owner key's path segments, read off the isolated job's
+# scope so the two cannot drift: a job's own key is filed below its account's
+# (``<account>`` + ``ISOLATED_JOB_SCOPE`` + ``<job id>``, :func:`memory_owner_for`),
+# and a purge by owner prefix reads the segments (:func:`owner_under`).
+OWNER_PATH_SEPARATOR = ISOLATED_JOB_SCOPE[0]
+if not (
+    ISOLATED_JOB_SCOPE.startswith(OWNER_PATH_SEPARATOR)
+    and ISOLATED_JOB_SCOPE.endswith(OWNER_PATH_SEPARATOR)
+    and ISOLATED_JOB_SCOPE.strip(OWNER_PATH_SEPARATOR)
+):
+    raise RuntimeError("ISOLATED_JOB_SCOPE must be one path segment between separators")
+
+
+def isolated_jobs_prefix(created_by: Any) -> str:
+    """The owner prefix that names every isolated job's memory of one account, and no more.
+
+    The account's key followed by ``ISOLATED_JOB_SCOPE``, which ends in the
+    separator, so it names only what is strictly below (:func:`owner_under`):
+    each key :func:`memory_owner_for` gives an isolated job of that account,
+    never the account's own key.
+    """
+    return f"{created_by}{ISOLATED_JOB_SCOPE}"
+
+
 def owner_key(owner: Any) -> str | None:
     """The owner as entries are filed under it, or ``None`` for unscoped."""
     text = str(owner).strip() if owner is not None else ""
@@ -318,6 +342,60 @@ def memory_owner_for(created_by: Any, job_id: Any, isolated: bool) -> str:
     if not job:
         raise ValueError("an isolated job's memory owner needs the job's id")
     return f"{created_by}{ISOLATED_JOB_SCOPE}{job}"
+
+
+_UUID_SEGMENT = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+)
+
+
+def owner_prefix_key(prefix: Any) -> str | None:
+    """``prefix`` as the owner path a purge by owner reads (:func:`owner_under`).
+
+    ``None`` when it names no owner path: empty, separators alone, an empty
+    segment (``u1//job``) or more than one trailing separator. One trailing
+    separator is kept: it means strictly below the path. A first segment
+    shaped like a UUID is written lower case, as an account's id is filed.
+    """
+    text = str(prefix).strip() if prefix is not None else ""
+    below = text.endswith(OWNER_PATH_SEPARATOR)
+    path = text[: -len(OWNER_PATH_SEPARATOR)] if below else text
+    segments = path.split(OWNER_PATH_SEPARATOR)
+    if not path or any(not segment.strip() for segment in segments):
+        return None
+    if _UUID_SEGMENT.fullmatch(segments[0]):
+        segments[0] = segments[0].lower()
+    return OWNER_PATH_SEPARATOR.join(segments) + (OWNER_PATH_SEPARATOR if below else "")
+
+
+def owner_prefix_segments(prefix: Any) -> int:
+    """How many path segments the owner path ``prefix`` names; 0 when it names none."""
+    key = owner_prefix_key(prefix)
+    if key is None:
+        return 0
+    return len(key.rstrip(OWNER_PATH_SEPARATOR).split(OWNER_PATH_SEPARATOR))
+
+
+def owner_under(owner: Any, prefix: Any) -> bool:
+    """Whether ``owner`` lies at or below the owner path ``prefix`` names.
+
+    Read a path segment at a time (``OWNER_PATH_SEPARATOR``), never as a bare
+    string prefix. Shown with ``ISOLATED_JOB_SCOPE`` as ``/job/``: ``u1/job``
+    names ``u1/job`` and ``u1/job/<job id>``; with a trailing separator,
+    ``u1/job/`` (:func:`isolated_jobs_prefix`) names only what is strictly
+    below, every isolated job's key of ``u1``, and ``u1/`` names ``u1/x`` and
+    never ``u1`` itself. Neither names ``u1/jobs``
+    or another account whose key merely begins with the same characters. An
+    unscoped entry (no owner) is under no prefix, and a prefix that names no
+    owner path (:func:`owner_prefix_key`) names nothing.
+    """
+    key = owner_key(owner)
+    base = owner_prefix_key(prefix)
+    if key is None or base is None:
+        return False
+    if base.endswith(OWNER_PATH_SEPARATOR):
+        return key.startswith(base) and len(key) > len(base)
+    return key == base or key.startswith(base + OWNER_PATH_SEPARATOR)
 
 
 def keeps_owners(store: Any) -> bool:

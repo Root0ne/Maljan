@@ -405,6 +405,18 @@ class FunctionHashStore:
             logger.warning("FunctionHashStore.match failed (%s); returning no matches.", exc)
             return []
 
+    def purge_owners(self, prefix: str, *, dry_run: bool = False) -> int:
+        """Delete the function hashes filed under an owner at or below ``prefix``; how many.
+
+        The one prefix rule (``memory_repair.purge_owned_points``); ``dry_run``
+        counts and deletes nothing. Unlike the analysis-time methods it is not
+        fail-safe: an operator's purge raises rather than answer 0 for points
+        it could not read.
+        """
+        from maljan.memory.memory_repair import purge_owned_points
+
+        return purge_owned_points(self._client, self._collection, prefix, dry_run=dry_run)
+
     def count(self) -> int:
         """Return the total number of stored function-hash points (0 on error)."""
         if not self._collection_exists():

@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING, Any
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from maljan.core.settings_masking import masked_text
-from pydantic import BaseModel, Field
+from maljan.memory.long_term_memory import ISOLATED_JOB_SCOPE, OWNER_PATH_SEPARATOR
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import observability
@@ -478,6 +479,167 @@ def _purge(store: MemoryStore, body: LTMPurgeRequest, admin: User) -> LTMPurgeRe
         removed,
     )
     return LTMPurgeResponse(removed=removed, backend=backend_name, dry_run=False)
+
+
+class LTMPurgeOwnersRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    owner_prefix: str = Field(
+        min_length=1,
+        max_length=512,
+        description=(
+            "The owner path whose memory is purged, read a path segment at a time: "
+            f"'<user id>{ISOLATED_JOB_SCOPE.rstrip(OWNER_PATH_SEPARATOR)}' names that path "
+            f"and everything below it, and with a trailing separator ('<user id>"
+            f"{ISOLATED_JOB_SCOPE}', every isolated job's memory of that user) only what "
+            "is strictly below. A single segment (a whole account) is refused unless "
+            "whole_account is sent."
+        ),
+    )
+    whole_account: bool = Field(
+        default=False,
+        description=(
+            "Sent true to purge a prefix of a single segment: an account's own memory "
+            "and everything filed below it. Refused otherwise."
+        ),
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="When True, return the counts that *would* be purged without deleting.",
+    )
+
+
+class LTMPurgeOwnersResponse(BaseModel):
+    owner_prefix: str
+    cases: int
+    function_hashes: int
+    backend: str
+    dry_run: bool
+
+
+@router.post("/ltm/purge-owners", response_model=LTMPurgeOwnersResponse)
+async def ltm_purge_owners(
+    body: LTMPurgeOwnersRequest,
+    request: Request,
+    admin: User = Depends(require_admin_session),
+    db: AsyncSession = Depends(get_db),
+) -> LTMPurgeOwnersResponse:
+    """Purge the long-term memory filed under an owner prefix: its cases and function hashes.
+
+    For memory nothing reads again, such as the entries a job with memory of
+    its own filed under its per-job owner key. A bearer-session admin only,
+    and audited like the low-quality purge (``ltm.purge`` with the prefix and
+    each kind's count; a failure part way with what each kind had lost). An
+    owner that does not lie at or below the prefix, an unscoped entry among
+    them, is never touched. Refused: a prefix that names no owner path, a
+    single segment (a whole account) without ``whole_account``, a backend
+    that keeps no owners or cannot purge by them, and a purge that matches
+    nothing, so a mistyped prefix is said, never answered 0.
+    """
+    from maljan.memory.long_term_memory import owner_prefix_key, owner_prefix_segments
+
+    prefix = owner_prefix_key(body.owner_prefix)
+    if prefix is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="The owner prefix names no owner path.",
+        )
+    if owner_prefix_segments(prefix) == 1 and not body.whole_account:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "The owner prefix is a single segment, a whole account's memory; send "
+                "whole_account: true to purge it, or name the path below it (such as "
+                f"'<user id>{ISOLATED_JOB_SCOPE}')."
+            ),
+        )
+    try:
+        store = await _build_memory_store(db)
+    except Exception as exc:
+        said = masked_text(f"{type(exc).__name__}: {exc}")
+        logger.warning("ltm_purge_owners: failed to build memory store: %s", said)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=masked_text(f"memory store unavailable: {exc}"),
+        ) from exc
+    await end_read_transaction(db)
+    backend = type(store).__name__
+    purge = getattr(store, "purge_owners", None)
+    if not callable(purge):
+        await asyncio.to_thread(store.close)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"The {backend} memory backend cannot purge by owner.",
+        )
+    details: dict[str, Any] = {
+        "backend": backend,
+        "owner_prefix": prefix,
+        "whole_account": body.whole_account,
+    }
+    before = None if body.dry_run else await _count_of(store)
+    try:
+        counts = await asyncio.to_thread(purge, prefix, dry_run=body.dry_run)
+    except BaseException as exc:
+        if not body.dry_run:
+            # What each kind had lost: the store's own count where it says it
+            # (``OwnerPurgeFailed``), else the cases the store holds fewer of.
+            done = getattr(exc, "counts", None) or {}
+            after = await _count_of(store)
+            cases = done.get("cases")
+            if cases is None and before is not None and after is not None:
+                cases = before - after
+            cause = exc.__cause__ if done and exc.__cause__ is not None else exc
+            await audit.record(
+                "ltm.purge",
+                resource_type="memory",
+                user_id=admin.id,
+                details={
+                    **details,
+                    "outcome": "failed",
+                    "error": type(cause).__name__,
+                    "cases_removed": cases,
+                    "function_hashes_removed": done.get("function_hashes"),
+                },
+                request=request,
+            )
+        raise
+    finally:
+        await asyncio.to_thread(store.close)
+    if not body.dry_run:
+        if not (counts["cases"] or counts["function_hashes"]):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    f"No case or function hash is filed at or below {prefix!r}; nothing was "
+                    "purged. Check the prefix's spelling and case."
+                ),
+            )
+        logger.info(
+            "ltm_purge_owners: admin=%s backend=%s cases=%d function_hashes=%d",
+            getattr(admin, "id", "?"),
+            backend,
+            counts["cases"],
+            counts["function_hashes"],
+        )
+        await audit.record(
+            "ltm.purge",
+            resource_type="memory",
+            user_id=admin.id,
+            details={
+                **details,
+                "outcome": "completed",
+                "cases_removed": counts["cases"],
+                "function_hashes_removed": counts["function_hashes"],
+            },
+            request=request,
+        )
+    return LTMPurgeOwnersResponse(
+        owner_prefix=prefix,
+        cases=counts["cases"],
+        function_hashes=counts["function_hashes"],
+        backend=backend,
+        dry_run=body.dry_run,
+    )
 
 
 class LTMAdoptRequest(BaseModel):

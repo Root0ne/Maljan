@@ -284,6 +284,73 @@ def repair_memory(store: Any) -> str:
     return str(repair())
 
 
+def purge_owned_points(client: Any, collection: str, prefix: str, *, dry_run: bool) -> int:
+    """Delete every point of ``collection`` filed under an owner at or below ``prefix``.
+
+    The number of such points; with ``dry_run`` they are counted and kept. The
+    owned points are read a page at a time, their owner alone, and each is
+    matched by the one prefix rule (``long_term_memory.owner_under``), so an
+    owner that only shares characters with the prefix and every unscoped point
+    stay. Deleted a page at a time; a failure of a delete raises
+    :class:`OwnerPurgeFailed` naming the ids already deleted, and one of the
+    walk raises as it came, before anything is deleted. A collection that does
+    not exist holds none.
+    """
+    from qdrant_client.models import Filter, IsEmptyCondition, PayloadField, PointIdsList
+
+    from maljan.memory.long_term_memory import owner_prefix_key, owner_under
+    from maljan.memory.qdrant_store import OWNER_KEY
+
+    if owner_prefix_key(prefix) is None:
+        raise ValueError("an owner prefix is required to purge by owner")
+    if collection not in _collections(client):
+        return 0
+    owned = Filter(must_not=[IsEmptyCondition(is_empty=PayloadField(key=OWNER_KEY))])
+    doomed: list[Any] = []
+    offset: Any = None
+    while True:
+        points, offset = client.scroll(
+            collection_name=collection,
+            scroll_filter=owned,
+            limit=_PAGE,
+            offset=offset,
+            with_payload=[OWNER_KEY],
+            with_vectors=False,
+        )
+        doomed.extend(p.id for p in points if owner_under((p.payload or {}).get(OWNER_KEY), prefix))
+        if offset is None:
+            break
+    if not dry_run:
+        # After the walk, so a deleted page never moves the scroll's offset.
+        deleted: list[Any] = []
+        for start in range(0, len(doomed), _PAGE):
+            page = doomed[start : start + _PAGE]
+            try:
+                client.delete(
+                    collection_name=collection,
+                    points_selector=PointIdsList(points=page),
+                    wait=True,
+                )
+            except Exception as exc:
+                raise OwnerPurgeFailed({collection: deleted}) from exc
+            deleted.extend(page)
+    return len(doomed)
+
+
+class OwnerPurgeFailed(Exception):  # noqa: N818 - carries what a failed purge had deleted
+    """A purge by owner that stopped part way: what it had deleted, the cause chained.
+
+    ``deleted`` holds the ids already deleted per collection; ``counts`` the
+    numbers per kind where a store names its collections (``cases``,
+    ``function_hashes``).
+    """
+
+    def __init__(self, deleted: dict[str, list[Any]], counts: dict[str, int] | None = None) -> None:
+        super().__init__("purge by owner stopped part way")
+        self.deleted = {name: list(ids) for name, ids in deleted.items()}
+        self.counts = dict(counts or {})
+
+
 def _ownerless_pages(client: Any, collection: str) -> Any:
     """Every ownerless point of ``collection`` with payload and vector, a page at a time."""
     from qdrant_client.models import Filter, IsEmptyCondition, PayloadField

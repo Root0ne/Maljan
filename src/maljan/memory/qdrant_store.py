@@ -490,6 +490,42 @@ class QdrantStore:
             self._client, self._collection, self._function_hash_collection, owner_key(owner) or ""
         )
 
+    def purge_owners(self, prefix: str, *, dry_run: bool = False) -> dict[str, int]:
+        """Delete the cases and function hashes filed under an owner at or below ``prefix``.
+
+        The counts per kind (``memory_repair.purge_owned_points``): the cases
+        first, then the function-hash collection kept beside them, through its
+        own store (``FunctionHashStore.purge_owners``), where one is
+        configured. ``dry_run`` counts and deletes nothing. A failure raises
+        ``OwnerPurgeFailed`` with what each kind had lost: an operator's purge
+        never answers 0 for a store it could not read.
+        """
+        from maljan.memory.memory_repair import OwnerPurgeFailed, purge_owned_points
+
+        counts = {"cases": 0, "function_hashes": 0}
+        hashes = self.function_hash_store()
+        try:
+            counts["cases"] = purge_owned_points(
+                self._client, self._collection, prefix, dry_run=dry_run
+            )
+            if hashes is not None:
+                counts["function_hashes"] = hashes.purge_owners(prefix, dry_run=dry_run)
+        except OwnerPurgeFailed as exc:
+            done = {
+                "cases": len(exc.deleted.get(self._collection, [])) or counts["cases"],
+                "function_hashes": len(exc.deleted.get(self._function_hash_collection or "", [])),
+            }
+            raise OwnerPurgeFailed(exc.deleted, done) from exc
+        except Exception as exc:
+            raise OwnerPurgeFailed({}, counts) from exc
+        if not dry_run:
+            logger.info(
+                "QdrantStore.purge_owners: removed %d case(s) and %d function hash(es).",
+                counts["cases"],
+                counts["function_hashes"],
+            )
+        return counts
+
     def close(self) -> None:
         """Close the client (and with it any function-hash store sharing it)."""
         try:
