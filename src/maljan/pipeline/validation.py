@@ -1411,9 +1411,23 @@ _SILENT_E_ACT_ENDINGS = ("d",)
 # negations (``_NEGATIONS``).
 _FOLLOWING_NEGATIONS = frozenset({"free", "none", "unlikely", "absent"})
 # Where a clause that follows a word ends; a colon does not end it, so
-# "obfuscated strings: none" is one clause.
+# "obfuscated strings: none" is one clause. A "so" that opens a result with
+# its own subject ends it ("obfuscated so that none show"); a "so" before an
+# adjective ("so unlikely") does not.
 _FOLLOWING_CLAUSE_END_RE = re.compile(
-    r"[.;!?,(\n]|\b(?:and|but|while|whereas|although|though)\b", re.IGNORECASE
+    r"[.;!?,(\n]|\b(?:and|but|while|whereas|although|though)\b"
+    r"|\bso\s+(?:that|the|a|an|it|its|this|these|those|they|no|none|nothing)\b",
+    re.IGNORECASE,
+)
+# A word's verb and the "no" that writes the verb's own object right after
+# the word ("the obfuscation leaves no imports"): the "no" denies the object,
+# not the word. After a form of "be" or "have" ("obfuscation is no concern"),
+# or before a noun that names the word's own absence ("obfuscation shows no
+# sign"), it denies the word.
+_OWN_OBJECT_NO_RE = re.compile(r"\s+([A-Za-z]+)\s+no\s+([A-Za-z]+)\b", re.IGNORECASE)
+_LINKING_VERBS = frozenset({"is", "are", "was", "were", "be", "been", "has", "have", "had"})
+_ABSENCE_OBJECTS = frozenset(
+    {"evidence", "indication", "indications", "sign", "signs", "trace", "traces", "longer", "more"}
 )
 # "free of" or "free from" just before a word denies it ("free of obfuscation").
 _FREE_OF_BEFORE_RE = re.compile(r"\bfree\s+(?:of|from)\s+(?:\w+\s+)?$", re.IGNORECASE)
@@ -1442,12 +1456,21 @@ def _silent_e_stem(word: str) -> str:
 
 def _negated_after(text: str, start: int, end: int) -> bool:
     """Whether a negating word follows ``text[start:end]`` in its clause, or
-    "free of" stands just before it."""
+    "free of" stands just before it. A "no" that writes its verb's own object
+    (``_OWN_OBJECT_NO_RE``) is not read."""
     if _FREE_OF_BEFORE_RE.search(text[:start]):
         return True
     tail = text[end:]
     cut = _FOLLOWING_CLAUSE_END_RE.search(tail)
-    words = re.findall(r"[A-Za-z]+", tail[: cut.start()] if cut else tail)
+    clause = tail[: cut.start()] if cut else tail
+    own_object = _OWN_OBJECT_NO_RE.match(clause)
+    if (
+        own_object
+        and own_object.group(1).lower() not in _LINKING_VERBS | _NEGATIONS | _FOLLOWING_NEGATIONS
+        and own_object.group(2).lower() not in _ABSENCE_OBJECTS
+    ):
+        clause = clause[own_object.end() :]
+    words = re.findall(r"[A-Za-z]+", clause)
     return bool({word.lower() for word in words} & (_NEGATIONS | _FOLLOWING_NEGATIONS))
 
 

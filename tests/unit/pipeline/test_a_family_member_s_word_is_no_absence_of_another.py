@@ -28,6 +28,7 @@ from maljan.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     _another_member_s_word,
     _family_name_stems,
+    _negated_after,
     absence_claim_violation,
     name_stem_families,
 )
@@ -160,3 +161,44 @@ def test_a_silent_e_verb_s_inflection_of_the_rarest_own_word_affirms(
     if families.get(child, 0) < min(families.get(stem, 0) for stem in own):
         # Where only the rarest-own-word rule could set it aside, the bare verb does not.
         assert not _another_member_s_word(technique, f"The {word[:-1]} step.")(child)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Not packed; strings are obfuscated so that none show in plain text.",
+        "Not packed; the obfuscation leaves no imports.",
+        "Not packed; the strings are obfuscated so no string is readable.",
+    ],
+)
+def test_a_negation_of_another_object_leaves_the_rarest_own_word_affirmed(text: str) -> None:
+    # The negation after the word denies the result clause's subject or the
+    # verb's own object, not the obfuscation.
+    assert absence_claim_violation(_claim(text, "T1027"), "T1027", knowledge) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Not packed; obfuscation is so unlikely.",
+        "Not packed; obfuscation is no concern.",
+        "Not packed; obfuscation has no effect.",
+        "Not packed; obfuscation shows no sign.",
+        "Not packed; obfuscated strings: no hits.",
+        "Not packed; obfuscated strings no longer exist.",
+        "Not packed; obfuscated strings show no imports.",
+    ],
+)
+def test_a_negation_of_the_word_s_own_phrase_still_keeps_it_from_affirming(text: str) -> None:
+    found = absence_claim_violation(_claim(text, "T1027"), "T1027", knowledge)
+    assert found is not None and found.code == ABSENCE_CLAIM_CODE
+
+
+def test_the_negation_after_a_word_is_read_in_linear_time() -> None:
+    from tests.linear_cost import assert_scales
+
+    def build(size: int) -> str:
+        return "obfuscated" + " " * size + "leaves" + " so   x" * size + " " * size + "no"
+
+    assert _negated_after(build(10), 0, 10)
+    assert_scales(build, 20_000, lambda text: _negated_after(text, 0, 10))
