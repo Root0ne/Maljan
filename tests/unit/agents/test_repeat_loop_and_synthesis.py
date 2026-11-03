@@ -301,25 +301,41 @@ class TestTheSynthesisBudget:
 
         chars, how = synthesis_budget(settings, "static")
 
-        assert chars == (131072 - 8192 - 32768) * CHARS_PER_TOKEN
+        # A smaller generation cap shortens the answer; it never enlarges the
+        # salvage past what the uncapped quarter leaves.
+        assert chars == (131072 - 2 * 32768) * CHARS_PER_TOKEN
         assert how == (
-            f"{chars} characters — the 131072-token window less 8192 tokens of reply room "
-            f"and 32768 for the measure's error, at {CHARS_PER_TOKEN} characters a token"
+            f"{chars} characters — the 131072-token window less 32768 tokens of reply room "
+            "(the 8192-token generation cap does not shrink it) and 32768 for the measure's "
+            f"error, at {CHARS_PER_TOKEN} characters a token"
         )
 
     def test_the_floor_says_it_is_the_floor(self) -> None:
-        settings = Settings(_env_file=None, llm={"openai": {"context_size": 4096}})
+        settings = Settings(_env_file=None, llm={"openai": {"context_size": 8192}})
 
         chars, how = synthesis_budget(settings, "static")
 
         assert chars == _SYNTHESIS_MIN_CHARS
         assert how.startswith(f"{_SYNTHESIS_MIN_CHARS} characters — the floor, above the ")
+
+    def test_a_window_too_small_for_the_floor_holds_it_to_its_room(self) -> None:
+        # 16,000 characters do not fit a 4,096-token window at three a token;
+        # the floor is held to the window's room before the reply, and says so.
+        settings = Settings(_env_file=None, llm={"openai": {"context_size": 4096}})
+
+        chars, how = synthesis_budget(settings, "static")
+
+        assert chars == (4096 - 1024) * CHARS_PER_TOKEN
+        assert how.startswith(
+            f"{chars} characters — the floor, held to the window's room before the reply, "
+            f"above the {(4096 - 2048) * CHARS_PER_TOKEN} of the 4096-token window"
+        )
         assert synthesis_budget(Settings(_env_file=None), "static")[1].endswith(
             "no window was declared or learned"
         )
 
     def test_a_small_context_does_not_drop_below_the_floor(self) -> None:
-        settings = Settings(_env_file=None, llm={"openai": {"context_size": 4096}})
+        settings = Settings(_env_file=None, llm={"openai": {"context_size": 8192}})
 
         assert synthesis_budget_chars(settings, "static") == _SYNTHESIS_MIN_CHARS
 

@@ -264,6 +264,13 @@ _SYNTHESIS_DIRECTIVE = (
 # derived from it instead; where it is not, this is what holds.
 _SYNTHESIS_MIN_CHARS = 16_000
 
+# Characters a token where ``max_token_limit`` is set and the tokenizer that
+# measures the input cannot be loaded (``_input_room_chars``): the prose
+# estimate this fallback has always used, kept as it was. It sizes an
+# operator's own token limit, not the window's room, which is counted at the
+# context budget's ``CHARS_PER_TOKEN``.
+_TOKENIZER_UNAVAILABLE_CHARS_PER_TOKEN = 4
+
 
 def _model_context_tokens(cfg: Any, agent_name: str) -> int:
     """The context window of the model this agent runs on, or ``0``.
@@ -322,7 +329,10 @@ def synthesis_budget(cfg: Any, agent_name: str, window_tokens: int = 0) -> tuple
     share and a ratio of its own. Two parts of the window are kept back. The
     reply reserve the one rule sets (``reply_reserve_tokens`` over the
     deployment's generation cap) is where the salvage writes its answer, as the
-    loop's own room keeps it (``ContextBudget.tool_budget_chars``). A further
+    loop's own room keeps it (``ContextBudget.tool_budget_chars``), and never
+    less than the quarter the rule keeps uncapped: an operator's smaller
+    generation cap shortens the answer, and it does not hand the salvage the
+    margin its measure needs. A further
     quarter of the window (``REPLY_RESERVE_DIVISOR``) is the room for what the
     character measure gets wrong: the loop floors its measure on the server's
     own count of each request, and a trimmed conversation was never counted,
@@ -331,7 +341,8 @@ def synthesis_budget(cfg: Any, agent_name: str, window_tokens: int = 0) -> tuple
     over the window, would be refused again. The tool definitions a salvage
     sends beside the turns are its caller's to take off, as the loop's own
     measure charges them. No window to derive from is the floor, and the
-    floor is stated as such.
+    floor is stated as such; a known window too small for the floor holds it
+    to the window's room before the reply.
     """
     from maljan.llm.context_window import (
         REPLY_RESERVE_DIVISOR,
@@ -349,15 +360,19 @@ def synthesis_budget(cfg: Any, agent_name: str, window_tokens: int = 0) -> tuple
         )
     reply = reply_reserve_tokens(tokens, generation_reserve(cfg))
     margin = tokens // REPLY_RESERVE_DIVISOR
-    derived = chars_for_tokens(max(0, tokens - reply - margin))
+    kept = max(reply, margin)
+    derived = chars_for_tokens(max(0, tokens - kept - margin))
+    capped = f" (the {reply}-token generation cap does not shrink it)" if reply < kept else ""
     how = (
-        f"the {tokens}-token window less {reply} tokens of reply room and {margin} "
+        f"the {tokens}-token window less {kept} tokens of reply room{capped} and {margin} "
         f"for the measure's error, at {CHARS_PER_TOKEN} characters a token"
     )
     if derived < _SYNTHESIS_MIN_CHARS:
-        return _SYNTHESIS_MIN_CHARS, (
-            f"{_SYNTHESIS_MIN_CHARS} characters — the floor, above the {derived} of {how}"
+        floor = min(_SYNTHESIS_MIN_CHARS, chars_for_tokens(max(0, tokens - kept)))
+        held = (
+            "" if floor == _SYNTHESIS_MIN_CHARS else ", held to the window's room before the reply"
         )
+        return floor, f"{floor} characters — the floor{held}, above the {derived} of {how}"
     return derived, f"{derived} characters — {how}"
 
 
@@ -8423,12 +8438,12 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         trimmed = _trim_for_synthesis(sendable, budget)
         sent = _chars_of(trimmed)
-        if len(trimmed) < len(msgs):
+        if len(trimmed) < len(sendable):
             self.logger.warning(
                 "%s forced synthesis: trimmed %d of %d messages to fit %d chars%s.",
                 self.name,
-                len(msgs) - len(trimmed),
-                len(msgs),
+                len(sendable) - len(trimmed),
+                len(sendable),
                 budget,
                 f" ({remaining:.0f}s left at {rates})" if paced is not None else "",
             )
@@ -12641,7 +12656,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 tokens = len(tiktoken.get_encoding("cl100k_base").encode(text)) or 1
                 per_token = max(1.0, len(text) / tokens)
             except (KeyError, OSError, ValueError):
-                per_token = float(CHARS_PER_TOKEN)
+                per_token = float(_TOKENIZER_UNAVAILABLE_CHARS_PER_TOKEN)
             return max(0, int(configured * per_token) - INPUT_NOTICE_ROOM)
         from maljan.llm.context_window import ANSWER_SHARE, ContextBudget
 

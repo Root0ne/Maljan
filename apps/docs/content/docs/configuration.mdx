@@ -1140,7 +1140,8 @@ something. Its reasoning is then asked for once, with no tools, from what it
 gathered, and mediation reads the verdict from that; a judge loop that fails
 before gathering anything fails as before. Both salvages re-send the
 conversation trimmed to the loop's own room less a quarter of the window: the
-window the budget counts on less the reply reserve, and less that quarter for
+window the budget counts on less the reply reserve (never less than a quarter
+of the window, whatever the generation cap), and less that quarter for
 what the character measure gets wrong (a trimmed conversation was never
 counted by the server), at the budget's characters a token, less the tool
 definitions sent beside the turns. That window is the smaller of the declared

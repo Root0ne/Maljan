@@ -3329,6 +3329,11 @@ class JudgeAgent(BudgetMeter):
         """
         if timeout is not None and timeout < 1.0:
             self.logger.warning("JudgeAgent reasoning salvage skipped: no time left.")
+            self._salvage_row = {
+                "seconds_left": timeout,
+                "outcome": "not sent",
+                "detail": "no time left",
+            }
             self._last_loop_ending = (
                 f"the tool loop ended ({ended_why or 'before its final answer'}) with no time "
                 "left to write its reasoning"
