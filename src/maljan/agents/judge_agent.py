@@ -1808,11 +1808,37 @@ def _identity_prefix(sample: Any) -> str:
     return f"{block}\n\n" if block else ""
 
 
+class NotedText(str):
+    """A turn's text with the notes its message carries (``response_metadata``).
+
+    A string everywhere a string is read; copied, deep-copied and pickled with
+    its notes. Any string operation gives back a plain string, without them.
+    """
+
+    notes: dict[str, Any]
+
+    def __new__(cls, text: str = "", notes: Mapping[str, Any] | None = None) -> NotedText:
+        made = super().__new__(cls, text)
+        made.notes = dict(notes or {})
+        return made
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (type(self), (str(self), dict(self.notes)))
+
+
+def _notes_of(text: Any) -> dict[str, Any]:
+    """The notes a turn's text carries (:class:`NotedText`), or none."""
+    return dict(getattr(text, "notes", None) or {})
+
+
 def _standing_blocks(run_state: str, facts_block: str) -> str:
     """The run-state block and the pack as a prompt prefix, each with its blank line.
 
     The run state first, between its markers, because it is the shorter and
     the one a reader orients by; the pack after it, under its own heading.
+    The verdict and the technique question are built so. The mediation calls
+    it twice instead, the pack alone and then the run state alone, so every
+    round's turn leads with the same head (``standing_head`` in the mediation).
     """
     from maljan.pipeline.run_state import with_run_state
 
@@ -2685,7 +2711,9 @@ class JudgeAgent(BudgetMeter):
             if role == "system":
                 messages_pre.append(SystemMessage(content=content))
             elif role == "human":
-                messages_pre.append(HumanMessage(content=content))
+                messages_pre.append(
+                    HumanMessage(content=str(content), response_metadata=_notes_of(content))
+                )
         # The model message the returned text was read from, for a caller that
         # has to say why the text is empty (an answer cut at the output cap),
         # the bound that call was sent with, and how the loop ended when it
@@ -3557,6 +3585,11 @@ class JudgeAgent(BudgetMeter):
             tools=self.tools,
         )
         history_text = negotiation_history_text(history)
+        # The pack and the sample's identity first, then the run state: every
+        # round sends the same head, so its own breakpoint is read in each
+        # later round (``anthropic_history``, ``STANDING_FACTS_CHARS``); the
+        # run state, regenerated each round, stands after it.
+        standing_head = f"{_standing_blocks('', facts_block)}{_identity_prefix(sample)}"
 
         def _mediation_human(
             reports_shown: str, history_shown: str, notice: str, entries_shown: str = ""
@@ -3564,8 +3597,7 @@ class JudgeAgent(BudgetMeter):
             note = f"{notice}\n\n" if notice else ""
             entries = f"{entries_shown}\n\n" if entries_shown else ""
             return (
-                f"{_standing_blocks(run_state, facts_block)}"
-                f"{_identity_prefix(sample)}{note}"
+                f"{standing_head}{_standing_blocks(run_state, '')}{note}"
                 f"Expert Reports:\n{reports_shown}\n\nPrevious Discussion:\n{history_shown}\n\n"
                 f"{carried_facts}{entries}"
                 f"{MEDIATOR_HUMAN_CLOSING}"
@@ -3598,15 +3630,20 @@ class JudgeAgent(BudgetMeter):
                 - len(fitted_notice)
                 - self._mediation_entries_reserve(),
             )
+        from maljan.agents.technique_facts import STANDING_FACTS_CHARS
+
         prompt_messages = [
             ("system", system_text),
             (
                 "human",
-                _mediation_human(
-                    fitted_parts["expert reports"],
-                    fitted_parts[_HISTORY_PART],
-                    fitted_notice,
-                    entries_text,
+                NotedText(
+                    _mediation_human(
+                        fitted_parts["expert reports"],
+                        fitted_parts[_HISTORY_PART],
+                        fitted_notice,
+                        entries_text,
+                    ),
+                    {STANDING_FACTS_CHARS: len(standing_head)} if standing_head else {},
                 ),
             ),
         ]
@@ -3971,7 +4008,9 @@ class JudgeAgent(BudgetMeter):
         from maljan.llm.context_window import output_bound_kwargs
 
         turns: list[BaseMessage] = [
-            SystemMessage(content=text) if role == "system" else HumanMessage(content=text)
+            SystemMessage(content=text)
+            if role == "system"
+            else HumanMessage(content=str(text), response_metadata=_notes_of(text))
             for role, text in prompt_messages
         ]
         reads, reading = self._reading_model(self._mediation_ledger)
@@ -4695,7 +4734,13 @@ class JudgeAgent(BudgetMeter):
             questions, {i: e._replace(text="") for i, e in entries.items()}, cards=False
         )
         empty_head = lead + technique_question_head("", decided, carried)
-        structured = self._supports_structured_output()
+        from maljan.llm.registry import schema_tool_worth_offering
+
+        # Not where the read is offered beside the schema on a model that
+        # writes such a schema as text: the answer is then asked for in text.
+        structured = self._supports_structured_output() and (
+            not ledger or schema_tool_worth_offering(self.llm)
+        )
         # ``read_evidence`` over the run's ledger from the first turn, beside
         # the answer's schema on the structured path, where the model binds
         # it; else the question as it always was, its system text saying so.

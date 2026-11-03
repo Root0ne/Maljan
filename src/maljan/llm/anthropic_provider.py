@@ -24,7 +24,10 @@ description of the model — and nothing else:
   conversation — with explicit breakpoints on the newest user turn and on the
   turn the previous request ended with (``anthropic_history``); a single-shot
   call carries no marker and pays no write premium.
-  ``llm.anthropic.prompt_cache_ttl`` sets the lifetime.
+  ``llm.anthropic.prompt_cache_ttl`` sets the lifetime. The triage pack at
+  the head of a turn has a breakpoint of its own on every request that sends
+  it, at ``llm.anthropic.pack_cache_ttl`` (an hour by default), so an agent's
+  next debate round reads it after a pause past five minutes.
 * **Streaming.** A request whose output cap is past what the Anthropic SDK
   sends unstreamed by its own rule (an answer it expects to run past ten
   minutes) is streamed and joined into the same answer. The SDK would not
@@ -61,29 +64,46 @@ from maljan.llm.provider_base import (
 from maljan.llm.registry import register_provider
 
 _table_lock = threading.Lock()
-_fixed_sampling: dict[str, str] | None = None
+_table_sections: dict[str, dict[str, str]] = {}
 
 
-def _fixed_sampling_rows() -> dict[str, str]:
-    """The vendored table's ``fixed_sampling`` rows, read once: family key -> source."""
-    global _fixed_sampling
+def _table_rows(section: str) -> dict[str, str]:
+    """The vendored table's ``section`` rows, read once: family key -> source."""
     from maljan.core.paths import resolve_data
     from maljan.llm.context_window import TABLE_PATH
 
     with _table_lock:
-        if _fixed_sampling is not None:
-            return _fixed_sampling
+        held = _table_sections.get(section)
+        if held is not None:
+            return held
         rows: dict[str, str] = {}
         try:
             raw = json.loads(Path(resolve_data(TABLE_PATH)).read_text(encoding="utf-8"))
-            for key, row in (raw.get("fixed_sampling") or {}).items():
+            for key, row in (raw.get(section) or {}).items():
                 source = str(row.get("source") or "") if isinstance(row, dict) else ""
                 if not str(key).startswith("_") and source:
                     rows[str(key).lower()] = source
         except Exception as exc:  # noqa: BLE001 — a table that cannot be read names no model
-            logger.debug("the vendored fixed-sampling rows could not be read: %s", exc)
-        _fixed_sampling = rows
-        return _fixed_sampling
+            logger.debug("the vendored %s rows could not be read: %s", section, exc)
+        _table_sections[section] = rows
+        return rows
+
+
+def _fixed_sampling_rows() -> dict[str, str]:
+    """The vendored table's ``fixed_sampling`` rows, read once: family key -> source."""
+    return _table_rows("fixed_sampling")
+
+
+def _row_source(section: str, model: object) -> str:
+    """The source of the longest ``section`` key ``model``'s id starts with, or ``""``."""
+    from maljan.llm.context_window import model_family
+
+    family = model_family(model)
+    if not family:
+        return ""
+    rows = _table_rows(section)
+    matches = [key for key in rows if family.startswith(key)]
+    return rows[max(matches, key=len)] if matches else ""
 
 
 def fixed_sampling_source(model: object) -> str:
@@ -92,14 +112,16 @@ def fixed_sampling_source(model: object) -> str:
     The longest table key the model's id starts with answers, as the table's
     windows are matched.
     """
-    from maljan.llm.context_window import model_family
+    return _row_source("fixed_sampling", model)
 
-    family = model_family(model)
-    if not family:
-        return ""
-    rows = _fixed_sampling_rows()
-    matches = [key for key in rows if family.startswith(key)]
-    return rows[max(matches, key=len)] if matches else ""
+
+def thinks_by_default_source(model: object) -> str:
+    """Where it is documented that ``model`` thinks unless told not to, or ``""``.
+
+    The vendored table's ``thinks_by_default`` rows, matched as
+    :func:`fixed_sampling_source` matches its own.
+    """
+    return _row_source("thinks_by_default", model)
 
 
 def needs_streaming(model: str, max_tokens: object) -> bool:
@@ -449,6 +471,29 @@ class AnthropicProvider(LLMProvider):
         return True
 
     @classmethod
+    def native_json_schema_output(cls, llm: Any) -> bool:
+        # The API takes ``output_config.format`` beside tools, but the pinned
+        # langchain-anthropic's ``json_schema`` method replaces the model's
+        # bound tools with the format, and its parser refuses a reply that
+        # calls a tool: ``read_evidence`` would be lost, and a reply that
+        # reads could not be read.
+        return False
+
+    @classmethod
+    def schema_tool_answered_as_text(cls, llm: Any) -> bool:
+        # No tool choice is ever sent for a schema (``with_unforced_structured_output``),
+        # and a model that thinks by default (the vendored table's
+        # ``thinks_by_default`` rows), with no thinking setting of its own
+        # turning it off, cannot be made to call one: offered beside
+        # ``read_evidence`` it writes the JSON as text (every one of haiku7's
+        # 17 and haiku8's 22 structured calls).
+        thinking = getattr(llm, "thinking", None)
+        if isinstance(thinking, dict) and thinking.get("type") == "disabled":
+            return False
+        model = getattr(llm, "model", None) or getattr(llm, "model_name", None) or ""
+        return bool(model) and bool(thinks_by_default_source(model))
+
+    @classmethod
     def window_probes(cls, endpoint: object, model: str) -> tuple[Any, ...]:
         from urllib.parse import quote
 
@@ -474,7 +519,15 @@ class AnthropicProvider(LLMProvider):
 
     @classmethod
     def writes_hour_caches(cls, settings: Any) -> bool:
-        return str(getattr(cls.settings_block(settings), "prompt_cache_ttl", "") or "") == "1h"
+        # Every request may write the triage pack's entry for an hour
+        # (``pack_cache_ttl``): a call is admitted at the hour's write price,
+        # and a write whose split by lifetime is not reported is settled so.
+        from maljan.llm.anthropic_history import standing_marker
+
+        block = cls.settings_block(settings)
+        ttl = str(getattr(block, "prompt_cache_ttl", "") or "5m")
+        marker = standing_marker(ttl, str(getattr(block, "pack_cache_ttl", "off") or "off"))
+        return ttl == "1h" or (marker or {}).get("ttl") == "1h"
 
     @classmethod
     def _root(cls, endpoint: str) -> str:
@@ -627,6 +680,7 @@ class AnthropicProvider(LLMProvider):
                         )
                     ),
                     str(getattr(settings, "prompt_cache_ttl", "5m") or "5m"),
+                    str(getattr(settings, "pack_cache_ttl", "off") or "off"),
                 )
             ),
             "anthropic",

@@ -466,6 +466,62 @@ def structured_output_supported(config: Any | None = None, llm: Any | None = Non
         return False
 
 
+# Where a model object notes that it was said to take the text path, in its own
+# ``__dict__``: once per model, and a job's container builds its own.
+_TEXT_PATH_SAID = "_maljan_schema_text_path_said"
+
+
+def schema_tool_worth_offering(llm: Any) -> bool:
+    """Whether a structured call that offers ``read_evidence`` should offer its schema as a tool.
+
+    Not where the provider that built a model says it answers such a tool in
+    text (``LLMProvider.schema_tool_answered_as_text``) and asks for no
+    JSON-schema answer natively in its place: the call is then asked for its
+    JSON in text, the path every structured call already falls back to, and
+    each model says so once. A fallback list takes the text path only when
+    every one of its models would: a model later in the list that writes the
+    schema as text never takes the tool from one before it that calls it.
+    Never raises; a model nothing can be said of keeps the tool.
+    """
+    inner = getattr(llm, "models", None) if llm is not None else None
+    candidates = (
+        list(inner)
+        if isinstance(inner, list) and getattr(llm, "_llm_type", "") == "maljan-fallback"
+        else [llm]
+    )
+    try:
+        from maljan.llm.provider_base import provider_of_model
+
+        named: list[tuple[str, str]] = []
+        for model in candidates:
+            built_by = provider_of_model(model)
+            if (
+                built_by is None
+                or not built_by.schema_tool_answered_as_text(model)
+                or built_by.native_json_schema_output(model)
+            ):
+                return True
+            named.append(
+                (
+                    built_by.name,
+                    str(getattr(model, "model", None) or getattr(model, "model_name", "") or "?"),
+                )
+            )
+        held = getattr(llm, "__dict__", None)
+        if named and isinstance(held, dict) and not held.get(_TEXT_PATH_SAID):
+            held[_TEXT_PATH_SAID] = True
+            logger.info(
+                "%s writes a schema offered beside read_evidence as text (no tool choice is sent "
+                "while it thinks); structured answers are asked for as JSON text, with no schema "
+                "tool.",
+                ", ".join(f"{name} model {model}" for name, model in named),
+            )
+        return not named
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("schema-tool check failed (%s); the tool is offered.", exc)
+    return True
+
+
 def structured_output_supported_for_llm(llm: Any) -> bool:
     """``structured_output_supported`` for callers that hold no config.
 

@@ -278,5 +278,17 @@
     "claude-sonnet-5-5": {
       "source": "https://platform.claude.com/docs/en/build-with-claude/preserved-thinking (the conversation check)"
     }
+  },
+  "thinks_by_default": {
+    "_comment": "The model families whose vendor documents that adaptive thinking is on by default: a request that omits thinking runs it, and while it runs no tool can be forced, so a schema offered as a tool beside other tools is answered in text. The Anthropic provider asks such a model in text for a structured answer that offers read_evidence, with no schema tool; a model not listed is offered the schema's tool as before.",
+    "claude-haiku-5-5": {
+      "source": "https://platform.claude.com/docs/en/about-claude/models/migration-guide (Claude Haiku 5.5: adaptive thinking is on by default, a request that omits thinking runs it)"
+    },
+    "claude-opus-5": {
+      "source": "https://platform.claude.com/docs/en/about-claude/models/migration-guide (Claude Opus 5 and Claude Opus 5.5: adaptive thinking is on by default, a request that omits thinking runs it)"
+    },
+    "claude-sonnet-5": {
+      "source": "https://platform.claude.com/docs/en/about-claude/models/migration-guide (Claude Sonnet 5 and Claude Sonnet 5.5: adaptive thinking is on by default, a request that omits thinking runs it)"
+    }
   }
 }

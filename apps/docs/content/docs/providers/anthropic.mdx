@@ -19,6 +19,7 @@ Claude Haiku 5.5 (`claude-haiku-5-5`) included.
 | `core.llm.anthropic.judge_model` | `claude-sonnet-4-20250514` | The judge's model. |
 | `core.llm.anthropic.effort` | empty | Sent as `output_config.effort` on every request: `low`, `medium`, `high`, `xhigh` or `max`. Empty sends nothing and keeps the model's own default (`medium` on Claude Haiku 5.5). |
 | `core.llm.anthropic.prompt_cache_ttl` | `5m` | How long the prompt cache keeps what a request writes: `5m`, or `1h`, which costs more to write. |
+| `core.llm.anthropic.pack_cache_ttl` | `1h` | How long the prompt cache keeps the triage pack at the head of an agent's turn, behind a breakpoint of its own, so a later debate round reads it: `1h`, `5m`, or `off`. Never shorter than `prompt_cache_ttl`. |
 
 ```
 core.llm.provider               = anthropic

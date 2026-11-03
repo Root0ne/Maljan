@@ -127,7 +127,10 @@ class TestTheComposersSections:
             for body in bodies:
                 names = _tool_names(body)
                 assert names[-1] == READ_EVIDENCE_TOOL, section
-                assert len(names) == (2 if structured else 1), section
+                # Claude Haiku 5.5 writes a schema offered beside the read as
+                # text, so no section offers its schema as a tool on either
+                # path (``registry.schema_tool_worth_offering``).
+                assert len(names) == 1, section
 
     def test_the_cached_header_and_the_system_prompt_are_the_same_bytes(
         self, monkeypatch: pytest.MonkeyPatch
@@ -137,8 +140,16 @@ class TestTheComposersSections:
 
         for section, bodies in _by_section(reading).items():
             before = _by_section(plain)[section]
-            # Every request's first turn, the shared header and the section's ask.
-            assert [b["messages"][0] for b in bodies] == [b["messages"][0] for b in before], section
+
+            # Every request's first turn, the shared header and the section's ask,
+            # word for word. Its blocks may differ: with the read offered no
+            # section sends its schema as a tool on Claude Haiku 5.5, so every
+            # section's head is one cached block, not only the prose sections'.
+            def turn(body: dict[str, Any]) -> str:
+                content = body["messages"][0]["content"]
+                return content if isinstance(content, str) else "".join(b["text"] for b in content)
+
+            assert [turn(b) for b in bodies] == [turn(b) for b in before], section
             assert [b["system"] for b in bodies] == [b["system"] for b in before], section
             # The definitions the sections share are one byte string.
             read_tool = [t for t in bodies[0]["tools"] if t["name"] == READ_EVIDENCE_TOOL]
@@ -217,7 +228,10 @@ class TestTheNarrative:
     ) -> None:
         wire, out, _agent = self._generate(monkeypatch, self._in_text, LedgerReads(LEDGER))
 
-        assert _tool_names(wire.bodies[0]) == ["NarrativeOutput", READ_EVIDENCE_TOOL]
+        # Claude Haiku 5.5 writes a schema offered beside the read as text, so
+        # the narrative is asked for its JSON in text, the read alone offered
+        # (``registry.schema_tool_worth_offering``).
+        assert _tool_names(wire.bodies[0]) == [READ_EVIDENCE_TOOL]
         assert out is not None
 
     def test_a_read_reaches_the_ledger_and_the_narrative_is_written_after_it(
@@ -251,7 +265,9 @@ class TestTheNarrative:
 
         wire, out, agent = self._generate(monkeypatch, self._in_text, LedgerReads(LEDGER))
 
-        assert _tool_names(wire.bodies[0]) == ["NarrativeOutput"]
+        # Asked in text from the first call (the read was meant to stand beside
+        # the schema), with no tool, as a model that binds none is asked.
+        assert _tool_names(wire.bodies[0]) == []
         assert agent.degradations == [not_bound_reason("reporter")]
         assert out is not None
 

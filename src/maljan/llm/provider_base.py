@@ -195,6 +195,27 @@ class LLMProvider:
         """Whether a model object this provider built says structured output is not worth asking."""
         return False
 
+    @classmethod
+    def native_json_schema_output(cls, llm: Any) -> bool:
+        """Whether this provider asks ``llm`` for a JSON-schema answer natively, tools still bound.
+
+        The schema sent as the answer's format rather than as a tool, with
+        ``read_evidence`` still offered beside it and a reply that reads it
+        read as a read. No provider does so far.
+        """
+        return False
+
+    @classmethod
+    def schema_tool_answered_as_text(cls, llm: Any) -> bool:
+        """Whether ``llm`` answers a schema offered as a tool beside other tools in text.
+
+        Where it does and no native JSON-schema output takes the tool's place
+        (:meth:`native_json_schema_output`), a structured call that offers
+        ``read_evidence`` is asked for its JSON in text, with no schema tool
+        (``registry.schema_tool_worth_offering``).
+        """
+        return False
+
     # ── Context window ────────────────────────────────────────────────────
 
     @classmethod
