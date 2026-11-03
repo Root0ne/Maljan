@@ -181,12 +181,60 @@ def test_a_negation_of_another_object_leaves_the_rarest_own_word_affirmed(text: 
     "text",
     [
         "Not packed; obfuscation is so unlikely.",
-        "Not packed; obfuscation is no concern.",
-        "Not packed; obfuscation has no effect.",
-        "Not packed; obfuscation shows no sign.",
         "Not packed; obfuscated strings: no hits.",
         "Not packed; obfuscated strings no longer exist.",
         "Not packed; obfuscated strings show no imports.",
+        "Not packed; obfuscation shows no evidence.",
+        "Not packed; obfuscation plays no role.",
+        "Not packed; obfuscation plays no part.",
+        "Not packed; obfuscation yielded no results.",
+        "Not packed; obfuscation returned no hits.",
+        "Not packed; obfuscation shows no indicators.",
+        "Not packed; obfuscation shows no artifacts.",
+        "Not packed; obfuscation shows no hint.",
+        "Not packed; obfuscation shows no presence.",
+        "Not packed; obfuscation exhibits no signals.",
+        "Not packed; obfuscation seems no issue.",
+        "Not packed; obfuscation appears no longer.",
+        "Not packed; obfuscation remains no factor.",
+        "Not packed; obfuscation makes no difference.",
+        "Not packed; obfuscation matters no more.",
+        "Not packed; obfuscation found no matches.",
+        "Not packed; obfuscation detected no strings.",
+        "Not packed; obfuscation means no packing.",
+        "Not packed; obfuscation shows no proof.",
+        "Not packed; obfuscation gives no signal.",
+        "Not packed; obfuscated sections no.",
+        "Not packed; obfuscation would raise entropy so it is not present.",
+        "Not packed; obfuscation was checked so none is present.",
+        "Not packed; obfuscated so the analysis found none.",
+        "Not packed; obfuscation was sought so that none was found.",
+        "Not packed; obfuscation would show high entropy so it is absent.",
+        "Not packed; obfuscation leaves no trace.",
+        "Not packed; obfuscation performs no write.",
+        "Not packed; obfuscation uses no packing.",
+        "Not packed; obfuscation creates no key.",
+        "Not packed; obfuscation has no effect.",
+        "Not packed; obfuscation is no concern.",
+        "Not packed; obfuscation 's no",
+        "Not packed; obfuscation does not apply.",
+        "Not packed; obfuscation detection no hits.",
+        "Not packed; obfuscation scan no hits.",
+        "Not packed; obfuscation checks no hits.",
+        "Not packed; obfuscation present no.",
+        "Not packed; obfuscation found: no.",
+        "Not packed; obfuscation detected NO.",
+        "Not packed; obfuscation applied no.",
+        "Not packed; obfuscation observed no; strings in clear.",
+        "Not packed; obfuscation occurs no where.",
+        "Not packed; obfuscation was no factor.",
+        "Not packed; obfuscation seemed no factor.",
+        "Not packed; obfuscation became no issue.",
+        "Not packed; obfuscation contributes no entropy.",
+        "Not packed; obfuscation requires no key.",
+        "Not packed; obfuscation shows no sign of use.",
+        "Not packed; obfuscated payload absent.",
+        "Not packed; obfuscation shows no evidence and none is present.",
     ],
 )
 def test_a_negation_of_the_word_s_own_phrase_still_keeps_it_from_affirming(text: str) -> None:
@@ -198,7 +246,9 @@ def test_the_negation_after_a_word_is_read_in_linear_time() -> None:
     from tests.linear_cost import assert_scales
 
     def build(size: int) -> str:
-        return "obfuscated" + " " * size + "leaves" + " so   x" * size + " " * size + "no"
+        return (
+            "obfuscated" + " " * size + "leaves" + " so   x" * size + " so that none" + " x" * size
+        ) + " found"
 
     assert _negated_after(build(10), 0, 10)
     assert_scales(build, 20_000, lambda text: _negated_after(text, 0, 10))
