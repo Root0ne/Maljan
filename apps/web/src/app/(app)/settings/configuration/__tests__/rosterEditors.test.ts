@@ -132,6 +132,25 @@ describe("the agent detail's input data and sandbox row", () => {
     timeout_seconds: null,
   };
 
+  it("tells an agent whose role has no tab where its sections go, beside the tab it may pick", () => {
+    const hint = "Sections its tools&#x27; kinds do not place go to EVIDENCE unless you pick a tab";
+    for (const role of ["generic", "lead"] as const) {
+      for (const tab of [null, "static"]) {
+        const html = agentHtml("checker", { ...base, role, tab });
+        expect(html, `${role} ${tab}`).toContain(hint);
+        expect(html, `${role} ${tab}`).toContain('id="checker-tab-hint"');
+        expect(html.match(/<select[^>]*aria-label="checker tab"[^>]*>/)?.[0], `${role} ${tab}`).toContain(
+          'aria-describedby="checker-tab-hint"',
+        );
+      }
+    }
+    for (const role of ["static", "dynamic", "network"] as const) {
+      const html = agentHtml("checker", { ...base, role });
+      expect(html, role).not.toContain(hint);
+      expect(html, role).not.toContain("aria-describedby=\"checker-tab-hint\"");
+    }
+  });
+
   it("draws a box per served input slice, ticking the stored ones", () => {
     const html = agentHtml("checker", { ...base, data_sources: ["sandbox.behavior"] });
     for (const source of vocabulary) {
