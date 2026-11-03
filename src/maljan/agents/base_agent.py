@@ -1726,7 +1726,13 @@ def describe_exception_for_log(exc: BaseException) -> str:
 
 # Structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block parsing
 # (``read_claim_blocks``), the one reader every path that reads claims uses.
-_BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULTILINE)
+# A separator is a run of ``---`` lines, taken whole: it begins only where the
+# whitespace before it begins, so a long run of blank lines is walked once
+# rather than once per line in it.
+_BLOCK_SPLIT_RE = re.compile(
+    r"(?:\A|(?<!\s))(?:[^\S\n]*+\n|\A)\s*+-{3,}+(?:[^\S\n]*+\n\s*+-{3,}+)*\s*(?:\r?\n|$)",
+    flags=re.MULTILINE,
+)
 # The colon after a field label that begins a line, as ``_FIELD_LINE_RE``
 # reads it: closing emphasis or spaces may stand before it ("**TECHNIQUE**:",
 # "EVIDENCE :"). Read possessively, so a long run of spaces is read once.
