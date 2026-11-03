@@ -15,10 +15,10 @@ The whole report is shown instead, per peer, and a sentence on the round's
 record says why, when a line names the peer with no claim number for it (or
 one too long to read, or a range it cannot place), when it cites a claim of
 no analyst it names, when a number is past the claims of its answer in force,
-when a quoted claim shares no ledger id or address with its line, or when
-that answer is not held. The analyst's own report stays whole,
-the merge by claim number is untouched, and a whole report is headed and
-passed byte for byte as before.
+when a quoted claim shares no ledger id or address with the clause of its
+line that cites it, or when that answer is not held. The analyst's own report
+stays whole, the merge by claim number is untouched, and a whole report is
+headed and passed byte for byte as before.
 
 Every value is synthetic.
 """
@@ -488,7 +488,7 @@ class TestAMisquoteIsNotQuoted:
         assert shown == REPORTS["static"]
         assert shown.note.endswith(
             "blocking line 1 cites claim 30 of it, which shares no ledger id or address with "
-            "the line."
+            "the clause of blocking line 1 that cites it."
         )
 
     def test_an_address_written_with_leading_zeros_is_the_same_address(self) -> None:
@@ -520,7 +520,7 @@ class TestAMisquoteIsNotQuoted:
         assert shown == REPORTS["all_tools_static_r2"]
         assert shown.note.endswith(
             "blocking line 1 cites claim 2 of it, which shares no ledger id or address with "
-            "the line."
+            "the clause of blocking line 1 that cites it."
         )
 
     def test_a_mark_s_reason_is_no_clause_of_a_claim(self) -> None:

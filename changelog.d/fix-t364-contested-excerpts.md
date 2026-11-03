@@ -5,7 +5,7 @@
   - a number is too long or past the claims of its answer in force;
   - a range is wider than 20 claims;
   - a line cites a claim without naming its analyst;
-  - a quoted claim shares no ledger id or address with its own clause of the line citing it (from the reference to the next one, a ";" or the end of the sentence, never a mark's reason), which catches a mediator citation error;
+  - a quoted claim shares no ledger id or address with the clause of its blocking line that cites it (from the reference to the next one, a ";" or the end of the sentence, never a mark's reason), which catches a mediator citation error;
   - the peer's answer in force is not held.
 
   Each round's record, and `run_summary.efficiency.inputs.peer_reports`, count the excerpts and the whole reports with their character sizes. A round that asks every analyst, the merge by claim number, the system turn and the order of the prompt's blocks are unchanged, and a whole report is headed and passed byte for byte as before.

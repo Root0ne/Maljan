@@ -2580,7 +2580,7 @@ def peer_excerpt(
             if not ref.tokens_of(peer, n) & line_tokens(said):
                 return _whole(
                     f"{at} cites claim {n} of it, which shares no ledger id or address with "
-                    "the line"
+                    f"the clause of {at} that cites it"
                 )
         numbers.update(dict.fromkeys(written))
     if not numbers:
