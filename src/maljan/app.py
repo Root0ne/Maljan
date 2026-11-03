@@ -329,7 +329,11 @@ class MaljanApp:
         Only the neutral report's target hash is read, whichever sandbox ran.
         A report whose target is the sample, or that names none, is returned
         as it came. The mark is the platform's: one a sandbox published under
-        its word is not the run's finding, and is taken out, with a warning.
+        its word is not the run's finding. The intake already takes it out of
+        every provider's report (``schemas.sandbox_document.PLATFORM_MARKS``,
+        :meth:`_without_unearned_marks`); the removal here, with its warning,
+        stays as a second guard for a document that reaches this step by
+        another way.
         """
         from maljan.analysis.sample_integrity import sandbox_target_record
         from maljan.pipeline.sandbox_status import TARGET_KEY, target_mark

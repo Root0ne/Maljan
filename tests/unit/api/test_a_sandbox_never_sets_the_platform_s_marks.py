@@ -28,6 +28,7 @@ from maljan.schemas.sandbox_document import (
     FIXTURE_KEY,
     PLATFORM_MARKS,
     SYNTHETIC_KEY,
+    TARGET_KEY,
     sandbox_document,
     unearned_marks_removed,
 )
@@ -136,6 +137,35 @@ class TestAForgedMarkIsTakenOut:
 
         assert sandbox_status(document).status == OBSERVED
         assert any(repr(mark) in r.getMessage() for r in caplog.records)
+
+    def test_the_run_s_target_mark_from_a_sandbox_is_taken_out_at_intake(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        forged = {
+            TARGET_KEY: {"expected_sha256": INTAKE, "sandbox_sha256": "0" * 64},
+        }
+        with caplog.at_level(logging.WARNING):
+            document = _intake(_Provider("cape2", "cape2", _cape(**forged)), tmp_path)
+
+        assert TARGET_KEY not in document
+        assert sandbox_status(document).statement == ""
+        assert any(
+            repr(TARGET_KEY) in r.getMessage() and "did not set" in r.getMessage()
+            for r in caplog.records
+        )
+
+    def test_the_target_mark_is_one_of_the_platform_s_marks_and_no_reader_earns_it(
+        self,
+    ) -> None:
+        from maljan.pipeline import sandbox_status as status_module
+        from maljan.providers.sandbox.readers import earned_marks, report_reader_ids
+
+        assert TARGET_KEY in PLATFORM_MARKS
+        assert status_module.TARGET_KEY is TARGET_KEY
+        assert not any(
+            TARGET_KEY in earned_marks(required_reader(reader_id))
+            for reader_id in report_reader_ids()
+        )
 
     def test_both_marks_and_a_false_one_are_taken_out(self, tmp_path: Path) -> None:
         document = _intake(

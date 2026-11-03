@@ -159,14 +159,18 @@ CONTAINERS: frozenset[Path] = frozenset(
 # keys, written by the readers and the providers, never by a sandbox.
 SYNTHETIC_KEY = "synthetic"
 FIXTURE_KEY = "recorded_fixture"
+# The mark the run sets on a live report whose sandbox names a target SHA-256
+# that is not the sample's intake SHA-256: the two hashes, as
+# ``analysis.sample_integrity.sandbox_target_record`` keeps them. A report
+# whose target is the sample, or that names none, carries no mark. Set after
+# intake (``app.MaljanApp._tell_the_target``), so no reader earns it.
+TARGET_KEY = "target_not_the_sample"
 # Every platform mark a document can carry at its top level: the one list. A
 # sandbox's own report holding a key under one of these words is not the
 # platform's mark, and a reader that does not set the mark itself never passes
 # it on (:func:`unearned_marks_removed`). A later mark joins here, and is then
-# taken out of every provider's report at intake with no code of its own: the
-# run's mark for a report naming another target than the sample
-# (``target_not_the_sample``, set after intake) is the next.
-PLATFORM_MARKS: tuple[str, ...] = (SYNTHETIC_KEY, FIXTURE_KEY)
+# taken out of every provider's report at intake with no code of its own.
+PLATFORM_MARKS: tuple[str, ...] = (SYNTHETIC_KEY, FIXTURE_KEY, TARGET_KEY)
 
 
 def unearned_marks_removed(report: SandboxReport, earned: Collection[str] = ()) -> list[str]:
