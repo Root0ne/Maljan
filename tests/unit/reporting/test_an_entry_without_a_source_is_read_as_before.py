@@ -20,7 +20,7 @@ import pytest
 from maljan.core.builtin_declarations import BUILDER_OF_KIND
 from maljan.reporting import legacy_tool_names as legacy
 from maljan.reporting import tool_kinds
-from maljan.reporting.ledger_report import build_sections
+from maljan.reporting.ledger_report import SHAPE_READ_LABEL, SHAPE_RULE_SECTION, build_sections
 from maljan.reporting.models import NetworkIP, RecoveredValue
 from maljan.reporting.renderers.stix_renderer import (
     FILE_ONLY_PROCESS,
@@ -287,13 +287,17 @@ BENCHMARK = Path(".superpowers") / "sdd" / "mandate-2026-09-17" / "benchmark" / 
 # one "Functions examined" item that named the tool twice (``list_functions (list_functions)``)
 # and the decompiled functions it cut at 400 characters, now whole (T-389: run5's 56 and run4's
 # 83 batch functions; nothing else changed): the section count and the digest of the sections'
-# JSON (sorted keys).
+# JSON (sorted keys). Beside them each run now draws the rules its undeclared tool's answers
+# name as matched, read by their shape, in a table of its own (T-509): every other section is
+# the one dev drew.
 STORED_REBUILDS = {
     "run7": (89, "5622126326362a4b"),
     "run5": (102, "26962def958da05d"),
     "run4": (92, "a1b9e99cea2318db"),
     "local8": (40, "38eef84aca43089b"),
 }
+# The rules the stored runs' undeclared tool named as matched.
+SHAPED_RULES = {"win_mutex", "CRC32_poly_Constant", "HasRichSignature"}
 
 
 def _dumped(sections: list[Any]) -> list[dict[str, Any]]:
@@ -331,5 +335,9 @@ def test_a_stored_run_s_ledger_rebuilds_the_sections_dev_drew(run: str) -> None:
         for item in items
     ]
     sections = build_sections(ledger)
-    text = json.dumps(_dumped(sections), sort_keys=True)
-    assert (len(sections), hashlib.sha256(text.encode()).hexdigest()[:16]) == STORED_REBUILDS[run]
+    (shaped,) = [s for s in sections if s.key == SHAPE_RULE_SECTION]
+    assert {row[0] for row in shaped.rows} <= SHAPED_RULES
+    assert all(row[2] == SHAPE_READ_LABEL for row in shaped.rows)
+    rest = [s for s in sections if s.key != SHAPE_RULE_SECTION]
+    text = json.dumps(_dumped(rest), sort_keys=True)
+    assert (len(rest), hashlib.sha256(text.encode()).hexdigest()[:16]) == STORED_REBUILDS[run]

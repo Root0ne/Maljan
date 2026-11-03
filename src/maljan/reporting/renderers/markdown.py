@@ -93,6 +93,7 @@ from maljan.reporting.ledger_report import (
     BEHAVIOUR_CODE_SECTION,
     CAPABILITIES_TITLE,
     RULE_TABLES,
+    SHAPE_RULE_SECTION,
     analyst_persistence,
     listed_by,
     rule_table_tools,
@@ -2547,9 +2548,13 @@ class MarkdownRenderer:
 # ---------------------------------------------------------------------------
 
 # The evidence sections that are rule hits: the table of each rule kind
-# (``ledger_report.RULE_TABLES``), keyed by its kind whichever tool filled it.
+# (``ledger_report.RULE_TABLES``), keyed by its kind whichever tool filled it,
+# then the table of the matches undeclared tools' answers hold by their shape.
 _CAPABILITY_SECTION = section_key_of_kind("capability_rules")
-_RULE_SECTIONS = tuple(section_key_of_kind(kind) for kind in RULE_TABLES)
+_RULE_SECTIONS = (
+    *(section_key_of_kind(kind) for kind in RULE_TABLES),
+    SHAPE_RULE_SECTION,
+)
 
 # How the report builder begins the reason for an absent summary. Spelled here
 # rather than imported so the renderer keeps no import of the builder.

@@ -27,6 +27,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from maljan.core.rule_matches import BY_SHAPE_KEY
+
 __all__ = [
     "HELD_SCHEDULES",
     "PACK_LEFT_OUT",
@@ -95,6 +97,10 @@ RULE_MATCH_KINDS: frozenset[str] = frozenset({"capability_rules", "signature_rul
 # The legacy fields a stored team's condition reads, and the kind each counts.
 SIGNATURE_RULES = "signature_rules"
 CAPABILITY_RULES = "capability_rules"
+# The key the rule matches an undeclared tool's answer holds by its shape are
+# counted under (``core.rule_matches``): a shape names no kind, so they count
+# toward ``rule_hits`` and here, never toward a kind's key (a signature hit).
+SHAPE_RULE_MATCHES = BY_SHAPE_KEY
 
 
 @dataclass(frozen=True)
@@ -112,10 +118,12 @@ class TriageFacts:
 
     ``rule_hits`` is how many rules matched the sample in every answer of a
     rule-matching kind (:data:`RULE_MATCH_KINDS`) recorded so far, the pack's
-    and earlier stages' alike, whichever server answered; ``hits`` the same
-    count per key: the answer's declared kind (``signature_rules`` …), the
-    name its tool declares for corroboration (``source``), and the key of the
-    tool server that answered. A key nothing counted reads as zero
+    and earlier stages' alike, whichever server answered, and in every
+    undeclared tool's answer that holds rule matches by its shape; ``hits``
+    the same count per key: the answer's declared kind (``signature_rules`` …),
+    the name its tool declares for corroboration (``source``), the key of the
+    tool server that answered, and :data:`SHAPE_RULE_MATCHES` for a match read
+    by shape, which no kind's key counts. A key nothing counted reads as zero
     (``triage.hits["<key>"]``). ``yara_hits`` and ``capa_hits`` are kept for
     the stored teams that read them: the pack's own signature-rule and
     capability-rule counts, as they always were.
@@ -233,9 +241,13 @@ def rule_match_hits(rows: Any) -> tuple[dict[str, int], int]:
     Each entry's declared kind and row path (``core.declared_reading``; an
     entry written before facts were stored is read by its shipped facts)
     say whether it is a rule match and where its rows are; each row is one
-    rule that matched. A repeat of an earlier entry is not counted twice.
+    rule that matched. An entry whose tool declares no kind is read by its
+    answer's shape (``core.rule_matches``), each distinct rule it names as
+    matched counted under :data:`SHAPE_RULE_MATCHES` and its server's key,
+    never a kind's. A repeat of an earlier entry is not counted twice.
     """
     from maljan.core.declared_reading import facts_of
+    from maljan.core.rule_matches import rule_matches_of
     from maljan.core.tool_declarations import ToolDeclarations, select
 
     counted: dict[str, int] = {}
@@ -245,15 +257,26 @@ def rule_match_hits(rows: Any) -> tuple[dict[str, int], int]:
         if not get("ok") or get("repeated_of"):
             continue
         facts = facts_of(row)
-        if facts is None or facts.kind not in RULE_MATCH_KINDS or not facts.rows:
+        kinds: tuple[str, ...]
+        if facts is None or not facts.kind:
+            shaped = rule_matches_of(row)
+            if shaped is None or shaped.declared:
+                continue
+            # A rule a shaped answer names in more than one row (one row per
+            # string it matched) is one rule that matched.
+            found = len(set(shaped.rules))
+            kinds = (SHAPE_RULE_MATCHES,)
+        elif facts.kind not in RULE_MATCH_KINDS or not facts.rows:
             continue
-        found = len(select(get("structured"), facts.rows))
+        else:
+            found = len(select(get("structured"), facts.rows))
+            kinds = (facts.kind, facts.source)
         if not found:
             continue
         total += found
         source = ToolDeclarations.source_of(row)
         server = source.key if source is not None and source.kind == "mcp" else ""
-        for key in dict.fromkeys(k for k in (facts.kind, facts.source, server) if k):
+        for key in dict.fromkeys(k for k in (*kinds, server) if k):
             counted[key] = counted.get(key, 0) + found
     return counted, total
 

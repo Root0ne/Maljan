@@ -215,6 +215,10 @@ def test_an_undeclared_tool_keeps_its_whole_answer_in_its_own_block(
 
     keys = [s.key for s in sections if s.key != "identity"]
     assert section_key_of_kind("signature_rules") not in keys
-    assert keys == ["tool_sweep_patterns", "tool_sweep_patterns_matches"]
+    # Its matches, read by the answer's shape, also stand in the table of
+    # rule matches no kind is named for (T-509), never the declared kind's.
+    assert keys == ["tool_sweep_patterns", "tool_sweep_patterns_matches", "rule_matches_by_shape"]
     (table,) = [s for s in sections if s.key == "tool_sweep_patterns_matches"]
     assert [row[0] for row in table.rows] == ["Packed_UPX", "Has_Url"]
+    (shaped,) = [s for s in sections if s.key == "rule_matches_by_shape"]
+    assert [row[0] for row in shaped.rows] == ["Packed_UPX", "Has_Url"]
