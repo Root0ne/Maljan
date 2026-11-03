@@ -43,7 +43,6 @@ def test_the_program_a_value_names_is_its_last_path_segment(value: str, expected
         ("sample.exe", "C:\\work\\sample.exe", False),
         # Known limit: two folders that hold the same file name are one program.
         ("a/sample.exe", "sample.exe", True),
-        ("C:\\work\\", "", True),
     ],
 )
 def test_a_program_argument_names_a_program_by_path_or_last_segment(

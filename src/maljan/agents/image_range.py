@@ -232,6 +232,7 @@ def same_program(named: str, name: str) -> bool:
     ``name`` is read as given; ``named`` names it whole (``\\`` read as
     ``/``) or by the last segment of its path (:func:`program_name`), so a
     file name and a path ending in it name one program. Case is kept.
+    Callers pass ``name`` already in ``/`` form and never empty.
     """
     path = named.strip().replace("\\", "/")
     return path == name or program_name(path) == name
