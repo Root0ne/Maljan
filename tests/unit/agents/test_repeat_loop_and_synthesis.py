@@ -22,10 +22,12 @@ from maljan.agents.base_agent import (
     _SYNTHESIS_MIN_CHARS,
     _trim_for_synthesis,
     ledger_ids_in,
+    synthesis_budget,
     synthesis_budget_chars,
 )
 from maljan.agents.evidence_recorder import RepeatGuard
 from maljan.core.config import Settings
+from maljan.llm.context_window import CHARS_PER_TOKEN, DECLARED, ContextBudget, WindowFact
 
 
 def _ai(content: str = "", tool: str = "") -> Any:
@@ -281,10 +283,40 @@ class TestTheSynthesisBudget:
 
         assert synthesis_budget_chars(settings, "static") == _SYNTHESIS_MIN_CHARS
 
-    def test_a_known_context_gives_two_fifths_of_it_in_characters(self) -> None:
+    def test_a_known_context_gives_the_loop_s_room_less_a_quarter(self) -> None:
+        # The loop's own room — the window less the reply reserve, at the
+        # characters a token the context budget counts in — less a further
+        # quarter of the window for what the character measure gets wrong.
         settings = Settings(_env_file=None, llm={"openai": {"context_size": 131072}})
+        loop_room = ContextBudget(WindowFact(131072, DECLARED, "test")).tool_budget_chars()
 
-        assert synthesis_budget_chars(settings, "static") == int(131072 * 4 * 0.4)
+        assert synthesis_budget_chars(settings, "static") == (131072 - 2 * 32768) * CHARS_PER_TOKEN
+        assert synthesis_budget_chars(settings, "static") == loop_room - 32768 * CHARS_PER_TOKEN
+
+    def test_a_configured_generation_cap_is_the_reply_room(self) -> None:
+        settings = Settings(
+            _env_file=None,
+            llm={"openai": {"context_size": 131072}, "expert_max_tokens": 8192},
+        )
+
+        chars, how = synthesis_budget(settings, "static")
+
+        assert chars == (131072 - 8192 - 32768) * CHARS_PER_TOKEN
+        assert how == (
+            f"{chars} characters — the 131072-token window less 8192 tokens of reply room "
+            f"and 32768 for the measure's error, at {CHARS_PER_TOKEN} characters a token"
+        )
+
+    def test_the_floor_says_it_is_the_floor(self) -> None:
+        settings = Settings(_env_file=None, llm={"openai": {"context_size": 4096}})
+
+        chars, how = synthesis_budget(settings, "static")
+
+        assert chars == _SYNTHESIS_MIN_CHARS
+        assert how.startswith(f"{_SYNTHESIS_MIN_CHARS} characters — the floor, above the ")
+        assert synthesis_budget(Settings(_env_file=None), "static")[1].endswith(
+            "no window was declared or learned"
+        )
 
     def test_a_small_context_does_not_drop_below_the_floor(self) -> None:
         settings = Settings(_env_file=None, llm={"openai": {"context_size": 4096}})
@@ -297,7 +329,7 @@ class TestTheSynthesisBudget:
             llm={"provider": "ollama", "ollama": {"num_ctx": 65536}},
         )
 
-        assert synthesis_budget_chars(settings, "static") == int(65536 * 4 * 0.4)
+        assert synthesis_budget_chars(settings, "static") == (65536 - 2 * 16384) * CHARS_PER_TOKEN
 
     def test_settings_that_cannot_be_read_hold_the_floor(self) -> None:
         assert synthesis_budget_chars(object(), "static") == _SYNTHESIS_MIN_CHARS

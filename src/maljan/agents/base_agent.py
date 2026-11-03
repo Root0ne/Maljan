@@ -264,13 +264,6 @@ _SYNTHESIS_DIRECTIVE = (
 # derived from it instead; where it is not, this is what holds.
 _SYNTHESIS_MIN_CHARS = 16_000
 
-# How much of the window the salvage conversation may fill, and how many
-# characters a token is worth. Four characters per token is the usual English
-# ratio, and two fifths of the window leaves room for the system prompt this
-# does not measure and for the answer the model still has to generate.
-_SYNTHESIS_CONTEXT_SHARE = 0.4
-_CHARS_PER_TOKEN = 4
-
 
 def _model_context_tokens(cfg: Any, agent_name: str) -> int:
     """The context window of the model this agent runs on, or ``0``.
@@ -318,16 +311,54 @@ def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) ->
     full window at close to the conversation the server had just refused, and
     a fallback model with a smaller window must still be able to read it.
     """
+    return synthesis_budget(cfg, agent_name, window_tokens)[0]
+
+
+def synthesis_budget(cfg: Any, agent_name: str, window_tokens: int = 0) -> tuple[int, str]:
+    """``(characters, how)`` of conversation the salvage may re-send.
+
+    Derived from the window by the context budget's own rules, at the
+    characters a token it counts in (``CHARS_PER_TOKEN``), rather than from a
+    share and a ratio of its own. Two parts of the window are kept back. The
+    reply reserve the one rule sets (``reply_reserve_tokens`` over the
+    deployment's generation cap) is where the salvage writes its answer, as the
+    loop's own room keeps it (``ContextBudget.tool_budget_chars``). A further
+    quarter of the window (``REPLY_RESERVE_DIVISOR``) is the room for what the
+    character measure gets wrong: the loop floors its measure on the server's
+    own count of each request, and a trimmed conversation was never counted,
+    so its characters are all the salvage has — and a conversation that
+    tokenises denser than they say, re-sent after the server refused it as
+    over the window, would be refused again. The tool definitions a salvage
+    sends beside the turns are its caller's to take off, as the loop's own
+    measure charges them. No window to derive from is the floor, and the
+    floor is stated as such.
+    """
+    from maljan.llm.context_window import (
+        REPLY_RESERVE_DIVISOR,
+        generation_reserve,
+        reply_reserve_tokens,
+    )
+
     windows = [
         t for t in (int(window_tokens or 0), _model_context_tokens(cfg, agent_name)) if t > 0
     ]
     tokens = min(windows) if windows else 0
     if tokens <= 0:
-        return _SYNTHESIS_MIN_CHARS
-    return max(
-        _SYNTHESIS_MIN_CHARS,
-        int(chars_for_tokens(tokens, _CHARS_PER_TOKEN) * _SYNTHESIS_CONTEXT_SHARE),
+        return _SYNTHESIS_MIN_CHARS, (
+            f"{_SYNTHESIS_MIN_CHARS} characters — the floor: no window was declared or learned"
+        )
+    reply = reply_reserve_tokens(tokens, generation_reserve(cfg))
+    margin = tokens // REPLY_RESERVE_DIVISOR
+    derived = chars_for_tokens(max(0, tokens - reply - margin))
+    how = (
+        f"the {tokens}-token window less {reply} tokens of reply room and {margin} "
+        f"for the measure's error, at {CHARS_PER_TOKEN} characters a token"
     )
+    if derived < _SYNTHESIS_MIN_CHARS:
+        return _SYNTHESIS_MIN_CHARS, (
+            f"{_SYNTHESIS_MIN_CHARS} characters — the floor, above the {derived} of {how}"
+        )
+    return derived, f"{derived} characters — {how}"
 
 
 def salvage_chars_at_pace(
@@ -8341,15 +8372,19 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             return ""
 
-        # The earlier run-state blocks go out with the kept turns, outside the
-        # messages the trim measures, so the window holds them first.
-        window_budget = max(
-            0,
-            synthesis_budget_chars(
-                get_settings(), self.name, counted_window_tokens(self._context_budget())
-            )
-            - self._replayed_run_state_chars(),
+        # The same transcript rule the nudge follows: a tool call whose
+        # arguments never parsed is not sent back to the server.
+        keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
+        # The earlier run-state blocks go out with the kept turns, and so do the
+        # loop's tool definitions where the turns are kept whole, both outside
+        # the messages the trim measures, so the window holds them first.
+        room, room_how = synthesis_budget(
+            get_settings(), self.name, counted_window_tokens(self._context_budget())
         )
+        beside = self._replayed_run_state_chars() + (self._definitions_sent() if keeps_turns else 0)
+        window_budget = max(0, room - beside)
+        if beside:
+            room_how += f", less {beside} characters sent beside the turns"
         # What the time left can hold at this model's measured pace, when both
         # of its rates are known; the window's bound applies either way.
         paced = (
@@ -8363,9 +8398,6 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
         )
         budget = window_budget if paced is None else min(window_budget, paced)
-        # The same transcript rule the nudge follows: a tool call whose
-        # arguments never parsed is not sent back to the server.
-        keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
         sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
         conversation = _chars_of(sendable)
         framing = _chars_of(_framing_of(sendable))
@@ -8417,7 +8449,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             "sent_chars": sent,
             "budget_chars": budget,
             "sized_by": "window" if paced is None or window_budget <= paced else "pace",
+            "window_budget": room_how,
         }
+        if len(trimmed) < len(sendable):
+            record["messages_dropped"] = len(sendable) - len(trimmed)
         # Where the turns are kept whole, the loop's own system turn and tools
         # go with the salvage, the tools withheld (``tool_choice`` none), so the
         # history it re-sends is the loop's and its thinking stays valid.
@@ -12606,7 +12641,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 tokens = len(tiktoken.get_encoding("cl100k_base").encode(text)) or 1
                 per_token = max(1.0, len(text) / tokens)
             except (KeyError, OSError, ValueError):
-                per_token = float(_CHARS_PER_TOKEN)
+                per_token = float(CHARS_PER_TOKEN)
             return max(0, int(configured * per_token) - INPUT_NOTICE_ROOM)
         from maljan.llm.context_window import ANSWER_SHARE, ContextBudget
 

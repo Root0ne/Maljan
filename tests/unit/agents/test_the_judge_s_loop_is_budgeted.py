@@ -170,6 +170,8 @@ def _settings(declared: int = 0) -> Iterator[None]:
         cfg.llm.provider = "openai"
         cfg.llm.agents = {}
         cfg.llm.openai.context_size = declared
+        cfg.llm.expert_max_tokens = REPLY
+        cfg.llm.judge_max_tokens = REPLY
         yield
 
 
@@ -257,6 +259,12 @@ class TestAGenuineOverflowAfterGathering:
         assert model.refused >= 1, "the server did refuse"
         records = judge.drain_budget_records()
         assert records[-1]["cap"] == "no_room"
+        # The salvage is on the loop's record: what it was sized to and how.
+        salvage = records[-1]["salvage"]
+        assert salvage["outcome"] == "answered"
+        assert salvage["budget_chars"] == (WINDOW - REPLY - WINDOW // 4) * cw.CHARS_PER_TOKEN
+        assert f"the {WINDOW}-token window less {REPLY} tokens" in salvage["window_budget"]
+        assert salvage["sent_chars"] <= salvage["budget_chars"]
         ended = [d for kind, d in judge._container.events if kind == "stage_ended_at_cap"]
         assert "reported its context window full" in ended[-1]["detail"]
         assert extracted == [REASONING], "the verdict was read from the salvaged reasoning"

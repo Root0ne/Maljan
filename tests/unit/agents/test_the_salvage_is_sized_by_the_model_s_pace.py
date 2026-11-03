@@ -24,6 +24,7 @@ from maljan.agents.base_agent import (
     FINAL_ANSWER_EXPECTED_TOKENS,
     BaseAnalyst,
     salvage_chars_at_pace,
+    synthesis_budget,
 )
 from maljan.llm.generation_rate import (
     LLAMA_CPP_PROMPT_SOURCE,
@@ -163,15 +164,16 @@ def _salvage(agent: _Analyst) -> dict[str, Any]:
     return row["salvage"]
 
 
-# What the window allowed on that run: 32,768 tokens, four characters a token,
-# two fifths of it (``synthesis_budget_chars``).
+# What the window allowed on that run, pinned at the figure the run sized it
+# at, so this file measures the pace and not the window (``synthesis_budget``).
 WINDOW_CHARS = 52_428
 
 
 @pytest.fixture(autouse=True)
 def _the_run_s_window(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "maljan.agents.base_agent.synthesis_budget_chars", lambda *a, **k: WINDOW_CHARS
+        "maljan.agents.base_agent.synthesis_budget",
+        lambda *a, **k: (WINDOW_CHARS, f"{WINDOW_CHARS} characters — pinned"),
     )
 
 
@@ -228,6 +230,32 @@ class TestTheSalvageAtThisPace:
 
         record = _salvage(agent)
         assert (record["outcome"], record["detail"]) == ("failed", "TimeoutError")
+
+
+class TestTheWindowSizesItAndTheRecordSaysHow:
+    def test_a_cut_is_on_the_record_with_how_the_room_was_derived(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.config import Settings
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        settings = Settings(_env_file=None, llm={"openai": {"context_size": 32_768}})
+        monkeypatch.setattr("maljan.agents.base_agent.synthesis_budget", synthesis_budget)
+        monkeypatch.setattr("maljan.agents.base_agent.get_settings", lambda: settings)
+        agent = _Analyst(_Rates(None, None))
+        conversation = _conversation(9_000, 19, 2_500)
+
+        agent._force_final_synthesis(conversation, 1500, 1500 - SECONDS_LEFT)
+
+        record = _salvage(agent)
+        # The window less its quarter of reply room and its quarter for the
+        # measure's error, at the context budget's characters a token.
+        room = (32_768 - 8_192 - 8_192) * CHARS_PER_TOKEN
+        assert record["sized_by"] == "window"
+        assert record["budget_chars"] == room
+        assert record["window_budget"] == synthesis_budget(settings, "static")[1]
+        assert record["sent_chars"] <= room < record["conversation_chars"]
+        assert record["messages_dropped"] >= 1
 
 
 class TestTheSummaryCarriesIt:

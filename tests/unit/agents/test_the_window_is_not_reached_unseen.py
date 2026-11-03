@@ -403,13 +403,17 @@ class TestTheSalvageIsSizedFromTheCountedWindow:
         cfg.llm.provider = "openai"
         cfg.llm.agents = {}
         cfg.llm.openai.context_size = 65_536
+        cfg.llm.expert_max_tokens = REPLY
+        cfg.llm.judge_max_tokens = 0
         budget = _budget()  # probed 32,768
 
         declared_only = synthesis_budget_chars(cfg, "static")
         counted = synthesis_budget_chars(cfg, "static", counted_window_tokens(budget))
 
         assert declared_only > budget.tool_budget_chars(), "the stale declaration overshoots"
-        assert counted == int(WINDOW * 4 * 0.4)
+        # The loop's own room, from the same window, reserve and ratio, less
+        # the quarter of the window kept for what the character measure gets wrong.
+        assert counted == budget.tool_budget_chars() - cw.chars_for_tokens(WINDOW // 4)
         assert counted < budget.tool_budget_chars()
 
     def test_a_budget_that_derives_nothing_leaves_the_declaration_in_charge(self) -> None:

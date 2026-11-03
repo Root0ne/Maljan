@@ -284,7 +284,7 @@ class TestTheMediatorRecordsNoAnswer:
         gathered = [SystemMessage(content="You mediate."), HumanMessage(content="Reports: x")]
         with (
             patch.object(judge_agent, "_trim_for_synthesis", lambda msgs, _budget: msgs),
-            patch.object(judge_agent, "synthesis_budget_chars", return_value=1),
+            patch.object(judge_agent, "synthesis_budget", return_value=(1, "1 character")),
         ):
             said = asyncio.run(
                 judge._reasoning_from_what_was_gathered(

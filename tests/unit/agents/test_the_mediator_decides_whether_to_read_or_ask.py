@@ -491,7 +491,7 @@ class TestALimitEndedLoopIsNotRunAgain:
 
         with (
             patch.object(judge_agent, "_trim_for_synthesis", lambda msgs, _budget: msgs),
-            patch.object(judge_agent, "synthesis_budget_chars", return_value=1),
+            patch.object(judge_agent, "synthesis_budget", return_value=(1, "1 character")),
             patch.object(judge, "_initialize_mcp_client", AsyncMock()),
             patch.object(judge, "execute_tool_loop", side_effect=_loop),
         ):
