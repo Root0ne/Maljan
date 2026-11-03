@@ -295,10 +295,28 @@ class FunctionHashIndex(Protocol):
 ISOLATED_JOB_SCOPE = "/job/"
 
 
-# The separator of an owner key's path segments: a job's own key is filed
-# below its account's (``<account>/job/<job id>``), and a purge by owner
-# prefix reads the segments (:func:`owner_under`).
-OWNER_PATH_SEPARATOR = "/"
+# The separator of an owner key's path segments, read off the isolated job's
+# scope so the two cannot drift: a job's own key is filed below its account's
+# (``<account>`` + ``ISOLATED_JOB_SCOPE`` + ``<job id>``, :func:`memory_owner_for`),
+# and a purge by owner prefix reads the segments (:func:`owner_under`).
+OWNER_PATH_SEPARATOR = ISOLATED_JOB_SCOPE[0]
+if not (
+    ISOLATED_JOB_SCOPE.startswith(OWNER_PATH_SEPARATOR)
+    and ISOLATED_JOB_SCOPE.endswith(OWNER_PATH_SEPARATOR)
+    and ISOLATED_JOB_SCOPE.strip(OWNER_PATH_SEPARATOR)
+):
+    raise RuntimeError("ISOLATED_JOB_SCOPE must be one path segment between separators")
+
+
+def isolated_jobs_prefix(created_by: Any) -> str:
+    """The owner prefix that names every isolated job's memory of one account, and no more.
+
+    The account's key followed by ``ISOLATED_JOB_SCOPE``, which ends in the
+    separator, so it names only what is strictly below (:func:`owner_under`):
+    each key :func:`memory_owner_for` gives an isolated job of that account,
+    never the account's own key.
+    """
+    return f"{created_by}{ISOLATED_JOB_SCOPE}"
 
 
 def owner_key(owner: Any) -> str | None:
@@ -361,10 +379,12 @@ def owner_prefix_segments(prefix: Any) -> int:
 def owner_under(owner: Any, prefix: Any) -> bool:
     """Whether ``owner`` lies at or below the owner path ``prefix`` names.
 
-    Read a path segment at a time, never as a bare string prefix: ``u1/job``
+    Read a path segment at a time (``OWNER_PATH_SEPARATOR``), never as a bare
+    string prefix. Shown with ``ISOLATED_JOB_SCOPE`` as ``/job/``: ``u1/job``
     names ``u1/job`` and ``u1/job/<job id>``; with a trailing separator,
-    ``u1/job/`` names only what is strictly below (``u1/job/<job id>``), and
-    ``u1/`` names ``u1/x`` and never ``u1`` itself. Neither names ``u1/jobs``
+    ``u1/job/`` (:func:`isolated_jobs_prefix`) names only what is strictly
+    below, every isolated job's key of ``u1``, and ``u1/`` names ``u1/x`` and
+    never ``u1`` itself. Neither names ``u1/jobs``
     or another account whose key merely begins with the same characters. An
     unscoped entry (no owner) is under no prefix, and a prefix that names no
     owner path (:func:`owner_prefix_key`) names nothing.

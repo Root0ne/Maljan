@@ -19,7 +19,11 @@ from maljan.memory import embeddings
 from maljan.memory.function_hash_store import FunctionHashStore
 from maljan.memory.in_memory_store import InMemoryStore
 from maljan.memory.long_term_memory import (
+    ISOLATED_JOB_SCOPE,
+    OWNER_PATH_SEPARATOR,
     StoredCase,
+    isolated_jobs_prefix,
+    memory_owner_for,
     owner_prefix_key,
     owner_prefix_segments,
     owner_under,
@@ -123,6 +127,29 @@ class TestTheRule:
         assert owner_prefix_segments(f"{UID}/") == 1
         assert owner_prefix_segments(JOBS) == 2
         assert owner_prefix_segments("/") == 0
+
+
+class TestAnIsolatedJobsMemory:
+    """The keys an isolated job files under are the ones the job prefix purges."""
+
+    JOB = "6f1d2c3b-0a9e-4d8c-b7a6-5f4e3d2c1b0a"
+
+    def test_the_job_prefix_names_the_isolated_job_s_key_and_not_the_account_s(self) -> None:
+        isolated = memory_owner_for(UID, self.JOB, True)
+
+        assert isolated_jobs_prefix(UID) == f"{UID}/job/"
+        assert owner_under(isolated, f"{UID}/job/")
+        assert not owner_under(memory_owner_for(UID, self.JOB, False), f"{UID}/job/")
+        assert OWNER_PATH_SEPARATOR == ISOLATED_JOB_SCOPE[0] == ISOLATED_JOB_SCOPE[-1]
+
+    def test_an_isolated_job_s_case_is_purged_and_the_account_s_is_kept(self) -> None:
+        store = InMemoryStore()
+        store.store(_case("s1", memory_owner_for(UID, self.JOB, True)))
+        store.store(_case("s1", memory_owner_for(UID, self.JOB, False)))
+
+        assert store.purge_owners(f"{UID}/job/") == {"cases": 1, "function_hashes": 0}
+
+        assert [str(case.owner) for case, _vec, _by in store._cases] == [UID]
 
 
 class TestTheInMemoryStore:

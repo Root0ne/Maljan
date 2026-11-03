@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from maljan.core.settings_masking import masked_text
+from maljan.memory.long_term_memory import ISOLATED_JOB_SCOPE, OWNER_PATH_SEPARATOR
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -488,9 +489,11 @@ class LTMPurgeOwnersRequest(BaseModel):
         max_length=512,
         description=(
             "The owner path whose memory is purged, read a path segment at a time: "
-            "'<user id>/job' names that path and everything below it, and with a "
-            "trailing separator ('<user id>/job/') only what is strictly below. A "
-            "single segment (a whole account) is refused unless whole_account is sent."
+            f"'<user id>{ISOLATED_JOB_SCOPE.rstrip(OWNER_PATH_SEPARATOR)}' names that path "
+            f"and everything below it, and with a trailing separator ('<user id>"
+            f"{ISOLATED_JOB_SCOPE}', every isolated job's memory of that user) only what "
+            "is strictly below. A single segment (a whole account) is refused unless "
+            "whole_account is sent."
         ),
     )
     whole_account: bool = Field(
@@ -547,7 +550,7 @@ async def ltm_purge_owners(
             detail=(
                 "The owner prefix is a single segment, a whole account's memory; send "
                 "whole_account: true to purge it, or name the path below it (such as "
-                "'<user id>/job/')."
+                f"'<user id>{ISOLATED_JOB_SCOPE}')."
             ),
         )
     try:
