@@ -193,27 +193,44 @@ def test_a_value_the_failure_names_may_change_in_the_redo() -> None:
     assert redone_failures([other, redo]) == []
 
 
-def _code_call(entry_id: str, ok: bool, **args: object) -> LedgerEntry:
+def _code_call(
+    entry_id: str, ok: bool, error: str = "the call failed: count=4096 is too many", **args: object
+) -> LedgerEntry:
     return LedgerEntry(
         id=entry_id,
         tool="lift_routine",
         args={"address": hex(GATE), **args},
         ok=ok,
-        error=None if ok else "the call failed: count=4096 is more than the tool reads",
+        error=None if ok else error,
         output=f"int FUN_{GATE:x}(void)\n{{\n}}\n" if ok else "",
         facts=_DECOMPILE,
     )
 
 
 def test_an_argument_only_the_redo_sets_makes_a_narrower_question_no_redo() -> None:
-    # The whole routine asked, some of it answered: no default for the
-    # argument reaches the ledger, so the redo may be narrower and is not one.
+    # The whole routine asked, some of it answered: the failure named no count,
+    # so the count the redo sets may narrow it, and it is no redo.
+    timed_out = "the call timed out after 30 s"
     for value in (3, "3", 0):
-        failed = _code_call("ev_0001", False)
+        failed = _code_call("ev_0001", False, timed_out)
         redo = _code_call("ev_0002", True, count=value)
         assert redone_failures([failed, redo]) == []
-        failed_null = _code_call("ev_0001", False, count=None)
+        failed_null = _code_call("ev_0001", False, timed_out, count=None)
         assert redone_failures([failed_null, redo]) == []
+    # A name inside another word is no naming of it: "counter" is not "count".
+    failed = _code_call("ev_0001", False, "counter overflow", count=None)
+    assert redone_failures([failed, _code_call("ev_0002", True, count=3)]) == []
+
+
+def test_an_argument_the_refusal_named_and_the_redo_sets_is_a_redo_unless_cut() -> None:
+    refused = "validation error\ntimeout\n  Input should be a valid integer [input_value=None]"
+    failed = _code_call("ev_0001", False, refused, timeout=None)
+    redo = _code_call("ev_0002", True, timeout=120)
+    assert redone_failures([failed, redo])[0]["answered_by"] == ["ev_0002"]
+    # The same redo with its answer cut by the budget, or blanked, redoes nothing.
+    for cut in ({"chars_dropped": 40}, {"truncated": True, "output": ""}):
+        cut_redo = redo.model_copy(update=cut)
+        assert redone_failures([failed, cut_redo]) == []
 
 
 def test_a_refused_value_replaced_by_a_smaller_number_is_no_redo() -> None:
@@ -424,7 +441,18 @@ def test_run7_s_decompile_is_not_redone_by_a_read_of_seventy_instructions() -> N
     redone = {row["entry_id"]: row["answered_by"] for row in redone_failures(ledger)}
     # ev_0055 disassembled 70 instructions from 0x...1030: no redo of the decompile.
     # ev_0111, ev_0123 and ev_0174 are later calls of the same tool that set a
-    # timeout the failed calls left out, a default the ledger does not carry
-    # (T-529): they redo no decompile; ev_0123 lists 0x...caac whole and so
-    # redoes the failed disassembly of it, another tool's call.
+    # timeout the failed calls left out and their failures ("Cannot find
+    # function") never named (T-529): they redo no decompile; ev_0123 lists
+    # 0x...caac whole and so redoes the failed disassembly of it, another
+    # tool's call.
     assert redone == {"ev_0069": ["ev_0123"]}
+
+
+def test_haiku5_s_calls_refused_for_a_null_are_redone_by_the_calls_that_set_it() -> None:
+    ledger = _stored_ledger("haiku5")
+    redone = {row["entry_id"]: row["answered_by"] for row in redone_failures(ledger)}
+    # A null timeout, offset or limit the tool refused, set by the next call,
+    # whose answer is whole (T-529).
+    assert redone["ev_0054"] == ["ev_0060"]
+    assert redone["ev_0109"] == ["ev_0114"]
+    assert len(redone) == 10

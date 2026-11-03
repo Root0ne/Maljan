@@ -14,12 +14,13 @@ agreement question reads them, ``agreement_facts``, T-396):
   is the failed call's, except one the redo leaves absent or null and one whose
   failed value the failure's own message names (the value it refused). The
   redo is never narrower than the failed call (T-529): an argument the failed
-  call left absent or null and the redo sets counts only where the tool's
-  declared default for it is known and is that value; the ledger carries no
-  tool's input schema, so it never counts ("disassemble X" redone as
-  "disassemble 3 instructions of X" is no redo); a refused value replaced by a
-  number counts only when the number is not smaller than the refused one (a
-  read of 0x1000 bytes redone as a read of 4 is no redo);
+  call left absent or null and the redo sets counts only where the failure's
+  own message names that argument, as a word of its own (the call was refused
+  for it: "timeout ... Input should be a valid integer"), and the redo's answer
+  is not cut ("disassemble X" redone as "disassemble 3 instructions of X", a
+  failure that named no instruction count, is no redo); a refused value
+  replaced by a number counts only when the number is not smaller than the
+  refused one (a read of 0x1000 bytes redone as a read of 4 is no redo);
 * for a failed call that lists code, a later call of another tool that lists
   that function whole: a decompiled listing holding it, or a disassembly of the
   whole function. A read of some instructions from the address is no redo.
@@ -82,12 +83,28 @@ def _narrower(before: Any, after: Any) -> bool:
     return refused is not None and now is not None and now < refused
 
 
+def _names_argument(message: str, name: str) -> bool:
+    """Whether a failure's message names the argument ``name`` as a word of its own."""
+    if len(name) < _NAMED_VALUE_CHARS:
+        return False
+    return re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", message) is not None
+
+
+def _cut(answering: Any) -> bool:
+    """Whether an answer was cut: by the byte budget or the guardrail, or not held whole."""
+    from maljan.schemas.evidence import answer_not_shown, holds_its_answer
+
+    if getattr(answering, "truncated", False) or int(getattr(answering, "chars_dropped", 0) or 0):
+        return True
+    return answer_not_shown(answering) or not holds_its_answer(answering)
+
+
 def _same_question(failed: Any, answering: Any) -> bool:
     """Whether a later call of the failed call's tool asked what it asked, but for its addresses.
 
-    Never a narrower question: an argument only the redo sets, whose declared
-    default the ledger does not carry, and a refused value replaced by a smaller
-    number, each make it another question.
+    Never a narrower question: an argument only the redo sets, unless the
+    failure named it and the redo's answer is not cut, and a refused value
+    replaced by a smaller number, each make it another question.
     """
     from maljan.core.undeclared_tools import entry_address_arguments
     from maljan.pipeline.validation import _ADDRESS_LIST_ARGUMENTS
@@ -102,8 +119,10 @@ def _same_question(failed: Any, answering: Any) -> bool:
         if _empty(after) or before == after or str(before) == str(after):
             continue
         if _empty(before):
-            # Set by the redo alone: a narrower question unless the tool's
-            # default is that value, and no default reaches the ledger.
+            # Set by the redo alone: the fix of a refusal the failure named it
+            # in, where the answer is not cut; otherwise it may ask less.
+            if _names_argument(message, str(name)) and not _cut(answering):
+                continue
             return False
         refused = str(before)
         if (
@@ -140,13 +159,10 @@ def _answers(answering: Any) -> bool:
     or not.
     """
     from maljan.agents.function_callees import listing_is_error
-    from maljan.schemas.evidence import answer_not_shown, holds_its_answer
 
     if not getattr(answering, "ok", True) or getattr(answering, "repeated_of", None):
         return False
-    if getattr(answering, "truncated", False) or int(getattr(answering, "chars_dropped", 0) or 0):
-        return False
-    if answer_not_shown(answering) or not holds_its_answer(answering):
+    if _cut(answering):
         return False
     return not listing_is_error(answering)
 
