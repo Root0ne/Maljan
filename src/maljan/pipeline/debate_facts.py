@@ -49,7 +49,7 @@ import bisect
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NamedTuple
 
 from maljan.core.config import AGENT_KEY_PATTERN
 
@@ -1952,8 +1952,8 @@ _MARKS_AFTER_FIELD = re.compile(
     re.IGNORECASE,
 )
 # Where a reference's clause ends: a ";", or a "." that ends a sentence (one
-# an uppercase letter or the end of the line follows).
-_CLAUSE_END = re.compile(r";|\.(?=\s*+(?:[A-Z]|$))")
+# an uppercase letter, a ledger id, an address or the end of the line follows).
+_CLAUSE_END = re.compile(r";|\.(?=\s*+(?:[A-Z]|ev_|0x|$))")
 # The claim numbers the earlier reading read where a reference's numbers start.
 _EARLIER_NUMBERS = re.compile(r"\d++(?:\s*+(?:/|,|&|and|\+)\s*+#?\d++)*+", re.IGNORECASE)
 # "round-2" or "round 2" right before "claim(s)", after a name or its "'s".
@@ -1973,13 +1973,24 @@ def _earlier_round(text: str, start: int, names: Sequence[str]) -> bool:
     return _short_named(text, max(0, start - 40) + found.start(), names) is not None
 
 
+class ClaimReference(NamedTuple):
+    """One claim reference a line writes for a participant (:func:`claim_references_of`)."""
+
+    analyst: str
+    numbers_start: int
+    numbers: ClaimNumbers
+    read_before: bool
+    in_mark: bool
+
+
 def claim_references_of(
     text: str, names: Sequence[str], field_names: Sequence[str] | None
-) -> list[tuple[str, int, ClaimNumbers, bool]]:
+) -> list[ClaimReference]:
     """Every claim reference a line writes for a participant, in the order found.
 
-    ``(analyst, where its numbers start, its numbers, read_before)`` per
-    reference, for every participant the line names, whether its
+    A :class:`ClaimReference` (``analyst``, where its numbers start, its
+    ``numbers``, ``read_before``, ``in_mark``) per reference, for every
+    participant the line names, whether its
     ``[analysts: ...]`` field (``field_names``, from ``_named_in``) names it
     or not: a consumer that needs the claims of one set of analysts filters
     on top of it (the merge's reading keeps the field's, a revision's excerpt
@@ -1991,9 +2002,10 @@ def claim_references_of(
     analyst a short form of whose name stands before "claim(s) N"
     (``_short_named``). Its numbers are read whole (:func:`read_claim_numbers`).
 
-    ``read_before`` says whether the earlier reading read the reference. A
-    reference inside a ``[blocking: ...]`` or ``[not blocking: ...]`` mark is
-    its reason: it is kept only where the earlier reading read it, with the
+    ``read_before`` says whether the earlier reading read the reference,
+    ``in_mark`` whether it stands inside a ``[blocking: ...]`` or ``[not
+    blocking: ...]`` mark. A reference inside a mark is its reason: it is
+    kept only where the earlier reading read it, with the
     numbers that reading read and no more (no range, no list going on); a
     reference only the newer reading reads there is not returned. A claim of
     an earlier round ("TRIAGE ANALYST round-3 claim 24") is never one: its
@@ -2021,17 +2033,54 @@ def claim_references_of(
         short = _short_named(text, reference.start(), names)
         if short is not None:
             found.append((short, reference.start(1), bool(field_names)))
-    out: list[tuple[str, int, ClaimNumbers, bool]] = []
+    out: list[ClaimReference] = []
     for name, at, old in found:
         if any(start <= at < end for start, end in in_marks):
             earlier = _EARLIER_NUMBERS.match(text, at) if old else None
             if earlier is not None:
                 digits = tuple(re.findall(r"\d+", earlier.group(0)))
-                out.append((name, at, ClaimNumbers(digits, (), earlier.end()), True))
+                numbers = ClaimNumbers(digits, (), earlier.end())
+                out.append(ClaimReference(name, at, numbers, True, True))
+            continue
+        read = read_claim_numbers(text, at, names)
+        if read is not None:
+            out.append(ClaimReference(name, at, read, old, False))
+    return out
+
+
+def unattributed_references(
+    text: str, names: Sequence[str], references: Sequence[ClaimReference]
+) -> list[tuple[int, ClaimNumbers]]:
+    """The claim references of a line that no analyst is read for, in order.
+
+    ``(where its "claim(s)" starts, its numbers)`` per "claim(s) N" that no
+    reference of ``references`` (:func:`claim_references_of` over the same
+    ``text``) reads, read whole (:func:`read_claim_numbers`): "the
+    reverser's own claim 45", a bare "Claim 1" on a line whose field names
+    two analysts. A "claim N" inside a mark is its reason, "claims" with a
+    single number reads as a verb ("the dropper claims 3 hosts") and an
+    earlier round's claim names another answer: none is one. Linear in the
+    line.
+    """
+    in_marks = [m.span() for m in _MARK_ANYWHERE.finditer(text)]
+    read = [(ref.numbers_start, ref.numbers.end) for ref in references]
+    out: list[tuple[int, ClaimNumbers]] = []
+    for reference in _CLAIM_REFERENCE.finditer(text):
+        at = reference.start(1)
+        if any(start <= at < end for start, end in read) or any(
+            s <= reference.start() < e for s, e in in_marks
+        ):
             continue
         numbers = read_claim_numbers(text, at, names)
-        if numbers is not None:
-            out.append((name, at, numbers, old))
+        if numbers is None:
+            continue
+        read.append((at, numbers.end))
+        head = reference.group(0)[: at - reference.start()].lower()
+        if head.startswith("claims") and len(numbers.numbers) == 1 and not numbers.unplaced:
+            continue
+        if _earlier_round(text, reference.start(), names):
+            continue
+        out.append((reference.start(), numbers))
     return out
 
 
@@ -2069,13 +2118,11 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
             masked = masked[:start] + " " * (end - start) + masked[end:]
         stated = mark.blocking and not mark.unread
         references = claim_references_of(text, names, field_names)
-        starts = sorted(at for _name, at, _numbers, _old in references)
-        # Where each reference read above stands in the line.
-        read = [(at, numbers.end) for _name, at, numbers, _old in references]
+        starts = sorted(ref.numbers_start for ref in references)
         # Per reference kept: (analyst, its numbers, the tokens of its clause).
         kept: list[tuple[str, ClaimNumbers, frozenset[str]]] = []
         cited: dict[str, set[int]] = {}
-        for name, at, numbers, old in references:
+        for name, at, numbers, old, _in_mark in references:
             if field_names is not None and name not in field_names:
                 continue
             if not field_names and not old:
@@ -2131,22 +2178,9 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
                         reached.append(ExpandedNaming(number, rendering, tokens))
         # A "claim(s) N" no reference above read: no analyst is read for it.
         candidates = tuple(field_names) if field_names else tuple(names)
-        for reference in _CLAIM_REFERENCE.finditer(text):
-            at = reference.start(1)
-            if any(start <= at < end for start, end in read) or any(
-                s <= reference.start() < e for s, e in in_marks
-            ):
-                continue
-            unread = read_claim_numbers(text, at, names)
-            if unread is None:
-                continue
-            numbers = unread
-            read.append((at, numbers.end))
-            head = reference.group(0)[: at - reference.start()].lower()
-            if head.startswith("claims") and len(numbers.numbers) == 1 and not numbers.unplaced:
-                continue
-            if not stated or not candidates or _earlier_round(text, reference.start(), names):
-                continue
+        if not stated or not candidates:
+            continue
+        for _start, numbers in unattributed_references(text, names, references):
             counted = [n for n in map(_as_claim_number, numbers.numbers) if n is not None]
             rendered = [_range_rendering(first, last) for first, last in numbers.unplaced]
             if counted:

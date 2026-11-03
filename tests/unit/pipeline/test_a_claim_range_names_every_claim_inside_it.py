@@ -113,6 +113,38 @@ class TestEveryFormOfARangeOrAListNamesEachClaim:
         assert read_claim_references([line], PARTICIPANTS).unplaced == ()
 
 
+class TestTheReaderOfEveryParticipant:
+    def test_each_reference_says_whether_it_stands_inside_a_mark(self) -> None:
+        from maljan.pipeline.debate_facts import claim_references_of
+
+        text = (
+            "[analysts: STATIC ANALYST] STATIC ANALYST claims 2-3 are loose, versus TRIAGE "
+            "claim 9. [blocking: STATIC ANALYST claims 4-6 conflict]"
+        )
+
+        refs = claim_references_of(text, PARTICIPANTS, ["static"])
+
+        # A reference read both by name and by short form is found by each.
+        assert {(r.analyst, r.numbers.numbers, r.read_before, r.in_mark) for r in refs} == {
+            ("static", ("2", "3"), True, False),
+            ("static", ("4",), True, True),
+            ("triage", ("9",), True, False),
+        }
+
+    def test_the_references_no_analyst_is_read_for_are_one_computation(self) -> None:
+        from maljan.pipeline.debate_facts import claim_references_of, unattributed_references
+
+        text = (
+            "[analysts: STATIC ANALYST, TRIAGE ANALYST] Claim 1 and claim 44 say X; the dropper "
+            "claims 3 hosts, and TRIAGE ANALYST round-3 claim 24 agrees."
+        )
+
+        refs = claim_references_of(text, PARTICIPANTS, ["static", "triage"])
+        found = unattributed_references(text, PARTICIPANTS, refs)
+
+        assert [(text[at:].split()[0], n.numbers) for at, n in found] == [("Claim", ("1", "44"))]
+
+
 class TestWhatTheLineSaysAroundItsReferences:
     def test_a_claim_inside_a_mark_is_read_only_as_the_earlier_reading_read_it(self) -> None:
         # The earlier reading read "claims 4" there; the rest of the range is
@@ -415,6 +447,17 @@ class TestTheMergeReadsARangeAsItReadsASingleClaim:
         merge = _merge(line, _block(MUTEX))
 
         assert [n for n, *_rest in merge.range_carried] == [3]
+
+    def test_a_sentence_opening_with_a_ledger_id_is_not_the_ranges_clause(self) -> None:
+        # Every claim of FOUR cites ev_0001; the range's own sentence does not.
+        line = (
+            f"{STATIC} STATIC claims 2-4 repeat one technique. ev_0001 shows the decoder. {BLOCKS}"
+        )
+
+        merge = _merge(line, _block(MUTEX))
+
+        assert [n for n, _s, _r in merge.withdrawn_by_rule] == [2]
+        assert [n for n, *_rest in merge.range_carried] == [3, 4]
 
     def test_a_range_the_disputes_argue_answers_the_line(self) -> None:
         answer = _block(MUTEX)
