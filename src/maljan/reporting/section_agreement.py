@@ -511,11 +511,13 @@ def _hex_address(where: str) -> int | None:
 # quote, a list or clause mark, an operator, an arrow. A path, a file name, a URL
 # or a registry key is one word, and a longer identifier is one word.
 _WORD_BREAK = re.compile(
-    r"(?:->|<-|=>|[\s()\[\]{}<>\"'`,;:!?=*+&@|\u2014\u2018\u2019\u201c\u201d\u2190-\u21ff])+"
+    r"(?:->|<-|=>|[\s()\[\]{}<>\"'`,;:!?=*+&@|~#%"
+    r"\u2014\u2018\u2019\u201c\u201d\u2190-\u21ff])+"
 )
 # What joins addresses into one word: a range or a pair (``0x10-0x40``,
-# ``0x7504/0xd1c8``). Every part of such a word is an address, or none is.
-_ADDRESS_JOIN = re.compile(r"[/\\\-\u2013]")
+# ``0x10..0x40``, ``0x7504/0xd1c8``). Every part of such a word is an address,
+# or none is.
+_ADDRESS_JOIN = re.compile(r"\.\.|[/\\\-\u2013]")
 
 
 # A decompiler's name for a function written with ``0x`` before its address
@@ -523,15 +525,15 @@ _ADDRESS_JOIN = re.compile(r"[/\\\-\u2013]")
 _NAMED_HEX = re.compile(r"([A-Za-z]\w*?)([_.])0x([0-9a-f]{1,16})", re.IGNORECASE)
 
 
-def _whole_address(part: str) -> int | None:
+def _whole_address(part: str, function: re.Pattern[str]) -> int | None:
     """The address ``part`` is, written whole in a spelling the absence check reads, or
-    ``None``."""
-    for pattern in (_HEX_ADDRESS, generic_function_name(), _SUFFIXED_ADDRESS, _BARE_ADDRESS):
+    ``None``. ``function`` is the declared decompiler names' pattern."""
+    for pattern in (_HEX_ADDRESS, function, _SUFFIXED_ADDRESS, _BARE_ADDRESS):
         found = pattern.fullmatch(part)
         if found:
             return int(found.group(1), 16)
     named = _NAMED_HEX.fullmatch(part)
-    if named and generic_function_name().fullmatch(f"{named.group(1)}{named.group(2)}0"):
+    if named and function.fullmatch(f"{named.group(1)}{named.group(2)}0"):
         return int(named.group(3), 16)
     return None
 
@@ -542,14 +544,16 @@ def _addresses_named(text: str) -> list[int]:
 
     A hex run inside a path, a file name, a URL, a registry key or a longer
     identifier (``files/0x00020000000003ba-104.dat``) names no address: it is
-    part of a word that is not one. One pass over the text.
+    part of a word that is not one. A slash with nothing on its other side
+    (``0x401000/``, ``/0x5a10``) joins no path segment. One pass over the text.
     """
+    function = generic_function_name()
     out: list[int] = []
     for word in _WORD_BREAK.split(text):
-        word = word.rstrip(".")
+        word = word.rstrip(".\u2026").strip("/")
         if not word:
             continue
-        found = [_whole_address(part) for part in _ADDRESS_JOIN.split(word)]
+        found = [_whole_address(part, function) for part in _ADDRESS_JOIN.split(word)]
         if all(value is not None for value in found):
             out.extend(value for value in found if value is not None)
     return out

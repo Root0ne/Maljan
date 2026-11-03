@@ -666,6 +666,12 @@ def test_an_answered_failure_qualifies_no_sentence_on_dropped_files_beside_it() 
         ("It reads C:\\Temp\\0x5a10.bin and HKCU\\Software\\5a10ab.", []),
         ("It fetches http://host.test/0x5a10 and names mutex_0x5a10.", []),
         ("The dump memory/3648-3a5f was kept.", []),
+        # A range with two dots, a trailing ellipsis, the marks ~ # %, and a
+        # slash with nothing on its other side.
+        ("The span 0x5a10..0x5a38 and 0x5a10\u2026", [0x5A10, 0x5A38, 0x5A10]),
+        ("Near ~0x5a10, item #0x5a38 and 0x5a10%.", [0x5A10, 0x5A38, 0x5A10]),
+        ("At 0x5a10/ and /0x5a38.", [0x5A10, 0x5A38]),
+        ("The path /0x5a38.bin and dir/0x5a10/.", []),
     ],
 )
 def test_an_address_counts_only_as_a_word_of_its_own(text: str, named: list[int]) -> None:
