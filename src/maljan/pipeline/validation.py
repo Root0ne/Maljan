@@ -1433,7 +1433,7 @@ _PRESENCE_WORDS = frozenset(
 )
 # What the word, when it leaves or keeps "no" of something, leaves or keeps
 # of the sample: the "no" denies that, not the word ("the obfuscation leaves
-# no imports", "keeps no readable name"). Both lists are closed: after any
+# no imports", "leaves no names resolvable"). Both lists are closed: after any
 # other verb ("hides no payload", "plays no role") or before any other
 # object ("leaves no trace", "left no residue") the "no" may deny the word.
 # The objects are what the stored claims and T-531 name an obfuscated or
@@ -1445,6 +1445,16 @@ _LEFT_OBJECTS = frozenset(
     {
         *("import", "imports", "string", "strings", "readable", "plain", "plaintext"),
         *("cleartext", "name", "names", "api", "export", "exports"),
+    }
+)
+# The only words that may follow that object in its clause ("leaves no names
+# resolvable", "keeps no strings in clear text"). Any other may say the word
+# itself again ("leaves no strings obfuscated", "keeps no imports concealed"),
+# so the "no" is read.
+_LEFT_OBJECT_COMPLEMENTS = frozenset(
+    {
+        *("readable", "visible", "resolvable", "observable", "intact"),
+        *("at", "all", "in", "clear", "plain", "text", "calls", "call"),
     }
 )
 # "free of" or "free from" just before a word denies it ("free of obfuscation").
@@ -1498,8 +1508,12 @@ def _negated_after(text: str, start: int, end: int) -> bool:
         own_object
         and own_object.group(1).lower() in _LEAVING_VERBS
         and own_object.group(2).lower() in _LEFT_OBJECTS
+        and all(
+            word.lower() in _LEFT_OBJECT_COMPLEMENTS
+            for word in re.findall(r"[A-Za-z]+", clause[own_object.end() :])
+        )
     ):
-        clause = clause[own_object.end() :]
+        return False
     words = re.findall(r"[A-Za-z]+", clause)
     return bool({word.lower() for word in words} & (_NEGATIONS | _FOLLOWING_NEGATIONS))
 

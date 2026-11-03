@@ -171,7 +171,8 @@ def test_a_silent_e_verb_s_inflection_of_the_rarest_own_word_affirms(
         "Not packed; the strings are obfuscated so no string is readable.",
         "Not packed; strings obfuscated so the strings are not visible.",
         "Not packed; obfuscation keeps no strings in clear text.",
-        "Not packed; obfuscation leaves no readable strings.",
+        "Not packed; obfuscation leaves no names resolvable.",
+        "Not packed; obfuscation leaves no API calls observable.",
     ],
 )
 def test_a_negation_of_another_object_leaves_the_rarest_own_word_affirmed(text: str) -> None:
@@ -252,6 +253,14 @@ def test_a_negation_of_another_object_leaves_the_rarest_own_word_affirmed(text: 
         "Not packed; obfuscation leaves no marks.",
         "Not packed; obfuscation left no hint.",
         "Not packed; obfuscation left no residue.",
+        # A left object followed by a word that may say the word again.
+        "Not packed; obfuscation leaves no strings obfuscated.",
+        "Not packed; obfuscation left no strings encoded.",
+        "Not packed; obfuscation leaves no string encrypted.",
+        "Not packed; obfuscation leaves no strings unreadable.",
+        "Not packed; obfuscation keeps no strings hidden.",
+        "Not packed; obfuscation keeps no imports concealed.",
+        "Not packed; obfuscation keeps no names obscured.",
         # A result that denies a presence or the word again.
         "Not packed; obfuscation checked so the obfuscation is not applied.",
         "Not packed; obfuscation checked so the obfuscation is not evident.",
