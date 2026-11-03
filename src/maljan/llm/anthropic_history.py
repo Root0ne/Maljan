@@ -70,15 +70,16 @@ text blocks, the head with a breakpoint and the rest after it, whose texts
 joined are the turn's text, so every request sharing the head reads one cached
 prefix.
 
-**The standing facts** at the head of a turn (the triage pack, noted with its
-length where the platform puts it there: ``technique_facts.STANDING_FACTS_CHARS``)
-are sent the same way, as their own text block with a breakpoint of their own
-(``llm.anthropic.pack_cache_ttl``), on every request whose turn carries them,
-single-shot or not: an agent's next debate round sends the same tools, system
-prompt and pack again, often more than five minutes later, and reads them
-there. That breakpoint is the request's first, so the longer lifetime it may
-ask for stands before every shorter one, as the API requires; a request never
-carries more than :data:`MAX_BREAKPOINTS`.
+**The standing facts** at the head of a conversation's first user turn (the
+triage pack, noted with its length where the platform puts it there:
+``technique_facts.STANDING_FACTS_CHARS``) are sent the same way, as their own
+text block with a breakpoint of their own (``llm.anthropic.pack_cache_ttl``),
+on every request whose first turn carries them, single-shot or not: an
+agent's next debate round sends the same tools, system prompt and pack again,
+often more than five minutes later, and reads them there. That breakpoint is
+the request's first, so the longer lifetime it may ask for stands before every
+shorter one, as the API requires (:func:`_within_breakpoint_limit` holds a
+request to that order and to :data:`MAX_BREAKPOINTS`).
 
 What is remembered lives on the chat model that sent it (:func:`memory_of`),
 which a job's service container builds for its own agents and drops when the
@@ -151,9 +152,10 @@ class Memory:
         # marked turn -> when (``time.monotonic``): the cache entries this
         # model's requests wrote or read, and when each last lived again.
         self.marked: dict[str, float] = {}
-        # (length, digest) of each standing-facts head sent as its own block:
-        # a turn that begins with one is sent so again, noted or not.
-        self.standing: set[tuple[int, str]] = set()
+        # digest of a first user turn whose standing facts were sent as their
+        # own block, as it reads with and without its run-state block -> the
+        # facts' length: the same turn is split there again, noted or not.
+        self.standing_turns: dict[str, int] = {}
 
     def clear(self) -> None:
         with self.lock:
@@ -163,7 +165,7 @@ class Memory:
             self.listed_turns.clear()
             self.stale.clear()
             self.marked.clear()
-            self.standing.clear()
+            self.standing_turns.clear()
 
 
 _memory_lock = threading.Lock()
@@ -579,45 +581,51 @@ def _shared_heads(messages: list[Any], heads: dict[str, int], marker: dict[str, 
     return out
 
 
-def _standing_heads(
-    memory: Memory, messages: list[Any], noted: dict[str, int], marker: dict[str, str]
-) -> list[Any]:
-    """Each user turn that begins with standing facts, as those facts with ``marker`` and the rest.
+def _text_digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-    ``noted`` maps a noted turn's text to the facts' length. A head once sent
-    as its own block is remembered (``Memory.standing``), and a later turn that
-    begins with it is split there too, noted or not: a turn rebuilt without
-    its note keeps the shape every earlier request sent, so the history a
-    thinking block was written after never changes.
+
+def _standing_heads(
+    memory: Memory,
+    messages: list[Any],
+    noted: dict[str, int],
+    marker: dict[str, str],
+    attached: str = "",
+) -> list[Any]:
+    """The first user turn, where it begins with standing facts, as those facts with ``marker``.
+
+    ``noted`` maps a noted turn's text to the facts' length. Only the first
+    user turn is split: the facts lead a conversation, and their breakpoint,
+    the longest-lived, must stand before every other. A turn once split is
+    remembered by its whole text (``Memory.standing_turns``), with and
+    without the run-state block ``attached`` to it, and the same turn sent
+    again without its note is split at the same place, so the history a
+    thinking block was written after never changes. A turn that was never
+    noted is never split: no head is guessed.
     """
-    with memory.lock:
-        known = set(memory.standing)
-    heads: dict[str, int] = {}
-    for message in messages:
-        if not isinstance(message, dict) or message.get("role") != "user":
-            continue
-        text = _turn_text(message.get("content"))
-        if text is None:
-            continue
-        size = noted.get(text, 0)
-        if not size:
-            size = next(
-                (
-                    length
-                    for length, key in sorted(known)
-                    if length < len(text)
-                    and hashlib.sha256(text[:length].encode("utf-8")).hexdigest() == key
-                ),
-                0,
-            )
-        if size:
-            heads[text] = size
-            head = (size, hashlib.sha256(text[:size].encode("utf-8")).hexdigest())
-            if head not in known:
-                known.add(head)
-                with memory.lock:
-                    memory.standing.add(head)
-    return _shared_heads(messages, heads, marker)
+    users = _user_indexes(messages)
+    if not users:
+        return messages
+    text = _turn_text(messages[users[0]].get("content"))
+    if text is None:
+        return messages
+    size = noted.get(text, 0)
+    if size:
+        keys = {_text_digest(text)}
+        if attached and text.endswith(attached):
+            from maljan.pipeline.run_state import without_run_state_tail
+
+            keys.add(_text_digest(without_run_state_tail(text, attached)))
+        with memory.lock:
+            memory.standing_turns.update(dict.fromkeys(keys, size))
+    else:
+        with memory.lock:
+            size = memory.standing_turns.get(_text_digest(text), 0)
+    if not size:
+        return messages
+    out = list(messages)
+    out[users[0] : users[0] + 1] = _shared_heads([messages[users[0]]], {text: size}, marker)
+    return out
 
 
 def _breakpoint_turns(roles: list[Any], loop: bool, last: bool) -> set[int]:
@@ -765,36 +773,58 @@ def _cache_breakpoints(
 
 
 def _within_breakpoint_limit(messages: list[Any]) -> list[Any]:
-    """``messages`` with no more than :data:`MAX_BREAKPOINTS` breakpoints, the API's limit.
+    """``messages`` with the breakpoints the API takes: at most :data:`MAX_BREAKPOINTS`, in order.
 
-    Past it, the earliest breakpoints after the first are left out: the first
-    holds the longest-lived entry, and the latest reads and writes the most.
-    Logged where it happens; no request this module builds carries more than
-    three (the standing facts, the newest user turn, the turn before the
-    newest answer).
+    Past the limit, the earliest breakpoints after the first are left out: the
+    first holds the longest-lived entry, and the latest reads and writes the
+    most. A breakpoint that asks for an hour after one that asks for five
+    minutes, which the API refuses, asks for five minutes. Each is logged
+    where it happens; no request this module builds carries more than three
+    (the standing facts, the newest user turn, the turn before the newest
+    answer), and only the first user turn's facts ask for an hour.
     """
-    places = [
-        (i, j)
-        for i, m in enumerate(messages)
-        if isinstance(m, dict) and isinstance(m.get("content"), list)
-        for j, block in enumerate(m["content"])
-        if isinstance(block, dict) and "cache_control" in block
-    ]
-    extra = len(places) - MAX_BREAKPOINTS
-    if extra <= 0:
-        return messages
-    logger.warning(
-        "anthropic provider: the request held %d cache breakpoints; %d after the first are "
-        "left out, as the API takes at most %d.",
-        len(places),
-        extra,
-        MAX_BREAKPOINTS,
-    )
+
+    def places(turns: list[Any]) -> list[tuple[int, int]]:
+        return [
+            (i, j)
+            for i, m in enumerate(turns)
+            if isinstance(m, dict) and isinstance(m.get("content"), list)
+            for j, block in enumerate(m["content"])
+            if isinstance(block, dict) and "cache_control" in block
+        ]
+
+    def replaced(turns: list[Any], i: int, j: int, marker: dict[str, Any] | None) -> None:
+        content = list(turns[i]["content"])
+        block = {k: v for k, v in content[j].items() if k != "cache_control"}
+        content[j] = {**block, "cache_control": marker} if marker is not None else block
+        turns[i] = {**turns[i], "content": content}
+
     out = list(messages)
-    for i, j in places[1 : 1 + extra]:
-        content = list(out[i]["content"])
-        content[j] = {k: v for k, v in content[j].items() if k != "cache_control"}
-        out[i] = {**out[i], "content": content}
+    marked = places(out)
+    extra = len(marked) - MAX_BREAKPOINTS
+    if extra > 0:
+        logger.warning(
+            "anthropic provider: the request held %d cache breakpoints; %d after the first are "
+            "left out, as the API takes at most %d.",
+            len(marked),
+            extra,
+            MAX_BREAKPOINTS,
+        )
+        for i, j in marked[1 : 1 + extra]:
+            replaced(out, i, j, None)
+        marked = places(out)
+    shorter = False
+    for i, j in marked:
+        marker = out[i]["content"][j]["cache_control"]
+        hour = isinstance(marker, dict) and marker.get("ttl") == "1h"
+        if hour and shorter:
+            logger.warning(
+                "anthropic provider: a cache breakpoint asking for an hour followed one asking "
+                "for five minutes, which the API refuses; it asks for five minutes."
+            )
+            replaced(out, i, j, {k: v for k, v in marker.items() if k != "ttl"})
+        elif not hour:
+            shorter = True
     return out
 
 
@@ -917,7 +947,9 @@ def prepared(
         payload["messages"] = messages
         messages = _shared_heads(messages, dict(heads or {}), cache_marker)
         if standing_marker:
-            messages = _standing_heads(memory, messages, dict(standing or {}), standing_marker)
+            messages = _standing_heads(
+                memory, messages, dict(standing or {}), standing_marker, attached
+            )
         messages = _first_turn_listed(memory, messages, loop, attached)
         if bound:
             messages = _keep_run_state_appended(memory, messages, attached)

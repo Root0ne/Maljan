@@ -135,6 +135,15 @@ def _reasoning_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
     return None
 
 
+def _opening_cache_writes(response: Any) -> tuple[int, int] | None:
+    """The cache writes a stream's opening event reported, split by lifetime, or ``None``."""
+    from maljan.llm.generation_rate import PROMPT_USAGE_KEY
+
+    metadata = getattr(response, "response_metadata", None)
+    opened = metadata.get(PROMPT_USAGE_KEY) if isinstance(metadata, dict) else None
+    return _cache_writes_of(opened) if isinstance(opened, dict) else None
+
+
 def turn_usage(response: Any) -> dict[str, Any] | None:
     """One answer's reported usage, or ``None``.
 
@@ -157,6 +166,15 @@ def turn_usage(response: Any) -> dict[str, Any] | None:
     if cached is not None:
         out["cached_input_tokens"] = min(cached, out["input_tokens"])
     writes = _cache_writes_of(usage)
+    if writes is not None and not writes[1]:
+        # A streamed Anthropic answer's closing usage carries no split of its
+        # cache writes by lifetime; the opening event's does, kept on the
+        # answer (``generation_rate.PROMPT_USAGE_KEY``): an hour's writes are
+        # settled at the hour's price.
+        opened = _opening_cache_writes(response)
+        if opened is not None and opened[1]:
+            whole = max(writes[0], opened[0])
+            writes = (whole, min(opened[1], whole))
     if writes is not None:
         room = out["input_tokens"] - out.get("cached_input_tokens", 0)
         written = min(writes[0], room)

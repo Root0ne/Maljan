@@ -496,7 +496,15 @@ class AnthropicProvider(LLMProvider):
 
     @classmethod
     def writes_hour_caches(cls, settings: Any) -> bool:
-        return str(getattr(cls.settings_block(settings), "prompt_cache_ttl", "") or "") == "1h"
+        # Every request may write the triage pack's entry for an hour
+        # (``pack_cache_ttl``): a call is admitted at the hour's write price,
+        # and a write whose split by lifetime is not reported is settled so.
+        from maljan.llm.anthropic_history import standing_marker
+
+        block = cls.settings_block(settings)
+        ttl = str(getattr(block, "prompt_cache_ttl", "") or "5m")
+        marker = standing_marker(ttl, str(getattr(block, "pack_cache_ttl", "off") or "off"))
+        return ttl == "1h" or (marker or {}).get("ttl") == "1h"
 
     @classmethod
     def _root(cls, endpoint: str) -> str:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from maljan.agents.technique_facts import STANDING_FACTS_CHARS
@@ -155,6 +156,138 @@ class TestTheLimit:
         marked = [i for i, turn in enumerate(kept) if "cache_control" in turn["content"][0]]
         assert marked == [0, 3, 4, 5]
 
+    def test_an_hour_after_five_minutes_asks_for_five_minutes(self) -> None:
+        turns = [
+            {"role": "user", "content": [{"type": "text", "text": "a", "cache_control": FIVE}]},
+            {"role": "user", "content": [{"type": "text", "text": "b", "cache_control": HOUR}]},
+        ]
+        kept = _within_breakpoint_limit(turns)
+        assert [turn["content"][0]["cache_control"] for turn in kept] == [FIVE, FIVE]
+
+    def test_only_the_first_user_turn_s_facts_are_split(self) -> None:
+        """A later turn that begins with a pack is no head: the hour stays first."""
+        head = "HEAD " * 300
+        first = head + "rest " * 100
+        later = PACK + TASK
+        sent = prepared(
+            _request(
+                {"role": "user", "content": first},
+                {"role": "assistant", "content": "ok"},
+                {"role": "user", "content": later},
+            ),
+            Memory(),
+            bound=False,
+            cache_marker=FIVE,
+            heads={first: len(head)},
+            standing={later: len(PACK)},
+            standing_marker=HOUR,
+        )
+        assert HOUR not in _markers(sent)
+        content = sent["messages"][2]["content"]
+        assert content == later or [b["text"] for b in content] == [later]
+
+
+class TestALostNote:
+    """A turn sent again without its note is split where it was split, never at a guessed head."""
+
+    def test_two_heads_of_one_model_never_cross(self) -> None:
+        memory = Memory()
+        ident = "=== SAMPLE IDENTITY\nsha256 abc\n\n"
+        analyst = PACK + "\n\nAnalyse." + "a" * 500
+        mediation = PACK + "\n\n" + ident + "=== RUN STATE ...\n\nExpert Reports: " + "r" * 500
+        head = len(PACK) + 2 + len(ident)
+        for text, size in ((analyst, len(PACK)), (mediation, head)):
+            prepared(
+                _request({"role": "user", "content": text}),
+                memory,
+                bound=False,
+                cache_marker=FIVE,
+                standing={text: size},
+                standing_marker=HOUR,
+            )
+        again = prepared(
+            _request({"role": "user", "content": mediation}),
+            memory,
+            bound=False,
+            cache_marker=FIVE,
+            standing={},
+            standing_marker=HOUR,
+        )
+        assert again["messages"][0]["content"][0]["text"] == mediation[:head]
+
+    def test_a_turn_never_noted_is_never_split(self) -> None:
+        """The verdict and the technique question begin with the pack and carry no note."""
+        memory = Memory()
+        noted = PACK + TASK
+        prepared(
+            _request({"role": "user", "content": noted}),
+            memory,
+            bound=False,
+            cache_marker=FIVE,
+            standing={noted: len(PACK)},
+            standing_marker=HOUR,
+        )
+        verdict = PACK + "\n\nReturn a JSON STIX 2.1 Bundle."
+        sent = prepared(
+            _request({"role": "user", "content": verdict}),
+            memory,
+            bound=False,
+            cache_marker=FIVE,
+            standing={},
+            standing_marker=HOUR,
+        )
+        assert sent["messages"][0]["content"] == verdict
+
+
+class TestABoundLoop:
+    """On a model that binds thinking to its prefix, a loop's first turn is sent as it was."""
+
+    def test_the_second_request_resends_the_first_turn_with_its_run_state(self) -> None:
+        run_state = "\n\n=== RUN STATE ===\nsteps 5\n=== END RUN STATE ==="
+        body = "\n\nAnalyse the sample." + "a" * 500
+        memory = Memory()
+        first_text = PACK + body + run_state
+        first = prepared(
+            _request({"role": "user", "content": first_text}),
+            memory,
+            bound=True,
+            cache_marker=FIVE,
+            attached=run_state,
+            loop=True,
+            standing={first_text: len(PACK)},
+            standing_marker=HOUR,
+        )
+        answer = {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "t", "signature": "sig1"},
+                {"type": "tool_use", "id": "tu1", "name": "x", "input": {}},
+            ],
+        }
+        reply = {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "tu1", "content": "out" + run_state}
+            ],
+        }
+        second = prepared(
+            _request({"role": "user", "content": PACK + body}, answer, reply),
+            memory,
+            bound=True,
+            cache_marker=FIVE,
+            attached=run_state,
+            loop=True,
+            standing={PACK + body: len(PACK)},
+            standing_marker=HOUR,
+        )
+
+        def bare(turn: dict[str, Any]) -> list[dict[str, Any]]:
+            return [{k: v for k, v in b.items() if k != "cache_control"} for b in turn["content"]]
+
+        assert bare(second["messages"][0]) == bare(first["messages"][0])
+        assert second["messages"][0]["content"][0]["cache_control"] == HOUR
+        assert "betas" not in second and "thinking" not in second
+
 
 class TestOnTheWire:
     """The provider's own model, from the shipped settings, over a stand-in API."""
@@ -186,6 +319,56 @@ class TestOnTheWire:
         content = body["messages"][0]["content"]
         assert content[0] == {"type": "text", "text": PACK, "cache_control": HOUR}
         assert content[1] == {"type": "text", "text": TASK}
+
+    def test_a_streamed_pack_write_is_charged_at_the_hour_s_price(self, monkeypatch: Any) -> None:
+        """A stream's closing usage carries no split by lifetime; its opening event does."""
+        from maljan.core.spend import SpendMeter, table_prices
+        from maljan.core.token_ledger import turn_usage
+
+        written = 2_000
+        usage = {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": written,
+            "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": written,
+            },
+        }
+        wire = Wire(
+            lambda _body: message([{"type": "text", "text": "ok"}], stop="end_turn", usage=usage)
+        )
+        install(monkeypatch, wire)
+        settings = Settings(
+            _env_file=None,
+            llm={
+                "provider": "anthropic",
+                "expert_model": MODEL,
+                "anthropic": {
+                    "api_key": "test-anthropic-key",
+                    "expert_model": MODEL,
+                    "judge_model": MODEL,
+                },
+            },
+        )
+        model = AnthropicProvider(settings).build_model(
+            MODEL, 0.1, max_tokens=1024, streaming=True, stream_usage=True
+        )
+        turn = HumanMessage(
+            content=PACK + TASK, response_metadata={STANDING_FACTS_CHARS: len(PACK)}
+        )
+        answer = model.invoke([SystemMessage(content="You analyse."), turn])
+        assert wire.bodies[0]["stream"] is True
+        charged = turn_usage(answer)
+        assert charged is not None
+        assert charged["cache_write_1h_input_tokens"] == written
+        row = table_prices()[MODEL]
+        five = {k: v for k, v in charged.items() if k != "cache_write_1h_input_tokens"}
+        extra = row.cost(charged) - row.cost(five)
+        assert extra == pytest.approx(written * (0.20 - 0.125) / 1_000_000)
+        # A call is admitted at the hour's write price while the pack's entry may live an hour.
+        assert SpendMeter.from_settings(settings).writes_hour_caches(MODEL) is True
 
     def test_off_leaves_the_turn_whole(self, monkeypatch: Any) -> None:
         (body,) = self._bodies(monkeypatch, pack_cache_ttl="off")
