@@ -454,3 +454,22 @@ def test_the_console_offers_the_tabs_an_agent_may_declare() -> None:
     listed = editor.split("const AGENT_TABS = [", 1)[1].split("]", 1)[0]
     assert tuple(re.findall(r'"([a-z]+)"', listed)) == AGENT_TABS
     assert set(AGENT_TABS) == set(TABS)
+
+
+def test_the_console_reads_each_role_s_tab_as_the_settings_do() -> None:
+    # T-540: the editor's ROLE_TABS decides which roles are told their unplaced
+    # sections go to EVIDENCE; a role added or moved on one side only fails here.
+    import re
+    from pathlib import Path
+
+    from maljan.core.config import ROLE_TABS
+
+    editor = (
+        Path(__file__).resolve().parents[3]
+        / "apps/web/src/app/(app)/settings/configuration/AgentDefinitionsEditor.tsx"
+    ).read_text(encoding="utf-8")
+    body = editor.split("const ROLE_TABS:", 1)[1].split("= {", 1)[1].split("};", 1)[0]
+    pairs = re.findall(r'^\s*"?([a-z_]+)"?\s*:\s*"([a-z]+)"\s*,?\s*$', body, re.MULTILINE)
+    # Every line of the constant is a pair read here: none is skipped unseen.
+    assert len(pairs) == len([line for line in body.splitlines() if line.strip()])
+    assert dict(pairs) == ROLE_TABS
