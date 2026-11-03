@@ -73,6 +73,28 @@ class TestTheProviderSaysSo:
 
         assert schema_tool_worth_offering(_Other()) is True
 
+    def test_it_is_read_from_its_own_vendored_fact(self) -> None:
+        from maljan.llm.anthropic_provider import thinks_by_default_source
+
+        assert "adaptive thinking is on by default" in thinks_by_default_source(MODEL)
+        assert thinks_by_default_source("claude-3-5-haiku-20241022") == ""
+
+    def test_a_model_built_with_thinking_off_keeps_the_tool(self) -> None:
+        llm = _built(MODEL).model_copy(update={"thinking": {"type": "disabled"}})
+        assert AnthropicProvider.schema_tool_answered_as_text(llm) is False
+
+    def test_a_fallback_list_takes_the_text_path_only_when_every_model_would(self) -> None:
+        class _List:
+            _llm_type = "maljan-fallback"
+
+            def __init__(self, models: list[Any]) -> None:
+                self.models = models
+
+        thinking, older = _built(MODEL), _built("claude-3-5-haiku-20241022")
+        assert schema_tool_worth_offering(_List([older, thinking])) is True
+        assert schema_tool_worth_offering(_List([thinking, older])) is True
+        assert schema_tool_worth_offering(_List([thinking, _built(MODEL)])) is False
+
 
 class TestThePinnedClientHasNoNativePathWithReadsBound:
     """Why ``native_json_schema_output`` is ``False``: checked on the pinned client itself."""
@@ -124,6 +146,23 @@ class TestTheCallsAreAskedInText:
                 assert [tool["name"] for tool in body["tools"]] == [READ_EVIDENCE_TOOL], section
         # Nothing parsed is lost: every section was written from its text.
         assert not [d for d in composer.degradations if "missing" in d]
+
+    def test_a_model_that_does_not_think_by_default_is_offered_the_schema_beside_the_read(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        wire = Wire(_in_text)
+        install(monkeypatch, wire)
+        composer = ReportComposer(llm=_built("claude-3-5-haiku-20241022"), per_section_timeout=60)
+        composer.ledger_reads = LedgerReads(LEDGER)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+        ):
+            asyncio.run(composer.compose(_report(), _isr(), facts_block=FACTS, concurrent=False))
+        firsts = [b for b in wire.bodies if len(b["messages"]) == 1]
+        assert firsts
+        for body in firsts:
+            names = [tool["name"] for tool in body["tools"]]
+            assert len(names) == 2 and names[-1] == READ_EVIDENCE_TOOL, names
 
     def test_the_narrative_takes_the_text_path_from_its_first_call(self) -> None:
         agent = NarrativeAgent.__new__(NarrativeAgent)

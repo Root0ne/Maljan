@@ -478,9 +478,10 @@ def schema_tool_worth_offering(llm: Any) -> bool:
     text (``LLMProvider.schema_tool_answered_as_text``) and asks for no
     JSON-schema answer natively in its place: the call is then asked for its
     JSON in text, the path every structured call already falls back to, and
-    each model says so once. A fallback list takes the text path when any of
-    its models would. Never raises; a model nothing can be said of keeps the
-    tool.
+    each model says so once. A fallback list takes the text path only when
+    every one of its models would: a model later in the list that writes the
+    schema as text never takes the tool from one before it that calls it.
+    Never raises; a model nothing can be said of keeps the tool.
     """
     inner = getattr(llm, "models", None) if llm is not None else None
     candidates = (
@@ -491,24 +492,31 @@ def schema_tool_worth_offering(llm: Any) -> bool:
     try:
         from maljan.llm.provider_base import provider_of_model
 
+        named: list[tuple[str, str]] = []
         for model in candidates:
             built_by = provider_of_model(model)
             if (
-                built_by is not None
-                and built_by.schema_tool_answered_as_text(model)
-                and not built_by.native_json_schema_output(model)
+                built_by is None
+                or not built_by.schema_tool_answered_as_text(model)
+                or built_by.native_json_schema_output(model)
             ):
-                held = getattr(llm, "__dict__", None)
-                if isinstance(held, dict) and not held.get(_TEXT_PATH_SAID):
-                    held[_TEXT_PATH_SAID] = True
-                    logger.info(
-                        "%s model %s writes a schema offered beside read_evidence as text (no "
-                        "tool choice is sent while it thinks); structured answers are asked for "
-                        "as JSON text, with no schema tool.",
-                        built_by.name,
-                        getattr(model, "model", None) or getattr(model, "model_name", "") or "?",
-                    )
-                return False
+                return True
+            named.append(
+                (
+                    built_by.name,
+                    str(getattr(model, "model", None) or getattr(model, "model_name", "") or "?"),
+                )
+            )
+        held = getattr(llm, "__dict__", None)
+        if named and isinstance(held, dict) and not held.get(_TEXT_PATH_SAID):
+            held[_TEXT_PATH_SAID] = True
+            logger.info(
+                "%s writes a schema offered beside read_evidence as text (no tool choice is sent "
+                "while it thinks); structured answers are asked for as JSON text, with no schema "
+                "tool.",
+                ", ".join(f"{name} model {model}" for name, model in named),
+            )
+        return not named
     except Exception as exc:  # noqa: BLE001
         logger.debug("schema-tool check failed (%s); the tool is offered.", exc)
     return True

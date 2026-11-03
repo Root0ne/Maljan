@@ -1852,9 +1852,9 @@ class ReportComposer:
         tool, and every section shares one. Sections sent on the manual path
         from their first call (:meth:`_schema_tool_offered`) are one group.
         A group of one shares nothing and is left out, so its request carries
-        no breakpoint and pays no cache write. ``manual`` asks for the manual path's groups whatever
-        path the sections are first sent on: a structured answer that is not
-        read is asked again there.
+        no breakpoint and pays no cache write. ``manual`` asks for the manual
+        path's groups whatever path the sections are first sent on: a
+        structured answer that is not read is asked again there.
         """
         llm = getattr(self, "llm", None)
         if llm is None or not _caches_once_answered(llm):

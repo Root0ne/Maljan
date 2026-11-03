@@ -2380,7 +2380,9 @@ same leading text on every section.
 No tool choice is sent for a schema on Anthropic, and a model that thinks by
 default cannot be made to call one: offered beside `read_evidence`, Claude
 Haiku 5.5 wrote the JSON as text in every structured call of haiku7 and
-haiku8. The provider says so for such a model, and says it asks for no
+haiku8. The provider says so for such a model (read from the vendored table's
+`thinks_by_default` rows, unless the model is built with thinking off), and
+says it asks for no
 JSON-schema answer natively (the pinned langchain-anthropic's `json_schema`
 method replaces a model's bound tools and cannot read a reply that reads).
 The composer's sections, the narrative round and the judge's technique
@@ -2410,21 +2412,29 @@ then the run state, then the reports and the history: every round sends the
 same tools, system prompt and head, and the head is noted as standing facts,
 so its own breakpoint (below) is written once and read in each later round.
 With the run state first, haiku8's mediations shared about 920 characters.
+The order is the same on every provider; only Anthropic places a breakpoint
+on the head. The verdict and the technique question keep the run state first.
 
 ### The triage pack has a breakpoint of its own
 
 An agent's debate rounds send the same tools, system prompt and triage pack
 again, often more than five minutes apart (twelve to thirty-two in haiku8),
 so each round's first request wrote the whole prefix and read none of it. On
-Anthropic the pack at the head of a turn, noted with its length where the
+Anthropic the pack at the head of a conversation's first user turn, noted
+with its length where the
 platform puts it there, is sent as its own text block with a breakpoint that
 lives `llm.anthropic.pack_cache_ttl` (`1h` by default; `5m`, or `off` for
 none); joined, the two blocks are the turn's text. Every other breakpoint keeps
 `llm.anthropic.prompt_cache_ttl`, the pack's is never shorter and always
-first, as the API requires, and a request carries at most four. A turn that
-begins with a pack sent this way is sent the same way again even where its
-note was lost, so the history a thinking block was written after never
-changes. Other providers send the request as before.
+first, as the API requires (a breakpoint asking for an hour after one asking
+for five minutes is sent asking for five, with a WARNING), and a request
+carries at most four. A first turn once split is remembered by its whole text,
+and the same turn sent again without its note is split at the same place, so
+the history a thinking block was written after never changes; a turn never
+noted is never split. A call is admitted at the hour's write price while the
+pack's entry may live an hour, and a streamed answer's writes are settled by
+lifetime from the split its opening event reports. Other providers send the
+request as before.
 
 A stored `true` or `false` (a JSON boolean) keeps its meaning. Stages used to
 be written with `sequential` whether or not anybody chose it; the database
