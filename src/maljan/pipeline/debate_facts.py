@@ -129,12 +129,20 @@ def _claims_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, list
     A number is kept as the digits the line wrote, never converted: digits of
     any length are read (``_claim_place``).
     """
+    return [
+        (name, re.findall(r"\d+", numbers.group(1)))
+        for name, numbers in _claim_numbers_named(line, agent_names)
+    ]
+
+
+def _claim_numbers_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, re.Match[str]]]:
+    """``(agent, the claim numbers' match)`` for each analyst the line names with claim numbers."""
     names = sorted({str(n) for n in agent_names if str(n).strip()}, key=len, reverse=True)
     # The characters a name already read covers: a match over any of them is
     # inside a longer name. One name's matches never overlap each other, so
     # each name looks at each character at most once.
     taken = bytearray(len(line))
-    found: list[tuple[str, list[str]]] = []
+    found: list[tuple[str, re.Match[str]]] = []
     for name in names:
         for match in _name_pattern(name).finditer(line):
             start, end = match.span()
@@ -143,7 +151,7 @@ def _claims_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, list
             taken[start:end] = b"\x01" * (end - start)
             numbers = _CLAIM_NUMBERS.match(line, match.end())
             if numbers is not None:
-                found.append((name, re.findall(r"\d+", numbers.group(1))))
+                found.append((name, numbers))
     return found
 
 
@@ -1653,47 +1661,282 @@ def _short_named(text: str, start: int, participants: Sequence[str]) -> str | No
     return None
 
 
-def claims_named_by_lines(
-    lines: Sequence[str], participants: Sequence[str]
-) -> dict[str, dict[int, list[tuple[int, bool]]]]:
-    """``{analyst: {claim number: [(line number, blocking), ...]}}`` for the lines given.
+# The most claims a range ("claims 67 to 82") is read as, claim by claim. A
+# longer range, or one that ends below where it starts, is read as no claim
+# at all and stated (``ClaimNumbers.unplaced``): the platform never guesses
+# which claims of it the line means.
+CLAIM_RANGE_CAP = 20
+# The digits a claim number may have and still be counted (``_claim_place``
+# compares longer ones as text and never converts them).
+_CLAIM_DIGITS = 6
+
+# The first number of a reference, at the place its numbers start.
+_FIRST_CLAIM_NUMBER = re.compile(r"#?\s*+(\d++)")
+# One more number of the same reference: after a range word or an unspaced
+# dash ("32-34", "32–34", "17 to 19", "32 through 34"), or after a joiner
+# ("3/4", "3, 4", "3 and 4", "3, 4, and 5", "3 & 4", "3 + 4"), the word
+# "claim" written again or not ("claim #3 and claim 4").
+_NEXT_CLAIM_NUMBER = re.compile(
+    r"(?:(?P<dash>[-\u2013\u2014])"
+    r"|\s*+(?:(?P<range>to|through|thru)\b|,\s*+(?:(?:and|&)\s*+)?|/|&|and|\+)"
+    r"\s*+(?:(?P<again>claims?)\s*+)?#?\s*+)"
+    r"(?P<n>\d++)",
+    re.IGNORECASE,
+)
+# What tells that a number after "claim" written again is another analyst's
+# ("claim 3 and claim 4 of the static analyst"): the reference ends before it.
+_CLAIM_OF_ANOTHER = re.compile(r"\s*+(?:of|from|by|in)\b", re.IGNORECASE)
+# A range's last number that goes on as a word or a decimal ("3 to 0x5a").
+_NUMBER_GOES_ON = re.compile(r"[0-9A-Za-z_]|\.\d")
+
+
+@dataclass(frozen=True)
+class ClaimNumbers:
+    """The claim numbers one reference writes, read from where its numbers start.
+
+    ``numbers`` are the claims it names one by one, as digits: those it
+    writes, in order, and each claim inside a range it bounds
+    (:data:`CLAIM_RANGE_CAP` claims at most). ``unplaced`` are its ranges
+    read as no claim, ``(first, last)`` as written: one longer than the cap,
+    or one that ends below where it starts. ``end`` is where the reference
+    ends in the text.
+    """
+
+    numbers: tuple[str, ...]
+    unplaced: tuple[tuple[str, str], ...]
+    end: int
+
+
+def _as_claim_number(written: str) -> int | None:
+    digits = written.lstrip("0")
+    return int(digits) if digits and len(digits) <= _CLAIM_DIGITS else None
+
+
+def read_claim_numbers(text: str, start: int) -> ClaimNumbers | None:
+    """The claim numbers a reference writes from ``start`` on (:class:`ClaimNumbers`), or ``None``.
+
+    ``start`` is where a reference's first number is written (the number
+    group of "claim(s) N"). The numbers that follow it in the same reference
+    are read too, each named by whoever names the first: a list ("3, 4, and
+    5"), the word "claim" written again ("claim #3 and claim 4", unless what
+    follows gives it to someone else, "claim 4 of ..."), and a bounded range
+    ("32-34", "17 to 19", "32 through 34"), whose every claim is named. A
+    list the earlier reading read ("3/4", "3, 4", "3 and 4") is read exactly
+    as before. The one reader of claim ranges and continuations: every place
+    that reads which claims a line names reads them here. Linear in the
+    reference.
+    """
+    first = _FIRST_CLAIM_NUMBER.match(text, start)
+    if first is None:
+        return None
+    numbers: list[str] = [first.group(1)]
+    unplaced: list[tuple[str, str]] = []
+    end = first.end()
+    # Whether the number written last may start a range (it ends none).
+    single = True
+    while (more := _NEXT_CLAIM_NUMBER.match(text, end)) is not None:
+        written = more.group("n")
+        if more.group("again") and _CLAIM_OF_ANOTHER.match(text, more.end()):
+            break
+        if not (more.group("dash") or more.group("range")):
+            numbers.append(written)
+            end, single = more.end(), True
+            continue
+        if _NUMBER_GOES_ON.match(text, more.end()):
+            break
+        low_written = numbers[-1] if single else ""
+        low, high = _as_claim_number(low_written), _as_claim_number(written)
+        if low is not None and high is not None and low <= high < low + CLAIM_RANGE_CAP:
+            numbers.extend(str(n) for n in range(low + 1, high + 1))
+        else:
+            # Read as no claim at all, its first number with it.
+            if low_written:
+                numbers.pop()
+            unplaced.append((low_written, written))
+        end, single = more.end(), False
+    return ClaimNumbers(numbers=tuple(numbers), unplaced=tuple(unplaced), end=end)
+
+
+def _claim_spans(numbers: Sequence[int]) -> str:
+    """``1, 3-5, 9`` for ``[1, 3, 4, 5, 9]``."""
+    out: list[str] = []
+    ordered = sorted(set(numbers))
+    start = previous = None
+    for number in [*ordered, None]:
+        if previous is not None and number == previous + 1:
+            previous = number
+            continue
+        if start is not None:
+            out.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = number
+    return ", ".join(out)
+
+
+@dataclass(frozen=True)
+class UnplacedClaims:
+    """A claim reference of a mediation line that names no claim of any analyst.
+
+    ``line`` counts from 1 in the order the lines were given, ``blocking`` is
+    the mediator's mark, ``analysts`` the participants whose claims it may
+    mean (the one it names, for a range; the line's field, or every
+    participant, for numbers no analyst is named for), ``claims`` the
+    platform's own rendering of its numbers ("claims 1-50", "claim 45"),
+    ``why`` the reason it names no claim and ``lowest`` the lowest claim
+    number it may mean (0 where none is read). Its numbers are never guessed
+    onto a claim: no claim is withdrawn by rule on it, and the merge says so.
+    """
+
+    line: int
+    blocking: bool
+    analysts: tuple[str, ...]
+    claims: str
+    why: str
+    lowest: int = 0
+
+
+# Why a reference names no claim.
+RANGE_NOT_READ = (
+    f"it is a range of more than {CLAIM_RANGE_CAP} claims, or one that ends below where it starts"
+)
+NO_ANALYST_NAMED = "no analyst is named for it"
+
+
+@dataclass(frozen=True)
+class ClaimReferences:
+    """What the lines of a mediation name by claim number.
+
+    ``named`` is ``{analyst: {claim number: [(line number, blocking), ...]}}``
+    (:func:`claims_named_by_lines`); ``unplaced`` each reference that names
+    no claim (:class:`UnplacedClaims`), each once, in line order.
+    """
+
+    named: dict[str, dict[int, list[tuple[int, bool]]]]
+    unplaced: tuple[UnplacedClaims, ...] = ()
+
+    def unplaced_for(self, analyst: str) -> tuple[UnplacedClaims, ...]:
+        """The unplaced references that may mean ``analyst``'s claims, in line order."""
+        return tuple(u for u in self.unplaced if analyst in u.analysts)
+
+
+def _range_rendering(first: str, last: str) -> str:
+    """A range read as no claim, in the platform's words: digits only, never the line's text."""
+    low = first.lstrip("0") or ("0" if first else "")
+    high = last.lstrip("0") or "0"
+    if len(low) > _CLAIM_DIGITS or len(high) > _CLAIM_DIGITS:
+        return "claims numbered too long to read"
+    return f"claims {low}-{high}" if low else f"a range ending at claim {high}"
+
+
+def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> ClaimReferences:
+    """Per analyst, the claims each line names, and the references that name none.
 
     A line names an analyst's claim where it writes the analyst's name and
     then "claim(s) N" (``_claims_named``), and, when its ``[analysts: ...]``
     field names one analyst alone, where "claim(s) N" follows that field
     directly, and where a short form of a field analyst's name stands before
-    "claim(s) N" (``_short_named``). A line whose field names analysts
-    counts only for them: a
-    claim number it writes for another is no question put to that one. The
-    line number counts from 1 in the order given; ``blocking`` is the
-    mediator's mark (``read_marks``). Linear in the lines.
+    "claim(s) N" (``_short_named``). Each reference is read whole
+    (:func:`read_claim_numbers`): its list, its "claim" written again and its
+    bounded ranges name the analyst its first number names. A line whose
+    field names analysts counts only for them: a claim number it writes for
+    another is no question put to that one. The line number counts from 1
+    in the order given; ``blocking`` is the mediator's mark (``read_marks``).
+
+    A range the reader does not read claim by claim, and a "claim N" no
+    analyst is named for ("the reverser's own claim 45"), is an unplaced
+    reference (:class:`UnplacedClaims`): it names no claim and is kept to be
+    stated. "claims" with a single number after it and no analyst named
+    reads as a verb ("the dropper claims 3 hosts") and is no reference.
+    Linear in the lines.
     """
     names = [str(p) for p in participants if str(p).strip()]
     out: dict[str, dict[int, list[tuple[int, bool]]]] = {}
+    unplaced: dict[UnplacedClaims, None] = {}
     for number, (line, mark) in enumerate(zip(lines, read_marks(lines), strict=True), 1):
         text = without_line_mark(str(line))
         field_names = _named_in(text, names)
-        found: list[tuple[str, list[str]]] = list(_claims_named(text, names))
+        # (analyst, where the reference's numbers start).
+        found: list[tuple[str, int]] = [
+            (name, numbers.start(1)) for name, numbers in _claim_numbers_named(text, names)
+        ]
         if field_names is not None and len(field_names) == 1:
             opened = _ANALYSTS_FIELD.search(text)
             bare = _BARE_CLAIMS.match(text, opened.end()) if opened is not None else None
             if bare is not None:
-                found.append((field_names[0], re.findall(r"\d+", bare.group(1))))
+                found.append((field_names[0], bare.start(1)))
         if field_names:
             # A short form of a field analyst's name before "claim(s) N".
             for reference in _CLAIM_REFERENCE.finditer(text):
                 short = _short_named(text, reference.start(), names)
                 if short is not None:
-                    found.append((short, re.findall(r"\d+", reference.group(1))))
-        for name, digits in found:
+                    found.append((short, reference.start(1)))
+        # Where each reference read above stands in the line.
+        read: list[tuple[int, int]] = []
+        for name, at in found:
+            numbers = read_claim_numbers(text, at)
+            if numbers is None:
+                continue
+            read.append((at, numbers.end))
             if field_names is not None and name not in field_names:
                 continue
+            for first, last in numbers.unplaced:
+                said = UnplacedClaims(
+                    number,
+                    mark.blocking,
+                    (name,),
+                    _range_rendering(first, last),
+                    RANGE_NOT_READ,
+                    _as_claim_number(first) or 0,
+                )
+                unplaced.setdefault(said, None)
+            if not numbers.numbers:
+                continue
             claims = out.setdefault(name, {})
-            for written in digits:
+            for written in numbers.numbers:
                 stripped = written.lstrip("0")
-                if not stripped or len(stripped) > 6:
+                if not stripped or len(stripped) > _CLAIM_DIGITS:
                     continue
                 rows = claims.setdefault(int(stripped), [])
                 if (number, mark.blocking) not in rows:
                     rows.append((number, mark.blocking))
-    return out
+        # A "claim(s) N" no reference above read: no analyst is named for it.
+        candidates = tuple(field_names) if field_names else tuple(names)
+        for reference in _CLAIM_REFERENCE.finditer(text):
+            at = reference.start(1)
+            if any(start <= at < end for start, end in read):
+                continue
+            numbers = read_claim_numbers(text, at)
+            if numbers is None:
+                continue
+            read.append((at, numbers.end))
+            head = reference.group(0)[: at - reference.start()].lower()
+            if head.startswith("claims") and len(numbers.numbers) == 1 and not numbers.unplaced:
+                continue
+            counted = [n for n in map(_as_claim_number, numbers.numbers) if n is not None]
+            rendered = [_range_rendering(first, last) for first, last in numbers.unplaced]
+            if counted:
+                kind = "claim " if len(counted) == 1 else "claims "
+                rendered.insert(0, kind + _claim_spans(counted))
+            if not rendered or not candidates:
+                continue
+            lows = [*counted, *(n for f, _l in numbers.unplaced if (n := _as_claim_number(f)))]
+            said = UnplacedClaims(
+                number,
+                mark.blocking,
+                candidates,
+                "; ".join(rendered),
+                NO_ANALYST_NAMED,
+                min(lows) if lows else 0,
+            )
+            unplaced.setdefault(said, None)
+    return ClaimReferences(named=out, unplaced=tuple(unplaced))
+
+
+def claims_named_by_lines(
+    lines: Sequence[str], participants: Sequence[str]
+) -> dict[str, dict[int, list[tuple[int, bool]]]]:
+    """``{analyst: {claim number: [(line number, blocking), ...]}}`` for the lines given.
+
+    The claims :func:`read_claim_references` reads each line to name; the
+    references that name none are left out here. Linear in the lines.
+    """
+    return read_claim_references(lines, participants).named
