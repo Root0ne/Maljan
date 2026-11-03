@@ -165,9 +165,9 @@ __all__ = [
 # by is absorbed several times over by the reply reserve and the share below.
 #
 # Deliberately not the four characters per token the token ledger's estimate
-# and the salvage budget use. Those measure English prose. What this bounds is
-# JSON from a tool server and decompiled C, and both tokenise denser than prose
-# — which is exactly what the measurement above says.
+# uses. That measures English prose. What this bounds, and the salvage budget
+# sized from it too, is JSON from a tool server and decompiled C, and both
+# tokenise denser than prose — which is exactly what the measurement above says.
 CHARS_PER_TOKEN = 3
 
 

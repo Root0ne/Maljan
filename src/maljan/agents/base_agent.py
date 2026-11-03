@@ -264,12 +264,12 @@ _SYNTHESIS_DIRECTIVE = (
 # derived from it instead; where it is not, this is what holds.
 _SYNTHESIS_MIN_CHARS = 16_000
 
-# How much of the window the salvage conversation may fill, and how many
-# characters a token is worth. Four characters per token is the usual English
-# ratio, and two fifths of the window leaves room for the system prompt this
-# does not measure and for the answer the model still has to generate.
-_SYNTHESIS_CONTEXT_SHARE = 0.4
-_CHARS_PER_TOKEN = 4
+# Characters a token where ``max_token_limit`` is set and the tokenizer that
+# measures the input cannot be loaded (``_input_room_chars``): the prose
+# estimate this fallback has always used, kept as it was. It sizes an
+# operator's own token limit, not the window's room, which is counted at the
+# context budget's ``CHARS_PER_TOKEN``.
+_TOKENIZER_UNAVAILABLE_CHARS_PER_TOKEN = 4
 
 
 def _model_context_tokens(cfg: Any, agent_name: str) -> int:
@@ -308,7 +308,16 @@ def _model_context_tokens(cfg: Any, agent_name: str) -> int:
         return 0
 
 
-def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) -> int:
+def _citable_sentence(visible: list[str]) -> str:
+    """What the salvage's directive says of the evidence ids still in front of the model."""
+    if not visible:
+        return "Cite only evidence ids that appear above."
+    return "The evidence still in front of you is " + ", ".join(visible) + ". Cite only these ids."
+
+
+def synthesis_budget_chars(
+    cfg: Any, agent_name: str, window_tokens: int = 0, *, refused: bool = False
+) -> int:
     """How many characters of conversation the salvage may re-send.
 
     ``window_tokens`` is the window the job's context budget counts on — the
@@ -318,16 +327,71 @@ def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) ->
     full window at close to the conversation the server had just refused, and
     a fallback model with a smaller window must still be able to read it.
     """
+    return synthesis_budget(cfg, agent_name, window_tokens, refused=refused)[0]
+
+
+def synthesis_budget(
+    cfg: Any, agent_name: str, window_tokens: int = 0, *, refused: bool = False
+) -> tuple[int, str]:
+    """``(characters, how)`` of conversation the salvage may re-send.
+
+    Derived from the window by the context budget's own rules, at the
+    characters a token it counts in (``CHARS_PER_TOKEN``), rather than from a
+    share and a ratio of its own. The reply reserve the one rule sets
+    (``reply_reserve_tokens`` over the deployment's generation cap) is kept
+    back for the answer, as the loop's own room keeps it
+    (``ContextBudget.tool_budget_chars``), and never less than the quarter the
+    rule keeps uncapped: an operator's smaller generation cap shortens the
+    answer and does not widen the conversation re-sent.
+
+    ``refused`` is a loop the server ended by refusing its conversation as
+    over the window. Its salvage keeps a further quarter of the window
+    (``REPLY_RESERVE_DIVISOR``) back for what the character measure got wrong:
+    the server has just shown that this conversation tokenises denser than
+    its characters say, and a trimmed one re-sent at the same measure would
+    be refused again. A loop a step, time or repeat cap ended was sending a
+    conversation the server had just accepted, and its salvage keeps an eighth
+    of the window: the tool answers appended after the server's last count
+    were never counted, and a dense tail among them (hex, base64) tokenises
+    well under the measure's ratio. The tool definitions and the question a
+    salvage sends beside the turns are its caller's to take off, as the loop's
+    own measure charges them. No window to derive from is the floor, and the
+    floor is stated as such; a known window too small for the floor holds it
+    to the window's room before the reply.
+    """
+    from maljan.llm.context_window import (
+        REPLY_RESERVE_DIVISOR,
+        generation_reserve,
+        reply_reserve_tokens,
+    )
+
     windows = [
         t for t in (int(window_tokens or 0), _model_context_tokens(cfg, agent_name)) if t > 0
     ]
     tokens = min(windows) if windows else 0
     if tokens <= 0:
-        return _SYNTHESIS_MIN_CHARS
-    return max(
-        _SYNTHESIS_MIN_CHARS,
-        int(chars_for_tokens(tokens, _CHARS_PER_TOKEN) * _SYNTHESIS_CONTEXT_SHARE),
+        return _SYNTHESIS_MIN_CHARS, (
+            f"{_SYNTHESIS_MIN_CHARS} characters — the floor: no window was declared or learned"
+        )
+    reply = reply_reserve_tokens(tokens, generation_reserve(cfg))
+    quarter = tokens // REPLY_RESERVE_DIVISOR
+    kept = max(reply, quarter)
+    margin = quarter if refused else tokens // (2 * REPLY_RESERVE_DIVISOR)
+    derived = chars_for_tokens(max(0, tokens - kept - margin))
+    capped = f" (the {reply}-token generation cap does not shrink it)" if reply < kept else ""
+    server = "refused the conversation as over the window" if refused else "accepted it"
+    how = (
+        f"the {tokens}-token window less {kept} tokens of reply room{capped} and {margin} "
+        f"for the measure's error, the server having {server}, "
+        f"at {CHARS_PER_TOKEN} characters a token"
     )
+    floor = min(_SYNTHESIS_MIN_CHARS, chars_for_tokens(max(0, tokens - kept)))
+    if derived < floor:
+        held = (
+            "" if floor == _SYNTHESIS_MIN_CHARS else ", held to the window's room before the reply"
+        )
+        return floor, f"{floor} characters — the floor{held}, above the {derived} of {how}"
+    return derived, f"{derived} characters — {how}"
 
 
 def salvage_chars_at_pace(
@@ -7651,7 +7715,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # 1,530 s cap, and zero techniques out the other side.
             if time_capped and timeout is not None:
                 self._give_the_final_turn(final_reserve, float(timeout) - elapsed)
-            synthesized = self._force_final_synthesis(msgs, timeout, elapsed)
+            synthesized = self._force_final_synthesis(msgs, timeout, elapsed, refused=window_full)
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
                 content = synthesized
                 msgs = [*msgs, AIMessage(content=synthesized)]
@@ -8280,7 +8344,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         return [entry.to_captured() for entry in self._evidence_entries]
 
     def _force_final_synthesis(
-        self, msgs: list, timeout: float | None, elapsed: float = 0.0
+        self, msgs: list, timeout: float | None, elapsed: float = 0.0, *, refused: bool = False
     ) -> str:
         """Salvage a ReAct loop that hit its step budget without answering.
 
@@ -8341,15 +8405,29 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             return ""
 
-        # The earlier run-state blocks go out with the kept turns, outside the
-        # messages the trim measures, so the window holds them first.
-        window_budget = max(
-            0,
-            synthesis_budget_chars(
-                get_settings(), self.name, counted_window_tokens(self._context_budget())
-            )
-            - self._replayed_run_state_chars(),
+        # The same transcript rule the nudge follows: a tool call whose
+        # arguments never parsed is not sent back to the server.
+        keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
+        sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
+        # The earlier run-state blocks go out with the kept turns, the loop's
+        # tool definitions where the turns are kept whole, and the directive
+        # after them, all outside the messages the trim measures, so the window
+        # holds them first. The directive names the ids the trim leaves, so it
+        # is charged at the ids of the whole conversation, which it never exceeds.
+        room, room_how = synthesis_budget(
+            get_settings(),
+            self.name,
+            counted_window_tokens(self._context_budget()),
+            refused=refused,
         )
+        beside = (
+            self._replayed_run_state_chars()
+            + (self._definitions_sent() if keeps_turns else 0)
+            + len(_SYNTHESIS_DIRECTIVE)
+            + len(_citable_sentence(ledger_ids_in(sendable)))
+        )
+        window_budget = max(0, room - beside)
+        room_how += f", less {beside} characters sent beside the turns"
         # What the time left can hold at this model's measured pace, when both
         # of its rates are known; the window's bound applies either way.
         paced = (
@@ -8363,10 +8441,6 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
         )
         budget = window_budget if paced is None else min(window_budget, paced)
-        # The same transcript rule the nudge follows: a tool call whose
-        # arguments never parsed is not sent back to the server.
-        keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
-        sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
         conversation = _chars_of(sendable)
         framing = _chars_of(_framing_of(sendable))
         rates = self._rates_sentence(generation_rate, prompt_rate)
@@ -8391,12 +8465,12 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         trimmed = _trim_for_synthesis(sendable, budget)
         sent = _chars_of(trimmed)
-        if len(trimmed) < len(msgs):
+        if len(trimmed) < len(sendable):
             self.logger.warning(
                 "%s forced synthesis: trimmed %d of %d messages to fit %d chars%s.",
                 self.name,
-                len(msgs) - len(trimmed),
-                len(msgs),
+                len(sendable) - len(trimmed),
+                len(sendable),
                 budget,
                 f" ({remaining:.0f}s left at {rates})" if paced is not None else "",
             )
@@ -8405,11 +8479,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # not be any more, and an analyst citing one it can no longer read is
         # how "referenced but not displayed" got into a report.
         visible = ledger_ids_in(trimmed)
-        citable = (
-            "The evidence still in front of you is " + ", ".join(visible) + ". Cite only these ids."
-            if visible
-            else "Cite only evidence ids that appear above."
-        )
+        citable = _citable_sentence(visible)
         directive = HumanMessage(content=_SYNTHESIS_DIRECTIVE + citable)
         record = {
             "seconds_left": remaining,
@@ -8417,7 +8487,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             "sent_chars": sent,
             "budget_chars": budget,
             "sized_by": "window" if paced is None or window_budget <= paced else "pace",
+            "window_budget": room_how,
         }
+        if len(trimmed) < len(sendable):
+            record["messages_dropped"] = len(sendable) - len(trimmed)
         # Where the turns are kept whole, the loop's own system turn and tools
         # go with the salvage, the tools withheld (``tool_choice`` none), so the
         # history it re-sends is the loop's and its thinking stays valid.
@@ -12606,7 +12679,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 tokens = len(tiktoken.get_encoding("cl100k_base").encode(text)) or 1
                 per_token = max(1.0, len(text) / tokens)
             except (KeyError, OSError, ValueError):
-                per_token = float(_CHARS_PER_TOKEN)
+                per_token = float(_TOKENIZER_UNAVAILABLE_CHARS_PER_TOKEN)
             return max(0, int(configured * per_token) - INPUT_NOTICE_ROOM)
         from maljan.llm.context_window import ANSWER_SHARE, ContextBudget
 

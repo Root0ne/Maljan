@@ -1139,10 +1139,18 @@ ends with `no_room` on the same strict full-window answer once it has gathered
 something. Its reasoning is then asked for once, with no tools, from what it
 gathered, and mediation reads the verdict from that; a judge loop that fails
 before gathering anything fails as before. Both salvages re-send the
-conversation trimmed to two fifths of the window the budget counts on — the
-smaller of the declared and the probed one, so a `context_size` left larger
-than the served window cannot size a salvage close to the request the server
-just refused — and each gets only what is left of its loop's time. An
+conversation trimmed to the loop's own room less a margin: the window the
+budget counts on less the reply reserve (never less than a quarter of the
+window, whatever the generation cap), less an eighth of the window for what the
+character measure gets wrong (the tool answers after the server's last count
+were never counted), at the budget's characters a token, less the tool
+definitions and the salvage's own question sent beside the turns. After the
+server refused the conversation as over the window, the margin is a quarter of
+the window. That window is the smaller of the declared
+and the probed one, so a `context_size` left larger than the served window
+cannot size a salvage close to the request the server just refused; how the
+room was sized and how many messages were dropped are on the loop's budget
+record. Each gets only what is left of its loop's time. An
 analyst's salvage is also held to what that time can read and answer at the
 model's measured rates, and is not sent when not even the task fits (see the
 time cap in [architecture](/architecture/)).

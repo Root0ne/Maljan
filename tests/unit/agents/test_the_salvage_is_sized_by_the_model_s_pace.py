@@ -24,6 +24,7 @@ from maljan.agents.base_agent import (
     FINAL_ANSWER_EXPECTED_TOKENS,
     BaseAnalyst,
     salvage_chars_at_pace,
+    synthesis_budget,
 )
 from maljan.llm.generation_rate import (
     LLAMA_CPP_PROMPT_SOURCE,
@@ -163,15 +164,16 @@ def _salvage(agent: _Analyst) -> dict[str, Any]:
     return row["salvage"]
 
 
-# What the window allowed on that run: 32,768 tokens, four characters a token,
-# two fifths of it (``synthesis_budget_chars``).
+# What the window allowed on that run, pinned at the figure the run sized it
+# at, so this file measures the pace and not the window (``synthesis_budget``).
 WINDOW_CHARS = 52_428
 
 
 @pytest.fixture(autouse=True)
 def _the_run_s_window(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "maljan.agents.base_agent.synthesis_budget_chars", lambda *a, **k: WINDOW_CHARS
+        "maljan.agents.base_agent.synthesis_budget",
+        lambda *a, **k: (WINDOW_CHARS, f"{WINDOW_CHARS} characters — pinned"),
     )
 
 
@@ -228,6 +230,83 @@ class TestTheSalvageAtThisPace:
 
         record = _salvage(agent)
         assert (record["outcome"], record["detail"]) == ("failed", "TimeoutError")
+
+
+class TestTheWindowSizesItAndTheRecordSaysHow:
+    def test_a_cut_is_on_the_record_with_how_the_room_was_derived(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.config import Settings
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        settings = Settings(_env_file=None, llm={"openai": {"context_size": 32_768}})
+        monkeypatch.setattr("maljan.agents.base_agent.synthesis_budget", synthesis_budget)
+        monkeypatch.setattr("maljan.agents.base_agent.get_settings", lambda: settings)
+        agent = _Analyst(_Rates(None, None))
+        conversation = _conversation(9_000, 19, 2_500)
+
+        agent._force_final_synthesis(conversation, 1500, 1500 - SECONDS_LEFT, refused=True)
+
+        record = _salvage(agent)
+        # The window less its quarter of reply room and its quarter for the
+        # measure's error, at the context budget's characters a token, less the
+        # directive sent after the turns.
+        directive = _directive_chars(conversation)
+        room = (32_768 - 8_192 - 8_192) * CHARS_PER_TOKEN - directive
+        assert record["sized_by"] == "window"
+        assert record["budget_chars"] == room
+        assert record["window_budget"] == (
+            synthesis_budget(settings, "static", refused=True)[1]
+            + f", less {directive} characters sent beside the turns"
+        )
+        assert record["sent_chars"] <= room < record["conversation_chars"]
+        assert record["messages_dropped"] >= 1
+
+    @pytest.mark.parametrize(
+        ("windows", "refused", "kept_whole"),
+        [(1.55, True, False), (1.7, False, True), (2.0, False, False)],
+        ids=["window-full-1.55W", "step-cap-1.7W", "step-cap-2.0W"],
+    )
+    def test_what_is_trimmed_depends_on_whether_the_server_refused(
+        self, monkeypatch: pytest.MonkeyPatch, windows: float, refused: bool, kept_whole: bool
+    ) -> None:
+        """A conversation of so many windows' worth of characters.
+
+        After the server refused it as over the window it is trimmed to at most
+        1.5 windows' worth less the directive. At the step cap the server had
+        just accepted it: 1.7 windows' worth, sent whole before, is sent whole,
+        and 2.0 is trimmed to at most 1.875 windows' worth less the directive.
+        """
+        from maljan.core.config import Settings
+
+        window = 32_768
+        settings = Settings(_env_file=None, llm={"openai": {"context_size": window}})
+        monkeypatch.setattr("maljan.agents.base_agent.synthesis_budget", synthesis_budget)
+        monkeypatch.setattr("maljan.agents.base_agent.get_settings", lambda: settings)
+        agent = _Analyst(_Rates(None, None))
+        each = int(windows * window - 1_100) // 20 - len("tool-00-")
+        conversation = _conversation(1_000, 20, each)
+        size = sum(len(str(m.content)) for m in conversation)
+        assert abs(size - windows * window) < 0.01 * window
+
+        agent._force_final_synthesis(conversation, 1500, 1500 - SECONDS_LEFT, refused=refused)
+
+        record = _salvage(agent)
+        if kept_whole:
+            assert record["sent_chars"] == record["conversation_chars"]
+            assert "messages_dropped" not in record
+        else:
+            share = 1.5 if refused else 1.875
+            limit = share * window - _directive_chars(conversation)
+            assert record["sent_chars"] <= limit < record["conversation_chars"]
+            assert record["messages_dropped"] >= 1
+
+
+def _directive_chars(conversation: list) -> int:
+    """What the salvage's directive weighs at the ids of the whole conversation."""
+    from maljan.agents.base_agent import _SYNTHESIS_DIRECTIVE, _citable_sentence, ledger_ids_in
+
+    return len(_SYNTHESIS_DIRECTIVE) + len(_citable_sentence(ledger_ids_in(conversation)))
 
 
 class TestTheSummaryCarriesIt:

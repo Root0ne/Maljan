@@ -468,7 +468,7 @@ class TestAQuestionAfterAUserTurn:
         ]
         with (
             patch.object(judge_agent, "_trim_for_synthesis", lambda msgs, _budget: msgs[:2]),
-            patch.object(judge_agent, "synthesis_budget_chars", return_value=1),
+            patch.object(judge_agent, "synthesis_budget", return_value=(1, "1 character")),
         ):
             asyncio.run(judge._reasoning_from_what_was_gathered(gathered, 10.0, None))
         (request,) = model.seen

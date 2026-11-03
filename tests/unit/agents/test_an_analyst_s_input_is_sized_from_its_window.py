@@ -91,6 +91,20 @@ class TestAnOperatorsLimit:
     def test_the_default_is_derived(self) -> None:
         assert Settings(_env_file=None).max_token_limit is None
 
+    def test_a_tokenizer_that_cannot_load_counts_four_characters_a_token(self) -> None:
+        # The estimate this fallback has always used: the operator's limit in
+        # characters is not shortened by the context budget's denser ratio.
+        from maljan.agents.base_agent import INPUT_NOTICE_ROOM
+
+        cfg = Settings(_env_file=None, max_token_limit=1_000)
+        with (
+            patch("maljan.agents.base_agent.get_settings", lambda: cfg),
+            patch("maljan.agents.base_agent.tiktoken.get_encoding", side_effect=OSError("gone")),
+        ):
+            room = _analyst(1_000_000)._input_room_chars("word " * 10)
+
+        assert room == 1_000 * 4 - INPUT_NOTICE_ROOM
+
 
 def _revised_input(
     agent: _Analyst, data: str, own: str, peers: dict[str, str], feedback: str

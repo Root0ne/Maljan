@@ -251,6 +251,11 @@ class TestAServerThatSaysTheWindowIsFull:
 
         records = agent.drain_budget_records()
         assert [row["cap"] for row in records] == ["no_room"]
+        # Sized as a salvage after a refusal: the margin for the measure's error is kept.
+        assert (
+            "the server having refused the conversation as over the window"
+            in (records[0]["salvage"]["window_budget"])
+        )
         ended = [data for kind, data in container.events if kind == "stage_ended_at_cap"]
         assert [data["cap"] for data in ended] == ["no_room"]
         assert "window" in ended[0]["detail"]
@@ -403,14 +408,20 @@ class TestTheSalvageIsSizedFromTheCountedWindow:
         cfg.llm.provider = "openai"
         cfg.llm.agents = {}
         cfg.llm.openai.context_size = 65_536
+        cfg.llm.expert_max_tokens = REPLY
+        cfg.llm.judge_max_tokens = 0
         budget = _budget()  # probed 32,768
 
         declared_only = synthesis_budget_chars(cfg, "static")
         counted = synthesis_budget_chars(cfg, "static", counted_window_tokens(budget))
+        refused = synthesis_budget_chars(cfg, "static", counted_window_tokens(budget), refused=True)
 
         assert declared_only > budget.tool_budget_chars(), "the stale declaration overshoots"
-        assert counted == int(WINDOW * 4 * 0.4)
-        assert counted < budget.tool_budget_chars()
+        # The loop's own room, from the same window, reserve and ratio, less an
+        # eighth of the window for what the character measure gets wrong, and a
+        # quarter after the server refused the conversation.
+        assert counted == budget.tool_budget_chars() - cw.chars_for_tokens(WINDOW // 8)
+        assert refused == budget.tool_budget_chars() - cw.chars_for_tokens(WINDOW // 4)
 
     def test_a_budget_that_derives_nothing_leaves_the_declaration_in_charge(self) -> None:
         from maljan.agents.base_agent import counted_window_tokens

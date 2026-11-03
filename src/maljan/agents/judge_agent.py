@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from maljan.agents.base_agent import (
     TOOL_LOOP_TURN_CALL,
+    BaseAnalyst,
     BudgetMeter,
     LoopBudget,
     OfferReadAgainFirst,
@@ -65,7 +66,7 @@ from maljan.agents.base_agent import (
     request_chars,
     run_on_agent_loop,
     steps_used,
-    synthesis_budget_chars,
+    synthesis_budget,
 )
 from maljan.agents.judge_postprocess import (
     ASSESSMENT_READ_LOOSELY_CODE,
@@ -2338,6 +2339,9 @@ class JudgeAgent(BudgetMeter):
         # What the tool definitions of the current loop weigh with each
         # request, for the budget record and the ticks; none before a loop.
         self._tool_definition_chars: int = 0
+        # What the last loop's reasoning salvage sent and how it was sized,
+        # put on that loop's budget record once the record is written.
+        self._salvage_row: dict[str, Any] | None = None
         # The model message the last tool loop's text was read from, the
         # bound its call was sent with, and how a loop with no final answer
         # of its own ended.
@@ -3176,6 +3180,7 @@ class JudgeAgent(BudgetMeter):
                     settings,
                     counted_window_tokens(room),
                     ended_why=why,
+                    refused=ended["window_full"],
                 )
             # The graph's own sentence at its step limit is not the judge's
             # reasoning, and what reads the reasoning next is a model. The
@@ -3231,6 +3236,9 @@ class JudgeAgent(BudgetMeter):
                 "repeats": f"{repeats.served_repeats} repeated tool call(s)",
             }
             self._record_budget(budget, turns, cap, detail=details.get(cap or "", ""))
+            salvage, self._salvage_row = self._salvage_row, None
+            if salvage is not None:
+                BaseAnalyst._note_on_last_loop(self, "salvage", salvage)  # type: ignore[arg-type]
             self._budget_tick(budget, turns, final=True, ledger_entries=len(recorder.entries))
             # The loop is over, so its size stops binding every later cap.
             if isinstance(room, ContextBudget):
@@ -3311,6 +3319,7 @@ class JudgeAgent(BudgetMeter):
         window_tokens: int = 0,
         *,
         ended_why: str = "",
+        refused: bool = False,
     ) -> str:
         """The judge's reasoning, asked for once from what its loop gathered.
 
@@ -3322,6 +3331,11 @@ class JudgeAgent(BudgetMeter):
         """
         if timeout is not None and timeout < 1.0:
             self.logger.warning("JudgeAgent reasoning salvage skipped: no time left.")
+            self._salvage_row = {
+                "seconds_left": timeout,
+                "outcome": "not sent",
+                "detail": "no time left",
+            }
             self._last_loop_ending = (
                 f"the tool loop ended ({ended_why or 'before its final answer'}) with no time "
                 "left to write its reasoning"
@@ -3332,9 +3346,30 @@ class JudgeAgent(BudgetMeter):
         # unparsed call as not run.
         keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
         sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
-        trimmed = _trim_for_synthesis(
-            sendable, synthesis_budget_chars(settings, "judge", window_tokens)
-        )
+        # The loop's tool definitions go with kept turns, and the question after
+        # them, outside what the trim measures.
+        room, room_how = synthesis_budget(settings, "judge", window_tokens, refused=refused)
+        beside = (self._definitions_sent() if keeps_turns else 0) + len(MEDIATION_SALVAGE_QUESTION)
+        room_how += f", less {beside} characters sent beside the turns"
+        fits = max(0, room - beside)
+        trimmed = _trim_for_synthesis(sendable, fits)
+        dropped = len(sendable) - len(trimmed)
+        row: dict[str, Any] = {
+            "conversation_chars": sum(_message_chars(m) for m in sendable),
+            "sent_chars": sum(_message_chars(m) for m in trimmed),
+            "budget_chars": fits,
+            "sized_by": "window",
+            "window_budget": room_how,
+        }
+        self._salvage_row = row
+        if dropped:
+            row["messages_dropped"] = dropped
+            self.logger.warning(
+                "JudgeAgent reasoning salvage: trimmed %d of %d messages to fit %d chars.",
+                dropped,
+                len(sendable),
+                fits,
+            )
         directive = HumanMessage(content=MEDIATION_SALVAGE_QUESTION)
         from maljan.llm.context_window import output_bound_kwargs
 
@@ -3344,6 +3379,7 @@ class JudgeAgent(BudgetMeter):
             bound = self._spend_admits("salvage", asked, slot=salvage_slot, deadline_s=timeout)
         except SpendCeilingStop as stop:
             self.logger.warning("JudgeAgent reasoning salvage not made: %s.", stop)
+            row["outcome"] = "not sent"
             self._last_loop_ending = (
                 f"the tool loop ended ({ended_why or 'before its final answer'}) and the call "
                 "to write its reasoning was not admitted under the job's spend ceiling"
@@ -3360,6 +3396,7 @@ class JudgeAgent(BudgetMeter):
             self._record_usage(response, call="reasoning salvage")
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves no reasoning
             self.logger.warning("JudgeAgent reasoning salvage failed (%s).", type(exc).__name__)
+            row.update(outcome="failed", detail=type(exc).__name__)
             self._last_loop_ending = (
                 f"the tool loop ended ({ended_why or 'before its final answer'}) and the call "
                 f"to write its reasoning failed ({type(exc).__name__})"
@@ -3367,6 +3404,7 @@ class JudgeAgent(BudgetMeter):
             return ""
         finally:
             self._spend_release(salvage_slot)
+        row["outcome"] = "answered"
         self._last_answer = response
         self._last_answer_cap = bound if held else None
         text = _answer_text(response)
