@@ -11,8 +11,19 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("next/navigation", () => ({ useParams: () => ({ id: "J1" }) }));
 
 import type { EvidenceSection, MalwareReport, NetworkIOCs, SandboxSignature, StringIOC } from "@/types/malware-report";
+import type { SignatureScale } from "@/lib/severity";
 import { MALWARE_REPORT } from "../../../../e2e/report-fixture";
-import { signatureGroups, techniqueTactics, techniqueUnder, viewKeeps, viewOfHash } from "../behaviourView";
+import {
+  processGroups,
+  seenInText,
+  signatureGroups,
+  SPAN_PROCESSES,
+  techniqueTactics,
+  techniqueUnder,
+  viewKeeps,
+  viewOfHash,
+  type ProcessGroup,
+} from "../behaviourView";
 import { exportCounts, exportState, filterIocs, iocFacets, iocRows, relatedFindings } from "../iocList";
 import { IocDetail } from "../IocBrowser";
 import { hostRows, urlHost } from "../networkView";
@@ -50,6 +61,75 @@ describe("Behaviour: signatures by severity, then technique", () => {
     const [group] = signatureGroups([sig("x", 3)], null);
     expect(group.rung).toBeNull();
     expect(group.techniques[0].rows[0].sandboxText).toBe("unrated, 3");
+  });
+});
+
+describe("Behaviour: signatures per process where the sandbox named the process", () => {
+  const scale = { name: "1–10", max: 10, rungs: ["Informational", "Low", "Low", "Low", "Medium", "Medium", "High", "High", "Critical", "Critical"] } satisfies SignatureScale;
+  const at = (s: SandboxSignature, pids: string[]): SandboxSignature => ({ ...s, pids });
+  const tree = [
+    {
+      pid: 900,
+      ppid: 0,
+      name: "explorer.exe",
+      command_line: "",
+      children: [{ pid: 2100, ppid: 900, name: "invoice.exe", command_line: "", children: [], injected_into: [] }],
+      injected_into: [],
+    },
+  ];
+
+  it("falls back to the severity grouping when no signature names a process", () => {
+    expect(processGroups([sig("a", 8), sig("b", 2)], scale, tree)).toBeNull();
+  });
+
+  it("groups per process in the tree's order, unlisted pids after, signatures with none last", () => {
+    const groups = processGroups(
+      [at(sig("inject", 8, ["T1055"]), ["2100", "4000"]), sig("odd", 3), at(sig("enum", 2), ["900"]), at(sig("low", 2), ["2100"])],
+      scale,
+      tree,
+    )!;
+    const label = (g: ProcessGroup) => (g.kind === "process" ? [g.pid, g.name, g.count] : [g.kind, g.count]);
+    expect(groups.map(label)).toEqual([
+      ["900", "explorer.exe", 1],
+      ["2100", "invoice.exe", 2],
+      ["4000", null, 1],
+      ["none", 1],
+    ]);
+    // Each process's hits keep the severity → technique grouping.
+    expect(groups[1].severities.map((s) => s.rung)).toEqual(["High", "Low"]);
+    expect(groups[1].severities[0].techniques[0].technique).toBe("T1055");
+  });
+
+  it("lists a signature seen in more than three processes once, under the count it spans", () => {
+    const wide = at(sig("enumerates", 2), ["1", "2", "3", "4", "5"]);
+    const cut = { ...at(sig("injects", 8), ["7", "8"]), pids_total: 40 };
+    const three = at(sig("three", 5), ["900", "2100", "4000"]);
+    const groups = processGroups([wide, cut, three], scale, tree)!;
+    expect(groups.map((g) => (g.kind === "spans" ? ["spans", g.processes, g.count] : [g.kind, g.count]))).toEqual([
+      ["process", 1],
+      ["process", 1],
+      ["process", 1],
+      ["spans", 40, 1],
+      ["spans", 5, 1],
+    ]);
+    expect(SPAN_PROCESSES).toBe(3);
+  });
+
+  it("orders pids the tree does not list by their digits, never by a rounded number or by text", () => {
+    const big = "90071992547409931";
+    const groups = processGroups(
+      [at(sig("a", 2), ["10"]), at(sig("b", 2), ["9"]), at(sig("c", 2), [big]), at(sig("d", 2), ["90071992547409930"])],
+      scale,
+      [],
+    )!;
+    expect(groups.map((g) => (g.kind === "process" ? g.pid : g.kind))).toEqual(["9", "10", "90071992547409930", big]);
+  });
+
+  it("says the pids a hit was seen in, singular or plural, and when its list was cut", () => {
+    expect(seenInText(sig("x", 1))).toBe("");
+    expect(seenInText(at(sig("x", 1), ["4"]))).toBe("Seen in pid 4");
+    expect(seenInText(at(sig("x", 1), ["4", "9"]))).toBe("Seen in pids 4, 9");
+    expect(seenInText({ ...at(sig("x", 1), ["4"]), pids_total: 12 })).toBe("Seen in pids 4 (1 of 12 listed)");
   });
 });
 

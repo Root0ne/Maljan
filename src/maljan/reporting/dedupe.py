@@ -28,6 +28,7 @@ is a fact removed from a report with nothing saying it happened.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from maljan.schemas.stix_pattern import Comparison, canonical_pattern, read_comparisons
@@ -473,6 +474,19 @@ def _distinct_level(nodes: list[Any]) -> list[Any]:
 def signature_identity(signature: Any) -> tuple[Any, ...]:
     """A sandbox signature row by everything it states; the same row read twice is one."""
     return (
+        *signature_identity_without_processes(signature),
+        tuple(getattr(signature, "pids", None) or ()),
+        getattr(signature, "pids_total", 0) or 0,
+    )
+
+
+def signature_identity_without_processes(signature: Any) -> tuple[Any, ...]:
+    """A sandbox signature row by what it states but the processes it was seen in.
+
+    What a surface that does not print the processes tells two rows apart by:
+    two rows that differ only in their pids read there as one.
+    """
+    return (
         str(getattr(signature, "name", "") or ""),
         str(getattr(signature, "description", "") or ""),
         getattr(signature, "severity", None),
@@ -481,12 +495,14 @@ def signature_identity(signature: Any) -> tuple[Any, ...]:
     )
 
 
-def distinct_signatures(signatures: list[Any]) -> list[Any]:
-    """``signatures`` with each row once, at its first place."""
+def distinct_signatures(
+    signatures: list[Any], identity: Callable[[Any], tuple[Any, ...]] = signature_identity
+) -> list[Any]:
+    """``signatures`` with each row once by ``identity``, at its first place."""
     seen: set[tuple[Any, ...]] = set()
     out: list[Any] = []
     for signature in signatures:
-        key = signature_identity(signature)
+        key = identity(signature)
         if key not in seen:
             seen.add(key)
             out.append(signature)

@@ -6132,6 +6132,9 @@
         "confidence": 100,
         "description": "Checks available memory",
         "name": "antivm_checks_available_memory",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6139,6 +6142,9 @@
         "confidence": 100,
         "description": "Queries computer hostname",
         "name": "queries_computer_name",
+        "pids": [
+          "6128"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6146,6 +6152,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "6128"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6160,6 +6169,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "6128"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6167,6 +6179,9 @@
         "confidence": 100,
         "description": "Uses Windows APIs to generate a cryptographic key",
         "name": "generates_crypto_key",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6181,6 +6196,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6188,6 +6206,9 @@
         "confidence": 80,
         "description": "Registers a vectored exception handler (VEH), possibly to hijack execution flow",
         "name": "registers_vectored_exception_handler",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6195,6 +6216,9 @@
         "confidence": 100,
         "description": "Allocated memory and changed its protection to PAGE_NOACCESS, may be used to hide payloads from memory scanners or to trigger an access violation for exception-driven execution",
         "name": "allocated_memory_protection_noaccess",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6209,6 +6233,9 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6216,6 +6243,9 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6223,6 +6253,9 @@
         "confidence": 100,
         "description": "Writes to the memory another process",
         "name": "injection_write_process",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6230,6 +6263,9 @@
         "confidence": 100,
         "description": "Reads from the memory of another process",
         "name": "reads_memory_remote_process",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6237,6 +6273,9 @@
         "confidence": 100,
         "description": "Terminates another process",
         "name": "terminates_remote_process",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6268,6 +6307,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6275,6 +6317,9 @@
         "confidence": 40,
         "description": "Enumerated Anti-Malware Scan Interface (AMSI) providers, a potential precursor to AMSI bypass or EDR unhooking",
         "name": "amsi_enumeration",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6282,6 +6327,9 @@
         "confidence": 50,
         "description": "Registered a Vectored Exception Handler (VEH) and intentionally triggered exceptions or manipulated thread contexts. May be used to hijack the OS error dispatcher to execute a payload or shellcode",
         "name": "exception_driven_execution",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6296,6 +6344,9 @@
         "confidence": 100,
         "description": "Writes an executable to the memory of another process",
         "name": "injection_write_exe_process",
+        "pids": [
+          "1820"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6303,6 +6354,10 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "6128",
+          "1820"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6310,6 +6365,9 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "6128"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6317,6 +6375,9 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "6128"
+        ],
         "references": [],
         "severity": 3
       },

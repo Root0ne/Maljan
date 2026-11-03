@@ -2698,7 +2698,7 @@ ANNOTATIONS.update(
         "sandbox.rest.mapping.signatures": _rest(
             "Mapping: signatures",
             "JSONPath to the signature hits; each match supplies name, description, "
-            "severity and ttps.",
+            "severity, ttps and pids (one process id or a list).",
             generic_only=True,
         ),
         "sandbox.rest.mapping.dns": _rest(

@@ -64,6 +64,7 @@ from maljan.reporting.models import (
     StringIOC,
 )
 from maljan.schemas.evidence import build_entry, format_entry_id
+from maljan.schemas.sandbox_document import signature_pids
 from maljan.schemas.sandbox_report import (
     FLOW_PROCESS_KEY,
     LINEAGE_DISPUTED_KEY,
@@ -647,6 +648,12 @@ def _not_held(rows: list[dict[str, Any]], held: set[str]) -> list[dict[str, Any]
     return kept
 
 
+def _cut_total(value: Any, listed: int) -> int:
+    """The count of pids a row says it was cut from, or 0 where it lists them all."""
+    total = value if isinstance(value, int) and not isinstance(value, bool) else 0
+    return total if total > listed else 0
+
+
 def _pids_of(value: Any) -> list[str]:
     """The pids a sandbox tool's row names, as text, once each; ``[]`` for anything else."""
     if not isinstance(value, list):
@@ -806,6 +813,12 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
                     # The ids the sandbox tags the signature with, under the
                     # key the tool writes them (``sandbox_signatures``).
                     technique_ids=technique_ids_in(row.get("technique_ids")),
+                    # The processes the hit was seen in, under the key the
+                    # tool writes them; each a whole number, or not read.
+                    pids=(pids := signature_pids({"pids": row.get("pids")})),
+                    # Where the answer listed the first of them only, their
+                    # count is kept beside them (``SandboxSignature.pids_total``).
+                    pids_total=_cut_total(row.get("pids_total"), len(pids)),
                 )
             )
 

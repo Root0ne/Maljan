@@ -5721,6 +5721,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "1044"
+        ],
         "references": [],
         "severity": 1
       },
@@ -5728,6 +5731,9 @@
         "confidence": 100,
         "description": "A file with an unusual extension was attempted to be loaded as a DLL.",
         "name": "dll_load_uncommon_file_types",
+        "pids": [
+          "2540"
+        ],
         "references": [],
         "severity": 1
       },
@@ -5735,6 +5741,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "1044"
+        ],
         "references": [],
         "severity": 1
       },
@@ -5749,6 +5758,9 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "1044"
+        ],
         "references": [],
         "severity": 2
       },
@@ -5756,6 +5768,9 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "1044"
+        ],
         "references": [],
         "severity": 2
       },
@@ -5798,6 +5813,9 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "1044"
+        ],
         "references": [],
         "severity": 3
       },
@@ -5805,6 +5823,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "1044"
+        ],
         "references": [],
         "severity": 3
       },
@@ -5812,6 +5833,9 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "2540"
+        ],
         "references": [],
         "severity": 3
       },
@@ -5819,6 +5843,9 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun_tasks",
+        "pids": [
+          "2540"
+        ],
         "references": [],
         "severity": 3
       },

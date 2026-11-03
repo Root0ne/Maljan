@@ -74,6 +74,7 @@ from maljan.pipeline.validation import (
     wrong_entry_citations,
 )
 from maljan.reporting import tool_kinds
+from maljan.reporting.dedupe import distinct_signatures, signature_identity_without_processes
 from maljan.reporting.models import (
     DefensiveRecommendation,
     KeyFinding,
@@ -504,7 +505,11 @@ def findings_lines(
     # --- Sandbox signatures ---------------------------------------------
     lines.append("Sandbox signatures:")
     if report.dynamic and report.dynamic.sandbox_signatures:
-        for sig in report.dynamic.sandbox_signatures:
+        # One line a signature: the processes it was seen in are not printed,
+        # so two rows that differ only in them are one line here.
+        for sig in distinct_signatures(
+            report.dynamic.sandbox_signatures, signature_identity_without_processes
+        ):
             ttps = ",".join(sig.technique_ids) or "-"
             severity = "unknown" if sig.severity is None else sig.severity
             lines.append(f"  - {quoted_value(sig.name)} (severity {severity}, ATT&CK={ttps})")

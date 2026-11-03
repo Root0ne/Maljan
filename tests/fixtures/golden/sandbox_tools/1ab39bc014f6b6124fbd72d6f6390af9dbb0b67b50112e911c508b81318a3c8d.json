@@ -6269,6 +6269,9 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "4856"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6283,6 +6286,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "3528"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6290,6 +6296,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "3528"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6304,6 +6313,9 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "4856"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6311,6 +6323,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "4856"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6318,6 +6333,9 @@
         "confidence": 100,
         "description": "At least one IP Address, Domain, or File Name was found in a crypto call",
         "name": "encrypted_ioc",
+        "pids": [
+          "4856"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6325,6 +6343,10 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "3528",
+          "4856"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6332,6 +6354,9 @@
         "confidence": 100,
         "description": "Writes to the memory another process",
         "name": "injection_write_process",
+        "pids": [
+          "3528"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6339,6 +6364,9 @@
         "confidence": 100,
         "description": "Enumerates the modules from a process (may be used to locate base addresses in process injection)",
         "name": "createtoolhelp32snapshot_module_enumeration",
+        "pids": [
+          "4856"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6374,6 +6402,9 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "4856"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6388,6 +6419,9 @@
         "confidence": 100,
         "description": "Uses suspicious IO control codes, indicative of disk enumeration or a bootkit/wiper",
         "name": "suspicious_iocontrol_codes",
+        "pids": [
+          "4856"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6395,6 +6429,9 @@
         "confidence": 100,
         "description": "Loads clean ntdll.dll from disk, possibly for syscall/anti-EDR",
         "name": "suspicious_ntdll_disk_load",
+        "pids": [
+          "4856"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6402,6 +6439,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "4856"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6409,6 +6449,9 @@
         "confidence": 100,
         "description": "Queries information on disks, possibly for anti-virtualization",
         "name": "antivm_generic_disk",
+        "pids": [
+          "4856"
+        ],
         "references": [],
         "severity": 3
       }

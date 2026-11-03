@@ -3353,6 +3353,9 @@
         "confidence": 100,
         "description": "Checks available memory",
         "name": "antivm_checks_available_memory",
+        "pids": [
+          "1656"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3360,6 +3363,9 @@
         "confidence": 100,
         "description": "Queries computer hostname",
         "name": "queries_computer_name",
+        "pids": [
+          "1656"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3367,6 +3373,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "1656"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3374,6 +3383,9 @@
         "confidence": 100,
         "description": "Attempts to connect to a dead IP:Port (1 unique times)",
         "name": "dead_connect",
+        "pids": [
+          "1656"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3381,6 +3393,9 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "1656"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3395,6 +3410,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "1656"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3402,6 +3420,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "1656"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3409,6 +3430,9 @@
         "confidence": 100,
         "description": "Anomalous file deletion behavior detected (10+)",
         "name": "anomalous_deletefile",
+        "pids": [
+          "1656"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3444,6 +3468,9 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "1656"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3451,6 +3478,9 @@
         "confidence": 30,
         "description": "Steals private information from local Internet browsers",
         "name": "infostealer_browser",
+        "pids": [
+          "1656"
+        ],
         "references": [],
         "severity": 3
       },

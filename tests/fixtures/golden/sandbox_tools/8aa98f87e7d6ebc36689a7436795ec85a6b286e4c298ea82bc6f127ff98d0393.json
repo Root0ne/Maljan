@@ -3866,6 +3866,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "4768"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3889,6 +3892,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3896,6 +3902,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3910,6 +3919,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "4768"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3917,6 +3929,9 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3924,6 +3939,9 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3931,6 +3949,9 @@
         "confidence": 100,
         "description": "Writes to the memory another process",
         "name": "injection_write_process",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3938,6 +3959,9 @@
         "confidence": 100,
         "description": "Reads from the memory of another process",
         "name": "reads_memory_remote_process",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3976,6 +4000,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3983,6 +4010,9 @@
         "confidence": 100,
         "description": "Writes an executable to the memory of another process",
         "name": "injection_write_exe_process",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3990,6 +4020,9 @@
         "confidence": 100,
         "description": "Attempted to blind ETW telemetry by writing into ntdll!EtwEventWrite from dynamically allocated (unbacked) memory — a technique used by Brute Ratel, Havoc C2, and similar offensive frameworks to suppress event-tracing visibility",
         "name": "unbacked_etw_patching",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3997,6 +4030,9 @@
         "confidence": 100,
         "description": "Manipulated process mitigation policies (CFG/DEP) from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_mitigation_alteration",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4004,6 +4040,9 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4011,6 +4050,9 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4018,6 +4060,9 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4025,6 +4070,9 @@
         "confidence": 100,
         "description": "Created or queried a mutex from dynamically allocated (unbacked) memory, indicative of a fileless payload checking or creating an infection marker",
         "name": "unbacked_mutex_creation",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4032,6 +4080,9 @@
         "confidence": 100,
         "description": "Attempted to spawn a new child process from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_creation",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4039,6 +4090,9 @@
         "confidence": 100,
         "description": "Attempted to enumerate running processes from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_enumeration",
+        "pids": [
+          "3560"
+        ],
         "references": [],
         "severity": 3
       },

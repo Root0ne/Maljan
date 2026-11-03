@@ -2340,6 +2340,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "2308"
+        ],
         "references": [],
         "severity": 1
       },
@@ -2354,6 +2357,9 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "2308"
+        ],
         "references": [],
         "severity": 2
       },
@@ -2361,6 +2367,9 @@
         "confidence": 50,
         "description": "A DLL was loaded from a suspicious directory",
         "name": "dllload_suspicious_directory",
+        "pids": [
+          "2308"
+        ],
         "references": [],
         "severity": 2
       },

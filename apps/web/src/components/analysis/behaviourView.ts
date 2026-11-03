@@ -6,6 +6,8 @@
  * one technique sit together. A signature's severity is the sandbox's own
  * number read on the scale the run recorded for it (`signatureScore`), and is
  * drawn on the console's one n/5 ladder; the sandbox's number stays beside it.
+ * Where the sandbox named the processes it saw the hits in, the reader can
+ * list them per process instead, each process's hits grouped that way.
  *
  * Persistence and defence evasion are views of the tab, not blocks of their
  * own: each keeps the behaviours and the techniques under its ATT&CK tactic.
@@ -15,7 +17,7 @@
  * sandbox, a family or a technique by name.
  */
 
-import type { MalwareReport, SandboxSignature, SeverityRating } from "@/types/malware-report";
+import type { MalwareReport, ProcessNode, SandboxSignature, SeverityRating } from "@/types/malware-report";
 import { SEVERITY_LADDER, signatureScore, type SignatureScale } from "@/lib/severity";
 import { parseTechniques } from "./capabilityHeatmap";
 
@@ -130,4 +132,119 @@ export function signatureGroups(
         .map(([technique, rows]) => ({ technique, rows }));
       return { rung, techniques, count: techniques.reduce((n, t) => n + t.rows.length, 0) };
     });
+}
+
+
+/**
+ * A signature seen in more processes than this is listed once, under the
+ * count of processes it spans, rather than under each: a hit the sandbox saw
+ * in fifty processes says something of the run, not of one process.
+ */
+export const SPAN_PROCESSES = 3;
+
+export type ProcessGroup =
+  | {
+      kind: "process";
+      /** The pid the sandbox saw the hits in. */
+      pid: string;
+      /** The process's name where the run's process tree lists the pid. */
+      name: string | null;
+      severities: SeverityGroup[];
+      count: number;
+    }
+  | {
+      kind: "spans";
+      /** How many processes each signature of the group was seen in. */
+      processes: number;
+      severities: SeverityGroup[];
+      count: number;
+    }
+  | {
+      kind: "none";
+      severities: SeverityGroup[];
+      count: number;
+    };
+
+/** How many processes the sandbox saw one signature's hit in. */
+export function signatureSpan(signature: SandboxSignature): number {
+  return Math.max(new Set(signature.pids ?? []).size, signature.pids_total ?? 0);
+}
+
+/** "Seen in pid 4", "Seen in pids 4, 9", with the count where the list is cut; "" for none. */
+export function seenInText(signature: SandboxSignature): string {
+  const pids = [...new Set(signature.pids ?? [])];
+  if (pids.length === 0) return "";
+  const total = signature.pids_total ?? 0;
+  const more = total > pids.length ? ` (${pids.length} of ${total} listed)` : "";
+  return `Seen in pid${pids.length === 1 && !more ? "" : "s"} ${pids.join(", ")}${more}`;
+}
+
+/** Each pid of the tree, in the order the tree lists its processes, with the process's name. */
+function treeNames(nodes: readonly ProcessNode[], out: Map<string, string> = new Map()): Map<string, string> {
+  for (const node of nodes) {
+    const pid = String(node.pid ?? "");
+    if (pid && !out.has(pid)) out.set(pid, node.name ?? "");
+    treeNames(Array.isArray(node.children) ? node.children : [], out);
+  }
+  return out;
+}
+
+/** Two pids the tree does not list, in numeric order read on their digits (no float rounding). */
+function byDigits(a: string, b: string): number {
+  return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
+}
+
+/**
+ * The signatures per process the sandbox saw them in, each process's hits
+ * grouped as `signatureGroups` groups them; null where no signature names a
+ * process, and the tab then has only its severity view.
+ *
+ * A signature seen in up to {@link SPAN_PROCESSES} processes is listed under
+ * each; one seen in more is listed once, under the count it spans. Processes
+ * come in the order the run's process tree lists them, the ones it does not
+ * list after them by pid, then the wide signatures (widest first), then those
+ * that name no process.
+ */
+export function processGroups(
+  signatures: readonly SandboxSignature[],
+  scale: SignatureScale | null | undefined,
+  tree: readonly ProcessNode[] | null | undefined,
+): ProcessGroup[] | null {
+  if (!signatures.some((s) => (s.pids ?? []).length > 0)) return null;
+  const byPid = new Map<string, SandboxSignature[]>();
+  const bySpan = new Map<number, SandboxSignature[]>();
+  const none: SandboxSignature[] = [];
+  const push = <K>(map: Map<K, SandboxSignature[]>, key: K, s: SandboxSignature) => {
+    const rows = map.get(key) ?? [];
+    rows.push(s);
+    map.set(key, rows);
+  };
+  for (const signature of signatures) {
+    const pids = [...new Set(signature.pids ?? [])];
+    const span = signatureSpan(signature);
+    if (pids.length === 0) none.push(signature);
+    else if (span > SPAN_PROCESSES) push(bySpan, span, signature);
+    else for (const pid of pids) push(byPid, pid, signature);
+  }
+  const names = treeNames(tree ?? []);
+  const listed = new Map([...names.keys()].map((pid, i) => [pid, i]));
+  // Listed processes in the tree's order, then the unlisted ones by pid.
+  const pids = [...byPid.keys()].sort((a, b) => {
+    const ia = listed.get(a);
+    const ib = listed.get(b);
+    if (ia !== undefined && ib !== undefined) return ia - ib;
+    if (ia !== undefined) return -1;
+    if (ib !== undefined) return 1;
+    return byDigits(a, b);
+  });
+  const groups: ProcessGroup[] = pids.map((pid) => {
+    const rows = byPid.get(pid)!;
+    return { kind: "process", pid, name: names.get(pid) || null, severities: signatureGroups(rows, scale), count: rows.length };
+  });
+  for (const span of [...bySpan.keys()].sort((a, b) => b - a)) {
+    const rows = bySpan.get(span)!;
+    groups.push({ kind: "spans", processes: span, severities: signatureGroups(rows, scale), count: rows.length });
+  }
+  if (none.length > 0) groups.push({ kind: "none", severities: signatureGroups(none, scale), count: none.length });
+  return groups;
 }

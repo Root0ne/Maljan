@@ -4376,6 +4376,9 @@
         "confidence": 100,
         "description": "Queries computer hostname",
         "name": "queries_computer_name",
+        "pids": [
+          "2216"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4383,6 +4386,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "2216"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4390,6 +4396,10 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "3612",
+          "2216"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4404,6 +4414,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "3612"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4418,6 +4431,10 @@
         "confidence": 100,
         "description": "Guard pages use detected - possible anti-debugging.",
         "name": "antidebug_guardpages",
+        "pids": [
+          "3612",
+          "2216"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4446,6 +4463,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "3612"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4467,6 +4487,10 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "3612",
+          "2216"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4474,6 +4498,10 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "3612",
+          "2216"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4481,6 +4509,10 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "3612",
+          "2216"
+        ],
         "references": [],
         "severity": 3
       },

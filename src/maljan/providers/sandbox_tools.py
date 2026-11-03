@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 from maljan.core.logger import logger
 from maljan.pipeline.sandbox_status import NOT_RUN, sandbox_status
 from maljan.providers.call_arguments import pick_argument
-from maljan.schemas.sandbox_document import place
+from maljan.schemas.sandbox_document import place, signature_pids
 from maljan.schemas.sandbox_report import LINEAGE_MARKED_STORED
 from maljan.utils.marked_cut import marked_cut
 
@@ -395,6 +395,13 @@ def _signature_techniques(sig: Mapping[str, Any]) -> list[str]:
     return list(found)
 
 
+# The most pids one signature row of an answer lists, as the row's references
+# are held to five: a signature seen in fifty processes is placed by its first
+# ten, and ``pids_total`` counts them all. The report states the count the same
+# way (``SandboxSignature.pids_total``).
+SIGNATURE_PIDS_SHOWN = 10
+
+
 def sandbox_signatures(
     report: dict[str, Any] | None,
     offset: int = 0,
@@ -406,7 +413,8 @@ def sandbox_signatures(
 
     Reported as what they are — one detection engine's opinion — not folded
     into the verdict. A sandbox signature firing is evidence the agent weighs
-    alongside everything else it found.
+    alongside everything else it found. Each row lists at most
+    :data:`SIGNATURE_PIDS_SHOWN` of the processes the hit was seen in.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
@@ -435,6 +443,17 @@ def sandbox_signatures(
             tags = _signature_techniques(sig)
             if tags:
                 row["technique_ids"] = tags
+            # The processes the hit was seen in, by the pids its marks name
+            # (``schemas.sandbox_document.signature_pids``): what places a
+            # behaviour in one process of the tree. Left out where none is
+            # named, so such an answer is as it was. Past the cap the list is
+            # cut and ``pids_total`` says how many there are.
+            pids = signature_pids(sig)
+            if pids:
+                if len(pids) > SIGNATURE_PIDS_SHOWN:
+                    row["pids_total"] = len(pids)
+                    pids = pids[:SIGNATURE_PIDS_SHOWN]
+                row["pids"] = pids
             rows.append(row)
     return {"signatures": rows, "total": len(signatures), **meta}
 

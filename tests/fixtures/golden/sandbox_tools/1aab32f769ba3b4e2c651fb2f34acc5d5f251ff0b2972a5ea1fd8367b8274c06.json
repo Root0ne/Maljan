@@ -8116,6 +8116,9 @@
         "confidence": 100,
         "description": "Checks available memory",
         "name": "antivm_checks_available_memory",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 1
       },
@@ -8123,6 +8126,9 @@
         "confidence": 100,
         "description": "Queries computer hostname",
         "name": "queries_computer_name",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 1
       },
@@ -8130,6 +8136,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 1
       },
@@ -8137,6 +8146,11 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "4384",
+          "5144",
+          "424"
+        ],
         "references": [],
         "severity": 1
       },
@@ -8144,6 +8158,11 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "4384",
+          "2436",
+          "424"
+        ],
         "references": [],
         "severity": 1
       },
@@ -8158,6 +8177,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "4384"
+        ],
         "references": [],
         "severity": 1
       },
@@ -8165,6 +8187,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "4384"
+        ],
         "references": [],
         "severity": 1
       },
@@ -8179,6 +8204,12 @@
         "confidence": 100,
         "description": "A process attempted to delay the analysis task.",
         "name": "antisandbox_sleep",
+        "pids": [
+          "4384",
+          "5144",
+          "2436",
+          "424"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8186,6 +8217,10 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "5144",
+          "2436"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8193,6 +8228,12 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "4384",
+          "5144",
+          "2436",
+          "424"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8200,6 +8241,9 @@
         "confidence": 80,
         "description": "Registers a vectored exception handler (VEH), possibly to hijack execution flow",
         "name": "registers_vectored_exception_handler",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8207,6 +8251,9 @@
         "confidence": 100,
         "description": "Allocated memory and changed its protection to PAGE_NOACCESS, may be used to hide payloads from memory scanners or to trigger an access violation for exception-driven execution",
         "name": "allocated_memory_protection_noaccess",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8214,6 +8261,9 @@
         "confidence": 100,
         "description": "Performs HTTP requests potentially not found in PCAP.",
         "name": "http_request",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8221,6 +8271,11 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "4384",
+          "816",
+          "424"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8228,6 +8283,9 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "816"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8235,6 +8293,10 @@
         "confidence": 100,
         "description": "Reads from the memory of another process",
         "name": "reads_memory_remote_process",
+        "pids": [
+          "4384",
+          "424"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8242,6 +8304,9 @@
         "confidence": 100,
         "description": "Enumerates the modules from a process (may be used to locate base addresses in process injection)",
         "name": "createtoolhelp32snapshot_module_enumeration",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8249,6 +8314,9 @@
         "confidence": 100,
         "description": "Terminates another process",
         "name": "terminates_remote_process",
+        "pids": [
+          "424"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8280,6 +8348,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "4384"
+        ],
         "references": [],
         "severity": 2
       },
@@ -8294,6 +8365,9 @@
         "confidence": 80,
         "description": "Executes WMI queries that can be used for anti-virtualization",
         "name": "antivm_wmi",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8301,6 +8375,9 @@
         "confidence": 40,
         "description": "Enumerated Anti-Malware Scan Interface (AMSI) providers, a potential precursor to AMSI bypass or EDR unhooking",
         "name": "amsi_enumeration",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8308,6 +8385,10 @@
         "confidence": 100,
         "description": "Loads clean ntdll.dll from disk, possibly for syscall/anti-EDR",
         "name": "suspicious_ntdll_disk_load",
+        "pids": [
+          "4384",
+          "424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8315,6 +8396,9 @@
         "confidence": 50,
         "description": "Registered a Vectored Exception Handler (VEH) and intentionally triggered exceptions or manipulated thread contexts. May be used to hijack the OS error dispatcher to execute a payload or shellcode",
         "name": "exception_driven_execution",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8322,6 +8406,9 @@
         "confidence": 100,
         "description": "Manipulated process mitigation policies (CFG/DEP) from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_mitigation_alteration",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8329,6 +8416,11 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "4384",
+          "5144",
+          "424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8336,6 +8428,11 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "4384",
+          "5144",
+          "424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8343,6 +8440,11 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "4384",
+          "5144",
+          "424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8350,6 +8452,9 @@
         "confidence": 100,
         "description": "Created or queried a mutex from dynamically allocated (unbacked) memory, indicative of a fileless payload checking or creating an infection marker",
         "name": "unbacked_mutex_creation",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8357,6 +8462,10 @@
         "confidence": 100,
         "description": "Attempted to spawn a new child process from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_creation",
+        "pids": [
+          "4384",
+          "424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8364,6 +8473,9 @@
         "confidence": 40,
         "description": "Invoked native Windows cryptographic APIs from dynamically allocated (unbacked) memory, possible encryption/decryption of payloads, c2, files or data",
         "name": "unbacked_crypto_operations",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8371,6 +8483,10 @@
         "confidence": 100,
         "description": "Paused execution (sleep/delay) in a thread executing in dynamically allocated (unbacked) memory, indicative of sandbox evasion or C2 sleeping between callbacks",
         "name": "unbacked_delay_execution",
+        "pids": [
+          "4384",
+          "424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8378,6 +8494,10 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "5144",
+          "2436"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8385,6 +8505,9 @@
         "confidence": 100,
         "description": "Excessive IOCTL calls to the Kernel Security Device Driver (KsecDD), indicative of ransomware/wiper hardware-accelerated mass encryption",
         "name": "kernel_crypto_driver_abuse",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8413,6 +8536,9 @@
         "confidence": 100,
         "description": "Sniffs keystrokes",
         "name": "infostealer_keylog",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 3
       },
@@ -8427,6 +8553,9 @@
         "confidence": 100,
         "description": "Attempts to remove evidence of file being downloaded from the Internet",
         "name": "removes_zoneid_ads",
+        "pids": [
+          "5144"
+        ],
         "references": [],
         "severity": 3
       }

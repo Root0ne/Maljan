@@ -24992,6 +24992,9 @@
         "confidence": 100,
         "description": "Queries computer hostname",
         "name": "queries_computer_name",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 1
       },
@@ -24999,6 +25002,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 1
       },
@@ -25006,6 +25012,9 @@
         "confidence": 100,
         "description": "Attempts to connect to a dead IP:Port (1 unique times)",
         "name": "dead_connect",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 1
       },
@@ -25013,6 +25022,9 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 1
       },
@@ -25020,6 +25032,9 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "4092"
+        ],
         "references": [],
         "severity": 1
       },
@@ -25041,6 +25056,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "4092"
+        ],
         "references": [],
         "severity": 1
       },
@@ -25048,6 +25066,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "4092"
+        ],
         "references": [],
         "severity": 1
       },
@@ -25055,6 +25076,9 @@
         "confidence": 50,
         "description": "Queries or modifies system parameters associated with user presence detection or sandbox evasion",
         "name": "antisandbox_system_parameters_info",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -25062,6 +25086,10 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "2508",
+          "4092"
+        ],
         "references": [],
         "severity": 2
       },
@@ -25069,6 +25097,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "4092"
+        ],
         "references": [],
         "severity": 2
       },
@@ -25076,6 +25107,9 @@
         "confidence": 80,
         "description": "Registers a vectored exception handler (VEH), possibly to hijack execution flow",
         "name": "registers_vectored_exception_handler",
+        "pids": [
+          "3736"
+        ],
         "references": [],
         "severity": 2
       },
@@ -25083,6 +25117,9 @@
         "confidence": 100,
         "description": "Allocated memory and changed its protection to PAGE_NOACCESS, may be used to hide payloads from memory scanners or to trigger an access violation for exception-driven execution",
         "name": "allocated_memory_protection_noaccess",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -25097,6 +25134,9 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "628"
+        ],
         "references": [],
         "severity": 2
       },
@@ -25104,6 +25144,9 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "628"
+        ],
         "references": [],
         "severity": 2
       },
@@ -25111,6 +25154,9 @@
         "confidence": 100,
         "description": "Reads from the memory of another process",
         "name": "reads_memory_remote_process",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -25118,6 +25164,9 @@
         "confidence": 100,
         "description": "Enumerates running processes",
         "name": "enumerates_running_processes",
+        "pids": [
+          "3736"
+        ],
         "references": [],
         "severity": 2
       },
@@ -25163,6 +25212,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -25170,6 +25222,9 @@
         "confidence": 60,
         "description": "Tries to unhook or modify Windows functions monitored by CAPE",
         "name": "antisandbox_unhook",
+        "pids": [
+          "3736"
+        ],
         "references": [],
         "severity": 3
       },
@@ -25177,6 +25232,9 @@
         "confidence": 100,
         "description": "Queries Windows licensing, activation, or genuine status, possibly to detect unactivated sandbox or analysis environments.",
         "name": "antisandbox_windows_activation",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 3
       },
@@ -25184,6 +25242,9 @@
         "confidence": 80,
         "description": "Executes direct syscalls to evade EDR and user-land API hooks",
         "name": "direct_syscall_evasion",
+        "pids": [
+          "3736"
+        ],
         "references": [],
         "severity": 3
       },
@@ -25191,6 +25252,9 @@
         "confidence": 50,
         "description": "Registered a Vectored Exception Handler (VEH) and intentionally triggered exceptions or manipulated thread contexts. May be used to hijack the OS error dispatcher to execute a payload or shellcode",
         "name": "exception_driven_execution",
+        "pids": [
+          "3736"
+        ],
         "references": [],
         "severity": 3
       },
@@ -25198,6 +25262,9 @@
         "confidence": 30,
         "description": "Executes loops of failed RWX memory allocations returning CONFLICTING_ADDRESSES in high-memory ranges, indicative of code cave hunting or module stomping",
         "name": "injection_module_stomping_probing",
+        "pids": [
+          "3736"
+        ],
         "references": [],
         "severity": 3
       },
@@ -25205,6 +25272,9 @@
         "confidence": 20,
         "description": "A system process is generating network traffic likely as a result of process injection",
         "name": "injection_network_traffic",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 3
       },
@@ -25212,6 +25282,9 @@
         "confidence": 100,
         "description": "Paused execution (sleep/delay) in a thread executing in dynamically allocated (unbacked) memory, indicative of sandbox evasion or C2 sleeping between callbacks",
         "name": "unbacked_delay_execution",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 3
       },
@@ -25219,6 +25292,9 @@
         "confidence": 100,
         "description": "Fake User-Agent detected",
         "name": "network_fake_useragent",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 3
       },
@@ -25226,6 +25302,11 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "2508",
+          "4092",
+          "3736"
+        ],
         "references": [],
         "severity": 3
       },
@@ -25233,6 +25314,11 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun_tasks",
+        "pids": [
+          "2508",
+          "4092",
+          "3736"
+        ],
         "references": [],
         "severity": 3
       },
@@ -25240,6 +25326,9 @@
         "confidence": 50,
         "description": "Creates a hidden or system file",
         "name": "stealth_file",
+        "pids": [
+          "2952"
+        ],
         "references": [],
         "severity": 3
       },
@@ -25254,6 +25343,9 @@
         "confidence": 80,
         "description": "Tries to suspend Cuckoo threads to prevent logging of malicious activity",
         "name": "antisandbox_suspend",
+        "pids": [
+          "3736"
+        ],
         "references": [],
         "severity": 3
       }

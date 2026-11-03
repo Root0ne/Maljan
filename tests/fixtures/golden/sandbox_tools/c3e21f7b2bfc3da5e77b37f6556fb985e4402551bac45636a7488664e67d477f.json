@@ -3722,6 +3722,9 @@
         "confidence": 100,
         "description": "Queries computer hostname",
         "name": "queries_computer_name",
+        "pids": [
+          "1288"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3729,6 +3732,9 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "1072"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3743,6 +3749,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "4116"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3757,6 +3766,11 @@
         "confidence": 100,
         "description": "Guard pages use detected - possible anti-debugging.",
         "name": "antidebug_guardpages",
+        "pids": [
+          "4116",
+          "1288",
+          "1072"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3813,6 +3827,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "4116"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3827,6 +3844,10 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "1288",
+          "1072"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3834,6 +3855,10 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "4116",
+          "1288"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3841,6 +3866,10 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "4116",
+          "1288"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3848,6 +3877,10 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "4116",
+          "1288"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3855,6 +3888,9 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "4116"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3862,6 +3898,9 @@
         "confidence": 100,
         "description": "A process sent information about the computer to a remote location.",
         "name": "recon_beacon",
+        "pids": [
+          "1288"
+        ],
         "references": [],
         "severity": 3
       },

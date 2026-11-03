@@ -3119,6 +3119,9 @@
         "confidence": 100,
         "description": "Queries computer hostname",
         "name": "queries_computer_name",
+        "pids": [
+          "3240"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3126,6 +3129,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "3240"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3147,6 +3153,9 @@
         "confidence": 100,
         "description": "Enumerates running processes",
         "name": "enumerates_running_processes",
+        "pids": [
+          "3240"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3175,6 +3184,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "3240"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3182,6 +3194,9 @@
         "confidence": 100,
         "description": "Attempts to query display device information, possibly to determine if the process is running in a virtualized environment",
         "name": "antivm_display",
+        "pids": [
+          "3240"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3189,6 +3204,9 @@
         "confidence": 100,
         "description": "Loads clean ntdll.dll from disk, possibly for syscall/anti-EDR",
         "name": "suspicious_ntdll_disk_load",
+        "pids": [
+          "3240"
+        ],
         "references": [],
         "severity": 3
       },

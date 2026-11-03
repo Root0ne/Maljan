@@ -3979,6 +3979,9 @@
         "confidence": 100,
         "description": "Checks available memory",
         "name": "antivm_checks_available_memory",
+        "pids": [
+          "5036"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4002,6 +4005,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "5036"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4016,6 +4022,9 @@
         "confidence": 80,
         "description": "Registers a vectored exception handler (VEH), possibly to hijack execution flow",
         "name": "registers_vectored_exception_handler",
+        "pids": [
+          "5036"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4037,6 +4046,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "5036"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4044,6 +4056,9 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "5036"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4051,6 +4066,9 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "5036"
+        ],
         "references": [],
         "severity": 3
       },

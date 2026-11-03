@@ -6922,6 +6922,9 @@
         "confidence": 100,
         "description": "Checks available memory",
         "name": "antivm_checks_available_memory",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6929,6 +6932,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6936,6 +6942,9 @@
         "confidence": 100,
         "description": "Attempts to connect to a dead IP:Port (3 unique times)",
         "name": "dead_connect",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6943,6 +6952,9 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "7932"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6957,6 +6969,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6980,6 +6995,11 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "3928",
+          "5096",
+          "7932"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6987,6 +7007,12 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "3928",
+          "5096",
+          "7640",
+          "7932"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6994,6 +7020,9 @@
         "confidence": 50,
         "description": "A DLL was loaded from a suspicious directory",
         "name": "dllload_suspicious_directory",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7001,6 +7030,9 @@
         "confidence": 100,
         "description": "Allocated memory and changed its protection to PAGE_NOACCESS, may be used to hide payloads from memory scanners or to trigger an access violation for exception-driven execution",
         "name": "allocated_memory_protection_noaccess",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7008,6 +7040,10 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "816",
+          "956"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7015,6 +7051,10 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "816",
+          "956"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7022,6 +7062,9 @@
         "confidence": 100,
         "description": "Enumerates running processes",
         "name": "enumerates_running_processes",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7029,6 +7072,9 @@
         "confidence": 100,
         "description": "Expresses interest in specific running processes",
         "name": "process_interest",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7036,6 +7082,10 @@
         "confidence": 100,
         "description": "Repeatedly searches for a not-found process, may want to run with startbrowser=1 option",
         "name": "process_needed",
+        "pids": [
+          "3928",
+          "6352"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7043,6 +7093,9 @@
         "confidence": 100,
         "description": "Terminates another process",
         "name": "terminates_remote_process",
+        "pids": [
+          "956"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7064,6 +7117,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7078,6 +7134,9 @@
         "confidence": 60,
         "description": "Tries to unhook or modify Windows functions monitored by CAPE",
         "name": "antisandbox_unhook",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7085,6 +7144,9 @@
         "confidence": 80,
         "description": "Executes WMI queries that can be used for anti-virtualization",
         "name": "antivm_wmi",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7092,6 +7154,9 @@
         "confidence": 40,
         "description": "Enumerated Anti-Malware Scan Interface (AMSI) providers, a potential precursor to AMSI bypass or EDR unhooking",
         "name": "amsi_enumeration",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7099,6 +7164,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "956"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7106,6 +7174,9 @@
         "confidence": 100,
         "description": "Forces a created process to be the child of an unrelated process",
         "name": "stealth_childproc",
+        "pids": [
+          "956"
+        ],
         "references": [
           "https://www.countercept.com/blog/detecting-parent-pid-spoofing/"
         ],
@@ -7143,6 +7214,9 @@
         "confidence": 100,
         "description": "Detects virtualization software with SCSI Disk Identifier trick",
         "name": "antivm_generic_scsi",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7171,6 +7245,9 @@
         "confidence": 100,
         "description": "Detects VirtualBox using WNetGetProviderName trick",
         "name": "antivm_vbox_provname",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7178,6 +7255,9 @@
         "confidence": 100,
         "description": "Detects VirtualBox through the presence of a window",
         "name": "antivm_vbox_window",
+        "pids": [
+          "3928"
+        ],
         "references": [],
         "severity": 3
       },

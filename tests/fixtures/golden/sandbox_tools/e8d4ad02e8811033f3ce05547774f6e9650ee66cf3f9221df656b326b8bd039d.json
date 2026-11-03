@@ -3648,6 +3648,9 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "4280"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3669,6 +3672,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "4280"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3707,6 +3713,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "4280"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3721,6 +3730,9 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "4280"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3728,6 +3740,9 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "4280"
+        ],
         "references": [],
         "severity": 3
       },

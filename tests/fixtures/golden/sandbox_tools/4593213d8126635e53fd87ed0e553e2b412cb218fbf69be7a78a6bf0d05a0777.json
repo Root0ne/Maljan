@@ -2953,6 +2953,9 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "2452"
+        ],
         "references": [],
         "severity": 1
       },
@@ -2974,6 +2977,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "2452"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3002,6 +3008,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "2452"
+        ],
         "references": [],
         "severity": 2
       },

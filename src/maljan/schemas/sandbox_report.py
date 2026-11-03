@@ -39,6 +39,7 @@ from maljan.core.report_formats import SignatureScale, reader_display_name
 from maljan.schemas.sandbox_document import (
     GROUP_ROWS_KEY,
     kept_source,
+    pid_of,
 )
 from maljan.schemas.sandbox_document import (
     SUMMARY_KEYS as _DOCUMENT_SUMMARY_KEYS,
@@ -156,12 +157,17 @@ class SandboxSignatureRow(BaseModel):
     severity: int | None = None
     marks: list[Any] = Field(default_factory=list)
     ttp_tags: list[str] = Field(default_factory=list)
+    # The processes the hit was seen in, as pid texts, where the reader's
+    # source names them by a field the marks' own process id is not read from
+    # (``schemas.sandbox_document.signature_pids`` reads those). Empty where
+    # it names none, and then left out of the dump.
+    pids: list[str] = Field(default_factory=list)
     # The signature's other fields, under the sandbox's own names.
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @model_serializer(mode="wrap")
     def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
-        return _without_empty(self, handler, ("extra",))
+        return _without_empty(self, handler, ("pids", "extra"))
 
 
 class SandboxDnsRequest(BaseModel):
@@ -1526,6 +1532,7 @@ def triage_overview_to_sandbox_report(
                 severity=_int(s.get("score")),
                 marks=list(s.get("indicators") or []),
                 ttp_tags=_as_str_list(s.get("ttp")),
+                pids=_triage_indicator_pids(s.get("indicators")),
                 extra={k: v for k, v in s.items() if k not in _TRIAGE_SIGNATURE_READ},
             )
             for s in (overview.get("signatures") or [])
@@ -1548,6 +1555,24 @@ def triage_overview_to_sandbox_report(
         read_from=READ_FROM_TASKS if tasks_read else READ_FROM_OVERVIEW,
         raw=overview,
     )
+
+
+def _triage_indicator_pids(indicators: Any) -> list[str]:
+    """The processes a Triage signature's indicators were seen in, once each, in order.
+
+    Each indicator's process is read under the field its process is listed by
+    (``procid``, else ``pid``), the same choice the reader makes for the
+    process itself, so a pid here names a process of the report's own list.
+    """
+    out: dict[str, None] = {}
+    for indicator in indicators if isinstance(indicators, list) else []:
+        if not isinstance(indicator, dict):
+            continue
+        key = "procid" if indicator.get("procid") else "pid"
+        pid = pid_of(indicator.get(key))
+        if pid:
+            out[pid] = None
+    return list(out)
 
 
 def _triage_run_limit(overview: dict[str, Any]) -> int | None:

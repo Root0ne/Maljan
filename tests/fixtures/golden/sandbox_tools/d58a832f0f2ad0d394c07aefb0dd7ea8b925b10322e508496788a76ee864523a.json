@@ -4538,6 +4538,11 @@
         "confidence": 100,
         "description": "Queries computer hostname",
         "name": "queries_computer_name",
+        "pids": [
+          "3348",
+          "5308",
+          "2740"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4545,6 +4550,9 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "2740"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4559,6 +4567,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "744"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4575,6 +4586,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "2740"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4589,6 +4603,11 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "3348",
+          "5308",
+          "2740"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4596,6 +4615,12 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "3348",
+          "5308",
+          "744",
+          "2740"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4603,6 +4628,9 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "956"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4610,6 +4638,9 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "956"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4617,6 +4648,9 @@
         "confidence": 100,
         "description": "Terminates another process",
         "name": "terminates_remote_process",
+        "pids": [
+          "956"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4641,6 +4675,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "3736"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4662,6 +4699,9 @@
         "confidence": 60,
         "description": "Tries to unhook or modify Windows functions monitored by CAPE",
         "name": "antisandbox_unhook",
+        "pids": [
+          "3736"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4669,6 +4709,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "956"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4676,6 +4719,9 @@
         "confidence": 100,
         "description": "Forces a created process to be the child of an unrelated process",
         "name": "stealth_childproc",
+        "pids": [
+          "956"
+        ],
         "references": [
           "https://www.countercept.com/blog/detecting-parent-pid-spoofing/"
         ],
@@ -4685,6 +4731,9 @@
         "confidence": 80,
         "description": "Tries to suspend Cuckoo threads to prevent logging of malicious activity",
         "name": "antisandbox_suspend",
+        "pids": [
+          "3736"
+        ],
         "references": [],
         "severity": 3
       },

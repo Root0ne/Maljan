@@ -4186,6 +4186,19 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "4108",
+          "5324",
+          "5716",
+          "6124",
+          "6692",
+          "3784",
+          "7360",
+          "7768",
+          "7636",
+          "7980"
+        ],
+        "pids_total": 56,
         "references": [],
         "severity": 1
       },
@@ -4193,6 +4206,19 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "4108",
+          "5324",
+          "5716",
+          "6124",
+          "6692",
+          "3784",
+          "7360",
+          "7768",
+          "7636",
+          "7980"
+        ],
+        "pids_total": 56,
         "references": [],
         "severity": 1
       },
@@ -4207,6 +4233,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "4108"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4214,6 +4243,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "4108"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4228,6 +4260,19 @@
         "confidence": 100,
         "description": "Anomalous file deletion behavior detected (10+)",
         "name": "anomalous_deletefile",
+        "pids": [
+          "4108",
+          "5324",
+          "5716",
+          "6124",
+          "6692",
+          "3784",
+          "7360",
+          "7768",
+          "7636",
+          "7980"
+        ],
+        "pids_total": 56,
         "references": [],
         "severity": 2
       },
@@ -4235,6 +4280,9 @@
         "confidence": 50,
         "description": "Queries or modifies system parameters associated with user presence detection or sandbox evasion",
         "name": "antisandbox_system_parameters_info",
+        "pids": [
+          "6692"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4242,6 +4290,19 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "4108",
+          "5324",
+          "5716",
+          "6124",
+          "6692",
+          "3784",
+          "7360",
+          "7768",
+          "7636",
+          "7980"
+        ],
+        "pids_total": 56,
         "references": [],
         "severity": 2
       },
@@ -4249,6 +4310,19 @@
         "confidence": 100,
         "description": "Allocated memory and changed its protection to PAGE_NOACCESS, may be used to hide payloads from memory scanners or to trigger an access violation for exception-driven execution",
         "name": "allocated_memory_protection_noaccess",
+        "pids": [
+          "4108",
+          "5324",
+          "5716",
+          "6124",
+          "6692",
+          "3784",
+          "7360",
+          "7768",
+          "7636",
+          "7980"
+        ],
+        "pids_total": 56,
         "references": [],
         "severity": 2
       },
@@ -4256,6 +4330,19 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "4108",
+          "5324",
+          "5716",
+          "6124",
+          "6692",
+          "3784",
+          "7360",
+          "7768",
+          "7636",
+          "7980"
+        ],
+        "pids_total": 56,
         "references": [],
         "severity": 2
       },
@@ -4273,6 +4360,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "4108"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4280,6 +4370,19 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "4108",
+          "5324",
+          "5716",
+          "6124",
+          "6692",
+          "3784",
+          "7360",
+          "7768",
+          "7636",
+          "7980"
+        ],
+        "pids_total": 52,
         "references": [],
         "severity": 3
       },
@@ -4287,6 +4390,19 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "4108",
+          "5324",
+          "5716",
+          "6124",
+          "6692",
+          "3784",
+          "7360",
+          "7768",
+          "7636",
+          "7980"
+        ],
+        "pids_total": 56,
         "references": [],
         "severity": 3
       },
@@ -4294,6 +4410,19 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "4108",
+          "5324",
+          "5716",
+          "6124",
+          "6692",
+          "3784",
+          "7360",
+          "7768",
+          "7636",
+          "7980"
+        ],
+        "pids_total": 55,
         "references": [],
         "severity": 3
       },
@@ -4301,6 +4430,19 @@
         "confidence": 100,
         "description": "Attempted to spawn a new child process from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_creation",
+        "pids": [
+          "4108",
+          "5324",
+          "5716",
+          "6124",
+          "6692",
+          "3784",
+          "7360",
+          "7768",
+          "7636",
+          "7980"
+        ],
+        "pids_total": 56,
         "references": [],
         "severity": 3
       },
@@ -4308,6 +4450,19 @@
         "confidence": 100,
         "description": "Paused execution (sleep/delay) in a thread executing in dynamically allocated (unbacked) memory, indicative of sandbox evasion or C2 sleeping between callbacks",
         "name": "unbacked_delay_execution",
+        "pids": [
+          "4108",
+          "5324",
+          "5716",
+          "6124",
+          "6692",
+          "3784",
+          "7360",
+          "7768",
+          "7636",
+          "7980"
+        ],
+        "pids_total": 52,
         "references": [],
         "severity": 3
       },

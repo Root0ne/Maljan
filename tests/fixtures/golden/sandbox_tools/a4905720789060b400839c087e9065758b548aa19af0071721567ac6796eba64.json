@@ -4086,6 +4086,9 @@
         "confidence": 100,
         "description": "Queries computer hostname",
         "name": "queries_computer_name",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4093,6 +4096,10 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "5876",
+          "4584"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4100,6 +4107,9 @@
         "confidence": 100,
         "description": "Attempts to connect to a dead IP:Port (1 unique times)",
         "name": "dead_connect",
+        "pids": [
+          "5876"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4114,6 +4124,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4121,6 +4134,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "5876"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4135,6 +4151,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "5876"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4142,6 +4161,9 @@
         "confidence": 100,
         "description": "Performs HTTP requests potentially not found in PCAP.",
         "name": "http_request",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4149,6 +4171,9 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4156,6 +4181,9 @@
         "confidence": 100,
         "description": "Writes to the memory another process",
         "name": "injection_write_process",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4163,6 +4191,9 @@
         "confidence": 50,
         "description": "Decompresses an executable in memory, may be indicative of a packer or manual loader",
         "name": "decompress_exe",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4170,6 +4201,9 @@
         "confidence": 100,
         "description": "Enumerates running processes",
         "name": "enumerates_running_processes",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4194,6 +4228,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4208,6 +4245,9 @@
         "confidence": 100,
         "description": "Writes an executable to the memory of another process",
         "name": "injection_write_exe_process",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4236,6 +4276,9 @@
         "confidence": 100,
         "description": "Detects BullGuard Antivirus through the presence of a library",
         "name": "antiav_bullguard_libs",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4243,6 +4286,9 @@
         "confidence": 100,
         "description": "Detects Sandboxie through the presence of a library",
         "name": "antisandbox_sboxie_libs",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4250,6 +4296,9 @@
         "confidence": 100,
         "description": "Detects SunBelt Sandbox through the presence of a library",
         "name": "antisandbox_sunbelt_libs",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4257,6 +4306,9 @@
         "confidence": 100,
         "description": "Executed a process and injected code into it, probably while unpacking",
         "name": "injection_runpe",
+        "pids": [
+          "4584"
+        ],
         "references": [],
         "severity": 3
       },

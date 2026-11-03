@@ -3442,6 +3442,9 @@
         "confidence": 50,
         "description": "Suspicious communication with abused trusted site",
         "name": "suspicious_communication_trusted_site",
+        "pids": [
+          "4712"
+        ],
         "references": [
           "https://go.recordedfuture.com/hubfs/reports/cta-2023-0816.pdf",
           "https://lots-project.com/"
@@ -3452,6 +3455,9 @@
         "confidence": 100,
         "description": "Expresses interest in specific running processes",
         "name": "process_interest",
+        "pids": [
+          "4712"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3490,6 +3496,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "4712"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3504,6 +3513,9 @@
         "confidence": 100,
         "description": "Checks for the presence of known windows from debuggers and forensic tools",
         "name": "antidebug_windows",
+        "pids": [
+          "4712"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3511,6 +3523,9 @@
         "confidence": 100,
         "description": "Loads clean ntdll.dll from disk, possibly for syscall/anti-EDR",
         "name": "suspicious_ntdll_disk_load",
+        "pids": [
+          "4712"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3518,6 +3533,9 @@
         "confidence": 80,
         "description": "Executes direct syscalls to evade EDR and user-land API hooks",
         "name": "direct_syscall_evasion",
+        "pids": [
+          "4712"
+        ],
         "references": [],
         "severity": 3
       },

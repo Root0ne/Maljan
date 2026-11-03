@@ -66823,6 +66823,10 @@
         "confidence": 100,
         "description": "Checks available memory",
         "name": "antivm_checks_available_memory",
+        "pids": [
+          "2084",
+          "9316"
+        ],
         "references": [],
         "severity": 1
       },
@@ -66830,6 +66834,11 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "5596",
+          "3336",
+          "3952"
+        ],
         "references": [],
         "severity": 1
       },
@@ -66837,6 +66846,11 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "3336",
+          "3952",
+          "2508"
+        ],
         "references": [],
         "severity": 1
       },
@@ -66844,6 +66858,11 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "8900",
+          "3952",
+          "2508"
+        ],
         "references": [],
         "severity": 1
       },
@@ -66858,6 +66877,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "5596"
+        ],
         "references": [],
         "severity": 1
       },
@@ -66865,6 +66887,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "3952"
+        ],
         "references": [],
         "severity": 1
       },
@@ -66879,6 +66904,9 @@
         "confidence": 100,
         "description": "Checks for mouse movement",
         "name": "mouse_movement_detect",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66886,6 +66914,9 @@
         "confidence": 50,
         "description": "Queries or modifies system parameters associated with user presence detection or sandbox evasion",
         "name": "antisandbox_system_parameters_info",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66893,6 +66924,14 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "7680",
+          "7004",
+          "6172",
+          "8708",
+          "3952",
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66900,6 +66939,13 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "7680",
+          "2084",
+          "8900",
+          "6172",
+          "3952"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66907,6 +66953,10 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "3952",
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66914,6 +66964,11 @@
         "confidence": 50,
         "description": "A DLL was loaded from a suspicious directory",
         "name": "dllload_suspicious_directory",
+        "pids": [
+          "3336",
+          "7004",
+          "8708"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66921,6 +66976,10 @@
         "confidence": 80,
         "description": "Registers a vectored exception handler (VEH), possibly to hijack execution flow",
         "name": "registers_vectored_exception_handler",
+        "pids": [
+          "2084",
+          "9316"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66928,6 +66987,11 @@
         "confidence": 100,
         "description": "Allocated memory and changed its protection to PAGE_NOACCESS, may be used to hide payloads from memory scanners or to trigger an access violation for exception-driven execution",
         "name": "allocated_memory_protection_noaccess",
+        "pids": [
+          "3336",
+          "2084",
+          "8900"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66935,6 +66999,9 @@
         "confidence": 50,
         "description": "Performs high-volume NtQueryInformationToken calls for TokenUser and TokenGroups, indicative of wiper/ransomware checking whether it has write permission to each file",
         "name": "per_file_acl_token_check",
+        "pids": [
+          "6172"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66949,6 +67016,9 @@
         "confidence": 100,
         "description": "Reads from the memory of another process",
         "name": "reads_memory_remote_process",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66956,6 +67026,11 @@
         "confidence": 100,
         "description": "Enumerates running processes",
         "name": "enumerates_running_processes",
+        "pids": [
+          "5596",
+          "7004",
+          "8708"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66963,6 +67038,12 @@
         "confidence": 100,
         "description": "Expresses interest in specific running processes",
         "name": "process_interest",
+        "pids": [
+          "5596",
+          "7004",
+          "8708",
+          "3952"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66970,6 +67051,10 @@
         "confidence": 100,
         "description": "A process created a hidden window",
         "name": "stealth_window",
+        "pids": [
+          "3336",
+          "3952"
+        ],
         "references": [],
         "severity": 2
       },
@@ -66977,6 +67062,11 @@
         "confidence": 100,
         "description": "Terminates another process",
         "name": "terminates_remote_process",
+        "pids": [
+          "7004",
+          "8708",
+          "956"
+        ],
         "references": [],
         "severity": 2
       },
@@ -67029,6 +67119,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "5596"
+        ],
         "references": [],
         "severity": 2
       },
@@ -67036,6 +67129,10 @@
         "confidence": 100,
         "description": "The following process appear to have been packed with Themida: rapes.exe, 3f4f590c05779739682f.exe",
         "name": "packer_themida",
+        "pids": [
+          "5596",
+          "3952"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67043,6 +67140,10 @@
         "confidence": 100,
         "description": "Checks for the presence of known windows from debuggers and forensic tools",
         "name": "antidebug_windows",
+        "pids": [
+          "5596",
+          "3952"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67050,6 +67151,10 @@
         "confidence": 60,
         "description": "Tries to unhook or modify Windows functions monitored by CAPE",
         "name": "antisandbox_unhook",
+        "pids": [
+          "8708",
+          "3952"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67057,6 +67162,10 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "8900",
+          "3952"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67064,6 +67173,10 @@
         "confidence": 100,
         "description": "Queries Windows licensing, activation, or genuine status, possibly to detect unactivated sandbox or analysis environments.",
         "name": "antisandbox_windows_activation",
+        "pids": [
+          "8900",
+          "2508"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67071,6 +67184,9 @@
         "confidence": 100,
         "description": "Uses suspicious IO control codes, indicative of disk enumeration or a bootkit/wiper",
         "name": "suspicious_iocontrol_codes",
+        "pids": [
+          "8900"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67078,6 +67194,10 @@
         "confidence": 100,
         "description": "Loads clean ntdll.dll from disk, possibly for syscall/anti-EDR",
         "name": "suspicious_ntdll_disk_load",
+        "pids": [
+          "5596",
+          "3952"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67085,6 +67205,10 @@
         "confidence": 80,
         "description": "Executes direct syscalls to evade EDR and user-land API hooks",
         "name": "direct_syscall_evasion",
+        "pids": [
+          "5596",
+          "3952"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67092,6 +67216,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "3952"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67106,6 +67233,9 @@
         "confidence": 100,
         "description": "Inter-process synchronization via mutexes, possibly for routing local C2 traffic or injection",
         "name": "interprocess_comms_mutex",
+        "pids": [
+          "3952"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67113,6 +67243,10 @@
         "confidence": 100,
         "description": "Inter-process communication via named shared memory (file mappings), possibly for routing local C2 traffic or injection",
         "name": "interprocess_comms_shared_memory",
+        "pids": [
+          "2084",
+          "9316"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67120,6 +67254,11 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "5596",
+          "2084",
+          "3952"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67127,6 +67266,9 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "2084"
+        ],
         "references": [],
         "severity": 3
       },
@@ -67134,6 +67276,14 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun_tasks",
+        "pids": [
+          "3336",
+          "7680",
+          "7004",
+          "8900",
+          "8708",
+          "2508"
+        ],
         "references": [],
         "severity": 3
       },

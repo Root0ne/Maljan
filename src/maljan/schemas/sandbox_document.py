@@ -121,6 +121,64 @@ PROCESS_COMMAND_LINE_PATHS: tuple[Path, ...] = (
     ("environ", "CommandLine"),
 )
 
+# The fields a row of the ``signatures`` part holds the marks of its hit under:
+# the form's (``marks``) or, where the reader kept its source's arrangement, the
+# source's own (``data``). A mark names the process it was seen in under one of
+# :data:`PROCESS_ID_KEYS`. ``SIGNATURE_PIDS_KEY`` is the form's own field for
+# those processes, which a reader fills where its source names them otherwise.
+SIGNATURE_MARK_KEYS: tuple[str, ...] = ("marks", "data")
+SIGNATURE_PIDS_KEY = "pids"
+# The longest text read as a pid: a process id is a number, and a longer run of
+# digits is no pid any sandbox writes.
+_PID_DIGITS = 20
+
+
+def pid_of(value: Any) -> str:
+    """``value`` as a process id's text, or ``""`` where it is none.
+
+    A pid is a whole number above 0, written as a number or as its digits; text
+    of any other shape (and ``0``, the form's "not stated") is no pid, so a
+    field that holds anything else never reaches an answer as one.
+    """
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, int):
+        return str(value) if 0 < value < 10**_PID_DIGITS else ""
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isascii() and text.isdigit() and len(text) <= _PID_DIGITS:
+            return text.lstrip("0")
+    return ""
+
+
+def signature_pids(signature: Mapping[str, Any]) -> list[str]:
+    """The processes one signature row's hit was seen in, as pid texts, in order, once each.
+
+    The form's own field (:data:`SIGNATURE_PIDS_KEY`) where the row has it,
+    else each mark's process id (:data:`SIGNATURE_MARK_KEYS`,
+    :data:`PROCESS_ID_KEYS`). ``[]`` where the row names none. Linear in the
+    marks.
+    """
+    out: dict[str, None] = {}
+    stated = signature.get(SIGNATURE_PIDS_KEY)
+    if isinstance(stated, list):
+        out.update((pid, None) for pid in map(pid_of, stated) if pid)
+        return list(out)
+    for field in SIGNATURE_MARK_KEYS:
+        marks = signature.get(field)
+        if not isinstance(marks, list):
+            continue
+        for mark in marks:
+            if not isinstance(mark, Mapping):
+                continue
+            for key in PROCESS_ID_KEYS:
+                pid = pid_of(mark.get(key))
+                if pid:
+                    out[pid] = None
+                    break
+    return list(out)
+
+
 # The Sigma events a report's telemetry is read into (``analysis.sigma_layer``):
 # per kind, the Sigma logsource categories an event of that kind is, and the
 # Sigma fields it can carry. An event carries a field only where the report
@@ -780,6 +838,9 @@ def _signature_row(signature: Any) -> dict[str, Any]:
         "marks": list(signature.marks),
         "ttp_tags": list(signature.ttp_tags),
     }
+    # Left out where the reader named no process, as before the field existed.
+    if signature.pids:
+        row[SIGNATURE_PIDS_KEY] = list(signature.pids)
     if signature.extra:
         row["extra"] = dict(signature.extra)
     return row

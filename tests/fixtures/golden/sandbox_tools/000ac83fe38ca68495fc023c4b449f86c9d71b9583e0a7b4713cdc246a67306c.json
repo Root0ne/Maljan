@@ -2334,6 +2334,9 @@
         "confidence": 50,
         "description": "Decompresses an executable in memory, may be indicative of a packer or manual loader",
         "name": "decompress_exe",
+        "pids": [
+          "4616"
+        ],
         "references": [],
         "severity": 2
       },
@@ -2341,6 +2344,9 @@
         "confidence": 100,
         "description": "Enumerates running processes",
         "name": "enumerates_running_processes",
+        "pids": [
+          "4616"
+        ],
         "references": [],
         "severity": 2
       },
@@ -2348,6 +2354,9 @@
         "confidence": 100,
         "description": "Repeatedly searches for a not-found process, may want to run with startbrowser=1 option",
         "name": "process_needed",
+        "pids": [
+          "4616"
+        ],
         "references": [],
         "severity": 2
       },
@@ -2390,6 +2399,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "4616"
+        ],
         "references": [],
         "severity": 2
       },
@@ -2404,6 +2416,9 @@
         "confidence": 100,
         "description": "Attempted to enumerate running processes from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_enumeration",
+        "pids": [
+          "4616"
+        ],
         "references": [],
         "severity": 3
       },

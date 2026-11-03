@@ -7030,6 +7030,12 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "288",
+          "4360",
+          "5448",
+          "5772"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7037,6 +7043,10 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "288",
+          "5448"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7051,6 +7061,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "288"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7058,6 +7071,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "288"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7072,6 +7088,10 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "4360",
+          "5772"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7079,6 +7099,12 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "288",
+          "4360",
+          "5448",
+          "5772"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7086,6 +7112,10 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "4360",
+          "5772"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7093,6 +7123,11 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "288",
+          "816",
+          "5448"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7100,6 +7135,11 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "288",
+          "816",
+          "5448"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7107,6 +7147,10 @@
         "confidence": 100,
         "description": "Writes to the memory another process",
         "name": "injection_write_process",
+        "pids": [
+          "288",
+          "5448"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7142,6 +7186,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "288"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7156,6 +7203,10 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "4360",
+          "5772"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7163,6 +7214,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "4360"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7170,6 +7224,10 @@
         "confidence": 100,
         "description": "Writes an executable to the memory of another process",
         "name": "injection_write_exe_process",
+        "pids": [
+          "288",
+          "5448"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7177,6 +7235,9 @@
         "confidence": 80,
         "description": "Creates a thread executing from dynamically allocated (unbacked) memory rather than a file on disk, likely to execute shellcode",
         "name": "thread_unbacked_memory",
+        "pids": [
+          "5772"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7184,6 +7245,10 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "288",
+          "5448"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7191,6 +7256,10 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "288",
+          "5448"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7198,6 +7267,10 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "288",
+          "5448"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7205,6 +7278,10 @@
         "confidence": 100,
         "description": "Attempted to spawn a new child process from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_creation",
+        "pids": [
+          "288",
+          "5448"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7212,6 +7289,9 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "4360"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7240,6 +7320,9 @@
         "confidence": 100,
         "description": "Sniffs keystrokes",
         "name": "infostealer_keylog",
+        "pids": [
+          "5772"
+        ],
         "references": [],
         "severity": 3
       }

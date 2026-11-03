@@ -32,7 +32,7 @@ class RestMappingConfig(BaseModel):
     target_sha256: str = "$.target.sha256"
     processes: str = ""  # each match: {pid, ppid, name, command_line}
     calls: str = ""  # each match: {pid, api, args, timestamp}
-    signatures: str = ""  # each match: {name, description, severity, ttps}
+    signatures: str = ""  # each match: {name, description, severity, ttps, pids}
     dns: str = ""  # each match: {request, type, answers[]}
     http: str = ""
     tcp: str = ""  # each match: {dst, dport}
