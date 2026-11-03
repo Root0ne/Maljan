@@ -22,10 +22,13 @@ agreement question reads them, ``agreement_facts``, T-396):
   replaced by a number counts only when the number is not smaller than the
   refused one (a read of 0x1000 bytes redone as a read of 4 is no redo);
 * for a failed call that lists code, a later call of another tool, or of the
-  same tool asking another question, that lists that function whole: a
+  same tool that changed no value the failed call set (but for the refused
+  value, replaced by one not narrower), that lists that function whole: a
   decompiled listing holding it, or a disassembly of the whole function (the
   entry's declared kind says which). A read of some instructions from the
-  address is no redo.
+  address is no redo. Known limit: an argument the same tool's call only adds
+  is not checked on this route; the listing is read as whole by its kind, so a
+  bound only the redo sets (``max_lines=3``) is not seen.
 
 The answering call must hold its answer whole (``holds_its_answer``, and
 nothing cut by the byte budget or the tool-output guardrail), and an answer
@@ -39,7 +42,7 @@ where the run's counts are (``run_summary.evidence.failed`` and ``failures``).
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
 __all__ = ["ENTRY_ID", "redone_failures"]
@@ -86,10 +89,21 @@ def _narrower(before: Any, after: Any) -> bool:
 
 
 def _names_argument(message: str, name: str) -> bool:
-    """Whether a failure's message names the argument ``name`` as a word of its own."""
+    """Whether a failure's message names the argument ``name`` as an argument.
+
+    Written alone on a line (``timeout`` above its validation error), quoted
+    (``'limit'``), or followed by ``=`` or ``:`` (``count=4096``): a word of
+    ordinary prose (a name, a type, a path, a size) is not one.
+    """
     if len(name) < _NAMED_VALUE_CHARS:
         return False
-    return re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", message) is not None
+    word = re.escape(name)
+    shaped = (
+        rf"^[ \t]*{word}[ \t]*$"
+        rf"|(['\"`]){word}\1"
+        rf"|(?<![\w-]){word}[ \t]*[=:]"
+    )
+    return re.search(shaped, message, re.MULTILINE) is not None
 
 
 def _cut(answering: Any) -> bool:
@@ -101,12 +115,13 @@ def _cut(answering: Any) -> bool:
     return answer_not_shown(answering) or not holds_its_answer(answering)
 
 
-def _same_question(failed: Any, answering: Any) -> bool:
-    """Whether a later call of the failed call's tool asked what it asked, but for its addresses.
+def _changed(failed: Any, answering: Any) -> Iterator[tuple[str, bool, bool]]:
+    """Each argument, but for the addresses, a later call set to another value than the failed one.
 
-    Never a narrower question: an argument only the redo sets, unless the
-    failure named it and the redo's answer is not cut, and a refused value
-    replaced by a smaller number, each make it another question.
+    ``(name, added, fixed)``: ``added`` when the failed call left it absent or
+    null; ``fixed`` when the failure's own message names it (an added one) or
+    the value it refused (a set one, replaced by a value not narrower). An
+    argument the redo leaves absent or null is no change.
     """
     from maljan.core.undeclared_tools import entry_address_arguments
     from maljan.pipeline.validation import _ADDRESS_LIST_ARGUMENTS
@@ -116,25 +131,38 @@ def _same_question(failed: Any, answering: Any) -> bool:
     asked = getattr(failed, "args", None) or {}
     again = getattr(answering, "args", None) or {}
     message = str(getattr(failed, "error", "") or getattr(failed, "output", "") or "")
-    for name in {*asked, *again} - skip:
+    for name in sorted({*asked, *again} - skip, key=str):
         before, after = asked.get(name), again.get(name)
         if _empty(after) or before == after or str(before) == str(after):
             continue
         if _empty(before):
-            # Set by the redo alone: the fix of a refusal the failure named it
-            # in, where the answer is not cut; otherwise it may ask less.
-            if _names_argument(message, str(name)) and not _cut(answering):
-                continue
-            return False
-        refused = str(before)
-        if (
-            len(refused) >= _NAMED_VALUE_CHARS
-            and refused in message
-            and not _narrower(before, after)
-        ):
+            yield str(name), True, _names_argument(message, str(name))
             continue
-        return False
-    return True
+        refused = str(before)
+        named = len(refused) >= _NAMED_VALUE_CHARS and refused in message
+        yield str(name), False, named and not _narrower(before, after)
+
+
+def _same_question(failed: Any, answering: Any) -> bool:
+    """Whether a later call of the failed call's tool asked what it asked, but for its addresses.
+
+    Never a narrower question: an argument only the redo sets, unless the
+    failure named it, and a refused value replaced by a smaller number, each
+    make it another question. The answer is whole: ``_answers`` keeps no cut
+    one.
+    """
+    return all(fixed for _name, _added, fixed in _changed(failed, answering))
+
+
+def _changes_a_set_value(failed: Any, answering: Any) -> bool:
+    """Whether a later call changed a value the failed call set, but for a refusal's fix.
+
+    A value set on both sides and different (another program, a smaller
+    bound) asks another question, unless it is the refused value the failure
+    names, replaced by one not narrower. An argument only the later call adds
+    is not read here.
+    """
+    return any(not added and not fixed for _name, added, fixed in _changed(failed, answering))
 
 
 def _whole_listings(answering: Any, bases: Sequence[int]) -> set[int]:
@@ -206,9 +234,10 @@ def redone_failures(ledger: Iterable[Any]) -> list[dict[str, Any]]:
             if getattr(answering, "tool", None) == getattr(failed, "tool", None):
                 if _same_question(failed, answering):
                     covered = {one_spelling(a, bases) for a in answered_addresses(answering)}
-                elif lists_code:
-                    # Another question of the same name that lists the function
-                    # whole still answers a failed listing of it.
+                elif lists_code and not _changes_a_set_value(failed, answering):
+                    # The same name listing the function whole, with an
+                    # argument added but no value the failed call set changed,
+                    # still answers a failed listing of it.
                     covered = _whole_listings(answering, bases)
                 else:
                     continue

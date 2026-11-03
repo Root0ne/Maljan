@@ -234,10 +234,39 @@ def test_an_argument_the_refusal_named_and_the_redo_sets_is_a_redo_unless_cut() 
     failed = _code_call("ev_0001", False, refused, timeout=None)
     redo = _code_call("ev_0002", True, timeout=120)
     assert redone_failures([failed, redo])[0]["answered_by"] == ["ev_0002"]
-    # The same redo with its answer cut by the budget, or blanked, redoes nothing.
+    # The same redo with its answer cut by the budget, or blanked, is no answer
+    # at all (the ledger's answers are whole ones), so it redoes nothing.
     for cut in ({"chars_dropped": 40}, {"truncated": True, "output": ""}):
         cut_redo = redo.model_copy(update=cut)
         assert redone_failures([failed, cut_redo]) == []
+
+
+@pytest.mark.parametrize(
+    ("message", "named"),
+    [
+        ("validation error\ntimeout\n  Input should be a valid integer", True),
+        ("the 'timeout' field must be an integer", True),
+        ("timeout=None is not an integer", True),
+        ("timeout: expected an integer", True),
+        ("the timeout was reached", False),
+        ("timeout_ms out of range", False),
+        ("--timeout is required", False),
+    ],
+)
+def test_an_argument_is_named_only_where_the_message_writes_it_as_one(
+    message: str, named: bool
+) -> None:
+    failed = _code_call("ev_0001", False, message, timeout=None)
+    redo = _code_call("ev_0002", True, timeout=120)
+    assert bool(redone_failures([failed, redo])) is named
+
+
+def test_a_word_of_ordinary_prose_names_no_argument() -> None:
+    for name in ("name", "type", "path", "size"):
+        message = f"Cannot read the {name} of the function"
+        failed = _code_call("ev_0001", False, message, **{name: None})
+        redo = _code_call("ev_0002", True, **{name: "x"})
+        assert redone_failures([failed, redo]) == []
 
 
 def test_a_refused_value_replaced_by_a_smaller_number_is_no_redo() -> None:
@@ -293,6 +322,46 @@ def test_a_call_of_the_same_name_listing_another_function_or_cut_redoes_nothing(
         facts=listing,
     )
     assert redone_failures([asked, some]) == []
+
+
+def _decompile(entry_id: str, ok: bool, error: str = "no function found there", **args: object):
+    entry = _lifted(entry_id, GATE).model_copy(
+        update={"args": {"address": hex(GATE), **args}, "ok": ok}
+    )
+    if not ok:
+        entry = entry.model_copy(update={"error": error, "output": ""})
+    return entry
+
+
+def test_a_call_of_the_same_name_for_another_program_redoes_nothing() -> None:
+    failed = _decompile("ev_0001", False, program="dropper.exe")
+    other = _decompile("ev_0002", True, program="payload.dll")
+    assert redone_failures([failed, other]) == []
+    # The same program asked again, a timeout added, lists it whole: a redo.
+    again = _decompile("ev_0003", True, program="dropper.exe", timeout=120)
+    assert redone_failures([failed, other, again])[0]["answered_by"] == ["ev_0003"]
+
+
+def test_a_whole_listing_of_the_same_name_with_a_value_changed_or_narrowed() -> None:
+    # A value the failed call set and the redo changed asks another question.
+    changed = _decompile("ev_0001", False, mode="c")
+    assert redone_failures([changed, _decompile("ev_0002", True, mode="pseudo")]) == []
+    # A bound the redo set below the failed one, unnamed or refused, is narrower.
+    bound = _decompile("ev_0001", False, max_lines=400)
+    assert redone_failures([bound, _decompile("ev_0002", True, max_lines=3)]) == []
+    refused = _decompile("ev_0001", False, "max_lines=400 is too many", max_lines=400)
+    assert redone_failures([refused, _decompile("ev_0002", True, max_lines=3)]) == []
+    # The refused bound replaced by one not smaller is the refusal's fix.
+    wider = _decompile("ev_0002", True, max_lines=800)
+    assert redone_failures([refused, wider])[0]["answered_by"] == ["ev_0002"]
+
+
+def test_a_bound_only_the_redo_adds_is_read_by_the_listing_s_kind() -> None:
+    # Known limit: an argument only the same tool's redo adds is not checked on
+    # the whole-listing route; a decompile is read as whole by its kind.
+    failed = _decompile("ev_0001", False)
+    added = _decompile("ev_0002", True, max_lines=3)
+    assert redone_failures([failed, added])[0]["answered_by"] == ["ev_0002"]
 
 
 def test_an_answer_that_holds_nothing_redoes_nothing() -> None:
