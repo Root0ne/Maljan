@@ -342,6 +342,32 @@ def test_a_call_of_the_same_name_for_another_program_redoes_nothing() -> None:
     assert redone_failures([failed, other, again])[0]["answered_by"] == ["ev_0003"]
 
 
+def test_a_call_of_another_name_for_another_program_redoes_nothing() -> None:
+    # T-542: another tool listing the address whole in another program answers
+    # of another file; the same program, or none named, is still a redo.
+    failed = _decompile("ev_0001", False, program="dropper.exe")
+    listing = {"v": 1, "kind": "function_disassembly", "reader": "listing"}
+
+    def whole(entry_id: str, **args: object) -> LedgerEntry:
+        return LedgerEntry(
+            id=entry_id,
+            tool="list_function",
+            args={"address": hex(GATE), **args},
+            output=f"{GATE:#x}  mov rax, rcx\n",
+            facts=listing,
+        )
+
+    assert redone_failures([failed, whole("ev_0002", program="payload.dll")]) == []
+    same = whole("ev_0003", program="dropper.exe", timeout=60)
+    assert redone_failures([failed, same])[0]["answered_by"] == ["ev_0003"]
+    unnamed = whole("ev_0004")
+    assert redone_failures([failed, unnamed])[0]["answered_by"] == ["ev_0004"]
+    # The program the failure refused, replaced by another, is the refusal's fix.
+    refused = _decompile("ev_0001", False, "program='dropper' is not open", program="dropper")
+    fixed = whole("ev_0005", program="dropper.exe")
+    assert redone_failures([refused, fixed])[0]["answered_by"] == ["ev_0005"]
+
+
 def test_a_whole_listing_of_the_same_name_with_a_value_changed_or_narrowed() -> None:
     # A value the failed call set and the redo changed asks another question.
     changed = _decompile("ev_0001", False, mode="c")

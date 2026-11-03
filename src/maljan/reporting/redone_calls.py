@@ -21,9 +21,10 @@ agreement question reads them, ``agreement_facts``, T-396):
   failure that named no instruction count, is no redo); a refused value
   replaced by a number counts only when the number is not smaller than the
   refused one (a read of 0x1000 bytes redone as a read of 4 is no redo);
-* for a failed call that lists code, a later call of another tool, or of the
-  same tool that changed no value the failed call set (but for the refused
-  value, replaced by one not narrower), that lists that function whole: a
+* for a failed call that lists code, a later call of any tool that changed no
+  value the failed call set under the same argument name (but for the refused
+  value, replaced by one not narrower: a call of another tool for another
+  ``program`` asks of another file, T-542), that lists that function whole: a
   decompiled listing holding it, or a disassembly of the whole function (the
   entry's declared kind says which). A read of some instructions from the
   address is no redo. Known limit: an argument the same tool's call only adds
@@ -160,7 +161,8 @@ def _changes_a_set_value(failed: Any, answering: Any) -> bool:
     A value set on both sides and different (another program, a smaller
     bound) asks another question, unless it is the refused value the failure
     names, replaced by one not narrower. An argument only the later call adds
-    is not read here.
+    is not read here, nor one only the failed call set: a call of another tool
+    is read only on the names both calls carry.
     """
     return any(not added and not fixed for _name, added, fixed in _changed(failed, answering))
 
@@ -231,17 +233,14 @@ def redone_failures(ledger: Iterable[Any]) -> list[dict[str, Any]]:
             if later <= at:
                 continue
             answering = entries[later]
-            if getattr(answering, "tool", None) == getattr(failed, "tool", None):
-                if _same_question(failed, answering):
-                    covered = {one_spelling(a, bases) for a in answered_addresses(answering)}
-                elif lists_code and not _changes_a_set_value(failed, answering):
-                    # The same name listing the function whole, with an
-                    # argument added but no value the failed call set changed,
-                    # still answers a failed listing of it.
-                    covered = _whole_listings(answering, bases)
-                else:
-                    continue
-            elif lists_code:
+            same_tool = getattr(answering, "tool", None) == getattr(failed, "tool", None)
+            if same_tool and _same_question(failed, answering):
+                covered = {one_spelling(a, bases) for a in answered_addresses(answering)}
+            elif lists_code and not _changes_a_set_value(failed, answering):
+                # A call of any name listing the function whole, with an
+                # argument added but no value the failed call set changed
+                # under the same name (another program), still answers a
+                # failed listing of it.
                 covered = _whole_listings(answering, bases)
             else:
                 continue
