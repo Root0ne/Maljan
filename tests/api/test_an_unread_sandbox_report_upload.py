@@ -188,6 +188,25 @@ def test_a_declaration_that_does_not_recognise_the_upload_saves_nothing(monkeypa
     assert state["rows"][0].format == "unread"
 
 
+def test_a_declaration_naming_the_mock_reader_saves_nothing(monkeypatch) -> None:
+    # The mock's reader reads only the platform's own fixtures and earns their
+    # marks: an accepted format read by it would read a sandbox's report as a
+    # recorded fixture (T-512).
+    api, sample, state = _client(monkeypatch, ["unread"])
+    saved = AsyncMock()
+    monkeypatch.setattr("app.services.settings_service.SettingsService.save", saved)
+    body = _upload(api, sample, _blob("unread_flat_report.json")).json()
+    declaration = body["proposal"]["declaration"]
+    declaration["reader"] = "mock"
+    declaration.pop("mapping", None)
+    r = _accept(api, sample, state["rows"][0], declaration)
+    assert r.status_code == 422
+    assert "'mock'" in r.json()["detail"]
+    assert "Nothing was saved" in r.json()["detail"]
+    saved.assert_not_awaited()
+    assert state["rows"][0].format == "unread"
+
+
 def test_a_declaration_that_does_not_validate_saves_nothing(monkeypatch) -> None:
     api, sample, state = _client(monkeypatch, ["unread"])
     saved = AsyncMock()
