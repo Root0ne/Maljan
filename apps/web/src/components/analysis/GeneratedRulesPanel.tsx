@@ -169,7 +169,7 @@ function RuleRow({ rule, onOpen }: { rule: DetectionRule; onOpen: (opener: HTMLE
           .{KIND_EXT[rule.kind]}
         </button>
       </span>
-      <p className={`basis-full text-[11px] ${standingTone(standing)}`}>{standing.sentence}</p>
+      {standing && <p className={`basis-full text-[11px] ${standingTone(standing)}`}>{standing.sentence}</p>}
     </li>
   );
 }
@@ -187,7 +187,7 @@ function RuleBody({ rule }: { rule: DetectionRule }) {
         <p className="rounded bg-status-red/5 px-2 py-1.5 text-[11px] text-status-red">{rule.compile_error}</p>
       )}
       {sample && <p className={`rounded px-2 py-1.5 text-[11px] ${SAMPLE_FOOTER[sample.tone]}`}>{sample.detail}</p>}
-      <p className={`px-2 text-[11px] ${standingTone(standing)}`}>{standing.sentence}</p>
+      {standing && <p className={`px-2 text-[11px] ${standingTone(standing)}`}>{standing.sentence}</p>}
     </div>
   );
 }

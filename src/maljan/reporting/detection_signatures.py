@@ -252,6 +252,7 @@ def build_detection_rules(
             )
             continue
         if rule is not None:
+            rule.printed, rule.standing = rule_standing(rule)
             rules.append(rule)
     logger.info(
         "detection_signatures: generated %d rule(s) (errors=%d, sigma_gated=%s, yara_gated=%s).",
@@ -352,6 +353,19 @@ def precision_line(rule: DetectionRule) -> str:
         + _NOT_RETRO_HUNTED.format(what="traffic")
         + "."
     )
+
+
+def rule_standing(rule: DetectionRule) -> tuple[bool, str]:
+    """Whether the analyst report prints a draft's body, and the sentence it says beside it.
+
+    The one source of that sentence: the analyst report prints it, and the
+    record carries it (``DetectionRule.printed`` and ``standing``) for every
+    other reader, the console's rule card among them.
+    """
+    why = analyst_print_gate(rule)
+    if why is None:
+        return True, precision_line(rule)
+    return False, f"Not printed in the analyst report: {why}; its body is in the evidence bundle."
 
 
 def _found(strings: list[SampleString]) -> int:

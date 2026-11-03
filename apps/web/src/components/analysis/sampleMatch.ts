@@ -8,8 +8,9 @@
  * matched it at or none, or why the rule was not checked. Nothing here
  * re-derives the draft's threshold: the clauses are read as recorded. The
  * sentence is the report's own §10.2 line, so the card and the report say the
- * same thing. `ruleStanding` is the report's §8.2 line beside the rule's name:
- * its Precision line, or why the analyst report does not print it.
+ * same thing. `ruleStanding` reads the report's §8.2 line beside the rule's
+ * name from the record: its Precision line, or why the analyst report does not
+ * print it.
  */
 
 import type { DetectionRule, RuleClause, SampleString } from "@/types/malware-report";
@@ -108,70 +109,19 @@ export function sampleMatchBadge(rule: DetectionRule): SampleMatchBadge | null {
   return { label: held.label, tone: held.tone, detail: said.join(" ") };
 }
 
-/** What the analyst report says of a draft beside its name (§8.2): the
- *  Precision line of a rule it prints, or why it does not print it. */
+/** What the analyst report says of a draft beside its name (§8.2). */
 export interface RuleStanding {
   printed: boolean;
   sentence: string;
 }
 
-// The report's own wording (`detection_signatures.analyst_print_gate` and
-// `precision_line`), so the card and the analyst report say the same thing.
-const NOT_PRINTED_UNCOMPILED = "it does not compile";
-const NOT_PRINTED_MISSES = "it does not match the sample it was drafted from";
-const NOT_PRINTED_NOT_CHECKED =
-  "it was not run against the sample it was drafted from, so no match by its content is shown";
-const NOT_PRINTED_STORED_BEFORE =
-  "it was drafted before drafts were run against their sample, so no match by its content is shown";
-
-function notRetroHunted(what: string): string {
-  return `not run against any other ${what} (no retro-hunt), so how often it fires elsewhere is not measured`;
-}
-
-/** Why the analyst report does not print the rule's body, or `null` when it does. */
-function notPrintedBecause(rule: DetectionRule): string | null {
-  if (rule.compile_error) return NOT_PRINTED_UNCOMPILED;
-  if (rule.matches_sample === false) return NOT_PRINTED_MISSES;
-  if (Array.isArray(rule.matched_by)) {
-    if (rule.matched_by.includes("strings")) return null;
-    const clauses = rule.matched_by.filter((part) => part !== "strings").join(" and ");
-    return `it matches the sample by its ${clauses || "hash"} only, not by its content`;
+/** The rule's §8.2 sentence as its record carries it (`printed`, `standing`):
+ *  the Precision line, or why the analyst report leaves the body out. `null`
+ *  for a rule stored before the record carried it, which keeps only its badge;
+ *  the sentence is never re-derived here. */
+export function ruleStanding(rule: DetectionRule): RuleStanding | null {
+  if (typeof rule.printed !== "boolean" || typeof rule.standing !== "string" || !rule.standing) {
+    return null;
   }
-  if (rule.sample_not_checked) return NOT_PRINTED_NOT_CHECKED;
-  if (rule.kind === "yara") return NOT_PRINTED_STORED_BEFORE;
-  return null;
-}
-
-/** What a printed draft was measured on: a file rule's strings its sample
- *  held, published and stored apart; a behaviour or traffic rule's values. */
-function precisionLine(rule: DetectionRule): string {
-  if (rule.kind === "yara") {
-    const strings = rule.sample_strings ?? [];
-    const published = strings.filter((s) => s.identifier.startsWith("$s"));
-    const stored = strings.filter((s) => !s.identifier.startsWith("$s"));
-    const counts = [
-      `${published.filter(wasFound).length} of ${published.length} published strings` +
-        (stored.length > 0 ? "" : " found"),
-    ];
-    if (stored.length > 0) {
-      counts.push(`${stored.filter(wasFound).length} of ${stored.length} stored values found`);
-    }
-    return (
-      `Precision: its strings match the sample it was drafted from (${counts.join(", ")}), ` +
-      `not its hash alone; ${notRetroHunted("file")}.`
-    );
-  }
-  if (rule.kind === "sigma") {
-    return `Precision: it selects on values this run publishes or a sandbox recorded; ${notRetroHunted("log")}.`;
-  }
-  return `Precision: it matches only the network indicators this run publishes; ${notRetroHunted("traffic")}.`;
-}
-
-/** The rule's line in the analyst report: its Precision line where the report
- *  prints its body, or why it does not, which for a rule that matched its
- *  sample by a hash alone says it did not match by its content. */
-export function ruleStanding(rule: DetectionRule): RuleStanding {
-  const why = notPrintedBecause(rule);
-  if (why === null) return { printed: true, sentence: precisionLine(rule) };
-  return { printed: false, sentence: `Not printed in the analyst report: ${why}.` };
+  return { printed: rule.printed, sentence: rule.standing };
 }
