@@ -116,6 +116,7 @@ from maljan.reporting.prose_decisions import (
     PUBLISHED_TECHNIQUE_DOUBTED_CODE,
     with_decided_statements,
 )
+from maljan.reporting.redone_calls import ENTRY_ID
 from maljan.reporting.renderers.layout import ANALYST, BUNDLE, FULL, checked
 from maljan.reporting.renderers.prose_forms import (
     end_references,
@@ -517,6 +518,7 @@ class MarkdownRenderer:
             failed = int(evidence.get("failed") or 0)
             said = f"\nEvidence: {entries} tool call(s)"
             said += f", {failed} failed" if failed else ""
+            said += _redone_clause(evidence, ids=False) if failed else ""
             repeats = int(evidence.get("repeats") or 0)
             said += f", {repeats} answered from an earlier entry" if repeats else ""
             guarded = int(evidence.get("guard_answers") or 0)
@@ -2103,7 +2105,9 @@ class MarkdownRenderer:
             guarded = int(evidence.get("guard_answers") or 0)
             lines.append(
                 f"**Evidence bounds:** {evidence.get('entries', 0)} ledger entries, "
-                f"{evidence.get('ok', 0)} ok, {evidence.get('failed', 0)} failed, "
+                f"{evidence.get('ok', 0)} ok, {evidence.get('failed', 0)} failed"
+                + _redone_clause(evidence, ids=True)
+                + ", "
                 + (f"{repeats} answered from an earlier entry without running, " if repeats else "")
                 + (f"{guarded} answered by a guard with no tool run, " if guarded else "")
                 + f"{evidence.get('trimmed', 0)} trimmed to the budget"
@@ -2994,15 +2998,45 @@ class _Context:
     def partial_sentence(self) -> str:
         """What made the evidence partial, as a sentence, or ``""``."""
         evidence = (self.report.run_summary or {}).get("evidence") or {}
-        failed = int(evidence.get("failed") or 0)
+        # A failed call a later call redid left no gap: counted in the run's
+        # bounds, not here (T-494 D6).
+        redone = len(_redone_rows(evidence))
+        failed = max(0, int(evidence.get("failed") or 0) - redone)
         trimmed = int(evidence.get("trimmed") or 0)
         entries = int(evidence.get("entries") or 0)
         parts = []
         if failed:
-            parts.append(f"{failed} of {entries} tool calls failed")
+            not_redone = " and were not redone" if redone else ""
+            parts.append(f"{failed} of {entries} tool calls failed{not_redone}")
         if trimmed:
             parts.append(f"{trimmed} of {entries} ledger entries were trimmed")
         return f" The evidence is partial: {' and '.join(parts)}." if parts else ""
+
+
+def _redone_rows(evidence: dict[str, Any]) -> list[dict[str, Any]]:
+    """The failed calls a later call redid (``run_summary.evidence.redone``), as held."""
+    return [row for row in (evidence.get("redone") or []) if isinstance(row, dict)]
+
+
+def _redone_clause(evidence: dict[str, Any], *, ids: bool) -> str:
+    """``", N of them redone ..."`` after a failed count, or ``""`` when none was redone.
+
+    With ``ids``, in brackets, each redone call and the later calls that
+    answered it, as the run's bounds list them.
+    """
+    rows = _redone_rows(evidence)
+    if not rows:
+        return ""
+    said = f"{len(rows)} of them redone by a later call for the same address"
+    if not ids:
+        return f", {said}"
+    pairs = []
+    for row in rows:
+        failed = str(row.get("entry_id") or "")
+        by = [str(i) for i in row.get("answered_by") or [] if ENTRY_ID.fullmatch(str(i))]
+        if ENTRY_ID.fullmatch(failed) and by:
+            pairs.append(f"{failed} by {', '.join(by)}")
+    return f" ({said}" + (f": {'; '.join(pairs)}" if pairs else "") + ")"
 
 
 def _guardrail_cut_clause(evidence: dict[str, Any], truncation: Any) -> str:

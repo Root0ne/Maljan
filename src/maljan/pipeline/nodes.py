@@ -187,6 +187,7 @@ from maljan.pipeline.validation import (
     validity_check_available,
 )
 from maljan.reporting.ledger_report import section_is_grounded
+from maljan.reporting.redone_calls import redone_failures
 from maljan.schemas.evidence import (
     LedgerEntry,
     apply_budget,
@@ -2148,6 +2149,11 @@ def evidence_summary(ledger: Sequence[Any]) -> dict[str, Any]:
         summary["repeats"] = repeats
     if guarded:
         summary["guard_answers"] = guarded
+    # A failed call a later call answered for every address it asked is still
+    # counted as failed, and listed apart: it left no gap (T-494 D6).
+    redone = redone_failures(ledger)
+    if redone:
+        summary["redone"] = redone
     if cut:
         summary["cut"] = len(cut)
         summary["chars_dropped"] = sum(int(e.chars_dropped) for e in cut)

@@ -53,7 +53,9 @@ __all__ = [
     "AnsweredLater",
     "LedgerFacts",
     "ListedRoutine",
+    "answered_addresses",
     "answered_later",
+    "asked_addresses",
     "ledger_facts",
     "spelled",
 ]
@@ -90,7 +92,7 @@ class LedgerFacts:
     listed: tuple[ListedRoutine, ...] = ()
 
 
-def _asked(entry: Any) -> list[int]:
+def asked_addresses(entry: Any) -> list[int]:
     """The addresses a call was given, by its address arguments and its address lists."""
     args = getattr(entry, "args", None) or {}
     found: list[int] = []
@@ -105,7 +107,7 @@ def _asked(entry: Any) -> list[int]:
     return list(dict.fromkeys(found))
 
 
-def _answered_for(entry: Any) -> list[int]:
+def answered_addresses(entry: Any) -> list[int]:
     """The addresses a call answered for: a listing's functions, else what it was asked.
 
     A code listing whose one answer is error text answered for none, as a
@@ -117,7 +119,7 @@ def _answered_for(entry: Any) -> list[int]:
         held = [address for address, _names in _entry_functions(entry) if address is not None]
         if held:
             return list(dict.fromkeys(held))
-    return _asked(entry)
+    return asked_addresses(entry)
 
 
 def _groups(entry: Any) -> tuple[tuple[str, str], ...]:
@@ -141,7 +143,7 @@ def answered_later(entries: Iterable[Any], image_bases: Sequence[int] = ()) -> l
     linked: set[tuple[int, int]] = set()
     for entry in entries:
         if not getattr(entry, "ok", True):
-            for address in _asked(entry):
+            for address in asked_addresses(entry):
                 for group in _groups(entry):
                     waiting.setdefault((one_spelling(address, image_bases), group), []).append(
                         entry
@@ -149,7 +151,7 @@ def answered_later(entries: Iterable[Any], image_bases: Sequence[int] = ()) -> l
             continue
         if answer_not_shown(entry) or getattr(entry, "repeated_of", None):
             continue
-        for address in _answered_for(entry):
+        for address in answered_addresses(entry):
             key = one_spelling(address, image_bases)
             for group in _groups(entry):
                 for failed in waiting.pop((key, group), ()):
