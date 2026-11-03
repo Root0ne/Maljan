@@ -686,6 +686,13 @@ export function AgentDetail({
                   <option key={tab} value={tab}>{tab}</option>
                 ))}
               </select>
+              {/* A generic role has no tab of its own (`core.config.ROLE_TABS`),
+                  so its sections land in the EVIDENCE footer by default. */}
+              {agent.role === "generic" && (
+                <span className="block text-[11px] text-text-muted mt-0.5">
+                  Its sections go to EVIDENCE unless you pick a tab
+                </span>
+              )}
               <FieldError message={fieldError("tab")} />
             </label>
             {/* Whether the agent is asked for a technique id on each claim.

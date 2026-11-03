@@ -58,6 +58,24 @@ const STATUS_STYLES: Record<
   },
 };
 
+/** The text of each claim, in the order the agent made them. A claim is an
+ *  object with a `description` or a `claim`, or a bare string; one of any
+ *  other shape is shown as its JSON rather than left out. */
+export function claimTexts(claims: unknown[] | null | undefined): string[] {
+  if (!Array.isArray(claims)) return [];
+  const texts: string[] = [];
+  for (const claim of claims) {
+    if (claim === null || claim === undefined) continue;
+    if (typeof claim === "string") texts.push(claim);
+    else if (typeof claim === "object" && "description" in claim)
+      texts.push(String((claim as Record<string, unknown>).description));
+    else if (typeof claim === "object" && "claim" in claim)
+      texts.push(String((claim as Record<string, unknown>).claim));
+    else texts.push(typeof claim === "object" ? JSON.stringify(claim) : String(claim));
+  }
+  return texts;
+}
+
 function confidenceToSignal(confidence: number): string {
   if (confidence >= 75) return "high";
   if (confidence >= 45) return "medium";
@@ -94,22 +112,17 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
     // Signal strength only makes sense for completed runs. For failed /
     // timed-out / no-data the lifecycle status is the entire story.
     const signal = status === "complete" && pct !== null ? confidenceToSignal(pct) : "unknown";
-    // Extract first claim description as key finding
-    let keyFinding = "No specific findings recorded.";
-    if (f.claims && Array.isArray(f.claims) && f.claims.length > 0) {
-      const first = f.claims[0];
-      if (first && typeof first === "object" && "description" in first) {
-        keyFinding = String((first as Record<string, unknown>).description);
-      } else if (first && typeof first === "object" && "claim" in first) {
-        keyFinding = String((first as Record<string, unknown>).claim);
-      } else if (typeof first === "string") {
-        keyFinding = first;
-      }
-    }
+    // Every claim the agent made: the first leads the cell and the rest sit
+    // under a disclosure, so an agent with many claims reads as many.
+    const claims = claimTexts(f.claims);
+    let keyFinding = claims[0] ?? "No specific findings recorded.";
+    let moreClaims = claims.slice(1);
     // Prefer the status_reason for non-complete rows so the table
-    // explains the gap instead of repeating "No specific findings".
+    // explains the gap instead of repeating "No specific findings"; the
+    // claims such a row still holds all go under the disclosure.
     if (status !== "complete" && f.status_reason) {
       keyFinding = String(f.status_reason);
+      moreClaims = claims;
     }
     return {
       key: f.agent_name,
@@ -118,6 +131,7 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
       confidence: pct,
       domain: f.domain,
       key_finding: keyFinding,
+      more_claims: moreClaims,
       revision_rounds: f.revision_rounds,
       status,
     };
@@ -248,6 +262,27 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
                         className=""
                       />
                     </div>
+                    {agent.more_claims.length > 0 && (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-[11px] text-text-muted">
+                          +{agent.more_claims.length} more
+                          {agent.more_claims.length === 1 ? " claim" : " claims"}
+                        </summary>
+                        <ol className="mt-1 space-y-1 list-decimal pl-4 text-xs text-text-secondary">
+                          {agent.more_claims.map((text, i) => (
+                            <li key={i}>
+                              <SafeMarkdown
+                                markdown={text}
+                                cite
+                                inline
+                                regionName={`${agent.name} further claim ${i + 1}`}
+                                className=""
+                              />
+                            </li>
+                          ))}
+                        </ol>
+                      </details>
+                    )}
                   </td>
                 </tr>
               );

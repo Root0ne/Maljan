@@ -132,6 +132,15 @@ describe("the agent detail's input data and sandbox row", () => {
     timeout_seconds: null,
   };
 
+  it("tells a generic agent where its sections go, beside the tab it may pick", () => {
+    const hint = "Its sections go to EVIDENCE unless you pick a tab";
+    expect(agentHtml("checker", base)).toContain(hint);
+    expect(agentHtml("checker", { ...base, tab: "static" })).toContain(hint);
+    for (const role of ["static", "dynamic", "network", "lead"] as const) {
+      expect(agentHtml("checker", { ...base, role }), role).not.toContain(hint);
+    }
+  });
+
   it("draws a box per served input slice, ticking the stored ones", () => {
     const html = agentHtml("checker", { ...base, data_sources: ["sandbox.behavior"] });
     for (const source of vocabulary) {
