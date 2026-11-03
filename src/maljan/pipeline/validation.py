@@ -1419,34 +1419,33 @@ _FOLLOWING_CLAUSE_END_RE = re.compile(
 # none show", "so no string is readable"). A "so" before an adjective ("so
 # unlikely") or a pronoun that may stand for the word ("so it is not
 # present") opens none. The result is still read where its negation stands
-# with a word of presence ("so the analysis found none", "so that none was
-# found"): that denies the word.
+# with a word of presence ("so the analysis found none", "so the result was
+# no") or with the word's own stem again ("so no obfuscation was identified"):
+# that denies the word.
 _RESULT_SO_RE = re.compile(r"\bso\s+(?:that|the|a|an|no|none|nothing)\b", re.IGNORECASE)
 _PRESENCE_WORDS = frozenset(
     {
         *("present", "absent", "found", "detected", "observed", "seen"),
-        *("exist", "exists", "used", "applied"),
+        *("exist", "exists", "used", "applied", "identified", "confirmed"),
+        *("evident", "apparent", "noticed", "recognized", "recognised", "involved"),
+        *("result", "results"),
     }
 )
-# A verb that states what the word does to something else, and the "no" that
-# writes that verb's own object right after the word ("the obfuscation leaves
-# no imports", "strips no section"): the "no" denies the object, not the word.
-# Only these verbs: after any other ("plays no role", "returned no hits", "is
-# no concern") the "no" may deny the word itself. A noun that names the
-# word's own absence ("leaves no trace") still denies it.
+# What the word, when it leaves or keeps "no" of something, leaves or keeps
+# of the sample: the "no" denies that, not the word ("the obfuscation leaves
+# no imports", "keeps no readable name"). Both lists are closed: after any
+# other verb ("hides no payload", "plays no role") or before any other
+# object ("leaves no trace", "left no residue") the "no" may deny the word.
+# The objects are what the stored claims and T-531 name an obfuscated or
+# packed file without: imports, strings, readable or plain(-text) names,
+# cleartext values, API names and exports.
 _OWN_OBJECT_NO_RE = re.compile(r"\s+([A-Za-z]+)\s+no\s+([A-Za-z]+)\b", re.IGNORECASE)
-_EFFECT_VERBS = frozenset(
+_LEAVING_VERBS = frozenset({"leave", "leaves", "left", "keep", "keeps", "kept"})
+_LEFT_OBJECTS = frozenset(
     {
-        *("leave", "leaves", "left"),
-        *("remove", "removes", "removed"),
-        *("strip", "strips", "stripped"),
-        *("hide", "hides", "hid", "hidden"),
-        *("conceal", "conceals", "concealed"),
-        *("keep", "keeps", "kept"),
+        *("import", "imports", "string", "strings", "readable", "plain", "plaintext"),
+        *("cleartext", "name", "names", "api", "export", "exports"),
     }
-)
-_ABSENCE_OBJECTS = frozenset(
-    {"evidence", "indication", "indications", "sign", "signs", "trace", "traces"}
 )
 # "free of" or "free from" just before a word denies it ("free of obfuscation").
 _FREE_OF_BEFORE_RE = re.compile(r"\bfree\s+(?:of|from)\s+(?:\w+\s+)?$", re.IGNORECASE)
@@ -1476,8 +1475,9 @@ def _silent_e_stem(word: str) -> str:
 def _negated_after(text: str, start: int, end: int) -> bool:
     """Whether a negating word follows ``text[start:end]`` in its clause, or
     "free of" stands just before it. A result "so" (``_RESULT_SO_RE``) ends
-    the clause unless its result denies a presence, and a "no" that writes the
-    own object of an effect verb (``_OWN_OBJECT_NO_RE``) is not read."""
+    the clause unless its result denies a presence or the word again, and a
+    "no" that writes what the word leaves or keeps (``_OWN_OBJECT_NO_RE``) is
+    not read."""
     if _FREE_OF_BEFORE_RE.search(text[:start]):
         return True
     tail = text[end:]
@@ -1485,15 +1485,19 @@ def _negated_after(text: str, start: int, end: int) -> bool:
     clause = tail[: cut.start()] if cut else tail
     result = _RESULT_SO_RE.search(clause)
     if result:
-        said = {word.lower() for word in re.findall(r"[A-Za-z]+", clause[result.start() :])}
-        if said & (_NEGATIONS | _FOLLOWING_NEGATIONS) and said & _PRESENCE_WORDS:
+        said = re.findall(r"[A-Za-z]+", clause[result.start() :])
+        lowered = {word.lower() for word in said}
+        stem = _stem(text[start:end])
+        if lowered & (_NEGATIONS | _FOLLOWING_NEGATIONS) and (
+            lowered & _PRESENCE_WORDS or any(_stem(word) == stem for word in said)
+        ):
             return True
         clause = clause[: result.start()]
     own_object = _OWN_OBJECT_NO_RE.match(clause)
     if (
         own_object
-        and own_object.group(1).lower() in _EFFECT_VERBS
-        and own_object.group(2).lower() not in _ABSENCE_OBJECTS
+        and own_object.group(1).lower() in _LEAVING_VERBS
+        and own_object.group(2).lower() in _LEFT_OBJECTS
     ):
         clause = clause[own_object.end() :]
     words = re.findall(r"[A-Za-z]+", clause)

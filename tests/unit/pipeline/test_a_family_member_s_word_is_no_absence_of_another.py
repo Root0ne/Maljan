@@ -169,6 +169,9 @@ def test_a_silent_e_verb_s_inflection_of_the_rarest_own_word_affirms(
         "Not packed; strings are obfuscated so that none show in plain text.",
         "Not packed; the obfuscation leaves no imports.",
         "Not packed; the strings are obfuscated so no string is readable.",
+        "Not packed; strings obfuscated so the strings are not visible.",
+        "Not packed; obfuscation keeps no strings in clear text.",
+        "Not packed; obfuscation leaves no readable strings.",
     ],
 )
 def test_a_negation_of_another_object_leaves_the_rarest_own_word_affirmed(text: str) -> None:
@@ -235,6 +238,31 @@ def test_a_negation_of_another_object_leaves_the_rarest_own_word_affirmed(text: 
         "Not packed; obfuscation shows no sign of use.",
         "Not packed; obfuscated payload absent.",
         "Not packed; obfuscation shows no evidence and none is present.",
+        # A verb that may deny what the word does, or an object that is no
+        # part of the sample the word leaves.
+        "Not packed; obfuscation hides no payload.",
+        "Not packed; obfuscation hides no strings.",
+        "Not packed; obfuscation conceals no code.",
+        "Not packed; obfuscation removes no imports.",
+        "Not packed; obfuscation strips no symbols.",
+        "Not packed; obfuscation leaves no evidence.",
+        "Not packed; obfuscation leaves no artifacts.",
+        "Not packed; obfuscation leaves no indicators.",
+        "Not packed; obfuscation leaves no footprint.",
+        "Not packed; obfuscation leaves no marks.",
+        "Not packed; obfuscation left no hint.",
+        "Not packed; obfuscation left no residue.",
+        # A result that denies a presence or the word again.
+        "Not packed; obfuscation checked so the obfuscation is not applied.",
+        "Not packed; obfuscation checked so the obfuscation is not evident.",
+        "Not packed; obfuscation checked so no obfuscation was identified.",
+        "Not packed; obfuscation checked so the sample is not obfuscated.",
+        "Not packed; obfuscation checked so no obfuscation is visible.",
+        "Not packed; obfuscation looked for so no obfuscation was confirmed.",
+        "Not packed; obfuscation looked for so the result was no.",
+        "Not packed; obfuscated so it is not present.",
+        "Not packed; obfuscation so not present.",
+        "Not packed; obfuscation so that obfuscation is not involved.",
     ],
 )
 def test_a_negation_of_the_word_s_own_phrase_still_keeps_it_from_affirming(text: str) -> None:
