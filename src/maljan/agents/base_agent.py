@@ -1663,8 +1663,10 @@ def describe_exception_for_log(exc: BaseException) -> str:
 # Structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block parsing
 # (``read_claim_blocks``), the one reader every path that reads claims uses.
 _BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULTILINE)
+# The sentence ends where ``_TAIL_START_RE`` begins the fields, in the same
+# casing, so a line read as the technique is never also the sentence's.
 _BLOCK_CLAIM_RE = re.compile(
-    r"CLAIM:\s*(.+?)(?=\s*\n" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE):|\Z)",
+    r"CLAIM:\s*(.+?)(?=\s*\n" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE)):|\Z)",
     re.DOTALL,
 )
 # A field line, as a claim's sentence would begin if its heading wrote none:

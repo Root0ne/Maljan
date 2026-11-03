@@ -181,3 +181,15 @@ def test_the_same_label_on_the_heading_line_is_the_sentence(field: str) -> None:
     )
     assert [claim.claim for claim in read.claims] == [field]
     assert read.unread == 0
+
+
+@pytest.mark.parametrize("label", ["Technique", "technique", "**Technique", "- Technique"])
+def test_a_technique_line_in_any_casing_ends_the_sentence_it_is_read_for(label: str) -> None:
+    read = read_claim_blocks(
+        f"CLAIM: Routine 0x4100 decodes its strings at run time.\n{label}: T1140\n"
+        "EVIDENCE: [ev_0002]\nCONFIDENCE: 0.8\n",
+        require_evidence=True,
+    )
+    assert [(claim.claim, claim.technique_id) for claim in read.claims] == [
+        ("Routine 0x4100 decodes its strings at run time.", "T1140")
+    ]
