@@ -425,22 +425,23 @@ class TestTheNarrowedPrompt:
         assert feedback.startswith("The reports agree on the loader.")
         assert feedback.endswith("Confidence: 0.60")
 
-    def test_a_peer_cited_by_claim_number_is_shown_the_claim_it_is_cited_by(self) -> None:
-        _update, agents = _revise(_mediator(revise=["static", "all_tools_static_r2", "dynamic"]))
+    def test_a_peer_cited_in_a_clause_sharing_nothing_with_the_claim_is_shown_whole(self) -> None:
+        update, agents = _revise(_mediator(revise=["static", "all_tools_static_r2", "dynamic"]))
 
         args, _kw = agents["all_tools_static_r2"].safe_revise_isr.call_args
         peers, feedback = args[2], args[3]
         # Its one point names only itself in the field, and cites STATIC
-        # Claim 1: that claim is quoted from the peer's answer in force
+        # Claim 1 in a clause whose one id, [ev_0007], is not the claim's: the
+        # peer is shown whole, and the round says why
         # (``test_a_revision_is_shown_the_contested_claims_of_its_peers``).
-        assert peers == {
-            "static": (
-                "Claim 1 quoted, with its disputes and other points naming you; the whole "
-                "report is not shown.\n"
-                "  Claim 1: Reads the flag at 0x40. | Evidence: [ev_0010] | Confidence: 0.80"
-            )
-        }
-        assert peers["static"].claims == (1,)
+        assert peers == {"static": _whole("static")}
+        assert any(
+            "all_tools_static_r2 analyst's round-1 revision was shown the static analyst's "
+            "whole report"
+            in note
+            and "shares no ledger id or address" in note
+            for note in update["revision_rounds"][0]["peers"]["notes"]
+        )
         assert "Claim 2" in feedback and "[ev_0007]" in feedback
 
     def test_every_claim_number_and_entry_id_the_points_cite_is_kept(self) -> None:

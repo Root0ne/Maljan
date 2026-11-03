@@ -2000,6 +2000,31 @@ _EARLIER_NUMBERS = re.compile(r"\d++(?:\s*+(?:/|,|&|and|\+)\s*+#?\d++)*+", re.IG
 _ROUND_BEFORE = re.compile(r"(?:['’]s)?\s*+round[-\s]*+\d++\s*+$", re.IGNORECASE)
 
 
+def marks_blanked(text: str) -> str:
+    """``text`` with every mark's reason blanked out, one space for one character."""
+    masked = text
+    for m in _MARK_ANYWHERE.finditer(text):
+        start, end = m.span()
+        masked = masked[:start] + " " * (end - start) + masked[end:]
+    return masked
+
+
+def clause_tokens(
+    text: str, masked: str, at: int, end: int, starts: Sequence[int]
+) -> frozenset[str]:
+    """The ledger ids and addresses of a reference's own clause (:func:`line_tokens`).
+
+    The clause runs from where the reference's numbers start (``at``) to the
+    next reference named for an analyst (``starts``), a ";" or the end of the
+    sentence after its numbers (``end``), whichever comes first; it is read
+    in ``masked`` (:func:`marks_blanked`), so a mark's reason never counts.
+    """
+    next_start = min((s for s in starts if s > at), default=len(text))
+    ended = _CLAUSE_END.search(text, end)
+    clause_end = min(next_start, ended.start() if ended is not None else len(text))
+    return line_tokens(masked[at:clause_end])
+
+
 def _earlier_round(text: str, start: int, names: Sequence[str]) -> bool:
     """Whether the "claim(s)" at ``start`` is an analyst's claim of an earlier round.
 
@@ -2151,11 +2176,8 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
     for number, (line, mark) in enumerate(zip(lines, read_marks(lines), strict=True), 1):
         text = without_line_mark(str(line))
         field_names = _named_in(text, names)
-        in_marks = [m.span() for m in _MARK_ANYWHERE.finditer(text)]
         # The text with every mark's reason blanked out, for the clauses' tokens.
-        masked = text
-        for start, end in in_marks:
-            masked = masked[:start] + " " * (end - start) + masked[end:]
+        masked = marks_blanked(text)
         stated = mark.blocking and not mark.unread
         references = claim_references_of(text, names, field_names)
         starts = sorted(ref.numbers_start for ref in references)
@@ -2175,10 +2197,7 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
                 else set()
             )
             cited.setdefault(name, set()).update(before)
-            next_start = min((s for s in starts if s > at), default=len(text))
-            ended = _CLAUSE_END.search(text, numbers.end)
-            clause_end = min(next_start, ended.start() if ended is not None else len(text))
-            kept.append((name, numbers, line_tokens(masked[at:clause_end])))
+            kept.append((name, numbers, clause_tokens(text, masked, at, numbers.end, starts)))
         for name, numbers, tokens in kept:
             for first, last in numbers.unplaced:
                 if stated:
@@ -2245,33 +2264,6 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
     )
 
 
-def _line_claims(
-    text: str, names: Sequence[str]
-) -> tuple[list[str] | None, list[tuple[str, list[str]]]]:
-    """``(the analysts the field names, [(analyst, claim digits), ...])`` for one line.
-
-    Every analyst the line writes "claim(s) N" for, field or not
-    (``claims_named_by_lines`` keeps the field's): the analyst's name before
-    the numbers (``_claims_named``), numbers right after a field that names one
-    analyst alone, and a short form of a name before them where the line has
-    a field (``_short_named``). The text is the line without its mark.
-    """
-    field_names = _named_in(text, names)
-    found: list[tuple[str, list[str]]] = list(_claims_named(text, names))
-    if field_names is not None and len(field_names) == 1:
-        opened = _ANALYSTS_FIELD.search(text)
-        bare = _BARE_CLAIMS.match(text, opened.end()) if opened is not None else None
-        if bare is not None:
-            found.append((field_names[0], re.findall(r"\d+", bare.group(1))))
-    if field_names:
-        # A short form of a field analyst's name before "claim(s) N".
-        for reference in _CLAIM_REFERENCE.finditer(text):
-            short = _short_named(text, reference.start(), names)
-            if short is not None:
-                found.append((short, re.findall(r"\d+", reference.group(1))))
-    return field_names, found
-
-
 def claims_named_by_lines(
     lines: Sequence[str], participants: Sequence[str]
 ) -> dict[str, dict[int, list[tuple[int, bool]]]]:
@@ -2284,35 +2276,6 @@ def claims_named_by_lines(
     return NamedByLines(read_claim_references(lines, participants))
 
 
-# How many claims a range a line writes ("claims 32-34") may span and be
-# quoted: a wider one is not read as a list of claims.
-_CLAIM_RANGE = 20
-
-# "claim(s) N" with every number written after it: lists ("3, 4, and 5",
-# "3/4", "3 & 4") and ranges ("32-34", "32–34", "32 through 34", "17 to 19").
-_RANGE_WORD = r"(?:[-–—]|\bthrough\b|\bthru\b|\bto\b)"
-_CLAIM_EXPRESSION = re.compile(
-    r"\bclaims?\s*+#?\s*+(\d++(?:\s*+(?:,\s*+(?:and\b|or\b|&)?|/|&|\+|\band\b|\bor\b|"
-    + _RANGE_WORD
-    + r")\s*+#?\s*+\d++)*+)",
-    re.IGNORECASE,
-)
-_RANGE_TOKEN = re.compile(r"(\d++)|" + _RANGE_WORD, re.IGNORECASE)
-# The mediator's marks written right after a line's field, before its text.
-_MARKS_AFTER_FIELD = re.compile(
-    r"(?:\s*+\[\s*+(?:not\s+blocking|blocking)\s*+:" + _REASON + r"\]"
-    r"|\s*+\[\s*+(?:carried\s*+:\s*+L?\s*+\d{1,9}\s*+|new\s*+)\])++",
-    re.IGNORECASE,
-)
-# The mediator's mark wherever it stands on a line, its reason included.
-_MARK_ANYWHERE = re.compile(
-    r"\[\s*+(?:not\s+blocking|blocking)\s*+:" + _REASON + r"\]", re.IGNORECASE
-)
-# What stands between two references that the second continues the first
-# ("claim #3 and claim 4").
-_CONTINUES = re.compile(r"[\s,]*+(?:and|or|&|/|\+)?[\s,]*+", re.IGNORECASE)
-
-
 @dataclass(frozen=True)
 class ContestedRef:
     """What one listed line of a mediation refers to, read from its text.
@@ -2323,11 +2286,13 @@ class ContestedRef:
     each ``(analyst, claim number)`` it writes, for any participant, field or
     not, in the order written, a range read as every claim in it;
     ``unplaced`` the analysts it gives a claim number too long to be a place;
-    ``wide`` the analysts it gives a range it cannot place (wider than
-    :data:`_CLAIM_RANGE` claims, or written backwards); ``unattributed``
-    whether it writes a claim number it attributes to no analyst; ``entries``
-    the ledger ids it cites, lower-cased; ``question`` the line without its
-    carried-or-new mark.
+    ``wide`` the analysts it gives a range longer than
+    :data:`CLAIM_RANGE_CAP` claims; ``unattributed`` whether it writes a
+    claim number it attributes to no analyst; ``entries`` the ledger ids it
+    cites, lower-cased; ``question`` the line without its carried-or-new
+    mark; ``tokens`` per ``(analyst, claim number)`` the ledger ids and
+    addresses of the clause of the reference that names it
+    (:func:`clause_tokens`).
     """
 
     line: int
@@ -2339,130 +2304,64 @@ class ContestedRef:
     unplaced: tuple[str, ...] = ()
     wide: tuple[str, ...] = ()
     unattributed: bool = False
+    tokens: tuple[tuple[str, int, frozenset[str]], ...] = ()
 
     def claims_of(self, analyst: str) -> tuple[int, ...]:
         """The claim numbers the line writes for ``analyst``, each once, in order."""
         return tuple(dict.fromkeys(n for who, n in self.claims if who == analyst))
 
-
-def _claim_owners(text: str, names: Sequence[str], field_names: list[str] | None) -> dict[int, str]:
-    """``{where the digits of a "claim(s) N" start: the analyst it is}`` for one line.
-
-    The analyst is read as ``_line_claims`` reads it: the analyst's name right
-    before "claim(s)" (``_CLAIM_NUMBERS``, a longer name first), the one
-    analyst a field names for numbers right after the field, and a short form
-    of a name before "claim(s)" where the line has a field (``_short_named``).
-    """
-    owners: dict[int, str] = {}
-    taken = bytearray(len(text))
-    for name in sorted(names, key=len, reverse=True):
-        for match in _name_pattern(name).finditer(text):
-            start, end = match.span()
-            if taken.find(1, start, end) != -1:
-                continue
-            taken[start:end] = b"\x01" * (end - start)
-            numbers = _CLAIM_NUMBERS.match(text, end)
-            if numbers is not None:
-                owners.setdefault(numbers.start(1), name)
-    if field_names is not None and len(field_names) == 1:
-        opened = _ANALYSTS_FIELD.search(text)
-        if opened is not None:
-            # The mediator's mark may stand between the field and the numbers
-            # ("[analysts: X] [blocking: ...] Claims 11 and 20 say ...").
-            after = _MARKS_AFTER_FIELD.match(text, opened.end())
-            bare = _BARE_CLAIMS.match(text, after.end() if after else opened.end())
-            if bare is not None:
-                owners.setdefault(bare.start(1), field_names[0])
-    if field_names:
-        for reference in _CLAIM_REFERENCE.finditer(text):
-            short = _short_named(text, reference.start(), names)
-            if short is not None:
-                owners.setdefault(reference.start(1), short)
-    return owners
-
-
-def _numbers_written(expression: str) -> tuple[list[str], bool]:
-    """``(the digits each claim number is written with, a range was unreadable)``.
-
-    A range ("32-34", "17 to 19") is every number in it; one wider than
-    :data:`_CLAIM_RANGE` claims, written backwards, or with a number longer
-    than :data:`_CLAIM_DIGITS` digits at an end, is not read, and says so.
-    """
-    out: list[str] = []
-    unread = False
-    ranging = False
-    for token in _RANGE_TOKEN.finditer(expression):
-        digits = token.group(1)
-        if digits is None:
-            ranging = bool(out)
-            continue
-        if ranging:
-            ranging = False
-            low, high = out[-1].lstrip("0"), digits.lstrip("0")
-            if len(low) > _CLAIM_DIGITS or len(high) > _CLAIM_DIGITS:
-                unread = True
-                continue
-            first, last = int(low or "0"), int(high or "0")
-            if last < first or last - first + 1 > _CLAIM_RANGE:
-                unread = True
-                continue
-            out.extend(str(n) for n in range(first + 1, last + 1))
-            continue
-        out.append(digits)
-    return out, unread
+    def tokens_of(self, analyst: str, number: int) -> frozenset[str]:
+        """The ids and addresses of the clauses that name ``analyst``'s claim ``number``."""
+        found: frozenset[str] = frozenset()
+        for who, n, tokens in self.tokens:
+            if who == analyst and n == number:
+                found |= tokens
+        return found
 
 
 def contested_refs(lines: Sequence[str], participants: Sequence[str]) -> list[ContestedRef]:
     """One :class:`ContestedRef` per line, in order. Linear in the lines.
 
-    Every "claim(s) N" of a line (``_CLAIM_EXPRESSION``: lists and bounded
-    ranges read whole) is given the analyst ``claims_named_by_lines`` would
-    read for it (``_claim_owners``), without that reader's rule that a line
-    with a field counts only for the field's analysts: a peer's claim a line
-    cites is what a revision is shown of it. A reference no analyst is read
-    for takes the analyst of the reference it continues ("STATIC claim #3 and
-    claim 4"); otherwise the line is marked ``unattributed``. A number of zero
-    is kept (no claim has it); one longer than :data:`_CLAIM_DIGITS` digits is
-    never converted and names its analyst in ``unplaced``. A "claim N" inside
-    the mediator's ``[blocking: ...]`` or ``[not blocking: ...]`` mark is its
-    reason and is not read. The merge's reading (``claims_named_by_lines``) is
-    not changed by this one.
+    Every reference the merged reader reads on a line
+    (:func:`claim_references_of`), for any participant, field or not: a
+    peer's claim a line cites is what a revision is shown of it. A reference
+    inside the mediator's ``[blocking: ...]`` or ``[not blocking: ...]`` mark
+    is its reason and is not quoted. A range longer than
+    :data:`CLAIM_RANGE_CAP` claims names its analyst in ``wide``; a number of
+    zero is kept (no claim has it); one longer than :data:`_CLAIM_DIGITS`
+    digits is never converted and names its analyst in ``unplaced``. A
+    "claim(s) N" the reader gives to no analyst
+    (:func:`unattributed_references`) marks the line ``unattributed``.
     """
     names = [str(p) for p in participants if str(p).strip()]
     out: list[ContestedRef] = []
     for number, (line, mark) in enumerate(zip(lines, read_marks(lines), strict=True), 1):
         text = without_line_mark(str(line))
         field_names = _named_in(text, names)
-        owners = _claim_owners(text, names, field_names)
+        references = claim_references_of(text, names, field_names)
+        masked = marks_blanked(text)
+        starts = sorted(ref.numbers_start for ref in references)
         claims: dict[tuple[str, int], None] = {}
+        tokens: dict[tuple[str, int, frozenset[str]], None] = {}
         unplaced: dict[str, None] = {}
         wide: dict[str, None] = {}
-        unattributed = False
-        previous: tuple[int, str | None] = (-1, None)
-        # A claim number inside the mediator's mark is its reason, not a
-        # reference the line puts to an analyst.
-        in_marks = [m.span() for m in _MARK_ANYWHERE.finditer(text)]
-        for reference in _CLAIM_EXPRESSION.finditer(text):
-            if any(start <= reference.start() < end for start, end in in_marks):
+        # A reference the reader finds twice (by name and by a short form) is one.
+        seen: set[tuple[str, int]] = set()
+        for ref in references:
+            if ref.in_mark or (ref.analyst, ref.numbers_start) in seen:
                 continue
-            owner = owners.get(reference.start(1))
-            if owner is None and previous[1] is not None:
-                between = text[previous[0] : reference.start()]
-                if _CONTINUES.fullmatch(between):
-                    owner = previous[1]
-            previous = (reference.end(), owner)
-            if owner is None:
-                unattributed = True
-                continue
-            digits, unread = _numbers_written(reference.group(1))
-            if unread:
-                wide[owner] = None
-            for written in digits:
+            seen.add((ref.analyst, ref.numbers_start))
+            if ref.numbers.unplaced:
+                wide[ref.analyst] = None
+            clause = clause_tokens(text, masked, ref.numbers_start, ref.numbers.end, starts)
+            for written in ref.numbers.numbers:
                 stripped = written.lstrip("0")
                 if len(stripped) > _CLAIM_DIGITS:
-                    unplaced[owner] = None
+                    unplaced[ref.analyst] = None
                     continue
-                claims[(owner, int(stripped or "0"))] = None
+                claim = (ref.analyst, int(stripped or "0"))
+                claims[claim] = None
+                tokens[(*claim, clause)] = None
         out.append(
             ContestedRef(
                 line=number,
@@ -2473,7 +2372,8 @@ def contested_refs(lines: Sequence[str], participants: Sequence[str]) -> list[Co
                 question=" ".join(text.split()),
                 unplaced=tuple(unplaced),
                 wide=tuple(wide),
-                unattributed=unattributed,
+                unattributed=bool(unattributed_references(text, names, references)),
+                tokens=tuple(tokens),
             )
         )
     return out
@@ -2573,19 +2473,6 @@ def _claim_numbers_said(numbers: Sequence[int]) -> str:
     return f"{which} {said}" + (f" and {rest} more" if rest > 0 else "")
 
 
-# The ledger ids and the addresses a text writes: what a quoted claim must
-# share with the line citing it.
-_LEDGER_ID = re.compile(r"\bev_\d++\b", re.IGNORECASE)
-_ADDRESS = re.compile(r"\b0x([0-9a-f]{2,16})\b", re.IGNORECASE)
-
-
-def _ids_and_addresses(text: str) -> set[str]:
-    """The ledger ids (lower-cased) and the addresses (as numbers) ``text`` writes."""
-    found = {m.group(0).lower() for m in _LEDGER_ID.finditer(text)}
-    found.update(f"0x{int(m.group(1), 16):x}" for m in _ADDRESS.finditer(text))
-    return found
-
-
 def _names_analyst(
     text: str, name: str, patterns: Sequence[re.Pattern[str]], participants: Sequence[str]
 ) -> bool:
@@ -2655,9 +2542,9 @@ def peer_excerpt(
     names the peer with no claim number for it, one too long to read or a
     range it cannot place, when it cites a claim of no analyst it names, when
     a number is past the claims of the answer in force, when a quoted claim
-    shares no ledger id or address with the line citing it (the mediator may
-    have cited a claim by another number), or when the answer in force is not
-    held.
+    shares no ledger id or address with the clause of the line that cites it
+    (:func:`clause_tokens`: the mediator may have cited a claim by another
+    number), or when the answer in force is not held.
     """
     from maljan.schemas.isr_models import claim_summary_line
 
@@ -2685,13 +2572,12 @@ def peer_excerpt(
                 f"{at} names its {_claim_numbers_said(past)}, and its answer in force holds "
                 f"{len(blocks)} claim(s)"
             )
-        cited = _ids_and_addresses(ref.question)
         for n in written:
             said = " ".join(
                 f"{getattr(c, 'claim', '') or ''} {getattr(c, 'evidence_ref', '') or ''}"
                 for c in blocks[n - 1]
             )
-            if not cited & _ids_and_addresses(said):
+            if not ref.tokens_of(peer, n) & line_tokens(said):
                 return _whole(
                     f"{at} cites claim {n} of it, which shares no ledger id or address with "
                     "the line"

@@ -112,8 +112,26 @@ class TestContestedRefs:
                 "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claims 1 and 3 "
                 "[ev_0010, ev_0012]. [blocking: the ledger refutes it]"
             ),
+            tokens=(
+                ("dynamic", 1, frozenset()),
+                ("static", 1, frozenset({"ev_0010", "ev_0012"})),
+                ("static", 3, frozenset({"ev_0010", "ev_0012"})),
+            ),
         )
         assert ref.claims_of("static") == (1, 3)
+        # A reference's clause ends where the next named reference starts.
+        assert ref.tokens_of("dynamic", 1) == frozenset()
+
+    def test_each_claim_reads_only_its_own_clause(self) -> None:
+        line = (
+            "[analysts: dynamic] STATIC claim 1 rests on ev_0010; NETWORK claim 1 rests on "
+            "ev_0013 and [blocking: ev_0099 says otherwise]"
+        )
+
+        (ref,) = contested_refs([line], NAMES)
+
+        assert ref.tokens_of("static", 1) == frozenset({"ev_0010"})
+        assert ref.tokens_of("network", 1) == frozenset({"ev_0013"})
 
     def test_lines_count_from_one_and_carry_their_mark(self) -> None:
         lines = [LINE, "[analysts: network] NETWORK Claim 1 is moot. [not blocking: wording]"]
@@ -396,14 +414,21 @@ class TestRangesAndContinuations:
         assert shown.claims == (1, 2, 3)
         assert "Opens a key." in shown
 
-    @pytest.mark.parametrize("cited", ["claims 1-40", "claims 3-1"])
-    def test_a_range_it_cannot_place_shows_the_whole_report(self, cited: str) -> None:
-        line = f"[analysts: dynamic] DYNAMIC Claim 1 versus STATIC {cited} [ev_0010]."
+    def test_a_range_longer_than_the_cap_shows_the_whole_report(self) -> None:
+        line = "[analysts: dynamic] DYNAMIC Claim 1 versus STATIC claims 1-40 [ev_0010]."
 
         shown = _shown(line)["static"]
 
         assert shown == REPORTS["static"]
         assert shown.note.endswith("blocking line 1 writes a claim range it cannot place.")
+
+    def test_a_falling_range_ends_the_reference_at_its_first_number(self) -> None:
+        line = "[analysts: dynamic] DYNAMIC Claim 1 versus STATIC claims 3-1 [ev_0012]."
+
+        (ref,) = contested_refs([line], NAMES)
+
+        assert ref.claims_of("static") == (3,)
+        assert not ref.wide
 
     @pytest.mark.parametrize("mark", ["blocking", "not blocking"])
     def test_a_claim_number_inside_the_mark_is_not_read(self, mark: str) -> None:
@@ -467,9 +492,44 @@ class TestAMisquoteIsNotQuoted:
         )
 
     def test_an_address_written_with_leading_zeros_is_the_same_address(self) -> None:
-        line = "[analysts: dynamic] DYNAMIC Claim 1 versus STATIC Claim 1 at 0x0040. [blocking: x]"
+        isrs = {**IN_FORCE, "static": _isr("static", "Reads the flag at 0x401000.")}
+        line = (
+            "[analysts: dynamic] DYNAMIC Claim 1 versus STATIC Claim 1 at 0x00401000. [blocking: x]"
+        )
 
-        assert _shown(line)["static"].claims == (1,)
+        assert _shown(line, isrs=isrs)["static"].claims == (1,)
+
+    def test_an_id_of_another_clause_of_the_line_is_no_match(self) -> None:
+        # Shaped on a stored line: the id the line cites for one analyst's
+        # claim is also in the evidence of the claim it cites of another,
+        # which its own clause says nothing about.
+        isrs = {
+            **IN_FORCE,
+            "all_tools_static_r2": _isr(
+                "all_tools_static_r2", "Lists exports.", "Enumerates processes [ev_0021]."
+            ),
+        }
+        line = (
+            "[analysts: network] NETWORK Claim 1 says the mutex gates execution, resting on "
+            "the ev_0021 trace. ALL_TOOLS_STATIC_R2 ANALYST claim 2 says the mutex name is not "
+            "recovered; DYNAMIC claim 1 says no mutex is created. [blocking: x]"
+        )
+
+        shown = _shown(line, name="network", isrs=isrs)["all_tools_static_r2"]
+
+        assert shown == REPORTS["all_tools_static_r2"]
+        assert shown.note.endswith(
+            "blocking line 1 cites claim 2 of it, which shares no ledger id or address with "
+            "the line."
+        )
+
+    def test_a_mark_s_reason_is_no_clause_of_a_claim(self) -> None:
+        line = (
+            "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claim 1 "
+            "[blocking: ev_0010 refutes it]"
+        )
+
+        assert _shown(line)["static"] == REPORTS["static"]
 
 
 # ---------------------------------------------------------------------------
