@@ -58,6 +58,7 @@ from maljan.core.undeclared_tools import (
 )
 from maljan.pipeline.validation import (
     _address_value,
+    _addresses_written,
     _batch_listings,
     _entry_functions,
     _listing_text,
@@ -68,9 +69,11 @@ from maljan.schemas.evidence import answer_not_shown
 
 __all__ = [
     "CallEdges",
+    "NamedUnread",
     "UnreadCallee",
     "call_edges",
     "listing_is_error",
+    "named_unread",
     "read_routines",
     "unread_callees",
 ]
@@ -382,3 +385,73 @@ def unread_callees(
         )
         for address, (callers, read_in, stated_in) in sorted(out.items())
     ]
+
+
+@dataclass(frozen=True)
+class NamedUnread:
+    """One function the loop names and no entry reads (T-403).
+
+    ``callers`` are the read routines that call it, none when only a claim
+    names it; ``named`` is whether one of the analyst's claims names it.
+    """
+
+    address: int
+    callers: tuple[int, ...] = ()
+    named: bool = False
+
+
+def named_unread(
+    entries: Iterable[Any], found: FunctionMap, said: Iterable[str]
+) -> list[NamedUnread]:
+    """The functions named and never read: called by a read routine, or named by a claim.
+
+    A read routine's callee no entry lists is :func:`unread_callees`. A claim
+    names a function by an address it writes (``_addresses_written``, as the
+    map reads a claim) that the run's own facts know as a function: a caller
+    or a callee a call fact states, a row of the function index, a function
+    an artefact is tied to. An address no fact knows as a function (a string's,
+    a call site's) is none, and a read routine is never unread. ``found`` is
+    the map of ``entries``; ``said`` the claims' texts.
+
+    Ordered by what the map does not already say: first the ones no other
+    line of the map carries (a row of the function index, or a function
+    reaching artefacts, is on the not-visited line), then the ones more of
+    what was read points at (each read routine that calls it, and a claim
+    naming it, counts one), then by address. A claim counts no more than a
+    caller: during the loop its claims are not parsed yet. Linear: each entry
+    and each claim is read once, and each lookup reads an address's
+    spellings in a set.
+    """
+    entries = list(entries)
+    bases = tuple(found.image_bases)
+    edges = call_edges(entries)
+    unread = {u.address: u for u in unread_callees(entries, found, edges)}
+    read = read_routines(entries, found, edges)
+    known: set[int] = set()
+    for caller, callees in edges.calls.items():
+        known.add(one_spelling(caller, bases))
+        known.update(one_spelling(callee, bases) for callee in callees)
+    known.update(one_spelling(address, bases) for address, _artefacts in found.index_unvisited)
+    known.update(one_spelling(address, bases) for address, _artefacts in found.unvisited)
+
+    def _held(address: int, keys: Mapping[int, Any] | set[int]) -> int | None:
+        for key in address_spellings(address, bases):
+            if key in keys and same_function(key, address, bases):
+                return key
+        return None
+
+    named: dict[int, None] = {}
+    for text in said:
+        for address in _addresses_written(text):
+            key = _held(address, unread)
+            if key is None and _held(address, read) is None:
+                key = _held(address, known)
+            if key is not None:
+                named[key] = None
+    out = [NamedUnread(a, u.callers, a in named) for a, u in unread.items()]
+    out.extend(NamedUnread(a, (), True) for a in named if a not in unread)
+    on_map = {one_spelling(a, bases) for a, _rest in found.index_unvisited} | {
+        one_spelling(a, bases) for a, _rest in found.unvisited
+    }
+    out.sort(key=lambda n: (n.address in on_map, -(len(n.callers) + n.named), n.address))
+    return out

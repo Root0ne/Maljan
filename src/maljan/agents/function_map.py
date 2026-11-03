@@ -17,7 +17,10 @@ again. The map is kept for it by the platform, from facts only:
 * whether the function is a row of the pack's function index
   (``tools.artefact_index``): with an index, the coverage line counts the
   visited functions among the index's rows, and the not-visited line lists
-  the other rows in the pack's rank order.
+  the other rows in the pack's rank order;
+* the functions named and never read: a read function's callees no listing
+  holds, and the functions the analyst's claims name that no listing holds
+  (``function_callees.named_unread``). A fact; it asks for no call.
 
 The model never writes to it. The block is rendered fresh on every turn beside
 the run-state lines and replaces nothing the model already sees.
@@ -29,7 +32,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from maljan.core.declared_reading import kind_free_facts, kind_of, reads_as
 from maljan.core.undeclared_tools import (
@@ -49,6 +52,9 @@ from maljan.pipeline.validation import (
 )
 from maljan.schemas.evidence import answer_not_shown
 from maljan.utils.written_forms import pack_escaped
+
+if TYPE_CHECKING:
+    from maljan.agents.function_callees import NamedUnread
 
 __all__ = [
     "FUNCTION_MAP_HEAD",
@@ -184,6 +190,11 @@ class FunctionMap:
     # The index's rows no visited function is, in the pack's rank order, as
     # ``(offset, distinct artefacts of its own)``.
     index_unvisited: list[tuple[int, int]] = field(default_factory=list)
+    # What the map was read from, for the functions named and never read
+    # (``function_callees.named_unread``), read when the block is rendered:
+    # the entries it kept and its claims' texts.
+    read_from: tuple[Any, ...] = field(default=(), repr=False, compare=False)
+    said: tuple[str, ...] = field(default=(), repr=False, compare=False)
 
     def coverage(self) -> str:
         """``N functions visited (…); M functions reach artefacts …, K of them visited``.
@@ -682,6 +693,8 @@ def build_function_map(
         indexed=len(found.indexed),
         index_entry=found.index_entry,
         index_unvisited=[row for row in found.index_rows if row[0] not in held],
+        read_from=tuple(entries),
+        said=tuple(said),
     )
 
 
@@ -832,8 +845,9 @@ def function_map_block(found: FunctionMap, room: int | None = None) -> str:
     """The map as the model reads it, or ``""`` when nothing is visited or tied.
 
     A head, the coverage line, one line per visited function that reaches an
-    artefact or has a summary, one line of the other visited addresses, and one
-    line of the functions reaching artefacts that were not visited.
+    artefact or has a summary, one line of the other visited addresses, one
+    line of the functions named and never read (:func:`_named_unread_line`),
+    and one line of the functions reaching artefacts that were not visited.
 
     With a function index, that last line lists the index's rows not visited
     and takes only the room the other lines leave of ``room``, the characters
@@ -851,6 +865,16 @@ def function_map_block(found: FunctionMap, room: int | None = None) -> str:
         # A visit with nothing but its entry id: the transcript already
         # stamps the id on the listing, so the address is enough here.
         lines.append("also visited: " + ", ".join(_folded(e) for e in bare))
+    # The named line shares the room left with the not-visited line after it:
+    # when that line has rows to list, half of what its fixed clauses leave,
+    # so its rows keep half the room they had; all of it when it has none.
+    left = None if room is None else room - sum(len(line) + 1 for line in lines)
+    fixed = _rows_line_fixed(found)
+    if left is not None and fixed:
+        left = max(0, left - fixed) // 2
+    named = _named_unread_line(found, left)
+    if named:
+        lines.append(named)
     if found.indexed:
         # With an index, the not-visited line reads the index's rows, as the
         # coverage line does, in the pack's rank order.
@@ -861,6 +885,26 @@ def function_map_block(found: FunctionMap, room: int | None = None) -> str:
         left = None if room is None else room - sum(len(line) + 1 for line in lines)
         lines.append(_unvisited_line(found, left))
     return "\n".join(lines)
+
+
+def _rows_line_fixed(found: FunctionMap) -> int:
+    """The characters the not-visited line takes besides its rows, ``0`` when it lists none.
+
+    Its head and its closing clause at their longest, as the line itself keeps
+    room for them (:func:`_index_line`, :func:`_unvisited_line`).
+    """
+    if found.indexed:
+        if not found.index_unvisited:
+            return 0
+        head = f"not visited, holding artefacts in the function index ({found.index_entry}): "
+        closing = f"; and {len(found.index_unvisited)} more; " + INDEX_ELSEWHERE.format(
+            entry=found.index_entry
+        )
+        return len(head) + len(closing) + 1
+    if not found.unvisited:
+        return 0
+    closing = f"; and {len(found.unvisited)} more not listed here for want of room"
+    return len("not visited, reaching artefacts: ") + len(closing) + 1
 
 
 def _unvisited_line(found: FunctionMap, room: int | None) -> str:
@@ -890,6 +934,86 @@ def _unvisited_line(found: FunctionMap, room: int | None) -> str:
     if not shown:
         return f"{head}{_count(total, 'function', 'functions')}, {unlisted}"
     return f"{head}{'; '.join(shown)}; and {total - len(shown)} more {unlisted}"
+
+
+# The functions named and never read: how the line is headed, and how many it
+# lists at most, whatever the room, so the rows after it keep theirs.
+NAMED_UNREAD_HEAD = (
+    "named, not read (none of your listings holds its code; a function you read "
+    "calls it, or your claims name it): "
+)
+NAMED_UNREAD_SHOWN = 24
+# How many of a function's read callers its item names.
+_CALLERS_SHOWN = 2
+
+
+# The closing clause naming the listed ones the analyst's claims name.
+NAMED_IN_CLAIMS = "named in your claims: "
+
+
+def _named_unread_item(item: NamedUnread) -> str:
+    if not item.callers:
+        return hex(item.address)
+    callers = ", ".join(hex(c) for c in item.callers[:_CALLERS_SHOWN])
+    more = len(item.callers) - _CALLERS_SHOWN
+    return f"{hex(item.address)} (called by {callers}" + (f" and {more} more)" if more > 0 else ")")
+
+
+def _named_unread_text(items: Sequence[NamedUnread], cut: str = "") -> str:
+    """The line for ``items``: each item, the cut clause, then the ones the claims name."""
+    text = NAMED_UNREAD_HEAD + "; ".join(_named_unread_item(n) for n in items) + cut
+    named = [hex(n.address) for n in items if n.named]
+    return f"{text}; {NAMED_IN_CLAIMS}{', '.join(named)}" if named else text
+
+
+def _named_unread_line(found: FunctionMap, room: int | None) -> str:
+    """The functions named and never read, in ``room`` characters; ``""`` for none (T-403).
+
+    A fact, as every line of the map is: it asks for no call and refuses
+    none. Addresses only, written by the platform, so no sample text rides
+    it. At most :data:`NAMED_UNREAD_SHOWN` of them, fewer when the room is
+    smaller; a list cut says how many there are in all, and when none fits
+    the count stands alone where it fits, and no line is given where it does
+    not, so the block stays inside its room. The ones the claims
+    name are said once, in a closing clause, not on each item.
+    """
+    from maljan.agents.function_callees import named_unread
+
+    try:
+        found_unread = named_unread(found.read_from, found, found.said)
+    except Exception:  # noqa: BLE001 — a fact left out never costs the map
+        return ""
+    if not found_unread:
+        return ""
+    total = len(found_unread)
+    items = found_unread[:NAMED_UNREAD_SHOWN]
+    whole = _named_unread_text(items)
+    if total == len(items) and (room is None or len(whole) <= room):
+        return whole
+    # The longest the line may be with ``shown`` items: they, the cut clause
+    # at its longest, and the claims clause over them. One pass, each item's
+    # length added once.
+    cut = f"; {{shown}} of {total} listed"
+    fixed = len(NAMED_UNREAD_HEAD) + len(cut.format(shown=total))
+    shown = 0
+    body = claims = 0
+    for item in items:
+        body_next = body + len(_named_unread_item(item)) + (2 if shown else 0)
+        claims_next = claims + (len(hex(item.address)) + (2 if claims else 0) if item.named else 0)
+        claims_cost = len(f"; {NAMED_IN_CLAIMS}") + claims_next if claims_next else 0
+        if room is not None and fixed + body_next + claims_cost > room:
+            break
+        shown += 1
+        body, claims = body_next, claims_next
+    if not shown:
+        # The count alone, where it fits; in a room smaller than that, no
+        # line: the not-visited line after it keeps the room it had.
+        count = (
+            f"{NAMED_UNREAD_HEAD}{_count(total, 'function', 'functions')}, "
+            "not listed here for want of room"
+        )
+        return count if room is None or len(count) <= room else ""
+    return _named_unread_text(items[:shown], cut.format(shown=shown))
 
 
 # Where the whole index is, said after the rows the room left out.
