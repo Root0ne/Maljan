@@ -1661,10 +1661,10 @@ def _short_named(text: str, start: int, participants: Sequence[str]) -> str | No
     return None
 
 
-# The most claims a range ("claims 67 to 82") is read as, claim by claim. A
-# longer range, or one that ends below where it starts, is read as no claim
-# at all and stated (``ClaimNumbers.unplaced``): the platform never guesses
-# which claims of it the line means.
+# The most claims a range ("claims 67 to 82") is read as, claim by claim. Of a
+# longer range only its first number is named, as before ranges were read;
+# the rest is read as no claim and stated (``ClaimNumbers.unplaced``): the
+# platform never guesses which claims of it the line means.
 CLAIM_RANGE_CAP = 20
 # The digits a claim number may have and still be counted (``_claim_place``
 # compares longer ones as text and never converts them).
@@ -1672,20 +1672,21 @@ _CLAIM_DIGITS = 6
 
 # The first number of a reference, at the place its numbers start.
 _FIRST_CLAIM_NUMBER = re.compile(r"#?\s*+(\d++)")
-# One more number of the same reference: after a range word or an unspaced
-# dash ("32-34", "32–34", "17 to 19", "32 through 34"), or after a joiner
-# ("3/4", "3, 4", "3 and 4", "3, 4, and 5", "3 & 4", "3 + 4"), the word
-# "claim" written again or not ("claim #3 and claim 4").
+# One more number of the same reference: after a dash or a range word ("32-34",
+# "32 – 34", "17 to 19", "32 through 34"), or after a joiner ("3/4", "3, 4",
+# "3 and 4", "3 or 4", "3, 4, and 5", "3 & 4", "3 + 4"), the word "claim"
+# written again or not ("claim #3 and claim 4").
 _NEXT_CLAIM_NUMBER = re.compile(
-    r"(?:(?P<dash>[-\u2013\u2014])"
-    r"|\s*+(?:(?P<range>to|through|thru)\b|,\s*+(?:(?:and|&)\s*+)?|/|&|and|\+)"
-    r"\s*+(?:(?P<again>claims?)\s*+)?#?\s*+)"
-    r"(?P<n>\d++)",
+    r"\s*+(?:(?P<range>[-–—]|(?:to|through|thru)\b)"
+    r"|,\s*+(?:(?:and|or|&)\s*+)?|/|&|and|or\b|\+)"
+    r"\s*+(?:(?P<again>claims?)\s*+)?#?\s*+(?P<n>\d++)",
     re.IGNORECASE,
 )
 # What tells that a number after "claim" written again is another analyst's
 # ("claim 3 and claim 4 of the static analyst"): the reference ends before it.
 _CLAIM_OF_ANOTHER = re.compile(r"\s*+(?:of|from|by|in)\b", re.IGNORECASE)
+# The parenthesis that may name the analyst of a number ("claim 4 (TRIAGE)").
+_PARENTHESIS_OPENS = re.compile(r"\s*+\(\s*+")
 # A range's last number that goes on as a word or a decimal ("3 to 0x5a").
 _NUMBER_GOES_ON = re.compile(r"[0-9A-Za-z_]|\.\d")
 
@@ -1696,10 +1697,10 @@ class ClaimNumbers:
 
     ``numbers`` are the claims it names one by one, as digits: those it
     writes, in order, and each claim inside a range it bounds
-    (:data:`CLAIM_RANGE_CAP` claims at most). ``unplaced`` are its ranges
-    read as no claim, ``(first, last)`` as written: one longer than the cap,
-    or one that ends below where it starts. ``end`` is where the reference
-    ends in the text.
+    (:data:`CLAIM_RANGE_CAP` claims at most). ``unplaced`` are the parts of
+    its ranges read as no claim, ``(first, last)``: the claims after the
+    first of a range longer than the cap. ``end`` is where the reference ends
+    in the text.
     """
 
     numbers: tuple[str, ...]
@@ -1712,19 +1713,34 @@ def _as_claim_number(written: str) -> int | None:
     return int(digits) if digits and len(digits) <= _CLAIM_DIGITS else None
 
 
-def read_claim_numbers(text: str, start: int) -> ClaimNumbers | None:
+def _named_next(text: str, at: int, participants: Sequence[str]) -> bool:
+    """Whether a parenthesis at ``at`` opens with a participant's name ("(TRIAGE)")."""
+    opened = _PARENTHESIS_OPENS.match(text, at)
+    return opened is not None and any(
+        _name_pattern(name).match(text, opened.end()) for name in participants
+    )
+
+
+def read_claim_numbers(
+    text: str, start: int, participants: Sequence[str] = ()
+) -> ClaimNumbers | None:
     """The claim numbers a reference writes from ``start`` on (:class:`ClaimNumbers`), or ``None``.
 
     ``start`` is where a reference's first number is written (the number
     group of "claim(s) N"). The numbers that follow it in the same reference
     are read too, each named by whoever names the first: a list ("3, 4, and
-    5"), the word "claim" written again ("claim #3 and claim 4", unless what
-    follows gives it to someone else, "claim 4 of ..."), and a bounded range
-    ("32-34", "17 to 19", "32 through 34"), whose every claim is named. A
-    list the earlier reading read ("3/4", "3, 4", "3 and 4") is read exactly
-    as before. The one reader of claim ranges and continuations: every place
-    that reads which claims a line names reads them here. Linear in the
-    reference.
+    5", "3 or 4"), the word "claim" written again ("claim #3 and claim 4",
+    unless what follows gives the number to someone else, "claim 4 of ..."
+    or a participant's name in a parenthesis, "claim 4 (TRIAGE)"), and a
+    range ("32-34", "3 - 5", "17 to 19", "32 through 34"), whose every claim
+    is named up to :data:`CLAIM_RANGE_CAP` claims. Every number the earlier
+    reading read is named as it was: the first number of a longer range
+    too, its other claims unplaced. A range that ends below where it starts
+    ("3-2 analysts"), that has no first number of its own ("3-5-7", a date in
+    a list) or whose last number goes on as a word ends the reference there,
+    and is no range. The reader of the merge's reading
+    (:func:`read_claim_references`) and of a revision's disputes
+    (``revision_merge``). Linear in the reference.
     """
     first = _FIRST_CLAIM_NUMBER.match(text, start)
     if first is None:
@@ -1736,23 +1752,23 @@ def read_claim_numbers(text: str, start: int) -> ClaimNumbers | None:
     single = True
     while (more := _NEXT_CLAIM_NUMBER.match(text, end)) is not None:
         written = more.group("n")
-        if more.group("again") and _CLAIM_OF_ANOTHER.match(text, more.end()):
+        if more.group("again") and (
+            _CLAIM_OF_ANOTHER.match(text, more.end()) or _named_next(text, more.end(), participants)
+        ):
             break
-        if not (more.group("dash") or more.group("range")):
+        if not more.group("range"):
             numbers.append(written)
             end, single = more.end(), True
             continue
-        if _NUMBER_GOES_ON.match(text, more.end()):
+        if not single or _NUMBER_GOES_ON.match(text, more.end()):
             break
-        low_written = numbers[-1] if single else ""
-        low, high = _as_claim_number(low_written), _as_claim_number(written)
-        if low is not None and high is not None and low <= high < low + CLAIM_RANGE_CAP:
+        low, high = _as_claim_number(numbers[-1]), _as_claim_number(written)
+        if low is None or high is None or high < low:
+            break
+        if high - low < CLAIM_RANGE_CAP:
             numbers.extend(str(n) for n in range(low + 1, high + 1))
         else:
-            # Read as no claim at all, its first number with it.
-            if low_written:
-                numbers.pop()
-            unplaced.append((low_written, written))
+            unplaced.append((str(low + 1), written))
         end, single = more.end(), False
     return ClaimNumbers(numbers=tuple(numbers), unplaced=tuple(unplaced), end=end)
 
@@ -1772,55 +1788,34 @@ def _claim_spans(numbers: Sequence[int]) -> str:
     return ", ".join(out)
 
 
+# Why a reference names no claim.
+RANGE_NOT_READ = f"a range of more than {CLAIM_RANGE_CAP} claims"
+NO_ANALYST_NAMED = "the platform reads no analyst for it"
+
+
 @dataclass(frozen=True)
 class UnplacedClaims:
-    """A claim reference of a mediation line that names no claim of any analyst.
+    """A claim reference of a blocking mediation line that names no claim.
 
-    ``line`` counts from 1 in the order the lines were given, ``blocking`` is
-    the mediator's mark, ``analysts`` the participants whose claims it may
-    mean (the one it names, for a range; the line's field, or every
-    participant, for numbers no analyst is named for), ``claims`` the
-    platform's own rendering of its numbers ("claims 1-50", "claim 45"),
-    ``why`` the reason it names no claim and ``lowest`` the lowest claim
-    number it may mean (0 where none is read). Its numbers are never guessed
-    onto a claim: no claim is withdrawn by rule on it, and the merge says so.
+    Kept only for a line that blocks by a mark that was read, or by having
+    none: a line that does not block, or whose mark is not read, withdraws
+    nothing by rule and is not stated. ``line`` counts from 1 in the order
+    the lines were given, ``marked`` whether the line's blocking mark was
+    written, ``analysts`` the participants whose claims it may mean (the one
+    it names, for a range; the line's field, or every participant, for
+    numbers no analyst is read for), the first of them stating it;
+    ``claims`` the platform's own rendering of its numbers ("claims 2-50",
+    "claim 45"), ``why`` the reason it names no claim and ``lowest`` the
+    lowest claim number it may mean. Its numbers are never guessed onto a
+    claim: no claim is withdrawn by rule on it, and the merge says so.
     """
 
     line: int
-    blocking: bool
+    marked: bool
     analysts: tuple[str, ...]
     claims: str
     why: str
     lowest: int = 0
-
-
-# Why a reference names no claim.
-RANGE_NOT_READ = (
-    f"it is a range of more than {CLAIM_RANGE_CAP} claims, or one that ends below where it starts"
-)
-NO_ANALYST_NAMED = "no analyst is named for it"
-
-
-@dataclass(frozen=True)
-class ClaimReferences:
-    """What the lines of a mediation name by claim number.
-
-    ``named`` is ``{analyst: {claim number: [(line number, blocking), ...]}}``
-    (:func:`claims_named_by_lines`); ``unplaced`` each reference that names
-    no claim (:class:`UnplacedClaims`), each once, in line order.
-    """
-
-    named: dict[str, dict[int, list[tuple[int, bool]]]]
-    unplaced: tuple[UnplacedClaims, ...] = ()
-    expanded: dict[str, dict[int, tuple[ExpandedNaming, ...]]] = field(default_factory=dict)
-
-    def unplaced_for(self, analyst: str) -> tuple[UnplacedClaims, ...]:
-        """The unplaced references that may mean ``analyst``'s claims, in line order."""
-        return tuple(u for u in self.unplaced if analyst in u.analysts)
-
-    def expanded_for(self, analyst: str) -> dict[int, tuple[ExpandedNaming, ...]]:
-        """Per claim number of ``analyst``, the lines that reach it only by a range or a list."""
-        return dict(self.expanded.get(analyst, {}))
 
 
 # A ledger id or an address a line and a claim may share: a hex value of three
@@ -1842,15 +1837,18 @@ def line_tokens(text: str) -> frozenset[str]:
 
 @dataclass(frozen=True)
 class ExpandedNaming:
-    """A line that names a claim only through a range or a list going on.
+    """A line that names a claim only by what the earlier reading did not read.
 
     The earlier reading read a reference's first numbers alone ("claims
-    32-34" as claim 32); a claim the line reaches only by reading the rest,
-    and cites nowhere else by its own number, is named here. ``line`` counts
-    from 1, ``reference`` is the platform's rendering of the reference's
-    numbers ("claims 32-34"), ``tokens`` the ledger ids and addresses the line
-    writes (:func:`line_tokens`). A blocking line that names a claim only so
-    withdraws it by rule only when the claim shares one of them
+    32-34" as claim 32) and no "Claim N" after a mark that follows the line's
+    field; a claim the line reaches only so, and cites nowhere else by a
+    number that reading read, is named here. ``line`` counts from 1,
+    ``reference`` is the platform's rendering of the reference's numbers
+    ("claims 32-34"), ``tokens`` the ledger ids and addresses the
+    reference's own clause writes (:func:`line_tokens`): from the reference
+    to the next reference named for an analyst, a ";" or the end of the
+    sentence, never a mark's reason. A blocking line that names a claim only
+    so withdraws it by rule only when the claim shares one of them
     (``revision_merge``): a range drawn wider than its point never withdraws
     a claim it does not speak to.
     """
@@ -1860,13 +1858,97 @@ class ExpandedNaming:
     tokens: frozenset[str]
 
 
+@dataclass(frozen=True)
+class ClaimReferences:
+    """What the lines of a mediation name by claim number.
+
+    ``named`` is ``{analyst: {claim number: [(line number, blocking), ...]}}``
+    (:func:`claims_named_by_lines`); ``unplaced`` each reference that names
+    no claim (:class:`UnplacedClaims`), each once, in line order;
+    ``expanded`` per analyst and claim the lines that reach it only by the
+    newer reading (:class:`ExpandedNaming`).
+    """
+
+    named: dict[str, dict[int, list[tuple[int, bool]]]]
+    unplaced: tuple[UnplacedClaims, ...] = ()
+    expanded: dict[str, dict[int, tuple[ExpandedNaming, ...]]] = field(default_factory=dict)
+
+    def unplaced_for(self, analyst: str) -> tuple[UnplacedClaims, ...]:
+        """The unplaced references ``analyst``'s merge states: those it is first named for."""
+        return tuple(u for u in self.unplaced if u.analysts and u.analysts[0] == analyst)
+
+    def expanded_for(self, analyst: str) -> dict[int, tuple[ExpandedNaming, ...]]:
+        """Per claim number of ``analyst``, the lines that reach it only by the newer reading."""
+        return dict(self.expanded.get(analyst, {}))
+
+
+class NamedClaims(dict[int, list[tuple[int, bool]]]):
+    """One analyst's ``{claim number: [(line number, blocking), ...]}``, as a plain dict.
+
+    It carries, for the merge (``revision_merge.merge_revision``), the
+    references its merge states (``unplaced``) and the claims the lines
+    reach only by the newer reading (``expanded``).
+    """
+
+    def __init__(
+        self,
+        rows: Mapping[int, list[tuple[int, bool]]] | None = None,
+        *,
+        unplaced: Sequence[UnplacedClaims] = (),
+        expanded: Mapping[int, tuple[ExpandedNaming, ...]] | None = None,
+    ) -> None:
+        super().__init__(rows or {})
+        self.unplaced: tuple[UnplacedClaims, ...] = tuple(unplaced)
+        self.expanded: dict[int, tuple[ExpandedNaming, ...]] = dict(expanded or {})
+
+
+class NamedByLines(dict[str, dict[int, list[tuple[int, bool]]]]):
+    """``claims_named_by_lines``' answer: a plain dict, a :class:`NamedClaims` per analyst.
+
+    Its keys and rows are the ones the earlier reading gave a line it reads
+    alike. ``get`` hands an analyst no line names a claim of the references
+    its merge states, as an empty :class:`NamedClaims`, where there are any.
+    """
+
+    def __init__(self, references: ClaimReferences) -> None:
+        super().__init__(
+            {
+                name: NamedClaims(
+                    rows,
+                    unplaced=references.unplaced_for(name),
+                    expanded=references.expanded_for(name),
+                )
+                for name, rows in references.named.items()
+            }
+        )
+        self.references = references
+
+    def get(self, key: str, default: Any = None) -> Any:  # type: ignore[override]
+        found = super().get(key)
+        if found is not None:
+            return found
+        stated = self.references.unplaced_for(key)
+        return NamedClaims(unplaced=stated) if stated else default
+
+
 def _range_rendering(first: str, last: str) -> str:
-    """A range read as no claim, in the platform's words: digits only, never the line's text."""
-    low = first.lstrip("0") or ("0" if first else "")
-    high = last.lstrip("0") or "0"
-    if len(low) > _CLAIM_DIGITS or len(high) > _CLAIM_DIGITS:
-        return "claims numbered too long to read"
-    return f"claims {low}-{high}" if low else f"a range ending at claim {high}"
+    """Claims of a range read as no claim, in the platform's words: digits only."""
+    return f"claims {first.lstrip('0') or '0'}-{last.lstrip('0') or '0'}"
+
+
+# The mediator's mark wherever it stands on a line, its reason included: a
+# "claim N" inside it is its reason, not a reference the line puts to anyone.
+_MARK_ANYWHERE = re.compile(
+    r"\[\s*+(?:not\s+blocking|blocking)\s*+:" + _REASON + r"\]", re.IGNORECASE
+)
+# The mediator's marks written right after a line's field, before its text.
+_MARKS_AFTER_FIELD = re.compile(
+    r"(?:\s*+\[\s*+(?:not\s+blocking|blocking)\s*+:" + _REASON + r"\]"
+    r"|\s*+\[\s*+(?:carried\s*+:\s*+L?\s*+\d{1,9}\s*+|new\s*+)\])++",
+    re.IGNORECASE,
+)
+# Where a reference's clause ends: a ";" or the end of a sentence.
+_CLAUSE_END = re.compile(r";|\.(?=\s|$)")
 
 
 def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> ClaimReferences:
@@ -1875,18 +1957,21 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
     A line names an analyst's claim where it writes the analyst's name and
     then "claim(s) N" (``_claims_named``), and, when its ``[analysts: ...]``
     field names one analyst alone, where "claim(s) N" follows that field
-    directly, and where a short form of a field analyst's name stands before
-    "claim(s) N" (``_short_named``). Each reference is read whole
-    (:func:`read_claim_numbers`): its list, its "claim" written again and its
-    bounded ranges name the analyst its first number names. A line whose
-    field names analysts counts only for them: a claim number it writes for
-    another is no question put to that one. The line number counts from 1
-    in the order given; ``blocking`` is the mediator's mark (``read_marks``).
+    directly or after the mediator's marks written after it, and where a
+    short form of a field analyst's name stands before "claim(s) N"
+    (``_short_named``). A "claim N" inside a ``[blocking: ...]`` or ``[not
+    blocking: ...]`` mark is its reason and is not read. Each reference is
+    read whole (:func:`read_claim_numbers`). A line whose field names
+    analysts counts only for them: a claim number it writes for another is
+    no question put to that one. The line number counts from 1 in the order
+    given; ``blocking`` is the mediator's mark (``read_marks``), except that
+    a line whose mark is not read blocks with no claim only the newer reading
+    reaches (``expanded``).
 
-    A range the reader does not read claim by claim, and a "claim N" no
-    analyst is named for ("the reverser's own claim 45"), is an unplaced
-    reference (:class:`UnplacedClaims`): it names no claim and is kept to be
-    stated. "claims" with a single number after it and no analyst named
+    A range longer than the cap, and a "claim N" no analyst is read for
+    ("the reverser's own claim 45"), is an unplaced reference
+    (:class:`UnplacedClaims`) where the line blocks and its mark is read or
+    absent. "claims" with a single number after it and no analyst named
     reads as a verb ("the dropper claims 3 hosts") and is no reference.
     Linear in the lines.
     """
@@ -1897,50 +1982,72 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
     for number, (line, mark) in enumerate(zip(lines, read_marks(lines), strict=True), 1):
         text = without_line_mark(str(line))
         field_names = _named_in(text, names)
-        # (analyst, the match whose number group the reference starts at).
-        found: list[tuple[str, re.Match[str]]] = list(_claim_numbers_named(text, names))
+        in_marks = [m.span() for m in _MARK_ANYWHERE.finditer(text)]
+        # The text with every mark's reason blanked out, for the clauses' tokens.
+        masked = text
+        for start, end in in_marks:
+            masked = masked[:start] + " " * (end - start) + masked[end:]
+        stated = mark.blocking and not mark.unread
+        # (analyst, the match whose number group the reference starts at,
+        # whether the earlier reading read it).
+        found: list[tuple[str, re.Match[str], bool]] = [
+            (name, match, True) for name, match in _claim_numbers_named(text, names)
+        ]
         if field_names is not None and len(field_names) == 1:
             opened = _ANALYSTS_FIELD.search(text)
-            bare = _BARE_CLAIMS.match(text, opened.end()) if opened is not None else None
-            if bare is not None:
-                found.append((field_names[0], bare))
+            if opened is not None:
+                bare = _BARE_CLAIMS.match(text, opened.end())
+                if bare is not None:
+                    found.append((field_names[0], bare, True))
+                elif (after := _MARKS_AFTER_FIELD.match(text, opened.end())) is not None:
+                    # "[analysts: X] [not blocking: ...] Claim 18 says ...".
+                    bare = _BARE_CLAIMS.match(text, after.end())
+                    if bare is not None:
+                        found.append((field_names[0], bare, False))
         if field_names:
             # A short form of a field analyst's name before "claim(s) N".
             for reference in _CLAIM_REFERENCE.finditer(text):
                 short = _short_named(text, reference.start(), names)
                 if short is not None:
-                    found.append((short, reference))
+                    found.append((short, reference, True))
+        found = [f for f in found if not any(s <= f[1].start(1) < e for s, e in in_marks)]
+        starts = sorted(match.start() for _name, match, _old in found)
         # Where each reference read above stands in the line.
         read: list[tuple[int, int]] = []
-        # Per analyst, the numbers the line cites as the earlier reading read
-        # them, and those only a range or a list going on reaches.
+        # Per reference kept: (analyst, its numbers, the tokens of its clause).
+        kept: list[tuple[str, ClaimNumbers, frozenset[str]]] = []
         cited: dict[str, set[int]] = {}
-        reached: dict[str, dict[int, str]] = {}
-        for name, match in found:
-            at = match.start(1)
-            numbers = read_claim_numbers(text, at)
+        for name, match, old in found:
+            numbers = read_claim_numbers(text, match.start(1), names)
             if numbers is None:
                 continue
-            read.append((at, numbers.end))
+            read.append((match.start(1), numbers.end))
             if field_names is not None and name not in field_names:
                 continue
-            before = {n for n in map(_as_claim_number, re.findall(r"\d+", match.group(1))) if n}
+            before = (
+                {n for n in map(_as_claim_number, re.findall(r"\d+", match.group(1))) if n}
+                if old
+                else set()
+            )
             cited.setdefault(name, set()).update(before)
+            next_start = min((s for s in starts if s > match.start()), default=len(text))
+            ended = _CLAUSE_END.search(text, numbers.end)
+            clause_end = min(next_start, ended.start() if ended is not None else len(text))
+            kept.append((name, numbers, line_tokens(masked[match.start() : clause_end])))
+        for name, numbers, tokens in kept:
+            for first, last in numbers.unplaced:
+                if stated:
+                    said = UnplacedClaims(
+                        number,
+                        mark.marked,
+                        (name,),
+                        _range_rendering(first, last),
+                        RANGE_NOT_READ,
+                        _as_claim_number(first) or 0,
+                    )
+                    unplaced.setdefault(said, None)
             counted = [n for n in map(_as_claim_number, numbers.numbers) if n is not None]
             rendering = ("claim " if len(counted) == 1 else "claims ") + _claim_spans(counted)
-            for claim in counted:
-                if claim not in before:
-                    reached.setdefault(name, {}).setdefault(claim, rendering)
-            for first, last in numbers.unplaced:
-                said = UnplacedClaims(
-                    number,
-                    mark.blocking,
-                    (name,),
-                    _range_rendering(first, last),
-                    RANGE_NOT_READ,
-                    _as_claim_number(first) or 0,
-                )
-                unplaced.setdefault(said, None)
             if not numbers.numbers:
                 continue
             claims = out.setdefault(name, {})
@@ -1948,41 +2055,50 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
                 stripped = written.lstrip("0")
                 if not stripped or len(stripped) > _CLAIM_DIGITS:
                     continue
-                rows = claims.setdefault(int(stripped), [])
-                if (number, mark.blocking) not in rows:
-                    rows.append((number, mark.blocking))
-        tokens = line_tokens(str(line))
-        for name, claims_reached in reached.items():
-            for claim, rendering in claims_reached.items():
-                if claim in cited.get(name, set()):
-                    continue
-                expanded.setdefault(name, {}).setdefault(claim, []).append(
-                    ExpandedNaming(number, rendering, tokens)
-                )
-        # A "claim(s) N" no reference above read: no analyst is named for it.
+                claim = int(stripped)
+                newly = claim not in cited.get(name, set())
+                # A line whose mark is not read blocks only with what the
+                # earlier reading read on it.
+                row = (number, mark.blocking and not (newly and mark.unread))
+                rows = claims.setdefault(claim, [])
+                if row not in rows:
+                    rows.append(row)
+                if newly:
+                    reached = expanded.setdefault(name, {}).setdefault(claim, [])
+                    if reached and reached[-1].line == number:
+                        reached[-1] = ExpandedNaming(
+                            number, reached[-1].reference, reached[-1].tokens | tokens
+                        )
+                    else:
+                        reached.append(ExpandedNaming(number, rendering, tokens))
+        # A "claim(s) N" no reference above read: no analyst is read for it.
         candidates = tuple(field_names) if field_names else tuple(names)
         for reference in _CLAIM_REFERENCE.finditer(text):
             at = reference.start(1)
-            if any(start <= at < end for start, end in read):
+            if any(start <= at < end for start, end in read) or any(
+                s <= reference.start() < e for s, e in in_marks
+            ):
                 continue
-            numbers = read_claim_numbers(text, at)
+            numbers = read_claim_numbers(text, at, names)
             if numbers is None:
                 continue
             read.append((at, numbers.end))
             head = reference.group(0)[: at - reference.start()].lower()
             if head.startswith("claims") and len(numbers.numbers) == 1 and not numbers.unplaced:
                 continue
+            if not stated or not candidates:
+                continue
             counted = [n for n in map(_as_claim_number, numbers.numbers) if n is not None]
             rendered = [_range_rendering(first, last) for first, last in numbers.unplaced]
             if counted:
                 kind = "claim " if len(counted) == 1 else "claims "
                 rendered.insert(0, kind + _claim_spans(counted))
-            if not rendered or not candidates:
+            if not rendered:
                 continue
             lows = [*counted, *(n for f, _l in numbers.unplaced if (n := _as_claim_number(f)))]
             said = UnplacedClaims(
                 number,
-                mark.blocking,
+                mark.marked,
                 candidates,
                 "; ".join(rendered),
                 NO_ANALYST_NAMED,
@@ -2001,7 +2117,8 @@ def claims_named_by_lines(
 ) -> dict[str, dict[int, list[tuple[int, bool]]]]:
     """``{analyst: {claim number: [(line number, blocking), ...]}}`` for the lines given.
 
-    The claims :func:`read_claim_references` reads each line to name; the
-    references that name none are left out here. Linear in the lines.
+    The claims :func:`read_claim_references` reads each line to name, each
+    analyst's carrying what its merge reads besides (:class:`NamedClaims`).
+    Linear in the lines.
     """
-    return read_claim_references(lines, participants).named
+    return NamedByLines(read_claim_references(lines, participants))

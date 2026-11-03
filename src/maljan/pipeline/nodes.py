@@ -98,9 +98,9 @@ from maljan.pipeline.conditions import (
 )
 from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
-    ClaimReferences,
     analysts_to_revise,
     carried_marks,
+    claims_named_by_lines,
     contested_input,
     facts_naming,
     ledger_count_facts,
@@ -112,7 +112,6 @@ from maljan.pipeline.debate_facts import (
     place_facts,
     place_facts_for,
     points_naming,
-    read_claim_references,
     round_facts_text,
     tools_taking_an_address,
     with_ledger_facts,
@@ -6149,14 +6148,12 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
 
         # Per analyst, the claims each line of the round's mediation named, and
         # whether the line blocks (``revision_merge``: a blocking line's claim
-        # the revision leaves unanswered is withdrawn by rule), and the
-        # references that name no claim, stated by the merge.
+        # the revision leaves unanswered is withdrawn by rule).
         try:
-            references = read_claim_references(contested, list(agent_names))
+            named_by_lines = claims_named_by_lines(contested, list(agent_names))
         except Exception as exc:  # noqa: BLE001 — no lines read is no claim named
             logger.debug("revision: the lines' claim numbers were not read (%s).", exc)
-            references = ClaimReferences(named={})
-        named_by_lines = references.named
+            named_by_lines = {}
         # An analyst the mediation did not name keeps its answer in force.
         for name in agent_names:
             if name not in asked:
@@ -6298,8 +6295,6 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                         revised_text,
                         iteration,
                         named_by_lines.get(name),
-                        references.unplaced_for(name),
-                        references.expanded_for(name),
                     )
                     if noted is not None and name not in not_asked
                     else RevisionMerge()

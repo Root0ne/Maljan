@@ -15,12 +15,13 @@ before and after. Here a revision changes only what it states:
   reaches the report as if it stood. A line names a claim by its number, in
   a list or inside a bounded range ("claims 32-34",
   ``debate_facts.read_claim_numbers``); a reference that names no claim (a
-  longer range, or a number no analyst is named for) withdraws nothing and
+  longer range, or a number no analyst is read for) withdraws nothing and
   is stated, one sentence per reference (``unplaced_sentence``). A claim a
   blocking line reaches only through a range or a list (no number of its
   own on the line, as the earlier reading read it) is withdrawn by rule only
-  when it shares a ledger id or an address with the line; otherwise it is
-  carried with the line, and that is stated (``range_carried_sentence``);
+  when it shares a ledger id or an address with that reference's clause;
+  otherwise it is carried with the line, and that is stated
+  (``range_carried_sentence``);
 - a claim it writes under a new number, or one that writes again no claim in
   force, is added;
 - every other claim in force stays as the answer in force wrote it, marked
@@ -71,6 +72,7 @@ from maljan.pipeline.claim_drops import (
     defanged,
 )
 from maljan.pipeline.debate_facts import (
+    RANGE_NOT_READ,
     ExpandedNaming,
     UnplacedClaims,
     line_tokens,
@@ -382,13 +384,22 @@ def _tokens_of(block: _Block) -> frozenset[str]:
 
 
 def unplaced_sentence(name: str, revision_round: int, reference: UnplacedClaims) -> str:
-    """The sentence for a claim reference that names no claim: never acted on in silence."""
-    return (
-        f"{'Blocking line' if reference.blocking else 'Line'} L{int(reference.line)} of the "
-        f"round-{int(revision_round)} mediation writes {reference.claims} and names no claim of "
-        f"the {name} analyst by it ({reference.why}): no claim of that analyst's answer in force "
-        "is withdrawn by rule on that reference."
+    """The sentence for a claim reference that names no claim: never acted on in silence.
+
+    Said once per reference, in the merge of the first analyst it may mean
+    (``ClaimReferences.unplaced_for``); "Blocking line" only for a line whose
+    blocking mark was read.
+    """
+    head = (
+        f"{'Blocking line' if reference.marked else 'Line'} L{int(reference.line)} of the "
+        f"round-{int(revision_round)} mediation writes {reference.claims}"
     )
+    if reference.why == RANGE_NOT_READ:
+        return (
+            f"{head} of the {name} analyst, {reference.why}: no claim of it is withdrawn by rule "
+            "on that reference."
+        )
+    return f"{head} and {reference.why}: no claim is withdrawn by rule on that reference."
 
 
 def rule_sentence(name: str, revision_round: int, number: int, sentence: str, reason: str) -> str:
@@ -459,7 +470,7 @@ def merge_revision(
     answer: str,
     revision_round: int,
     named: Mapping[int, Sequence[NamingLine]] | None = None,
-    unplaced: Sequence[UnplacedClaims] = (),
+    unplaced: Sequence[UnplacedClaims] | None = None,
     expanded: Mapping[int, Sequence[ExpandedNaming]] | None = None,
 ) -> RevisionMerge:
     """``revision`` merged into ``in_force`` by claim (:class:`RevisionMerge`).
@@ -468,20 +479,26 @@ def merge_revision(
     ``named`` is, per claim number of the answer in force, each line of the
     round's mediation that named it (``debate_facts.claims_named_by_lines``),
     and ``unplaced`` each reference of those lines that names no claim and
-    may mean this analyst's (``ClaimReferences.unplaced_for``): it withdraws
-    nothing and is stated. ``expanded`` is, per claim number, each line that
-    reaches it only through a range or a list going on
+    that this merge states (``ClaimReferences.unplaced_for``): it withdraws
+    nothing. ``expanded`` is, per claim number, each line that reaches it
+    only by the newer reading, a range or a list going on
     (``ClaimReferences.expanded_for``): such a blocking line withdraws the
     claim by rule only when the claim shares a ledger id or an address with
-    it; otherwise the claim is carried with the line, and that is stated.
-    ``in_force`` is not changed.
+    the reference's clause; otherwise the claim is carried with the line,
+    and that is stated. Where ``unplaced`` or ``expanded`` is not given, it
+    is read from ``named`` (``debate_facts.NamedClaims``). ``in_force`` is
+    not changed.
     """
+    if unplaced is None:
+        unplaced = tuple(getattr(named, "unplaced", ()) or ())
+    if expanded is None:
+        expanded = dict(getattr(named, "expanded", {}) or {})
     first_claims = list(getattr(in_force, "claims", None) or [])
     revision_claims = list(getattr(revision, "claims", None) or [])
     first = _blocks(first_claims)
-    # A reference whose every number lies past the answer in force names
-    # none of its claims, and is no question about this merge.
-    unplaced = tuple(u for u in unplaced if int(u.lowest) <= len(first))
+    # A range whose every claim lies past the answer in force names none of
+    # its claims, and is no question about this merge.
+    unplaced = tuple(u for u in unplaced if u.why != RANGE_NOT_READ or int(u.lowest) <= len(first))
     if not first_claims or not revision_claims:
         return RevisionMerge(unplaced=unplaced)
     named = named or {}

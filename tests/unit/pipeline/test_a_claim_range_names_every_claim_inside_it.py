@@ -1,12 +1,14 @@
 """A mediation line names every claim of a range or a list, and states a reference it cannot place.
 
 "claims 32-34", "17 to 19" or "claims 3, 4, and 5" name each of those claims
-of the analyst the first number is written for, so a claim the mediator
-blocked inside a range is withdrawn by rule exactly as a single cited claim
-is (``revision_merge``). A range longer than the cap, one that ends below
-where it starts, and a claim number no analyst is named for are never guessed
-onto a claim: they withdraw nothing, and the merge says so in one sentence
-per reference.
+of the analyst the first number is written for. A claim a blocking line
+reaches only so is withdrawn by rule when its reference's clause shares a
+ledger id or an address with it, exactly as a single cited claim is
+(``revision_merge``), and is carried and stated otherwise. Every number the
+earlier reading read is named as it was. The rest of a range longer than the
+cap and a claim number no analyst is read for are never guessed onto a claim:
+they withdraw nothing, and one merge says so, once per reference, where the
+line blocks by a mark that was read or by having none.
 
 Every address, name and sentence here is made up for the test.
 """
@@ -24,15 +26,16 @@ from maljan.pipeline.debate_facts import (
     CLAIM_RANGE_CAP,
     NO_ANALYST_NAMED,
     RANGE_NOT_READ,
+    NamedClaims,
     claims_named_by_lines,
     read_claim_numbers,
     read_claim_references,
 )
 from maljan.pipeline.nodes import make_revision_node
-from maljan.pipeline.revision_merge import merge_revision
+from maljan.pipeline.revision_merge import _numbers_written, merge_revision
 from maljan.schemas.isr_models import AgentISR
 
-PARTICIPANTS = ["static", "all_tools_reverser_ghidra", "dynamic"]
+PARTICIPANTS = ["static", "all_tools_reverser_ghidra", "dynamic", "triage"]
 REVERSER = "[analysts: ALL_TOOLS_REVERSER_GHIDRA ANALYST]"
 STATIC = "[analysts: STATIC ANALYST]"
 BLOCKS = "[blocking: the listing shows another call.]"
@@ -56,6 +59,8 @@ class TestEveryFormOfARangeOrAListNamesEachClaim:
             (f"{REVERSER} ALL_TOOLS_REVERSER_GHIDRA claims 3, 4, and 5 say X. {BLOCKS}", [3, 4, 5]),
             (f"{REVERSER} Reverser claim #3 and claim 4 say X. {BLOCKS}", [3, 4]),
             (f"{REVERSER} Reverser claims 1-2, 7 and 9 to 10 say X. {BLOCKS}", [1, 2, 7, 9, 10]),
+            (f"{REVERSER} Reverser claims 32 - 34 say X. {BLOCKS}", [32, 33, 34]),
+            (f"{REVERSER} Reverser claim 3 or 4 says X. {BLOCKS}", [3, 4]),
         ],
     )
     def test_the_form_names_each_claim_of_the_analyst(self, line: str, expected: list[int]) -> None:
@@ -90,6 +95,71 @@ class TestEveryFormOfARangeOrAListNamesEachClaim:
         [said] = refs.unplaced
         assert (said.claims, said.why, said.analysts) == ("claim 4", NO_ANALYST_NAMED, ("static",))
 
+    def test_a_participant_named_in_a_parenthesis_ends_the_reference(self) -> None:
+        line = f"{STATIC} STATIC ANALYST claim 3 and claim 4 (TRIAGE) say X. {BLOCKS}"
+
+        assert _named(line) == {"static": [3]}
+
+    @pytest.mark.parametrize(
+        ("written", "expected"),
+        [("3-5-7", [3, 4, 5]), ("3, 2026-10-31", [3, 2026]), ("3-2 analysts", [3])],
+    )
+    def test_a_range_with_no_first_number_of_its_own_ends_the_reference_unsaid(
+        self, written: str, expected: list[int]
+    ) -> None:
+        line = f"{STATIC} STATIC ANALYST claims {written} say X. {BLOCKS}"
+
+        assert _named(line) == {"static": expected}
+        assert read_claim_references([line], PARTICIPANTS).unplaced == ()
+
+
+class TestWhatTheLineSaysAroundItsReferences:
+    def test_a_claim_inside_a_mark_is_its_reason_and_is_not_read(self) -> None:
+        line = (
+            f"{STATIC} STATIC ANALYST claim 2 is loose. "
+            "[blocking: STATIC ANALYST claims 4-6 conflict with it]"
+        )
+
+        assert _named(line) == {"static": [2]}
+
+    def test_a_claim_after_a_mark_that_follows_the_field_is_read(self) -> None:
+        line = "[analysts: STATIC ANALYST] [not blocking: wording only.] Claim 18 says X."
+
+        named = claims_named_by_lines([line], PARTICIPANTS)
+
+        # The mark stands mid-line and is not read: the line blocks with no
+        # claim only the newer reading reaches.
+        assert named == {"static": {18: [(1, False)]}}
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            f"{STATIC} The analyst's own claim 4 is loose. [not blocking: the same reading.]",
+            f"{STATIC} [blocking: x] The analyst's own claim 4 is loose.",
+        ],
+    )
+    def test_a_line_that_does_not_block_or_whose_mark_is_unread_states_nothing(
+        self, line: str
+    ) -> None:
+        refs = read_claim_references([line], PARTICIPANTS)
+
+        assert refs.unplaced == ()
+
+    def test_a_reference_is_stated_once_by_the_first_analyst_it_may_mean(self) -> None:
+        line = f"[analysts: DYNAMIC ANALYST, STATIC ANALYST] The own claim 4 says X. {BLOCKS}"
+
+        refs = read_claim_references([line], PARTICIPANTS)
+        named = claims_named_by_lines([line], PARTICIPANTS)
+
+        [said] = refs.unplaced
+        assert said.analysts == ("dynamic", "static")
+        assert refs.unplaced_for("dynamic") == (said,) and refs.unplaced_for("static") == ()
+        # A plain dict as before; the analyst its merge states it for still gets it.
+        assert named == {}
+        stated = named.get("dynamic")
+        assert isinstance(stated, NamedClaims) and stated == {} and stated.unplaced == (said,)
+        assert named.get("static") is None
+
 
 class TestARangeIsCapped:
     def test_a_range_of_the_cap_is_read_whole(self) -> None:
@@ -97,31 +167,43 @@ class TestARangeIsCapped:
 
         assert _named(line) == {"static": list(range(1, CLAIM_RANGE_CAP + 1))}
 
-    @pytest.mark.parametrize(
-        ("written", "said"),
-        [(f"1 to {CLAIM_RANGE_CAP + 1}", f"claims 1-{CLAIM_RANGE_CAP + 1}"), ("9-5", "claims 9-5")],
-    )
-    def test_a_longer_or_a_falling_range_names_no_claim_and_is_unplaced(
-        self, written: str, said: str
+    def test_a_longer_range_names_its_first_claim_as_before_and_the_rest_is_unplaced(
+        self,
     ) -> None:
-        line = f"{STATIC} STATIC ANALYST claims {written} say X. {BLOCKS}"
+        line = f"{STATIC} STATIC ANALYST claims 1 to {CLAIM_RANGE_CAP + 1} say X. {BLOCKS}"
 
         refs = read_claim_references([line], PARTICIPANTS)
 
-        # Not even its first number: the platform never guesses which claims it means.
-        assert refs.named == {}
+        assert _named(line) == {"static": [1]}
         [reference] = refs.unplaced
         assert reference.analysts == ("static",)
-        assert (reference.claims, reference.why, reference.line) == (said, RANGE_NOT_READ, 1)
-        assert reference.blocking is True
+        assert (reference.claims, reference.why, reference.line) == (
+            f"claims 2-{CLAIM_RANGE_CAP + 1}",
+            RANGE_NOT_READ,
+            1,
+        )
+        assert reference.marked is True
+
+    @pytest.mark.parametrize("written", ["9-5", "3-2"])
+    def test_a_falling_range_names_its_first_claim_as_before_and_states_nothing(
+        self, written: str
+    ) -> None:
+        line = f"{STATIC} STATIC ANALYST claims {written} say X. {BLOCKS}"
+
+        assert _named(line) == {"static": [int(written.split("-")[0])]}
+        assert read_claim_references([line], PARTICIPANTS).unplaced == ()
 
     def test_the_numbers_before_a_range_that_is_not_read_are_still_named(self) -> None:
         line = f"{STATIC} STATIC ANALYST claims 2, 40 to 90 say X. {BLOCKS}"
 
         refs = read_claim_references([line], PARTICIPANTS)
 
-        assert _named(line) == {"static": [2]}
-        assert [u.claims for u in refs.unplaced] == ["claims 40-90"]
+        assert _named(line) == {"static": [2, 40]}
+        assert [u.claims for u in refs.unplaced] == ["claims 41-90"]
+
+    def test_the_disputes_read_a_falling_or_a_longer_range_as_before(self) -> None:
+        assert _numbers_written("I keep claims 3-2 as stated") == {3}
+        assert _numbers_written("claims 1-50 stand") == {1}
 
 
 class TestANumberNoAnalystIsNamedForIsUnplaced:
@@ -158,7 +240,7 @@ class TestASingleNumberIsReadAsBefore:
             (f"{STATIC} STATIC ANALYST claim 7 is loose. {BLOCKS}", {"static": [7]}),
             (f"{STATIC} Claims 30 and 62 say a thing. {BLOCKS}", {"static": [30, 62]}),
             (f"{STATIC} Claims 4/40 say a thing. {BLOCKS}", {"static": [4, 40]}),
-            (f"{STATIC} Static claim 3 - 5 hosts answer it. {BLOCKS}", {"static": [3]}),
+            (f"{STATIC} Static claim 3 - 2 analysts agree. {BLOCKS}", {"static": [3]}),
             (f"{STATIC} Static claim 3-related text. {BLOCKS}", {"static": [3]}),
             (f"{STATIC} Static claim 3 to 0x5a is the key. {BLOCKS}", {"static": [3]}),
             (f"{STATIC} STATIC ANALYST claim 0 is no claim. {BLOCKS}", {"static": []}),
@@ -198,15 +280,12 @@ FOUR = _block(MUTEX) + _block(BEACON) + _block(CRYPTO) + _block(PERSIST)
 
 
 def _merge(line: str, answer: str) -> Any:
-    refs = read_claim_references([line], PARTICIPANTS)
     return merge_revision(
         _isr(FOUR),
         _isr(answer),
         answer,
         3,
-        refs.named.get("static"),
-        refs.unplaced_for("static"),
-        refs.expanded_for("static"),
+        claims_named_by_lines([line], PARTICIPANTS).get("static"),
     )
 
 
@@ -269,6 +348,24 @@ class TestTheMergeReadsARangeAsItReadsASingleClaim:
         assert [n for n, _s, _r in merge.withdrawn_by_rule] == [2, 4]
         assert [n for n, *_rest in merge.range_carried] == [3]
 
+    def test_a_token_in_another_analysts_clause_is_not_the_ranges(self) -> None:
+        line = (
+            "[analysts: STATIC ANALYST, TRIAGE ANALYST] STATIC ANALYST claims 2-3 repeat one "
+            f"technique, while TRIAGE claim 9 places the decoder at 0x403000. {BLOCKS}"
+        )
+
+        merge = _merge(line, _block(MUTEX))
+
+        assert [n for n, _s, _r in merge.withdrawn_by_rule] == [2]
+        assert [n for n, *_rest in merge.range_carried] == [3]
+
+    def test_a_token_in_a_marks_reason_is_not_the_ranges(self) -> None:
+        line = f"{STATIC} Claims 2-3 say X. [blocking: the listing at 0x403000 shows more.]"
+
+        merge = _merge(line, _block(MUTEX))
+
+        assert [n for n, *_rest in merge.range_carried] == [3]
+
     def test_a_range_the_disputes_argue_answers_the_line(self) -> None:
         answer = _block(MUTEX)
         revision = _isr(answer)
@@ -293,18 +390,24 @@ class TestTheMergeReadsARangeAsItReadsASingleClaim:
         assert merge.withdrawn_by_rule == ()
         assert merge.merged is not None
         assert [c.claim for c in merge.merged.claims] == [MUTEX, BEACON, CRYPTO, PERSIST]
-        said = [s for s in merge.sentences("static", 3) if "names no claim" in s]
+        said = [s for s in merge.sentences("static", 3) if "on that reference" in s]
         assert said == [
-            "Blocking line L1 of the round-3 mediation writes claims 1-40 and names no claim of "
-            f"the static analyst by it ({RANGE_NOT_READ}): no claim of that analyst's answer in "
-            "force is withdrawn by rule on that reference.",
-            "Blocking line L1 of the round-3 mediation writes claim 2 and names no claim of the "
-            "static analyst by it (no analyst is named for it): no claim of that analyst's "
-            "answer in force is withdrawn by rule on that reference.",
+            "Blocking line L1 of the round-3 mediation writes claims 2-40 of the static analyst, "
+            f"{RANGE_NOT_READ}: no claim of it is withdrawn by rule on that reference.",
+            "Blocking line L1 of the round-3 mediation writes claim 2 and the platform reads no "
+            "analyst for it: no claim is withdrawn by rule on that reference.",
         ]
 
-    def test_a_reference_past_every_claim_in_force_is_no_question_to_the_merge(self) -> None:
-        merge = _merge(f"{STATIC} The static's own claim 45 says X. {BLOCKS}", _block(MUTEX))
+    def test_an_unmarked_line_is_a_line_not_a_blocking_line(self) -> None:
+        merge = _merge(f"{STATIC} The static's own claim 2 says X.", _block(MUTEX))
+
+        assert [s for s in merge.sentences("static", 3) if "on that reference" in s] == [
+            "Line L1 of the round-3 mediation writes claim 2 and the platform reads no analyst "
+            "for it: no claim is withdrawn by rule on that reference."
+        ]
+
+    def test_a_range_past_every_claim_in_force_is_no_question_to_the_merge(self) -> None:
+        merge = _merge(f"{STATIC} STATIC ANALYST claims 30 to 60 say X. {BLOCKS}", _block(MUTEX))
 
         assert merge.unplaced == ()
 
@@ -351,6 +454,8 @@ class TestTheMergeReadsARangeAsItReadsASingleClaim:
         assert ruled == {BEACON, CRYPTO}
         said = out["revision_replacements"]
         assert any(
-            s.startswith("Blocking line L2 of the round-2 mediation writes claim 4 and names no")
+            s.startswith(
+                "Blocking line L2 of the round-2 mediation writes claim 4 and the platform"
+            )
             for s in said
         )
