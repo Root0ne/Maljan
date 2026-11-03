@@ -46,11 +46,14 @@ const SAMPLE_FOOTER: Record<SampleMatchTone, string> = {
   neutral: "text-text-secondary",
 };
 
-/* A printed rule's Precision line is muted; a rule the analyst report leaves
- * out says why in the hash-only amber, since its badge alone can read as a
- * match by content. */
-function standingTone(standing: RuleStanding): string {
-  return standing.printed ? "text-text-muted" : "text-status-orange";
+/* A printed rule's Precision line is muted. A rule the analyst report leaves
+ * out says why in the compile error's red when it does not compile or does
+ * not match its sample, and in the hash-only amber otherwise (a hash-only
+ * match, not checked, stored before the check). */
+function standingTone(rule: DetectionRule, standing: RuleStanding): string {
+  if (standing.printed) return "text-text-muted";
+  if (rule.compile_error || rule.matches_sample === false) return "text-status-red";
+  return "text-status-orange";
 }
 
 /** How many rules the list draws before offering more. */
@@ -169,7 +172,9 @@ function RuleRow({ rule, onOpen }: { rule: DetectionRule; onOpen: (opener: HTMLE
           .{KIND_EXT[rule.kind]}
         </button>
       </span>
-      {standing && <p className={`basis-full text-[11px] ${standingTone(standing)}`}>{standing.sentence}</p>}
+      {standing && (
+        <p className={`basis-full text-[11px] ${standingTone(rule, standing)}`}>{standing.sentence}</p>
+      )}
     </li>
   );
 }
@@ -187,7 +192,7 @@ function RuleBody({ rule }: { rule: DetectionRule }) {
         <p className="rounded bg-status-red/5 px-2 py-1.5 text-[11px] text-status-red">{rule.compile_error}</p>
       )}
       {sample && <p className={`rounded px-2 py-1.5 text-[11px] ${SAMPLE_FOOTER[sample.tone]}`}>{sample.detail}</p>}
-      {standing && <p className={`px-2 text-[11px] ${standingTone(standing)}`}>{standing.sentence}</p>}
+      {standing && <p className={`px-2 text-[11px] ${standingTone(rule, standing)}`}>{standing.sentence}</p>}
     </div>
   );
 }
