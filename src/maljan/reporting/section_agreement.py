@@ -1740,7 +1740,7 @@ def _grounds(fact: Passage, reading: _Reading) -> bool:
 # farther from its verb than this, within one clause, is not read as one.
 _CLAUSE_REACH = 240
 _IN_CLAUSE = rf"[^.;:()\u2014\u2013]{{0,{_CLAUSE_REACH}}}?"
-_NEGATION = r"\b(?:no|not|never|none)\b"
+_NEGATION_WORD = r"\b(?:no|not|never|none)\b"
 _NOT_DONE = r"(?:\b(?:does|do|did|can|could)\s+not\s+|\bcannot\s+|\b(?:doesn|don|didn)'t\s+)"
 _READ_VERB = (
     r"\b(?:establish|show|settle|trace|list|read|identify|recover|decompile|disassemble|"
@@ -1750,7 +1750,7 @@ _CODE_READ = r"\b(?:(?:function\s+)?index|these\s+functions|code\s+reads?|traced
 _UNESTABLISHED = re.compile(
     "|".join(
         (
-            _NEGATION
+            _NEGATION_WORD
             + _IN_CLAUSE
             + r"\b(?:established|shown|read|listed|traced|identified|recovered|decompiled|"
             r"disassembled|examined|settled)\b",
@@ -1758,11 +1758,11 @@ _UNESTABLISHED = re.compile(
             r"\b(?:ledger|entries|this\s+record|this\s+run|listings?|decompiles?|"
             r"(?:function\s+)?index|code\s+reads?)\b" + _IN_CLAUSE + _NOT_DONE + _READ_VERB,
             r"\bwe\s+" + _NOT_DONE + _READ_VERB,
-            _NEGATION + _IN_CLAUSE + _CODE_READ,
-            _CODE_READ + _IN_CLAUSE + _NEGATION,
+            _NEGATION_WORD + _IN_CLAUSE + _CODE_READ,
+            _CODE_READ + _IN_CLAUSE + _NEGATION_WORD,
             r"\b(?:caller|callee|call\s+(?:site|path)|routine)s?\b"
             + _IN_CLAUSE
-            + _NEGATION
+            + _NEGATION_WORD
             + r"\s+in\s+the\s+(?:ledger|listings?|index|entries)\b",
         )
     ),
