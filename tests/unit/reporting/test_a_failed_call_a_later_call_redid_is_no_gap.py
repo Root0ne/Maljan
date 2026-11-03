@@ -31,6 +31,9 @@ from tests.unit.reporting._report_inventory import stored_runs
 
 GATE, OTHER = 0x2475A10, 0x2475B20
 _DECOMPILE = {"v": 1, "kind": "decompile", "reader": "listing"}
+# A tool asked for an address whose answer is no code listing: its redo is the
+# same question, a listing of the function answering nothing more.
+_NOT_A_LISTING = {"v": 1, "kind": "xrefs"}
 # The lines a run with one failure and no redo printed before this change,
 # rendered by the base branch's code from the same summary.
 HEAD_LINE = "Evidence: 2 tool call(s), 1 failed (see §13)."
@@ -161,14 +164,14 @@ def test_the_same_tool_asked_another_question_for_the_address_redoes_nothing(
         args={"address": hex(GATE), **asked},
         ok=False,
         error="the call timed out",
-        facts=_DECOMPILE,
+        facts=_NOT_A_LISTING,
     )
     answer = LedgerEntry(
         id="ev_0002",
         tool=tool,
         args={"address": hex(GATE), **again},
-        output=f"int FUN_{GATE:x}(void)\n{{\n}}\n",
-        facts=_DECOMPILE,
+        output=f"From {GATE + 4:x} in FUN_{GATE:x} [READ]",
+        facts=_NOT_A_LISTING,
     )
     assert redone_failures([failed, answer]) == []
     # The same question again, a null or absent argument aside, is a redo.
@@ -182,10 +185,14 @@ def test_a_value_the_failure_names_may_change_in_the_redo() -> None:
         update={
             "args": {"address": hex(GATE), "program": "sample"},
             "error": "program='sample' is not a program this job opened",
+            "facts": _NOT_A_LISTING,
         }
     )
     redo = _lifted("ev_0002", GATE).model_copy(
-        update={"args": {"address": hex(GATE), "program": "sample.job.exe"}}
+        update={
+            "args": {"address": hex(GATE), "program": "sample.job.exe"},
+            "facts": _NOT_A_LISTING,
+        }
     )
     assert redone_failures([failed, redo])[0]["answered_by"] == ["ev_0002"]
     # A value the message does not name is the question, and must match.
@@ -202,8 +209,8 @@ def _code_call(
         args={"address": hex(GATE), **args},
         ok=ok,
         error=None if ok else error,
-        output=f"int FUN_{GATE:x}(void)\n{{\n}}\n" if ok else "",
-        facts=_DECOMPILE,
+        output=f"From {GATE + 4:x} in FUN_{GATE:x} [READ]" if ok else "",
+        facts=_NOT_A_LISTING,
     )
 
 
@@ -252,6 +259,40 @@ def test_a_same_or_wider_redo_is_still_redone() -> None:
         _code_call("ev_0002", True),
     ):
         assert redone_failures([failed, redo])[0]["answered_by"] == ["ev_0002"]
+
+
+def test_a_call_of_the_same_name_listing_the_function_whole_redoes_a_failed_listing() -> None:
+    # Another question of the same tool (a timeout the failure never named),
+    # but its answer lists the function whole: the failed listing is redone.
+    failed = _failed("ev_0001", GATE).model_copy(update={"error": "no function found there"})
+    whole = _lifted("ev_0002", GATE).model_copy(
+        update={"args": {"address": hex(GATE), "timeout": 120}}
+    )
+    assert redone_failures([failed, whole])[0]["answered_by"] == ["ev_0002"]
+
+
+def test_a_call_of_the_same_name_listing_another_function_or_cut_redoes_nothing() -> None:
+    failed = _failed("ev_0001", GATE).model_copy(update={"error": "no function found there"})
+    other = _lifted("ev_0002", OTHER).model_copy(
+        update={"args": {"address": hex(OTHER), "timeout": 120}}
+    )
+    assert redone_failures([failed, other]) == []
+    cut = _lifted("ev_0003", GATE).model_copy(
+        update={"args": {"address": hex(GATE), "timeout": 120}, "chars_dropped": 64}
+    )
+    assert redone_failures([failed, cut]) == []
+    # Some instructions from the address, asked of the same instruction lister,
+    # list no function whole.
+    listing = {"v": 1, "kind": "disassembly", "reader": "listing"}
+    asked = failed.model_copy(update={"tool": "read_instructions", "facts": listing})
+    some = LedgerEntry(
+        id="ev_0004",
+        tool="read_instructions",
+        args={"address": hex(GATE), "num_instructions": 3},
+        output=f"{GATE:#x}  mov rax, rcx\n",
+        facts=listing,
+    )
+    assert redone_failures([asked, some]) == []
 
 
 def test_an_answer_that_holds_nothing_redoes_nothing() -> None:
@@ -440,12 +481,15 @@ def test_run7_s_decompile_is_not_redone_by_a_read_of_seventy_instructions() -> N
     ledger = _stored_ledger("run7")
     redone = {row["entry_id"]: row["answered_by"] for row in redone_failures(ledger)}
     # ev_0055 disassembled 70 instructions from 0x...1030: no redo of the decompile.
-    # ev_0111, ev_0123 and ev_0174 are later calls of the same tool that set a
-    # timeout the failed calls left out and their failures ("Cannot find
-    # function") never named (T-529): they redo no decompile; ev_0123 lists
-    # 0x...caac whole and so redoes the failed disassembly of it, another
-    # tool's call.
-    assert redone == {"ev_0069": ["ev_0123"]}
+    # ev_0111, ev_0123 and ev_0174 set a timeout the failed decompiles left out
+    # and their failures never named, but each lists the function whole, which
+    # redoes a failed listing of it (T-529).
+    assert redone == {
+        "ev_0050": ["ev_0111"],
+        "ev_0067": ["ev_0123"],
+        "ev_0069": ["ev_0123"],
+        "ev_0095": ["ev_0174"],
+    }
 
 
 def test_haiku5_s_calls_refused_for_a_null_are_redone_by_the_calls_that_set_it() -> None:

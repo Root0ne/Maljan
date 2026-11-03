@@ -21,9 +21,11 @@ agreement question reads them, ``agreement_facts``, T-396):
   failure that named no instruction count, is no redo); a refused value
   replaced by a number counts only when the number is not smaller than the
   refused one (a read of 0x1000 bytes redone as a read of 4 is no redo);
-* for a failed call that lists code, a later call of another tool that lists
-  that function whole: a decompiled listing holding it, or a disassembly of the
-  whole function. A read of some instructions from the address is no redo.
+* for a failed call that lists code, a later call of another tool, or of the
+  same tool asking another question, that lists that function whole: a
+  decompiled listing holding it, or a disassembly of the whole function (the
+  entry's declared kind says which). A read of some instructions from the
+  address is no redo.
 
 The answering call must hold its answer whole (``holds_its_answer``, and
 nothing cut by the byte budget or the tool-output guardrail), and an answer
@@ -136,7 +138,7 @@ def _same_question(failed: Any, answering: Any) -> bool:
 
 
 def _whole_listings(answering: Any, bases: Sequence[int]) -> set[int]:
-    """The functions a call of another tool listed whole: decompiled, or disassembled whole."""
+    """The functions a call listed whole: decompiled, or disassembled whole."""
     from maljan.agents.function_map import one_spelling
     from maljan.core.undeclared_tools import entry_decompiles, entry_lists_a_function
     from maljan.pipeline.validation import _entry_functions
@@ -202,9 +204,14 @@ def redone_failures(ledger: Iterable[Any]) -> list[dict[str, Any]]:
                 continue
             answering = entries[later]
             if getattr(answering, "tool", None) == getattr(failed, "tool", None):
-                if not _same_question(failed, answering):
+                if _same_question(failed, answering):
+                    covered = {one_spelling(a, bases) for a in answered_addresses(answering)}
+                elif lists_code:
+                    # Another question of the same name that lists the function
+                    # whole still answers a failed listing of it.
+                    covered = _whole_listings(answering, bases)
+                else:
                     continue
-                covered = {one_spelling(a, bases) for a in answered_addresses(answering)}
             elif lists_code:
                 covered = _whole_listings(answering, bases)
             else:
