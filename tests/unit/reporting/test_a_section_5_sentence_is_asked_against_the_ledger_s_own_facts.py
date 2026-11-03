@@ -571,25 +571,66 @@ def test_a_sentence_already_carrying_the_fact_s_clause_is_not_qualified_again() 
 @pytest.mark.parametrize(
     "body",
     [
-        # The routine named a paragraph on, and named only after the sentence.
+        # The caller named after the absence, a paragraph on or a paragraph back.
         f"{ABSENT}\n\nThe gate at 0x5a10 returns early [ev_0107].",
         f"{ABSENT} The gate at 0x5a10 returns early [ev_0107].",
-        # The sentence before it names the caller, a paragraph back.
         f"The gate at 0x5a10 returns early [ev_0107].\n\n{ABSENT}",
     ],
 )
-def test_a_fact_the_passage_names_away_from_the_sentence_qualifies_nothing(body: str) -> None:
+def test_an_absence_is_qualified_on_a_routine_its_passage_names_anywhere(body: str) -> None:
     out, done = _qualify("anything", body=body)
+    assert out == body.replace(ABSENT, f"No environment check is established; {CLAUSE}.")
+    assert done.summary["rewritten"] == 1
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        # States no absence: the routine fact is about the sentence alone.
+        "The sample also writes a Run key for persistence [ev_0107].",
+        "Routine 0x7c40 returns early.",
+    ],
+)
+def test_a_routine_fact_qualifies_no_other_sentence_its_passage_does_not_name_it_in(
+    sentence: str,
+) -> None:
+    body = f"The gate at 0x5a10 returns early [ev_0107]. {sentence}"
+    out, done = _qualify("anything", sentence, body)
     assert out == body
     assert done.summary["rewritten"] == 0
     assert done.tally.by_code[REWRITE_UNGROUNDED_CODE] == 2
 
 
-def test_a_sentence_naming_another_address_is_not_read_as_the_one_before() -> None:
-    sentence = "Routine 0x7c40 performs no check."
-    body = f"The gate at 0x5a10 returns early [ev_0107]. {sentence}"
-    out, done = _qualify("anything", sentence, body)
-    assert out == body
+def test_a_bound_value_qualifies_no_sentence_stating_no_absence_beside_its_call() -> None:
+    other = "The gate then sleeps for a while [ev_0107]."
+    report = _bound_report(f"{GATED} {other}")
+    row = _row("evasion_antiforensics", other, ["bound.1"], "x")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.evasion_antiforensics.body == f"{GATED} {other}"
+    assert done.summary["rewritten"] == 0
+
+
+def test_an_answered_failure_is_about_the_sentence_naming_it_alone() -> None:
+    dropped = "One file was dropped, files/0x5a10-104.dat [ev_0107]."
+    report = _report()
+    body = f"{FAILED} {dropped}"
+    report.technical_analysis.string_resolution.body = body
+    row = _row("string_resolution", dropped, ["answered.1"], "anything")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.string_resolution.body == body
+    assert done.summary["rewritten"] == 0
+    assert done.tally.by_code[REWRITE_UNGROUNDED_CODE] == 2
+
+
+def test_an_answered_failure_is_not_about_an_absence_beside_it() -> None:
+    # A routine fact is read passage-wide on an absence; a failed call answered
+    # later never is.
+    report = _report()
+    body = f"{FAILED} {ABSENT}"
+    report.technical_analysis.string_resolution.body = body
+    row = _row("string_resolution", ABSENT, ["answered.1"], "anything")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.string_resolution.body == body
     assert done.summary["rewritten"] == 0
 
 
