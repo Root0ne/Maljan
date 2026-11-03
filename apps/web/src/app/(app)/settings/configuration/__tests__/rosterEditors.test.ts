@@ -132,12 +132,22 @@ describe("the agent detail's input data and sandbox row", () => {
     timeout_seconds: null,
   };
 
-  it("tells a generic agent where its sections go, beside the tab it may pick", () => {
-    const hint = "Its sections go to EVIDENCE unless you pick a tab";
-    expect(agentHtml("checker", base)).toContain(hint);
-    expect(agentHtml("checker", { ...base, tab: "static" })).toContain(hint);
-    for (const role of ["static", "dynamic", "network", "lead"] as const) {
-      expect(agentHtml("checker", { ...base, role }), role).not.toContain(hint);
+  it("tells an agent whose role has no tab where its sections go, beside the tab it may pick", () => {
+    const hint = "Sections its tools&#x27; kinds do not place go to EVIDENCE unless you pick a tab";
+    for (const role of ["generic", "lead"] as const) {
+      for (const tab of [null, "static"]) {
+        const html = agentHtml("checker", { ...base, role, tab });
+        expect(html, `${role} ${tab}`).toContain(hint);
+        expect(html, `${role} ${tab}`).toContain('id="checker-tab-hint"');
+        expect(html.match(/<select[^>]*aria-label="checker tab"[^>]*>/)?.[0], `${role} ${tab}`).toContain(
+          'aria-describedby="checker-tab-hint"',
+        );
+      }
+    }
+    for (const role of ["static", "dynamic", "network"] as const) {
+      const html = agentHtml("checker", { ...base, role });
+      expect(html, role).not.toContain(hint);
+      expect(html, role).not.toContain("aria-describedby=\"checker-tab-hint\"");
     }
   });
 

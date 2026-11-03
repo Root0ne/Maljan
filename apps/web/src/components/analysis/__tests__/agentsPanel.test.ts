@@ -64,13 +64,14 @@ describe("the agents table's Key Finding cell", () => {
     const html = panelHtml([finding({ claims })]);
     for (let i = 1; i <= 37; i++) expect(html, `claim ${i}`).toContain(`claim number ${i}.`);
     expect(html).toContain("<details");
-    expect(html).toMatch(/\+36 more(<!-- -->)? claims/);
+    expect(html).toContain(">+36 more claims</summary>");
+    expect(html).toContain('aria-label="checker: +36 more claims"');
     expect(html.match(/<li\b/g)).toHaveLength(36);
   });
 
   it("says one more claim in the singular", () => {
     const html = panelHtml([finding({ claims: ["first", "second"] })]);
-    expect(html).toMatch(/\+1 more(<!-- -->)? claim</);
+    expect(html).toContain(">+1 more claim</summary>");
   });
 
   it("draws no disclosure for a single claim", () => {
@@ -86,7 +87,14 @@ describe("the agents table's Key Finding cell", () => {
     expect(html).toContain("ran out of time");
     expect(html).toContain("partial a");
     expect(html).toContain("partial b");
-    expect(html).toMatch(/\+2 more(<!-- -->)? claims/);
+    expect(html).toContain(">2 claims</summary>");
+    expect(html).toContain('aria-label="checker: 2 claims"');
+    expect(html).not.toContain("more claim");
+  });
+
+  it("counts a single claim under a non-complete agent's reason in the singular", () => {
+    const html = panelHtml([finding({ status: "failed", status_reason: "model error", claims: ["partial"] })]);
+    expect(html).toContain(">1 claim</summary>");
   });
 
   it("still says so when an agent recorded nothing", () => {

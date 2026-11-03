@@ -117,12 +117,15 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
     const claims = claimTexts(f.claims);
     let keyFinding = claims[0] ?? "No specific findings recorded.";
     let moreClaims = claims.slice(1);
+    let claimsLabel = `+${moreClaims.length} more ${moreClaims.length === 1 ? "claim" : "claims"}`;
     // Prefer the status_reason for non-complete rows so the table
     // explains the gap instead of repeating "No specific findings"; the
-    // claims such a row still holds all go under the disclosure.
+    // claims such a row still holds all go under the disclosure, which then
+    // counts them rather than calling them more.
     if (status !== "complete" && f.status_reason) {
       keyFinding = String(f.status_reason);
       moreClaims = claims;
+      claimsLabel = `${claims.length} ${claims.length === 1 ? "claim" : "claims"}`;
     }
     return {
       key: f.agent_name,
@@ -132,6 +135,7 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
       domain: f.domain,
       key_finding: keyFinding,
       more_claims: moreClaims,
+      claims_label: claimsLabel,
       revision_rounds: f.revision_rounds,
       status,
     };
@@ -264,9 +268,11 @@ export default function AgentsTab({ roster = null }: { roster?: JobRoster | null
                     </div>
                     {agent.more_claims.length > 0 && (
                       <details className="mt-1">
-                        <summary className="cursor-pointer text-[11px] text-text-muted">
-                          +{agent.more_claims.length} more
-                          {agent.more_claims.length === 1 ? " claim" : " claims"}
+                        <summary
+                          className="cursor-pointer text-[11px] text-text-muted"
+                          aria-label={`${agent.name}: ${agent.claims_label}`}
+                        >
+                          {agent.claims_label}
                         </summary>
                         <ol className="mt-1 space-y-1 list-decimal pl-4 text-xs text-text-secondary">
                           {agent.more_claims.map((text, i) => (

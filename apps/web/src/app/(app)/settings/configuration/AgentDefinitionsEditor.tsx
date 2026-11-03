@@ -53,6 +53,14 @@ import type {
 
 /** The console tabs an agent may declare (`core.config.AGENT_TABS`). */
 const AGENT_TABS = ["identity", "static", "dynamic", "network", "persistence"] as const;
+/** The tab each role's sections are drawn on when the definition names none
+ *  (`core.config.ROLE_TABS`). A role missing here has no tab of its own. */
+const ROLE_TABS: Readonly<Record<string, (typeof AGENT_TABS)[number]>> = {
+  static: "static",
+  dynamic: "dynamic",
+  network: "network",
+  judge: "identity",
+};
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
@@ -382,6 +390,10 @@ export function AgentDetail({
   // any of them but its `enabled` switch, so none is offered. The served list
   // names all of them; an API older than it leaves the five class built-ins.
   const locked = builtinKeySet(builtinAgentKeys).has(agentKey);
+  // A role an operator may pick that has no tab of its own: the tab field
+  // then says where the sections it leaves unplaced are drawn.
+  const tabHint =
+    agent !== undefined && ROLE_CHOICES.includes(agent.role) && !Object.hasOwn(ROLE_TABS, agent.role);
 
   const put = (key: string, next: Partial<AgentDefinitionEntry>) => {
     resolve.noteEdit(key, next);
@@ -677,6 +689,7 @@ export function AgentDetail({
               <select
                 className={input}
                 aria-label={`${agentKey} tab`}
+                aria-describedby={tabHint ? `${agentKey}-tab-hint` : undefined}
                 disabled={locked}
                 value={agent.tab ?? ""}
                 onChange={(e) => put(agentKey, { tab: e.target.value || null })}
@@ -686,11 +699,11 @@ export function AgentDetail({
                   <option key={tab} value={tab}>{tab}</option>
                 ))}
               </select>
-              {/* A generic role has no tab of its own (`core.config.ROLE_TABS`),
-                  so its sections land in the EVIDENCE footer by default. */}
-              {agent.role === "generic" && (
-                <span className="block text-[11px] text-text-muted mt-0.5">
-                  Its sections go to EVIDENCE unless you pick a tab
+              {/* A role with no tab of its own (`ROLE_TABS`) leaves such a
+                  section to the EVIDENCE footer unless the agent names one. */}
+              {tabHint && (
+                <span id={`${agentKey}-tab-hint`} className="block text-[11px] text-text-muted mt-0.5">
+                  Sections its tools&apos; kinds do not place go to EVIDENCE unless you pick a tab
                 </span>
               )}
               <FieldError message={fieldError("tab")} />
