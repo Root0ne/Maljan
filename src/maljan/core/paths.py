@@ -65,14 +65,18 @@ def resolve_data(path_like: str | Path) -> Path:
 def resolve_mcp_args(args: list[str]) -> list[str]:
     """Resolve relative paths inside MCP ``args`` against the project root.
 
-    An argument is rooted at the project directory only when it is a relative
-    path into it: it contains ``/`` or ``\\``, is not absolute, carries no
-    scheme or other colon (``https://…``, ``git+https://…``, an image
-    reference's ``:tag``), does not start with ``@`` (an npm ``@scope/pkg``)
-    and holds no ``=``, and its first component exists under the project root
-    (``scripts/dev/ghidra_manager.py``, ``./tools/x``, ``data/out/new.json``).
-    Anything else — a package or image name, a URL, ``owner/repo``, a CLI
-    flag — reaches the child exactly as written.
+    An argument is rooted at the project directory by the rule
+    :func:`resolve_mcp_command` roots a command by, only when it is a relative
+    path into it: it contains ``/`` (or ``\\`` where that is the platform's
+    separator), is not absolute, carries no scheme or other colon
+    (``https://…``, ``git+https://…``, an image reference's ``:tag``), does not
+    start with ``-``, ``@`` (an npm ``@scope/pkg``) or ``~`` and holds no
+    ``=``, its first component past any leading ``.`` exists under the project
+    root, and the rooted path stays inside it (``scripts/dev/ghidra_manager.py``,
+    ``./tools/x``, ``data/out/new.json``). Anything else — a package or image
+    name, a URL, ``owner/repo``, a CLI flag, ``../x`` or ``scripts/../../x`` —
+    reaches the child exactly as written; :func:`mcp_paths_leaving_project`
+    names the last kind, so the launch can say it left them.
 
     This allows ``.env`` files to store portable relative paths such as
     ``scripts/dev/ghidra_manager.py`` instead of hard-coding host-specific
@@ -85,49 +89,59 @@ def resolve_mcp_args(args: list[str]) -> list[str]:
         A new list with relative project paths resolved to absolute paths.
     """
     project_root = get_project_root()
-    return [_rooted(arg, project_root) for arg in args]
+    return [_rooted(arg, project_root)[0] for arg in args]
 
 
-def _rooted(arg: str, project_root: Path) -> str:
-    """``arg`` rooted at ``project_root`` when it is a relative path into it, else as written."""
-    if arg.startswith(("-", "@")) or ":" in arg or "=" in arg:
-        return arg
-    if "/" not in arg and "\\" not in arg:
-        # Plain value (e.g. "stdio", "root", "Ubuntu").
-        return arg
-    p = Path(arg)
-    if p.is_absolute():
-        return arg
-    first = arg.replace("\\", "/").split("/", 1)[0]
-    if not first or not (project_root / first).exists():
-        return arg
-    return str(project_root / p)
+def mcp_paths_leaving_project(values: list[str]) -> list[str]:
+    """The ``values`` written as a relative path that leaves the project, which are not rooted.
+
+    ``../x``, ``./../x``, ``scripts/../../x``: :func:`resolve_mcp_args` and
+    :func:`resolve_mcp_command` leave each as written, read from the child's
+    own working directory, rather than root it at the project as they root a
+    relative path into it.
+    """
+    project_root = get_project_root()
+    return [value for value in values if _rooted(value, project_root)[1]]
 
 
 def resolve_mcp_command(command: str) -> str:
     """An MCP ``command`` rooted at the project root when it is a relative path into it.
 
-    The rule :func:`resolve_mcp_args` roots an argument by, kept tighter for
-    the program a server runs: a value with no path separator (a bare program
-    name such as ``npx`` or ``uvx``, looked up on the child's ``PATH``), an
-    absolute path, ``~``, a scheme or option is left as written; ``\\`` is a
-    separator only where the platform's is. A relative path is rooted only when
-    its first component past any leading ``.`` exists under the project root
-    and the rooted path stays inside it, so ``../x``, ``./../x`` and
-    ``./missing/x`` are left as written, as the child reads them.
+    The rule :func:`resolve_mcp_args` roots an argument by: a value with no
+    path separator (a bare program name such as ``npx`` or ``uvx``, looked up
+    on the child's ``PATH``), an absolute path, ``~``, a scheme or option is
+    left as written; ``\\`` is a separator only where the platform's is. A
+    relative path is rooted only when its first component past any leading
+    ``.`` exists under the project root and the rooted path stays inside it,
+    so ``../x``, ``./../x`` and ``./missing/x`` are left as written, as the
+    child reads them.
     """
-    if not command or command.startswith(("-", "@", "~")) or ":" in command or "=" in command:
-        return command
-    written = command.replace("\\", "/") if os.sep == "\\" else command
+    return _rooted(command)[0]
+
+
+def _rooted(value: str, project_root: Path | None = None) -> tuple[str, bool]:
+    """``value`` rooted at the project root when it is a relative path into it, else as written.
+
+    With whether ``value`` was left as written because it is a relative path
+    that leaves the project. ``project_root`` defaults to
+    :func:`get_project_root`, read only for a value written as a path.
+    """
+    if not value or value.startswith(("-", "@", "~")) or ":" in value or "=" in value:
+        return value, False
+    written = value.replace("\\", "/") if os.sep == "\\" else value
     if "/" not in written or Path(written).is_absolute():
-        return command
+        return value, False
     parts = [part for part in written.split("/") if part]
     while parts and parts[0] == ".":
         parts.pop(0)
-    if not parts or parts[0] == "..":
-        return command
-    root = get_project_root()
+    if not parts:
+        return value, False
+    if parts[0] == "..":
+        return value, True
+    root = get_project_root() if project_root is None else project_root
     rooted = Path(os.path.normpath(root / written))
-    if not rooted.is_relative_to(root) or not (root / parts[0]).exists():
-        return command
-    return str(rooted)
+    if not rooted.is_relative_to(root):
+        return value, True
+    if not (root / parts[0]).exists():
+        return value, False
+    return str(rooted), False

@@ -136,19 +136,25 @@ def launch_cwd(cwd: str | None) -> str | None:
 def stdio_launch(config: Any, *, server: str = "") -> StdioLaunch:
     """How ``config``'s child is started: :func:`child_env`, rooted command and arguments, cwd.
 
-    Its arguments as ``core.paths.resolve_mcp_args`` roots them; its
-    environment the block's ``env`` and ``env_allow`` give
-    (:func:`child_env`), before what a job adds; its working directory as
-    :func:`launch_cwd` reads it (:class:`LaunchCwdError` for one it refuses).
-    Its command, where the block names no working directory, as
-    ``core.paths.resolve_mcp_command`` roots it: a relative path into the
-    project is rooted there rather than at whatever directory the parent runs
-    in, and a bare program name (``npx``, ``uvx``), an absolute path or one
-    that leaves the project is left as written. A block with a working
-    directory has a relative command run from that directory, already
-    rooted, and keeps it as written.
+    Its arguments as ``core.paths.resolve_mcp_args`` roots them, by the rule
+    its command is rooted by; its environment the block's ``env`` and
+    ``env_allow`` give (:func:`child_env`), before what a job adds; its
+    working directory as :func:`launch_cwd` reads it (:class:`LaunchCwdError`
+    for one it refuses). Its command, where the block names no working
+    directory, as ``core.paths.resolve_mcp_command`` roots it: a relative path
+    into the project is rooted there rather than at whatever directory the
+    parent runs in, and a bare program name (``npx``, ``uvx``), an absolute
+    path or one that leaves the project is left as written. A block with a
+    working directory has a relative command run from that directory, already
+    rooted, and keeps it as written. A command or argument left as written
+    because it is a relative path that leaves the project (``../x``) is said in
+    a warning naming the server.
     """
-    from maljan.core.paths import resolve_mcp_args, resolve_mcp_command
+    from maljan.core.paths import (
+        mcp_paths_leaving_project,
+        resolve_mcp_args,
+        resolve_mcp_command,
+    )
 
     env = child_env(
         getattr(config, "env", None) or {},
@@ -157,7 +163,16 @@ def stdio_launch(config: Any, *, server: str = "") -> StdioLaunch:
     )
     cwd = launch_cwd(getattr(config, "cwd", None))
     command = str(getattr(config, "command", None) or "")
+    written = [str(arg) for arg in getattr(config, "args", None) or ()]
+    leaving = mcp_paths_leaving_project(([command] if cwd is None else []) + written)
+    if leaving:
+        logger.warning(
+            "Tool server %s: %s left as written, not rooted at the project: a relative path "
+            "that leaves the project is read from the directory the child runs in.",
+            server or "(unnamed)",
+            ", ".join(repr(value) for value in leaving),
+        )
     if cwd is None:
         command = resolve_mcp_command(command)
-    args = resolve_mcp_args([str(arg) for arg in getattr(config, "args", None) or ()])
+    args = resolve_mcp_args(written)
     return StdioLaunch(command=command, args=args, env=env, cwd=cwd)

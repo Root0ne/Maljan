@@ -509,3 +509,108 @@ class TestRootedCommand:
         assert stdio
         for name, config in stdio.items():
             assert stdio_launch(config).command == config.command, name
+
+
+class TestRootedArguments:
+    """A stdio block's arguments are rooted by the rule its command is (``stdio_launch``).
+
+    A relative path into the project is rooted there; one that leaves the
+    project (``../x``) reaches the child as written and is said in a warning,
+    and the trust grant reads the argument the launch hands the child.
+    """
+
+    @pytest.fixture()
+    def project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        root = tmp_path / "project"
+        (root / "scripts").mkdir(parents=True)
+        (root / "scripts" / "server.py").write_text("")
+        (tmp_path / "evil.py").write_text("")
+        for where in ("one", "two"):
+            (tmp_path / where / "run").mkdir(parents=True)
+            (tmp_path / where / "near.py").write_text("")
+        monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: root)
+        monkeypatch.chdir(tmp_path / "one" / "run")
+        return root
+
+    @pytest.mark.parametrize("written", ["../evil.py", "./../evil.py", "scripts/../../evil.py"])
+    def test_an_argument_that_leaves_the_project_is_left_as_written_and_said(
+        self, project: Path, written: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import sys
+
+        from maljan.core.config import MCPServerConfig
+
+        config = MCPServerConfig(
+            enabled=True, command=sys.executable, args=["-u", "scripts/server.py", written]
+        )
+        with caplog.at_level("WARNING", logger="maljan"):
+            launch = stdio_launch(config, server="zq-args")
+        assert launch.args == ["-u", str(project / "scripts" / "server.py"), written]
+        said = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any("zq-args" in line and repr(written) in line for line in said), said
+
+    def test_an_argument_into_the_project_is_not_said(
+        self, project: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import sys
+
+        from maljan.core.config import MCPServerConfig
+
+        config = MCPServerConfig(
+            enabled=True,
+            command=sys.executable,
+            args=["scripts/../scripts/server.py", "--flag=../x", "owner/repo"],
+        )
+        with caplog.at_level("WARNING", logger="maljan"):
+            launch = stdio_launch(config, server="zq-args")
+        assert launch.args == [str(project / "scripts" / "server.py"), "--flag=../x", "owner/repo"]
+        assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+    def test_the_grant_reads_the_argument_the_launch_hands_the_child(
+        self, project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import os
+        import sys
+
+        from maljan.core import tool_declarations as td
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.servers import ServerHandle
+
+        recorder = MagicMock()
+        monkeypatch.setattr("mcp.StdioServerParameters", recorder)
+        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _toolkit_factory())
+        config = MCPServerConfig(enabled=True, command=sys.executable, args=["../near.py"])
+        ServerHandle("zq-args", config)._build_toolkit(None, 0, None)
+        started = recorder.call_args.kwargs
+        assert started["args"] == ["../near.py"]
+        assert started["cwd"] is None
+        # The child reads ``../near.py`` from the directory it is started in,
+        # and so does the grant; never a file the project root steps out to.
+        resolved = td._resolved_launch(config)
+        assert resolved is not None
+        assert resolved.get("args") == {"0": os.path.realpath(tmp_path / "one" / "near.py")}
+        grant = td.granted_launch(config)
+        monkeypatch.chdir(tmp_path / "two" / "run")
+        assert td.granted_launch(config) != grant
+
+    def test_every_shipped_stdio_server_s_arguments_are_rooted_inside_the_project(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import os
+
+        from maljan.core.config import Settings
+        from maljan.core.paths import get_project_root
+
+        settings = Settings(_env_file=None)
+        blocks = {**settings.mcp.servers, "ghidra": settings.static.ghidra}
+        stdio = {n: c for n, c in blocks.items() if c.transport == "stdio" and c.args}
+        assert stdio
+        root = str(get_project_root())
+        with caplog.at_level("WARNING", logger="maljan"):
+            for name, config in stdio.items():
+                launch = stdio_launch(config, server=name)
+                for written, arg in zip(config.args, launch.args, strict=True):
+                    if arg != written:
+                        assert arg == os.path.normpath(os.path.join(root, written)), name
+                        assert arg.startswith(root + os.sep), name
+        assert not [r for r in caplog.records if r.levelname == "WARNING"]

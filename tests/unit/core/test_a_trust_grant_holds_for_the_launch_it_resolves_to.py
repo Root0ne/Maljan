@@ -331,3 +331,52 @@ def test_a_grant_for_a_bare_name_or_absolute_command_is_unchanged(
     )
     assert granted_launch(block) == grant
     assert _trusted(block, grant)
+
+
+def test_a_grant_for_an_argument_rooted_out_of_the_project_does_not_hold_for_another_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dataclasses
+
+    import maljan.agents.subprocess_env as subprocess_env
+
+    # ``../server.py`` was once rooted at the project, so the child ran the
+    # file beside the project; it now reaches the child as written, read from
+    # the directory the child starts in, and the grant reads that file.
+    root = tmp_path / "project"
+    root.mkdir()
+    beside = tmp_path / "server.py"
+    beside.write_text("print('zq')\n")
+    (tmp_path / "elsewhere" / "run").mkdir(parents=True)
+    other = tmp_path / "elsewhere" / "server.py"
+    other.write_text("print('zq')\n")
+    monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: root)
+    monkeypatch.chdir(tmp_path / "elsewhere" / "run")
+    block = _block(command=sys.executable, args=["../server.py"])
+    now = td._resolved_launch(block)
+    assert now is not None
+    assert now["args"] == {"0": os.path.realpath(other)}
+    assert subprocess_env.stdio_launch(block).args == ["../server.py"]
+    # The grant recorded while the argument was rooted out of the project
+    # held for the file beside it, not for the one the child now starts.
+    rooted = subprocess_env.stdio_launch
+    with monkeypatch.context() as before:
+        before.setattr(
+            subprocess_env,
+            "stdio_launch",
+            lambda cfg, **kw: dataclasses.replace(
+                rooted(cfg, **kw), args=[str(root / "../server.py")]
+            ),
+        )
+        old_grant = granted_launch(block)
+        then = td._resolved_launch(block)
+        assert then is not None
+        assert then["args"] == {"0": os.path.realpath(beside)}
+    assert old_grant
+    assert granted_launch(block) != old_grant
+    assert not _trusted(block, old_grant)
+    # Where the child starts in the project root, both read the same file, so
+    # that grant still holds.
+    monkeypatch.chdir(root)
+    assert granted_launch(block) == old_grant
+    assert _trusted(block, old_grant)
