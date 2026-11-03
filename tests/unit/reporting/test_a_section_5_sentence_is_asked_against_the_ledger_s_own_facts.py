@@ -31,16 +31,19 @@ from maljan.reporting.models import (
     TechnicalSubsection,
 )
 from maljan.reporting.section_agreement import (
+    _CLAUSE_JOIN,
     FACT,
     LISTED_CODE,
     REWRITE_UNGROUNDED_CODE,
     REWRITTEN_CODE,
     UNKNOWN_SOURCE_CODE,
+    _Reading,
     ask_section_agreement,
     passages_of,
     prompt_text,
 )
 from maljan.schemas.evidence import LedgerEntry
+from tests.linear_cost import assert_scales
 
 BASE = 0x2470000
 GATE, CHECK = BASE + 0x5A10, BASE + 0x5A38
@@ -581,6 +584,89 @@ def test_an_absence_is_qualified_on_a_routine_its_passage_names_anywhere(body: s
     out, done = _qualify("anything", body=body)
     assert out == body.replace(ABSENT, f"No environment check is established; {CLAUSE}.")
     assert done.summary["rewritten"] == 1
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "No log clearing, timestomping or file deletion appears in the code read.",
+        "No listed call path selects the Startup folder.",
+        "Whether the gate is open in the analysed sample is not established.",
+        "The routine's caller is not identified.",
+        "The call site was not recovered.",
+        "The ledger does not show whether the gate passed.",
+        "This run did not trace the key assembly.",
+        "Which text is used is not settled by the entries here.",
+        "No row of the function index lists them.",
+        "That caller trace is not in the ledger.",
+    ],
+)
+def test_an_absence_the_code_read_leaves_unsettled_is_qualified_on_a_routine(
+    sentence: str,
+) -> None:
+    body = f"The gate at 0x5a10 returns early [ev_0107]. {sentence}"
+    out, done = _qualify("anything", sentence, body)
+    assert out == body.replace(sentence, f"{sentence[:-1]}; {CLAUSE}.")
+    assert done.summary["rewritten"] == 1
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        # An absence the run recorded is about no routine (T-537).
+        "The sandbox recorded no API call trace [ev_0107].",
+        "None of these commands was observed in this run.",
+        "The decoded texts contain no shadow-copy command [ev_0107].",
+        # A reading word before the negation is not what the sentence says is absent.
+        "The capture, all packets read, contains no DNS query [ev_0107].",
+        "Text whose bytes already read as printable is not decoded [ev_0107].",
+        "The import table does not show the API surface.",
+        "The sandbox entries do not tie it to a sample process.",
+        "No process listing is observed.",
+        "Process attribution for the dumps is not in the ledger.",
+        # A reading word in another clause than the negation.
+        "The sandbox report carries no api_calls section, so the test is established from "
+        "static reading.",
+        "The tool runs returned no findings [ev_0107], but the decompiled code holds gates.",
+    ],
+)
+def test_an_absence_the_run_recorded_is_not_qualified_on_a_routine(sentence: str) -> None:
+    body = f"The gate at 0x5a10 returns early [ev_0107]. {sentence}"
+    out, done = _qualify("anything", sentence, body)
+    assert out == body
+    assert done.summary["rewritten"] == 0
+    assert done.tally.by_code[REWRITE_UNGROUNDED_CODE] == 2
+
+
+@pytest.mark.parametrize(
+    ("opening", "unit", "small", "split"),
+    [
+        # A negation repeated: each one reaches its reading word within the clause bound.
+        ("", "no ", 2_000, 256_000),
+        # An unclosed citation repeated: no citation spans another's bracket.
+        ("", "[ev_1 ", 64_000, 256_000),
+        # One bracket never closed, then ids: a citation is read only where it closes.
+        ("[", "ev_1 ", 8_000, 8_000),
+    ],
+)
+def test_whether_a_sentence_is_unsettled_is_read_in_linear_time(
+    opening: str, unit: str, small: int, split: int
+) -> None:
+    # A section 5 sentence may quote the sample's own text at any length.
+    def flood(size: int) -> str:
+        return opening + (unit * (size // len(unit) + 1))[:size]
+
+    assert_scales(flood, small, lambda text: _Reading(text, "").unestablished, factor=4)
+    assert_scales(flood, split, _CLAUSE_JOIN.split, factor=4)
+
+
+def test_a_bound_value_qualifies_no_absence_the_run_recorded_beside_its_call() -> None:
+    recorded = "The sandbox recorded no mutex objects [ev_0107]."
+    report = _bound_report(f"{GATED} {recorded}")
+    row = _row("evasion_antiforensics", recorded, ["bound.1"], "x")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.evasion_antiforensics.body == f"{GATED} {recorded}"
+    assert done.summary["rewritten"] == 0
 
 
 @pytest.mark.parametrize(
