@@ -77,6 +77,11 @@ def detection_sections() -> dict[str, tuple[str, tuple[str, ...]]]:
     columns compared on a pair. A column that says where a rule matched
     (``Where``, ``Matched fields``) is not a fact about which rule matched,
     and is left out of the comparison.
+
+    The table of the matches an undeclared tool's answer holds by its shape
+    (``ledger_report.SHAPE_RULE_SECTION``) is deliberately none of them: a
+    shape names no kind, and reads an indicator list or a technique catalogue
+    as it reads rules, so it is an evidence section and never a detection one.
     """
     from maljan.reporting.ledger_report import RULE_TABLES, section_key_of_kind
 

@@ -27,6 +27,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from maljan.core.rule_matches import BY_SHAPE_KEY
+
 __all__ = [
     "HELD_SCHEDULES",
     "PACK_LEFT_OUT",
@@ -95,6 +97,12 @@ RULE_MATCH_KINDS: frozenset[str] = frozenset({"capability_rules", "signature_rul
 # The legacy fields a stored team's condition reads, and the kind each counts.
 SIGNATURE_RULES = "signature_rules"
 CAPABILITY_RULES = "capability_rules"
+# The one key the rule matches an undeclared tool's answer holds by its shape
+# are counted under (``core.rule_matches``). A shape names no kind, and reads an
+# indicator list or a technique catalogue as it reads rules, so these count
+# nowhere else: not toward ``rule_hits``, a kind's key (a signature hit) or the
+# answering server's key.
+SHAPE_RULE_MATCHES = BY_SHAPE_KEY
 
 
 @dataclass(frozen=True)
@@ -115,7 +123,10 @@ class TriageFacts:
     and earlier stages' alike, whichever server answered; ``hits`` the same
     count per key: the answer's declared kind (``signature_rules`` …), the
     name its tool declares for corroboration (``source``), and the key of the
-    tool server that answered. A key nothing counted reads as zero
+    tool server that answered. :data:`SHAPE_RULE_MATCHES` alone counts the
+    distinct rules an undeclared tool's answer names as matched by its shape:
+    a shape names no kind, so they count toward no other key and not toward
+    ``rule_hits``. A key nothing counted reads as zero
     (``triage.hits["<key>"]``). ``yara_hits`` and ``capa_hits`` are kept for
     the stored teams that read them: the pack's own signature-rule and
     capability-rule counts, as they always were.
@@ -233,9 +244,14 @@ def rule_match_hits(rows: Any) -> tuple[dict[str, int], int]:
     Each entry's declared kind and row path (``core.declared_reading``; an
     entry written before facts were stored is read by its shipped facts)
     say whether it is a rule match and where its rows are; each row is one
-    rule that matched. A repeat of an earlier entry is not counted twice.
+    rule that matched. An entry whose tool declares no kind is read by its
+    answer's shape (``core.rule_matches``), each distinct rule it names as
+    matched counted under :data:`SHAPE_RULE_MATCHES` alone, never toward
+    ``rule_hits``, a kind's key or its server's. A repeat of an earlier entry
+    is not counted twice.
     """
     from maljan.core.declared_reading import facts_of
+    from maljan.core.rule_matches import rule_matches_of
     from maljan.core.tool_declarations import ToolDeclarations, select
 
     counted: dict[str, int] = {}
@@ -245,7 +261,15 @@ def rule_match_hits(rows: Any) -> tuple[dict[str, int], int]:
         if not get("ok") or get("repeated_of"):
             continue
         facts = facts_of(row)
-        if facts is None or facts.kind not in RULE_MATCH_KINDS or not facts.rows:
+        if facts is None or not facts.kind:
+            shaped = rule_matches_of(row)
+            if shaped is not None and not shaped.declared and shaped.rules:
+                # A rule a shaped answer names in more than one row (one row
+                # per string it matched) is one rule that matched.
+                found = len(set(shaped.rules))
+                counted[SHAPE_RULE_MATCHES] = counted.get(SHAPE_RULE_MATCHES, 0) + found
+            continue
+        if facts.kind not in RULE_MATCH_KINDS or not facts.rows:
             continue
         found = len(select(get("structured"), facts.rows))
         if not found:

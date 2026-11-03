@@ -42,6 +42,9 @@ from typing import Any
 SIGNATURE_RULES = "signature_rules"
 # The field the tools of the kind share for their rows, where a declaration names none.
 _SHARED_ROWS = "matches"
+# The key the matches read by an answer's shape are held under, as a report
+# table and as a rule-hit count: never a kind's key, since a shape names none.
+BY_SHAPE_KEY = "rule_matches_by_shape"
 
 # The words of a key's name: "matchedRules" and "matched_rules" are both
 # "matched rules".
@@ -248,7 +251,8 @@ def _answer(entry: Any) -> Any:
         return None
     try:
         return json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # An answer nested past the decoder's depth is read as no answer.
         return None
 
 
