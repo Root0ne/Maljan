@@ -84,6 +84,19 @@ _MARK = re.compile(
 _ANY_MARK = re.compile(
     r"\[\s*(?P<kind>not\s+blocking|blocking)\s*(?::" + _REASON + r")?\]", re.IGNORECASE
 )
+# A line's marks written right after its opening [analysts: ...] field, before
+# its text: a mark there, with only other marks or the carried-or-new mark
+# beside it, is the line's mark as one that ends the line is.
+_FIELD_MARKS = re.compile(
+    r"^[\s*_`]*+(?:(?:[-*•]|\d+[.)])\s+)?[*_`]*+\[\s*analysts?\s*:[^\[\]]*\]"
+    r"(?P<marks>(?:\s*+\[\s*+(?:not\s+blocking|blocking)\s*(?::" + _REASON + r")?\]"
+    r"|\s*+\[\s*+(?:carried\s*+:\s*+L?\s*+\d{1,9}\s*+|new\s*+)\])++)",
+    re.IGNORECASE,
+)
+_FIELD_MARK = re.compile(
+    r"\[\s*+(?P<kind>not\s+blocking|blocking)\s*(?::(?P<reason>" + _REASON + r"))?\]",
+    re.IGNORECASE,
+)
 # What a mark opens with: a line that holds it and no mark that reads was
 # written a mark the parser could not read.
 _MARK_OPENING = re.compile(r"\[\s*(?:not\s+)?blocking\b", re.IGNORECASE)
@@ -718,10 +731,27 @@ def _kind(match: re.Match[str]) -> str:
     return " ".join(match.group("kind").lower().split())
 
 
+def _mark_after_field(text: str) -> re.Match[str] | None:
+    """The mark written right after the line's opening field (``_FIELD_MARKS``), or None.
+
+    Of several, the first that gives a reason; a second of the other kind is a
+    conflict the caller reads first.
+    """
+    opened = _FIELD_MARKS.match(text)
+    if opened is None:
+        return None
+    found = list(_FIELD_MARK.finditer(text, opened.start("marks"), opened.end("marks")))
+    return next(
+        (m for m in found if (m.group("reason") or "").strip()), found[0] if found else None
+    )
+
+
 def read_marks(lines: Iterable[str]) -> list[Mark]:
     """The mediator's mark on each line; an unmarked line blocks.
 
-    - A mark ends its line and gives a reason, which may cite a ledger id in
+    - A mark ends its line, or stands right after the line's opening
+      ``[analysts: ...]`` field (with only other marks or the carried-or-new
+      mark between them), and gives a reason, which may cite a ledger id in
       brackets.
     - A line with marks of both kinds blocks.
     - ``[not blocking]`` with no reason is no mark: the line blocks.
@@ -738,7 +768,7 @@ def read_marks(lines: Iterable[str]) -> list[Mark]:
         # Nor is the carried-or-new mark.
         marked = without_line_mark(_ANALYSTS_FIELD.sub(" ", text))
         kinds = {_kind(m) for m in _ANY_MARK.finditer(marked)}
-        match = _MARK.search(marked)
+        match = _MARK.search(marked) or _mark_after_field(text)
         reason = (match.group("reason") or "").strip() if match is not None else ""
         if len(kinds) > 1:
             marks.append(Mark(line=text, blocking=True, marked=True, unread=True))

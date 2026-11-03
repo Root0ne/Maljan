@@ -24,7 +24,12 @@ from maljan.agents.base_agent import (
 from maljan.agents.claim_headings import CLAIM_HEAD_RE, claim_blocks
 from maljan.agents.repeat_watch import ClaimRepeatReader
 from maljan.pipeline.claim_drops import claim_substance
-from maljan.pipeline.debate_facts import fact_atoms, ledger_count_facts, ledger_stated
+from maljan.pipeline.debate_facts import (
+    fact_atoms,
+    ledger_count_facts,
+    ledger_stated,
+    read_marks,
+)
 from maljan.pipeline.validation import (
     EntryTexts,
     absence_holders_note,
@@ -195,6 +200,16 @@ LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 
         pytest.param(
             lambda t: ledger_count_facts(["T1106" + " " * len(t) + "1"], {}, LEDGER, ["a"]),
             id="claim numbers between an id and a number",
+        ),
+        pytest.param(
+            lambda t: read_marks(
+                ["[analysts: a]" + " [new]" * (len(t) // 6) + " [not blocking: x"]
+            ),
+            id="many marks after the field and one left open",
+        ),
+        pytest.param(
+            lambda t: read_marks(["[analysts: a] [not blocking: " + "[x] " * (len(t) // 4)]),
+            id="a mark after the field whose reason never closes",
         ),
     ],
 )
