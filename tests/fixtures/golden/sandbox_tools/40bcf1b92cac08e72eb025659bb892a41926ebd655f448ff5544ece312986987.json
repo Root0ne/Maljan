@@ -7276,6 +7276,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "1232"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7283,6 +7286,9 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "3160"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7290,6 +7296,9 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "6016"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7304,6 +7313,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "1232"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7311,6 +7323,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "3160"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7325,6 +7340,9 @@
         "confidence": 100,
         "description": "Anomalous file deletion behavior detected (10+)",
         "name": "anomalous_deletefile",
+        "pids": [
+          "6016"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7332,6 +7350,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "1232"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7339,6 +7360,9 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "1232"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7346,6 +7370,9 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "3160"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7353,6 +7380,9 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "3160"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7360,6 +7390,9 @@
         "confidence": 100,
         "description": "Enumerates running processes",
         "name": "enumerates_running_processes",
+        "pids": [
+          "3160"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7367,6 +7400,9 @@
         "confidence": 100,
         "description": "A process created a hidden window",
         "name": "stealth_window",
+        "pids": [
+          "1232"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7412,6 +7448,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "3160"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7433,6 +7472,9 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "6016"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7440,6 +7482,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "1232"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7454,6 +7499,9 @@
         "confidence": 100,
         "description": "Maps a shared memory section into both the local and a remote process, possibly to inject code without using WriteProcessMemory",
         "name": "section_mapping_injection",
+        "pids": [
+          "3160"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7461,6 +7509,9 @@
         "confidence": 20,
         "description": "Collects information about installed applications",
         "name": "recon_programs",
+        "pids": [
+          "1232"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7489,6 +7540,9 @@
         "confidence": 100,
         "description": "Deletes its original binary from disk",
         "name": "deletes_self",
+        "pids": [
+          "6016"
+        ],
         "references": [],
         "severity": 3
       },

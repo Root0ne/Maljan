@@ -42783,6 +42783,10 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "3364",
+          "5516"
+        ],
         "references": [],
         "severity": 1
       },
@@ -42790,6 +42794,10 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "3364",
+          "2508"
+        ],
         "references": [],
         "severity": 1
       },
@@ -42797,6 +42805,9 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "3364"
+        ],
         "references": [],
         "severity": 1
       },
@@ -42811,6 +42822,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "3364"
+        ],
         "references": [],
         "severity": 1
       },
@@ -42818,6 +42832,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "3364"
+        ],
         "references": [],
         "severity": 1
       },
@@ -42832,6 +42849,9 @@
         "confidence": 50,
         "description": "Queries or modifies system parameters associated with user presence detection or sandbox evasion",
         "name": "antisandbox_system_parameters_info",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -42839,6 +42859,10 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "3364",
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -42846,6 +42870,10 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "3364",
+          "5564"
+        ],
         "references": [],
         "severity": 2
       },
@@ -42853,6 +42881,10 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "3364",
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -42867,6 +42899,10 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "956",
+          "816"
+        ],
         "references": [],
         "severity": 2
       },
@@ -42874,6 +42910,10 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "956",
+          "816"
+        ],
         "references": [],
         "severity": 2
       },
@@ -42881,6 +42921,9 @@
         "confidence": 100,
         "description": "Reads from the memory of another process",
         "name": "reads_memory_remote_process",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -42888,6 +42931,11 @@
         "confidence": 100,
         "description": "Expresses interest in specific running processes",
         "name": "process_interest",
+        "pids": [
+          "3364",
+          "5516",
+          "7804"
+        ],
         "references": [],
         "severity": 2
       },
@@ -42895,6 +42943,9 @@
         "confidence": 100,
         "description": "A process created a hidden window",
         "name": "stealth_window",
+        "pids": [
+          "3364"
+        ],
         "references": [],
         "severity": 2
       },
@@ -42902,6 +42953,9 @@
         "confidence": 100,
         "description": "Terminates another process",
         "name": "terminates_remote_process",
+        "pids": [
+          "956"
+        ],
         "references": [],
         "severity": 2
       },
@@ -42937,6 +42991,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "3364"
+        ],
         "references": [],
         "severity": 2
       },
@@ -42944,6 +43001,11 @@
         "confidence": 100,
         "description": "The following process appear to have been packed with Themida: c2bee3616cf5c0f19ecc.exe, skotes.exe",
         "name": "packer_themida",
+        "pids": [
+          "3364",
+          "5516",
+          "7804"
+        ],
         "references": [],
         "severity": 3
       },
@@ -42951,6 +43013,10 @@
         "confidence": 100,
         "description": "Checks for the presence of known windows from debuggers and forensic tools",
         "name": "antidebug_windows",
+        "pids": [
+          "3364",
+          "5516"
+        ],
         "references": [],
         "severity": 3
       },
@@ -42958,6 +43024,9 @@
         "confidence": 60,
         "description": "Tries to unhook or modify Windows functions monitored by CAPE",
         "name": "antisandbox_unhook",
+        "pids": [
+          "3364"
+        ],
         "references": [],
         "severity": 3
       },
@@ -42965,6 +43034,9 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "3364"
+        ],
         "references": [],
         "severity": 3
       },
@@ -42972,6 +43044,9 @@
         "confidence": 100,
         "description": "Queries Windows licensing, activation, or genuine status, possibly to detect unactivated sandbox or analysis environments.",
         "name": "antisandbox_windows_activation",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 3
       },
@@ -42979,6 +43054,11 @@
         "confidence": 100,
         "description": "Loads clean ntdll.dll from disk, possibly for syscall/anti-EDR",
         "name": "suspicious_ntdll_disk_load",
+        "pids": [
+          "3364",
+          "5516",
+          "7804"
+        ],
         "references": [],
         "severity": 3
       },
@@ -42986,6 +43066,10 @@
         "confidence": 80,
         "description": "Executes direct syscalls to evade EDR and user-land API hooks",
         "name": "direct_syscall_evasion",
+        "pids": [
+          "3364",
+          "5516"
+        ],
         "references": [],
         "severity": 3
       },
@@ -42993,6 +43077,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "3364"
+        ],
         "references": [],
         "severity": 3
       },
@@ -43007,6 +43094,9 @@
         "confidence": 100,
         "description": "Inter-process synchronization via mutexes, possibly for routing local C2 traffic or injection",
         "name": "interprocess_comms_mutex",
+        "pids": [
+          "5516"
+        ],
         "references": [],
         "severity": 3
       },
@@ -43014,6 +43104,10 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "3364",
+          "5516"
+        ],
         "references": [],
         "severity": 3
       },
@@ -43021,6 +43115,9 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun_tasks",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 3
       },

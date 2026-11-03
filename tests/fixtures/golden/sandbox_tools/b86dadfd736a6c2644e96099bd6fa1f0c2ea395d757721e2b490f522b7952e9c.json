@@ -6156,6 +6156,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "1044"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6170,6 +6173,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "1044"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6184,6 +6190,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "1044"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6205,6 +6214,9 @@
         "confidence": 20,
         "description": "Collects information about installed applications",
         "name": "recon_programs",
+        "pids": [
+          "1044"
+        ],
         "references": [],
         "severity": 3
       },

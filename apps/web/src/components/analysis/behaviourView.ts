@@ -6,6 +6,8 @@
  * one technique sit together. A signature's severity is the sandbox's own
  * number read on the scale the run recorded for it (`signatureScore`), and is
  * drawn on the console's one n/5 ladder; the sandbox's number stays beside it.
+ * Where the sandbox named the processes it saw the hits in, they are listed
+ * per process first, each process's hits grouped that way.
  *
  * Persistence and defence evasion are views of the tab, not blocks of their
  * own: each keeps the behaviours and the techniques under its ATT&CK tactic.
@@ -15,7 +17,7 @@
  * sandbox, a family or a technique by name.
  */
 
-import type { MalwareReport, SandboxSignature, SeverityRating } from "@/types/malware-report";
+import type { MalwareReport, ProcessNode, SandboxSignature, SeverityRating } from "@/types/malware-report";
 import { SEVERITY_LADDER, signatureScore, type SignatureScale } from "@/lib/severity";
 import { parseTechniques } from "./capabilityHeatmap";
 
@@ -130,4 +132,68 @@ export function signatureGroups(
         .map(([technique, rows]) => ({ technique, rows }));
       return { rung, techniques, count: techniques.reduce((n, t) => n + t.rows.length, 0) };
     });
+}
+
+export interface ProcessGroup {
+  /** The pid the sandbox saw the hits in, or null for the signatures that name no process. */
+  pid: string | null;
+  /** The process's name where the run's process tree lists the pid. */
+  name: string | null;
+  severities: SeverityGroup[];
+  count: number;
+}
+
+/** Each pid of the tree, in the order the tree lists its processes, with the process's name. */
+function treeNames(nodes: readonly ProcessNode[], out: Map<string, string> = new Map()): Map<string, string> {
+  for (const node of nodes) {
+    const pid = String(node.pid ?? "");
+    if (pid && !out.has(pid)) out.set(pid, node.name ?? "");
+    treeNames(Array.isArray(node.children) ? node.children : [], out);
+  }
+  return out;
+}
+
+/**
+ * The signatures per process the sandbox saw them in, each process's hits
+ * grouped as `signatureGroups` groups them; null where no signature names a
+ * process, and the tab then lists them by severity as it always did.
+ *
+ * A signature seen in several processes is listed under each. Processes come
+ * in the order the run's process tree lists them, the ones it does not list
+ * after them by pid, and the signatures that name no process last.
+ */
+export function processGroups(
+  signatures: readonly SandboxSignature[],
+  scale: SignatureScale | null | undefined,
+  tree: readonly ProcessNode[] | null | undefined,
+): ProcessGroup[] | null {
+  if (!signatures.some((s) => (s.pids ?? []).length > 0)) return null;
+  const byPid = new Map<string | null, SandboxSignature[]>();
+  for (const signature of signatures) {
+    const pids = [...new Set(signature.pids ?? [])];
+    for (const pid of pids.length > 0 ? pids : [null]) {
+      const rows = byPid.get(pid) ?? [];
+      rows.push(signature);
+      byPid.set(pid, rows);
+    }
+  }
+  const names = treeNames(tree ?? []);
+  const listed = new Map([...names.keys()].map((pid, i) => [pid, i]));
+  // Listed processes in the tree's order, then unlisted ones by pid, then none.
+  const key = (pid: string | null): [number, number] =>
+    pid === null ? [2, 0] : listed.has(pid) ? [0, listed.get(pid)!] : [1, Number(pid) || 0];
+  const pids = [...byPid.keys()].sort((a, b) => {
+    const [ga, ia] = key(a);
+    const [gb, ib] = key(b);
+    return ga - gb || ia - ib || String(a).localeCompare(String(b));
+  });
+  return pids.map((pid) => {
+    const rows = byPid.get(pid)!;
+    return {
+      pid,
+      name: pid === null ? null : names.get(pid) || null,
+      severities: signatureGroups(rows, scale),
+      count: rows.length,
+    };
+  });
 }

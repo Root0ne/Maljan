@@ -6650,6 +6650,9 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "2684"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6657,6 +6660,10 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "6920",
+          "2684"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6671,6 +6678,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "6800"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6685,6 +6695,9 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "6920"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6692,6 +6705,10 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "6920",
+          "2684"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6699,6 +6716,9 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "2684"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6706,6 +6726,9 @@
         "confidence": 50,
         "description": "A DLL was loaded from a suspicious directory",
         "name": "dllload_suspicious_directory",
+        "pids": [
+          "2684"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6713,6 +6736,9 @@
         "confidence": 100,
         "description": "At least one IP Address, Domain, or File Name was found in a crypto call",
         "name": "encrypted_ioc",
+        "pids": [
+          "6920"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6720,6 +6746,10 @@
         "confidence": 80,
         "description": "Registers a vectored exception handler (VEH), possibly to hijack execution flow",
         "name": "registers_vectored_exception_handler",
+        "pids": [
+          "6800",
+          "2684"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6727,6 +6757,11 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "6800",
+          "6920",
+          "2684"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6734,6 +6769,10 @@
         "confidence": 100,
         "description": "Writes to the memory another process",
         "name": "injection_write_process",
+        "pids": [
+          "6800",
+          "2684"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6741,6 +6780,9 @@
         "confidence": 100,
         "description": "Enumerates the modules from a process (may be used to locate base addresses in process injection)",
         "name": "createtoolhelp32snapshot_module_enumeration",
+        "pids": [
+          "6920"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6783,6 +6825,9 @@
         "confidence": 100,
         "description": "NtSetInformationThread: attempt to hide thread from debugger",
         "name": "antidebug_ntsetinformationthread",
+        "pids": [
+          "6800"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6797,6 +6842,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "6800"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6804,6 +6852,9 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "6920"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6818,6 +6869,9 @@
         "confidence": 100,
         "description": "Uses suspicious IO control codes, indicative of disk enumeration or a bootkit/wiper",
         "name": "suspicious_iocontrol_codes",
+        "pids": [
+          "6920"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6825,6 +6879,10 @@
         "confidence": 100,
         "description": "Loads clean ntdll.dll from disk, possibly for syscall/anti-EDR",
         "name": "suspicious_ntdll_disk_load",
+        "pids": [
+          "6920",
+          "2684"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6832,6 +6890,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "6920"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6839,6 +6900,9 @@
         "confidence": 100,
         "description": "Attempted to blind ETW telemetry by writing into ntdll!EtwEventWrite from dynamically allocated (unbacked) memory — a technique used by Brute Ratel, Havoc C2, and similar offensive frameworks to suppress event-tracing visibility",
         "name": "unbacked_etw_patching",
+        "pids": [
+          "2684"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6846,6 +6910,9 @@
         "confidence": 100,
         "description": "Modified exception handling mechanisms (UEF/VEH) from dynamically allocated (unbacked) memory, indicative of fileless anti-debugging or silent crash suppression",
         "name": "unbacked_exception_filter",
+        "pids": [
+          "2684"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6853,6 +6920,9 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "2684"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6867,6 +6937,9 @@
         "confidence": 100,
         "description": "Queries information on disks, possibly for anti-virtualization",
         "name": "antivm_generic_disk",
+        "pids": [
+          "6920"
+        ],
         "references": [],
         "severity": 3
       }

@@ -3877,6 +3877,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "3340"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3891,6 +3894,9 @@
         "confidence": 50,
         "description": "Suspicious communication with abused trusted site",
         "name": "suspicious_communication_trusted_site",
+        "pids": [
+          "3340"
+        ],
         "references": [
           "https://go.recordedfuture.com/hubfs/reports/cta-2023-0816.pdf",
           "https://lots-project.com/"
@@ -3901,6 +3907,9 @@
         "confidence": 100,
         "description": "Expresses interest in specific running processes",
         "name": "process_interest",
+        "pids": [
+          "3340"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3939,6 +3948,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "3340"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3953,6 +3965,9 @@
         "confidence": 100,
         "description": "Checks for the presence of known windows from debuggers and forensic tools",
         "name": "antidebug_windows",
+        "pids": [
+          "3340"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3960,6 +3975,9 @@
         "confidence": 100,
         "description": "Loads clean ntdll.dll from disk, possibly for syscall/anti-EDR",
         "name": "suspicious_ntdll_disk_load",
+        "pids": [
+          "3340"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3967,6 +3985,9 @@
         "confidence": 80,
         "description": "Executes direct syscalls to evade EDR and user-land API hooks",
         "name": "direct_syscall_evasion",
+        "pids": [
+          "3340"
+        ],
         "references": [],
         "severity": 3
       },

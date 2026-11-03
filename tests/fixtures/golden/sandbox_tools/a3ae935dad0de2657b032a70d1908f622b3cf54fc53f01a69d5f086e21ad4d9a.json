@@ -3276,6 +3276,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "5020"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3283,6 +3286,9 @@
         "confidence": 80,
         "description": "Registers a vectored exception handler (VEH), possibly to hijack execution flow",
         "name": "registers_vectored_exception_handler",
+        "pids": [
+          "5020"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3304,6 +3310,9 @@
         "confidence": 50,
         "description": "Registered a Vectored Exception Handler (VEH) and intentionally triggered exceptions or manipulated thread contexts. May be used to hijack the OS error dispatcher to execute a payload or shellcode",
         "name": "exception_driven_execution",
+        "pids": [
+          "5020"
+        ],
         "references": [],
         "severity": 3
       }

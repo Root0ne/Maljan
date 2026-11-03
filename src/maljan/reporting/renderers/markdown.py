@@ -1360,15 +1360,19 @@ class MarkdownRenderer:
 
         signatures = distinct_signatures(dyn.sandbox_signatures)
         if signatures:
+            # The processes a hit was seen in, in a column of their own once
+            # any signature names one; a report without them reads as before.
+            placed = any(sig.pids for sig in signatures)
+            head = ("Name", "Severity", "Techniques", *(("Processes",) if placed else ()))
             lines.extend(
                 [
                     _plain_heading("Sandbox signatures"),
                     "",
-                    _row("Name", "Severity", "Techniques", "Description"),
-                    _divider(4),
+                    _row(*head, "Description"),
+                    _divider(len(head) + 1),
                 ]
             )
-            lines.extend(_signature_row(sig) for sig in signatures[:30])
+            lines.extend(_signature_row(sig, placed=placed) for sig in signatures[:30])
             lines.extend(_left_out(len(signatures), 30, "sandbox signatures"))
             lines.append("")
 
@@ -6499,6 +6503,7 @@ def _severity_cell(sig: SandboxSignature) -> Any:
     return "unknown" if sig.severity is None else sig.severity
 
 
-def _signature_row(sig: SandboxSignature) -> str:
+def _signature_row(sig: SandboxSignature, *, placed: bool = False) -> str:
     ttps = ", ".join(sig.technique_ids) if sig.technique_ids else "-"
-    return _row(sig.name, _severity_cell(sig), ttps, _whole(sig.description or "-"))
+    processes = (", ".join(sig.pids) or "-",) if placed else ()
+    return _row(sig.name, _severity_cell(sig), ttps, *processes, _whole(sig.description or "-"))

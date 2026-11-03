@@ -2521,6 +2521,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "3616"
+        ],
         "references": [],
         "severity": 1
       },
@@ -2542,6 +2545,9 @@
         "confidence": 100,
         "description": "Modified exception handling mechanisms (UEF/VEH) from dynamically allocated (unbacked) memory, indicative of fileless anti-debugging or silent crash suppression",
         "name": "unbacked_exception_filter",
+        "pids": [
+          "3616"
+        ],
         "references": [],
         "severity": 3
       },
@@ -2549,6 +2555,9 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "3616"
+        ],
         "references": [],
         "severity": 3
       },
@@ -2556,6 +2565,9 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "3616"
+        ],
         "references": [],
         "severity": 3
       },
@@ -2563,6 +2575,9 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "3616"
+        ],
         "references": [],
         "severity": 3
       },
@@ -2570,6 +2585,9 @@
         "confidence": 100,
         "description": "Attempted to modify the Windows registry from dynamically allocated (unbacked) memory",
         "name": "unbacked_registry_modification",
+        "pids": [
+          "3616"
+        ],
         "references": [],
         "severity": 3
       },
@@ -2577,6 +2595,9 @@
         "confidence": 100,
         "description": "Attempted to interact with the Service Control Manager from dynamically allocated (unbacked) memory",
         "name": "unbacked_service_manipulation",
+        "pids": [
+          "3616"
+        ],
         "references": [],
         "severity": 3
       },
@@ -2584,6 +2605,9 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "3616"
+        ],
         "references": [],
         "severity": 3
       },
@@ -2591,6 +2615,9 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun_tasks",
+        "pids": [
+          "3616"
+        ],
         "references": [],
         "severity": 3
       },
@@ -2619,6 +2646,9 @@
         "confidence": 100,
         "description": "Deletes its original binary from disk",
         "name": "deletes_self",
+        "pids": [
+          "3616"
+        ],
         "references": [],
         "severity": 3
       }

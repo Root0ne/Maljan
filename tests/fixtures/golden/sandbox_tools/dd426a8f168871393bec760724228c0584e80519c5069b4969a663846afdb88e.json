@@ -2803,6 +2803,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "2244"
+        ],
         "references": [],
         "severity": 1
       },
@@ -2810,6 +2813,9 @@
         "confidence": 80,
         "description": "Registers a vectored exception handler (VEH), possibly to hijack execution flow",
         "name": "registers_vectored_exception_handler",
+        "pids": [
+          "2244"
+        ],
         "references": [],
         "severity": 2
       },

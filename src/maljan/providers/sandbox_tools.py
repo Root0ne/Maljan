@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 from maljan.core.logger import logger
 from maljan.pipeline.sandbox_status import NOT_RUN, sandbox_status
 from maljan.providers.call_arguments import pick_argument
-from maljan.schemas.sandbox_document import place
+from maljan.schemas.sandbox_document import place, signature_pids
 from maljan.schemas.sandbox_report import LINEAGE_MARKED_STORED
 from maljan.utils.marked_cut import marked_cut
 
@@ -435,6 +435,13 @@ def sandbox_signatures(
             tags = _signature_techniques(sig)
             if tags:
                 row["technique_ids"] = tags
+            # The processes the hit was seen in, by the pids its marks name
+            # (``schemas.sandbox_document.signature_pids``): what places a
+            # behaviour in one process of the tree. Left out where none is
+            # named, so such an answer is as it was.
+            pids = signature_pids(sig)
+            if pids:
+                row["pids"] = pids
             rows.append(row)
     return {"signatures": rows, "total": len(signatures), **meta}
 

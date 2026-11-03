@@ -6278,6 +6278,10 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "2424",
+          "4276"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6292,6 +6296,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "4812"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6299,6 +6306,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 1
       },
@@ -6313,6 +6323,9 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "4276"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6320,6 +6333,10 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "2424",
+          "4276"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6327,6 +6344,9 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6334,6 +6354,9 @@
         "confidence": 50,
         "description": "A DLL was loaded from a suspicious directory",
         "name": "dllload_suspicious_directory",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6341,6 +6364,9 @@
         "confidence": 100,
         "description": "At least one IP Address, Domain, or File Name was found in a crypto call",
         "name": "encrypted_ioc",
+        "pids": [
+          "4276"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6348,6 +6374,9 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6355,6 +6384,10 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "4812",
+          "4276"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6362,6 +6395,9 @@
         "confidence": 100,
         "description": "Writes to the memory another process",
         "name": "injection_write_process",
+        "pids": [
+          "4812"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6369,6 +6405,9 @@
         "confidence": 100,
         "description": "Reads from the memory of another process",
         "name": "reads_memory_remote_process",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6376,6 +6415,9 @@
         "confidence": 100,
         "description": "Enumerates the modules from a process (may be used to locate base addresses in process injection)",
         "name": "createtoolhelp32snapshot_module_enumeration",
+        "pids": [
+          "4276"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6411,6 +6453,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 2
       },
@@ -6425,6 +6470,9 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "4276"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6439,6 +6487,9 @@
         "confidence": 100,
         "description": "Uses suspicious IO control codes, indicative of disk enumeration or a bootkit/wiper",
         "name": "suspicious_iocontrol_codes",
+        "pids": [
+          "4276"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6446,6 +6497,10 @@
         "confidence": 100,
         "description": "Loads clean ntdll.dll from disk, possibly for syscall/anti-EDR",
         "name": "suspicious_ntdll_disk_load",
+        "pids": [
+          "2424",
+          "4276"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6453,6 +6508,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6460,6 +6518,9 @@
         "confidence": 100,
         "description": "Manipulated process mitigation policies (CFG/DEP) from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_mitigation_alteration",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6467,6 +6528,9 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6474,6 +6538,9 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6481,6 +6548,9 @@
         "confidence": 100,
         "description": "Attempted to spawn a new child process from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_creation",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6488,6 +6558,9 @@
         "confidence": 100,
         "description": "Writes data to the filesystem from dynamically allocated (unbacked) memory",
         "name": "unbacked_file_dropping",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6495,6 +6568,9 @@
         "confidence": 100,
         "description": "Attempted to modify the Windows registry from dynamically allocated (unbacked) memory",
         "name": "unbacked_registry_modification",
+        "pids": [
+          "2424"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6502,6 +6578,10 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "2424",
+          "4276"
+        ],
         "references": [],
         "severity": 3
       },
@@ -6516,6 +6596,9 @@
         "confidence": 100,
         "description": "Queries information on disks, possibly for anti-virtualization",
         "name": "antivm_generic_disk",
+        "pids": [
+          "4276"
+        ],
         "references": [],
         "severity": 3
       }

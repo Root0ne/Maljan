@@ -4377,6 +4377,9 @@
         "confidence": 100,
         "description": "Queries computer hostname",
         "name": "queries_computer_name",
+        "pids": [
+          "4028"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4384,6 +4387,9 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "2176"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4398,6 +4404,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "2176"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4405,6 +4414,9 @@
         "confidence": 100,
         "description": "A file with an unusual extension was attempted to be loaded as a DLL.",
         "name": "dll_load_uncommon_file_types",
+        "pids": [
+          "2176"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4419,6 +4431,9 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "4028"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4426,6 +4441,9 @@
         "confidence": 100,
         "description": "At least one IP Address, Domain, or File Name was found in a crypto call",
         "name": "encrypted_ioc",
+        "pids": [
+          "4028"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4433,6 +4451,9 @@
         "confidence": 80,
         "description": "Registers a vectored exception handler (VEH), possibly to hijack execution flow",
         "name": "registers_vectored_exception_handler",
+        "pids": [
+          "4028"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4440,6 +4461,9 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "2176"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4447,6 +4471,9 @@
         "confidence": 100,
         "description": "Terminates another process",
         "name": "terminates_remote_process",
+        "pids": [
+          "2176"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4464,6 +4491,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "4028"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4485,6 +4515,9 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "4028"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4492,6 +4525,9 @@
         "confidence": 80,
         "description": "Creates a thread executing from dynamically allocated (unbacked) memory rather than a file on disk, likely to execute shellcode",
         "name": "thread_unbacked_memory",
+        "pids": [
+          "4028"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4499,6 +4535,9 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "2176"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4506,6 +4545,9 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "2176"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4513,6 +4555,9 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "2176"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4520,6 +4565,9 @@
         "confidence": 100,
         "description": "Attempted to spawn a new child process from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_creation",
+        "pids": [
+          "2176"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4527,6 +4575,10 @@
         "confidence": 100,
         "description": "Paused execution (sleep/delay) in a thread executing in dynamically allocated (unbacked) memory, indicative of sandbox evasion or C2 sleeping between callbacks",
         "name": "unbacked_delay_execution",
+        "pids": [
+          "4028",
+          "2176"
+        ],
         "references": [],
         "severity": 3
       },

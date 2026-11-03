@@ -64,6 +64,7 @@ from maljan.reporting.models import (
     StringIOC,
 )
 from maljan.schemas.evidence import build_entry, format_entry_id
+from maljan.schemas.sandbox_document import signature_pids
 from maljan.schemas.sandbox_report import (
     FLOW_PROCESS_KEY,
     LINEAGE_DISPUTED_KEY,
@@ -806,6 +807,9 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
                     # The ids the sandbox tags the signature with, under the
                     # key the tool writes them (``sandbox_signatures``).
                     technique_ids=technique_ids_in(row.get("technique_ids")),
+                    # The processes the hit was seen in, under the key the
+                    # tool writes them; each a whole number, or not read.
+                    pids=signature_pids({"pids": row.get("pids")}),
                 )
             )
 

@@ -379,6 +379,11 @@ class SandboxSignature(BaseModel):
     severity: int | None = None
     technique_ids: list[str] = Field(default_factory=list)
     marks: list[str] = Field(default_factory=list)
+    # The pids of the processes the sandbox saw the hit in, where its report
+    # named them: what places a behaviour in one process of the tree. Empty
+    # when it named none, and then left out of the dump, as on a report stored
+    # before the field existed.
+    pids: list[str] = Field(default_factory=list, exclude_if=lambda value: not value)
 
 
 class DynamicBehavior(BaseModel):

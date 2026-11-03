@@ -16,9 +16,11 @@ import { hasSection, sectionsForTab } from "@/components/analysis/reportSections
 import { dynamicAnalystClaims } from "@/components/analysis/dynamicClaims";
 import AnalystFindings from "@/components/analysis/AnalystFindings";
 import {
+  processGroups,
   signatureGroups,
   viewKeeps,
   type BehaviourView,
+  type SeverityGroup,
   type SignatureRow,
 } from "@/components/analysis/behaviourView";
 import { StructuredCell } from "@/components/analysis/StructuredValue";
@@ -136,6 +138,8 @@ export function BehavioursBlock({
   const scale = runSignatureScale(report.run_summary);
   const signatures = (dyn?.sandbox_signatures ?? []).filter((s) => viewKeeps(view, s.technique_ids ?? [], tactics));
   const groups = signatureGroups(signatures, scale);
+  // Per process where the sandbox named the processes it saw the hits in.
+  const byProcess = processGroups(signatures, scale, dyn?.process_tree);
   const keptPersistence = view === "defence-evasion" ? [] : persistence;
   // The registry exists on Windows and nowhere else; the table is drawn from
   // evidence — typed rows or a registry section — never from the platform.
@@ -154,7 +158,11 @@ export function BehavioursBlock({
         title: row.signature.name,
         severity: row.rung,
         category: `Sandbox signature · ${row.sandboxText}${row.scale ? ` on the ${row.scale} scale` : ""}`,
-        details: [row.signature.description, ...row.signature.marks].filter((d) => Boolean(d && d.trim())),
+        details: [
+          row.signature.description,
+          ...row.signature.marks,
+          ...((row.signature.pids ?? []).length > 0 ? [`Seen in pid ${(row.signature.pids ?? []).join(", ")}`] : []),
+        ].filter((d) => Boolean(d && d.trim())),
         techniques: row.signature.technique_ids,
         evidenceIds: [],
       },
@@ -183,52 +191,32 @@ export function BehavioursBlock({
                 {view === "all" ? "No sandbox signature fired." : "No sandbox signature under this tactic."}
               </p>
             )}
-            {groups.map((group) => (
-              <div key={group.rung ?? "unrated"} className="space-y-2">
-                <h3 className="flex items-center gap-2 text-xs font-semibold text-text-secondary">
-                  <SeverityPill severity={group.rung} />
-                  <span>
-                    {group.count} signature{group.count === 1 ? "" : "s"}
-                  </span>
-                </h3>
-                <ul className="divide-y divide-border-light rounded border border-border-light">
-                  {group.techniques.map((t) =>
-                    t.rows.map((row, i) => (
-                      <li key={`${t.technique}-${i}`} className="flex items-start gap-3 px-3 py-2">
-                        <span className="w-20 shrink-0 font-mono text-[11px] text-status-blue">
-                          {i === 0 ? t.technique || "No technique" : ""}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <button
-                            type="button"
-                            onClick={(e) => openSignature(row, e.currentTarget)}
-                            className="text-left text-sm font-medium text-text-primary hover:underline"
-                          >
-                            {row.signature.name}
-                          </button>
-                          {row.signature.description && (
-                            <p className="mt-0.5 text-xs text-text-secondary">{row.signature.description}</p>
-                          )}
-                          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-text-muted">
-                            <span title={row.scale ? `${row.sandboxText} on the ${row.scale} scale` : "The sandbox's own number; its scale is not recorded for this run"}>
-                              Sandbox: {row.sandboxText}
-                            </span>
-                            {row.signature.technique_ids.slice(1).map((tid) => (
-                              <Tag key={tid}>{tid}</Tag>
-                            ))}
-                            {row.signature.marks.length > 0 && (
-                              <span>
-                                · {row.signature.marks.length} evidence mark{row.signature.marks.length === 1 ? "" : "s"}
-                              </span>
-                            )}
-                          </p>
-                        </div>
-                      </li>
-                    )),
-                  )}
-                </ul>
-              </div>
-            ))}
+            {byProcess
+              ? byProcess.map((proc) => (
+                  <div
+                    key={proc.pid ?? "no-process"}
+                    className="space-y-2"
+                    role="group"
+                    aria-label={proc.pid === null ? "Signatures that name no process" : `Process ${proc.pid}`}
+                  >
+                    <h3 className="text-xs font-semibold text-text-primary">
+                      {proc.pid === null ? (
+                        "No process named"
+                      ) : (
+                        <>
+                          {proc.name || "Process"} <span className="font-mono text-text-muted">pid {proc.pid}</span>
+                        </>
+                      )}
+                      <span className="ml-2 font-normal text-text-muted">
+                        {proc.count} signature{proc.count === 1 ? "" : "s"}
+                      </span>
+                    </h3>
+                    <div className="space-y-2 border-l border-border-light pl-3">
+                      <SeverityGroups groups={proc.severities} onOpen={openSignature} />
+                    </div>
+                  </div>
+                ))
+              : <SeverityGroups groups={groups} onOpen={openSignature} />}
             <ToolOutput sections={covering} />
           </div>
         )}
@@ -306,6 +294,66 @@ export function BehavioursBlock({
         {view === "all" && <ArtifactSections sections={otherSections} />}
       </div>
     </Section>
+  );
+}
+
+/** Signatures by severity, then by the technique each names first (`signatureGroups`). */
+function SeverityGroups({
+  groups,
+  onOpen,
+}: {
+  groups: SeverityGroup[];
+  onOpen: (row: SignatureRow, opener: HTMLElement) => void;
+}) {
+  return (
+    <>
+      {groups.map((group) => (
+        <div key={group.rung ?? "unrated"} className="space-y-2">
+          <h3 className="flex items-center gap-2 text-xs font-semibold text-text-secondary">
+            <SeverityPill severity={group.rung} />
+            <span>
+              {group.count} signature{group.count === 1 ? "" : "s"}
+            </span>
+          </h3>
+          <ul className="divide-y divide-border-light rounded border border-border-light">
+            {group.techniques.map((t) =>
+              t.rows.map((row, i) => (
+                <li key={`${t.technique}-${i}`} className="flex items-start gap-3 px-3 py-2">
+                  <span className="w-20 shrink-0 font-mono text-[11px] text-status-blue">
+                    {i === 0 ? t.technique || "No technique" : ""}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      onClick={(e) => onOpen(row, e.currentTarget)}
+                      className="text-left text-sm font-medium text-text-primary hover:underline"
+                    >
+                      {row.signature.name}
+                    </button>
+                    {row.signature.description && (
+                      <p className="mt-0.5 text-xs text-text-secondary">{row.signature.description}</p>
+                    )}
+                    <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-text-muted">
+                      <span title={row.scale ? `${row.sandboxText} on the ${row.scale} scale` : "The sandbox's own number; its scale is not recorded for this run"}>
+                        Sandbox: {row.sandboxText}
+                      </span>
+                      {row.signature.technique_ids.slice(1).map((tid) => (
+                        <Tag key={tid}>{tid}</Tag>
+                      ))}
+                      {row.signature.marks.length > 0 && (
+                        <span>
+                          · {row.signature.marks.length} evidence mark{row.signature.marks.length === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </li>
+              )),
+            )}
+          </ul>
+        </div>
+      ))}
+    </>
   );
 }
 

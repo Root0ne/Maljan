@@ -38206,6 +38206,18 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "5156",
+          "5492",
+          "6376",
+          "7100",
+          "7744",
+          "3832",
+          "8596",
+          "9124",
+          "2508",
+          "3612"
+        ],
         "references": [],
         "severity": 1
       },
@@ -38213,6 +38225,17 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "5156",
+          "5492",
+          "6376",
+          "7100",
+          "7744",
+          "3832",
+          "8596",
+          "9124",
+          "3612"
+        ],
         "references": [],
         "severity": 1
       },
@@ -38227,6 +38250,9 @@
         "confidence": 100,
         "description": "A file with an unusual extension was attempted to be loaded as a DLL.",
         "name": "dll_load_uncommon_file_types",
+        "pids": [
+          "5492"
+        ],
         "references": [],
         "severity": 1
       },
@@ -38234,6 +38260,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "7100"
+        ],
         "references": [],
         "severity": 1
       },
@@ -38248,6 +38277,16 @@
         "confidence": 100,
         "description": "Anomalous file deletion behavior detected (10+)",
         "name": "anomalous_deletefile",
+        "pids": [
+          "5492",
+          "6376",
+          "7100",
+          "7744",
+          "3832",
+          "8596",
+          "9124",
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38255,6 +38294,15 @@
         "confidence": 100,
         "description": "Checks for mouse movement",
         "name": "mouse_movement_detect",
+        "pids": [
+          "5156",
+          "5492",
+          "6376",
+          "7100",
+          "3832",
+          "9124",
+          "3612"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38262,6 +38310,9 @@
         "confidence": 50,
         "description": "Queries or modifies system parameters associated with user presence detection or sandbox evasion",
         "name": "antisandbox_system_parameters_info",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38269,6 +38320,18 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "5156",
+          "5492",
+          "6376",
+          "7100",
+          "7744",
+          "3832",
+          "8596",
+          "9124",
+          "2508",
+          "3612"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38276,6 +38339,17 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "5156",
+          "5492",
+          "6376",
+          "7100",
+          "7744",
+          "3832",
+          "8596",
+          "9124",
+          "3612"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38283,6 +38357,11 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "5156",
+          "5492",
+          "3612"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38290,6 +38369,10 @@
         "confidence": 50,
         "description": "A DLL was loaded from a suspicious directory",
         "name": "dllload_suspicious_directory",
+        "pids": [
+          "5156",
+          "3612"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38297,6 +38380,9 @@
         "confidence": 100,
         "description": "Performs HTTP requests potentially not found in PCAP.",
         "name": "http_request",
+        "pids": [
+          "5492"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38304,6 +38390,11 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "5156",
+          "3612",
+          "816"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38311,6 +38402,13 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "5156",
+          "7744",
+          "8596",
+          "3612",
+          "816"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38318,6 +38416,9 @@
         "confidence": 100,
         "description": "Connection to a legitimate domain from an unexpected process",
         "name": "legitimate_domain_abuse",
+        "pids": [
+          "5492"
+        ],
         "references": [
           "https://go.recordedfuture.com/hubfs/reports/cta-2023-0816.pdf",
           "https://lots-project.com/"
@@ -38328,6 +38429,9 @@
         "confidence": 50,
         "description": "Suspicious communication with abused trusted site",
         "name": "suspicious_communication_trusted_site",
+        "pids": [
+          "5492"
+        ],
         "references": [
           "https://go.recordedfuture.com/hubfs/reports/cta-2023-0816.pdf",
           "https://lots-project.com/"
@@ -38338,6 +38442,12 @@
         "confidence": 100,
         "description": "Enumerates running processes",
         "name": "enumerates_running_processes",
+        "pids": [
+          "6376",
+          "7100",
+          "7744",
+          "8596"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38345,6 +38455,12 @@
         "confidence": 100,
         "description": "Expresses interest in specific running processes",
         "name": "process_interest",
+        "pids": [
+          "6376",
+          "7100",
+          "7744",
+          "8596"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38404,6 +38520,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "5156"
+        ],
         "references": [],
         "severity": 2
       },
@@ -38411,6 +38530,9 @@
         "confidence": 60,
         "description": "Tries to unhook or modify Windows functions monitored by CAPE",
         "name": "antisandbox_unhook",
+        "pids": [
+          "5156"
+        ],
         "references": [],
         "severity": 3
       },
@@ -38418,6 +38540,9 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "3612"
+        ],
         "references": [],
         "severity": 3
       },
@@ -38425,6 +38550,9 @@
         "confidence": 100,
         "description": "Queries Windows licensing, activation, or genuine status, possibly to detect unactivated sandbox or analysis environments.",
         "name": "antisandbox_windows_activation",
+        "pids": [
+          "2508"
+        ],
         "references": [],
         "severity": 3
       },
@@ -38432,6 +38560,10 @@
         "confidence": 100,
         "description": "Uses suspicious IO control codes, indicative of disk enumeration or a bootkit/wiper",
         "name": "suspicious_iocontrol_codes",
+        "pids": [
+          "5156",
+          "3612"
+        ],
         "references": [],
         "severity": 3
       },
@@ -38439,6 +38571,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "5156"
+        ],
         "references": [],
         "severity": 3
       },
@@ -38453,6 +38588,10 @@
         "confidence": 100,
         "description": "Inter-process synchronization via mutexes, possibly for routing local C2 traffic or injection",
         "name": "interprocess_comms_mutex",
+        "pids": [
+          "5492",
+          "3612"
+        ],
         "references": [],
         "severity": 3
       },
@@ -38460,6 +38599,10 @@
         "confidence": 100,
         "description": "Inter-process communication via named shared memory (file mappings), possibly for routing local C2 traffic or injection",
         "name": "interprocess_comms_shared_memory",
+        "pids": [
+          "5492",
+          "3612"
+        ],
         "references": [],
         "severity": 3
       },
@@ -38467,6 +38610,9 @@
         "confidence": 100,
         "description": "Network activity contains more than one unique useragent.",
         "name": "multiple_useragents",
+        "pids": [
+          "5492"
+        ],
         "references": [],
         "severity": 3
       },
@@ -38474,6 +38620,16 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "5156",
+          "5492",
+          "6376",
+          "7100",
+          "7744",
+          "8596",
+          "2508",
+          "3612"
+        ],
         "references": [],
         "severity": 3
       },
@@ -38481,6 +38637,10 @@
         "confidence": 100,
         "description": "Likely virus infection of existing binary",
         "name": "virus",
+        "pids": [
+          "5492",
+          "3612"
+        ],
         "references": [],
         "severity": 3
       },
@@ -38502,6 +38662,9 @@
         "confidence": 80,
         "description": "Tries to suspend Cuckoo threads to prevent logging of malicious activity",
         "name": "antisandbox_suspend",
+        "pids": [
+          "5156"
+        ],
         "references": [],
         "severity": 3
       },

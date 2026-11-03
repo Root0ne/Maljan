@@ -61,7 +61,7 @@ from maljan.reporting.dedupe import (
 from maljan.reporting.models import OPEN_QUESTION_SOURCE, EvidenceSection
 from maljan.schemas.evidence import answer_not_shown
 from maljan.schemas.isr_models import would_answer_text
-from maljan.schemas.sandbox_document import DNS_NAME_KEYS, dns_name_key
+from maljan.schemas.sandbox_document import DNS_NAME_KEYS, dns_name_key, signature_pids
 from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
@@ -982,17 +982,32 @@ def _sandbox_signatures(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]
         # The ids the sandbox tags a signature with, in a column of their own
         # once any signature of the run carries them.
         acc.add_column(table, SIGNATURE_TECHNIQUES_COLUMN)
-    with_ids = SIGNATURE_TECHNIQUES_COLUMN in table.columns
-    for row, ids in zip(rows, tagged, strict=True):
+    placed = [
+        signature_pids({"pids": row.get("pids")}) if isinstance(row, dict) else [] for row in rows
+    ]
+    if any(placed):
+        # The processes the sandbox saw a hit in, likewise, once any signature
+        # of the run names one.
+        acc.add_column(table, SIGNATURE_PROCESSES_COLUMN)
+    for row, ids, pids in zip(rows, tagged, placed, strict=True):
         if not isinstance(row, dict):
             continue
-        cells = [_text(row.get("name")), _text(row.get("severity")), _text(row.get("description"))]
-        acc.add_row(table, [*cells, ", ".join(ids) or "-"] if with_ids else cells)
+        cells = {
+            "Name": _text(row.get("name")),
+            "Severity": _text(row.get("severity")),
+            "Description": _text(row.get("description")),
+            SIGNATURE_TECHNIQUES_COLUMN: ", ".join(ids) or "-",
+            SIGNATURE_PROCESSES_COLUMN: ", ".join(pids) or "-",
+        }
+        # In the order the table holds its columns, which an earlier call set.
+        acc.add_row(table, [cells.get(column, "-") for column in table.columns])
     acc.credit(table, entry)
 
 
-# The column the sandbox signature table names a signature's techniques under.
+# The columns the sandbox signature table names a signature's techniques and
+# the processes it was seen in under.
 SIGNATURE_TECHNIQUES_COLUMN = "Techniques"
+SIGNATURE_PROCESSES_COLUMN = "Processes"
 
 
 def _sandbox_dropped(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:

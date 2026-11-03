@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.providers.errors import ProviderConfigurationError
+from maljan.schemas.sandbox_document import signature_pids
 from maljan.schemas.sandbox_report import section_id
 
 if TYPE_CHECKING:
@@ -128,7 +129,8 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _FIELDS: dict[str, tuple[str, ...]] = {
     "processes": ("pid", "ppid", "name", "command_line"),
     "calls": ("pid", "api", "args", "timestamp"),
-    "signatures": ("name", "description", "severity", "ttps"),
+    # ``pids``: the processes the hit was seen in, where the sandbox names them.
+    "signatures": ("name", "description", "severity", "ttps", "pids"),
     "dns": ("request", "type", "answers"),
     "tcp": ("dst", "dport"),
     "udp": ("dst", "dport"),
@@ -316,6 +318,10 @@ def _signature_row(row: dict[str, Any], scale: SignatureScale | None) -> Sandbox
         description=str(row.get("description") or ""),
         severity=severity,
         ttp_tags=_texts(row.get("ttps")),
+        # One process id or a list of them, each a whole number or not read.
+        pids=signature_pids(
+            {"pids": pids if isinstance(pids := row.get("pids"), list) else [pids]}
+        ),
         extra=extra,
     )
 

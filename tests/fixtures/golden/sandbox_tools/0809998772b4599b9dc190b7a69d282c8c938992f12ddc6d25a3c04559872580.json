@@ -3230,6 +3230,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "2988"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3237,6 +3240,9 @@
         "confidence": 80,
         "description": "Registers a vectored exception handler (VEH), possibly to hijack execution flow",
         "name": "registers_vectored_exception_handler",
+        "pids": [
+          "2988"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3275,6 +3281,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "2988"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3289,6 +3298,9 @@
         "confidence": 50,
         "description": "Registered a Vectored Exception Handler (VEH) and intentionally triggered exceptions or manipulated thread contexts. May be used to hijack the OS error dispatcher to execute a payload or shellcode",
         "name": "exception_driven_execution",
+        "pids": [
+          "2988"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3296,6 +3308,9 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "2988"
+        ],
         "references": [],
         "severity": 3
       },
@@ -3303,6 +3318,9 @@
         "confidence": 100,
         "description": "Network connection initiated from dynamically allocated (unbacked) memory, indicative of fileless C2 activity",
         "name": "unbacked_memory_network_connection",
+        "pids": [
+          "2988"
+        ],
         "references": [],
         "severity": 3
       },

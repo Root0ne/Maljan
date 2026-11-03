@@ -3858,6 +3858,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "4460"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3865,6 +3868,9 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "4460"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3879,6 +3885,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "4460"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3886,6 +3895,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "288"
+        ],
         "references": [],
         "severity": 1
       },
@@ -3900,6 +3912,9 @@
         "confidence": 100,
         "description": "A process attempted to delay the analysis task.",
         "name": "antisandbox_sleep",
+        "pids": [
+          "4460"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3907,6 +3922,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "4460"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3914,6 +3932,9 @@
         "confidence": 100,
         "description": "Attempts to connect to a dead IP:Port (5 unique times)",
         "name": "dead_connect",
+        "pids": [
+          "4460"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3921,6 +3942,9 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "288"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3928,6 +3952,9 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "288"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3935,6 +3962,9 @@
         "confidence": 100,
         "description": "Writes to the memory another process",
         "name": "injection_write_process",
+        "pids": [
+          "288"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3942,6 +3972,9 @@
         "confidence": 100,
         "description": "Reads from the memory of another process",
         "name": "reads_memory_remote_process",
+        "pids": [
+          "288"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3949,6 +3982,9 @@
         "confidence": 60,
         "description": "Sets WinHTTP or WinINet timeouts to unusually low values (<= 10 seconds), possible C2 technique to prevent thread hanging",
         "name": "suspicious_http_timeouts",
+        "pids": [
+          "4460"
+        ],
         "references": [],
         "severity": 2
       },
@@ -3956,6 +3992,9 @@
         "confidence": 50,
         "description": "Suspicious communication with abused trusted site",
         "name": "suspicious_communication_trusted_site",
+        "pids": [
+          "4460"
+        ],
         "references": [
           "https://go.recordedfuture.com/hubfs/reports/cta-2023-0816.pdf",
           "https://lots-project.com/"
@@ -4011,6 +4050,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "288"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4018,6 +4060,9 @@
         "confidence": 100,
         "description": "Writes an executable to the memory of another process",
         "name": "injection_write_exe_process",
+        "pids": [
+          "288"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4039,6 +4084,9 @@
         "confidence": 100,
         "description": "Detects Sandboxie through the presence of a library",
         "name": "antisandbox_sboxie_libs",
+        "pids": [
+          "288"
+        ],
         "references": [],
         "severity": 3
       },

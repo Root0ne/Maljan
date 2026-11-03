@@ -2397,6 +2397,9 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "4280"
+        ],
         "references": [],
         "severity": 1
       },
@@ -2442,6 +2445,9 @@
         "confidence": 100,
         "description": "Manipulated process mitigation policies (CFG/DEP) from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_mitigation_alteration",
+        "pids": [
+          "4280"
+        ],
         "references": [],
         "severity": 3
       },

@@ -51258,6 +51258,10 @@
         "confidence": 100,
         "description": "Checks available memory",
         "name": "antivm_checks_available_memory",
+        "pids": [
+          "5908",
+          "6748"
+        ],
         "references": [],
         "severity": 1
       },
@@ -51265,6 +51269,12 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "4632",
+          "5908",
+          "6748",
+          "1764"
+        ],
         "references": [],
         "severity": 1
       },
@@ -51272,6 +51282,16 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "4632",
+          "5908",
+          "6748",
+          "7740",
+          "8636",
+          "9172",
+          "10112",
+          "1764"
+        ],
         "references": [],
         "severity": 1
       },
@@ -51286,6 +51306,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "5712"
+        ],
         "references": [],
         "severity": 1
       },
@@ -51293,6 +51316,9 @@
         "confidence": 100,
         "description": "A file with an unusual extension was attempted to be loaded as a DLL.",
         "name": "dll_load_uncommon_file_types",
+        "pids": [
+          "4632"
+        ],
         "references": [],
         "severity": 1
       },
@@ -51300,6 +51326,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "6192"
+        ],
         "references": [],
         "severity": 1
       },
@@ -51314,6 +51343,17 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "4632",
+          "5712",
+          "5908",
+          "6192",
+          "6748",
+          "7740",
+          "8636",
+          "9172",
+          "1764"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51321,6 +51361,15 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "4632",
+          "7740",
+          "7716",
+          "8636",
+          "9172",
+          "9276",
+          "10112"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51328,6 +51377,11 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "5908",
+          "6748",
+          "1764"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51335,6 +51389,16 @@
         "confidence": 50,
         "description": "A DLL was loaded from a suspicious directory",
         "name": "dllload_suspicious_directory",
+        "pids": [
+          "5712",
+          "5908",
+          "6192",
+          "6748",
+          "7740",
+          "7716",
+          "8636",
+          "9172"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51342,6 +51406,11 @@
         "confidence": 100,
         "description": "Allocated memory and changed its protection to PAGE_NOACCESS, may be used to hide payloads from memory scanners or to trigger an access violation for exception-driven execution",
         "name": "allocated_memory_protection_noaccess",
+        "pids": [
+          "5908",
+          "6748",
+          "10112"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51349,6 +51418,9 @@
         "confidence": 50,
         "description": "Performs high-volume NtQueryInformationToken calls for TokenUser and TokenGroups, indicative of wiper/ransomware checking whether it has write permission to each file",
         "name": "per_file_acl_token_check",
+        "pids": [
+          "10112"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51356,6 +51428,12 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "628",
+          "5908",
+          "6748",
+          "1764"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51363,6 +51441,12 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "628",
+          "5908",
+          "6748",
+          "1764"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51370,6 +51454,14 @@
         "confidence": 100,
         "description": "Enumerates running processes",
         "name": "enumerates_running_processes",
+        "pids": [
+          "5712",
+          "5908",
+          "7740",
+          "8636",
+          "9172",
+          "1764"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51377,6 +51469,16 @@
         "confidence": 100,
         "description": "Expresses interest in specific running processes",
         "name": "process_interest",
+        "pids": [
+          "5712",
+          "5908",
+          "6192",
+          "6748",
+          "7740",
+          "8636",
+          "9172",
+          "1764"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51391,6 +51493,11 @@
         "confidence": 100,
         "description": "A process created a hidden window",
         "name": "stealth_window",
+        "pids": [
+          "5908",
+          "6748",
+          "1764"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51398,6 +51505,10 @@
         "confidence": 100,
         "description": "Terminates another process",
         "name": "terminates_remote_process",
+        "pids": [
+          "5908",
+          "6748"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51412,6 +51523,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "5908"
+        ],
         "references": [],
         "severity": 2
       },
@@ -51433,6 +51547,10 @@
         "confidence": 60,
         "description": "Tries to unhook or modify Windows functions monitored by CAPE",
         "name": "antisandbox_unhook",
+        "pids": [
+          "5908",
+          "6748"
+        ],
         "references": [],
         "severity": 3
       },
@@ -51440,6 +51558,11 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "5908",
+          "6748",
+          "10112"
+        ],
         "references": [],
         "severity": 3
       },
@@ -51447,6 +51570,12 @@
         "confidence": 100,
         "description": "Uses suspicious IO control codes, indicative of disk enumeration or a bootkit/wiper",
         "name": "suspicious_iocontrol_codes",
+        "pids": [
+          "5908",
+          "6748",
+          "10112",
+          "1764"
+        ],
         "references": [],
         "severity": 3
       },
@@ -51454,6 +51583,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "5908"
+        ],
         "references": [],
         "severity": 3
       },
@@ -51468,6 +51600,10 @@
         "confidence": 100,
         "description": "Inter-process synchronization via mutexes, possibly for routing local C2 traffic or injection",
         "name": "interprocess_comms_mutex",
+        "pids": [
+          "6748",
+          "1764"
+        ],
         "references": [],
         "severity": 3
       },
@@ -51475,6 +51611,13 @@
         "confidence": 100,
         "description": "Inter-process communication via named shared memory (file mappings), possibly for routing local C2 traffic or injection",
         "name": "interprocess_comms_shared_memory",
+        "pids": [
+          "6192",
+          "6748",
+          "8636",
+          "9172",
+          "1764"
+        ],
         "references": [],
         "severity": 3
       },
@@ -51482,6 +51625,17 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "4632",
+          "5908",
+          "6748",
+          "7740",
+          "7716",
+          "8636",
+          "9172",
+          "10112",
+          "1764"
+        ],
         "references": [],
         "severity": 3
       },
@@ -51489,6 +51643,17 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun_tasks",
+        "pids": [
+          "4632",
+          "5908",
+          "6748",
+          "7740",
+          "7716",
+          "8636",
+          "9172",
+          "10112",
+          "1764"
+        ],
         "references": [],
         "severity": 3
       },

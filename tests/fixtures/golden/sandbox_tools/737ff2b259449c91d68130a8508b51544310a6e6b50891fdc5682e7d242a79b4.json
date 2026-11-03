@@ -4259,6 +4259,9 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "2836"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4266,6 +4269,9 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "2836"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4280,6 +4286,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "2836"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4287,6 +4296,9 @@
         "confidence": 100,
         "description": "A file with an unusual extension was attempted to be loaded as a DLL.",
         "name": "dll_load_uncommon_file_types",
+        "pids": [
+          "4608"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4294,6 +4306,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "1608"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4308,6 +4323,9 @@
         "confidence": 100,
         "description": "Checks for mouse movement",
         "name": "mouse_movement_detect",
+        "pids": [
+          "2836"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4315,6 +4333,9 @@
         "confidence": 50,
         "description": "Queries or modifies system parameters associated with user presence detection or sandbox evasion",
         "name": "antisandbox_system_parameters_info",
+        "pids": [
+          "2836"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4322,6 +4343,10 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "4608",
+          "2836"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4329,6 +4354,10 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "4608",
+          "2836"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4336,6 +4365,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "4608"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4343,6 +4375,9 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "4608"
+        ],
         "references": [],
         "severity": 2
       },

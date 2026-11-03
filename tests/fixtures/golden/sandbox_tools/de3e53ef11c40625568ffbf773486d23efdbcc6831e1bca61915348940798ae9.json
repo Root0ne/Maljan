@@ -7148,6 +7148,10 @@
         "confidence": 100,
         "description": "Checks available memory",
         "name": "antivm_checks_available_memory",
+        "pids": [
+          "988",
+          "2092"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7155,6 +7159,10 @@
         "confidence": 100,
         "description": "Queries computer hostname",
         "name": "queries_computer_name",
+        "pids": [
+          "988",
+          "2092"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7162,6 +7170,10 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "988",
+          "2092"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7169,6 +7181,10 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "988",
+          "2092"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7176,6 +7192,10 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "988",
+          "2092"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7199,6 +7219,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "988"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7213,6 +7236,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "988"
+        ],
         "references": [],
         "severity": 1
       },
@@ -7227,6 +7253,9 @@
         "confidence": 100,
         "description": "Anomalous file deletion behavior detected (10+)",
         "name": "anomalous_deletefile",
+        "pids": [
+          "988"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7234,6 +7263,9 @@
         "confidence": 50,
         "description": "Queries or modifies system parameters associated with user presence detection or sandbox evasion",
         "name": "antisandbox_system_parameters_info",
+        "pids": [
+          "2092"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7241,6 +7273,9 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "988"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7248,6 +7283,9 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "988"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7255,6 +7293,9 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "988"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7262,6 +7303,9 @@
         "confidence": 50,
         "description": "A DLL was loaded from a suspicious directory",
         "name": "dllload_suspicious_directory",
+        "pids": [
+          "988"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7269,6 +7313,9 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "956"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7276,6 +7323,9 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "956"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7290,6 +7340,9 @@
         "confidence": 100,
         "description": "Terminates another process",
         "name": "terminates_remote_process",
+        "pids": [
+          "956"
+        ],
         "references": [],
         "severity": 2
       },
@@ -7339,6 +7392,10 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "988",
+          "2092"
+        ],
         "references": [],
         "severity": 3
       },
@@ -7346,6 +7403,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "988"
+        ],
         "references": [],
         "severity": 3
       },

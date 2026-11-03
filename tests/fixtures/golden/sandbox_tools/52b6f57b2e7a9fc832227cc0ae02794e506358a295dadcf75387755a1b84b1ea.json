@@ -34098,6 +34098,10 @@
         "confidence": 100,
         "description": "Checks available memory",
         "name": "antivm_checks_available_memory",
+        "pids": [
+          "5744",
+          "8160"
+        ],
         "references": [],
         "severity": 1
       },
@@ -34105,6 +34109,12 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "5744",
+          "1036",
+          "5312",
+          "5788"
+        ],
         "references": [],
         "severity": 1
       },
@@ -34112,6 +34122,12 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "5744",
+          "3584",
+          "8160",
+          "5788"
+        ],
         "references": [],
         "severity": 1
       },
@@ -34126,6 +34142,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "3584"
+        ],
         "references": [],
         "severity": 1
       },
@@ -34133,6 +34152,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "1036"
+        ],
         "references": [],
         "severity": 1
       },
@@ -34147,6 +34169,13 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "5744",
+          "8160",
+          "1036",
+          "5312",
+          "5788"
+        ],
         "references": [],
         "severity": 2
       },
@@ -34154,6 +34183,14 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "5744",
+          "3584",
+          "8160",
+          "1036",
+          "5312",
+          "5788"
+        ],
         "references": [],
         "severity": 2
       },
@@ -34161,6 +34198,10 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "1036",
+          "5312"
+        ],
         "references": [],
         "severity": 2
       },
@@ -34168,6 +34209,9 @@
         "confidence": 100,
         "description": "Allocated memory and changed its protection to PAGE_NOACCESS, may be used to hide payloads from memory scanners or to trigger an access violation for exception-driven execution",
         "name": "allocated_memory_protection_noaccess",
+        "pids": [
+          "3584"
+        ],
         "references": [],
         "severity": 2
       },
@@ -34175,6 +34219,9 @@
         "confidence": 50,
         "description": "Performs high-volume NtQueryInformationToken calls for TokenUser and TokenGroups, indicative of wiper/ransomware checking whether it has write permission to each file",
         "name": "per_file_acl_token_check",
+        "pids": [
+          "3584"
+        ],
         "references": [],
         "severity": 2
       },
@@ -34182,6 +34229,9 @@
         "confidence": 50,
         "description": "Creates a process in a suspended state, likely for injection",
         "name": "creates_suspended_process",
+        "pids": [
+          "816"
+        ],
         "references": [],
         "severity": 2
       },
@@ -34189,6 +34239,9 @@
         "confidence": 100,
         "description": "Resumed a thread in another process",
         "name": "resumethread_remote_process",
+        "pids": [
+          "816"
+        ],
         "references": [],
         "severity": 2
       },
@@ -34196,6 +34249,9 @@
         "confidence": 100,
         "description": "Writes to the memory another process",
         "name": "injection_write_process",
+        "pids": [
+          "5312"
+        ],
         "references": [],
         "severity": 2
       },
@@ -34271,6 +34327,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "1036"
+        ],
         "references": [],
         "severity": 2
       },
@@ -34285,6 +34344,11 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "3584",
+          "1036",
+          "5312"
+        ],
         "references": [],
         "severity": 3
       },
@@ -34292,6 +34356,9 @@
         "confidence": 100,
         "description": "Queries Windows licensing, activation, or genuine status, possibly to detect unactivated sandbox or analysis environments.",
         "name": "antisandbox_windows_activation",
+        "pids": [
+          "3584"
+        ],
         "references": [],
         "severity": 3
       },
@@ -34299,6 +34366,10 @@
         "confidence": 100,
         "description": "Attempts to query display device information, possibly to determine if the process is running in a virtualized environment",
         "name": "antivm_display",
+        "pids": [
+          "5744",
+          "8160"
+        ],
         "references": [],
         "severity": 3
       },
@@ -34306,6 +34377,9 @@
         "confidence": 100,
         "description": "Uses suspicious IO control codes, indicative of disk enumeration or a bootkit/wiper",
         "name": "suspicious_iocontrol_codes",
+        "pids": [
+          "3584"
+        ],
         "references": [],
         "severity": 3
       },
@@ -34313,6 +34387,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "1036"
+        ],
         "references": [],
         "severity": 3
       },
@@ -34320,6 +34397,10 @@
         "confidence": 100,
         "description": "Inter-process synchronization via mutexes, possibly for routing local C2 traffic or injection",
         "name": "interprocess_comms_mutex",
+        "pids": [
+          "8160",
+          "5788"
+        ],
         "references": [],
         "severity": 3
       },
@@ -34327,6 +34408,9 @@
         "confidence": 80,
         "description": "Creates a thread executing from dynamically allocated (unbacked) memory rather than a file on disk, likely to execute shellcode",
         "name": "thread_unbacked_memory",
+        "pids": [
+          "5312"
+        ],
         "references": [],
         "severity": 3
       },
@@ -34334,6 +34418,10 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "3584",
+          "1036"
+        ],
         "references": [],
         "severity": 3
       },
@@ -34355,6 +34443,9 @@
         "confidence": 100,
         "description": "Sniffs keystrokes",
         "name": "infostealer_keylog",
+        "pids": [
+          "5312"
+        ],
         "references": [],
         "severity": 3
       },

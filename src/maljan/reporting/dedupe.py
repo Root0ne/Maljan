@@ -478,6 +478,7 @@ def signature_identity(signature: Any) -> tuple[Any, ...]:
         getattr(signature, "severity", None),
         tuple(getattr(signature, "technique_ids", None) or ()),
         tuple(getattr(signature, "marks", None) or ()),
+        tuple(getattr(signature, "pids", None) or ()),
     )
 
 

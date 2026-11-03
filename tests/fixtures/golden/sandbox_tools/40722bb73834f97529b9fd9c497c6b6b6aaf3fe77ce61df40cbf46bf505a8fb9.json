@@ -4101,6 +4101,9 @@
         "confidence": 100,
         "description": "Queries the username",
         "name": "queries_user_name",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4115,6 +4118,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 1
       },
@@ -4129,6 +4135,9 @@
         "confidence": 100,
         "description": "A process attempted to delay the analysis task.",
         "name": "antisandbox_sleep",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4136,6 +4145,9 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4143,6 +4155,9 @@
         "confidence": 50,
         "description": "A DLL was loaded from a suspicious directory",
         "name": "dllload_suspicious_directory",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4164,6 +4179,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 2
       },
@@ -4171,6 +4189,9 @@
         "confidence": 100,
         "description": "Manually resolves API addresses from dynamically allocated (unbacked) memory, indicative of shellcode or an unpacker",
         "name": "unbacked_api_resolution",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4178,6 +4199,9 @@
         "confidence": 100,
         "description": "Loads a new DLL where the caller address originates from dynamically allocated (unbacked) memory",
         "name": "unbacked_library_load",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4185,6 +4209,9 @@
         "confidence": 20,
         "description": "Altered memory protections from dynamically allocated (unbacked) memory, indicative of self-modifying shellcode or memory patching",
         "name": "unbacked_memory_protection_alteration",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4192,6 +4219,9 @@
         "confidence": 100,
         "description": "Paused execution (sleep/delay) in a thread executing in dynamically allocated (unbacked) memory, indicative of sandbox evasion or C2 sleeping between callbacks",
         "name": "unbacked_delay_execution",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4199,6 +4229,9 @@
         "confidence": 100,
         "description": "Attempted to enumerate running processes from dynamically allocated (unbacked) memory",
         "name": "unbacked_process_enumeration",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 3
       },
@@ -4206,6 +4239,9 @@
         "confidence": 100,
         "description": "Network connection initiated from dynamically allocated (unbacked) memory, indicative of fileless C2 activity",
         "name": "unbacked_memory_network_connection",
+        "pids": [
+          "2608"
+        ],
         "references": [],
         "severity": 3
       },

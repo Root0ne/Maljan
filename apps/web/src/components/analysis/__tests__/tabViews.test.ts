@@ -11,8 +11,9 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("next/navigation", () => ({ useParams: () => ({ id: "J1" }) }));
 
 import type { EvidenceSection, MalwareReport, NetworkIOCs, SandboxSignature, StringIOC } from "@/types/malware-report";
+import type { SignatureScale } from "@/lib/severity";
 import { MALWARE_REPORT } from "../../../../e2e/report-fixture";
-import { signatureGroups, techniqueTactics, techniqueUnder, viewKeeps, viewOfHash } from "../behaviourView";
+import { processGroups, signatureGroups, techniqueTactics, techniqueUnder, viewKeeps, viewOfHash } from "../behaviourView";
 import { exportCounts, exportState, filterIocs, iocFacets, iocRows, relatedFindings } from "../iocList";
 import { IocDetail } from "../IocBrowser";
 import { hostRows, urlHost } from "../networkView";
@@ -50,6 +51,42 @@ describe("Behaviour: signatures by severity, then technique", () => {
     const [group] = signatureGroups([sig("x", 3)], null);
     expect(group.rung).toBeNull();
     expect(group.techniques[0].rows[0].sandboxText).toBe("unrated, 3");
+  });
+});
+
+describe("Behaviour: signatures per process where the sandbox named the process", () => {
+  const scale = { name: "1–10", max: 10, rungs: ["Informational", "Low", "Low", "Low", "Medium", "Medium", "High", "High", "Critical", "Critical"] } satisfies SignatureScale;
+  const at = (s: SandboxSignature, pids: string[]): SandboxSignature => ({ ...s, pids });
+  const tree = [
+    {
+      pid: 900,
+      ppid: 0,
+      name: "explorer.exe",
+      command_line: "",
+      children: [{ pid: 2100, ppid: 900, name: "invoice.exe", command_line: "", children: [], injected_into: [] }],
+      injected_into: [],
+    },
+  ];
+
+  it("falls back to the severity grouping when no signature names a process", () => {
+    expect(processGroups([sig("a", 8), sig("b", 2)], scale, tree)).toBeNull();
+  });
+
+  it("groups per process in the tree's order, unlisted pids after, signatures with none last", () => {
+    const groups = processGroups(
+      [at(sig("inject", 8, ["T1055"]), ["2100", "4000"]), sig("odd", 3), at(sig("enum", 2), ["900"]), at(sig("low", 2), ["2100"])],
+      scale,
+      tree,
+    )!;
+    expect(groups.map((g) => [g.pid, g.name, g.count])).toEqual([
+      ["900", "explorer.exe", 1],
+      ["2100", "invoice.exe", 2],
+      ["4000", null, 1],
+      [null, null, 1],
+    ]);
+    // Each process's hits keep the severity → technique grouping.
+    expect(groups[1].severities.map((s) => s.rung)).toEqual(["High", "Low"]);
+    expect(groups[1].severities[0].techniques[0].technique).toBe("T1055");
   });
 });
 

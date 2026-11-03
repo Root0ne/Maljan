@@ -9086,6 +9086,12 @@
         "confidence": 100,
         "description": "Queries the keyboard layout",
         "name": "queries_keyboard_layout",
+        "pids": [
+          "5900",
+          "6544",
+          "4380",
+          "3360"
+        ],
         "references": [],
         "severity": 1
       },
@@ -9093,6 +9099,10 @@
         "confidence": 100,
         "description": "Queries the computer locale (possible geofencing)",
         "name": "queries_locale_api",
+        "pids": [
+          "6544",
+          "3360"
+        ],
         "references": [],
         "severity": 1
       },
@@ -9107,6 +9117,9 @@
         "confidence": 40,
         "description": "SetUnhandledExceptionFilter detected (possible anti-debug)",
         "name": "antidebug_setunhandledexceptionfilter",
+        "pids": [
+          "1132"
+        ],
         "references": [],
         "severity": 1
       },
@@ -9114,6 +9127,9 @@
         "confidence": 40,
         "description": "Possible date expiration check, exits too soon after checking local time",
         "name": "stealth_timeout",
+        "pids": [
+          "4380"
+        ],
         "references": [],
         "severity": 1
       },
@@ -9128,6 +9144,9 @@
         "confidence": 100,
         "description": "Anomalous file deletion behavior detected (10+)",
         "name": "anomalous_deletefile",
+        "pids": [
+          "3360"
+        ],
         "references": [],
         "severity": 2
       },
@@ -9135,6 +9154,13 @@
         "confidence": 80,
         "description": "Queries process token information to check for Administrator privileges or UAC elevation status",
         "name": "privilege_elevation_check",
+        "pids": [
+          "5900",
+          "6544",
+          "1132",
+          "4380",
+          "3360"
+        ],
         "references": [],
         "severity": 2
       },
@@ -9142,6 +9168,13 @@
         "confidence": 50,
         "description": "Queried the FIPS cryptography policy, can be used to adapt C2 network encryption or by legitimate encryption software",
         "name": "query_fips_reconnaissance",
+        "pids": [
+          "5900",
+          "6544",
+          "1132",
+          "4380",
+          "3360"
+        ],
         "references": [],
         "severity": 2
       },
@@ -9149,6 +9182,10 @@
         "confidence": 20,
         "description": "Queries the mount points and then resolves volume paths to enumerate storage devices",
         "name": "mountpoints_volume_discovery",
+        "pids": [
+          "5900",
+          "4380"
+        ],
         "references": [],
         "severity": 2
       },
@@ -9156,6 +9193,9 @@
         "confidence": 50,
         "description": "A DLL was loaded from a suspicious directory",
         "name": "dllload_suspicious_directory",
+        "pids": [
+          "4380"
+        ],
         "references": [],
         "severity": 2
       },
@@ -9163,6 +9203,10 @@
         "confidence": 100,
         "description": "Writes to the memory another process",
         "name": "injection_write_process",
+        "pids": [
+          "5900",
+          "4380"
+        ],
         "references": [],
         "severity": 2
       },
@@ -9179,6 +9223,9 @@
         "confidence": 100,
         "description": "Terminates another process",
         "name": "terminates_remote_process",
+        "pids": [
+          "3360"
+        ],
         "references": [],
         "severity": 2
       },
@@ -9231,6 +9278,9 @@
         "confidence": 50,
         "description": "Creates RWX memory",
         "name": "injection_rwx",
+        "pids": [
+          "5900"
+        ],
         "references": [],
         "severity": 2
       },
@@ -9245,6 +9295,10 @@
         "confidence": 80,
         "description": "Queries the Volume Serial Number or Physical Hardware ID, possibly for anti-sandbox, victim profiling or environmental keying",
         "name": "hardware_id_profiling",
+        "pids": [
+          "5900",
+          "4380"
+        ],
         "references": [],
         "severity": 3
       },
@@ -9252,6 +9306,9 @@
         "confidence": 60,
         "description": "Repeatedly opens the MountPointManager device to enumerate drive letters and resolve volume paths to discover all attached drives and network shares",
         "name": "mountpoint_manager_access",
+        "pids": [
+          "4380"
+        ],
         "references": [],
         "severity": 3
       },
@@ -9259,6 +9316,9 @@
         "confidence": 100,
         "description": "Inter-process synchronization via mutexes, possibly for routing local C2 traffic or injection",
         "name": "interprocess_comms_mutex",
+        "pids": [
+          "6544"
+        ],
         "references": [],
         "severity": 3
       },
@@ -9266,6 +9326,10 @@
         "confidence": 80,
         "description": "Creates a thread executing from dynamically allocated (unbacked) memory rather than a file on disk, likely to execute shellcode",
         "name": "thread_unbacked_memory",
+        "pids": [
+          "5900",
+          "4380"
+        ],
         "references": [],
         "severity": 3
       },
@@ -9273,6 +9337,11 @@
         "confidence": 100,
         "description": "Installs itself for autorun at Windows startup",
         "name": "persistence_autorun",
+        "pids": [
+          "5900",
+          "1132",
+          "4380"
+        ],
         "references": [],
         "severity": 3
       },
@@ -9301,6 +9370,9 @@
         "confidence": 100,
         "description": "Sniffs keystrokes",
         "name": "infostealer_keylog",
+        "pids": [
+          "5900"
+        ],
         "references": [],
         "severity": 3
       },
