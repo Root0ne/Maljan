@@ -648,6 +648,12 @@ def _not_held(rows: list[dict[str, Any]], held: set[str]) -> list[dict[str, Any]
     return kept
 
 
+def _cut_total(value: Any, listed: int) -> int:
+    """The count of pids a row says it was cut from, or 0 where it lists them all."""
+    total = value if isinstance(value, int) and not isinstance(value, bool) else 0
+    return total if total > listed else 0
+
+
 def _pids_of(value: Any) -> list[str]:
     """The pids a sandbox tool's row names, as text, once each; ``[]`` for anything else."""
     if not isinstance(value, list):
@@ -809,7 +815,10 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
                     technique_ids=technique_ids_in(row.get("technique_ids")),
                     # The processes the hit was seen in, under the key the
                     # tool writes them; each a whole number, or not read.
-                    pids=signature_pids({"pids": row.get("pids")}),
+                    pids=(pids := signature_pids({"pids": row.get("pids")})),
+                    # Where the answer listed the first of them only: a row
+                    # that lists them all replaces it (``distinct_signatures``).
+                    pids_total=_cut_total(row.get("pids_total"), len(pids)),
                 )
             )
 

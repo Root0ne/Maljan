@@ -17,9 +17,11 @@ import { dynamicAnalystClaims } from "@/components/analysis/dynamicClaims";
 import AnalystFindings from "@/components/analysis/AnalystFindings";
 import {
   processGroups,
+  seenInText,
   signatureGroups,
   viewKeeps,
   type BehaviourView,
+  type ProcessGroup,
   type SeverityGroup,
   type SignatureRow,
 } from "@/components/analysis/behaviourView";
@@ -30,6 +32,20 @@ import type { JobRoster } from "@/types";
 
 /** How many rows the registry, file and API tables draw before offering more. */
 const STEP = 10;
+
+/** How the signatures are listed: by severity (the default), or per process. */
+type Grouping = "severity" | "process";
+const GROUPINGS: { key: Grouping; label: string }[] = [
+  { key: "severity", label: "By severity" },
+  { key: "process", label: "By process" },
+];
+
+/** The words a process group is headed and named by, for the groups that are no one process. */
+function processGroupTitle(group: ProcessGroup): string {
+  if (group.kind === "process") return `Process ${group.pid}${group.name ? ` (${group.name})` : ""}`;
+  if (group.kind === "spans") return `Seen in ${group.processes} processes`;
+  return "No process named";
+}
 
 /* D10: detect anti-emulation / anti-VM / anti-debug signatures so the empty
  * process-tree state can explain why the sandbox traced nothing. Mirrors the
@@ -138,8 +154,10 @@ export function BehavioursBlock({
   const scale = runSignatureScale(report.run_summary);
   const signatures = (dyn?.sandbox_signatures ?? []).filter((s) => viewKeeps(view, s.technique_ids ?? [], tactics));
   const groups = signatureGroups(signatures, scale);
-  // Per process where the sandbox named the processes it saw the hits in.
+  // Per process, on the reader's asking, where the sandbox named the
+  // processes it saw the hits in; by severity otherwise and by default.
   const byProcess = processGroups(signatures, scale, dyn?.process_tree);
+  const [grouping, setGrouping] = useState<Grouping>("severity");
   const keptPersistence = view === "defence-evasion" ? [] : persistence;
   // The registry exists on Windows and nowhere else; the table is drawn from
   // evidence — typed rows or a registry section — never from the platform.
@@ -161,7 +179,7 @@ export function BehavioursBlock({
         details: [
           row.signature.description,
           ...row.signature.marks,
-          ...((row.signature.pids ?? []).length > 0 ? [`Seen in pid ${(row.signature.pids ?? []).join(", ")}`] : []),
+          seenInText(row.signature),
         ].filter((d) => Boolean(d && d.trim())),
         techniques: row.signature.technique_ids,
         evidenceIds: [],
@@ -191,32 +209,51 @@ export function BehavioursBlock({
                 {view === "all" ? "No sandbox signature fired." : "No sandbox signature under this tactic."}
               </p>
             )}
-            {byProcess
+            {byProcess && (
+              <div role="group" aria-label="Signatures listed" className="flex flex-wrap items-center gap-1">
+                {GROUPINGS.map((g) => (
+                  <button
+                    key={g.key}
+                    type="button"
+                    aria-pressed={grouping === g.key}
+                    onClick={() => setGrouping(g.key)}
+                    className={`rounded border px-2.5 py-1 text-xs ${
+                      grouping === g.key
+                        ? "border-accent bg-bg-active text-text-primary"
+                        : "border-border text-text-secondary hover:text-text-primary"
+                    }`}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {byProcess && grouping === "process"
               ? byProcess.map((proc) => (
                   <div
-                    key={proc.pid ?? "no-process"}
+                    key={proc.kind === "process" ? `pid-${proc.pid}` : proc.kind === "spans" ? `spans-${proc.processes}` : "none"}
                     className="space-y-2"
                     role="group"
-                    aria-label={proc.pid === null ? "Signatures that name no process" : `Process ${proc.pid}`}
+                    aria-label={processGroupTitle(proc)}
                   >
                     <h3 className="text-xs font-semibold text-text-primary">
-                      {proc.pid === null ? (
-                        "No process named"
-                      ) : (
+                      {proc.kind === "process" ? (
                         <>
                           {proc.name || "Process"} <span className="font-mono text-text-muted">pid {proc.pid}</span>
                         </>
+                      ) : (
+                        processGroupTitle(proc)
                       )}
                       <span className="ml-2 font-normal text-text-muted">
                         {proc.count} signature{proc.count === 1 ? "" : "s"}
                       </span>
                     </h3>
                     <div className="space-y-2 border-l border-border-light pl-3">
-                      <SeverityGroups groups={proc.severities} onOpen={openSignature} />
+                      <SeverityGroups groups={proc.severities} onOpen={openSignature} level={4} />
                     </div>
                   </div>
                 ))
-              : <SeverityGroups groups={groups} onOpen={openSignature} />}
+              : <SeverityGroups groups={groups} onOpen={openSignature} level={3} />}
             <ToolOutput sections={covering} />
           </div>
         )}
@@ -297,24 +334,31 @@ export function BehavioursBlock({
   );
 }
 
-/** Signatures by severity, then by the technique each names first (`signatureGroups`). */
+/**
+ * Signatures by severity, then by the technique each names first
+ * (`signatureGroups`); each severity headed at `level`, one below the heading
+ * the groups sit under.
+ */
 function SeverityGroups({
   groups,
   onOpen,
+  level,
 }: {
   groups: SeverityGroup[];
   onOpen: (row: SignatureRow, opener: HTMLElement) => void;
+  level: 3 | 4;
 }) {
+  const Heading = level === 3 ? "h3" : "h4";
   return (
     <>
       {groups.map((group) => (
         <div key={group.rung ?? "unrated"} className="space-y-2">
-          <h3 className="flex items-center gap-2 text-xs font-semibold text-text-secondary">
+          <Heading className="flex items-center gap-2 text-xs font-semibold text-text-secondary">
             <SeverityPill severity={group.rung} />
             <span>
               {group.count} signature{group.count === 1 ? "" : "s"}
             </span>
-          </h3>
+          </Heading>
           <ul className="divide-y divide-border-light rounded border border-border-light">
             {group.techniques.map((t) =>
               t.rows.map((row, i) => (

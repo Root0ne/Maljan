@@ -12,8 +12,10 @@ from __future__ import annotations
 from typing import Any
 
 from maljan.core.report_mapping import RestMappingConfig
+from maljan.pipeline.triage_pack import _SANDBOX_VIEWS
 from maljan.providers.sandbox.rest_mapping import apply_mapping, compile_mapping
-from maljan.providers.sandbox_tools import sandbox_signatures
+from maljan.providers.sandbox_tools import SIGNATURE_PIDS_SHOWN, sandbox_signatures
+from maljan.reporting.dedupe import distinct_signatures
 from maljan.reporting.ledger_projection import dynamic_from_ledger
 from maljan.reporting.ledger_report import SIGNATURE_PROCESSES_COLUMN, build_sections
 from maljan.reporting.models import SandboxSignature
@@ -160,7 +162,7 @@ class TestTheReport:
         )
         assert bare.columns == ["Name", "Severity", "Description"]
 
-    def test_the_markdown_table_has_a_processes_column_only_when_a_row_names_one(self) -> None:
+    def test_the_markdown_report_has_no_processes_column(self) -> None:
         report = rich_report()
         assert report.dynamic is not None
         report.dynamic.sandbox_signatures = [
@@ -168,12 +170,76 @@ class TestTheReport:
             SandboxSignature(name="net", description="n", severity=1),
         ]
         table = MarkdownRenderer().render(report).split("### Sandbox signatures", 1)[1]
-        assert "| Name | Severity | Techniques | Processes | Description |" in table
-        assert "| inject | 3 | - | 2100 | d |" in table
-        assert "| net | 1 | - | - | n |" in table
-        report.dynamic.sandbox_signatures = [
-            SandboxSignature(name="net", description="n", severity=1)
-        ]
-        table = MarkdownRenderer().render(report).split("### Sandbox signatures", 1)[1]
         assert "| Name | Severity | Techniques | Description |" in table
+        assert "| inject | 3 | - | d |" in table
         assert "Processes" not in table.split("\n\n", 2)[1]
+        assert "2100" not in table.split("\n\n", 2)[1]
+
+
+def _many(count: int) -> dict[str, Any]:
+    marks = [{"type": "call", "pid": 100 + n} for n in range(count)]
+    return _report({"name": "enumerates", "severity": 2, "data": marks})
+
+
+def _cut_and_whole() -> tuple[dict[str, Any], dict[str, Any]]:
+    """An analyst's answer, its list cut, and the pack's, every pid listed."""
+    return sandbox_signatures(_many(14)), sandbox_signatures(_many(14), pids_shown=None)
+
+
+class TestTheCap:
+    def test_an_analyst_s_answer_lists_the_first_pids_and_counts_them_all(self) -> None:
+        cut, whole = _cut_and_whole()
+        row = cut["signatures"][0]
+        assert row["pids"] == [str(100 + n) for n in range(SIGNATURE_PIDS_SHOWN)]
+        assert row["pids_total"] == 14
+        assert whole["signatures"][0]["pids"] == [str(100 + n) for n in range(14)]
+        assert "pids_total" not in whole["signatures"][0]
+
+    def test_a_list_at_the_cap_is_not_cut(self) -> None:
+        row = sandbox_signatures(_many(SIGNATURE_PIDS_SHOWN))["signatures"][0]
+        assert len(row["pids"]) == SIGNATURE_PIDS_SHOWN
+        assert "pids_total" not in row
+
+    def test_the_pack_reads_every_pid(self) -> None:
+        view = _SANDBOX_VIEWS["sandbox_signatures"]
+        assert view(_many(14))["signatures"][0]["pids"] == [str(100 + n) for n in range(14)]
+
+    def test_the_report_keeps_the_whole_list_whichever_answer_came_first(self) -> None:
+        cut, whole = _cut_and_whole()
+        for order in ((cut, whole), (whole, cut)):
+            counter = EvidenceCounter()
+            ledger = [entry("sandbox_signatures", data, counter, agent="dynamic") for data in order]
+            dynamic = dynamic_from_ledger(ledger)
+            assert dynamic is not None
+            assert [(len(s.pids), s.pids_total) for s in dynamic.sandbox_signatures] == [(14, 0)]
+            table = next(s for s in build_sections(ledger) if s.key == "sandbox_signatures")
+            assert len(table.rows) == 1
+            assert table.rows[0][-1] == ", ".join(str(100 + n) for n in range(14))
+
+    def test_a_cut_answer_read_alone_says_so(self) -> None:
+        cut, _whole = _cut_and_whole()
+        ledger = [entry("sandbox_signatures", cut, EvidenceCounter(), agent="dynamic")]
+        dynamic = dynamic_from_ledger(ledger)
+        assert dynamic is not None
+        (signature,) = dynamic.sandbox_signatures
+        assert (len(signature.pids), signature.pids_total) == (SIGNATURE_PIDS_SHOWN, 14)
+        assert signature.model_dump()["pids_total"] == 14
+        table = next(s for s in build_sections(ledger) if s.key == "sandbox_signatures")
+        assert table.rows[0][-1].endswith(", … (14 in all)")
+
+
+class TestTheDedupe:
+    def test_the_same_signature_with_the_same_pids_is_one_row(self) -> None:
+        one = SandboxSignature(name="inject", description="d", severity=3, pids=["4", "9"])
+        assert distinct_signatures([one, one.model_copy()]) == [one]
+
+    def test_the_same_signature_with_other_pids_is_two_rows(self) -> None:
+        one = SandboxSignature(name="inject", description="d", severity=3, pids=["4"])
+        other = one.model_copy(update={"pids": ["9"]})
+        assert distinct_signatures([one, other]) == [one, other]
+
+    def test_a_cut_row_gives_way_only_to_a_whole_row_it_begins(self) -> None:
+        whole = SandboxSignature(name="x", description="d", severity=3, pids=["1", "2", "3"])
+        cut = whole.model_copy(update={"pids": ["1", "2"], "pids_total": 3})
+        stranger = whole.model_copy(update={"pids": ["7", "8"], "pids_total": 3})
+        assert distinct_signatures([cut, whole, stranger]) == [whole, stranger]

@@ -479,15 +479,36 @@ def signature_identity(signature: Any) -> tuple[Any, ...]:
         tuple(getattr(signature, "technique_ids", None) or ()),
         tuple(getattr(signature, "marks", None) or ()),
         tuple(getattr(signature, "pids", None) or ()),
+        getattr(signature, "pids_total", 0) or 0,
     )
 
 
+def _cut_pids(signature: Any) -> bool:
+    """Whether the row lists only the first of the pids it counts (``pids_total``)."""
+    return (getattr(signature, "pids_total", 0) or 0) > len(getattr(signature, "pids", None) or ())
+
+
 def distinct_signatures(signatures: list[Any]) -> list[Any]:
-    """``signatures`` with each row once, at its first place."""
+    """``signatures`` with each row once, at its first place.
+
+    A row whose pid list was cut (an analyst's answer lists the first few) is
+    the same row as one that lists them all and starts with those, and is
+    dropped where that row is listed. Linear in the rows and their pids.
+    """
+    whole: dict[tuple[Any, ...], list[tuple[str, ...]]] = {}
+    for signature in signatures:
+        if not _cut_pids(signature):
+            whole.setdefault(signature_identity(signature)[:5], []).append(
+                tuple(getattr(signature, "pids", None) or ())
+            )
     seen: set[tuple[Any, ...]] = set()
     out: list[Any] = []
     for signature in signatures:
         key = signature_identity(signature)
+        if _cut_pids(signature):
+            shown = key[5]
+            if any(pids[: len(shown)] == shown for pids in whole.get(key[:5], ())):
+                continue
         if key not in seen:
             seen.add(key)
             out.append(signature)

@@ -395,18 +395,27 @@ def _signature_techniques(sig: Mapping[str, Any]) -> list[str]:
     return list(found)
 
 
+# The most pids one signature row of an agent's answer lists, as the row's
+# references are held to five: a signature seen in fifty processes is placed by
+# its first ten, and ``pids_total`` counts the rest. The pack's own call reads
+# every pid (``pids_shown=None``), which is what the report is built from.
+SIGNATURE_PIDS_SHOWN = 10
+
+
 def sandbox_signatures(
     report: dict[str, Any] | None,
     offset: int = 0,
     limit: int = 0,
     *,
     normalised_by: Sequence[str] | None = None,
+    pids_shown: int | None = SIGNATURE_PIDS_SHOWN,
 ) -> dict[str, Any]:
     """The sandbox's own signature hits, with their severity.
 
     Reported as what they are — one detection engine's opinion — not folded
     into the verdict. A sandbox signature firing is evidence the agent weighs
-    alongside everything else it found.
+    alongside everything else it found. Each row lists at most ``pids_shown``
+    of the processes the hit was seen in (``None``: every one).
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
@@ -438,9 +447,13 @@ def sandbox_signatures(
             # The processes the hit was seen in, by the pids its marks name
             # (``schemas.sandbox_document.signature_pids``): what places a
             # behaviour in one process of the tree. Left out where none is
-            # named, so such an answer is as it was.
+            # named, so such an answer is as it was. Past ``pids_shown`` the
+            # list is cut and ``pids_total`` says how many there are.
             pids = signature_pids(sig)
             if pids:
+                if pids_shown is not None and len(pids) > pids_shown:
+                    row["pids_total"] = len(pids)
+                    pids = pids[:pids_shown]
                 row["pids"] = pids
             rows.append(row)
     return {"signatures": rows, "total": len(signatures), **meta}

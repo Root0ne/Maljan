@@ -29,6 +29,7 @@ every number the first occurrence carried exactly as it was written.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -206,6 +207,11 @@ class _Sections:
         for row, value in zip(section.rows, values, strict=False):
             row[at] = value
         self._seen[section.key] = {tuple(row) for row in section.rows}
+
+    def replace_row(self, section: EvidenceSection, index: int, row: list[str]) -> None:
+        """Put ``row`` in the place of the table's row at ``index``."""
+        section.rows[index] = row
+        self._seen[section.key] = {tuple(held) for held in section.rows}
 
     def add_row(self, section: EvidenceSection, row: list[str]) -> None:
         fingerprint = tuple(row)
@@ -992,15 +998,22 @@ def _sandbox_signatures(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]
     for row, ids, pids in zip(rows, tagged, placed, strict=True):
         if not isinstance(row, dict):
             continue
+        total = row.get("pids_total")
+        cut = isinstance(total, int) and not isinstance(total, bool) and total > len(pids)
+        processes = ", ".join(pids) or "-"
         cells = {
             "Name": _text(row.get("name")),
             "Severity": _text(row.get("severity")),
             "Description": _text(row.get("description")),
             SIGNATURE_TECHNIQUES_COLUMN: ", ".join(ids) or "-",
-            SIGNATURE_PROCESSES_COLUMN: ", ".join(pids) or "-",
+            # A list an analyst's answer cut says so, and how many there are.
+            SIGNATURE_PROCESSES_COLUMN: f"{processes}, … ({total} in all)" if cut else processes,
         }
         # In the order the table holds its columns, which an earlier call set.
-        acc.add_row(table, [cells.get(column, "-") for column in table.columns])
+        cells_row = [cells.get(column, "-") for column in table.columns]
+        if pids and _signature_row_placed(acc, table, cells_row, pids, cut=cut):
+            continue
+        acc.add_row(table, cells_row)
     acc.credit(table, entry)
 
 
@@ -1008,6 +1021,31 @@ def _sandbox_signatures(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]
 # the processes it was seen in under.
 SIGNATURE_TECHNIQUES_COLUMN = "Techniques"
 SIGNATURE_PROCESSES_COLUMN = "Processes"
+_CUT_PIDS = re.compile(r", … \(\d+ in all\)$")
+
+
+def _signature_row_placed(
+    acc: _Sections, table: EvidenceSection, row: list[str], pids: list[str], *, cut: bool
+) -> bool:
+    """Whether the table already says what ``row`` says of one signature's processes.
+
+    The pack's answer lists every pid of a signature and an analyst's lists the
+    first few (``sandbox_tools.SIGNATURE_PIDS_SHOWN``): a cut row is one the
+    table holds when a row of the same signature lists those pids first, and a
+    whole row takes the place of a cut one the table took first.
+    """
+    at = table.columns.index(SIGNATURE_PROCESSES_COLUMN)
+    for index, held in enumerate(table.rows):
+        if held[:at] + held[at + 1 :] != row[:at] + row[at + 1 :]:
+            continue
+        held_cut = bool(_CUT_PIDS.search(held[at]))
+        listed = _CUT_PIDS.sub("", held[at]).split(", ")
+        if cut and not held_cut and listed[: len(pids)] == pids:
+            return True
+        if not cut and held_cut and pids[: len(listed)] == listed:
+            acc.replace_row(table, index, row)
+            return True
+    return False
 
 
 def _sandbox_dropped(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
