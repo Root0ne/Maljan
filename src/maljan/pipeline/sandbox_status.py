@@ -43,10 +43,12 @@ RECORDED_FIXTURE = "recorded fixture"
 OBSERVED = "observed"
 
 # Where the md5, sha1 and size of a marked report's identity came from
-# (:func:`sample_file_identity`): never a field of the block, only which
+# (:func:`sample_file_identity`): the sample's own bytes, or nowhere, the
+# router's values standing alone. Never a field of the block, only which
 # header the judge's block is written under.
 IDENTITY_SOURCE_KEY = "identity_source"
 FROM_SAMPLE_BYTES = "sample_bytes"
+FROM_ROUTER_ONLY = "router_only"
 
 # The tool name of the pack entry that states the status. Named like the
 # sandbox views so the console files it with them.
@@ -167,14 +169,15 @@ def sample_file_identity(report: Any, sample_path: Any, expected: str) -> dict[s
     the values are read from the sample's own bytes instead, and only where
     that copy still reads ``expected``, the intake SHA-256
     (``analysis.sample_integrity.sample_fingerprints``). Values so read carry
-    :data:`IDENTITY_SOURCE_KEY`; a copy that gave none gives ``{}``, and the
-    caller takes no size from it either (:func:`names_another_target`).
+    :data:`IDENTITY_SOURCE_KEY` as :data:`FROM_SAMPLE_BYTES`; a copy that gave
+    none carries it as :data:`FROM_ROUTER_ONLY` and no value, and the caller
+    takes no size from it either (:func:`names_another_target`).
     """
     if names_another_target(report):
         from maljan.analysis.sample_integrity import sample_fingerprints
 
         read = sample_fingerprints(sample_path, expected)
-        return {**read, IDENTITY_SOURCE_KEY: FROM_SAMPLE_BYTES} if read else {}
+        return {**read, IDENTITY_SOURCE_KEY: FROM_SAMPLE_BYTES if read else FROM_ROUTER_ONLY}
     target = report.get("target") if isinstance(report, dict) else None
     sandbox_file = target.get("file") if isinstance(target, dict) else None
     if not isinstance(sandbox_file, dict):

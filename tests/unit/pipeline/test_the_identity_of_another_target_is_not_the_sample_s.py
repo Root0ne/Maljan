@@ -20,6 +20,7 @@ from typing import Any
 import pytest
 
 from maljan.agents.judge_agent import (
+    ROUTER_ONLY_IDENTITY_HEADER,
     SAMPLE_BYTES_IDENTITY_HEADER,
     SAMPLE_IDENTITY_HEADER,
     sample_identity_block,
@@ -93,20 +94,30 @@ class TestAMarkedReport:
     def test_no_sample_on_disk_gives_no_hash_and_no_size(self) -> None:
         identity = _sample_identity(_state(_marked(), None))
 
-        assert set(identity) == {"sha256", "file_name", "file_type", "platform"}
+        assert set(identity) == {
+            "sha256",
+            "file_name",
+            "file_type",
+            "platform",
+            status.IDENTITY_SOURCE_KEY,
+        }
+        assert identity[status.IDENTITY_SOURCE_KEY] == status.FROM_ROUTER_ONLY
 
     @pytest.mark.parametrize("copy_is", ["missing", "changed"])
-    def test_no_row_from_the_bytes_keeps_the_router_s_header(
+    def test_no_row_from_the_bytes_is_headed_by_the_router_alone(
         self, tmp_path: Path, copy_is: str
     ) -> None:
         path = None if copy_is == "missing" else _sample(tmp_path, b"other bytes")
         identity = _sample_identity(_state(_marked(), path))
         block = sample_identity_block(identity)
 
-        assert status.IDENTITY_SOURCE_KEY not in identity
         assert "size_bytes" not in identity
-        assert block.startswith(f"=== {SAMPLE_IDENTITY_HEADER} ===\n")
+        assert block.startswith(f"=== {ROUTER_ONLY_IDENTITY_HEADER} ===\n")
+        assert "file block" not in block
         assert "own bytes" not in block
+        # The provenance picks the header; it is never a row of the block.
+        assert status.IDENTITY_SOURCE_KEY not in block
+        assert status.FROM_ROUTER_ONLY not in block
 
     def test_the_block_says_its_values_are_the_sample_s_own_bytes(self, tmp_path: Path) -> None:
         identity = _sample_identity(_state(_marked(), _sample(tmp_path)))
