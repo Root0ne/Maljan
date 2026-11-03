@@ -1204,10 +1204,11 @@ class SpendMeter:
             and usage.get("cache_write_input_tokens")
             and "cache_write_1h_input_tokens" not in usage
         ):
-            # A cache write whose split by lifetime was not reported (a
-            # stream's opening event carries it, ``token_ledger.turn_usage``)
-            # is settled at the hour's price where the provider may write for
-            # an hour: the dearer figure, never under the cost.
+            # A cache write whose split by lifetime was reported nowhere (a
+            # stream's opening event carries it, ``token_ledger.turn_usage``,
+            # which then states the hour's share, zero included) is settled at
+            # the hour's price where the provider may write for an hour: the
+            # dearer figure, never under the cost.
             usage = {**usage, "cache_write_1h_input_tokens": usage["cache_write_input_tokens"]}
         # The source is the tier's the call was priced at: a long prompt is
         # not said to be priced at the short prompt's figures.

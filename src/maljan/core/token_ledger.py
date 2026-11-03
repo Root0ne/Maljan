@@ -96,8 +96,12 @@ def _cached_input_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
     return _count(raw.get("prompt_cache_hit_tokens"))
 
 
-def _cache_writes_of(usage: dict[str, Any]) -> tuple[int, int] | None:
+def _cache_writes_of(usage: dict[str, Any]) -> tuple[int, int | None] | None:
     """``(input tokens written to the prompt cache, of them for an hour)``, or ``None`` unreported.
+
+    The hour's share is ``None`` where no split by lifetime was reported, and
+    a number, zero included, where one was: a split stating no hour's write
+    is a five minutes' write, never one left to be guessed.
 
     LangChain's ``input_token_details`` as langchain-anthropic fills it from
     Anthropic's usage: ``cache_creation`` (``cache_creation_input_tokens``),
@@ -115,7 +119,10 @@ def _cache_writes_of(usage: dict[str, Any]) -> tuple[int, int] | None:
     if whole is None and five is None and hour is None:
         return None
     split = (five or 0) + (hour or 0)
-    return max(whole or 0, split), min(hour or 0, max(whole or 0, split))
+    total = max(whole or 0, split)
+    if five is None and hour is None:
+        return total, None
+    return total, min(hour or 0, total)
 
 
 def _reasoning_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
@@ -135,7 +142,7 @@ def _reasoning_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
     return None
 
 
-def _opening_cache_writes(response: Any) -> tuple[int, int] | None:
+def _opening_cache_writes(response: Any) -> tuple[int, int | None] | None:
     """The cache writes a stream's opening event reported, split by lifetime, or ``None``."""
     from maljan.llm.generation_rate import PROMPT_USAGE_KEY
 
@@ -166,20 +173,22 @@ def turn_usage(response: Any) -> dict[str, Any] | None:
     if cached is not None:
         out["cached_input_tokens"] = min(cached, out["input_tokens"])
     writes = _cache_writes_of(usage)
-    if writes is not None and not writes[1]:
+    if writes is not None and writes[1] is None:
         # A streamed Anthropic answer's closing usage carries no split of its
         # cache writes by lifetime; the opening event's does, kept on the
-        # answer (``generation_rate.PROMPT_USAGE_KEY``): an hour's writes are
-        # settled at the hour's price.
+        # answer (``generation_rate.PROMPT_USAGE_KEY``): each write is settled
+        # at its own lifetime's price, five minutes' included.
         opened = _opening_cache_writes(response)
-        if opened is not None and opened[1]:
+        if opened is not None and opened[1] is not None:
             whole = max(writes[0], opened[0])
             writes = (whole, min(opened[1], whole))
     if writes is not None:
         room = out["input_tokens"] - out.get("cached_input_tokens", 0)
         written = min(writes[0], room)
         out["cache_write_input_tokens"] = written
-        if writes[1]:
+        if writes[1] is not None:
+            # Stated wherever a split was reported, zero included, so a write
+            # reported as five minutes' is never settled at the hour's price.
             out["cache_write_1h_input_tokens"] = min(writes[1], written)
     reasoning = _reasoning_of(usage, raw)
     if reasoning is not None:

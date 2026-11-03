@@ -370,6 +370,76 @@ class TestOnTheWire:
         # A call is admitted at the hour's write price while the pack's entry may live an hour.
         assert SpendMeter.from_settings(settings).writes_hour_caches(MODEL) is True
 
+    @staticmethod
+    def _settled(monkeypatch: Any, usage: dict[str, Any], *, streaming: bool) -> float:
+        """What the shipped settings' meter settles one answer reporting ``usage`` at."""
+        from maljan.core.spend import SpendMeter
+        from maljan.core.token_ledger import turn_usage
+
+        wire = Wire(
+            lambda _body: message([{"type": "text", "text": "ok"}], stop="end_turn", usage=usage)
+        )
+        install(monkeypatch, wire)
+        settings = Settings(
+            _env_file=None,
+            llm={
+                "provider": "anthropic",
+                "expert_model": MODEL,
+                "anthropic": {
+                    "api_key": "test-anthropic-key",
+                    "expert_model": MODEL,
+                    "judge_model": MODEL,
+                },
+            },
+        )
+        extra = {"streaming": True, "stream_usage": True} if streaming else {}
+        model = AnthropicProvider(settings).build_model(MODEL, 0.1, max_tokens=1024, **extra)
+        answer = model.invoke([HumanMessage(content="hi")])
+        assert bool(wire.bodies[0].get("stream")) is streaming
+        charged = turn_usage(answer)
+        assert charged is not None
+        meter = SpendMeter.from_settings(settings)
+        assert meter.writes_hour_caches(MODEL) is True
+        meter.settle(charged, MODEL)
+        return meter.spent()
+
+    def _five_minutes(self, written: int) -> dict[str, Any]:
+        return {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": written,
+            "cache_creation": {
+                "ephemeral_5m_input_tokens": written,
+                "ephemeral_1h_input_tokens": 0,
+            },
+        }
+
+    def test_a_streamed_five_minutes_write_is_charged_at_the_five_minutes_price(
+        self, monkeypatch: Any
+    ) -> None:
+        written = 2_000
+        spent = self._settled(monkeypatch, self._five_minutes(written), streaming=True)
+        assert spent == pytest.approx((10 * 0.10 + written * 0.125 + 5 * 0.50) / 1_000_000)
+
+    def test_a_whole_answer_s_split_with_no_hour_is_charged_at_the_five_minutes_price(
+        self, monkeypatch: Any
+    ) -> None:
+        written = 2_000
+        spent = self._settled(monkeypatch, self._five_minutes(written), streaming=False)
+        assert spent == pytest.approx((10 * 0.10 + written * 0.125 + 5 * 0.50) / 1_000_000)
+
+    def test_a_write_split_nowhere_is_settled_at_the_hour_s_price(self, monkeypatch: Any) -> None:
+        written = 2_000
+        usage = {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": written,
+        }
+        spent = self._settled(monkeypatch, usage, streaming=True)
+        assert spent == pytest.approx((10 * 0.10 + written * 0.20 + 5 * 0.50) / 1_000_000)
+
     def test_off_leaves_the_turn_whole(self, monkeypatch: Any) -> None:
         (body,) = self._bodies(monkeypatch, pack_cache_ttl="off")
         content = body["messages"][0]["content"]
