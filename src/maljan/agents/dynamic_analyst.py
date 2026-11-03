@@ -25,6 +25,7 @@ from maljan.agents.prompt_fragments import (
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_disputes
 from maljan.core.logger import logger
+from maljan.pipeline.debate_facts import peer_report_heading
 from maljan.schemas.isr_models import AgentISR
 
 # The provider- and platform-independent head of the dynamic system prompt: it
@@ -280,7 +281,8 @@ class DynamicAnalyst(BaseAnalyst):
 
         peer_isr_summaries = (
             "\n\n".join(
-                f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
+                f"{peer_report_heading(name, report)}\n{report}"
+                for name, report in peer_reports.items()
             )
             or "No peer reports available."
         )

@@ -34,6 +34,7 @@ from maljan.agents.prompt_fragments import (
     tools_statement,
 )
 from maljan.agents.registry import register_agent
+from maljan.pipeline.debate_facts import peer_report_heading
 from maljan.providers.base import (
     StaticJobContext,
     absent_provider_fragment,
@@ -696,7 +697,8 @@ class StaticAnalyst(BaseAnalyst):
 
         peer_isr_summaries = (
             "\n\n".join(
-                f"{name.upper()} REPORT:\n{report}" for name, report in peer_reports.items()
+                f"{peer_report_heading(name, report)}\n{report}"
+                for name, report in peer_reports.items()
             )
             or "No peer reports available."
         )

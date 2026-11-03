@@ -14,7 +14,10 @@ parts of :data:`core.input_meter.PARTS` in **characters**, with the input
 tokens the provider reported for the same requests beside them where it
 reported any. ``calls`` is each agent's model calls as the summary's ``tokens``
 block states them, so an agent whose calls the meter did not measure is named
-rather than left out.
+rather than left out. ``peer_reports``, where a revision round named its
+analysts, is per round how many peer reports its revisions were shown as
+excerpts of the contested claims and how many whole, with the characters of
+each and of the excerpted reports whole (``debate_facts.peers_shown_record``).
 
 ``uncited`` is the evidence nothing cites: of the ledger entries whose tool
 ran and answered (a repeat and a guard's answer are not evidence of their own,
@@ -157,7 +160,17 @@ def inputs_record(container: Any, tokens: Mapping[str, Any] | None = None) -> di
     except Exception:  # noqa: BLE001 — a meter that cannot be read leaves the part out
         return None
     named = [row for row in rows if str(row.get("agent") or "").strip()]
-    return {"unit": "characters", "loops": named, "calls": _ledger_calls(tokens)}
+    record: dict[str, Any] = {"unit": "characters", "loops": named, "calls": _ledger_calls(tokens)}
+    # Per revision round, the peer reports cut to the claims the contested
+    # lines name and the ones shown whole, with their sizes.
+    peers_of = getattr(meter, "peer_rows", None)
+    try:
+        peers = list(peers_of()) if callable(peers_of) else []
+    except Exception:  # noqa: BLE001 — rows that cannot be read leave the part out
+        peers = []
+    if peers:
+        record["peer_reports"] = peers
+    return record
 
 
 def _field(entry: Any, name: str) -> Any:
@@ -804,6 +817,17 @@ def _input_lines(inputs: Mapping[str, Any]) -> list[str]:
     if unmeasured:
         lines.append(
             "Not measured by part (model calls in the token ledger): " + ", ".join(unmeasured) + "."
+        )
+    peers = [row for row in inputs.get("peer_reports") or [] if isinstance(row, Mapping)]
+    if peers:
+        excerpted = sum(_int(row.get("excerpted")) for row in peers)
+        whole = sum(_int(row.get("whole")) for row in peers)
+        lines.append(
+            f"Peer reports shown to the named revisions: {_count(excerpted, 'excerpt')} of "
+            f"{sum(_int(row.get('excerpt_chars')) for row in peers):,} characters, for reports of "
+            f"{sum(_int(row.get('excerpted_whole_chars')) for row in peers):,} characters whole, "
+            f"and {_count(whole, 'whole report')} of "
+            f"{sum(_int(row.get('whole_chars')) for row in peers):,} characters."
         )
     if lines:
         lines.append(
