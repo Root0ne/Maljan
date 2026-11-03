@@ -26,6 +26,7 @@ from maljan.pipeline.validation import EntryTexts
 from maljan.reporting.models import (
     EvidenceSection,
     FileHashes,
+    KeyFinding,
     MalwareReport,
     SampleIdentity,
     TechnicalAnalysis,
@@ -541,23 +542,14 @@ def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> Non
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
     assert report.technical_analysis.analyst_limitations.body == body
     assert done.summary["not_applied"] == 1
-    # Naming decompiling names every decompile a later call redid: the batch one
-    # (ev_0168 by ev_0171) and the one of 0x7b80 (ev_0187 by ev_0191).
-    only_batch = (
+    # The clause that names the batch decompile cites the call that redid it: it
+    # accounts for decompiling, and names no other decompile.
+    true = (
         "The emulation call by candidate names failed [ev_0122]; the batch decompile that "
         "failed was redone by a later call, so the dispatch routines' control flow was read "
         "from its listing [ev_0025][ev_0171]."
     )
-    row = _row(HAIKU8_SENTENCE, [emulation, batch], only_batch)
-    done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
-    assert done.summary["not_applied"] == 1
-    true = (
-        "The emulation call by candidate names failed [ev_0122]; the decompiles that failed "
-        "were redone by later calls, so the dispatch routines' control flow was read from "
-        "their decompiled code [ev_0025][ev_0171][ev_0191]."
-    )
-    single = next(i for i, p in facts.items() if i.startswith("failed.") and "ev_0187" in p.cites)
-    row = _row(HAIKU8_SENTENCE, [emulation, batch, single], true)
+    row = _row(HAIKU8_SENTENCE, [emulation, batch], true)
     done, _ = _ask(report, ledger, {"sentences": [row]})
     assert done.summary["rewritten"] == 1
     assert report.technical_analysis.analyst_limitations.body == body.replace(HAIKU8_SENTENCE, true)
@@ -568,6 +560,69 @@ def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> Non
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
     assert report.technical_analysis.analyst_limitations.body == body
     assert done.summary["not_applied"] == 1
+
+
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        # A1: "for good" in the emulation's clause denies no redo of a decompile.
+        "The emulation call by candidate names failed for good [ev_0122]; the batch decompile "
+        "that failed was redone by a later call, so the dispatch routines were read from its "
+        "output [ev_0025][ev_0171].",
+        # A2: "no later call redid" the emulation, in its own clause.
+        "No later call redid the emulation by candidate names [ev_0122]; the batch decompile "
+        "that failed was answered by a later call [ev_0025][ev_0171].",
+        # A3: the clause naming the batch decompile cites the call that redid it.
+        "The emulation call by candidate names failed [ev_0122]; the batch decompile that "
+        "failed was answered by a later call [ev_0025][ev_0171].",
+        # B1: a decompiler listing of 0x6f48, the call that produced it cited.
+        "The emulation call by candidate names failed [ev_0122]; the control flow of 0x6f48 "
+        "was read from the decompiler listing a later call produced [ev_0025][ev_0171].",
+    ],
+)
+def test_a_denial_or_a_kind_word_counts_in_its_own_clause(rewrite: str) -> None:
+    report, ledger = _haiku8()
+    sources = ["failed.2", "failed.3"]
+    facts = _by_id(report, ledger)
+    assert "ev_0122" in facts["failed.2"].cites and "ev_0168" in facts["failed.3"].cites
+    done, _ = _ask(report, ledger, {"sentences": [_row(HAIKU8_SENTENCE, sources, rewrite)]})
+    assert done.summary["rewritten"] == 1
+    assert rewrite in report.technical_analysis.analyst_limitations.body
+
+
+def test_a_section_5_sentence_saying_a_comparison_fails_is_put_in() -> None:
+    # The check on the other passages counts only what a rewrite adds; a section 5
+    # rewrite is the platform's own, on a fact with a clause of its own.
+    report, ledger = _haiku8()
+    facts = _by_id(report, ledger)
+    sentence = (
+        "The comparison therefore fails, the write is skipped, and 0x6f48 returns 0 [ev_0082]."
+    )
+    assert sentence in facts["payloads"].text
+    row = {
+        "passage": "payloads",
+        "sentence": sentence,
+        "sources": ["unread.5"],
+        "decision": "rewrite",
+        "rewrite": "The comparison fails, so the write is skipped and 0x6f48 returns 0 [ev_0082].",
+    }
+    done, _ = _ask(report, ledger, {"sentences": [row]})
+    assert done.summary["rewritten"] == 1
+    assert FAILURE_REDONE_CODE not in [r["code"] for r in done.tally.unresolved]
+
+
+def test_a_claim_led_rewrite_keeping_its_sentence_s_failure_is_put_in() -> None:
+    # The delta check flags only a failure or a redone call the rewrite adds.
+    report = _report()
+    report.key_findings = [
+        KeyFinding(text="The decompiler failed on the loader [ev_0001].", evidence_ids=["ev_0001"])
+    ]
+    check = _by_id(report, _ledger())["key_findings.1"].sourced_check
+    assert check is not None
+    kept = "The decompiler failed on the loader routine [ev_0001]."
+    assert check(kept, [], "The decompiler failed on the loader [ev_0001].") == []
+    added = "The loader ran; the decompiler failed on it [ev_0001]."
+    assert check(added, [], "The loader ran [ev_0001].")
 
 
 @pytest.mark.parametrize("source", ["failed", "open"])
