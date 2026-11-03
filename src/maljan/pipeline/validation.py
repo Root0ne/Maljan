@@ -1340,19 +1340,33 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
     the vendored data writes for the parent itself (:func:`technique_vocabulary`),
     and in no more technique families' names than the rarest family stem of the
     word it would set aside ("strings XOR-encoded; not packed": "encod", two
-    families, beside "pack", two). Read from the catalogue's names and the
-    vendored data, for every parent and child, with no number of its own."""
+    families, beside "pack", two). The rarest stem of the technique's own name
+    affirms whatever its count when it is written as the act
+    (:func:`_writes_the_act`) and no negating word follows it in its clause
+    (:func:`_negated_after`): "strings obfuscated; not packed" ("obfusc", three
+    families, beside "pack", two), never "the input box" (the bare stem) or
+    "obfuscation is unlikely"; its commoner ones ("file", "inform") never
+    affirm by that alone. Read from the catalogue's names and the vendored
+    data, for every parent and child, with no number of its own."""
     own, others = _family_name_stems(technique_id)
     families = _name_stem_families()
     parent = "." not in str(technique_id or "")
     affirmed: list[int] = []
+    own_rarest_affirmed = False
     if parent:
+        own_rarest = min((families.get(stem, 0) for stem in own), default=0)
         text = _read_dashes(text)
         vocabulary = technique_vocabulary(technique_id)
         reader: _NegationReader | None = None
         negated: Callable[[int], bool] | None = None
         for match in re.finditer(r"[A-Za-z]{3,}", text):
             stem = _stem(match.group(0))
+            if stem not in own and stem not in others:
+                # "created" under Create Account: a silent-"e" verb's inflection
+                # meets only the rarest stem of the technique's own name.
+                silent = _silent_e_stem(match.group(0))
+                if silent in own and families.get(silent, 0) == own_rarest:
+                    stem = silent
             if (stem not in own and stem not in others) or stem not in vocabulary:
                 continue
             reader = reader or _NegationReader(text)
@@ -1361,6 +1375,12 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
                 match.start()
             ):
                 affirmed.append(families.get(stem, 0))
+                own_rarest_affirmed |= (
+                    stem in own
+                    and families.get(stem, 0) == own_rarest
+                    and _writes_the_act(match.group(0), stem)
+                    and not _negated_after(text, match.start(), match.end())
+                )
         if not affirmed:
             return lambda _mention: False
 
@@ -1371,9 +1391,64 @@ def _another_member_s_word(technique_id: str, text: str) -> Callable[[str], bool
         if not parent:
             return True
         rarest = min(families.get(stem, 0) for stem in stems & others)
-        return any(count <= rarest for count in affirmed)
+        return own_rarest_affirmed or any(count <= rarest for count in affirmed)
 
     return another_s
+
+
+# The endings that write a stem as an act or its doing: "obfuscated",
+# "obfuscation", "injecting". A stem written bare ("input", "indicator") or
+# as a plural names a thing, not the technique's act.
+_ACT_ENDINGS = frozenset(
+    {"ed", "ing", "ings", "ion", "ions", "ation", "ations", "ated", "ating", "ates"}
+)
+# The inflection of ``_SILENT_E_INFLECTIONS`` that writes a silent-"e" verb's
+# act ("created", "archived"). Its "-s" form is left out: on a name's noun it
+# is the plural ("images", "resources"), a thing and not the act.
+_SILENT_E_ACT_ENDINGS = ("d",)
+# The words after a word in its clause that deny it ("obfuscation is
+# unlikely", "obfuscation-free", "obfuscated strings: none"), beside the
+# negations (``_NEGATIONS``).
+_FOLLOWING_NEGATIONS = frozenset({"free", "none", "unlikely", "absent"})
+# Where a clause that follows a word ends; a colon does not end it, so
+# "obfuscated strings: none" is one clause.
+_FOLLOWING_CLAUSE_END_RE = re.compile(
+    r"[.;!?,(\n]|\b(?:and|but|while|whereas|although|though)\b", re.IGNORECASE
+)
+# "free of" or "free from" just before a word denies it ("free of obfuscation").
+_FREE_OF_BEFORE_RE = re.compile(r"\bfree\s+(?:of|from)\s+(?:\w+\s+)?$", re.IGNORECASE)
+
+
+def _writes_the_act(word: str, stem: str) -> bool:
+    """Whether ``word`` writes ``stem`` with one of the ``_ACT_ENDINGS``, or, for
+    a stem that ends in a silent "e", with one of ``_SILENT_E_ACT_ENDINGS``
+    ("created", "archived")."""
+    lowered = word.lower()
+    if not lowered.startswith(stem):
+        return False
+    rest = lowered[len(stem) :]
+    return rest in _ACT_ENDINGS or (stem.endswith("e") and rest in _SILENT_E_ACT_ENDINGS)
+
+
+def _silent_e_stem(word: str) -> str:
+    """The silent-"e" verb ``word`` writes as its act ("created": "create"), at
+    least four letters before the "e" as :func:`_inflected_forms` reads it, or
+    ``""``."""
+    lowered = word.lower()
+    if lowered[-1:] in _SILENT_E_ACT_ENDINGS and re.fullmatch(r"[a-z]{4,}e", lowered[:-1]):
+        return lowered[:-1]
+    return ""
+
+
+def _negated_after(text: str, start: int, end: int) -> bool:
+    """Whether a negating word follows ``text[start:end]`` in its clause, or
+    "free of" stands just before it."""
+    if _FREE_OF_BEFORE_RE.search(text[:start]):
+        return True
+    tail = text[end:]
+    cut = _FOLLOWING_CLAUSE_END_RE.search(tail)
+    words = re.findall(r"[A-Za-z]+", tail[: cut.start()] if cut else tail)
+    return bool({word.lower() for word in words} & (_NEGATIONS | _FOLLOWING_NEGATIONS))
 
 
 CLAIM_DOES_NOT_DESCRIBE_CODE = "attck.claim_does_not_describe"
@@ -7231,6 +7306,73 @@ _STATE_WITHHELD_RE = re.compile(
     r"|kept\s+out\b|excluded\b)",
     re.IGNORECASE,
 )
+# A named state's opening negation.
+_STATE_NEGATION_OPENING_RE = re.compile(r"^\W*(?:no|not|never)\b", re.IGNORECASE)
+# A participle an opening negation governs to state a state ("not attributed",
+# "never seen"): a regular one, or one of the common irregular ones, named
+# whole (an "-en" or "-wn" ending alone also ends "even", "often", "own").
+_STATE_PARTICIPLE_RE = re.compile(
+    r"[a-z]{2,}ed|seen|shown|kept|held|sent|found|taken|written|made|built|put|set"
+    r"|done|run|left|drawn|chosen|bought|meant|told",
+    re.IGNORECASE,
+)
+# The words after an opening negation, or after its "yet", that leave the
+# state undecided ("not decided", "not yet decided", "not clear", "not
+# confirmed", "not given"): plain English words of indecision, or of a check
+# not yet made. Such a state says nothing of the table's, and the model is
+# asked.
+_STATE_UNDECIDED_WORDS = frozenset(
+    {
+        "decided",
+        "determined",
+        "known",
+        "sure",
+        "clear",
+        "certain",
+        "settled",
+        "resolved",
+        "assessed",
+        "evaluated",
+        "confirmed",
+        "verified",
+        "specified",
+        "stated",
+        "established",
+        "given",
+        "provided",
+        "reviewed",
+        "checked",
+        "finalized",
+        "investigated",
+    }
+)
+# The platform's own words for what it publishes and why, which an opening
+# negation states a state with ("not an IOC", "not in the indicator table",
+# "not for publication", "no attribution", "no process attributed"): read in
+# the first two words after one of ``_STATE_PUBLISH_LEADS``.
+_STATE_PUBLISH_WORDS = frozenset(
+    {
+        "publication",
+        "public",
+        "ioc",
+        "iocs",
+        "indicator",
+        "indicators",
+        "table",
+        "attributed",
+        "attribution",
+    }
+)
+# The words that may stand between the negation and a publish word, one lead
+# at most: an article, "in the", "part of the", "for".
+_STATE_PUBLISH_LEADS = (
+    ("part", "of", "the"),
+    ("in", "the"),
+    ("a",),
+    ("an",),
+    ("the",),
+    ("for",),
+)
 # A named state that says the value is published.
 _STATE_AFFIRMS_RE = re.compile(r"^\W*(?:yes|published)\b", re.IGNORECASE)
 # The platform's own words for a value it does not publish, written by the model.
@@ -7254,7 +7396,7 @@ _KEPT_CLAIM_RE = re.compile(
 # A form of "publish" that is not "unpublished".
 _PUBLISH_WORD_RE = re.compile(r"(?<![a-z])publish(?:ed|es)?\b", re.IGNORECASE)
 # A named state's own "not published" opening: the one "published" it may carry.
-_NOT_PUBLISHED_OPENING_RE = re.compile(r"^\W*(?:not|never)\s+published\b", re.IGNORECASE)
+_NOT_PUBLISHED_OPENING_RE = re.compile(r"^\W*(?:not|never)\s+(?:yet\s+)?published\b", re.IGNORECASE)
 # The words that withhold a value, each read for a negation just before it.
 _WITHHOLDING_RE = re.compile(r"withheld|kept\s+out|excluded|un\w*published", re.IGNORECASE)
 # How many words before a withholding word a negation turns it around.
@@ -7316,14 +7458,23 @@ def _unnegated(pattern: re.Pattern[str], text: str) -> bool:
 def _reads_withheld(said: str) -> bool:
     """Whether a named state reads as not published, and nothing in it says otherwise.
 
-    It opens with a negation or a withholding word (``_STATE_WITHHELD_RE``);
-    it names "publish" nowhere but in its own "not published" opening; and no
+    It opens with a negation or a withholding word (``_STATE_WITHHELD_RE``), a
+    negation that stands bare ("no", "no;", "no —") or governs a participle
+    that states a state ("not attributed", "never seen", "not yet
+    attributed") or one of the platform's publish words ("not an IOC", "not in
+    the indicator table", ``_STATE_PUBLISH_WORDS``), never another article,
+    noun or adverb, or a word of indecision ("not a concern", "not yet
+    decided", ``_STATE_UNDECIDED_WORDS``);
+    it names "publish" nowhere but in its own "not (yet) published" opening; and no
     negation stands within ``_WITHHOLDING_NEGATION_WINDOW`` words before a
     withholding word ("not withheld", "no longer withheld"), the opening's own
     negation aside ("never published; withheld"). When in doubt it is no state, and the
     model is asked.
     """
     if not _STATE_WITHHELD_RE.search(said):
+        return False
+    opening = _STATE_NEGATION_OPENING_RE.match(said)
+    if opening is not None and not _negation_states_a_state(said[opening.end() :]):
         return False
     rest = _NOT_PUBLISHED_OPENING_RE.sub(" ", said, count=1)
     if _PUBLISH_WORD_RE.search(rest):
@@ -7333,6 +7484,36 @@ def _reads_withheld(said: str) -> bool:
         if _NEGATIONS & set(before[-_WITHHOLDING_NEGATION_WINDOW:]):
             return False
     return True
+
+
+def _negation_states_a_state(after: str) -> bool:
+    """Whether what follows a named state's opening negation leaves it a state.
+
+    The negation stands bare (nothing, or a mark, follows it) or governs a
+    participle that is no word of indecision; after "yet" the word that
+    follows is read the same way ("not yet attributed" is a state, "not yet
+    decided" is not). A negation of the platform's own publish words is a
+    state too ("not an IOC", "not in the IOC table", "no process
+    attributed", ``_STATE_PUBLISH_WORDS``).
+    """
+    tail = after.lstrip()
+    if not tail or not tail[0].isalnum():
+        return True
+    words = [word.lower() for word in re.findall(r"[A-Za-z]+", tail)[:5]]
+    if words and words[0] == "yet":
+        words = words[1:]
+    if not words or words[0] in _STATE_UNDECIDED_WORDS:
+        return False
+    if _STATE_PARTICIPLE_RE.fullmatch(words[0]) is not None:
+        return True
+    # A publish word left undecided is no state ("no IOC yet decided").
+    if _STATE_UNDECIDED_WORDS & set(words[:4]):
+        return False
+    for lead in _STATE_PUBLISH_LEADS:
+        if tuple(words[: len(lead)]) == lead:
+            words = words[len(lead) :]
+            break
+    return bool(_STATE_PUBLISH_WORDS & set(words[:2]))
 
 
 def _restates_reason(after: str, answer: str, *, slack: float = 0.0) -> bool:

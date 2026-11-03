@@ -71,6 +71,100 @@ class TestAStatedState:
     def test_a_state_that_agrees_with_the_table_raises_nothing(self, written: str) -> None:
         assert _found(f"The capture holds {ADDRESS} {written} with two flows [ev_0031].") == []
 
+    @pytest.mark.parametrize(
+        "written",
+        [
+            "(publish state: no)",
+            "(publish state: no; the capture names no process)",
+            "(publish state: no — the capture names no process)",
+            "(publish state: not attributed to the sample's processes in the sandbox)",
+            "(publish state: not published, the capture names no process)",
+            "(publish state: never seen in the sample's process tree)",
+            # A common irregular participle.
+            "(publish state: not drawn from the sample's processes)",
+            "(publish state: not made by the sample's processes)",
+            "(publish state: not built into the indicator table)",
+            "(publish state: not put in the table)",
+            "(publish state: not set by the sample)",
+            "(publish state: not done by the sample)",
+            "(publish state: not run by the sample)",
+            "(publish state: not left in the table)",
+            "(publish state: not chosen)",
+            "(publish state: not bought)",
+            "(publish state: not meant for the table)",
+            "(publish state: not told apart from other hosts)",
+            # A negation of the platform's own publish words.
+            "(publish state: not an IOC)",
+            "(publish state: not an indicator)",
+            "(publish state: no IOC)",
+            "(publish state: not in the IOC table)",
+            "(publish state: not part of the indicator table)",
+            "(publish state: not for publication)",
+            "(publish state: no publication)",
+            "(publish state: not public)",
+            "(publish state: no process attributed)",
+            "(publish state: no attribution)",
+            # "yet" is read past: the word after it decides.
+            "(publish state: not yet attributed to the sample in the capture)",
+            "(publish state: not yet published)",
+        ],
+    )
+    def test_a_bare_negation_or_one_of_a_state_s_participle_is_a_stated_state(
+        self, written: str
+    ) -> None:
+        assert _found(f"The capture holds {ADDRESS} {written} with two flows [ev_0031].") == []
+
+    @pytest.mark.parametrize(
+        "written",
+        [
+            "(publish state: not decided)",
+            "(publish state: not yet decided)",
+            "(publish state: not yet)",
+            "(publish state: not yet clear)",
+            "(publish state: not determined)",
+            "(publish state: not known)",
+            "(publish state: not sure)",
+            "(publish state: not clear)",
+            "(publish state: not a concern)",
+            "(publish state: no concern here)",
+            "(publish state: never mind)",
+        ]
+        + [
+            f"(publish state: not {word})"
+            for word in (
+                "confirmed",
+                "verified",
+                "specified",
+                "stated",
+                "established",
+                "given",
+                "provided",
+                "reviewed",
+                "checked",
+                "finalized",
+                "investigated",
+            )
+        ]
+        + [
+            "(publish state: not yet confirmed)",
+            # A publish word left undecided.
+            "(publish state: no IOC yet decided)",
+            "(publish state: not an indicator yet confirmed)",
+            # An answer that is not a state; a real reason is still read
+            # (``test_the_table_s_reason_restated_is_a_stated_state``).
+            "(publish state: not applicable)",
+            "(publish state: not available)",
+            "(publish state: no data)",
+            "(publish state: no evidence of sample traffic)",
+        ],
+    )
+    def test_a_negation_of_an_article_a_noun_or_indecision_is_asked_about(
+        self, written: str
+    ) -> None:
+        (found,) = _found(f"The capture holds {ADDRESS} {written} with two flows [ev_0031].")
+
+        assert found.code == UNPUBLISHED_VALUE_CODE
+
     def test_the_table_s_reason_restated_is_a_stated_state(self) -> None:
         body = f"It holds {ADDRESS}:53 (the capture names no process behind these flows)."
 
