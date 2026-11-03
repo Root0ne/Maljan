@@ -487,13 +487,15 @@ def passages_of(
     limitations, limitation_facts, limited = _limitation_passages(report, held, found, facts)
     if limitations:
         # A false failure is wrong in any section: while the limitation facts
-        # are shown, a rewrite of any other passage adds none.
-        # A section 5 rewrite is the platform's own (``_qualified``), on a fact
-        # with a clause of its own, which no limitation fact has: it adds none.
+        # are shown, a rewrite of any other passage adds none. A section 5
+        # rewrite is the platform's own (``_qualified``), whose fact clauses
+        # write kind words ("decompiled or disassembled"): it is read by its
+        # citations alone.
         added = _failure_added_check(limited)
-        for passage in uncoded:
+        cited = _failure_cited_check(limited)
+        for passage in (*coded, *uncoded):
             if _writable(passage) and passage.sourced_check is None:
-                passage.sourced_check = added
+                passage.sourced_check = cited if passage.kind == SECTION_5 else added
     uncoded.extend(limitations)
     facts.extend(limitation_facts)
     return [*facts, *coded, *debate, *uncoded]
@@ -1029,6 +1031,7 @@ def _stale_calls(
 
     sourced_stems = set().union(*(_stems_of(call) for call in sourced)) if sourced else set()
     stale: list[FailedCall] = []
+    before: list[FailedCall] = []
     for clause in _clauses_of(text):
         cited = entry_ids_in(clause)
         named = [
@@ -1054,14 +1057,42 @@ def _stale_calls(
             pool = of_kind or [c for c in redone if stem in _stems_of(c)]
             named.extend(c for c in pool if c.redone and c not in named)
         denied = _denies_redo(clause)
+        if denied and not named:
+            # A denial of its own ("; it was never redone", ". It never
+            # succeeded") is about the calls the clause before it named.
+            stale.extend(call for call in before if call not in stale)
         for call in named:
             if (denied or not _redo_cited(call)) and call not in stale:
                 stale.append(call)
+        before = named
     if broad:
         for call in sourced:
             if call.redone and not _redo_cited(call) and call not in stale:
                 stale.append(call)
     return stale
+
+
+def _failure_cited_check(
+    failed: Sequence[FailedCall],
+) -> Callable[[str, Sequence[str], str], list[Violation]]:
+    """What a section 5 rewrite is held to while the limitation facts are shown: by its
+    citations alone, it cites no failed call a later call redid that the sentence it
+    replaces did not cite, unless it cites a call that redid it. No kind word and no
+    address is read: the platform's own fact clauses write them."""
+    redone = [call for call in failed if call.redone]
+
+    def _check(rewrite: str, sources: Sequence[str], sentence: str = "") -> list[Violation]:
+        cited, had = entry_ids_in(rewrite), entry_ids_in(sentence)
+        stale = [
+            call
+            for call in redone
+            if call.entry.lower() in cited
+            and call.entry.lower() not in had
+            and not cited & {by.lower() for by in call.redone_by}
+        ]
+        return _failure_redone_violation(stale) if stale else []
+
+    return _check
 
 
 def _failure_redone_violation(stale: Sequence[FailedCall]) -> list[Violation]:

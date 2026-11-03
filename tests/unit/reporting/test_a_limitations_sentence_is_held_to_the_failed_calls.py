@@ -590,6 +590,59 @@ def test_a_denial_or_a_kind_word_counts_in_its_own_clause(rewrite: str) -> None:
     assert rewrite in report.technical_analysis.analyst_limitations.body
 
 
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        # D1, D2: a denial written as a clause or a sentence of its own is about the
+        # call the clause before it named.
+        "The batch decompile failed [ev_0025][ev_0168][ev_0171]; it was never redone, so the "
+        "control flow was read from the function index.",
+        "The batch decompile failed [ev_0025][ev_0168][ev_0171]. It never succeeded, so the "
+        "control flow was read from the function index.",
+        # D3: a denial in the clause that names the call.
+        "The batch decompile failed and, although ev_0171 exists, it was not redone "
+        "[ev_0025][ev_0168][ev_0171].",
+    ],
+)
+def test_a_denial_of_its_own_is_about_the_call_before_it(rewrite: str) -> None:
+    report, ledger = _haiku8()
+    body = report.technical_analysis.analyst_limitations.body
+    row = _row(HAIKU8_SENTENCE, ["failed.3"], rewrite)
+    done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
+    assert report.technical_analysis.analyst_limitations.body == body
+    assert FAILURE_REDONE_CODE in [r["code"] for r in done.tally.unresolved]
+
+
+def test_a_section_5_rewrite_is_read_by_its_citations() -> None:
+    report, ledger = _haiku8()
+    facts = _by_id(report, ledger)
+    check = facts["payloads"].sourced_check
+    assert check is not None
+    sentence = _sentences_of(facts["payloads"].text)[0]
+    said = sentence.rstrip(".").rstrip() + "; the batch decompile of 0x6f48 failed [ev_0168]."
+    # Citing the redone call it did not cite, without the call that redid it.
+    assert [v.code for v in check(said, ["answered.2"], sentence)] == [FAILURE_REDONE_CODE]
+    # The platform's own clause cites both, and its "decompiled or disassembled"
+    # is no kind word here.
+    qualified = (
+        sentence.rstrip(".").rstrip() + "; a later call for offset 0x6f48 answered it, so the "
+        "address was not left unread (decompiled or disassembled) [ev_0168][ev_0171]."
+    )
+    assert check(qualified, ["answered.2"], sentence) == []
+    # A section 5 rewrite on a fact is the platform's: the model's words never
+    # reach the report, only the fact's own clause.
+    row = {
+        "passage": "payloads",
+        "sentence": sentence,
+        "sources": ["answered.2"],
+        "decision": "rewrite",
+        "rewrite": said,
+    }
+    _ask(report, ledger, {"sentences": [row]})
+    body = report.technical_analysis.payloads.body
+    assert "the batch decompile of 0x6f48 failed" not in body
+
+
 def test_a_section_5_sentence_saying_a_comparison_fails_is_put_in() -> None:
     # The check on the other passages counts only what a rewrite adds; a section 5
     # rewrite is the platform's own, on a fact with a clause of its own.
