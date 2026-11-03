@@ -2805,12 +2805,13 @@ def _resolved_launch(cfg: Any) -> dict[str, Any] | None:
     written as a path that names an existing file or directory (an
     interpreter's script), or an option's value after ``=`` that does
     (``--script=./x.py``, keyed ``<index>=``), as its real path. An argument
-    that names nothing here is read as written.
+    that names nothing here is read as written. Read without the launch's
+    warnings, which the launch itself says when it starts the server.
     """
     from maljan.agents.subprocess_env import LaunchCwdError, stdio_launch
 
     try:
-        launch = stdio_launch(cfg)
+        launch = stdio_launch(cfg, say=False)
         out: dict[str, Any] = {}
         base = Path(launch.cwd) if launch.cwd else Path.cwd()
         if launch.cwd:

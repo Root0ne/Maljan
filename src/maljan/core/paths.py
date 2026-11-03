@@ -95,7 +95,8 @@ def resolve_mcp_args(args: list[str]) -> list[str]:
 def mcp_paths_leaving_project(values: list[str]) -> list[str]:
     """The ``values`` written as a relative path that leaves the project, which are not rooted.
 
-    ``../x``, ``./../x``, ``scripts/../../x``: :func:`resolve_mcp_args` and
+    ``../x``, ``./../x``, ``scripts/../../x``, or a path through a link that
+    points outside the project: :func:`resolve_mcp_args` and
     :func:`resolve_mcp_command` leave each as written, read from the child's
     own working directory, rather than root it at the project as they root a
     relative path into it.
@@ -123,8 +124,12 @@ def _rooted(value: str, project_root: Path | None = None) -> tuple[str, bool]:
     """``value`` rooted at the project root when it is a relative path into it, else as written.
 
     With whether ``value`` was left as written because it is a relative path
-    that leaves the project. ``project_root`` defaults to
-    :func:`get_project_root`, read only for a value written as a path.
+    that leaves the project: by its ``..`` components, or through a link, as
+    its real path is read (``link/passwd`` where ``link`` points outside),
+    the containment ``launch_cwd`` reads a working directory by. A value whose
+    path cannot be read here (too long, say) is left as written.
+    ``project_root`` defaults to :func:`get_project_root`, read only for a
+    value written as a path.
     """
     if not value or value.startswith(("-", "@", "~")) or ":" in value or "=" in value:
         return value, False
@@ -142,6 +147,11 @@ def _rooted(value: str, project_root: Path | None = None) -> tuple[str, bool]:
     rooted = Path(os.path.normpath(root / written))
     if not rooted.is_relative_to(root):
         return value, True
-    if not (root / parts[0]).exists():
+    try:
+        if not (root / parts[0]).exists():
+            return value, False
+        if not Path(os.path.realpath(rooted)).is_relative_to(root.resolve()):
+            return value, True
+    except (OSError, ValueError):
         return value, False
     return str(rooted), False

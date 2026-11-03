@@ -593,6 +593,98 @@ class TestRootedArguments:
         monkeypatch.chdir(tmp_path / "two" / "run")
         assert td.granted_launch(config) != grant
 
+    def test_an_argument_kept_inside_the_project_by_the_working_directory_is_not_said(
+        self, project: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import sys
+
+        from maljan.core.config import MCPServerConfig
+
+        (project / "services" / "foo").mkdir(parents=True)
+        (project / "services" / "shared").mkdir()
+        (project / "services" / "shared" / "util.py").write_text("")
+        config = MCPServerConfig(
+            enabled=True,
+            command=sys.executable,
+            args=["../shared/util.py", "../../../evil.py"],
+            cwd="services/foo",
+        )
+        with caplog.at_level("WARNING", logger="maljan"):
+            launch = stdio_launch(config, server="zq-args")
+        assert launch.args == ["../shared/util.py", "../../../evil.py"]
+        said = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert len(said) == 1
+        assert "'../../../evil.py'" in said[0]
+        assert "util.py" not in said[0]
+
+    def test_a_path_through_a_link_out_of_the_project_is_not_rooted_and_is_said(
+        self, project: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import sys
+
+        from maljan.core.config import MCPServerConfig
+        from maljan.core.paths import resolve_mcp_command
+
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "passwd").write_text("")
+        (project / "link").symlink_to(outside)
+        config = MCPServerConfig(enabled=True, command=sys.executable, args=["link/passwd"])
+        with caplog.at_level("WARNING", logger="maljan"):
+            launch = stdio_launch(config, server="zq-args")
+        assert launch.args == ["link/passwd"]
+        assert resolve_mcp_command("link/passwd") == "link/passwd"
+        said = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any("'link/passwd'" in line for line in said), said
+
+    def test_a_value_too_long_to_read_is_left_as_written_and_said_capped(
+        self, project: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import sys
+
+        from maljan.core.config import MCPServerConfig
+
+        long_name = "z" * 5000 + "/x.py"
+        leaving = "../" + "z" * 5000
+        config = MCPServerConfig(enabled=True, command=sys.executable, args=[long_name, leaving])
+        with caplog.at_level("WARNING", logger="maljan"):
+            launch = stdio_launch(config, server="zq-args")
+        assert launch.args == [long_name, leaving]
+        (said,) = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert repr(leaving[:200]) in said
+        assert len(said) < 600
+
+    def test_a_trust_check_reads_the_launch_without_its_warnings(
+        self, project: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import sys
+        from types import SimpleNamespace
+
+        from maljan.core import tool_declarations as td
+
+        secret = sorted(PLATFORM_SECRET_NAMES)[0]
+        block = SimpleNamespace(
+            transport="stdio",
+            command=sys.executable,
+            args=["../evil.py"],
+            cwd=None,
+            url=None,
+            env={secret: "x"},
+            env_allow=[secret],
+            trusts_served_declaration=True,
+            trust_granted_for="0" * 16,
+        )
+        with caplog.at_level("WARNING", logger="maljan"):
+            assert td.granted_launch(block)
+            td.trusts_served("mcp:zq-never-seen-server", block)
+        assert not [r for r in caplog.records if r.levelname == "WARNING"]
+        # The launch itself still says both.
+        with caplog.at_level("WARNING", logger="maljan"):
+            stdio_launch(block, server="zq-args")
+        said = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+        assert any(secret in line for line in said)
+        assert any("'../evil.py'" in line for line in said)
+
     def test_every_shipped_stdio_server_s_arguments_are_rooted_inside_the_project(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
