@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DetectionRule } from "@/types/malware-report";
-import { sampleMatchBadge } from "../sampleMatch";
+import { ruleStanding, sampleMatchBadge } from "../sampleMatch";
 
 const SAID = "Run against the sample it was drafted from: ";
 
@@ -148,5 +148,104 @@ describe("a drafted rule checked against its own sample", () => {
         sample_not_checked: null,
       } as unknown as DetectionRule),
     ).toBeNull();
+  });
+});
+
+// The sentences below are the analyst report's own (`detection_signatures.
+// analyst_print_gate` and `precision_line`), as it prints them for the same rules.
+const NO_RETRO = "(no retro-hunt), so how often it fires elsewhere is not measured.";
+
+describe("what the analyst report says of a drafted rule", () => {
+  it("gives a rule whose strings match its Precision line, published strings counted", () => {
+    expect(
+      ruleStanding(
+        rule({
+          matches_sample: true,
+          matched_by: ["sha256", "strings"],
+          sample_strings: [
+            { identifier: "$s0", offset: 16 },
+            { identifier: "$s1", offset: null },
+          ],
+        }),
+      ),
+    ).toEqual({
+      printed: true,
+      sentence:
+        "Precision: its strings match the sample it was drafted from (1 of 2 published strings found), " +
+        `not its hash alone; not run against any other file ${NO_RETRO}`,
+    });
+  });
+
+  it("counts the stored values apart from the published strings", () => {
+    const standing = ruleStanding(
+      rule({
+        matches_sample: true,
+        matched_by: ["strings"],
+        sample_strings: [
+          { identifier: "$s0", offset: 16 },
+          { identifier: "$d0", offset: 4 },
+          { identifier: "$h0", offset: null },
+          { identifier: "$h1", offset: 8 },
+        ],
+      }),
+    );
+    expect(standing.sentence).toBe(
+      "Precision: its strings match the sample it was drafted from " +
+        "(1 of 1 published strings, 2 of 3 stored values found), " +
+        `not its hash alone; not run against any other file ${NO_RETRO}`,
+    );
+  });
+
+  it("says a rule that matched its sample by a hash alone is not printed, and did not match by content", () => {
+    // The haiku8 YARA draft: its sha256 and import hash held, none of its five strings.
+    const haiku8 = rule({
+      name: "Maljan_AutoGen_Latrodectus",
+      matches_sample: true,
+      matched_by: ["sha256", "imphash"],
+      sample_strings: ["$s0", "$s1", "$s2", "$s3", "$s4"].map((identifier) => ({ identifier, offset: null })),
+    });
+    expect(ruleStanding(haiku8)).toEqual({
+      printed: false,
+      sentence:
+        "Not printed in the analyst report: it matches the sample by its sha256 and imphash only, " +
+        "not by its content.",
+    });
+    expect(ruleStanding(rule({ matches_sample: true, matched_by: [] })).sentence).toBe(
+      "Not printed in the analyst report: it matches the sample by its hash only, not by its content.",
+    );
+  });
+
+  it("says why any other unprinted rule is left out, compile error first", () => {
+    const said = (extra: Partial<DetectionRule>) => ruleStanding(rule(extra));
+    expect(said({ compile_error: "x", matches_sample: true, matched_by: ["strings"] })).toEqual({
+      printed: false,
+      sentence: "Not printed in the analyst report: it does not compile.",
+    });
+    expect(said({ matches_sample: false, matched_by: [] }).sentence).toBe(
+      "Not printed in the analyst report: it does not match the sample it was drafted from.",
+    );
+    expect(said({ sample_not_checked: "unreadable" }).sentence).toBe(
+      "Not printed in the analyst report: it was not run against the sample it was drafted from, " +
+        "so no match by its content is shown.",
+    );
+    expect(said({}).sentence).toBe(
+      "Not printed in the analyst report: it was drafted before drafts were run against their sample, " +
+        "so no match by its content is shown.",
+    );
+  });
+
+  it("gives a behaviour or traffic rule the Precision line of what it selects on", () => {
+    expect(ruleStanding(rule({ kind: "sigma" }))).toEqual({
+      printed: true,
+      sentence:
+        "Precision: it selects on values this run publishes or a sandbox recorded; " +
+        `not run against any other log ${NO_RETRO}`,
+    });
+    const traffic =
+      "Precision: it matches only the network indicators this run publishes; " +
+      `not run against any other traffic ${NO_RETRO}`;
+    expect(ruleStanding(rule({ kind: "suricata" })).sentence).toBe(traffic);
+    expect(ruleStanding(rule({ kind: "snort" })).sentence).toBe(traffic);
+    expect(ruleStanding(rule({ kind: "sigma", compile_error: "bad" })).printed).toBe(false);
   });
 });
