@@ -3546,6 +3546,11 @@ each class of external tool, so the choice is configuration rather than code.
 **No sandbox observation where no sandbox ran.** `mock` executes nothing: it
 returns a recorded fixture for a sample it has one for (marked
 `recorded_fixture`), and an empty stand-in marked `synthetic` for any other.
+The marks are the platform's (`sandbox_document.PLATFORM_MARKS`): only the
+mock's reader sets them (`ReportReader.platform_marks`), and at the intake of
+every report a provider hands the run, live or attached, a mark its reader did
+not set — a sandbox's own top-level `synthetic` or `recorded_fixture` key — is
+taken out with a warning, so a live report always reads as *observed*.
 `pipeline.sandbox_status` reads the run's report once — no report or a
 stand-in is *not run*, a fixture is *recorded fixture*, anything else is
 *observed* — and every reader says the same thing. Where no sandbox ran, the

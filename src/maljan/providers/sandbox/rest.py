@@ -138,7 +138,18 @@ class RestSandboxProvider(SandboxProvider):
         _validate_task_id_template("report.path", rest.report.path)
         if rest.report.pcap_path:
             _validate_task_id_template("report.pcap_path", rest.report.pcap_path)
-        return cls(rest, compile_mapping(rest.mapping), cfg.sandbox.report_formats)
+        provider = cls(rest, compile_mapping(rest.mapping), cfg.sandbox.report_formats)
+        provider._refuse_a_fixture_reader()
+        return provider
+
+    def _refuse_a_fixture_reader(self) -> None:
+        """Refuse a ``report.format`` whose reader reads only the platform's own fixtures."""
+        from maljan.providers.errors import ProviderConfigurationError
+        from maljan.providers.sandbox.readers import named_reader_refusal
+
+        refusal = named_reader_refusal(self._reader_id())
+        if refusal:
+            raise ProviderConfigurationError(f"sandbox.rest.report.format: {refusal}")
 
     @property
     def capabilities(self) -> SandboxCapabilities:
@@ -380,6 +391,7 @@ class RestSandboxProvider(SandboxProvider):
         # settings declare.
         name = self._cfg.report.format
         fmt = sandbox_format_named(name, self._formats)
+        self._refuse_a_fixture_reader()
         refusal = mapping_refusal(fmt)
         if refusal:
             raise ProviderConfigurationError(refusal)

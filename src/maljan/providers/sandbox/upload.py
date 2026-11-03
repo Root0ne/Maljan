@@ -29,6 +29,7 @@ from maljan.providers.sandbox.readers import (
     ReaderFormat,
     format_mapping,
     mapping_refusal,
+    named_reader_refusal,
     report_reader,
     sandbox_format_named,
     sandbox_formats,
@@ -169,7 +170,7 @@ class UploadSandboxProvider(SandboxProvider):
                 f"The attached sandbox report's format {name!r} names no registered "
                 "reader; no analysis can read it yet."
             )
-        refusal = mapping_refusal(found)
+        refusal = mapping_refusal(found) or named_reader_refusal(found.reader)
         if refusal:
             raise AttachedReportRefused(refusal)
         return found
@@ -235,7 +236,7 @@ class UploadSandboxProvider(SandboxProvider):
                 f"Uploaded report sniffed as {found.name!r}; accepted formats are "
                 f"{', '.join(sorted(self._cfg.allowed_formats))}."
             )
-        refusal = mapping_refusal(found)
+        refusal = mapping_refusal(found) or named_reader_refusal(found.reader)
         if refusal:
             raise ProviderError(refusal)
         # The format names the registered reader that reads it; the format's

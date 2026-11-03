@@ -329,7 +329,11 @@ class MaljanApp:
         Only the neutral report's target hash is read, whichever sandbox ran.
         A report whose target is the sample, or that names none, is returned
         as it came. The mark is the platform's: one a sandbox published under
-        its word is not the run's finding, and is taken out, with a warning.
+        its word is not the run's finding. The intake already takes it out of
+        every provider's report (``schemas.sandbox_document.PLATFORM_MARKS``,
+        :meth:`_without_unearned_marks`); the removal here, with its warning,
+        stays as a second guard for a document that reaches this step by
+        another way.
         """
         from maljan.analysis.sample_integrity import sandbox_target_record
         from maljan.pipeline.sandbox_status import TARGET_KEY, target_mark
@@ -359,6 +363,28 @@ class MaljanApp:
         if record is not None:
             report[TARGET_KEY] = target_mark(record)
         return report
+
+    @staticmethod
+    def _without_unearned_marks(run: Any) -> None:
+        """Take out of a provider's report every platform mark its reader does not set.
+
+        Run at the intake of every report a provider hands the run, a live
+        one and an attached one alike, before anything reads the marks: a
+        sandbox's own document can hold a top-level key under a mark's word
+        (``synthetic``, ``recorded_fixture``), and read as written it would
+        turn an observation into a stand-in or a recorded fixture
+        (``pipeline.sandbox_status``). The marks the reader sets itself
+        (``ReportReader.platform_marks``) are kept only for the built-in
+        reader that set them (``readers.earned_marks``), so the mock
+        sandbox's stand-in and fixtures read as before and a plug-in reader
+        earns none.
+        """
+        from maljan.providers.sandbox.readers import earned_marks, report_reader
+        from maljan.schemas.sandbox_document import unearned_marks_removed
+
+        report = run.report
+        reader = report_reader(str(getattr(report, "source_format", "") or ""))
+        unearned_marks_removed(report, earned_marks(reader))
 
     async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:
         """Submit sample to sandbox and return the neutral report's document.
@@ -401,6 +427,7 @@ class MaljanApp:
                     logger.error("Attached sandbox report unusable: %s", exc)
                     self._sandbox_failed(f"the attached sandbox report is unusable: {exc}")
                     return None
+                self._without_unearned_marks(run)
                 self._note_the_reader(provider, run)
                 return sandbox_document(run.report)
             logger.info("Submitting sample to sandbox: %s", sample_path)
@@ -453,6 +480,7 @@ class MaljanApp:
             if status == "reported":
                 stage = "fetching the report"
                 run = await asyncio.to_thread(provider.fetch, task_id)
+                self._without_unearned_marks(run)
                 self._note_the_reader(provider, run)
                 if not (run.report.synthetic or run.report.recorded_fixture):
                     # The target the sandbox says it ran, for the worker to

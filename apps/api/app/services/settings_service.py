@@ -547,6 +547,35 @@ def definitions_after_save(current: dict[str, Any], changes: dict[str, Any]) -> 
     return out
 
 
+def _fixture_reader_refusals(settings: Any) -> dict[str, str]:
+    """Each place the settings name a reader of the platform's own fixtures for a sandbox's reports.
+
+    A declared report format's ``reader`` and the REST sandbox's
+    ``report.format`` (a declared format's reader, else the reader it names)
+    may not name a reader that is not ``choosable``: read by the mock's
+    reader, a live report would be read as a recorded fixture
+    (``readers.named_reader_refusal``).
+    """
+    from maljan.providers.sandbox.readers import (
+        named_reader_refusal,
+        sandbox_format_named,
+        sandbox_formats,
+    )
+
+    sandbox = settings.sandbox
+    out: dict[str, str] = {}
+    for index, fmt in enumerate(sandbox.report_formats):
+        refusal = named_reader_refusal(fmt.reader)
+        if refusal:
+            out[f"core.sandbox.report_formats.{index}.reader"] = refusal
+    name = sandbox.rest.report.format
+    fmt = sandbox_format_named(name, sandbox_formats(sandbox.report_formats))
+    refusal = named_reader_refusal(fmt.reader if fmt is not None and fmt.reader else name)
+    if refusal:
+        out["core.sandbox.rest.report.format"] = refusal
+    return out
+
+
 class SettingsValidationError(Exception):
     def __init__(self, errors: dict[str, str]) -> None:
         super().__init__("; ".join(f"{k}: {v}" for k, v in errors.items()))
@@ -1202,6 +1231,7 @@ class SettingsService:
             problem = role_block_problem(built)
             if problem:
                 errors["core.llm.provider"] = problem
+            errors.update(_fixture_reader_refusals(built))
         # No ``APISettings(**nest(merged_api))`` here: ``extra="ignore"`` drops
         # everything a catalog ``api.*`` key could supply (every one of them
         # moved off the model), so the call could only ever have failed

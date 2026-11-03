@@ -26,22 +26,21 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+# The marks are the document's (``schemas.sandbox_document.PLATFORM_MARKS``):
+# the mock sandbox's stand-in carries ``SYNTHETIC_KEY`` (``MockSandboxClient``),
+# a report it read from a fixture file ``FIXTURE_KEY``, and a live report whose
+# sandbox names another target than the sample ``TARGET_KEY`` (set by the run,
+# ``app.MaljanApp._tell_the_target``). Named here as every reader of the status
+# has always imported them.
+from maljan.schemas.sandbox_document import FIXTURE_KEY, SYNTHETIC_KEY, TARGET_KEY
+
+__all__ = ["FIXTURE_KEY", "SYNTHETIC_KEY", "TARGET_KEY"]
+
 # The three answers. Words rather than codes because they are written into
 # the ledger entry and the run summary, where a reader meets them as they are.
 NOT_RUN = "not run"
 RECORDED_FIXTURE = "recorded fixture"
 OBSERVED = "observed"
-
-# The mark the mock sandbox's stand-in report carries (``MockSandboxClient``).
-SYNTHETIC_KEY = "synthetic"
-# The mark a report the mock sandbox read from a fixture file carries
-# (``schemas.sandbox_document``).
-FIXTURE_KEY = "recorded_fixture"
-# The mark the run sets on a live report whose sandbox names a target SHA-256
-# that is not the sample's intake SHA-256: the two hashes, as
-# ``analysis.sample_integrity.sandbox_target_record`` keeps them. A report
-# whose target is the sample, or that names none, carries no mark.
-TARGET_KEY = "target_not_the_sample"
 
 # The tool name of the pack entry that states the status. Named like the
 # sandbox views so the console files it with them.
