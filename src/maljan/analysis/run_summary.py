@@ -2506,9 +2506,13 @@ class RunSummaryBuilder:
             final_confidence=(
                 confidence_history[-1] if applicable and confidence_history else None
             ),
-            revision_replacements=[
-                str(sentence) for sentence in (state.get("revision_replacements") or [])
-            ],
+            # Each sentence once: a claim reference that may mean several
+            # analysts is said in each of their merges in the same words.
+            revision_replacements=list(
+                dict.fromkeys(
+                    str(sentence) for sentence in (state.get("revision_replacements") or [])
+                )
+            ),
             mediation_notes=list(
                 dict.fromkeys(
                     str(getattr(arg, "note", ""))

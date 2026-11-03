@@ -386,9 +386,10 @@ def _tokens_of(block: _Block) -> frozenset[str]:
 def unplaced_sentence(name: str, revision_round: int, reference: UnplacedClaims) -> str:
     """The sentence for a claim reference that names no claim: never acted on in silence.
 
-    Said once per reference, in the merge of the first analyst it may mean
-    (``ClaimReferences.unplaced_for``); "Blocking line" only for a line whose
-    blocking mark was read.
+    Said in the merge of each analyst it may mean
+    (``ClaimReferences.unplaced_for``), in the same words where no analyst is
+    read for it, and kept once by the run summary; "Blocking line" only for a
+    line whose blocking mark was read.
     """
     head = (
         f"{'Blocking line' if reference.marked else 'Line'} L{int(reference.line)} of the "

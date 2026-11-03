@@ -114,13 +114,52 @@ class TestEveryFormOfARangeOrAListNamesEachClaim:
 
 
 class TestWhatTheLineSaysAroundItsReferences:
-    def test_a_claim_inside_a_mark_is_its_reason_and_is_not_read(self) -> None:
+    def test_a_claim_inside_a_mark_is_read_only_as_the_earlier_reading_read_it(self) -> None:
+        # The earlier reading read "claims 4" there; the rest of the range is
+        # the mark's reason and names nothing more.
         line = (
             f"{STATIC} STATIC ANALYST claim 2 is loose. "
             "[blocking: STATIC ANALYST claims 4-6 conflict with it]"
         )
 
-        assert _named(line) == {"static": [2]}
+        refs = read_claim_references([line], PARTICIPANTS)
+
+        assert _named(line) == {"static": [2, 4]}
+        assert refs.expanded == {} and refs.unplaced == ()
+
+    def test_a_short_form_inside_a_mark_keeps_the_earlier_readings_claims(self) -> None:
+        line = (
+            f"{STATIC} Static holds it. [blocking: the static analyst's claims 4 and 5 rest on it]"
+        )
+
+        named = claims_named_by_lines([line], PARTICIPANTS)
+
+        assert named == {"static": {4: [(1, True)], 5: [(1, True)]}}
+
+    def test_a_claim_only_the_newer_reading_reads_inside_a_mark_is_not_read(self) -> None:
+        line = f"{STATIC} Static holds it. [blocking: the static analyst's claims 4, and 5 rest]"
+
+        assert _named(line) == {"static": [4]}
+
+    def test_an_earlier_rounds_claim_names_nothing_and_is_not_stated(self) -> None:
+        line = (
+            "[analysts: STATIC ANALYST] STATIC ANALYST claim 2 says X, versus TRIAGE ANALYST "
+            "round-3 claim 24 and the dynamic's round-2 claims 9 to 20. "
+            f"{BLOCKS}"
+        )
+
+        refs = read_claim_references([line], PARTICIPANTS)
+
+        assert _named(line) == {"static": [2]} and refs.unplaced == ()
+
+    def test_a_short_form_on_a_line_without_a_field_is_read_never_unplaced(self) -> None:
+        line = f"Reverser claim 3 says X, versus the own claim 4. {BLOCKS}"
+
+        refs = read_claim_references([line], PARTICIPANTS)
+
+        # Named as the earlier reading named it: not at all; not unplaced either.
+        assert refs.named == {}
+        assert [u.claims for u in refs.unplaced] == ["claim 4"]
 
     def test_a_claim_after_a_mark_that_follows_the_field_is_read(self) -> None:
         line = "[analysts: STATIC ANALYST] [not blocking: wording only.] Claim 18 says X."
@@ -145,7 +184,10 @@ class TestWhatTheLineSaysAroundItsReferences:
 
         assert refs.unplaced == ()
 
-    def test_a_reference_is_stated_once_by_the_first_analyst_it_may_mean(self) -> None:
+    def test_a_reference_is_stated_by_each_analyst_it_may_mean_and_kept_once(self) -> None:
+        from maljan.analysis.run_summary import RunSummaryBuilder
+        from maljan.pipeline.revision_merge import unplaced_sentence
+
         line = f"[analysts: DYNAMIC ANALYST, STATIC ANALYST] The own claim 4 says X. {BLOCKS}"
 
         refs = read_claim_references([line], PARTICIPANTS)
@@ -153,12 +195,20 @@ class TestWhatTheLineSaysAroundItsReferences:
 
         [said] = refs.unplaced
         assert said.analysts == ("dynamic", "static")
-        assert refs.unplaced_for("dynamic") == (said,) and refs.unplaced_for("static") == ()
-        # A plain dict as before; the analyst its merge states it for still gets it.
+        assert refs.unplaced_for("dynamic") == refs.unplaced_for("static") == (said,)
+        # A plain dict as before; each analyst it may mean still gets it.
         assert named == {}
-        stated = named.get("dynamic")
-        assert isinstance(stated, NamedClaims) and stated == {} and stated.unplaced == (said,)
-        assert named.get("static") is None
+        for name in ("dynamic", "static"):
+            stated = named.get(name)
+            assert isinstance(stated, NamedClaims) and stated == {}
+            assert stated.unplaced == (said,)
+        assert named.get("triage") is None
+        sentences = [unplaced_sentence(name, 2, said) for name in ("dynamic", "static")]
+        assert sentences[0] == sentences[1]
+        summary = RunSummaryBuilder(start_time=0.0).set_negotiation(
+            {"iteration_count": 2, "revision_replacements": sentences}, max_iterations=3
+        )
+        assert summary.build().to_dict()["negotiation"]["revision_replacements"] == [sentences[0]]
 
 
 class TestARangeIsCapped:
