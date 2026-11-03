@@ -203,6 +203,11 @@ class MalwareReportBuilder:
         from maljan.reporting.call_bindings import bound_values_from_ledger
 
         bound = bound_values_from_ledger(ledger)
+        # Each 32-bit value the sample stores that a decoder or a hash resolver
+        # read and named: what a drafted YARA rule matches the file's own bytes on.
+        from maljan.reporting.code_constants import code_constants_from_ledger
+
+        constants = code_constants_from_ledger(ledger)
         # Where the run's tools saw each value an analyst listed: a listed
         # value stands on the answer that holds it, and "no tool saw it" is
         # said only when this search of the whole ledger found none.
@@ -282,6 +287,7 @@ class MalwareReportBuilder:
             rule_match_strings=yara_rule_strings(ledger),
             emulated_strings=emulated,
             bound_values=bound,
+            code_constants=constants,
             tool_sightings=sightings,
             tool_queries=queries,
             references=references,

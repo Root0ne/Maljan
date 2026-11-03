@@ -30,6 +30,7 @@ import hashlib
 import os
 import re
 import stat
+import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -75,6 +76,23 @@ _MAX_SURICATA_RULES = 12
 LEFT_OUT_COMMENT = (
     "{rest} more published {what} are not in this draft; the report's IOC table carries every one."
 )
+# How many of the values the sample stores (``report.code_constants``) one
+# draft matches on: a decoder's seeds (``$dN``), and the function-name hashes
+# (``$hN``) that count only beside them. A function-name hash is how a program
+# finds its imports, which programs resolving by the same public algorithm
+# share; a seed with no hash beside it is four bytes. So the stored group holds
+# only with every seed and enough hashes, and a run with no seed, or fewer than
+# two hashes, drafts none. A draft that leaves any value out says how many; the
+# report's JSON carries every one.
+_MAX_YARA_SEEDS = 4
+_MAX_YARA_HASHES = 12
+_LEAST_HASHES = 2
+STORED_LEFT_OUT_COMMENT = (
+    "{rest} stored value{s} the run read {are} not in this draft{why}; the report's JSON "
+    "(code_constants) carries every one."
+)
+NO_STORED_GROUP_NO_SEED = "no decoder seed was read, and a function-name hash alone is no match"
+NO_STORED_GROUP_FEW_HASHES = "a decoder seed counts only beside two function-name hashes"
 _SAFE_RULE_NAME_RE = re.compile(r"[^A-Za-z0-9_]+")
 
 
@@ -194,6 +212,11 @@ def build_detection_rules(
     Twenty ``trojan-activity`` rules were drafted for a signed benign tool —
     certificate hosts, the vendor's home page and a version number read as an
     address — because the drafts read every row the string sweep produced.
+    The YARA draft matches on one thing more: the values the sample stores in
+    its own bytes that the run's tools read as a decoder's seed or a
+    function-name hash (``report.code_constants``). They are no indicator and
+    are published nowhere; they are what the file itself holds where it keeps
+    the published values encoded.
 
     ``sample`` is the file the YARA draft is run against once it compiles
     (:func:`_run_on_sample`). Without one the draft says it was not run, and why.
@@ -243,6 +266,183 @@ def build_detection_rules(
 def is_benign(report: MalwareReport) -> bool:
     """Whether the run's published verdict is Benign."""
     return str(getattr(report, "verdict", "") or "").strip().lower() == "benign"
+
+
+# ---------------------------------------------------------------------------
+# What the analyst report prints of a draft
+# ---------------------------------------------------------------------------
+
+# Why the analyst report does not print a draft's body, said beside its name;
+# the evidence bundle prints every body.
+NOT_PRINTED_UNCOMPILED = "it does not compile"
+NOT_PRINTED_MISSES = "it does not match the sample it was drafted from"
+NOT_PRINTED_HASH_ONLY = "it matches the sample by its {clauses} only, not by its content"
+NOT_PRINTED_NOT_CHECKED = (
+    "it was not run against the sample it was drafted from, so no match by its content is shown"
+)
+NOT_PRINTED_STORED_BEFORE = (
+    "it was drafted before drafts were run against their sample, so no match by its content "
+    "is shown"
+)
+# The one thing no draft was measured on, said on every Precision line.
+_NOT_RETRO_HUNTED = (
+    "not run against any other {what} (no retro-hunt), so how often it fires elsewhere is "
+    "not measured"
+)
+
+
+def analyst_print_gate(rule: DetectionRule) -> str | None:
+    """Why the analyst report does not print a draft's body, or ``None`` when it does.
+
+    A rule an engine ran against the sample prints only where its strings
+    clause held: a rule that matches the sample by its sha256 or import hash
+    alone says nothing a hash lookup does not, and one whose content match is
+    not shown carries no more. A behaviour or traffic rule, which no engine
+    runs on a file, prints when it compiles. Every body, printed or not, is in
+    the evidence bundle.
+    """
+    if rule.compile_error:
+        return NOT_PRINTED_UNCOMPILED
+    if rule.matches_sample is False:
+        return NOT_PRINTED_MISSES
+    if rule.matched_by is not None:
+        if "strings" in rule.matched_by:
+            return None
+        clauses = " and ".join(part for part in rule.matched_by if part != "strings")
+        return NOT_PRINTED_HASH_ONLY.format(clauses=clauses or "hash")
+    if rule.sample_not_checked:
+        return NOT_PRINTED_NOT_CHECKED
+    if rule.kind == "yara":
+        return NOT_PRINTED_STORED_BEFORE
+    return None
+
+
+def precision_line(rule: DetectionRule) -> str:
+    """The Precision sentence of a draft the analyst report prints: what it was measured on.
+
+    A file rule says how many of its strings its sample held; a behaviour or
+    traffic rule says what it selects on. None was run on anything else, and
+    each says so.
+    """
+    if rule.kind == "yara":
+        strings = rule.sample_strings or []
+        published = [item for item in strings if item.identifier.startswith("$s")]
+        stored = [item for item in strings if not item.identifier.startswith("$s")]
+        counts = [
+            f"{_found(published)} of {len(published)} published strings"
+            + ("" if stored else " found"),
+        ]
+        if stored:
+            counts.append(f"{_found(stored)} of {len(stored)} stored values found")
+        return (
+            "Precision: its strings match the sample it was drafted from ("
+            + ", ".join(counts)
+            + "), not its hash alone; "
+            + _NOT_RETRO_HUNTED.format(what="file")
+            + "."
+        )
+    if rule.kind == "sigma":
+        return (
+            "Precision: it selects on values this run publishes or a sandbox recorded; "
+            + _NOT_RETRO_HUNTED.format(what="log")
+            + "."
+        )
+    return (
+        "Precision: it matches only the network indicators this run publishes; "
+        + _NOT_RETRO_HUNTED.format(what="traffic")
+        + "."
+    )
+
+
+def _found(strings: list[SampleString]) -> int:
+    return sum(1 for item in strings if item.offset is not None)
+
+
+# ---------------------------------------------------------------------------
+# Hunting query
+# ---------------------------------------------------------------------------
+
+# How many values of one field the query lists, the longest value it quotes,
+# and the fewest characters a URL path holds besides its slashes to be queried
+# on (``/`` or ``/a/`` stands in any site's traffic).
+_HUNT_VALUES = 20
+_HUNT_VALUE_CHARS = 200
+_HUNT_LEAST_PATH = 3
+# The characters a quoted value never carries: format characters (a bidi
+# override, a zero-width joiner) and line and paragraph separators.
+_HUNT_DROPPED = frozenset({"Cf", "Zl", "Zp"})
+
+
+def hunting_query(report: MalwareReport) -> list[str] | None:
+    """A query for the requests the sample's code sends, to any host but the published ones.
+
+    Built from the IOC table's published rows, the ones the drafts read
+    (:func:`_published_rows`): the user agents the code sends
+    and the paths of its URLs, each worth querying on its own, joined by
+    ``and``, and the published hosts left out, so a match is a candidate for
+    more of the same infrastructure. ``None`` when the run publishes no user
+    agent and no URL path to query on, and on a run that drafted no rule (the
+    drafting switched off, or a Benign verdict): the query is drafted with the
+    rules. Field names are neutral, for the reader to map to a log's own.
+    """
+    from urllib.parse import urlsplit
+
+    if not getattr(report, "detection_signatures", None):
+        return None
+    rows = _published_rows(report)
+    agents: list[str] = []
+    paths: list[str] = []
+    hosts: list[str] = []
+    for row in rows:
+        kind = str(getattr(row, "kind", "") or "")
+        value = str(getattr(row, "value", "") or "").strip()
+        if not value:
+            continue
+        if kind == _USER_AGENT_KIND:
+            _once_in(agents, value)
+        elif kind == "url":
+            try:
+                parts = urlsplit(value)
+            except ValueError:
+                continue
+            if len(parts.path.strip("/")) >= _HUNT_LEAST_PATH:
+                _once_in(paths, parts.path)
+            if parts.hostname:
+                _once_in(hosts, parts.hostname.lower())
+        elif kind in ("domain", "ip"):
+            _once_in(hosts, value.lower())
+    if not agents and not paths:
+        return None
+    lines: list[str] = []
+    for field_name, values in (("user_agent", agents), ("url_path", paths)):
+        if values:
+            lines.append(("and " if lines else "") + _hunt_condition(field_name, values))
+    if hosts:
+        lines.append("and not " + _hunt_condition("host", hosts))
+    return lines
+
+
+def _once_in(values: list[str], value: str) -> None:
+    if value not in values:
+        values.append(value)
+
+
+def _hunt_condition(field_name: str, values: list[str]) -> str:
+    """``field = "v"`` or ``field in ("a", "b")``, every value quoted; a cut list says so."""
+    shown = [_hunt_quoted(value) for value in values[:_HUNT_VALUES]]
+    rest = len(values) - len(shown)
+    tail = f"  // {rest} more in the IOC table" if rest > 0 else ""
+    if len(shown) == 1:
+        return f"{field_name} = {shown[0]}{tail}"
+    return f"{field_name} in ({', '.join(shown)}){tail}"
+
+
+def _hunt_quoted(value: str) -> str:
+    """A value in double quotes on one line: control, format and separator characters dropped."""
+    cleaned = "".join(
+        c for c in value if c >= " " and unicodedata.category(c) not in _HUNT_DROPPED
+    )[:_HUNT_VALUE_CHARS]
+    return '"' + cleaned.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 # The IOC-table kinds a draft may match on, and the network kinds among them.
@@ -394,10 +594,16 @@ def _build_yara(report: MalwareReport, sample: OwnSample | None = None) -> Detec
     - ``pe.imphash() == "..."`` when imphash is known
     - ``N of them`` when at least two string IOCs are collected
 
-    The strings are the published rows of the IOC table and nothing else. The
-    import names the pack's technique rules fired on used to be strings here
-    too, and ``8 of them`` over common API names matches a great deal of
-    ordinary software: an import name is not an indicator this run publishes.
+    The strings are the published rows of the IOC table (``$sN``) and the
+    values the sample stores that a tool read as a decoder's seed (``$dN``) or
+    a function-name hash (``$hN``, ``report.code_constants``, chosen by
+    :func:`stored_selection`), each group with a quantifier of its own, and
+    nothing else. The import names the pack's
+    technique rules fired on used to be strings here too, and ``8 of them``
+    over common API names matches a great deal of ordinary software: an import
+    name is not an indicator this run publishes. A published value the sample
+    keeps encoded is in no byte of the file, and a draft of such values alone
+    matched its sample by its hash only.
 
     The rule that compiles is checked against ``sample``, the file it was
     drafted from, through the probe ruleset rendered beside it
@@ -420,6 +626,18 @@ def _build_yara(report: MalwareReport, sample: OwnSample | None = None) -> Detec
         reasons[slot] = _why_published(row)
         sources.append(f"string:{row.kind}:{row.value}")
 
+    # The values the sample stores as they are, which a draft matches the
+    # file's own bytes on where the published values are kept encoded.
+    chosen = stored_selection(report)
+    seeds: list[tuple[str, bytes]] = []
+    hashes: list[tuple[str, bytes]] = []
+    for item, raw in chosen.used:
+        group, prefix = (seeds, "$d") if item.role == "seed" else (hashes, "$h")
+        slot = f"{prefix}{len(group)}"
+        group.append((slot, raw))
+        reasons[slot] = _why_stored(item)
+        sources.append(f"constant:{item.value}:{item.entry}")
+
     # Gated above when the seed is a placeholder, so this normally uses the real
     # family; _rule_name_component keeps the name honest anyway should the gate
     # ever be relaxed.
@@ -434,6 +652,8 @@ def _build_yara(report: MalwareReport, sample: OwnSample | None = None) -> Detec
         verdict=report.verdict,
         generated_at_iso=report.generated_at.isoformat(),
         reasons=reasons,
+        seeds=seeds,
+        hashes=hashes,
     )
     body = rendered.draft
 
@@ -441,13 +661,16 @@ def _build_yara(report: MalwareReport, sample: OwnSample | None = None) -> Detec
         body += "\n// " + LEFT_OUT_COMMENT.format(
             rest=len(eligible) - _MAX_YARA_STRINGS, what="strings"
         )
+    if chosen.left_out:
+        body += "\n// " + chosen.comment()
     compiled, compile_error = _compile_yara(body)
     if compiled is None:
         check = _SampleCheck(
             not_checked=NOT_CHECKED_UNCOMPILED if _YARA_AVAILABLE else NOT_CHECKED_NO_ENGINE
         )
     else:
-        check = _run_on_sample(rendered, [slot for slot, _value in strings], sample)
+        slots = [slot for slot, _value in strings] + [slot for slot, _raw in [*seeds, *hashes]]
+        check = _run_on_sample(rendered, slots, sample)
     if check.not_checked:
         logger.info(
             "detection_signatures: the YARA draft was not checked against its sample: %s.",
@@ -476,6 +699,8 @@ def _render_yara(
     verdict: str,
     generated_at_iso: str,
     reasons: dict[str, str] | None = None,
+    seeds: list[tuple[str, bytes]] | None = None,
+    hashes: list[tuple[str, bytes]] | None = None,
 ) -> _YaraSources:
     """The drafted rule and its probe ruleset, written from the same declarations.
 
@@ -484,21 +709,49 @@ def _render_yara(
     the rule the report publishes and the rules its check scans cannot drift
     apart. The probe's strings clause is the draft's quantifier over the probe
     string rules where the draft has it over ``them``.
+
+    ``seeds`` (``$dN``) and ``hashes`` (``$hN``) are the values the sample
+    stores, each declared as its bytes. Together they are one group of the
+    strings clause, beside the published strings' group (``$sN``): every seed
+    and a quantifier of the hashes, ``all of ($d*) and k of ($h*)``. The group
+    is written only with a seed and a hash both; a draft with no such group is
+    written as it always was.
     """
     imports = ['import "hash"']
     if imphash:
         imports.append('import "pe"')
+    seeds, hashes = list(seeds or []), list(hashes or [])
+    stored = [*seeds, *hashes] if seeds and hashes else []
     declared = [
         (slot, f'"{_escape_yara(value)}" {_YARA_STRING_MODIFIERS}') for slot, value in strings
-    ]
+    ] + [(slot, f"{{ {raw.hex(' ')} }}") for slot, raw in stored]
     quantifier = str(max(2, len(strings) // 3)) if len(strings) >= 2 else "any"
     clauses: list[tuple[RuleClause, str]] = [
         ("sha256", f'hash.sha256(0, filesize) == "{_escape_yara(sha256)}"')
     ]
     if imphash:
         clauses.append(("imphash", f'pe.imphash() == "{_escape_yara(imphash)}"'))
+    # Each group of the strings clause: its quantifier, its slots in the draft
+    # and the probe's string rules standing for them, in the declared order.
+    string_rules = tuple(f"{_PROBE_STRING}{index}" for index in range(len(declared)))
+    # Each group as the draft writes it and as the probe writes it over the
+    # probe's string rules standing for the same strings.
+    drafted: list[str] = []
+    probed: list[str] = []
     if strings:
+        drafted.append(f"({quantifier} of ($s*))")
+        probed.append(f"({quantifier} of ({', '.join(string_rules[: len(strings)])}))")
+    if stored:
+        need = _hashes_quantifier(len(hashes))
+        first = len(strings)
+        on_seeds = string_rules[first : first + len(seeds)]
+        on_hashes = string_rules[first + len(seeds) :]
+        drafted.append(f"(all of ($d*) and {need} of ($h*))")
+        probed.append(f"(all of ({', '.join(on_seeds)}) and {need} of ({', '.join(on_hashes)}))")
+    if strings and not stored:
         clauses.append(("strings", f"{quantifier} of them"))
+    elif stored:
+        clauses.append(("strings", " or ".join(drafted)))
 
     lines: list[str] = [*imports, ""]
     lines.append(f"rule {rule_name}")
@@ -521,13 +774,14 @@ def _render_yara(
     lines.append("        " + " or ".join(f"({condition})" for _part, condition in clauses))
     lines.append("}")
 
-    string_rules = tuple(f"{_PROBE_STRING}{index}" for index in range(len(declared)))
     probe: list[str] = [*imports, ""]
     probe.extend(
         f"rule {name} {{ strings: $a = {text} condition: $a }}"
         for name, (_slot, text) in zip(string_rules, declared, strict=True)
     )
     over_probes = f"{quantifier} of ({', '.join(string_rules)})"
+    if stored:
+        over_probes = " or ".join(probed)
     for part, condition in clauses:
         written = over_probes if part == "strings" else condition
         probe.append(f"rule {_PROBE_PART}{part} {{ condition: {written} }}")
@@ -538,6 +792,73 @@ def _render_yara(
         probe="\n".join(probe) + "\n",
         string_rules=string_rules,
         parts=tuple(part for part, _condition in clauses),
+    )
+
+
+def _hashes_quantifier(count: int) -> str:
+    """How many of a draft's function-name hashes must stand in a file: all of a few, else half."""
+    return "all" if count <= 3 else str(max(3, count // 2))
+
+
+@dataclass(frozen=True)
+class StoredSelection:
+    """Which of the values the sample stores a draft matches on, and how many it leaves out.
+
+    ``used`` holds each drafted value with its four bytes, seeds first; ``read``
+    is how many the report holds; ``why`` says why none is drafted, when none is.
+    """
+
+    used: tuple[tuple[Any, bytes], ...]
+    read: int
+    why: str = ""
+
+    @property
+    def left_out(self) -> int:
+        return self.read - len(self.used)
+
+    def comment(self) -> str:
+        """The draft's closing comment on the values it leaves out."""
+        rest = self.left_out
+        return STORED_LEFT_OUT_COMMENT.format(
+            rest=rest,
+            s="s" if rest != 1 else "",
+            are="are" if rest != 1 else "is",
+            why=f" ({self.why})" if self.why else "",
+        )
+
+
+def stored_selection(report: MalwareReport) -> StoredSelection:
+    """The stored values (``report.code_constants``) one YARA draft of ``report`` matches on.
+
+    Every seed up to its cap and the function-name hashes up to theirs, when
+    there is a seed and at least two hashes; none otherwise, and why.
+    """
+    from maljan.reporting.code_constants import little_endian
+
+    seeds: list[tuple[Any, bytes]] = []
+    hashes: list[tuple[Any, bytes]] = []
+    read = 0
+    for item in getattr(report, "code_constants", None) or []:
+        raw = little_endian(item.value)
+        if raw is None:
+            continue
+        read += 1
+        (seeds if item.role == "seed" else hashes).append((item, raw))
+    if not seeds:
+        return StoredSelection((), read, NO_STORED_GROUP_NO_SEED if read else "")
+    if len(hashes) < _LEAST_HASHES:
+        return StoredSelection((), read, NO_STORED_GROUP_FEW_HASHES)
+    used = (*seeds[:_MAX_YARA_SEEDS], *hashes[:_MAX_YARA_HASHES])
+    return StoredSelection(used, read)
+
+
+def _why_stored(item: Any) -> str:
+    """``<value>: <meaning>; <where>; <entry>``, one line a draft's comment carries."""
+    where = f"; first at file offset {item.first_offset}" if item.first_offset else ""
+    entry = f"; {item.entry}" if item.entry else ""
+    said = f"{item.value}: {item.meaning}{where}{entry}"
+    return "".join(
+        c if c >= " " else " " for c in said if unicodedata.category(c) not in _HUNT_DROPPED
     )
 
 
