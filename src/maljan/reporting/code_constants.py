@@ -42,6 +42,7 @@ hashes, each in the order of the ledger.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -74,6 +75,9 @@ _LEAST_DISTINCT_BYTES = 3
 _LEAST_PER_ALGORITHM = 2
 # How many names one hash's meaning lists, and the longest word it prints.
 _NAMES_SAID = 3
+# The characters a word never carries: format characters (a bidi override, a
+# zero-width joiner) and line and paragraph separators.
+_DROPPED = frozenset({"Cf", "Zl", "Zp"})
 _WORD_CHARS = 64
 
 
@@ -175,24 +179,26 @@ def _hashes(
     seen: set[int],
 ) -> list[CodeConstant]:
     """The values a hash resolver's hits state under an algorithm that resolves two or more."""
-    read: list[tuple[int, list[str], Mapping[str, Any]]] = []
+    read: list[tuple[int, list[str], list[Any], Mapping[str, Any]]] = []
     resolved: dict[str, set[int]] = {}
+    # Only a value that is read at all counts toward its algorithm's two: a
+    # plain value, or one stated with no place, is no second resolution.
     for row in rows:
         number = _first_number(row, value_path)
-        if number is None:
+        if number is None or not _telling(number):
+            continue
+        offsets = [o for o in select(row, _OFFSETS) if o not in (None, "")]
+        if not offsets:
             continue
         algorithms = sorted({_word(a) for a in select(row, algorithm_path)} - {""})
         for algorithm in algorithms:
             resolved.setdefault(algorithm, set()).add(number)
-        read.append((number, algorithms, row))
+        read.append((number, algorithms, offsets, row))
     out: list[CodeConstant] = []
-    for number, algorithms, row in read:
+    for number, algorithms, offsets, row in read:
         if not any(len(resolved[a]) >= _LEAST_PER_ALGORITHM for a in algorithms):
             continue
-        if not _telling(number) or number in seen:
-            continue
-        offsets = [o for o in select(row, _OFFSETS) if o not in (None, "")]
-        if not offsets:
+        if number in seen:
             continue
         seen.add(number)
         names: list[str] = []
@@ -252,4 +258,5 @@ def _telling(number: int) -> bool:
 def _word(value: Any) -> str:
     """A tool's word on one line: whitespace collapsed, markup and separators replaced, capped."""
     flat = " ".join(str(value if value is not None else "").split())
-    return "".join("_" if c in '`|<>*[]{}\\"/' or c < " " else c for c in flat)[:_WORD_CHARS]
+    kept = "".join(c for c in flat if unicodedata.category(c) not in _DROPPED)
+    return "".join("_" if c in '`|<>*[]{}\\"/' or c < " " else c for c in kept)[:_WORD_CHARS]

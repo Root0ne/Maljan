@@ -857,7 +857,9 @@ def _why_stored(item: Any) -> str:
     where = f"; first at file offset {item.first_offset}" if item.first_offset else ""
     entry = f"; {item.entry}" if item.entry else ""
     said = f"{item.value}: {item.meaning}{where}{entry}"
-    return "".join(c if c >= " " else " " for c in said)
+    return "".join(
+        c if c >= " " else " " for c in said if unicodedata.category(c) not in _HUNT_DROPPED
+    )
 
 
 def _yara_string_eligible(ioc: Any) -> bool:

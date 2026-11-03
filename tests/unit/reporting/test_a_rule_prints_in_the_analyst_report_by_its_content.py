@@ -300,6 +300,24 @@ class TestTheStoredValuesAreReadByTheAnswersKind:
         assert alone == []
         assert [c.value for c in paired] == [HASHES[0], HASHES[2]]
 
+    def test_a_plain_value_is_no_second_resolution_of_its_algorithm(self) -> None:
+        # 0x00010000 resolves under the same algorithm but is too plain to be
+        # read, so the one real hash beside it stands alone.
+        assert code_constants_from_ledger([_resolver(HASHES[0], "0x00010000")]) == []
+
+    def test_a_value_stated_with_no_place_is_no_second_resolution(self) -> None:
+        entry = _resolver(*HASHES[:2])
+        assert isinstance(entry.structured, dict)
+        entry.structured["hits"][1]["occurrences"] = []
+
+        assert code_constants_from_ledger([entry]) == []
+
+    def test_a_format_or_separator_character_never_reaches_a_meaning(self) -> None:
+        name = "Internet‮Open‍W x "
+        constant = code_constants_from_ledger([_resolver(*HASHES[:2], names=(name,))])[0]
+
+        assert constant.meaning == "a function-name hash (InternetOpenW x)"
+
     def test_a_value_is_read_as_an_int_as_hexadecimal_or_as_decimal(self) -> None:
         constants = code_constants_from_ledger(
             [_decoder(0x33629D40, entry="ev_0021"), _decoder("0x5a17c0de", entry="ev_0022")]
@@ -395,6 +413,11 @@ class TestTheDraftMatchesTheStoredValues:
             f"\n// {rest} stored values the run read are not in this draft ({why}); the "
             "report's JSON (code_constants) carries every one."
         )
+
+    def test_a_comment_drops_format_and_separator_characters(self) -> None:
+        item = CodeConstant(value=SEED, role="seed", meaning="seed‮ of  x ", entry="ev‍_0021")
+
+        assert drafts._why_stored(item) == "0x33629d40: seed of x; ev_0021"
 
     def test_values_past_the_draft_s_room_are_said_to_be_left_out(self) -> None:
         report = _report()
