@@ -405,6 +405,20 @@ class TestRangesAndContinuations:
         assert shown == REPORTS["static"]
         assert shown.note.endswith("blocking line 1 writes a claim range it cannot place.")
 
+    @pytest.mark.parametrize("mark", ["blocking", "not blocking"])
+    def test_a_claim_number_inside_the_mark_is_not_read(self, mark: str) -> None:
+        line = (
+            "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claim 1 [ev_0010]. "
+            f"[{mark}: the ledger refutes it and claim 25 states both; new]"
+        )
+
+        (ref,) = contested_refs([line], NAMES)
+
+        assert not ref.unattributed
+        assert ref.claims == (("dynamic", 1), ("static", 1))
+        if mark == "blocking":
+            assert _shown(line)["static"].claims == (1,)
+
     def test_a_claim_of_no_analyst_shows_every_peer_of_the_line_whole(self) -> None:
         line = (
             "[analysts: dynamic] STATIC Claim 1 [ev_0010] and NETWORK Claim 1 [ev_0013] differ "
@@ -514,6 +528,31 @@ class TestWhatElseNamesTheAnalyst:
         assert "NETWORK Claim 1 is wording only." not in shown
         assert "Static R2 claim 2" not in shown
         assert shown.whole_chars == len(reports["static"])
+
+    def test_an_item_restating_a_listed_dispute_is_shown_once(self) -> None:
+        from maljan.agents.base_agent import WRITTEN_BESIDES_CLAIMS
+
+        reports = dict(REPORTS)
+        reports["static"] = (
+            "  Claim 1: Reads the flag at 0x40.\n"
+            f"{WRITTEN_BESIDES_CLAIMS}\n"
+            "- DYNAMIC Claim 1 has no   mutex call.\n"
+            "- DYNAMIC Claim 1 has no mutex call. The ledger lists none.\n"
+            "- DYNAMIC Claim 1 is also late."
+        )
+        line = (
+            "[analysts: dynamic] DYNAMIC Claim 1 contradicts STATIC Claim 1 [ev_0010]. "
+            "[blocking: x]"
+        )
+
+        _feedback, peers = contested_input(
+            "dynamic", _finding(line), [line], NAMES, reports, isrs=IN_FORCE
+        )
+        shown = peers["static"]
+
+        assert shown.count("has no") == 1
+        assert "    - DYNAMIC Claim 1 has no mutex call." in shown
+        assert "    - DYNAMIC Claim 1 is also late." in shown
 
 
 # ---------------------------------------------------------------------------

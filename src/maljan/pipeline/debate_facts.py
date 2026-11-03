@@ -2304,6 +2304,10 @@ _MARKS_AFTER_FIELD = re.compile(
     r"|\s*+\[\s*+(?:carried\s*+:\s*+L?\s*+\d{1,9}\s*+|new\s*+)\])++",
     re.IGNORECASE,
 )
+# The mediator's mark wherever it stands on a line, its reason included.
+_MARK_ANYWHERE = re.compile(
+    r"\[\s*+(?:not\s+blocking|blocking)\s*+:" + _REASON + r"\]", re.IGNORECASE
+)
 # What stands between two references that the second continues the first
 # ("claim #3 and claim 4").
 _CONTINUES = re.compile(r"[\s,]*+(?:and|or|&|/|\+)?[\s,]*+", re.IGNORECASE)
@@ -2419,8 +2423,10 @@ def contested_refs(lines: Sequence[str], participants: Sequence[str]) -> list[Co
     for takes the analyst of the reference it continues ("STATIC claim #3 and
     claim 4"); otherwise the line is marked ``unattributed``. A number of zero
     is kept (no claim has it); one longer than :data:`_CLAIM_DIGITS` digits is
-    never converted and names its analyst in ``unplaced``. The merge's reading
-    (``claims_named_by_lines``) is not changed by this one.
+    never converted and names its analyst in ``unplaced``. A "claim N" inside
+    the mediator's ``[blocking: ...]`` or ``[not blocking: ...]`` mark is its
+    reason and is not read. The merge's reading (``claims_named_by_lines``) is
+    not changed by this one.
     """
     names = [str(p) for p in participants if str(p).strip()]
     out: list[ContestedRef] = []
@@ -2433,7 +2439,12 @@ def contested_refs(lines: Sequence[str], participants: Sequence[str]) -> list[Co
         wide: dict[str, None] = {}
         unattributed = False
         previous: tuple[int, str | None] = (-1, None)
+        # A claim number inside the mediator's mark is its reason, not a
+        # reference the line puts to an analyst.
+        in_marks = [m.span() for m in _MARK_ANYWHERE.finditer(text)]
         for reference in _CLAIM_EXPRESSION.finditer(text):
+            if any(start <= reference.start() < end for start, end in in_marks):
+                continue
             owner = owners.get(reference.start(1))
             if owner is None and previous[1] is not None:
                 between = text[previous[0] : reference.start()]
@@ -2699,10 +2710,17 @@ def peer_excerpt(
     if disputes:
         lines.append(f"  Disputes naming the {name} analyst:")
         lines.extend(f"    - {item}" for item in disputes)
+    # An item that restates a dispute listed above is not shown twice.
+    listed = [" ".join(d.split()) for d in disputes if d.strip()]
     besides = [
         item
         for item in _items_besides_claims(whole)
         if _names_analyst(item, name, patterns, participants)
+        and not any(
+            (said := " ".join(_ITEM_OPENS.sub("", item, count=1).split())) == d
+            or said.startswith(d)
+            for d in listed
+        )
     ]
     if besides:
         lines.append(f"  Written besides its claims, naming the {name} analyst:")
