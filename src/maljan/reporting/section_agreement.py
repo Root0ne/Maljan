@@ -76,11 +76,14 @@ from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
 from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
+    _BARE_ADDRESS,
+    _HEX_ADDRESS,
+    _SUFFIXED_ADDRESS,
     EntryTexts,
     ValidationTally,
     Violation,
-    _addresses_written,
     citation_violations,
+    generic_function_name,
     ledger_absence_contradictions,
     misstated_entry_contents,
     retry_with_feedback,
@@ -496,12 +499,61 @@ def _hex_address(where: str) -> int | None:
     return int(found.group(1), 16) if found else None
 
 
+# Where a word ends, for reading an address a text names: a space, a bracket, a
+# quote, a list or clause mark, an operator, an arrow. A path, a file name, a URL
+# or a registry key is one word, and a longer identifier is one word.
+_WORD_BREAK = re.compile(
+    r"(?:->|<-|=>|[\s()\[\]{}<>\"'`,;:!?=*+&@|\u2014\u2018\u2019\u201c\u201d\u2190-\u21ff])+"
+)
+# What joins addresses into one word: a range or a pair (``0x10-0x40``,
+# ``0x7504/0xd1c8``). Every part of such a word is an address, or none is.
+_ADDRESS_JOIN = re.compile(r"[/\\\-\u2013]")
+
+
+# A decompiler's name for a function written with ``0x`` before its address
+# (``fcn.0x33ac``): the word before the address is read as a declared one.
+_NAMED_HEX = re.compile(r"([A-Za-z]\w*?)([_.])0x([0-9a-f]{1,16})", re.IGNORECASE)
+
+
+def _whole_address(part: str) -> int | None:
+    """The address ``part`` is, written whole in a spelling the absence check reads, or
+    ``None``."""
+    for pattern in (_HEX_ADDRESS, generic_function_name(), _SUFFIXED_ADDRESS, _BARE_ADDRESS):
+        found = pattern.fullmatch(part)
+        if found:
+            return int(found.group(1), 16)
+    named = _NAMED_HEX.fullmatch(part)
+    if named and generic_function_name().fullmatch(f"{named.group(1)}{named.group(2)}0"):
+        return int(named.group(3), 16)
+    return None
+
+
+def _addresses_named(text: str) -> list[int]:
+    """Every address ``text`` names as an address: a word that is one (``0x6f48``,
+    ``FUN_00406f48``, ``6f48h``, bare hex), or a range or pair of them.
+
+    A hex run inside a path, a file name, a URL, a registry key or a longer
+    identifier (``files/0x00020000000003ba-104.dat``) names no address: it is
+    part of a word that is not one. One pass over the text.
+    """
+    out: list[int] = []
+    for word in _WORD_BREAK.split(text):
+        word = word.rstrip(".")
+        if not word:
+            continue
+        found = [_whole_address(part) for part in _ADDRESS_JOIN.split(word)]
+        if all(value is not None for value in found):
+            out.extend(value for value in found if value is not None)
+    return out
+
+
 def _named_addresses(passages: Iterable[Passage]) -> set[int]:
-    """Every address the passages write, as the absence check reads one (``0x…``, a
-    decompiler's name, ``…h``, bare hex). One pass over each text."""
+    """Every address the passages name, in a spelling the absence check reads (``0x…``,
+    a decompiler's name, ``…h``, bare hex), as a word of its own (:func:`_addresses_named`).
+    One pass over each text."""
     named: set[int] = set()
     for passage in passages:
-        named.update(_addresses_written(passage.text))
+        named.update(_addresses_named(passage.text))
     return named
 
 
@@ -555,9 +607,9 @@ _UNREAD_CLAUSE = re.compile(
 
 
 def _addresses_before(text: str) -> set[int]:
-    """The last address ``text`` writes, read word by word from its end."""
+    """The last address ``text`` names, read word by word from its end."""
     for word in reversed(text.split()):
-        found = _addresses_written(word)
+        found = _addresses_named(word)
         if found:
             return set(found)
     return set()
@@ -582,7 +634,7 @@ def _said_unread(passages: Iterable[Passage]) -> set[int]:
                 breaks = [m.end() for m in _CLAUSE_BREAK.finditer(before)]
                 after = _CLAUSE_BREAK.search(sentence, match.end())
                 clause = sentence[breaks[-1] if breaks else 0 : after.start() if after else None]
-                found = set(_addresses_written(clause)) or _addresses_before(before)
+                found = set(_addresses_named(clause)) or _addresses_before(before)
                 if not found and index:
                     found = _addresses_before(ordered[index - 1])
                 out.update(found)
@@ -1021,7 +1073,7 @@ def _named_near(sentence: str, text: str) -> tuple[str, ...]:
     one of them is not about every sentence beside it (a sentence on dropped files
     gained a clause on a download routine two paragraphs on).
     """
-    if _addresses_written(sentence):
+    if _addresses_named(sentence):
         return (sentence,)
     sentences = _Sentences(text)
     span = sentences.span(sentence)
@@ -1097,8 +1149,8 @@ _VALUE_FLOOR = 3
 
 def _about(fact: Passage, *texts: str) -> bool:
     """Whether a fact is about what the texts name: an address it names, in any spelling
-    the absence check reads, or the value it binds or the call it is passed to, written
-    whole in one of them."""
+    the absence check reads, as a word of its own (:func:`_addresses_named`), or the value
+    it binds or the call it is passed to, written whole in one of them."""
     joined = " ".join(texts)
     for word in (fact.value, fact.call):
         if len(word) >= _VALUE_FLOOR and re.search(
@@ -1106,7 +1158,7 @@ def _about(fact: Passage, *texts: str) -> bool:
         ):
             return True
     return bool(fact.addresses) and any(
-        address in fact.addresses for address in _addresses_written(joined)
+        address in fact.addresses for address in _addresses_named(joined)
     )
 
 

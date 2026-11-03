@@ -607,6 +607,51 @@ def test_an_answered_failure_qualifies_no_sentence_on_dropped_files_beside_it() 
 
 
 @pytest.mark.parametrize(
+    ("text", "named"),
+    [
+        ("Routine 0x5a10 returns.", [0x5A10]),
+        ("It calls FUN_02475a10(a) [ev_0107].", [0x2475A10]),
+        ("The callers (0x5a10, 0x5a38) and 5a10h.", [0x5A10, 0x5A38, 0x5A10]),
+        ("The region 0x5a10-0x5a38 and the pair 0x5a10/0x5a38.", [0x5A10, 0x5A38] * 2),
+        ("Routine 0x5a10's gate.", [0x5A10]),
+        # A decompiler's name written with 0x, a chain and an address taken.
+        (
+            "It runs fcn.0x5a10 -> FUN_0x5a38, then id 7\u2192sub_5a10 and &0x5a38.",
+            [0x5A10, 0x5A38] * 2,
+        ),
+        # A hex run inside a path, a file name, a URL, a registry key or a
+        # longer identifier is part of a word that is no address.
+        ("One file, files/0x00020000000003ba-104.dat [ev_0015].", []),
+        ("It reads C:\\Temp\\0x5a10.bin and HKCU\\Software\\5a10ab.", []),
+        ("It fetches http://host.test/0x5a10 and names mutex_0x5a10.", []),
+        ("The dump memory/3648-3a5f was kept.", []),
+    ],
+)
+def test_an_address_counts_only_as_a_word_of_its_own(text: str, named: list[int]) -> None:
+    from maljan.reporting.section_agreement import _addresses_named
+
+    assert _addresses_named(text) == named
+
+
+def test_an_address_inside_a_path_qualifies_no_sentence() -> None:
+    dropped = "One file was dropped, files/0x5a10-104.dat [ev_0107]."
+    report = _report()
+    report.technical_analysis.string_resolution.body = f"{dropped} {FAILED}"
+    row = _row("string_resolution", dropped, ["answered.1"], "anything")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.string_resolution.body == f"{dropped} {FAILED}"
+    assert done.summary["rewritten"] == 0
+
+
+def test_a_routine_named_only_inside_a_path_is_no_fact_of_its_own() -> None:
+    report = _report()
+    report.intro_background = "The gate writes files/0x5a38.dat [ev_0107]."
+    report.technical_analysis.evasion_antiforensics.body = "The gate returns early [ev_0107]."
+    facts = [p.text for p in passages_of(report, entries=_ledger()) if p.kind == FACT]
+    assert not any(text.startswith(hex(CHECK)) for text in facts)
+
+
+@pytest.mark.parametrize(
     ("sentence", "qualified"),
     [
         ('Routine 0x5a10 maps "it."', 'Routine 0x5a10 maps "it"; Q [ev_0107].'),
