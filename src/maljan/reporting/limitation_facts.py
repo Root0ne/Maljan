@@ -41,7 +41,6 @@ from typing import Any
 
 from maljan.agents.function_map import one_spelling
 from maljan.pipeline.events import scrub
-from maljan.pipeline.validation import _addresses_written
 from maljan.reporting.agreement_facts import AnsweredLater, asked_addresses
 from maljan.schemas.evidence import entry_ids_in
 
@@ -233,6 +232,8 @@ def _cell(columns: Sequence[str], row: Sequence[Any], name: str) -> str:
 def open_questions(report: Any, bases: Sequence[int]) -> list[OpenQuestion]:
     """The questions the run left open, as its own table lists them, each once."""
     for section in getattr(report, "sections", None) or []:
+        from maljan.reporting.section_agreement import _addresses_named
+
         columns = list(getattr(section, "columns", None) or [])
         if getattr(section, "key", "") != "open_questions" or "Question" not in columns:
             continue
@@ -251,7 +252,7 @@ def open_questions(report: Any, bases: Sequence[int]) -> list[OpenQuestion]:
                     reason=reason,
                     cites=tuple(sorted(entry_ids_in(_cell(columns, row, "Evidence")))),
                     addresses=tuple(
-                        dict.fromkeys(one_spelling(a, bases) for a in _addresses_written(named))
+                        dict.fromkeys(one_spelling(a, bases) for a in _addresses_named(named))
                     ),
                 ),
             )

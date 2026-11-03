@@ -252,6 +252,34 @@ def test_a_tool_s_name_is_read_as_a_whole_word(sentence: str, held: bool) -> Non
     assert _held(sentence, ledger) == ([sentence] if held else [])
 
 
+@pytest.mark.parametrize(
+    ("sentence", "held"),
+    [
+        # An address names a call only as a word of its own, never inside a path.
+        ("Opening files/0x401a30.dat failed [ev_0001].", False),
+        ("Reading 0x401a30 failed [ev_0001].", True),
+    ],
+)
+def test_an_address_in_a_path_names_no_failed_call(sentence: str, held: bool) -> None:
+    ledger = [
+        LedgerEntry(id="ev_0001", tool="index_routines", output="FUN_401a30 at 0x401a30"),
+        LedgerEntry(
+            id="ev_0002", tool="fetch_bytes", args={"address": "0x401a30"}, ok=False, error="x"
+        ),
+        LedgerEntry(id="ev_0003", tool="fetch_bytes", args={"address": "0x401a30"}, output="c3"),
+    ]
+    assert _held(sentence, ledger) == ([sentence] if held else [])
+
+
+def test_an_open_question_s_path_names_no_address() -> None:
+    report = _report(questions=True)
+    section = report.sections[0]
+    section.rows[0][1] = "What does files/0x401a30.dat hold?"
+    section.rows[0][3] = "a read of files/0x401a30.dat"
+    text = _by_id(report, _ledger())["open.1"].text
+    assert "redone:" not in text
+
+
 def test_a_correct_paragraph_is_not_asked_and_the_request_is_unchanged() -> None:
     ledger = _ledger()
     without = _report()
@@ -645,7 +673,8 @@ def test_a_section_5_rewrite_is_read_by_its_citations() -> None:
 
 def test_a_section_5_sentence_saying_a_comparison_fails_is_put_in() -> None:
     # The check on the other passages counts only what a rewrite adds; a section 5
-    # rewrite is the platform's own, on a fact with a clause of its own.
+    # rewrite is the platform's own, on a fact about what the sentence names
+    # (0x6f48): its clause cites the failed call and the one that redid it.
     report, ledger = _haiku8()
     facts = _by_id(report, ledger)
     sentence = (
@@ -655,7 +684,7 @@ def test_a_section_5_sentence_saying_a_comparison_fails_is_put_in() -> None:
     row = {
         "passage": "payloads",
         "sentence": sentence,
-        "sources": ["unread.5"],
+        "sources": ["answered.2"],
         "decision": "rewrite",
         "rewrite": "The comparison fails, so the write is skipped and 0x6f48 returns 0 [ev_0082].",
     }
