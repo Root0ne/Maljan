@@ -586,6 +586,54 @@ def test_an_absence_is_qualified_on_a_routine_its_passage_names_anywhere(body: s
 @pytest.mark.parametrize(
     "sentence",
     [
+        "No log clearing, timestomping or file deletion appears in the code read.",
+        "No listed call path selects the Startup folder.",
+        "Whether the gate is open in the analysed sample is not established.",
+        "The routine's caller is not identified.",
+        "The call site was not recovered.",
+    ],
+)
+def test_an_absence_the_code_read_leaves_unsettled_is_qualified_on_a_routine(
+    sentence: str,
+) -> None:
+    body = f"The gate at 0x5a10 returns early [ev_0107]. {sentence}"
+    out, done = _qualify("anything", sentence, body)
+    assert out == body.replace(sentence, f"{sentence[:-1]}; {CLAUSE}.")
+    assert done.summary["rewritten"] == 1
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        # An absence the run recorded is about no routine (T-537).
+        "The sandbox recorded no API call trace [ev_0107].",
+        "None of these commands was observed in this run.",
+        "The decoded texts contain no shadow-copy command [ev_0107].",
+        # A reading word before the negation is not what the sentence says is absent.
+        "The capture, all packets read, contains no DNS query [ev_0107].",
+        "Text whose bytes already read as printable is not decoded [ev_0107].",
+    ],
+)
+def test_an_absence_the_run_recorded_is_not_qualified_on_a_routine(sentence: str) -> None:
+    body = f"The gate at 0x5a10 returns early [ev_0107]. {sentence}"
+    out, done = _qualify("anything", sentence, body)
+    assert out == body
+    assert done.summary["rewritten"] == 0
+    assert done.tally.by_code[REWRITE_UNGROUNDED_CODE] == 2
+
+
+def test_a_bound_value_qualifies_no_absence_the_run_recorded_beside_its_call() -> None:
+    recorded = "The sandbox recorded no mutex objects [ev_0107]."
+    report = _bound_report(f"{GATED} {recorded}")
+    row = _row("evasion_antiforensics", recorded, ["bound.1"], "x")
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
+    assert report.technical_analysis.evasion_antiforensics.body == f"{GATED} {recorded}"
+    assert done.summary["rewritten"] == 0
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
         # States no absence: the routine fact is about the sentence alone.
         "The sample also writes a Run key for persistence [ev_0107].",
         "Routine 0x7c40 returns early.",

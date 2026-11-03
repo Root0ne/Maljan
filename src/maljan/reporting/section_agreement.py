@@ -138,8 +138,8 @@ REWRITE_DROPS_CITATION_CODE = "agreement.rewrite_drops_citation"
 # sources that cite none; for a section 5 sentence, one resting only on facts
 # about nothing the sentence names (the routine or its caller, the address, the
 # value or the call), or, for a routine or bound-value fact on a sentence
-# stating an absence and naming no address, nothing its passage names, or with
-# no clause of their own.
+# stating that something is not established, read or shown and naming no
+# address, nothing its passage names, or with no clause of their own.
 REWRITE_UNGROUNDED_CODE = "agreement.rewrite_ungrounded"
 # A sentence the agreement question rewrote: what stood, what replaced it and
 # on which sources, recorded as the model's answer.
@@ -202,7 +202,8 @@ class Passage:
     qualifier: str = ""
     # A fact about a routine (one whose code no entry lists, or one an entry
     # lists) or a decoded value bound to a call: it grounds a section 5 sentence
-    # stating an absence wherever the sentence's passage names it (``_grounds``).
+    # stating that something is not established, read or shown wherever the
+    # sentence's passage names it (``_grounds``).
     on_absence: bool = False
     # The checks the field a passage stands in holds its text to, run on a
     # rewrite before it is put in (an ATT&CK procedure: one sentence, carrying
@@ -1637,8 +1638,9 @@ def _row_violations(
                             "section 5 sentence only where the sentence names the routine, "
                             "the address, the value or the call it is about, or, for a "
                             "fact about a routine or a bound value, where the sentence "
-                            "states an absence, names no address and its passage names "
-                            "what the fact is about. Keep the sentence."
+                            "states that something is not established, read or shown, "
+                            "names no address and its passage names what the fact is "
+                            "about. Keep the sentence."
                         ),
                         path=f"{path}.rewrite",
                     )
@@ -1656,9 +1658,10 @@ def _grounds_section_5(fact: Passage, reading: _Reading) -> bool:
     """Whether a fact grounds a rewrite of a section 5 sentence: where the sentence names
     what the fact is about (a routine whose code no entry lists or its caller, the address
     of an answered call, a bound value, its call or where it is passed), or, for a
-    fact about a routine or a bound value, where the sentence states an absence, names no
-    address and its passage names what the fact is about. The platform writes the rewrite
-    (``_qualified``); a fact with no clause of its own grounds none."""
+    fact about a routine or a bound value, where the sentence states that something is not
+    established, read or shown, names no address and its passage names what the fact is
+    about. The platform writes the rewrite (``_qualified``); a fact with no clause of its
+    own grounds none."""
     return _grounds(fact, reading)
 
 
@@ -1680,18 +1683,21 @@ class _Reading:
         return frozenset(_addresses_named(self.passage))
 
     @cached_property
-    def absence(self) -> bool:
-        return _states_an_absence(self.sentence)
+    def unestablished(self) -> bool:
+        return _UNESTABLISHED.search(self.sentence) is not None and _states_an_absence(
+            self.sentence
+        )
 
 
 def _grounds(fact: Passage, reading: _Reading) -> bool:
     """:func:`_grounds_section_5` for a sentence as copied: a fact with a clause of its
     own, whose clause the sentence does not already carry, about what the sentence
     names; or a fact about a routine or a bound value, about what the passage names,
-    where the sentence states an absence and names no address of its own ("No
-    environment check is established.", T-404; "The mutex name is not
-    established.", T-398). An absence naming an address is about that address
-    ("The call at 0x3808 was not read").
+    where the sentence states that something is not established, read or shown and
+    names no address of its own ("No environment check is established.", T-404; "The
+    mutex name is not established.", T-398). An absence naming an address is about
+    that address ("The call at 0x3808 was not read"); an absence the run recorded
+    ("The sandbox recorded no API call trace.") is about no routine (T-537).
 
     Any other fact is about the sentence alone: a section names many routines, and
     a failed call answered later is not about every sentence beside the one naming
@@ -1704,11 +1710,23 @@ def _grounds(fact: Passage, reading: _Reading) -> bool:
         return True
     return (
         fact.on_absence
-        and reading.absence
+        and reading.unestablished
         and not reading.named
         and _about(fact, reading.passage, reading.passage_named)
     )
 
+
+# An absence a routine or bound-value fact bears on without the sentence naming its
+# address: one the code read leaves unsettled, in a clause whose negation the reading word
+# follows ("No environment check is established.", "The mutex name is not established.",
+# "No listed call path selects Startup."). An absence the run recorded ("The sandbox
+# recorded no API call trace.") or a word read before the negation ("all packets read,
+# contains no DNS query") is not about code a routine fact is about (T-537).
+_UNESTABLISHED = re.compile(
+    r"\b(?:no|not|never|none)\b[^.;:()\u2014\u2013]*?\b(?:established|shown|read|listed|traced|"
+    r"identified|recovered|decompiled|disassembled|examined)\b|\bunread\b",
+    re.IGNORECASE,
+)
 
 # A word an absence may be stated of.
 _A_WORD = re.compile(r"[A-Za-z][\w-]*")
@@ -1966,8 +1984,9 @@ SYSTEM_PROMPT = (
     "decision rewrite only asks that it be qualified, and the platform adds the fact's own "
     "words and its ids to the sentence as it stands; it is qualified only where the "
     "sentence names the routine, the address, the value or the call the fact is about, or, "
-    "for a fact about a routine or a bound value, where the sentence states an absence, names "
-    "no address and its passage names what the fact is about.\n"
+    "for a fact about a routine or a bound value, where the sentence states that something is "
+    "not established, read or shown, names no address and its passage names what the fact "
+    "is about.\n"
     "Leave out every sentence no source states otherwise than. List each sentence once. "
     "Answer with exactly this JSON object, with an empty list when no sentence disagrees:\n"
     + EXPECTED_OBJECT
