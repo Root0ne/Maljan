@@ -73,8 +73,9 @@ _NOT_A_COUNT_KEY = re.compile(r"(?:^|_)(?:seconds?|secs?|ms|millis|bytes?|size|k
 # The reason may hold one level of bracketed text, such as a ledger id
 # written ``[ev_0021]``. Read from its bracket: spaces or emphasis before it
 # are no part of it, and a search starting at each of them read the run
-# again, which made a long run of spaces quadratic.
-_REASON = r"(?:[^\[\]]|\[[^\[\]]*\])*"
+# again, which made a long run of spaces quadratic. Read possessively: a
+# reason whose bracket never closes is read once, not once per split of it.
+_REASON = r"(?:[^\[\]]++|\[[^\[\]]*+\])*+"
 _MARK = re.compile(
     r"\[\s*+(?P<kind>not\s+blocking|blocking)\s*(?::(?P<reason>" + _REASON + r"))?\]"
     r"[*_`]*\s*\.?\s*$",
@@ -84,13 +85,30 @@ _MARK = re.compile(
 _ANY_MARK = re.compile(
     r"\[\s*(?P<kind>not\s+blocking|blocking)\s*(?::" + _REASON + r")?\]", re.IGNORECASE
 )
+# The carried-or-new mark (``_LINE_MARK``) as a part of a pattern.
+_CARRIED_OR_NEW = r"\[\s*+(?:carried\s*+:\s*+L?\s*+\d{1,9}\s*+|new\s*+)\]"
+# The mediator's mark with a reason, and with a reason or none.
+_REASONED_MARK = r"\[\s*+(?:not\s+blocking|blocking)\s*+:" + _REASON + r"\]"
+_ANY_MARK_PART = r"\[\s*+(?:not\s+blocking|blocking)\s*(?::" + _REASON + r")?\]"
+
+
+def _marks_after_field(mark: str, emphasis: str = "") -> str:
+    """The marks written right after a line's field: ``mark`` or the carried-or-new mark.
+
+    The one fragment both readers of them compose (``_FIELD_MARKS`` for the
+    line's mark, ``_MARKS_AFTER_FIELD`` for the claim numbers after them), each
+    mark with any ``emphasis`` around it.
+    """
+    return r"(?:\s*+" + emphasis + r"(?:" + mark + r"|" + _CARRIED_OR_NEW + r")" + emphasis + r")++"
+
+
 # A line's marks written right after its opening [analysts: ...] field, before
-# its text: a mark there, with only other marks or the carried-or-new mark
-# beside it, is the line's mark as one that ends the line is.
+# its text, with any emphasis around the field and each mark: a mark there,
+# with only other marks or the carried-or-new mark beside it, is the line's
+# mark as one that ends the line is.
 _FIELD_MARKS = re.compile(
-    r"^[\s*_`]*+(?:(?:[-*•]|\d+[.)])\s+)?[*_`]*+\[\s*analysts?\s*:[^\[\]]*\]"
-    r"(?P<marks>(?:\s*+\[\s*+(?:not\s+blocking|blocking)\s*(?::" + _REASON + r")?\]"
-    r"|\s*+\[\s*+(?:carried\s*+:\s*+L?\s*+\d{1,9}\s*+|new\s*+)\])++)",
+    r"^[\s*_`]*+(?:(?:[-*•]|\d+[.)])\s+)?[*_`]*+\[\s*analysts?\s*:[^\[\]]*\][*_`]*+"
+    r"(?P<marks>" + _marks_after_field(_ANY_MARK_PART, r"[*_`]*+") + r")",
     re.IGNORECASE,
 )
 _FIELD_MARK = re.compile(
@@ -751,8 +769,9 @@ def read_marks(lines: Iterable[str]) -> list[Mark]:
 
     - A mark ends its line, or stands right after the line's opening
       ``[analysts: ...]`` field (with only other marks or the carried-or-new
-      mark between them), and gives a reason, which may cite a ledger id in
-      brackets.
+      mark between them, emphasis around any of them), and gives a reason,
+      which may cite a ledger id in brackets. A reasoned mark after the field
+      is the line's over a bare one ending it.
     - A line with marks of both kinds blocks.
     - ``[not blocking]`` with no reason is no mark: the line blocks.
       ``[blocking]`` with no reason blocks as it asks.
@@ -768,7 +787,11 @@ def read_marks(lines: Iterable[str]) -> list[Mark]:
         # Nor is the carried-or-new mark.
         marked = without_line_mark(_ANALYSTS_FIELD.sub(" ", text))
         kinds = {_kind(m) for m in _ANY_MARK.finditer(marked)}
-        match = _MARK.search(marked) or _mark_after_field(text)
+        match = _MARK.search(marked)
+        if match is None or not (match.group("reason") or "").strip():
+            # A reasoned mark after the field is the line's over a bare one
+            # ending it; a bare one is read as before.
+            match = _mark_after_field(text) or match
         reason = (match.group("reason") or "").strip() if match is not None else ""
         if len(kinds) > 1:
             marks.append(Mark(line=text, blocking=True, marked=True, unread=True))
@@ -1976,11 +1999,7 @@ _MARK_ANYWHERE = re.compile(
     r"\[\s*+(?:not\s+blocking|blocking)\s*+:" + _REASON + r"\]", re.IGNORECASE
 )
 # The mediator's marks written right after a line's field, before its text.
-_MARKS_AFTER_FIELD = re.compile(
-    r"(?:\s*+\[\s*+(?:not\s+blocking|blocking)\s*+:" + _REASON + r"\]"
-    r"|\s*+\[\s*+(?:carried\s*+:\s*+L?\s*+\d{1,9}\s*+|new\s*+)\])++",
-    re.IGNORECASE,
-)
+_MARKS_AFTER_FIELD = re.compile(_marks_after_field(_REASONED_MARK), re.IGNORECASE)
 # Where a reference's clause ends: a ";", or a "." that ends a sentence (one
 # an uppercase letter, a ledger id, an address or the end of the line follows).
 _CLAUSE_END = re.compile(r";|\.(?=\s*+(?:[A-Z]|ev_|0x|$))")

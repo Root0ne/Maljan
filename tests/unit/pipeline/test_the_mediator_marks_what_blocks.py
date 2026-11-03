@@ -253,6 +253,32 @@ class TestTheMediatorsMarks:
 
             assert mark.blocking is True and mark.unread is True
 
+    def test_a_reasoned_mark_after_the_field_wins_over_a_bare_one_ending_the_line(self) -> None:
+        line = "[analysts: GAMMA ANALYST] [not blocking: a tally] Claim 3 vs 4 [not blocking]"
+
+        mark = read_marks([line])[0]
+
+        assert (mark.blocking, mark.marked, mark.reason, mark.unread) == (
+            False,
+            True,
+            "a tally",
+            False,
+        )
+
+    def test_emphasis_around_the_field_and_the_marks_after_it_is_no_part_of_them(self) -> None:
+        for line in (
+            "**[analysts: GAMMA ANALYST]** **[not blocking: a tally]** Claim 3 vs 4.",
+            "*[analysts: GAMMA ANALYST]* _[carried: L2]_ `[not blocking: a tally]` Claim 3.",
+        ):
+            mark = read_marks([line])[0]
+
+            assert (mark.blocking, mark.marked, mark.reason, mark.unread) == (
+                False,
+                True,
+                "a tally",
+                False,
+            )
+
     def test_a_mark_inside_the_text_after_the_field_is_still_unread(self) -> None:
         line = "[analysts: GAMMA ANALYST] Claim 3 [not blocking: a tally] vs BETA claim 4."
 

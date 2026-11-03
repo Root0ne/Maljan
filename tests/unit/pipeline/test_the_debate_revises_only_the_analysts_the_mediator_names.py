@@ -817,3 +817,15 @@ class TestAReportFromOutsideTheDebateIsShownAsOnDev:
 
         peers = agents["static"].safe_revise_isr.call_args[0][2]
         assert peers == {"triage_stopped": "triage stopped first"}
+
+
+def test_only_the_analyst_a_blocking_line_names_is_asked_beside_a_not_blocking_line() -> None:
+    from maljan.pipeline.debate_facts import analysts_to_revise, read_marks
+
+    lines = [
+        "[analysts: ALPHA ANALYST] [blocking: the technique is published] Claim 2 vs BETA.",
+        "[analysts: BETA ANALYST] [not blocking: a tally] Claim 4 vs ALPHA claim 1.",
+    ]
+    blocking = [mark.line for mark in read_marks(lines) if mark.blocking]
+
+    assert analysts_to_revise(blocking, ["alpha", "beta"]) == (["alpha"], "")
