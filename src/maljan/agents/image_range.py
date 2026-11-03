@@ -221,11 +221,26 @@ class ImageRangeReader:
         return self._range
 
 
+def program_name(value: str) -> str:
+    """The program a program argument names: the last segment of its path, ``\\`` read as ``/``."""
+    return value.strip().replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def same_program(named: str, name: str) -> bool:
+    """Whether the program argument ``named`` names the program ``name``.
+
+    ``name`` is read as given; ``named`` names it whole (``\\`` read as
+    ``/``) or by the last segment of its path (:func:`program_name`), so a
+    file name and a path ending in it name one program. Case is kept.
+    """
+    path = named.strip().replace("\\", "/")
+    return path == name or program_name(path) == name
+
+
 def _same_program(named: str, image: ImageRange) -> bool:
     """Whether a call's program argument names the program ``image`` was read for."""
     own = {image.program, *image.names} - {""}
-    named = named.strip().replace("\\", "/")
-    return named in own or named.rsplit("/", 1)[-1] in own
+    return any(same_program(named, name) for name in own)
 
 
 def _number(value: Any) -> int | None:
