@@ -26,14 +26,16 @@ agreement question reads them, ``agreement_facts``, T-396):
   the refused value, replaced by one not narrower), or of another tool that
   names no other program in an argument both declare to name the program
   (T-542; the role ``program`` of each entry's stored ``arguments``, two
-  values naming the same program when their last path segments agree, as
-  ``agents.image_range`` reads a program argument; a refused program the
-  failure names, replaced, is the refusal's fix): a
+  values naming the same program when their last path segments agree, by the
+  one rule ``agents.image_range.same_program`` reads a program argument with;
+  a refused program the failure names, replaced, is the refusal's fix): a
   decompiled listing holding it, or a disassembly of the whole function (the
   entry's declared kind says which). A read of some instructions from the
   address is no redo. Known limit: an argument the same tool's call only adds
   is not checked on this route; the listing is read as whole by its kind, so a
-  bound only the redo sets (``max_lines=3``) is not seen.
+  bound only the redo sets (``max_lines=3``) is not seen. Known limit: two
+  different folders that hold the same file name (``a/x.exe``, ``b/x.exe``)
+  are read as one program.
 
 The answering call must hold its answer whole (``holds_its_answer``, and
 nothing cut by the byte budget or the tool-output guardrail), and an answer
@@ -175,8 +177,8 @@ def _program_value(entry: Any) -> str:
     """The program a call named in the argument its tool declares to name the program; else ''.
 
     Read off the entry's stored declaration (its ``arguments`` role
-    ``program``), as the last segment of the path it gives, so a file name and
-    a path ending in it name one program.
+    ``program``), as the value it gives; :func:`_names_another_program` reads
+    it by its last path segment (``agents.image_range.same_program``).
     """
     from maljan.core.declared_reading import kind_free_facts
 
@@ -184,9 +186,7 @@ def _program_value(entry: Any) -> str:
     name = str(roles.get("program") or "") if isinstance(roles, Mapping) else ""
     args = getattr(entry, "args", None)
     value = args.get(name) if name and isinstance(args, Mapping) else None
-    if _empty(value):
-        return ""
-    return str(value).strip().replace("\\", "/").rsplit("/", 1)[-1]
+    return "" if _empty(value) else str(value)
 
 
 def _names_another_program(failed: Any, answering: Any) -> bool:
@@ -197,8 +197,11 @@ def _names_another_program(failed: Any, answering: Any) -> bool:
     (a ``mode``, a ``format``, a ``timeout``), so it is not read. The refused
     program the failure's own message names, replaced, is the refusal's fix.
     """
-    before, after = _program_value(failed), _program_value(answering)
-    if not before or not after or before == after:
+    from maljan.agents.image_range import program_name, same_program
+
+    named = _program_value(failed)
+    before, after = program_name(named), program_name(_program_value(answering))
+    if not before or not after or same_program(named, after):
         return False
     message = str(getattr(failed, "error", "") or getattr(failed, "output", "") or "")
     return not (len(before) >= _NAMED_VALUE_CHARS and before in message)
