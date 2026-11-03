@@ -193,6 +193,50 @@ def test_a_value_the_failure_names_may_change_in_the_redo() -> None:
     assert redone_failures([other, redo]) == []
 
 
+def _code_call(entry_id: str, ok: bool, **args: object) -> LedgerEntry:
+    return LedgerEntry(
+        id=entry_id,
+        tool="lift_routine",
+        args={"address": hex(GATE), **args},
+        ok=ok,
+        error=None if ok else "the call failed: count=4096 is more than the tool reads",
+        output=f"int FUN_{GATE:x}(void)\n{{\n}}\n" if ok else "",
+        facts=_DECOMPILE,
+    )
+
+
+def test_an_argument_only_the_redo_sets_makes_a_narrower_question_no_redo() -> None:
+    # The whole routine asked, some of it answered: no default for the
+    # argument reaches the ledger, so the redo may be narrower and is not one.
+    for value in (3, "3", 0):
+        failed = _code_call("ev_0001", False)
+        redo = _code_call("ev_0002", True, count=value)
+        assert redone_failures([failed, redo]) == []
+        failed_null = _code_call("ev_0001", False, count=None)
+        assert redone_failures([failed_null, redo]) == []
+
+
+def test_a_refused_value_replaced_by_a_smaller_number_is_no_redo() -> None:
+    failed = _code_call("ev_0001", False, count=4096)
+    for smaller in (4, "4", "0x10", 4095.5):
+        assert redone_failures([failed, _code_call("ev_0002", True, count=smaller)]) == []
+    # Not smaller: the same number, or a larger one, however written.
+    for same_or_wider in (4096, "0x1000", "8192", 1e5):
+        redo = _code_call("ev_0002", True, count=same_or_wider)
+        assert redone_failures([failed, redo])[0]["answered_by"] == ["ev_0002"]
+
+
+def test_a_same_or_wider_redo_is_still_redone() -> None:
+    failed = _code_call("ev_0001", False, count=4096)
+    # The same question, an argument the redo leaves null or absent aside.
+    for redo in (
+        _code_call("ev_0002", True, count=4096),
+        _code_call("ev_0002", True, count=4096, mode=None),
+        _code_call("ev_0002", True),
+    ):
+        assert redone_failures([failed, redo])[0]["answered_by"] == ["ev_0002"]
+
+
 def test_an_answer_that_holds_nothing_redoes_nothing() -> None:
     empty = _lifted("ev_0002", GATE).model_copy(update={"output": ""})
     blanked = _lifted("ev_0003", GATE).model_copy(update={"output": "", "truncated": True})
@@ -379,10 +423,8 @@ def test_run7_s_decompile_is_not_redone_by_a_read_of_seventy_instructions() -> N
     ledger = _stored_ledger("run7")
     redone = {row["entry_id"]: row["answered_by"] for row in redone_failures(ledger)}
     # ev_0055 disassembled 70 instructions from 0x...1030: no redo of the decompile.
-    # ev_0111, a later decompile of the whole function, is.
-    assert redone == {
-        "ev_0050": ["ev_0111"],
-        "ev_0067": ["ev_0123"],
-        "ev_0069": ["ev_0123"],
-        "ev_0095": ["ev_0174"],
-    }
+    # ev_0111, ev_0123 and ev_0174 are later calls of the same tool that set a
+    # timeout the failed calls left out, a default the ledger does not carry
+    # (T-529): they redo no decompile; ev_0123 lists 0x...caac whole and so
+    # redoes the failed disassembly of it, another tool's call.
+    assert redone == {"ev_0069": ["ev_0123"]}

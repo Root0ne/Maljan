@@ -11,8 +11,15 @@ later call answered the same question (the addresses are read as the
 agreement question reads them, ``agreement_facts``, T-396):
 
 * a later call of the same tool, for that address, whose every other argument
-  is the failed call's, except one absent or null on either side and one whose
-  failed value the failure's own message names (the value it refused);
+  is the failed call's, except one the redo leaves absent or null and one whose
+  failed value the failure's own message names (the value it refused). The
+  redo is never narrower than the failed call (T-529): an argument the failed
+  call left absent or null and the redo sets counts only where the tool's
+  declared default for it is known and is that value; the ledger carries no
+  tool's input schema, so it never counts ("disassemble X" redone as
+  "disassemble 3 instructions of X" is no redo); a refused value replaced by a
+  number counts only when the number is not smaller than the refused one (a
+  read of 0x1000 bytes redone as a read of 4 is no redo);
 * for a failed call that lists code, a later call of another tool that lists
   that function whole: a decompiled listing holding it, or a disassembly of the
   whole function. A read of some instructions from the address is no redo.
@@ -52,8 +59,36 @@ def _empty(value: Any) -> bool:
     return value is None or value == "" or value == [] or value == {}
 
 
+def _number(value: Any) -> int | float | None:
+    """``value`` as a number: an int or a float, or a decimal or ``0x`` hex text; else None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return value
+    text = str(value).strip()
+    try:
+        return int(text, 0)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _narrower(before: Any, after: Any) -> bool:
+    """Whether a refused value ``before`` is replaced by a smaller number ``after``."""
+    refused, now = _number(before), _number(after)
+    return refused is not None and now is not None and now < refused
+
+
 def _same_question(failed: Any, answering: Any) -> bool:
-    """Whether a later call of the failed call's tool asked what it asked, but for its addresses."""
+    """Whether a later call of the failed call's tool asked what it asked, but for its addresses.
+
+    Never a narrower question: an argument only the redo sets, whose declared
+    default the ledger does not carry, and a refused value replaced by a smaller
+    number, each make it another question.
+    """
     from maljan.core.undeclared_tools import entry_address_arguments
     from maljan.pipeline.validation import _ADDRESS_LIST_ARGUMENTS
 
@@ -64,10 +99,18 @@ def _same_question(failed: Any, answering: Any) -> bool:
     message = str(getattr(failed, "error", "") or getattr(failed, "output", "") or "")
     for name in {*asked, *again} - skip:
         before, after = asked.get(name), again.get(name)
-        if _empty(before) or _empty(after) or before == after or str(before) == str(after):
+        if _empty(after) or before == after or str(before) == str(after):
             continue
+        if _empty(before):
+            # Set by the redo alone: a narrower question unless the tool's
+            # default is that value, and no default reaches the ledger.
+            return False
         refused = str(before)
-        if len(refused) >= _NAMED_VALUE_CHARS and refused in message:
+        if (
+            len(refused) >= _NAMED_VALUE_CHARS
+            and refused in message
+            and not _narrower(before, after)
+        ):
             continue
         return False
     return True
