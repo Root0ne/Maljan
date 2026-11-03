@@ -18,7 +18,9 @@ from the ledger and the report alone:
 * **The tools not run**: each ``server.<key>.<tool>_unavailable(<reason>)`` the
   run recorded as a limitation or an operator choice, and how many of a
   server's tools the job withheld from the agents.
-* **The recorded limitations**: every other reason the run recorded.
+* **The recorded limitations**: every other reason the run recorded, but the
+  note on how an analyst's answer was read (its claims begun and read), which
+  says how the platform read the answer, not what the run could not establish.
 * **The open questions**: each one the analysts filed, by why it was left open;
   one filed on a failed call or a missing tool names the addresses it is
   about, and a question a later call answered is marked so, never dropped.
@@ -65,10 +67,23 @@ _WITHHELD = re.compile(r"\bis withheld:")
 _URL = re.compile(r"\b[a-zA-Z][\w+.-]*://[^\s,;()]*")
 
 
+# A digest or an identifier as long as one, which a message repeats in full.
+_DIGEST = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+# The note the analyst answer's reader records when it could not read every
+# claim (``base_agent.claims_unread_sentence``): how the platform read an
+# answer, not what the run could not establish.
+_ANSWER_READ_NOTE = re.compile(r"^The \S+ analyst's answer\b[^.]*? began \d+ claim\(s\)")
+
+
 def _plain(text: str) -> str:
     """A tool's message or a reason as a fact quotes it: scrubbed as an event payload is
     (a path to its last segment, a credential masked), and every URL left out."""
     return _URL.sub("a URL", scrub(text))
+
+
+def _first_clause(text: str) -> str:
+    """A tool's message as a fact quotes it: its first clause, a digest in it named so."""
+    return _DIGEST.sub("a digest", _plain(text).split(";", 1)[0].strip())
 
 
 @dataclass(frozen=True)
@@ -168,7 +183,7 @@ def failed_calls(
             FailedCall(
                 entry=entry_id,
                 tool=str(getattr(entry, "tool", "") or ""),
-                error=_plain(_error(entry)),
+                error=_first_clause(_error(entry)),
                 asked=asked,
                 answered=tuple((a, linked[a]) for a in asked if a in linked),
                 redone_by=redid.get(entry_id, ()),
@@ -253,7 +268,7 @@ def limitation_facts(
     not_run, withheld, rest = _not_run(dict.fromkeys([*reasons, *choices]))
     # An operator choice that is no tool left out is the operator's, not the run's limitation.
     held = set(reasons)
-    recorded = [_plain(line) for line in rest if line in held]
+    recorded = [_plain(line) for line in rest if line in held and not _ANSWER_READ_NOTE.match(line)]
     return LimitationFacts(
         failed=tuple(failed_calls(entries, answered, bases)),
         not_run=tuple(not_run),

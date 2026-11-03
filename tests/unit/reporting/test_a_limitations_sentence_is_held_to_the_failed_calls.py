@@ -36,6 +36,7 @@ from maljan.reporting.section_agreement import (
     FACT,
     FAILURE_REDONE_CODE,
     REWRITTEN_CODE,
+    _sentences_of,
     ask_section_agreement,
     held_limitation_sentences,
     passages_of,
@@ -48,7 +49,7 @@ ROUTINE = 0x401A30
 _DECOMPILE = {"v": 1, "kind": "decompile", "reader": "listing"}
 
 FALSE = (
-    "The listing tool failed, so the control flow was read from the function index, not "
+    "The decompiler failed, so the control flow was read from the function index, not "
     "from a listing [ev_0001]."
 )
 TRUE = "The emulation call failed, so the decoded keys rest on the strings alone [ev_0004]."
@@ -213,17 +214,41 @@ def test_only_the_sentence_the_ledger_says_otherwise_of_is_held() -> None:
         ("The beacon failed to connect to its server in the sandbox.", False),
         ("The beacon failed to connect to its server [ev_0001].", False),
         # A redone call cited without its redo is held, whatever the words say.
-        ("The listing tool failed, so the routine was re-read from the index [ev_0002].", True),
+        ("The decompiler failed, so the routine was re-read from the index [ev_0002].", True),
         # A negated redo word says no redo.
-        ("The listing tool failed and no later call answered it [ev_0001].", True),
-        ("The listing tool failed and was not redone [ev_0001].", True),
-        ("The listing tool failed and was never redone [ev_0001].", True),
+        ("The decompiler failed and no later call answered it [ev_0001].", True),
+        ("The decompiler failed and was not redone [ev_0001].", True),
+        ("The decompiler failed and was never redone [ev_0001].", True),
         # A redo said and cited agrees.
-        ("The listing tool failed once and was redone [ev_0002][ev_0003].", False),
+        ("The decompiler failed once and was redone [ev_0002][ev_0003].", False),
+        # A listing that is no listing of code names no call that lists code.
+        ("The process listing failed to enumerate the running services [ev_0001].", False),
+        ("The check-in failed, so no listing of the server's commands was kept [ev_0001].", False),
+        ("The decompiler failed, so no routine listing was read [ev_0001].", True),
     ],
 )
 def test_a_sentence_is_held_by_the_call_it_names_or_cites(sentence: str, held: bool) -> None:
     assert _held(sentence) == ([sentence] if held else [])
+
+
+@pytest.mark.parametrize(
+    ("sentence", "held"),
+    [
+        # A short tool name is read as a whole word, never inside another one.
+        ("The thread injection failed in the sandbox [ev_0001].", False),
+        ("The spread routine failed [ev_0001].", False),
+        ("The read call failed [ev_0001].", True),
+    ],
+)
+def test_a_tool_s_name_is_read_as_a_whole_word(sentence: str, held: bool) -> None:
+    ledger = [
+        LedgerEntry(id="ev_0001", tool="index_routines", output="FUN_401a30 at 0x401a30"),
+        LedgerEntry(
+            id="ev_0002", tool="read", args={"address": "0x401a30"}, ok=False, error="not open"
+        ),
+        LedgerEntry(id="ev_0003", tool="read", args={"address": "0x401a30"}, output="90 90 c3"),
+    ]
+    assert _held(sentence, ledger) == ([sentence] if held else [])
 
 
 def test_a_correct_paragraph_is_not_asked_and_the_request_is_unchanged() -> None:
@@ -231,7 +256,7 @@ def test_a_correct_paragraph_is_not_asked_and_the_request_is_unchanged() -> None
     without = _report()
     without.technical_analysis.analyst_limitations = None
     expected = prompt_text(passages_of(without, entries=ledger))
-    for body in (f"{TRUE} {OTHER}", OTHER, "The listing tool failed and was redone [ev_0003]."):
+    for body in (f"{TRUE} {OTHER}", OTHER, "The decompiler failed and was redone [ev_0003]."):
         assert prompt_text(passages_of(_report(body), entries=ledger)) == expected
 
 
@@ -252,10 +277,10 @@ def test_a_paragraph_is_byte_identical_where_no_call_failed() -> None:
 @pytest.mark.parametrize(
     "rewrite",
     [
-        "The listing tool failed once and a later call listed the routine, so the control "
+        "The decompiler failed once and a later call decompiled the routine, so the control "
         "flow was read from that listing [ev_0001][ev_0003].",
         # Decided by citation, not vocabulary: no redo word, the redo cited.
-        "The first listing call failed, and a second call listed the routine, so the control "
+        "The first decompile call failed, and a second call decompiled the routine, so the control "
         "flow was read from it [ev_0001][ev_0003].",
     ],
 )
@@ -274,13 +299,13 @@ def test_a_rewrite_citing_the_call_that_redid_it_is_put_in(rewrite: str) -> None
     [
         # Cites the failed call a later call redid, and still calls it failed.
         (
-            "The listing tool failed, so the control flow was read from the function index "
+            "The decompiler failed, so the control flow was read from the function index "
             "[ev_0001][ev_0002].",
             ["failed.1"],
         ),
         # One failure that stands cited beside it is no cover.
         (
-            "The listing tool failed, so the control flow was read from the function index "
+            "The decompiler failed, so the control flow was read from the function index "
             "[ev_0001][ev_0002][ev_0004].",
             ["failed.1", "failed.2"],
         ),
@@ -291,18 +316,36 @@ def test_a_rewrite_citing_the_call_that_redid_it_is_put_in(rewrite: str) -> None
         ),
         # A negated redo word is no redo, and a redo word alone is never enough.
         (
-            "The listing tool failed and was never redone, so the control flow was read from "
+            "The decompiler failed and was never redone, so the control flow was read from "
             "the function index [ev_0001][ev_0002].",
             ["failed.1"],
         ),
         (
-            "The listing tool failed and no later call answered it, so the control flow was "
+            "The decompiler failed and no later call answered it, so the control flow was "
             "read from the function index [ev_0001][ev_0002].",
             ["failed.1"],
         ),
         (
-            "The listing tool failed and was redone, so the control flow was read from the "
+            "The decompiler failed and was redone, so the control flow was read from the "
             "function index [ev_0001][ev_0002].",
+            ["failed.1"],
+        ),
+        # R1: a negated redo is no redo, even citing the call that redid it.
+        (
+            "The decompiler failed and was never redone, so the control flow was read from "
+            "the function index [ev_0001][ev_0002][ev_0003].",
+            ["failed.1"],
+        ),
+        # R2: naming the redone call is enough, with a standing failure the only source.
+        (
+            "The decompiler and emulation tools failed, so the control flow was read from the "
+            "function index [ev_0001][ev_0004].",
+            ["failed.2"],
+        ),
+        # R3: "for good" denies the redo it cites.
+        (
+            "The decompiler failed for good; ev_0003 shows only the function index "
+            "[ev_0001][ev_0003].",
             ["failed.1"],
         ),
     ],
@@ -329,6 +372,22 @@ def test_a_quoted_message_carries_no_path_and_no_url() -> None:
     text = _by_id(_report(), ledger)["failed.1"].text
     assert "/opt/tools" not in text and "10.0.0.5" not in text and "8089" not in text
     assert '"rules at rules are missing on a URL"' in text
+    # Only the first clause is quoted, a digest in it named so.
+    ledger[1] = ledger[1].model_copy(
+        update={"error": f"program='{'ab' * 32}' is not open; the call was not sent"}
+    )
+    text = _by_id(_report(), ledger)["failed.1"].text
+    assert "\"program='a digest' is not open\"" in text and "not sent" not in text
+
+
+def test_how_an_answer_was_read_is_no_recorded_limitation() -> None:
+    report = _report()
+    report.degradation_reasons.append(
+        "The static analyst's answer (round 1) began 42 claim(s), and 40 were read; 2 could "
+        "not be read as a claim and are not in its findings."
+    )
+    recorded = [p.text for i, p in _by_id(report, _ledger()).items() if i.startswith("recorded.")]
+    assert recorded == ['"triage.rules_failed"']
 
 
 def test_a_question_filed_on_a_redone_call_is_marked_and_kept() -> None:
@@ -464,12 +523,52 @@ def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> Non
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
     assert report.technical_analysis.analyst_limitations.body == body
     assert done.summary["not_applied"] == 1
-    true = (
+    # Naming decompiling names every decompile a later call redid: the batch one
+    # (ev_0168 by ev_0171) and the one of 0x7b80 (ev_0187 by ev_0191).
+    only_batch = (
         "The emulation call by candidate names failed [ev_0122]; the batch decompile that "
         "failed was redone by a later call, so the dispatch routines' control flow was read "
         "from its listing [ev_0025][ev_0171]."
     )
-    row = _row(HAIKU8_SENTENCE, [emulation, batch], true)
+    row = _row(HAIKU8_SENTENCE, [emulation, batch], only_batch)
+    done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
+    assert done.summary["not_applied"] == 1
+    true = (
+        "The emulation call by candidate names failed [ev_0122]; the decompiles that failed "
+        "were redone by later calls, so the dispatch routines' control flow was read from "
+        "their listings [ev_0025][ev_0171][ev_0191]."
+    )
+    single = next(i for i, p in facts.items() if i.startswith("failed.") and "ev_0187" in p.cites)
+    row = _row(HAIKU8_SENTENCE, [emulation, batch, single], true)
     done, _ = _ask(report, ledger, {"sentences": [row]})
     assert done.summary["rewritten"] == 1
     assert report.technical_analysis.analyst_limitations.body == body.replace(HAIKU8_SENTENCE, true)
+    # P6b: resting on the emulation fact alone, the rewrite still names decompiling and
+    # disassembling, which later calls redid.
+    row = _row(HAIKU8_SENTENCE, [emulation], covered)
+    report, ledger = _haiku8()
+    done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
+    assert report.technical_analysis.analyst_limitations.body == body
+    assert done.summary["not_applied"] == 1
+
+
+@pytest.mark.parametrize("source", ["failed", "open"])
+def test_a_limitation_fact_grounds_no_false_failure_in_another_section(source: str) -> None:
+    # A key finding rewritten on a limitation fact is held to the same check.
+    report, ledger = _haiku8()
+    facts = {p.id: p for p in passages_of(report, entries=ledger)}
+    fact = next(i for i, p in facts.items() if i.startswith(f"{source}.") and "ev_0168" in p.cites)
+    finding = facts["key_findings.1"]
+    assert finding.sourced_check is not None
+    sentence = _sentences_of(finding.text)[0]
+    rewrite = sentence.rstrip(".").rstrip() + "; the batch decompile of 0x6f48 failed [ev_0168]."
+    row = {
+        "passage": "key_findings.1",
+        "sentence": sentence,
+        "sources": [fact],
+        "decision": "rewrite",
+        "rewrite": rewrite,
+    }
+    done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
+    assert done.summary["rewritten"] == 0
+    assert FAILURE_REDONE_CODE in [r["code"] for r in done.tally.unresolved]
