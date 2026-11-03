@@ -259,6 +259,35 @@ class TestBuildQuery:
         assert "T1059" in q
         assert "Bad Type" not in q
 
+    def test_a_signature_seen_in_other_processes_is_named_once(self) -> None:
+        # T-543: two rows of one signature that differ only in the processes
+        # they were seen in name it once, and the next signature takes the slot.
+        names = ["inject", "inject", "antivm", "persist", "beacon", "unsigned", "packer"]
+        sigs: list[Any] = [
+            {"name": name, "severity": 2, "pids": [100 + at]} for at, name in enumerate(names)
+        ]
+        q = _build_query({"dynamic": {"sandbox_signatures": sigs}})
+        assert "Signatures: inject, antivm, persist, beacon, unsigned" in q
+        # The query prints the name alone: a row of the same name with another
+        # description adds no term either.
+        other = [{"name": "inject"}, {"name": "inject", "description": "into explorer"}, "bad"]
+        q = _build_query({"dynamic": {"sandbox_signatures": other}})
+        assert q == "Signatures: inject"
+
+    def test_a_malformed_signature_row_does_not_raise(self) -> None:
+        sigs: list[Any] = [
+            {"name": "inject", "technique_ids": 5, "marks": [{"a": 1}]},
+            {"name": "inject", "technique_ids": [["T1055"]]},
+            {"name": None},
+            {"name": 7},
+            {},
+            "bad",
+            None,
+            {"name": "antivm"},
+        ]
+        q = _build_query({"dynamic": {"sandbox_signatures": sigs}})
+        assert q == "Signatures: inject"
+
     def test_empty_inputs_yield_empty_string(self) -> None:
         assert _build_query({}) == ""
 

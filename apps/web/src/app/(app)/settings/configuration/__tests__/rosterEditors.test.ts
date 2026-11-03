@@ -103,7 +103,11 @@ describe("the server detail's agent boxes", () => {
 describe("the agent detail's input data and sandbox row", () => {
   const vocabulary = served("agent_definitions").data_source_choices as string[];
 
-  function agentHtml(key: string, definition: AgentDefinitionEntry): string {
+  function agentHtml(
+    key: string,
+    definition: AgentDefinitionEntry,
+    builtinAgentKeys?: readonly string[],
+  ): string {
     return renderToStaticMarkup(
       createElement(AgentDetail, {
         agentKey: key,
@@ -117,6 +121,7 @@ describe("the agent detail's input data and sandbox row", () => {
         resolve,
         sections: ["identity", "tools"],
         dataSourceChoices: vocabulary,
+        builtinAgentKeys,
       }),
     );
   }
@@ -148,6 +153,13 @@ describe("the agent detail's input data and sandbox row", () => {
       const html = agentHtml("checker", { ...base, role });
       expect(html, role).not.toContain(hint);
       expect(html, role).not.toContain("aria-describedby=\"checker-tab-hint\"");
+    }
+    // A built-in's tab select is locked: no hint about a tab it cannot pick.
+    for (const role of ["generic", "lead"] as const) {
+      const html = agentHtml("checker", { ...base, role }, ["checker"]);
+      expect(html.match(/<select[^>]*aria-label="checker tab"[^>]*>/)?.[0], role).toContain("disabled");
+      expect(html, role).not.toContain(hint);
+      expect(html, role).not.toContain('aria-describedby="checker-tab-hint"');
     }
   });
 

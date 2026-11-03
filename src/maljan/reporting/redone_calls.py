@@ -21,9 +21,14 @@ agreement question reads them, ``agreement_facts``, T-396):
   failure that named no instruction count, is no redo); a refused value
   replaced by a number counts only when the number is not smaller than the
   refused one (a read of 0x1000 bytes redone as a read of 4 is no redo);
-* for a failed call that lists code, a later call of another tool, or of the
-  same tool that changed no value the failed call set (but for the refused
-  value, replaced by one not narrower), that lists that function whole: a
+* for a failed call that lists code, a later call that lists that function
+  whole, of the same tool that changed no value the failed call set (but for
+  the refused value, replaced by one not narrower), or of another tool that
+  names no other program in an argument both declare to name the program
+  (T-542; the role ``program`` of each entry's stored ``arguments``, two
+  values naming the same program when their last path segments agree, as
+  ``agents.image_range`` reads a program argument; a refused program the
+  failure names, replaced, is the refusal's fix): a
   decompiled listing holding it, or a disassembly of the whole function (the
   entry's declared kind says which). A read of some instructions from the
   address is no redo. Known limit: an argument the same tool's call only adds
@@ -42,7 +47,7 @@ where the run's counts are (``run_summary.evidence.failed`` and ``failures``).
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
 __all__ = ["ENTRY_ID", "redone_failures"]
@@ -160,9 +165,43 @@ def _changes_a_set_value(failed: Any, answering: Any) -> bool:
     A value set on both sides and different (another program, a smaller
     bound) asks another question, unless it is the refused value the failure
     names, replaced by one not narrower. An argument only the later call adds
-    is not read here.
+    is not read here. For a call of the same tool only: another tool may give
+    one name another meaning (:func:`_names_another_program`).
     """
     return any(not added and not fixed for _name, added, fixed in _changed(failed, answering))
+
+
+def _program_value(entry: Any) -> str:
+    """The program a call named in the argument its tool declares to name the program; else ''.
+
+    Read off the entry's stored declaration (its ``arguments`` role
+    ``program``), as the last segment of the path it gives, so a file name and
+    a path ending in it name one program.
+    """
+    from maljan.core.declared_reading import kind_free_facts
+
+    roles = getattr(kind_free_facts(entry), "arguments", None)
+    name = str(roles.get("program") or "") if isinstance(roles, Mapping) else ""
+    args = getattr(entry, "args", None)
+    value = args.get(name) if name and isinstance(args, Mapping) else None
+    if _empty(value):
+        return ""
+    return str(value).strip().replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _names_another_program(failed: Any, answering: Any) -> bool:
+    """Whether a call of another tool named another program than the failed call did.
+
+    Only where both tools declare an argument to name the program and both
+    calls set it: any other argument may mean another thing to another tool
+    (a ``mode``, a ``format``, a ``timeout``), so it is not read. The refused
+    program the failure's own message names, replaced, is the refusal's fix.
+    """
+    before, after = _program_value(failed), _program_value(answering)
+    if not before or not after or before == after:
+        return False
+    message = str(getattr(failed, "error", "") or getattr(failed, "output", "") or "")
+    return not (len(before) >= _NAMED_VALUE_CHARS and before in message)
 
 
 def _whole_listings(answering: Any, bases: Sequence[int]) -> set[int]:
@@ -241,7 +280,9 @@ def redone_failures(ledger: Iterable[Any]) -> list[dict[str, Any]]:
                     covered = _whole_listings(answering, bases)
                 else:
                     continue
-            elif lists_code:
+            elif lists_code and not _names_another_program(failed, answering):
+                # Another tool listing the function whole answers a failed
+                # listing of it, but of another program (T-542).
                 covered = _whole_listings(answering, bases)
             else:
                 continue

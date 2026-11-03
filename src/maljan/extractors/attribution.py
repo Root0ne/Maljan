@@ -215,7 +215,7 @@ def _build_query(malware_report: dict[str, Any]) -> str:
     dynamic = malware_report.get("dynamic") or {}
     sigs = dynamic.get("sandbox_signatures") or []
     sig_names: list[str] = []
-    for s in sigs[:5]:
+    for s in _distinct_signature_rows(sigs)[:5]:
         if not isinstance(s, dict):
             continue
         name = s.get("name")
@@ -238,6 +238,26 @@ def _build_query(malware_report: dict[str, Any]) -> str:
         parts.append("Infrastructure: " + ", ".join(iocs[:8]))
 
     return ". ".join(parts)
+
+
+def _distinct_signature_rows(rows: list[Any]) -> list[Any]:
+    """``rows`` with each signature name once, at its first place.
+
+    The query names a signature by its name alone, so a later row of the same
+    name (the same signature seen in other processes, or stored twice) is no
+    further term and takes no slot of the five. A row that is no dict, or names
+    nothing, is kept where it is.
+    """
+    seen: set[str] = set()
+    out: list[Any] = []
+    for row in rows:
+        name = row.get("name") if isinstance(row, dict) else None
+        if isinstance(name, str) and name:
+            if name in seen:
+                continue
+            seen.add(name)
+        out.append(row)
+    return out
 
 
 def _trim(value: str, max_len: int) -> str:

@@ -391,9 +391,13 @@ export function AgentDetail({
   // names all of them; an API older than it leaves the five class built-ins.
   const locked = builtinKeySet(builtinAgentKeys).has(agentKey);
   // A role an operator may pick that has no tab of its own: the tab field
-  // then says where the sections it leaves unplaced are drawn.
+  // then says where the sections it leaves unplaced are drawn. A built-in's
+  // tab cannot be picked, so it is told nothing it could act on.
   const tabHint =
-    agent !== undefined && ROLE_CHOICES.includes(agent.role) && !Object.hasOwn(ROLE_TABS, agent.role);
+    !locked &&
+    agent !== undefined &&
+    ROLE_CHOICES.includes(agent.role) &&
+    !Object.hasOwn(ROLE_TABS, agent.role);
 
   const put = (key: string, next: Partial<AgentDefinitionEntry>) => {
     resolve.noteEdit(key, next);
