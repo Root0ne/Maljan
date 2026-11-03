@@ -27,12 +27,15 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # a command line, the sample's indicator adds its SHA-1 and MD5, its imphash
 # is an anomalous-activity indicator of its own, and an indicator's reason is
 # read from the rebuilt table.
+# Re-pinned when a process the sample's lineage rule leaves out of its tree
+# came to say so (T-511): each desktop process carries
+# ``x_maljan_sample_process_tree: false``, and nothing else changed.
 STORED_EXPORTS = {
-    "run7": "8954bac7f3ea132c",
-    "run5": "efe981ba18209c11",
-    "run4": "9a3a7b4040b09b57",
-    "local8": "952f4e3743111201",
-    "haiku4": "d8d0d7500af6a3ff",
+    "run7": "8ef468699faaa757",
+    "run5": "5dcfdb861872d1c3",
+    "run4": "a4ab66a0f4282d6c",
+    "local8": "d4732f60257652b8",
+    "haiku4": "1058469a77c8efa0",
 }
 # ``(markdown, html with the nonce "fixed", normalised STIX)`` for haiku4. The
 # Markdown and HTML were re-pinned when a sample's, a tool's or a finding's text
@@ -59,7 +62,10 @@ STORED_EXPORTS = {
 # Re-pinned when the commands table came to list only what descends from a
 # process running the sample (T-494): explorer.exe under sihost.exe leaves the
 # table, which has no row left and is not printed; the STIX export did not change.
-HAIKU4_RENDERS = ("06a395f0432b80a2", "eaaa767d3f812838", "830330837272aa44")
+# The STIX re-pinned when the desktop processes outside the sample's tree came
+# to say so (T-511: five carry ``x_maljan_sample_process_tree: false``); the
+# Markdown and HTML did not change.
+HAIKU4_RENDERS = ("06a395f0432b80a2", "eaaa767d3f812838", "59a81cbf1f25c42e")
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")

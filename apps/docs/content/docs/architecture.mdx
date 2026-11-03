@@ -1853,7 +1853,14 @@ its own.
 A sandbox's process tree is exported as STIX 2.1 observables: one `process`
 per node (pid, command line, `child_refs`), the image each ran from as a
 `file` whose id is derived from its name, and an `observed-data` naming them
-by `object_refs` with `number_observed: 1` — one run is one observation. The
+by `object_refs` with `number_observed: 1` — one run is one observation. Every
+process the sandbox listed stays, in its place in the tree; one the sample's
+lineage rule (`sample_process_tree`) leaves out of the sample's tree says so: a
+process outside it carries `x_maljan_sample_process_tree: false` (the desktop's
+explorer.exe under sihost.exe), and one the two lineage facts dispute carries
+`x_maljan_lineage_disputed` with the fact that alone names it (`marked` or
+`file`), as the report's network rows say it of a flow's process. A process of
+the tree carries neither, and a judge's object never does. The
 2.0 form it replaced embedded unnamed processes carrying a `name` 2.1 does not
 define and put the process count in `number_observed`; the OASIS validator
 could not read it. `tests/unit/reporting/test_the_export_passes_the_official_validator.py`

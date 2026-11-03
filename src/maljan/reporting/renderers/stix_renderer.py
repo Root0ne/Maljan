@@ -84,15 +84,24 @@ from maljan.reporting.models import (
 )
 from maljan.schemas.judgement import indicator_type_for
 from maljan.schemas.sandbox_report import (
+    LINEAGE_FILE,
+    LINEAGE_MARKED,
     LINEAGE_STORED_MARKED_BY,
+    PLACED_IN_TREE,
+    PLACED_OUTSIDE,
+    PLACED_UNSETTLED,
+    PLACED_UNSTATED,
     SampleTree,
+    process_placement,
     sample_process_tree,
 )
 from maljan.schemas.stix_models import (
     ATTACK_PATTERN_NAMESPACE,
     EVIDENCE_REFS_PROPERTY,
     KNOWN_KILL_CHAINS,
+    LINEAGE_DISPUTED_PROPERTY,
     PROPERTY_NOT_CARRIED_CODE,
+    SAMPLE_TREE_PROPERTY,
     AttackPattern,
     Bundle,
     File,
@@ -1322,8 +1331,19 @@ class ExtendedSTIXRenderer:
         #    ``object_refs``. The sandbox block carries no observation time, so
         #    both ends are the time the report was built — the latest the
         #    observation can have been — and one run is one observation.
+        #    A process the sample's lineage rule leaves out of its tree
+        #    (explorer.exe under sihost.exe) stays in the snapshot, as the
+        #    sandbox watched it, and says so (:func:`_lineage_marks`).
         if report.dynamic is not None and report.dynamic.process_tree:
-            observables = _processes_to_observables(distinct_processes(report.dynamic.process_tree))
+            roots = distinct_processes(report.dynamic.process_tree)
+            observables = _processes_to_observables(
+                roots,
+                _lineage_marks(
+                    roots,
+                    str(report.identity.file_name or ""),
+                    str(report.identity.hashes.sha256 or ""),
+                ),
+            )
             if observables:
                 objects.extend(observables)
                 objects.append(
@@ -5125,7 +5145,50 @@ def _host_reputation(report: Any, host: str) -> dict[str, Any] | None:
     return None
 
 
-def _processes_to_observables(roots: list[ProcessNode]) -> list[File | Process]:
+def _lineage_marks(
+    roots: list[ProcessNode], file_name: str, sha256: str
+) -> dict[tuple[int, int, str, str], dict[str, Any]]:
+    """What the sample's lineage rule says of each process it leaves out of the sample's tree.
+
+    By process identity, the properties its observable carries, read per
+    listed process (:func:`process_placement`), never per pid: a process
+    outside the tree carries :data:`SAMPLE_TREE_PROPERTY` ``false``; one the
+    two lineage facts disagree about is disputed and says which fact alone
+    names it as the sample's (:data:`LINEAGE_DISPUTED_PROPERTY`), as the
+    report's network rows say it of a flow's process. A process that stands
+    in two places takes the answer nearest the sample's tree. A process of
+    the tree carries nothing, nor does a reading of a tree process's pid
+    that records no lineage of its own, nor every process of a listing neither
+    fact names any process in: it says nothing either way.
+    """
+    # 0: the tree's; 1: disputed, with the fact alone naming it; 2: outside.
+    rank = {
+        PLACED_IN_TREE: 0,
+        PLACED_UNSETTLED: 0,
+        LINEAGE_MARKED: 1,
+        LINEAGE_FILE: 1,
+        PLACED_OUTSIDE: 2,
+    }
+    placed: dict[tuple[int, int, str, str], tuple[int, str]] = {}
+    for node, where in process_placement(roots, file_name, sha256):
+        if where == PLACED_UNSTATED:
+            return {}
+        state = (rank[where], where if rank[where] == 1 else "")
+        key = process_identity(node)
+        placed[key] = min(placed.get(key, state), state)
+    marks: dict[tuple[int, int, str, str], dict[str, Any]] = {}
+    for key, (level, which) in placed.items():
+        if level == 2:
+            marks[key] = {SAMPLE_TREE_PROPERTY: False}
+        elif level == 1:
+            marks[key] = {LINEAGE_DISPUTED_PROPERTY: which}
+    return marks
+
+
+def _processes_to_observables(
+    roots: list[ProcessNode],
+    marks: Mapping[tuple[int, int, str, str], Mapping[str, Any]] | None = None,
+) -> list[File | Process]:
     """The process tree as STIX 2.1 observables: processes, their images, their children.
 
     A process's name is the file it ran from — STIX 2.1 has no ``name`` on a
@@ -5136,6 +5199,11 @@ def _processes_to_observables(roots: list[ProcessNode]) -> list[File | Process]:
     One process is one object: a process that stands under two parents (two
     readings of its parent that differ, each holding it) is written once, with
     the children of every place it stands, and each parent names it.
+
+    A process the sample's lineage rule leaves out of the sample's tree is
+    kept, with its place in the tree, and carries what the rule says of it
+    (``marks``, :func:`_lineage_marks`): the sandbox watched it, and it is not
+    the sample's, or its lineage is disputed.
     """
     out: list[File | Process] = []
     images: dict[str, File] = {}
@@ -5153,7 +5221,11 @@ def _processes_to_observables(roots: list[ProcessNode]) -> list[File | Process]:
         if key in made:
             return made[key]
         process = Process(
-            pid=node.pid, command_line=node.command_line or None, image_ref=None, child_refs=[]
+            pid=node.pid,
+            command_line=node.command_line or None,
+            image_ref=None,
+            child_refs=[],
+            **(marks or {}).get(key, {}),
         )
         made[key] = process.id
         # A process that stands below itself (a repeat of an ancestor further

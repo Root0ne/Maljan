@@ -43,6 +43,7 @@ from maljan.analysis.technique_ids import attack_reference_id, is_technique_id
 from maljan.core.logger import logger
 from maljan.core.truncation_ledger import EXPORT_PASS, JUDGE_PASS
 from maljan.reporting.dedupe import pattern_fingerprint
+from maljan.schemas.stix_models import LINEAGE_DISPUTED_PROPERTY, SAMPLE_TREE_PROPERTY
 from maljan.schemas.stix_models import PROPERTY_NOT_CARRIED_CODE as _PROPERTY_NOT_CARRIED_CODE
 
 if TYPE_CHECKING:
@@ -74,11 +75,18 @@ UNKNOWN_OBJECT_CODE = "stix.unknown_object"
 # is wrong with the judge's answer, and the retry is not spent on it.
 PROPERTY_NOT_CARRIED_CODE = _PROPERTY_NOT_CARRIED_CODE
 
-# Properties the platform's models declare because the export writes them from
-# the run's record, and which a judge object therefore never carries: the
-# judge's copy is recorded as not carried, like an undeclared key, and dropped.
+# Properties the export writes from the run's record (declared by the
+# platform's models, or set on an observable by the export itself), and which a
+# judge object therefore never carries: the judge's copy is recorded as not
+# carried, like an undeclared key, and dropped.
 PLATFORM_ONLY_PROPERTIES: frozenset[str] = frozenset(
-    {"x_maljan_evidence_refs", "x_maljan_support", "x_maljan_support_note"}
+    {
+        "x_maljan_evidence_refs",
+        "x_maljan_support",
+        "x_maljan_support_note",
+        SAMPLE_TREE_PROPERTY,
+        LINEAGE_DISPUTED_PROPERTY,
+    }
 )
 
 # A leaf of the judge's assessment written in a type it does not take, and with

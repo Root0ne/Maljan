@@ -56,11 +56,18 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # local8 re-pinned when the commands table came to list only what descends from a
 # process running the sample (T-494): explorer.exe under sihost.exe leaves the
 # table, which has no row left and is not printed; nothing else changed (nor the STIX).
+# The STIX re-pinned when a process the sample's lineage rule leaves out of its
+# tree came to say so (T-511): each desktop process carries
+# ``x_maljan_sample_process_tree: false`` (run4 six: svchost.exe and
+# SecurityHealthHost.exe, each in the three readings the stored tree lists;
+# run5 and run7 one; local8 five), and nothing else changed; the Markdown and
+# HTML did not change. The readings of a pid of the sample's tree that record
+# no lineage of their own (run4's pid 83 and 89 rows) carry nothing.
 STORED_RENDERS = {
-    "run7": ("87ad1594f3cbc6ea", "125193da10162be9", "c6313f103ee42d52"),
-    "run5": ("4fbb0b856aea7f8e", "60e2582c1e229b35", "276aad22c908ff48"),
-    "run4": ("581eb11ec3924a68", "75af799857a50862", "b0060de27f126465"),
-    "local8": ("058e0d21f925bb0e", "8148921046a3b91c", "bd6ac195bc590655"),
+    "run7": ("87ad1594f3cbc6ea", "125193da10162be9", "d7d34f660c1bb621"),
+    "run5": ("4fbb0b856aea7f8e", "60e2582c1e229b35", "9641d065877c52f9"),
+    "run4": ("581eb11ec3924a68", "75af799857a50862", "bb10807f7a9e1244"),
+    "local8": ("058e0d21f925bb0e", "8148921046a3b91c", "b28907fee7bb4cca"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
