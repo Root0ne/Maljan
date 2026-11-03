@@ -639,21 +639,25 @@ def test_an_absence_the_run_recorded_is_not_qualified_on_a_routine(sentence: str
 
 
 @pytest.mark.parametrize(
-    ("unit", "small"),
+    ("opening", "unit", "small", "split"),
     [
         # A negation repeated: each one reaches its reading word within the clause bound.
-        ("no ", 2_000),
+        ("", "no ", 2_000, 256_000),
         # An unclosed citation repeated: no citation spans another's bracket.
-        ("[ev_1 ", 64_000),
+        ("", "[ev_1 ", 64_000, 256_000),
+        # One bracket never closed, then ids: a citation is read only where it closes.
+        ("[", "ev_1 ", 8_000, 8_000),
     ],
 )
-def test_whether_a_sentence_is_unsettled_is_read_in_linear_time(unit: str, small: int) -> None:
+def test_whether_a_sentence_is_unsettled_is_read_in_linear_time(
+    opening: str, unit: str, small: int, split: int
+) -> None:
     # A section 5 sentence may quote the sample's own text at any length.
     def flood(size: int) -> str:
-        return (unit * (size // len(unit) + 1))[:size]
+        return opening + (unit * (size // len(unit) + 1))[:size]
 
     assert_scales(flood, small, lambda text: _Reading(text, "").unestablished, factor=4)
-    assert_scales(flood, 256_000, _CLAUSE_JOIN.split, factor=4)
+    assert_scales(flood, split, _CLAUSE_JOIN.split, factor=4)
 
 
 def test_a_bound_value_qualifies_no_absence_the_run_recorded_beside_its_call() -> None:

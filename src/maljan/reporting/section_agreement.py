@@ -1769,9 +1769,11 @@ _UNESTABLISHED = re.compile(
     re.IGNORECASE,
 )
 # Where a negation's clause ends for :data:`_UNESTABLISHED`: a joined clause or a citation.
-# A citation holds no bracket of its own, so an unclosed "[ev_..." is read once.
+# A citation holds no bracket of its own and is read only where its bracket closes, so
+# an unclosed "[ev_..." is read once.
 _CLAUSE_JOIN = re.compile(
-    r",\s*(?:so|but|and)\s|\b(?:while|though|although|which|because)\b|\[[^\[\]]*\bev_\w+[^\[\]]*\]",
+    r",\s*(?:so|but|and)\s|\b(?:while|though|although|which|because)\b"
+    r"|\[(?=[^\[\]]*\])[^\[\]]*\bev_\w+[^\[\]]*\]",
     re.IGNORECASE,
 )
 
