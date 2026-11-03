@@ -151,7 +151,11 @@ from maljan.pipeline.routing import (
 )
 from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
-from maljan.pipeline.sandbox_status import sandbox_status
+from maljan.pipeline.sandbox_status import (
+    names_another_target,
+    sample_file_identity,
+    sandbox_status,
+)
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import (
     convergence_flags,
@@ -2853,8 +2857,10 @@ def _sample_identity(state: AnalysisState) -> dict[str, Any]:
     detection are the router's; the md5, sha1 and size come from the sandbox
     report's own file block when there is one, and the size otherwise from the
     file on disk. None of them is a conclusion about the sample, which is why they are
-    put in front of the judge without a caveat. The name is the one the
-    submitter gave and is labelled so.
+    put in front of the judge without a caveat. A report whose sandbox named
+    another target gives none of its block: they are read from the sample's
+    own bytes instead (``sandbox_status.sample_file_identity``). The name is
+    the one the submitter gave and is labelled so.
 
     Never raises. An identity block that cannot be built is one the prompt goes
     without, and a judge with no hash is what this exists to stop, not one this
@@ -2866,14 +2872,12 @@ def _sample_identity(state: AnalysisState) -> dict[str, Any]:
         "file_type": str(state.get("file_type") or ""),
         "platform": str(state.get("platform") or ""),
     }
-    report = state.get("sandbox_report")
-    target = (report or {}).get("target") if isinstance(report, dict) else None
-    sandbox_file = target.get("file") if isinstance(target, dict) else None
-    if isinstance(sandbox_file, dict):
-        identity["md5"] = str(sandbox_file.get("md5") or "")
-        identity["sha1"] = str(sandbox_file.get("sha1") or "")
-        identity["size_bytes"] = sandbox_file.get("size") or ""
-    if not identity.get("size_bytes"):
+    identity.update(
+        sample_file_identity(
+            state.get("sandbox_report"), state.get("sample_path"), identity["sha256"]
+        )
+    )
+    if not identity.get("size_bytes") and not names_another_target(state.get("sandbox_report")):
         from pathlib import Path
 
         path = state.get("sample_path")

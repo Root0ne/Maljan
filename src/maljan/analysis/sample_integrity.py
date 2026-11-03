@@ -76,6 +76,50 @@ def file_sha256(path: str | os.PathLike[str], size: int | None = None) -> tuple[
     Without ``size`` the whole file is read. Either way one streaming pass.
     ``why`` names the failure's kind, never the path. Never raises.
     """
+    digests, why = _file_digests(path, size, ("sha256",))
+    return str(digests.get("sha256") or ""), why
+
+
+def sample_fingerprints(path: Any, expected: str, size: int | None = None) -> dict[str, Any]:
+    """The md5, sha1 and size of the sample at ``path``, read from its own bytes; ``{}`` else.
+
+    One streaming pass, the copy opened as :func:`file_sha256` opens it, of
+    no more than ``size`` bytes where the intake size is given. They are
+    given only where the same pass reads ``expected``, the intake SHA-256: a
+    copy that is not the bytes the job took in, or one that could not be
+    read, gives none. A copy is read once while its size and modification
+    time hold (:data:`_FINGERPRINTS`), however many judge turns ask. Never
+    raises.
+    """
+    if not path or not expected:
+        return {}
+    try:
+        where = os.fspath(path)
+        held = os.stat(where, follow_symlinks=False)
+    except (OSError, TypeError, ValueError):
+        return {}
+    key = (where, held.st_size, held.st_mtime_ns, str(expected).strip().lower(), size)
+    if key not in _FINGERPRINTS:
+        digests, why = _file_digests(where, size, ("md5", "sha1", "sha256"))
+        found: dict[str, Any] = {}
+        if not why and digests.get("sha256") == key[3]:
+            found = {"md5": digests["md5"], "sha1": digests["sha1"], "size_bytes": digests["size"]}
+        while len(_FINGERPRINTS) >= _FINGERPRINTS_HELD:
+            _FINGERPRINTS.pop(next(iter(_FINGERPRINTS)))
+        _FINGERPRINTS[key] = found
+    return dict(_FINGERPRINTS[key])
+
+
+# Each copy's fingerprints as last read, by (path, size, modification time,
+# intake digest, intake size); the oldest go first past the bound.
+_FINGERPRINTS: dict[tuple[str, int, int, str, int | None], dict[str, Any]] = {}
+_FINGERPRINTS_HELD = 32
+
+
+def _file_digests(
+    path: str | os.PathLike[str], size: int | None, names: Sequence[str]
+) -> tuple[dict[str, Any], str]:
+    """The digests ``names`` and the size of one pass, read as :func:`file_sha256` reads."""
     where = os.fspath(path)
     try:
         dir_fd = os.open(
@@ -83,7 +127,7 @@ def file_sha256(path: str | os.PathLike[str], size: int | None = None) -> tuple[
             os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
         )
     except OSError as exc:
-        return "", type(exc).__name__
+        return {}, type(exc).__name__
     try:
         fd = os.open(
             os.path.basename(where),
@@ -91,30 +135,34 @@ def file_sha256(path: str | os.PathLike[str], size: int | None = None) -> tuple[
             dir_fd=dir_fd,
         )
     except OSError as exc:
-        return "", type(exc).__name__
+        return {}, type(exc).__name__
     finally:
         os.close(dir_fd)
     try:
         held = os.fstat(fd)
         if not stat.S_ISREG(held.st_mode):
-            return "", "not a regular file"
+            return {}, "not a regular file"
         if size is not None and held.st_size != size:
-            return "", f"size {held.st_size} is not the intake size {size}"
+            return {}, f"size {held.st_size} is not the intake size {size}"
         os.set_blocking(fd, True)
-        digest = hashlib.sha256()
+        # An MD5 or SHA1 here is a sample fingerprint, never a signature.
+        digests = {name: hashlib.new(name, usedforsecurity=False) for name in names}
         left = held.st_size if size is None else size
         while left > 0:
             chunk = os.read(fd, min(_CHUNK_BYTES, left))
             if not chunk:
                 break
-            digest.update(chunk)
+            for digest in digests.values():
+                digest.update(chunk)
             left -= len(chunk)
         after = os.fstat(fd).st_size
         if after != held.st_size or left:
-            return "", f"size moved from {held.st_size} to {after} while it was read"
-        return digest.hexdigest(), ""
+            return {}, f"size moved from {held.st_size} to {after} while it was read"
+        read: dict[str, Any] = {name: digest.hexdigest() for name, digest in digests.items()}
+        read["size"] = held.st_size
+        return read, ""
     except OSError as exc:
-        return "", type(exc).__name__
+        return {}, type(exc).__name__
     finally:
         os.close(fd)
 

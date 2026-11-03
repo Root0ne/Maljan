@@ -217,6 +217,9 @@ class MaljanApp:
         in ``arun`` doesn't have to know about magic-byte parsing or
         sandbox-OS fallback. Returns ``("unknown", "unknown")`` when the
         sample bytes are unreachable AND the sandbox didn't disambiguate.
+        A report that names another target (``sandbox_status.TARGET_KEY``)
+        disambiguates nothing: only the sample's own bytes are read, and a
+        warning says so.
         """
         from maljan.extractors.sample_identity import detect_file_type, infer_platform
 
@@ -239,6 +242,22 @@ class MaljanApp:
                     file_type = detect_file_type(path, blob)
             except OSError as exc:
                 logger.warning("_infer_sample_platform: could not read %s (%s)", sample_path, exc)
+
+        from maljan.pipeline.sandbox_status import names_another_target
+
+        if names_another_target(sandbox_report):
+            # The report names another target: its file block and its guest
+            # are of that target, so the routing reads the sample alone.
+            platform = infer_platform(file_type, None, None)
+            logger.warning(
+                "The sandbox report names a target that is not the sample, so the "
+                "sample's file type and platform are read from its own bytes only, "
+                "not from the report's file type or guest system (file type %r, "
+                "platform %r).",
+                file_type,
+                platform,
+            )
+            return file_type, platform
 
         # Best-effort MIME from the sandbox file block when we couldn't
         # read the bytes ourselves.

@@ -42,6 +42,14 @@ NOT_RUN = "not run"
 RECORDED_FIXTURE = "recorded fixture"
 OBSERVED = "observed"
 
+# Where the md5, sha1 and size of a marked report's identity came from
+# (:func:`sample_file_identity`): the sample's own bytes, or nowhere, the
+# router's values standing alone. Never a field of the block, only which
+# header the judge's block is written under.
+IDENTITY_SOURCE_KEY = "identity_source"
+FROM_SAMPLE_BYTES = "sample_bytes"
+FROM_ROUTER_ONLY = "router_only"
+
 # The tool name of the pack entry that states the status. Named like the
 # sandbox views so the console files it with them.
 STATUS_TOOL = "sandbox_status"
@@ -141,3 +149,41 @@ def observed_report(report: Any) -> dict[str, Any] | None:
     if sandbox_status(report).status == NOT_RUN:
         return None
     return report if isinstance(report, dict) else None
+
+
+def names_another_target(report: Any) -> bool:
+    """Whether ``report`` carries the run's mark: its sandbox named a target that is not the sample.
+
+    Nothing the report says of its target's file is then the sample's: not
+    its hashes and size, nor its file type or operating system.
+    """
+    return isinstance(report, dict) and isinstance(report.get(TARGET_KEY), Mapping)
+
+
+def sample_file_identity(report: Any, sample_path: Any, expected: str) -> dict[str, Any]:
+    """The md5, sha1 and size the judge is given as the sample's own; ``{}`` with none.
+
+    From the report's own file block, as the sandbox gave it, when the report
+    carries no target mark. A marked report's block is of the target its
+    sandbox named, not of the sample, so none of it is given as the sample's:
+    the values are read from the sample's own bytes instead, and only where
+    that copy still reads ``expected``, the intake SHA-256
+    (``analysis.sample_integrity.sample_fingerprints``). Values so read carry
+    :data:`IDENTITY_SOURCE_KEY` as :data:`FROM_SAMPLE_BYTES`; a copy that gave
+    none carries it as :data:`FROM_ROUTER_ONLY` and no value, and the caller
+    takes no size from it either (:func:`names_another_target`).
+    """
+    if names_another_target(report):
+        from maljan.analysis.sample_integrity import sample_fingerprints
+
+        read = sample_fingerprints(sample_path, expected)
+        return {**read, IDENTITY_SOURCE_KEY: FROM_SAMPLE_BYTES if read else FROM_ROUTER_ONLY}
+    target = report.get("target") if isinstance(report, dict) else None
+    sandbox_file = target.get("file") if isinstance(target, dict) else None
+    if not isinstance(sandbox_file, dict):
+        return {}
+    return {
+        "md5": str(sandbox_file.get("md5") or ""),
+        "sha1": str(sandbox_file.get("sha1") or ""),
+        "size_bytes": sandbox_file.get("size") or "",
+    }
