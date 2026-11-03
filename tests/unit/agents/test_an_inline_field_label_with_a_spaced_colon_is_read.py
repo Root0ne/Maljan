@@ -57,6 +57,13 @@ def test_a_technique_label_after_the_evidence_is_the_technique(spelling: str) ->
     assert _read(text) == [(SENTENCE, "[ev_0002]", 0.8, "T1027", None)]
 
 
+@pytest.mark.parametrize("spelling", SPELLINGS)
+def test_the_evidence_ends_at_a_technique_label(spelling: str) -> None:
+    label = spelling.format("TECHNIQUE")
+    text = f"CLAIM: {SENTENCE}\nEVIDENCE: [ev_0002] {label}: T1027 CONFIDENCE: 0.8\n"
+    assert _read(text) == [(SENTENCE, "[ev_0002]", 0.8, "T1027", None)]
+
+
 @pytest.mark.parametrize("spelling", COLONS)
 def test_an_evidence_label_after_the_technique_is_the_evidence(spelling: str) -> None:
     label = spelling.format("EVIDENCE")
