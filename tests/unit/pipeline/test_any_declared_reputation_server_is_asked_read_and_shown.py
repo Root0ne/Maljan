@@ -429,11 +429,11 @@ def test_reading_a_hostile_answer_grows_linearly() -> None:
             "b": {"detections": [f"d{i % 97}" for i in range(n)]},
             "c": [{"x": i} for i in range(n)],
         }
-        started = time.perf_counter()
+        started = time.thread_time()
         text = json.dumps(answer) + "1" * n
         read = read_answer(facts, output=text, structured=answer, server="x")
         assert isinstance(read, ReputationRecord) and len(read.detections) == n
-        return time.perf_counter() - started
+        return time.thread_time() - started
 
     timed(1_000)
     small = min(timed(5_000) for _ in range(3))

@@ -414,10 +414,10 @@ class TestSeveralDecisionsOnALine:
             ("KEEP C1" + " " * 100_000) * 3 + "x",
             "KEEP C1" + " and" * 100_000 + " x",
         ]
-        started = time.perf_counter()
+        started = time.thread_time()
         for line in lines:
             read_retry_drop_answers(line, self.LABELS)
-        assert time.perf_counter() - started < 2.0
+        assert time.thread_time() - started < 2.0
 
 
 class TestMoreClauseStarts:
@@ -504,11 +504,11 @@ class TestMoreClauseStarts:
             "1. " * repeats,
             "KEEP C1: a" + ". KEEP C1 C2 C3 x" * repeats,
         ]
-        started = time.perf_counter()
+        started = time.thread_time()
         for line in lines:
             read_retry_drop_answers(line, self.LABELS)
         # Linear: about a second here; quadratic would take hours.
-        assert time.perf_counter() - started < 20.0
+        assert time.thread_time() - started < 20.0
 
 
 class TestTheQuestionShowsWhatTheItemsCite:

@@ -264,9 +264,9 @@ class TestTheDirectoriesComeFromTheConfiguration:
     def test_many_repeated_names_take_linear_time(self, samples: Path) -> None:
         def timed(n: int) -> float:
             names = [f"d{i % 3}" for i in range(n)]
-            start = time.perf_counter()
+            start = time.thread_time()
             sample_files.work_dirs(names)
-            return time.perf_counter() - start
+            return time.thread_time() - start
 
         timed(1_000)
         small = min(timed(10_000) for _ in range(3))

@@ -71,12 +71,12 @@ class TestOneStrictReader:
         # Ten times the text takes at most about ten times as long (twenty, for noise).
         def took(size: int) -> float:
             text = ("T1055." * size) + ("T" + "1" * 9) * size + "\n"
-            start = time.perf_counter()
+            start = time.thread_time()
             technique_ids_in(text)
             TECHNIQUE_WORD_RE.findall(text)
             is_technique_id(text)
             sigma_technique_ids({"tags": [f"attack.{text}"]})
-            return time.perf_counter() - start
+            return time.thread_time() - start
 
         small = min(took(20_000) for _ in range(3))
         large = took(200_000)

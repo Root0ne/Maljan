@@ -144,11 +144,11 @@ def test_the_reading_is_linear_on_a_hostile_answer() -> None:
 
     def timed(n: int) -> float:
         text = "Unsupported query syntax " + "near ']' " * n + "\n" * (n // 10)
-        start = time.perf_counter()
+        start = time.thread_time()
         for _ in range(5):
             declared_error(patterns, "search", text)
             declared_error(patterns, "search", text.replace("\n", " "))
-        return time.perf_counter() - start
+        return time.thread_time() - start
 
     small, large = timed(20_000), timed(200_000)
     assert large < max(small, 1e-3) * 40

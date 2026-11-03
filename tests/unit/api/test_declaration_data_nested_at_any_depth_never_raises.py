@@ -186,14 +186,14 @@ def test_the_copy_of_declaration_data_keeps_order_and_is_independent() -> None:
 
 
 def _seconds(work: Callable[[], Any]) -> float:
-    """``work``'s wall time with the collector held, so its passes over the
+    """``work``'s CPU time with the collector held, so its passes over the
     input built beforehand are not counted as the walk's own time."""
     gc.collect()
     gc.disable()
     try:
-        began = time.perf_counter()
+        began = time.thread_time()
         work()
-        return time.perf_counter() - began
+        return time.thread_time() - began
     finally:
         gc.enable()
 

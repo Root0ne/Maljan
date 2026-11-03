@@ -687,9 +687,9 @@ def _timed(work: Callable[[], None]) -> float:
     gc.collect()
     gc.disable()
     try:
-        began = time.perf_counter()
+        began = time.thread_time()
         work()
-        return time.perf_counter() - began
+        return time.thread_time() - began
     finally:
         gc.enable()
 

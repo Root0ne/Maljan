@@ -501,9 +501,9 @@ class TestAHostileSampleCostsOneMatchPerString:
 
         monkeypatch.setattr(drafts, "_compile_yara", counting)
         tracemalloc.start()
-        start = time.perf_counter()
+        start = time.thread_time()
         rule = _yara(_report(names=names), OwnSample(path=str(path), budget_seconds=BUDGET))
-        took = time.perf_counter() - start
+        took = time.thread_time() - start
         _current, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
 
@@ -521,9 +521,9 @@ class TestAHostileSampleCostsOneMatchPerString:
             path = _sample(
                 tmp_path, (FIRST + " ").encode() * repeats + SECOND.encode(), f"{repeats}.bin"
             )
-            start = time.perf_counter()
+            start = time.thread_time()
             rule = _yara(_report(), OwnSample(path=str(path), budget_seconds=BUDGET))
-            return time.perf_counter() - start, rule
+            return time.thread_time() - start, rule
 
         took(500)
         small, _rule = took(5_000)

@@ -157,9 +157,9 @@ def test_a_hostile_graph_ten_times_larger_is_ranked_in_linear_time() -> None:
         for _ in range(3):
             gc.disable()
             try:
-                started = time.perf_counter()
+                started = time.thread_time()
                 rank_suspicious_functions(held, max_funcs=3)
-                times.append(time.perf_counter() - started)
+                times.append(time.thread_time() - started)
             finally:
                 gc.enable()
         return min(times)

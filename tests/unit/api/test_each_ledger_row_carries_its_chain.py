@@ -210,12 +210,12 @@ def test_chaining_is_linear_in_the_ledger_s_size():
     job_id = uuid.uuid4()
     small = _rows(job_id, 300)
     large = _rows(job_id, 3000)
-    started = time.perf_counter()
+    started = time.thread_time()
     ledger_chain.chain_rows(job_id, small, KEY)
-    small_time = time.perf_counter() - started
-    started = time.perf_counter()
+    small_time = time.thread_time() - started
+    started = time.thread_time()
     ledger_chain.chain_rows(job_id, large, KEY)
-    large_time = time.perf_counter() - started
+    large_time = time.thread_time() - started
     assert large_time < max(small_time, 1e-3) * 30
 
 

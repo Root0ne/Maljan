@@ -274,18 +274,18 @@ class TestTheSourcesOfATechnique:
             isrs = {
                 "a": _isr("a", *[_claim(f'"Autorun" {i} [ev_0002]', "[ev_0002]") for i in range(n)])
             }
-            start = time.perf_counter()
+            start = time.thread_time()
             technique_sources(isrs, _ledger())
-            timings.append(time.perf_counter() - start)
+            timings.append(time.thread_time() - start)
         assert timings[1] < timings[0] * 10 * 4 + 0.5
 
     def test_many_sources_are_joined_in_linear_time(self) -> None:
         timings = []
         for n in (2000, 20000):
             held = {f"ev_{i}": ("artefact", (f"root {i}", f"root {i + 1}")) for i in range(n)}
-            start = time.perf_counter()
+            start = time.thread_time()
             summary_of_sources(held)
-            timings.append(time.perf_counter() - start)
+            timings.append(time.thread_time() - start)
         assert timings[1] < timings[0] * 10 * 4 + 0.5
 
 
@@ -381,9 +381,9 @@ class TestTheWholeAnswer:
         timings = []
         for n in (2000, 20000):
             rows = [{"routine": "0x4000", "text": str(i)} for i in range(n)]
-            start = time.perf_counter()
+            start = time.thread_time()
             answer_facts({"rows": rows, "total": n})
-            timings.append(time.perf_counter() - start)
+            timings.append(time.thread_time() - start)
         assert timings[1] < timings[0] * 10 * 4 + 0.5
 
 

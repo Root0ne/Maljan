@@ -421,9 +421,9 @@ class TestOddAndLargeInput:
             for n in range(3000)
         )
 
-        started = time.monotonic()
+        started = time.thread_time()
         found = unpublished_value_violations(_body(body), _answers())
-        elapsed = time.monotonic() - started
+        elapsed = time.thread_time() - started
 
         (asked,) = found
         assert asked.code == UNPUBLISHED_VALUE_CODE

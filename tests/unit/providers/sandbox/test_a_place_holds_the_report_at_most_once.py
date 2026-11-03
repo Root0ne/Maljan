@@ -82,9 +82,9 @@ def _seconds(run: Callable[[], Any]) -> float:
         gc.collect()
         gc.disable()
         try:
-            started = time.perf_counter()
+            started = time.thread_time()
             run()
-            best = min(best, time.perf_counter() - started)
+            best = min(best, time.thread_time() - started)
         finally:
             gc.enable()
     return best

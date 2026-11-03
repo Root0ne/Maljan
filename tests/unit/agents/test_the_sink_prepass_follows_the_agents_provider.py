@@ -363,10 +363,10 @@ def test_the_head_is_read_in_one_pass_over_its_first_value() -> None:
     def _timed(n: int) -> float:
         tail = json.dumps({"rows": ["x" * 40] * n})
         joined = HEAD_CHUNK + "\n\n" + tail
-        start = time.perf_counter()
+        start = time.thread_time()
         for _ in range(20):
             assert head_object(joined) == json.loads(HEAD_CHUNK)
-        return time.perf_counter() - start
+        return time.thread_time() - start
 
     small, large = _timed(2_000), _timed(20_000)
     # The joined tail is never decoded: ten times the tail costs about the same.

@@ -19,11 +19,11 @@ import importlib.util
 import json
 import os
 import re
+import resource
 import shutil
 import stat
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -646,12 +646,18 @@ class TestTheScriptScan:
         assert "JScript.Encode" in answer["error"]["message"]
 
 
+def _children_cpu_seconds() -> float:
+    """The CPU time, user and system, of every child this process has waited for."""
+    used = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return used.ru_utime + used.ru_stime
+
+
 @needs_node
 def test_empty_blocks_are_rows_without_a_call(tmp_path: Path) -> None:
     """50,000 empty blocks: each a row, webcrack never asked (nor loaded), in moments."""
     hta = tmp_path / "a.hta"
     hta.write_bytes(b"<html>" + b"<script> \n</script>" * 50_000 + b"</html>")
-    began = time.monotonic()
+    began = _children_cpu_seconds()
     done = subprocess.run(
         ["node", str(DEOBFUSCATE), "--", str(hta)],
         capture_output=True,
@@ -659,7 +665,8 @@ def test_empty_blocks_are_rows_without_a_call(tmp_path: Path) -> None:
         timeout=120,
         check=True,
     )
-    assert time.monotonic() - began < 50
+    # The node child's own CPU time, which a loaded machine does not stretch.
+    assert _children_cpu_seconds() - began < 50
     rows = json.loads(done.stdout)["scripts"]
     assert len(rows) == 50_000
     assert not any(row["deobfuscated"] or "error" in row for row in rows)

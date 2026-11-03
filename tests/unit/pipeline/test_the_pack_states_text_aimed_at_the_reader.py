@@ -413,10 +413,10 @@ class TestRecordingIsBounded:
         """1.6 MB of distinct tool names: one group, every name listed, time and size bounded."""
         blob = b"".join(b'{"name":"f%07d","arguments":{' % i for i in range(50_000))
         path = _file(tmp_path, blob)
-        started = time.monotonic()
-        answer = directed_text_answer(path, None, [], {}, None, deadline=started + 120)
+        started = time.thread_time()
+        answer = directed_text_answer(path, None, [], {}, None, deadline=time.monotonic() + 120)
         entry = _recorded(_recorder(), directed_text.TOOL, answer)
-        took = time.monotonic() - started
+        took = time.thread_time() - started
         (row,) = answer["groups"]
         assert (row["count"], row["distinct_names"], len(row["names"])) == (50_000, 50_000, 50_000)
         assert "partial" not in answer

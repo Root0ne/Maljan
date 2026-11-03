@@ -258,10 +258,10 @@ class TestLinear:
         def timed(turns: int) -> float:
             messages = _conversation(turns, 300)
             clearing = tac.ToolAnswerClearing(window_chars=_size(messages) // 3)
-            began = time.perf_counter()
+            began = time.thread_time()
             _fit(clearing, messages)
             _fit(clearing, messages)
-            return time.perf_counter() - began
+            return time.thread_time() - began
 
         timed(200)
         small = min(timed(200) for _ in range(3))
@@ -278,10 +278,10 @@ class TestLinear:
 
         def timed(ids: int) -> float:
             messages = hostile(ids)
-            began = time.perf_counter()
+            began = time.thread_time()
             for _ in range(5):
                 _fit(tac.ToolAnswerClearing(window_chars=1), messages)
-            return time.perf_counter() - began
+            return time.thread_time() - began
 
         timed(2_000)
         small = min(timed(2_000) for _ in range(3))

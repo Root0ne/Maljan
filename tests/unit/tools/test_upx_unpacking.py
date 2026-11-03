@@ -439,10 +439,10 @@ def test_an_endless_length_prefix_stops_at_the_room_left() -> None:
 def test_random_bytes_as_a_stream_fail_in_linear_time() -> None:
     noise = os.urandom(200_000)
     for kind in ("2b", "2d", "2e"):
-        began = time.monotonic()
+        began = time.thread_time()
         with pytest.raises(upx.Damaged):
             upx._nrv(kind, 4, noise, 2_000_000)
-        assert time.monotonic() - began < 10.0
+        assert time.thread_time() - began < 10.0
 
 
 def test_a_truncated_lzma_stream_is_an_error() -> None:
@@ -522,11 +522,11 @@ def _reloc_image(count: int, table_at: int, step: int = 4) -> tuple[upx._Image, 
 def test_three_million_relocations_cost_a_few_bytes_each() -> None:
     count = 3_000_000
     image, _buf = _reloc_image(count, 0)
-    began = time.monotonic()
+    began = time.thread_time()
     said, peak = _peak(lambda: upx._rebuild_relocations(image))
     assert said == f"from UPX's relocation records: {count} relocations"
     assert peak < 4 * 4 * count
-    assert time.monotonic() - began < 60
+    assert time.thread_time() - began < 60
 
 
 def test_a_relocation_table_that_cannot_fit_is_refused_before_it_is_built() -> None:
@@ -584,9 +584,9 @@ def _long_forms(count: int) -> bytes:
 def _decode(stream: bytes) -> tuple[list[int], float]:
     image = 1 << 30
     buf = bytearray(stream)
-    began = time.monotonic()
+    began = time.thread_time()
     out = upx._reloc_positions(buf, 0, image, 4)
-    return out.tolist(), time.monotonic() - began
+    return out.tolist(), time.thread_time() - began
 
 
 def test_relocation_records_read_as_one_by_one_whatever_their_mix() -> None:

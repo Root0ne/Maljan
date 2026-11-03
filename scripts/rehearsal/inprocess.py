@@ -19,7 +19,8 @@ in gate mode is the gate):
 * no API, no queue, no worker: the job bookkeeping, the probe gate a job is
   submitted through, the stored report and the worker's job timeout
   (``core.job_timeout``) are exercised only against the stack; the deadline
-  here is ``asyncio.wait_for``;
+  here is ``asyncio.wait_for``, and ``deadline_hit``'s counts from the run's
+  first model call, so a slow start on a loaded machine cannot fire it;
 * the static provider is ``none`` (no Ghidra or radare2) and long-term
   memory is in memory (no Qdrant);
 * the rehearsal's own settings, not the operator's: effort ``high`` (judge
@@ -35,6 +36,7 @@ and capability facts.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
 import time
@@ -58,8 +60,12 @@ MODELS = {
     "openai": {"expert": "deepseek-v4-flash", "judge": "deepseek-v4-pro"},
 }
 JUDGE_EFFORT = {"anthropic": "medium", "openai": "max"}
-# The deadline ``deadline_hit`` is held to, short enough that it fires.
+# The deadline ``deadline_hit`` is held to, short enough that it fires. It
+# counts from the run's first model call: the sidecars and tools before it
+# take most of it on an idle machine, and all of it on a loaded one.
 DEADLINE_HIT_S = 12.0
+# How long a ``deadline_hit`` run may take to make its first model call.
+FIRST_CALL_WAIT_S = 120.0
 # How long a run stopped at its deadline is given for its in-flight work to see the stop.
 STRAGGLER_WAIT_S = 5.0
 # The transcript roles whose claims are an analyst's answer: its own answer
@@ -328,6 +334,42 @@ async def _probe(overrides: dict[str, Any]) -> tuple[bool, str]:
     return bool(result.ok), str(result.detail)
 
 
+class NoModelCall(Exception):
+    """The run made no model call within ``FIRST_CALL_WAIT_S``."""
+
+
+async def _held_from_first_call(run: Any, state: StubState, deadline_s: float | None) -> Any:
+    """Await ``run`` held to ``deadline_s`` from its first model call, not from its start.
+
+    The stub's log is emptied after the connection test, so its first entry,
+    held or answered, is the run's first call. A run that ends before it
+    answers as it ends; one that makes none within ``FIRST_CALL_WAIT_S`` is
+    stopped and raises ``NoModelCall``.
+    """
+    task = asyncio.ensure_future(run)
+    ends = time.monotonic() + FIRST_CALL_WAIT_S
+    try:
+        while not state.calls() and not task.done():
+            if time.monotonic() >= ends:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+                raise NoModelCall(
+                    f"no model call reached the stub within {FIRST_CALL_WAIT_S:.0f}s "
+                    "of the run's start"
+                )
+            await asyncio.sleep(0.05)
+    except asyncio.CancelledError:
+        # Cancelled from outside while waiting: the run goes with it, as
+        # ``wait_for`` would take it, and has wound down before the app is
+        # closed under it. The bare ``raise`` re-raises the caught cancellation.
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            await task
+        raise
+    return await asyncio.wait_for(task, timeout=deadline_s)
+
+
 async def rehearse(rehearsal: Rehearsal) -> RunRecord:
     """Run the pipeline once against a fresh stub; answer the run's record."""
     from scripts.rehearsal import wire
@@ -385,7 +427,10 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
                     sample_path=str(sample_path),
                     **static_paths,
                 )
-                result = await asyncio.wait_for(run, timeout=rehearsal.deadline_s)
+                if rehearsal.scenario == "deadline_hit":
+                    result = await _held_from_first_call(run, state, rehearsal.deadline_s)
+                else:
+                    result = await asyncio.wait_for(run, timeout=rehearsal.deadline_s)
                 status = "completed" if app.failed_step is None else "failed"
                 if rehearsal.remember and status == "completed":
                     await asyncio.to_thread(app.remember_the_run)
@@ -453,6 +498,11 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
             "slow_seconds": brain.slow_seconds,
             "job_timeout_s": rehearsal.deadline_s,
             "deadline_in": brain.deadline_in,
+            **(
+                {"deadline_from": "first_model_call"}
+                if rehearsal.scenario == "deadline_hit"
+                else {}
+            ),
             "slow_roles": sorted(brain.slow_roles),
             "mode": "in_process",
             "served_windows": {m: state.facts(m).window for m in served},

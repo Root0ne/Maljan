@@ -425,9 +425,9 @@ class TestRepeatsStayLinear:
             report, inputs = _repeated(n)
             best = float("inf")
             for _ in range(3):
-                started = time.perf_counter()
+                started = time.thread_time()
                 bc.link_behaviour_to_code(report, None, inputs)
-                best = min(best, time.perf_counter() - started)
+                best = min(best, time.thread_time() - started)
             return best
 
         small, large = spent(2_000), spent(16_000)

@@ -973,10 +973,10 @@ def test_the_record_stays_linear_on_a_hostile_ledger() -> None:
 
     def took(count: int) -> float:
         entries = [_lookup("mcp:far", sha256=str(n)) for n in range(count)]
-        started = time.perf_counter()
+        started = time.thread_time()
         record = disclosure_record(snapshot, entries=entries)
         assert record["lookups"][0]["calls"] == count
-        return time.perf_counter() - started
+        return time.thread_time() - started
 
     small = took(2_000)
     large = took(20_000)

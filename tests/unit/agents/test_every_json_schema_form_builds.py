@@ -395,10 +395,10 @@ HOSTILE: dict[str, dict[str, Any]] = {
 
 @pytest.mark.parametrize("case", sorted(HOSTILE))
 def test_a_hostile_property_costs_only_itself(case: str) -> None:
-    began = time.monotonic()
+    began = time.thread_time()
     tool, session = _build(HOSTILE[case], case)
     offered = _offered(tool)
-    assert time.monotonic() - began < 20.0
+    assert time.thread_time() - began < 20.0
     text = json.dumps(offered)
     assert len(text) < 70_000
     assert "$ref" not in text

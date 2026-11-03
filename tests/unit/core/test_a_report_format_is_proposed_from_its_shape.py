@@ -259,9 +259,9 @@ def _seconds(make: Callable[[int], Any], n: int) -> float:
         gc.collect()
         gc.disable()
         try:
-            started = time.perf_counter()
+            started = time.thread_time()
             propose_format(subject)
-            best = min(best, time.perf_counter() - started)
+            best = min(best, time.thread_time() - started)
         finally:
             gc.enable()
     return best

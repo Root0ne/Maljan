@@ -36,9 +36,9 @@ def _seconds(make: Callable[[int], Any], run: Callable[[Any], Any], n: int) -> f
         gc.collect()
         gc.disable()
         try:
-            started = time.perf_counter()
+            started = time.thread_time()
             run(subject)
-            best = min(best, time.perf_counter() - started)
+            best = min(best, time.thread_time() - started)
         finally:
             gc.enable()
     return best

@@ -56,9 +56,9 @@ def test_a_caller_decides_which_values_count() -> None:
 def _best_time(arguments: list[dict[str, str]], names: tuple[str, ...]) -> float:
     best = float("inf")
     for _ in range(3):
-        began = time.perf_counter()
+        began = time.thread_time()
         pick_argument(arguments, names)
-        best = min(best, time.perf_counter() - began)
+        best = min(best, time.thread_time() - began)
     return best
 
 

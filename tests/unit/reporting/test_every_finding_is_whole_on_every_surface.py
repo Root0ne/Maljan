@@ -107,12 +107,14 @@ class TestABodyCellIsWhole:
         pdftotext = shutil.which("pdftotext")
         if pdftotext is None:
             pytest.skip("pdftotext is not installed on this host")
-        started = time.monotonic()
+        # The whole process's CPU time: the renderer does part of its work on
+        # threads of its own.
+        started = time.process_time()
         try:
             pdf = PdfRenderer().render(report)
         except PdfUnavailableError:
             pytest.skip("WeasyPrint cannot be loaded on this host")
-        took = time.monotonic() - started
+        took = time.process_time() - started
 
         text = subprocess.run(
             [pdftotext, "-", "-"], input=pdf, capture_output=True, check=True

@@ -130,9 +130,9 @@ class TestTheEntriesALineCites:
         timings = []
         for n in (2000, 20000):
             line = "[analysts: STATIC] " + " ".join(f"ev_{i:04d} 0x{i:x}" for i in range(n))
-            start = time.perf_counter()
+            start = time.thread_time()
             line_entry_ids([line], [f'For the line "{line}": ' + "0x1 is listed in ev_0001; " * n])
-            timings.append(time.perf_counter() - start)
+            timings.append(time.thread_time() - start)
         assert timings[1] < timings[0] * 10 * 4 + 0.5
 
 
@@ -414,12 +414,12 @@ class TestTheMark:
         timings = []
         for n in (20000, 200000):
             text = line(n)
-            start = time.perf_counter()
+            start = time.thread_time()
             read_line_mark(text)
             point_key(text)
             read_marks([text])
             carries_line_field(text)
-            timings.append(time.perf_counter() - start)
+            timings.append(time.thread_time() - start)
         assert timings[1] < timings[0] * 10 * 4 + 0.5
 
 
