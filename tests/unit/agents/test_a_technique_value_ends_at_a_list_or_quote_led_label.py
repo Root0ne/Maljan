@@ -39,8 +39,9 @@ def _read(text: str) -> list[tuple[str, str, float, str | None, str | None]]:
     ]
 
 
-# What a line may begin with, written before a label after the technique.
-LEADS = ["- ", "+ ", "1. ", "> 2. ", "> ", "# ", "## ", "> - ", "* ", "** **", "- **"]
+# What a line may begin with, written before a label after the technique; a
+# number there ends a sentence instead (T-551).
+LEADS = ["- ", "+ ", "> ", "# ", "## ", "> - ", "* ", "** **", "- **"]
 
 
 @pytest.mark.parametrize("lead", LEADS)

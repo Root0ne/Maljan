@@ -1812,10 +1812,22 @@ _BLOCK_EVIDENCE_LABEL_RE = re.compile(
 _EVIDENCE_ENDS_AT_LINE_START_RE = re.compile(
     r"\n" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE))" + _LABEL_COLON
 )
-# A run of whitespace is read from its start and possessively, so a long run
-# is read once, not once per character of it.
+# What leads a label written after a value on its line, after the spaces: any
+# mark a line may begin with but a number. After words on a line, "443." and
+# "2)" end a sentence or a note ("on port 443. EVIDENCE:", "(step 2)
+# CONFIDENCE:"), so a number leads a label as a list mark only at a line's
+# start. A numbered label after a line break other than "\n" stays in the value.
+_INLINE_LABEL_LEAD = r"(?![ \t>*_#]*+\d)" + LINE_PREFIX
+# Matched from the value's start, it ends where the value does. The end is
+# tried where a run of whitespace begins and after its last mark, and the
+# rest of a run of spaces and marks is passed over whole, since it ends there
+# the same way: a long run is read once.
 _EVIDENCE_ENDS_INLINE_RE = re.compile(
-    r"(?<!\s)\s++" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE)" + _LABEL_COLON
+    r"\A(?:\S|\s[ \t]*+(?:[>*_#]++(?:[ \t]++(?=[>*_#]))?+)*+)*?(?=(?<!\s)\s++"
+    + _INLINE_LABEL_LEAD
+    + r"(?:CONFIDENCE|TECHNIQUE)"
+    + _LABEL_COLON
+    + r")"
 )
 # The CONFIDENCE value as written: what follows the label on its line, read
 # by ``_stated_confidence``. A label present with nothing readable after it is
@@ -1844,15 +1856,15 @@ UNREADABLE_CONFIDENCE_MARK = "(empty)"
 # kept and asked about rather than read for the first id in it. It ends at the
 # line's end or at a CONFIDENCE or EVIDENCE label written after it, with or
 # without a mark a line may begin with before it ("**EVIDENCE**:",
-# "- EVIDENCE:", "1. CONFIDENCE:"), as the evidence value ends; a number with
-# a closing bracket right after the spaces ends a note ("T1027 (step 2)
-# CONFIDENCE:"), not a list. The end is tried where a run of spaces begins,
-# and the rest of a run of spaces and marks is then passed over whole, since
-# it ends there the same way: a long run is read once.
+# "- EVIDENCE:", "> CONFIDENCE:"), as the evidence value ends
+# (``_INLINE_LABEL_LEAD``: a number there ends a sentence or a note, "T1071
+# over port 443. EVIDENCE:", not a list). The end is tried where a run of
+# spaces begins, and the rest of a run of spaces and marks is then passed over
+# whole, since it ends there the same way: a long run is read once.
 _TECHNIQUE_VALUE = (
     _VALUE_START
-    + r"((?:[^ \t\n]|[ \t][ \t>*_#]*+)*?)(?=(?<![ \t])[ \t]++(?!\d++\))"
-    + LINE_PREFIX
+    + r"((?:[^ \t\n]|[ \t][ \t>*_#]*+)*?)(?=(?<![ \t])[ \t]++"
+    + _INLINE_LABEL_LEAD
     + r"(?:CONFIDENCE|EVIDENCE)"
     + _LABEL_COLON
     + r"|$)"
@@ -1906,8 +1918,11 @@ def _evidence_field(tail: str) -> str | None:
     if label is None:
         return None
     rest = tail[label.end() :]
-    end = _EVIDENCE_ENDS_AT_LINE_START_RE.search(rest) or _EVIDENCE_ENDS_INLINE_RE.search(rest)
-    return rest[: end.start()] if end else rest
+    end = _EVIDENCE_ENDS_AT_LINE_START_RE.search(rest)
+    if end is not None:
+        return rest[: end.start()]
+    inline = _EVIDENCE_ENDS_INLINE_RE.match(rest)
+    return rest[: inline.end()] if inline else rest
 
 
 def _field(
