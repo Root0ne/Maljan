@@ -8,7 +8,7 @@ from what the run gathered: the evidence ledger, the analysts' claims and the
 judge's verdict. Every rendering below is made on request from that one stored
 report, so there is a single source of truth and no second copy to fall behind
 it. How the report is built is described in
-[Reporting](/architecture/#reporting).
+[Reporting](/docs/architecture/#reporting).
 
 ## Reading a report
 
@@ -101,7 +101,7 @@ Every row carries its `kind`, its `value`, a `source` (`sandbox`, `analyst`,
 `publish_answer`: `yes:` and why the row is published, or `no:` and why not. A
 value the sample hid carries `recovered_by`, naming the tool that recovered it
 and its ledger entry. The full rule — which kinds exist, when a sandbox address
-counts as the sample's — is in [Reports](/api/#reports) in the REST API
+counts as the sample's — is in [Reports](/docs/api/#reports) in the REST API
 reference.
 
 ## Detection drafts
@@ -588,12 +588,12 @@ verdict, ATT&CK, indicators, key findings, persistence, configuration, C2,
 detection, STIX, the run's own facts — with the evidence ids each run cites. It
 does not say which run is right and writes into neither. The console's
 comparison view draws the same answer; see [Comparing two
-runs](/console/#comparing-two-runs), and [What changed between two
-runs](/api/#what-changed-between-two-runs) for the format.
+runs](/docs/console/#comparing-two-runs), and [What changed between two
+runs](/docs/api/#what-changed-between-two-runs) for the format.
 
 ## Enrichment
 
 `POST /api/v1/reports/{report_id}/enrich` queues threat-intelligence lookups
 for the indicators the report names and answers 202. The lookups run as their
 own job so they never delay a verdict. See [Where the enrichment
-runs](/configuration/#where-the-enrichment-runs).
+runs](/docs/configuration/#where-the-enrichment-runs).

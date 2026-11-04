@@ -6,7 +6,7 @@ description: "Iteration 5 on the default model, scored key by key against the hu
 
 Default model (Qwen3.6-35B-A3B on ik_llama.cpp, 32,768-token context, 1 GiB prompt cache, 8 context checkpoints per
 slot, as in iteration 4), `dev` @ `2a93b02d`, default profile, **mock sandbox (nothing executed)**. The method is
-exactly as on the [benchmark page](/benchmark/#method) and in the [iteration-4 score](/benchmark/scores/latrodectus-iteration4-default/):
+exactly as on the [benchmark page](/docs/benchmark/#method) and in the [iteration-4 score](/docs/benchmark/scores/latrodectus-iteration4-default/):
 57 core items of K1–K10 (with K1.1 split), build items as consistency checks only, chain and later items not scored.
 
 - **partly (body)**: the body states part of the item, or states it with the wrong purpose.
@@ -42,7 +42,7 @@ Discounting appendix-only items gives **14 / 24 / 19 / 0** (iteration 4: 15 / 23
 ## Item by item
 
 ### K1
-| # | Score | Maljan (quoted) | Human source |
+| # | Score | Malspark (quoted) | Human source |
 |---|---|---|---|
 | K1.1a family | found | "**Family:** Latrodectus/Ulise (moderate-to-high confidence, 0.85, stated by the judge) [ev_0011, ev_0008]" | B intro |
 | K1.1b loader | **found** (it. 4: partly) | §1 "It operates as a DLL loader, utilizing obfuscation and RC4 encryption …"; §5.8 "it constructs a command-line execution string for rundll32.exe to load a dynamically generated payload"; §5.4 "the sample may be a loader or dropper that constructs paths for subsequent execution" | B intro |
@@ -51,7 +51,7 @@ Discounting appendix-only items gives **14 / 24 / 19 / 0** (iteration 4: 15 / 23
 | K1.5 four exports, one address | found | §7 "All 4 exports share one address, 0x3ce4." | E |
 
 ### K2
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K2.1 APIs by hash | partly (body) | §5.2 capa rows "resolve function by parsing PE exports", "hash data with CRC32"; §5.7 "network capability implemented via … dynamic resolution not captured in the static import table". Never "by hash" | B *Windows API resolution* |
 | K2.2 abort on failed check | missed | — | B *Anti analysis* |
@@ -61,7 +61,7 @@ Discounting appendix-only items gives **14 / 24 / 19 / 0** (iteration 4: 15 / 23
 | K2.6 `update_data.dat` for new C2s | partly (body) | §5.3 "Update Data File · \update_data.dat"; §9 "Data file for updates or storage". Purpose not stated | B *The update data .dat file* |
 
 ### K3
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K3.1 PEB BeingDebugged | partly (body) | §5.2 capa row "PEB access · B0001.019"; §7 "Debugger Detection::Process Environment Block". No sentence | B *Debugger check* |
 | K3.2 process count | missed | — | B |
@@ -72,7 +72,7 @@ Discounting appendix-only items gives **14 / 24 / 19 / 0** (iteration 4: 15 / 23
 | K3.7 self-deletion via ADS | missed | `:wtfbbq` is now in the §9 body, but as "Likely part of a mutex name or identifier" | E *Self-deletion* |
 
 ### K4–K6
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K4.1 bot ID | **partly (body)** (it. 4: appendix) | §5.3 "Identifier Pattern · %04X%04X%04X%04X%08X%04X"; §9 the same value as "Mutex name pattern". No derivation | B *Bot ID* |
 | K4.2 group → FNV-1a | partly (body) | §5.2 capa row "hash data using fnv"; `Littlehw` in §9 ("Likely part of a mutex name or identifier"); `group=%lu` in the beacon format. Not linked | B *Group and Group ID* |

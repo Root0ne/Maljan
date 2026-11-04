@@ -8,7 +8,7 @@ walks the lifecycle from the operator's side â€” upload, submit, follow, read â€
 and the choices a job can make for itself. The console does each step with a
 button; the API calls are shown so the same thing can be scripted. The worker's
 side of the same lifecycle is in
-[Architecture](/architecture/#request-and-job-lifecycle).
+[Architecture](/docs/architecture/#request-and-job-lifecycle).
 
 <Steps>
 
@@ -23,7 +23,7 @@ side of the same lifecycle is in
 
  The answer carries the sample's id. No sample is refused for its format:
  routing reads the file type from the bytes and picks the path, as described
- in [format routing](/architecture/#format-routing).
+ in [format routing](/docs/architecture/#format-routing).
 
 </Step>
 
@@ -40,7 +40,7 @@ side of the same lifecycle is in
  CAPEv2, Cuckoo and Triage reports are accepted by default
  (`sandbox.upload.allowed_formats`), and a format of your own is declared as
  data in `sandbox.report_formats` (see [Report formats are
- declarations](/tools/sandboxes/#report-formats-are-declarations)), up to
+ declarations](/docs/tools/sandboxes/#report-formats-are-declarations)), up to
  64 MiB (`sandbox.upload.max_report_bytes`). The upload records whether the
  report's own target hash matches the sample.
 
@@ -68,7 +68,7 @@ side of the same lifecycle is in
 <Step>
 
 **Read the report** once the job is `completed`; see
-[Reports and exports](/usage/reports-and-exports/).
+[Reports and exports](/docs/usage/reports-and-exports/).
 
 </Step>
 
@@ -82,7 +82,7 @@ submit rather than a failed job minutes later. Unknown keys pass through.
 
 | Key | Effect |
 | :-- | :-- |
-| `profile` | The team this job runs. Checked against the teams the deployment holds; an unknown team, or one that lists a disabled analyst, is refused. See [Teams and profiles](/usage/teams/). |
+| `profile` | The team this job runs. Checked against the teams the deployment holds; an unknown team, or one that lists a disabled analyst, is refused. See [Teams and profiles](/docs/usage/teams/). |
 | `llm_provider` | `openai`, `anthropic`, `ollama` or `gemini` for this job, in place of `llm.provider`. |
 | `static_provider` | `ghidra`, `r2`, `capa_yara`, `generic_mcp` or `none` for this job, in place of `static.provider`. |
 | `sandbox_provider` | `mock`, `cape2`, `upload`, `triage` or `rest` for this job, in place of `sandbox.provider`. |
@@ -104,10 +104,10 @@ three kinds of job that could only fail later:
   model unless they
   have an entry.
   See [a model is probed before a job may name
-  it](/configuration/#a-model-is-probed-before-a-job-may-name-it).
+  it](/docs/configuration/#a-model-is-probed-before-a-job-may-name-it).
 - **A static provider that is not ready.** Ghidra does not degrade, so a team
   that needs it waits for it. See [a team that needs Ghidra waits for
-  it](/configuration/#a-team-that-needs-ghidra-waits-for-it).
+  it](/docs/configuration/#a-team-that-needs-ghidra-waits-for-it).
 - **An unknown team**, or a team that lists a disabled analyst.
 
 ## Choosing a sandbox
@@ -124,7 +124,7 @@ for, and an empty stand-in marked `synthetic` for any other. Where no
 sandbox ran, the report says so in one sentence, the dynamic and network
 analysts are skipped, and a stand-in's empty sections are never rendered as
 "0 processes". See [no sandbox observation where no sandbox
-ran](/architecture/#providers).
+ran](/docs/architecture/#providers).
 
 </Tab>
 
@@ -147,7 +147,7 @@ waits for the report.
 
 <Tab value="upload">
 
-No detonation of Maljan's own: a report produced elsewhere and attached to
+No detonation of Malspark's own: a report produced elsewhere and attached to
 the sample (step 2 above) is read instead.
 
 </Tab>
@@ -162,7 +162,7 @@ the report's location and a JSONPath per channel (`sandbox.rest.*`).
 </Tabs>
 
 Each provider's settings, and the options each format is submitted with, are
-on the [Sandboxes](/tools/sandboxes/) page.
+on the [Sandboxes](/docs/tools/sandboxes/) page.
 
 ## Following a run
 
@@ -170,7 +170,7 @@ The console's **CONVERSATION** tab draws the run as the exchange it is: every
 agent's messages, its tool calls and the verdict, while the analysis header
 draws the team's stages, each filling in as it starts and finishes. The
 **EVIDENCE** tab is the ledger of every tool call the run made. See
-[Console](/console/).
+[Console](/docs/console/).
 
 Programmatically:
 
@@ -183,7 +183,7 @@ Programmatically:
 | `GET /api/v1/jobs/{job_id}/evidence` | The evidence ledger, one entry per tool call, filterable by stage, agent and tool. |
 | `DELETE /api/v1/jobs/{job_id}` | Cancels a pending or running job; its model calls stop. |
 
-The event and evidence formats are in the [REST API](/api/#jobs) reference.
+The event and evidence formats are in the [REST API](/docs/api/#jobs) reference.
 
 ## Running without the stack
 

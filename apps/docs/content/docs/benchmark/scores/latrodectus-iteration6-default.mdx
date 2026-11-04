@@ -6,7 +6,7 @@ description: "Iteration 6 on the default model, scored key by key against the hu
 
 Default model (Qwen3.6-35B-A3B on ik_llama.cpp, 32,768-token context, 1 GiB prompt cache, 8 context checkpoints per
 slot, as in iterations 4 and 5), `dev` @ `ed57265b`, default profile, **mock sandbox (nothing executed)**. The method
-is exactly as on the [benchmark page](/benchmark/#method) and in the [iteration-5 score](/benchmark/scores/latrodectus-iteration5-default/):
+is exactly as on the [benchmark page](/docs/benchmark/#method) and in the [iteration-5 score](/docs/benchmark/scores/latrodectus-iteration5-default/):
 57 core items of K1–K10 (with K1.1 split), build items as consistency checks only, chain and later items not scored.
 
 - **partly (body)**: the body states part of the item, or states it with the wrong purpose.
@@ -42,7 +42,7 @@ baseline 3 / 7 / 46 / 1. No item is appendix-only this time, so discounting appe
 ## Item by item
 
 ### K1
-| # | Score | Maljan (quoted) | Human source |
+| # | Score | Malspark (quoted) | Human source |
 |---|---|---|---|
 | K1.1a family | found | "**Family:** Latrodectus (moderate-to-high confidence, 0.85, stated by the judge) [ev_0011]" | B intro |
 | K1.1b loader | **partly (body)** (it. 5: found) | The sample is called a "Trojan/Backdoor" throughout; the nearest sentences are §5.6 rundll32 "potentially for persistence or payload execution" and §8 T1105 "The sample uses a custom update mechanism." Neither "loader" nor "downloads" appears | B intro |
@@ -51,7 +51,7 @@ baseline 3 / 7 / 46 / 1. No item is appendix-only this time, so discounting appe
 | K1.5 four exports, one address | found | §7 "All 4 exports share one address, 0x3ce4." | E |
 
 ### K2
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K2.1 APIs by hash | partly (body) | §5.2 capa rows "resolve function by parsing PE exports", "hash data with CRC32"; §5.1 "It uses CRC32 hashing for data integrity" (wrong purpose) | B |
 | K2.2 abort on failed check | missed | — | B |
@@ -61,7 +61,7 @@ baseline 3 / 7 / 46 / 1. No item is appendix-only this time, so discounting appe
 | K2.6 `update_data.dat` for new C2s | partly (body) | §9 `\update_data.dat` "Data file for storage"; §5.3 "Update Mechanism Strings". Purpose not stated | B |
 
 ### K3
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K3.1 PEB BeingDebugged | partly (body) | §5.2 capa row "PEB access · B0001.019"; §7 "Debugger Detection::Process Environment Block". No sentence | B |
 | K3.2 process count | missed | — | B |
@@ -72,7 +72,7 @@ baseline 3 / 7 / 46 / 1. No item is appendix-only this time, so discounting appe
 | K3.7 self-deletion via ADS | missed | `:wtfbbq` "Unknown string, possibly a key or identifier" | E |
 
 ### K4–K6
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K4.1 bot ID | partly (body) | §9 `%04X%04X%04X%04X%08X%04X` "Format for generating unique identifiers" (a right purpose now; it. 5 "Mutex name pattern"). No derivation | B |
 | K4.2 group → FNV-1a | partly (body) | §5.2 capa row "hash data using fnv"; `Littlehw` "Unknown string, possibly part of a key or identifier"; `group=%lu` in the beacon. Not linked | B |

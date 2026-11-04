@@ -51,7 +51,7 @@ nothing, so an agent that needs Ghidra fails the run when it starts.
 `POST /api/v1/jobs` therefore asks first: every agent of the chosen team
 that opens Ghidra is checked, and a Ghidra that is not ready is a 422
 naming the agent and the address. See [A team that needs Ghidra waits for
-it](/configuration/#a-team-that-needs-ghidra-waits-for-it).
+it](/docs/configuration/#a-team-that-needs-ghidra-waits-for-it).
 
 </Callout>
 
@@ -68,7 +68,7 @@ The worker states the path it hands Ghidra in one line at start:
 Static provider 'ghidra' mirrors a sample to data/samples/.work/<sha256> and is handed it as /data/samples/.work/<sha256>.
 ```
 
-See [Where a tool server sees the sample](/deployment/#where-a-tool-server-sees-the-sample).
+See [Where a tool server sees the sample](/docs/deployment/#where-a-tool-server-sees-the-sample).
 
 ## Running it lighter
 
@@ -82,7 +82,7 @@ The `ghidra-mcp` service reads three variables from `docker/.env`:
 
 Keep the memory limit about 2g above the heap: Ghidra's database is
 memory-mapped and its direct buffers live outside the heap. See [Running Ghidra
-lighter](/configuration/#running-ghidra-lighter).
+lighter](/docs/configuration/#running-ghidra-lighter).
 
 ## What an agent on Ghidra gets
 
@@ -92,7 +92,7 @@ first turn. The sample is mirrored for Ghidra even when Ghidra is not the
 deployment's global provider, so a reverser given `static_provider: "ghidra"`
 works under any global setting. The `deep_static` team's `reversing` stage and
 the importable all-tools team's reverser are the teams that use it most. See
-[Which agents open a static provider](/architecture/#which-agents-open-a-static-provider).
+[Which agents open a static provider](/docs/architecture/#which-agents-open-a-static-provider).
 
 ## What its tools are read as
 
@@ -105,4 +105,4 @@ says once that its tools run nothing, reach no network and send nothing
 and `run_script_inline` run whatever they are given. A read is read-only only
 when it names the job's program, so `list_open_programs` and `list_scripts`
 always run again. See [A decompiler's or disassembler's tools read from what it
-lists](/configuration/#what-a-server-declares-about-its-tools).
+lists](/docs/configuration/#what-a-server-declares-about-its-tools).

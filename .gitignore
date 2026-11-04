@@ -14,13 +14,6 @@ wheels/
 # and apps/web/.venv as well as the root one.
 .venv
 
-# ── Documentation site ─────────────────────────────────────────────────
-# The static export and the generated content index; the workflow rebuilds
-# both, nothing reads a stored copy. apps/docs/.gitignore says the same.
-apps/docs/.next/
-apps/docs/.source/
-apps/docs/out/
-
 # ── Node and Next.js ───────────────────────────────────────────────────
 node_modules/
 apps/web/.next/

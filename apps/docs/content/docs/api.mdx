@@ -32,7 +32,7 @@ session and refuse a key with 403. A save, import or reset that changes the
 sign-in policy (the rate limiter, the login lockout, the trusted proxies, the
 token lifetimes)
 also needs `current_password`. The refresh token is an HttpOnly cookie scoped to `/api/v1/auth`
-and is never sent by hand. See [security.md](/security/).
+and is never sent by hand. See [security.md](/docs/security/).
 
 ## Router groups
 
@@ -50,7 +50,7 @@ and is never sent by hand. See [security.md](/security/).
 | `/system` | Non-secret pipeline-mode flags for dashboards, and long-term-memory maintenance. |
 
 Outside the prefix: `GET /health` and `GET /healthz` (see
-[deployment.md](/deployment/)), and the WebSocket at
+[deployment.md](/docs/deployment/)), and the WebSocket at
 `/ws/analysis/{job_id}`, which streams one analysis run's events and
 negotiates the `maljan.v1` subprotocol when the client asks for it.
 
@@ -431,7 +431,7 @@ severity, code, message, team, stage, field and the dotted `path` a refusal
 would be keyed by, errors first, and each team laid out as nodes with a row
 and a column and edges between them. It stores nothing; its errors are the
 refusals `PATCH /settings` makes, in the same words. See
-[configuration.md](/configuration/).
+[configuration.md](/docs/configuration/).
 `GET /settings/plugins` (admin) answers every installed provider plugin per
 kind (`llm`, `static`, `sandbox`, `memory`) with its entry-point group: each
 plugin's name, its `entry` as the allow-list writes it, its distribution and
@@ -477,4 +477,4 @@ the platform's.
 - **Correlation** — send `X-Request-ID` to tie your call to the server's log
   lines; the API echoes it back and generates one when it is absent.
 - **Rate limits** — requests are throttled per client address and path from the
-  settings store; see [operations.md](/operations/).
+  settings store; see [operations.md](/docs/operations/).

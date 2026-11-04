@@ -7,7 +7,7 @@ description: "The all-tools team on hosted DeepSeek, run 5, scored key by key ag
 The reference sample run under the importable all-tools team with a real
 sandbox, on a hosted model, for the second time. Team `all_tools` (three static
 analysts, a Ghidra reverser, then the dynamic and network stages; see [An
-all-tools team](/configuration/#an-all-tools-team)), model
+all-tools team](/docs/configuration/#an-all-tools-team)), model
 `deepseek-flash` (DeepSeek, hosted) through the OpenAI-compatible provider with
 `compat = deepseek`, thinking on and `reasoning_effort = max`, a 1,048,576-token
 window, output caps of 393,216 tokens for every analyst, the judge and the
@@ -18,15 +18,15 @@ was 3.07 USD, computed from the recorded token counts at the published prices;
 the runner recorded no balance, so there is no charge to check it against.
 
 The run's artefacts do not record the commit. It ran on `dev` after the fixes
-that followed [run 4](/benchmark/scores/latrodectus-all-tools-run4/): the claim reader that
+that followed [run 4](/docs/benchmark/scores/latrodectus-all-tools-run4/): the claim reader that
 counts unread blocks, a validation turn on every revision answer, the function
 map, the host-identifier and configuration-value checks, the publish rule for
 unattributed addresses, and streaming for every hosted call.
 
 The method and the scoring surface are the same as for [run
-4](/benchmark/scores/latrodectus-all-tools-run4/) and the [local
-run](/benchmark/scores/latrodectus-all-tools-local6/) and are described in [the all-tools
-series](/benchmark/#the-all-tools-series).
+4](/docs/benchmark/scores/latrodectus-all-tools-run4/) and the [local
+run](/docs/benchmark/scores/latrodectus-all-tools-local6/) and are described in [the all-tools
+series](/docs/benchmark/#the-all-tools-series).
 
 ## Totals
 
@@ -49,7 +49,7 @@ series](/benchmark/#the-all-tools-series).
 **43 found / 11 partly (10 in the body, 1 in the appendix only) / 2 missed / 1
 wrong**, and **27 facts beyond the human reports** (below).
 
-Against [run 4](/benchmark/scores/latrodectus-all-tools-run4/) (45 / 9 / 2 / 1): 6 items better,
+Against [run 4](/docs/benchmark/scores/latrodectus-all-tools-run4/) (45 / 9 / 2 / 1): 6 items better,
 9 worse, 42 the same.
 
 - **A deeper command table, a weaker install story.** The gains are the items

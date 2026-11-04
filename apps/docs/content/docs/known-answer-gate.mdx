@@ -6,8 +6,8 @@ description: "Hold a change to what the benchmark already found: an item found i
 A change that makes a run cheaper or faster can still lose facts the benchmark
 found before. The **known-answer gate** compares scored runs of a candidate with
 scored runs of a baseline and fails when any item the baseline found drops. It
-reads scores that are already written, from a [blind scoring](/blind-scoring/)
-sheet, a key score file or the [calibration](/calibration/) scorer. It starts no
+reads scores that are already written, from a [blind scoring](/docs/blind-scoring/)
+sheet, a key score file or the [calibration](/docs/calibration/) scorer. It starts no
 run and asks no model. Everything lives in `scripts/benchmark/`, and none of it
 ships in the product.
 

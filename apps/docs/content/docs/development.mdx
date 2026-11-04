@@ -12,8 +12,8 @@ expected to follow.
 Maljan/
 ├── apps/
 │   ├── api/           FastAPI app, arq worker, Alembic migrations ("maljan-api")
-│   ├── docs/          this documentation site: pages under content/docs/,
-│   │                  images under public/assets/
+│   ├── docs/          these documentation pages: content/docs/, images under
+│   │                  public/assets/, and the content check (npm run check)
 │   └── web/           Next.js console, Playwright specs under e2e/
 ├── src/maljan/        the core package: agents, pipeline, analysis layers,
 │                      providers, memory, reporting, core (config, container)
@@ -101,10 +101,10 @@ on loopback port 8080.
   platform's deterministic rules over a stored run with no model call, and
   `--compare REF_A REF_B` names every difference a rule change makes between
   two refs. Run it before and after a change to a check, the report builder or
-  a publish rule; see [Replaying a stored run](/replay/).
+  a publish rule; see [Replaying a stored run](/docs/replay/).
 
 The evaluation harness behind the earlier measurements is no longer part of
-this tree; the [benchmark](/benchmark/) holds the current results.
+this tree; the [benchmark](/docs/benchmark/) holds the current results.
 
 ### Heavy local runs in a capped scope
 
@@ -177,15 +177,30 @@ backend image already runs under `LANG=C.UTF-8`.
 
 ## Documentation site
 
-The pages are MDX files under `apps/docs/content/docs/`, built into a static
-site with Fumadocs on Next.js, and published to GitHub Pages from `main` by
-[`.github/workflows/docs.yml`](https://github.com/Root0ne/Maljan/blob/dev/.github/workflows/docs.yml).
-The sidebar's order and groups are `content/docs/meta.json`. Preview it locally
-from `apps/docs` with `npm ci` and `npm run dev`; `npm run build` writes the
-static site to `apps/docs/out/` and fails if any address the site has served
-before no longer leads to a page (`scripts/old-urls.mjs`).
+The pages are MDX files under `apps/docs/content/docs/`, their images are in
+`apps/docs/public/assets/`, and the files served under `/examples/` are in
+`docs/examples/`. The website at [malspark.com](https://malspark.com) is built and published
+separately on Cloudflare Pages: production reads these three directories from
+`main`, previews from `dev`, so they stay where they are. Pages link to each
+other as `/docs/<page>/`. The sidebar's order and groups are
+`content/docs/meta.json`.
 
-[Validation codes](/validation-codes/) is generated, not written. Run
+[`.github/workflows/docs.yml`](https://github.com/Root0ne/Maljan/blob/dev/.github/workflows/docs.yml)
+checks the content on every pull request that touches it; run the same check
+from `apps/docs` with `npm ci` and `npm run check`. It fails if a page does not
+compile as MDX, its frontmatter has no title or a field of the wrong type, or it
+uses a component it neither imports nor gets from the site (the list in
+`scripts/check.mjs` must match the site's component map); if a `meta.json` does
+not parse or lists a page that is not there; if a link to `/docs/...`,
+`/assets/...` or `/examples/...`, anchor included, leads nowhere, or a link is
+relative, outside those three, or points at the old GitHub Pages address; and
+if an address the old site served (`scripts/old-addresses.mjs`) no longer
+leads to a page. On `main` the workflow also publishes a redirect site to
+GitHub Pages, so the old address `https://root0ne.github.io/Maljan/<page>/`
+leads to the same page under `https://malspark.com/docs/`, and a page that
+moved, such as `/paper/`, to the page that holds its text now.
+
+[Validation codes](/docs/validation-codes/) is generated, not written. Run
 `uv run python scripts/validation_codes/run.py` and commit the page after any of
 these edits:
 

@@ -22,46 +22,46 @@ ledger with a citable id.
 
 <Cards>
 
-<Card icon={<ScanSearch />} title="Ghidra" href="/tools/ghidra/">
+<Card icon={<ScanSearch />} title="Ghidra" href="/docs/tools/ghidra/">
 
 The decompiler, as an MCP server in its own container. A team that needs
 it waits for it.
 
 </Card>
 
-<Card icon={<SquareTerminal />} title="radare2" href="/tools/radare2/">
+<Card icon={<SquareTerminal />} title="radare2" href="/docs/tools/radare2/">
 
 r2mcp over stdio, degrading cleanly when it is not installed.
 
 </Card>
 
-<Card icon={<ShieldCheck />} title="capa and YARA" href="/tools/capa-yara/">
+<Card icon={<ShieldCheck />} title="capa and YARA" href="/docs/tools/capa-yara/">
 
 Deterministic capability and rule matches, as a provider, as tools and in
 the triage pack.
 
 </Card>
 
-<Card icon={<FlaskConical />} title="Sandboxes" href="/tools/sandboxes/">
+<Card icon={<FlaskConical />} title="Sandboxes" href="/docs/tools/sandboxes/">
 
 CAPEv2, Hatching Triage, an uploaded report, any REST sandbox, or the mock.
 
 </Card>
 
-<Card icon={<Globe />} title="VirusTotal" href="/tools/virustotal/">
+<Card icon={<Globe />} title="VirusTotal" href="/docs/tools/virustotal/">
 
 VirusTotal's own MCP server, registered with an agent token.
 
 </Card>
 
-<Card icon={<Fingerprint />} title="Identification servers" href="/tools/identification/">
+<Card icon={<Fingerprint />} title="Identification servers" href="/docs/tools/identification/">
 
 Detect It Easy, ILSpy and GoReSym, one container each, shipped switched off,
 with their own pack steps.
 
 </Card>
 
-<Card icon={<FileSearch />} title="Rule and document servers" href="/tools/rules-and-documents/">
+<Card icon={<FileSearch />} title="Rule and document servers" href="/docs/tools/rules-and-documents/">
 
 YARA-X over your own rule files, oletools over Office and RTF documents,
 webcrack over JavaScript droppers, one container each, shipped switched off,
@@ -69,7 +69,7 @@ with their own pack steps.
 
 </Card>
 
-<Card icon={<PackageOpen />} title="Container and Android servers" href="/tools/containers-and-android/">
+<Card icon={<PackageOpen />} title="Container and Android servers" href="/docs/tools/containers-and-android/">
 
 unblob carving and extracting what a container or firmware image holds, JADX
 decompiling an APK's or dex file's code, one container each, shipped switched
@@ -77,14 +77,14 @@ off, with their own pack steps.
 
 </Card>
 
-<Card icon={<Puzzle />} title="Analysis and knowledge sidecars" href="/tools/sidecars/">
+<Card icon={<Puzzle />} title="Analysis and knowledge sidecars" href="/docs/tools/sidecars/">
 
 The built-in tool servers: file analysis, ATT&CK knowledge, capture views
 and reputation.
 
 </Card>
 
-<Card icon={<Plug />} title="Generic MCP servers" href="/tools/generic-mcp/">
+<Card icon={<Plug />} title="Generic MCP servers" href="/docs/tools/generic-mcp/">
 
 Any MCP server, attached to the agents you choose, with the tools you tick.
 
@@ -105,7 +105,7 @@ Any MCP server, attached to the agents you choose, with the tools you tick.
 A job can choose its own provider with `static_provider`, a team can force one
 on every member, and an agent definition can name its own. Which agents open a
 provider, and what happens when one fails, is in
-[Providers](/architecture/#providers).
+[Providers](/docs/architecture/#providers).
 
 ## Every tool says what it cannot do
 
@@ -114,10 +114,10 @@ optional library, a binary or a setting, and which of those are present on its
 host. The console's server card names the unavailable tools before a run, a
 tool marked unavailable is kept out of the list the model is given, and a tool
 that cannot answer returns an error with a code and a remedy rather than
-raising. See [Built-in tool servers](/architecture/#built-in-tool-servers).
+raising. See [Built-in tool servers](/docs/architecture/#built-in-tool-servers).
 
 ## The measurement baseline
 
 The `measurement` team withholds every tool server and forces the static
 provider to `none`, so the same sample can be run with and without tools. See
-[Teams and profiles](/usage/teams/#the-measurement-baseline).
+[Teams and profiles](/docs/usage/teams/#the-measurement-baseline).

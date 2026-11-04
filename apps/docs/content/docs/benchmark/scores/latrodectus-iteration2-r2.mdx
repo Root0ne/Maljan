@@ -4,9 +4,9 @@ sidebarTitle: "Score: iteration 2, with r2"
 description: "Iteration 2 on the default model with the r2 disassembler, scored key by key against the human report."
 ---
 
-Same tree, model, profile and mock sandbox as the [default iteration-2 run](/benchmark/scores/latrodectus-iteration2-default/); the only
+Same tree, model, profile and mock sandbox as the [default iteration-2 run](/docs/benchmark/scores/latrodectus-iteration2-default/); the only
 change is `core.static.provider = "r2"` (radare2 through r2mcp) for this job, restored afterwards. Worker: "Static
-provider 'r2': 68 tools attached". Same method and grading as the [benchmark page](/benchmark/#method).
+provider 'r2': 68 tools attached". Same method and grading as the [benchmark page](/docs/benchmark/#method).
 
 ## What the static analyst did with a disassembler
 
@@ -47,7 +47,7 @@ variant was meant to test — K2.2, K3.2–K3.4, K3.7, K4.1 derivation, K6.4, K6
 
 ## Item by item (only where it differs from the default run, or needs the sentence)
 
-| # | Score | Maljan (quoted) | Source |
+| # | Score | Malspark (quoted) | Source |
 |---|---|---|---|
 | K1.1a, K1.1b, K1.5 | found | "Family: Latrodectus (high confidence, 0.90)"; "Category: loader"; §7 "All 4 exports share one address, 0x3ce4." | B, E |
 | K1.4 | partly (body) | §2 "pe, x86-64, DLL" (§1 calls it "a … Windows PE executable") | B |

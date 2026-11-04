@@ -47,8 +47,7 @@ updates:
         update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
-  # The documentation site; same Node line and the same TypeScript hold as
-  # the console.
+  # The docs content check (MDX compiler and its plugins).
   - package-ecosystem: "npm"
     directory: "/apps/docs"
     schedule:
@@ -59,11 +58,6 @@ updates:
     groups:
       docs-minor-and-patch:
         update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "typescript"
-        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   # The sidecars of one analysis program each pin their own packages by hash:

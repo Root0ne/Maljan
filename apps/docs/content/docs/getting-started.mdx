@@ -7,8 +7,8 @@ description: "Prerequisites, the two configuration files, starting the stack, fi
 This document takes a clean checkout to a first finished analysis on the
 compose stack. It covers the two configuration files the stack needs, the
 commands that bring it up, the first account, and where results appear. For the
-meaning of every setting see [configuration.md](/configuration/); for
-production concerns see [deployment.md](/deployment/).
+meaning of every setting see [configuration.md](/docs/configuration/); for
+production concerns see [deployment.md](/docs/deployment/).
 
 ## Prerequisites
 
@@ -39,7 +39,7 @@ unavailable, with the path each reads and the setting that names it.
 
 ## The two configuration files
 
-Maljan reads two files, and neither is committed.
+Malspark reads two files, and neither is committed.
 
 **`docker/.env`** — variables Compose substitutes into
 [`docker/docker-compose.yml`](https://github.com/Root0ne/Maljan/blob/dev/docker/docker-compose.yml).
@@ -160,7 +160,7 @@ walk the guides you need; at minimum:
 Each guide ends in a review step and applies the staged values in one write.
 Connection tests are available on the settings that have a probe. An instance
 that is already configured can be reproduced with a JSON export instead; see
-[configuration.md](/configuration/).
+[configuration.md](/docs/configuration/).
 
 ### A smaller model, when the machine has less memory
 
@@ -213,10 +213,10 @@ the console's analysis page subscribes to. The **CONVERSATION** tab draws the
 run as the exchange it is — every agent's messages, its tool calls and the
 verdict — while the analysis header draws the stages the team has, each one
 filling in as it starts and finishes; the **EVIDENCE** tab is the ledger of
-every tool call the run made. See [console.md](/console/). When the run
+every tool call the run made. See [console.md](/docs/console/). When the run
 finishes, the report appears under the analysis detail page, and the same
 content is available as Markdown, HTML, PDF, STIX 2.1 and a MITRE view under
-`/api/v1/reports/{report_id}/...` — see [api.md](/api/).
+`/api/v1/reports/{report_id}/...` — see [api.md](/docs/api/).
 
 Read the report from the evidence up rather than from the verdict down. Every
 section of it carries the ledger ids it was built from, rendered as chips; a

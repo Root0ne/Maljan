@@ -1,9 +1,10 @@
 <p align="center">
-  <img src="apps/docs/public/assets/logo.svg" alt="Maljan" width="112">
+  <img src="apps/docs/public/assets/logo.svg" alt="Malspark" width="112">
 </p>
 
-<h1 align="center">Maljan</h1>
-<p align="center"><em>Multi-Agent Malware Analysis Framework</em></p>
+<h1 align="center">Malspark</h1>
+<p align="center"><em>Multi-agent malware analysis, with plug-in tools, models and sandboxes</em></p>
+<p align="center"><a href="https://malspark.com">malspark.com</a></p>
 
 [![CI](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml/badge.svg)](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/Root0ne/Maljan/actions/workflows/codeql.yml/badge.svg)](https://github.com/Root0ne/Maljan/actions/workflows/codeql.yml)
@@ -11,7 +12,7 @@
 [![Python](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/)
 [![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
-Maljan connects LLM agent teams to malware-analysis tools. A team is an ordered
+Malspark connects LLM agent teams to malware-analysis tools. A team is an ordered
 list of **stages** — triage, then the passes the sample is worth, then a debate,
 a verdict and a report — and each stage runs the agents it names over the tools
 they are given: signature scanners, rule engines, binary and capture readers, a
@@ -34,6 +35,9 @@ Nothing is bound to Windows. Routing is by the sample's own format, and a
 format nothing recognises gets the neutral path and a report that says so
 rather than a rejection.
 
+Malspark was called Maljan, and the code still is: the Python package, the
+`maljan` command, the environment variables and the repository keep that name.
+
 ## The teams that ship
 
 | Team | Stages | For |
@@ -49,13 +53,13 @@ rather than a rejection.
 
 Teams are configuration, not code. A team of your own is an ordered list of
 stages and a prompt per agent, written in the console; see
-[Configuration](https://root0ne.github.io/Maljan/configuration/).
+[Configuration](https://malspark.com/docs/configuration/).
 
 Samples are submitted, tracked and read in a web console; the whole
 configuration of a deployment lives in that console as well, not in environment
 files.
 
-## How Maljan compares
+## How Malspark compares
 
 We ran the `default` team six times on a small set of samples, with fixes in
 between, and scored the reference sample's report item by item against a
@@ -74,7 +78,7 @@ The reference sample is a Latrodectus bot DLL (`6091f258…`) that
 lists among the samples it analysed. From that report we drew 57 core items,
 from identity and execution flow to C2, IOCs and ATT&CK:
 
-| Maljan report on the reference sample | Found | Partly | Missed | Wrong |
+| Malspark report on the reference sample | Found | Partly | Missed | Wrong |
 | :-- | --: | --: | --: | --: |
 | Baseline, before decoded strings and VirusTotal labels reached the triage pack | 3 | 7 | 46 | 1 |
 | Small model (qwen3.8:27b), iteration 1 | 10 | 28 | 19 | 0 |
@@ -97,7 +101,7 @@ were published from the analyst's hedged claims.
 This is one reference sample, one run per cell with no variance measured, on
 an 8 GB-GPU laptop. The method, the per-group scores, the false-positive
 control and the item-by-item score files are in
-[Benchmark](https://root0ne.github.io/Maljan/benchmark/).
+[Benchmark](https://malspark.com/docs/benchmark/).
 
 ## The console
 
@@ -110,7 +114,7 @@ control and the item-by-item score files are in
 
 ## Quick start
 
-The compose stack is the supported way to run Maljan. It needs Docker with the
+The compose stack is the supported way to run Malspark. It needs Docker with the
 Compose plugin, and `make setup` once to fetch the third-party trees the
 `ghidra-mcp` image is built from.
 
@@ -121,7 +125,7 @@ cp docker/.env.example docker/.env  # then fill in every secret it declares
 make dev-up                         # docker compose up -d, development overlay
 ```
 
-The development overlay is for a workstation; [Deployment](https://root0ne.github.io/Maljan/deployment/)
+The development overlay is for a workstation; [Deployment](https://malspark.com/docs/deployment/)
 covers a production deployment.
 
 Fill in every secret [`docker/.env.example`](docker/.env.example) declares; the
@@ -129,7 +133,7 @@ core services' ones are declared with `:?` in the compose file, so the stack
 refuses to start while one is missing. Ghidra MCP and Qdrant run under Compose
 profiles the example file turns on (`COMPOSE_PROFILES=ghidra,qdrant`), and a
 deployment may take either out;
-[Quick start](https://root0ne.github.io/Maljan/getting-started/) has the commands that
+[Quick start](https://malspark.com/docs/getting-started/) has the commands that
 generate them. Open <http://localhost:3000>, register the first account from
 the login page, promote it to `admin` once in the database, then walk
 **Settings → Setup** to point the deployment at a language model, a sandbox and
@@ -142,25 +146,25 @@ production deployment has no interactive schema.
 ## Documentation
 
 Everything below is published as a browsable site at
-<https://root0ne.github.io/Maljan/> and is written against the code in this
+<https://malspark.com/docs/> and is written against the code in this
 repository; the pages are under [apps/docs/content/docs/](apps/docs/content/docs/).
 
 | Document | What it covers |
 | :-- | :-- |
-| [Quick start](https://root0ne.github.io/Maljan/getting-started/) | Prerequisites, the two configuration files, starting the stack, first login and first analysis. |
-| [Configuration](https://root0ne.github.io/Maljan/configuration/) | The bootstrap environment contract, Settings → Configuration, the setup guides, connection probes, JSON export and import, secret storage. |
-| [Architecture](https://root0ne.github.io/Maljan/architecture/) | Components, the request and job lifecycle, teams as stages, agents and their tools, the evidence ledger, validation loops and report assembly. |
-| [Deployment](https://root0ne.github.io/Maljan/deployment/) | Compose services and healthchecks, required secrets, health endpoints, Kubernetes and systemd notes, upgrades and migrations. |
-| [Operations](https://root0ne.github.io/Maljan/operations/) | Logs, what a run's metrics mean, staged samples, the audit trail, rate limits, backups and a troubleshooting table. |
-| [Security](https://root0ne.github.io/Maljan/security/) | Authentication, roles, API keys, secret encryption, what an export leaves out, CORS and cookie flags, vulnerability reporting. |
-| [Development](https://root0ne.github.io/Maljan/development/) | Repository layout, `make` targets, the test suites, CI jobs and the branch workflow. |
-| [REST API](https://root0ne.github.io/Maljan/api/) | Router groups, the evidence endpoint, the run-summary fields, the stage events on the WebSocket, authentication and pagination. |
-| [Benchmark](https://root0ne.github.io/Maljan/benchmark/) | The benchmark: samples, models, the scoring key, results across iterations and against a human report, the false-positive control and limitations. |
+| [Quick start](https://malspark.com/docs/getting-started/) | Prerequisites, the two configuration files, starting the stack, first login and first analysis. |
+| [Configuration](https://malspark.com/docs/configuration/) | The bootstrap environment contract, Settings → Configuration, the setup guides, connection probes, JSON export and import, secret storage. |
+| [Architecture](https://malspark.com/docs/architecture/) | Components, the request and job lifecycle, teams as stages, agents and their tools, the evidence ledger, validation loops and report assembly. |
+| [Deployment](https://malspark.com/docs/deployment/) | Compose services and healthchecks, required secrets, health endpoints, Kubernetes and systemd notes, upgrades and migrations. |
+| [Operations](https://malspark.com/docs/operations/) | Logs, what a run's metrics mean, staged samples, the audit trail, rate limits, backups and a troubleshooting table. |
+| [Security](https://malspark.com/docs/security/) | Authentication, roles, API keys, secret encryption, what an export leaves out, CORS and cookie flags, vulnerability reporting. |
+| [Development](https://malspark.com/docs/development/) | Repository layout, `make` targets, the test suites, CI jobs and the branch workflow. |
+| [REST API](https://malspark.com/docs/api/) | Router groups, the evidence endpoint, the run-summary fields, the stage events on the WebSocket, authentication and pagination. |
+| [Benchmark](https://malspark.com/docs/benchmark/) | The benchmark: samples, models, the scoring key, results across iterations and against a human report, the false-positive control and limitations. |
 
 Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). The third-party rule sets Maljan can use carry
+MIT — see [LICENSE](LICENSE). The third-party rule sets Malspark can use carry
 their own licences and are not redistributed here; `make external` fetches
 them, licence files included.

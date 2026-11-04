@@ -11,9 +11,9 @@ written for one. A stage that declines is a row that says why, never an absent
 row.
 
 Teams are configuration, not code. This page is the operator's overview; the
-complete field reference is [Teams and stages](/configuration/#teams-and-stages)
+complete field reference is [Teams and stages](/docs/configuration/#teams-and-stages)
 in Configuration, and the runtime view is [Agents and
-teams](/architecture/#agents-and-teams) in Architecture.
+teams](/docs/architecture/#agents-and-teams) in Architecture.
 
 ## The teams that ship
 
@@ -98,7 +98,7 @@ curl -X POST http://localhost:8000/api/v1/jobs \
 | `builtin_tools` | `false` withholds every built-in tool server from this stage's agents. |
 
 The full table, with labels and debate options, is in
-[Teams and stages](/configuration/#teams-and-stages).
+[Teams and stages](/docs/configuration/#teams-and-stages).
 
 ## Conditions
 
@@ -117,7 +117,7 @@ triage.hits["signature_rules"] > 0
 A condition that does not parse is refused when the team is saved, and the
 console checks each condition box as it loses focus. One that fails at run time
 skips its stage with the reason recorded rather than failing the job. Every
-name the language knows is listed in [Conditions](/configuration/#conditions).
+name the language knows is listed in [Conditions](/docs/configuration/#conditions).
 
 ## The measurement baseline
 
@@ -132,7 +132,7 @@ much was the model. Compare its verdict, its techniques and its
 
 A fixed list of the built-in server keys would still hand the baseline any
 server an operator added afterwards. See [Tools, and the measurement
-baseline](/configuration/#tools-and-the-measurement-baseline).
+baseline](/docs/configuration/#tools-and-the-measurement-baseline).
 
 </Callout>
 
@@ -157,13 +157,13 @@ the team, which the console does in one click.
 - **Checked as you type.** The team editor sends the staged teams to
   `POST /api/v1/settings/lint-teams` and draws each team's stage graph with
   its findings beside it. See [Checking a team before it is
-  saved](/configuration/#checking-a-team-before-it-is-saved).
+  saved](/docs/configuration/#checking-a-team-before-it-is-saved).
 - **Delegation.** An agent can ask another agent for work the way it calls a
   tool: `ToolRef(kind="agent", agent="static")` puts `ask_static` in its
-  toolbox. See [Delegation](/configuration/#delegation).
+  toolbox. See [Delegation](/docs/configuration/#delegation).
 - **An all-tools team to import.** `docs/examples/profiles/all-tools.json` runs
   three static analysts on three tools, a Ghidra reverser, and the dynamic and
-  network stages. See [An all-tools team](/configuration/#an-all-tools-team)
+  network stages. See [An all-tools team](/docs/configuration/#an-all-tools-team)
   for the import and what it needs.
 
 ## How the analysts of a stage run
@@ -174,4 +174,4 @@ API runs the analysts in parallel, while Ollama or a local server with one slot
 runs them one after another, because concurrent analysts on a single-slot
 server clobber each other's state. A stage whose own `mode` is set keeps it.
 The rule in full is in [How an analysis stage runs its
-agents](/configuration/#how-an-analysis-stage-runs-its-agents).
+agents](/docs/configuration/#how-an-analysis-stage-runs-its-agents).

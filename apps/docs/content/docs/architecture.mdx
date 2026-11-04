@@ -3,14 +3,14 @@ title: "Architecture"
 description: "Components, the request and job lifecycle, teams as stages, agents and their tools, the evidence ledger, validation loops and report assembly."
 ---
 
-Maljan is a FastAPI service, an arq worker and a Next.js console over Postgres,
+Malspark is a FastAPI service, an arq worker and a Next.js console over Postgres,
 Redis and MinIO. The service owns requests and state; the worker owns analysis
 runs and everything an analysis talks to — language models, static analysis
 tools, sandboxes, long-term memory and threat-intelligence lookups. This
 document describes the components, what happens during a run, and the pieces an
 operator can reconfigure.
 
-![Maljan runtime components](/assets/architecture.svg)
+![Malspark runtime components](/assets/architecture.svg)
 
 ## Components
 
@@ -411,7 +411,7 @@ them; a fact a model may or may not ask for is not a fact a run can rely on.
 
 The pack is a list of steps declared as data (`maljan.core.pack_steps`; an
 operator lays their own over it in `triage.steps`, see *The pack's steps* in
-[configuration.md](/configuration/)): each step names its tool and server, an
+[configuration.md](/docs/configuration/)): each step names its tool and server, an
 argument template, the routed formats it runs for, its budget, whether it
 starts beside the others and beside which, the renderer of its pack line and
 the kind of answer it records. A step with a server is any tool server's tool,
@@ -432,15 +432,15 @@ entropies, the packer signature hits and the import rows); the identification
 servers' steps, each off (no call, no entry) while its server is not switched
 on: `die_scan` (Detect It Easy) on every sample, then `dotnet_types` (ILSpy)
 and `go_symbols` (GoReSym) where `die_scan`'s declared `name` value says .NET
-or Go (see [Identification servers](/tools/identification/)); the document
+or Go (see [Identification servers](/docs/tools/identification/)); the document
 servers' steps, each off the same way and each on the routed format: `ole_vba`
 (oletools) on an Office container, `office_dde` on an Office container or an
 RTF, `rtf_objects` on an RTF, `js_deobfuscate` (webcrack) on a JavaScript,
-HTA or WSF file (see [Rule and document servers](/tools/rules-and-documents/));
+HTA or WSF file (see [Rule and document servers](/docs/tools/rules-and-documents/));
 the container and Android servers' steps, each off the same way:
 `container_extract` (unblob) on every sample, each file it wrote taken into
 the job's artefact store, and `android_classes` (JADX) on an APK or dex file
-(see [Container and Android servers](/tools/containers-and-android/));
+(see [Container and Android servers](/docs/tools/containers-and-android/));
 a `strings` head
 capped by `triage.strings_head` and `iocs_from_file` (its indicator scan reads printable
 ASCII and UTF-16LE runs; a UTF-16LE host written directly after a NUL-terminated ASCII
@@ -894,7 +894,7 @@ events, the per-process API counts, the platform channels, the
 screenshots, what the sandbox extracted (configurations and payloads,
 `extracted`, ids `ext:<n>`), the resolved API names, the intrusion detection
 alerts and the process dumps, each read from the neutral report's document by
-the part's name ([one neutral report](/tools/sandboxes/#one-neutral-report));
+the part's name ([one neutral report](/docs/tools/sandboxes/#one-neutral-report));
 the process tree gives a process its parent where the row states none, and no
 items of its own. An index recorded before the `extracted` section was named
 so (`cape`, ids `cape:<n>`) is read as that section. An item is
@@ -3418,7 +3418,7 @@ reason says what is missing from its answer. A tool that cannot answer
 returns an error with a code and an authored remediation
 (`maljan.tools.errors`) rather than raising, and the sidecars' guards rewrite
 an implementation's flat error into that shape. See *Writing a tool server* in
-[configuration.md](/configuration/).
+[configuration.md](/docs/configuration/).
 
 The `dynamic` analyst's tools are the exception: its sandbox report is already
 in the worker's memory, so `ToolRef(kind="sandbox")` resolves to in-process
@@ -3431,7 +3431,7 @@ platform channels, and a bounded reader for any section the rest do not model.
 A tool server reached over HTTP does not share the worker's filesystem, so it
 is handed the sample rather than a path to it; a stdio sidecar is handed the
 path. See the remote-delivery section of
-[configuration.md](/configuration/).
+[configuration.md](/docs/configuration/).
 
 **The sample's path is not the model's to give.** On the three built-in
 sidecars, an argument whose name means the file under analysis — `path`,
@@ -3553,7 +3553,7 @@ each class of external tool, so the choice is configuration rather than code.
   `generic_mcp` for a server of your own, and `none`.
 - **Sandbox** — `mock` (the default), `cape2`, `triage`, `upload` for a report
   produced elsewhere, and `rest`, a mapping-driven adapter for a sandbox
-  Maljan has never heard of.
+  Malspark has never heard of.
 - **Tool servers (MCP)** — additional servers declared in the settings store,
   each with the tools it is allowed to expose and the agents allowed to call
   it.
@@ -3582,7 +3582,7 @@ tab. A recorded fixture is said to be one — the same entry, then the sandbox
 views as before. A live sandbox's report is read as it always was.
 
 Every provider that can be reached over the network has a probe behind a Test
-button in the console; see [configuration.md](/configuration/).
+button in the console; see [configuration.md](/docs/configuration/).
 
 ### Which agents open a static provider
 
@@ -3605,7 +3605,7 @@ gets the ranked priority functions, followed by its own sentence on what to
 do with them (`priority_follow_up`), while one that reads none gets no hint;
 and submitting a job checks every such
 provider that does not degrade (*A team that needs Ghidra waits for it* in
-[configuration.md](/configuration/)). A provider that degrades and does not
+[configuration.md](/docs/configuration/)). A provider that degrades and does not
 attach — an r2mcp that is nowhere to be found — lets the static analyst run
 without it, and the run summary names it as `static provider '<id>'
 unavailable: …` with the remedy.
@@ -3664,7 +3664,7 @@ loop, the triage pass or the function-hash pass, is answered from the note
 after the declared select; a select the server refuses opens and analyses the
 path afresh. Ghidra's block ships declaring `load_program`, `switch_program`
 and `run_analysis` (*A server whose open resets its analysis* in
-[configuration.md](/configuration/)).
+[configuration.md](/docs/configuration/)).
 
 What stays in the Ghidra adapter is Ghidra's own transport and its own
 failures: the REST client (each tool is an endpoint, and the client makes a
@@ -3697,7 +3697,7 @@ the model's pace is measured; then an OpenAI-compatible, Anthropic or Gemini
 request whose output cap takes longer at the measured pace carries that time
 as its own (`generation_rate.with_sized_request_timeout`; Gemini's fixed 90 s
 is gone). httpx reads a client's timeout as the longest silence, so it only
-ever ended an answer on a server that sends nothing until done. Maljan's own
+ever ended an answer on a server that sends nothing until done. Malspark's own
 whole-call deadline starts from the same values; where nothing is measured it
 bounds only the silence before a call's first generated piece. A call whose
 pieces arrive is held to its output cap (or its window's room after the
@@ -4175,7 +4175,7 @@ smallest and largest cap the run used. The whole arithmetic and the probe are
 the truncation ledger does, the run-state refresher tells it what the loop's
 conversation weighs before every model turn, and what it hands out is charged
 as it goes so a turn that calls several tools spends one turn's room between
-them. See [Configuration](/configuration/) for the numbers.
+them. See [Configuration](/docs/configuration/) for the numbers.
 
 **Old answers cleared when the window refuses, or past a price tier.** A tool
 loop sends its whole conversation on every turn, so what the caps above bound
@@ -4593,7 +4593,7 @@ keeps its scheme and host only, and every path is cut to its file name. A
 Windows function name the vendored export-name catalogue holds, one this
 job's hash resolution on the analysis server read, or a hash-algorithm id of
 the vendored algorithm catalogue, is a name and travels as written, as it does in the
-report ([Configuration](/configuration/#long-agent-keys-in-the-conversation), "Long agent keys in the conversation"). A
+report ([Configuration](/docs/configuration/#long-agent-keys-in-the-conversation), "Long agent keys in the conversation"). A
 producer may scrub as well; the publisher is what makes it a guarantee rather
 than a habit, and the transcript's copy is scrubbed as it is taken, so a
 replayed run reads exactly as the live one did.
@@ -5637,7 +5637,7 @@ is assembled from what the run gathered rather than recomputed beside it:
   locale whose `tolower` leaves a capital I alone its `nocase` strings and its
   import-hash clause would be wrong, so the draft is not checked rather than said to miss,
   and the platform's processes pin `LC_CTYPE` so that this does not arise (see
-  [Native runs pin `LC_CTYPE`](/development/#native-runs-pin-lc_ctype)). A drafted
+  [Native runs pin `LC_CTYPE`](/docs/development/#native-runs-pin-lc_ctype)). A drafted
   rule carries the sample's own sha256, so it always matches by that clause
   (but on an empty file, whose hash the engine leaves undefined). Its imphash
   is pefile's, the identity table's value and the one external services

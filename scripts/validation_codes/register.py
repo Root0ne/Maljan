@@ -2802,13 +2802,13 @@ def _words(text: str) -> set[str]:
 
 
 def _route(path: str) -> str:
-    """The address a docs page under ``content/docs`` is served at."""
+    """The address a docs page under ``content/docs`` is served at, under ``/docs/``."""
     stem = path[: -len(".mdx")]
     if stem == "index":
-        return "/"
+        return "/docs/"
     if stem.endswith("/index"):
         stem = stem[: -len("/index")]
-    return f"/{stem}/"
+    return f"/docs/{stem}/"
 
 
 def _title(text: str) -> str:

@@ -3,12 +3,12 @@ title: "MCP servers"
 description: "Transports, remote sample delivery, and the conventions that make a tool server a good citizen of a run."
 ---
 
-Maljan is an MCP client. Every analysis capability its pipeline uses is also a
+Malspark is an MCP client. Every analysis capability its pipeline uses is also a
 tool on an MCP server, and any MCP server an operator adds is called the same
 way. This page is for someone connecting or writing a server: the transports,
 how the sample reaches a server on another host, and the conventions that make
 a server a better citizen of a run. Adding a server from the console is
-described in [Generic MCP servers](/tools/generic-mcp/).
+described in [Generic MCP servers](/docs/tools/generic-mcp/).
 
 ## Transports
 
@@ -21,7 +21,7 @@ The transport decides, not the manifest: a stdio sidecar is never uploaded to,
 because it can already open the file.
 
 A stdio server's stdout carries protocol messages only; its logs, banners and
-progress output belong on stderr. Maljan's own sidecars route the root
+progress output belong on stderr. Malspark's own sidecars route the root
 handler and the `maljan` logger to stderr first of all (`core.stdio_safe`), so
 none of their log lines reaches stdout. A UTF-8 text line on stdout that is not a
 protocol message (a log line, a JSON log record, a dependency's download
@@ -63,7 +63,7 @@ declared `sample_mount` have to agree.
 <Tab value="The `put_sample` convention">
 
 A server reached over HTTP advertises `put_sample` on its manifest, and
-Maljan uploads the sample to it before the agent's first tool call:
+Malspark uploads the sample to it before the agent's first tool call:
 
 | Tool | Arguments | Returns |
 | :-- | :-- | :-- |
@@ -83,7 +83,7 @@ called with, and uploads are cached per server and sha256 for half an hour.
 Staging never fails a run: an upload that goes wrong is recorded as a
 degradation reason, and the server is called with the local path. These
 primitives are never shown to the model. See [Tool servers on another
-host](/configuration/#tool-servers-on-another-host).
+host](/docs/configuration/#tool-servers-on-another-host).
 
 ## Files a server wrote
 
@@ -91,7 +91,7 @@ A tool that writes a file (a carved payload, an unpacked member, a decoded
 script) names it in its answer, and a triage pack step that declares
 `outputs` has the platform take each such file into the job's artefact store,
 from which a later step's tool on any other server is handed it (see *Files
-passed between servers* in [the pack's steps](/configuration/#the-packs-steps)).
+passed between servers* in [the pack's steps](/docs/configuration/#the-packs-steps)).
 A server on the worker's filesystem (stdio, no `sample_mount`) is read inside
 its own job staging directory and needs nothing more. Any other server, or one
 that would rather serve its files itself, offers one tool:
@@ -154,7 +154,7 @@ The codes are `missing_dependency`, `timeout`, `bad_argument`, `no_such_file`,
 `unsupported_format`, `not_configured` and `tool_failed`; a code of your own is
 kept as written. A returned error is a failed ledger entry with its remedy, and
 the report header lists each distinct failure once. See [Writing a tool
-server](/configuration/#writing-a-tool-server).
+server](/docs/configuration/#writing-a-tool-server).
 
 ## What the platform does around every call
 
@@ -165,6 +165,6 @@ server](/configuration/#writing-a-tool-server).
 - **A server that keeps failing is rested.** After three unanswered calls in a
   row, calls are answered with a `server_resting` error for 60 s. See [A tool
   server that keeps failing is
-  rested](/configuration/#a-tool-server-that-keeps-failing-is-rested).
+  rested](/docs/configuration/#a-tool-server-that-keeps-failing-is-rested).
 - **Calls are capped per server** at four at once by default
   (`core.mcp.breaker.max_concurrent_calls`).
