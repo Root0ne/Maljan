@@ -222,3 +222,61 @@ class TestTheProviderIsNotRunTwice:
     async def test_without_a_pack_the_provider_runs(self, fake_container: Any) -> None:
         collect = await self._run(fake_container, [])
         collect.assert_called_once()
+
+
+CAPA_WHY = "no rule was loaded from data/capa-rules, which is missing or holds none"
+
+
+async def _with_bundle(container: Any, bundle: Any) -> dict[str, Any]:
+    """The report node over a run whose evidence-only provider answers ``bundle``."""
+    from maljan.pipeline.nodes import make_report_node
+
+    container.is_mock = False
+    container.get_narrative_agent.return_value = None
+    container.get_report_composer.return_value = None
+    provider = container.get_static_provider.return_value
+    provider.capabilities.provides_evidence = True
+    provider.capabilities.degrade_on_failure = True
+    provider.declaration_source = "provider:capa_yara"
+    provider.id = "capa_yara"
+    provider.collect_evidence.return_value = bundle
+    state = {**_initial_state(), "sample_path": "/tmp/sample.bin", "evidence_ledger": []}
+    return await make_report_node(container)(state)  # type: ignore[arg-type]
+
+
+class TestAPassTheProviderDidNotMakeDegradesTheRun:
+    """T-556: an evidence-only provider whose capa rules are missing says so in the state."""
+
+    @pytest.mark.asyncio
+    async def test_the_state_the_report_and_the_scope_say_it(self, fake_container: Any) -> None:
+        from maljan.pipeline.operator_choice import provider_pass_reason
+        from maljan.providers.base import StaticEvidenceBundle
+        from maljan.reporting.models import MalwareReport
+        from maljan.reporting.renderers import MarkdownRenderer
+        from maljan.reporting.renderers.layout import ANALYST
+
+        reason = provider_pass_reason("capa_yara", "capa", CAPA_WHY, "put the rules in place")
+
+        result = await _with_bundle(fake_container, StaticEvidenceBundle(unavailable=(reason,)))
+
+        summary = result["run_summary"]
+        assert summary["degraded_mode"] is True
+        assert reason in summary["degradation_reasons"]
+        assert summary["lost_tools"] == [{"tool": "capa", "reason": CAPA_WHY}]
+        assert result["degraded_mode"] is True
+        assert reason in result["degradation_reasons"]
+        report = MalwareReport.model_validate(result["malware_report"])
+        assert report.degraded_mode and reason in report.degradation_reasons
+        markdown = MarkdownRenderer(layout=ANALYST).render(report)
+        scope = markdown.split("## 2. Introduction and scope", 1)[1].split("\n## ", 1)[0]
+        assert f"The run went without capa ({CAPA_WHY})." in scope
+        assert "went without capa;" in markdown.split("\n## 1.", 1)[0]
+
+    @pytest.mark.asyncio
+    async def test_a_whole_pass_changes_nothing(self, fake_container: Any) -> None:
+        from maljan.providers.base import StaticEvidenceBundle
+
+        result = await _with_bundle(fake_container, StaticEvidenceBundle())
+
+        assert "degraded_mode" not in result
+        assert not (result.get("run_summary") or {}).get("lost_tools")

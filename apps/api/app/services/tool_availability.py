@@ -341,9 +341,23 @@ def unavailable_tools(
 
 
 def as_rows(found: list[Unavailable]) -> list[dict[str, Any]]:
-    """The API's rows: server, tool, reason, remedy, what it still answers, and the run's words."""
-    return [
-        {
+    """The API's rows: server, tool, reason, remedy, what it still answers, and the run's words.
+
+    One tool missing the same thing with the same remedy in two places (the
+    analysis server's tool and the worker's own pass) is one row naming both
+    places, ``"analysis, pipeline"``, with each place's words for the run; a
+    tool that lacks something different in each keeps a row per place.
+    """
+    rows: list[dict[str, Any]] = []
+    held: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for u in found:
+        same = (u.tool, u.reason, u.remediation or "", u.without, u.code or "")
+        row = held.get(same)
+        if row is not None:
+            row["server"] += f", {u.server}"
+            row["degradation_reason"] += f"; {u.degradation_reason}"
+            continue
+        row = {
             "server": u.server,
             "tool": u.tool,
             "reason": u.reason,
@@ -352,5 +366,6 @@ def as_rows(found: list[Unavailable]) -> list[dict[str, Any]]:
             "degradation_reason": u.degradation_reason,
             "manifest_code": u.code or "",
         }
-        for u in found
-    ]
+        held[same] = row
+        rows.append(row)
+    return rows

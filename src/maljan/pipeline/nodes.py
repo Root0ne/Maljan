@@ -8079,15 +8079,31 @@ def make_report_node(
         with suppress(Exception):
             if _static_bundle is not None and _static_provider.capabilities.degrade_on_failure:
                 _static_reasons = [str(r) for r in _static_bundle.unavailable if str(r).strip()]
+        # What the run summary says of them, as the judge's would have: the
+        # degraded flag, the reasons and the tools the run went without. The
+        # report carries it, and the state's summary below, so the stored run,
+        # the API's column and the console say it as the report does.
+        _static_summary: dict[str, Any] = {}
         if _static_reasons:
             logger.warning("report_node: %s", "; ".join(_static_reasons))
-            # The run summary the report carries says it too, as the judge's would.
             _held = [str(r) for r in (run_summary_state.get("degradation_reasons") or [])]
-            run_summary_state = {
-                **run_summary_state,
+            _lost = [
+                dict(r) for r in run_summary_state.get("lost_tools") or [] if isinstance(r, dict)
+            ]
+            _lost_names = {str(r.get("tool") or "") for r in _lost}
+            _static_summary = {
                 "degraded_mode": True,
                 "degradation_reasons": [*_held, *(r for r in _static_reasons if r not in _held)],
+                "lost_tools": [
+                    *_lost,
+                    *(
+                        row
+                        for row in lost_tool_rows(_static_reasons)
+                        if row["tool"] not in _lost_names
+                    ),
+                ],
             }
+            run_summary_state = {**run_summary_state, **_static_summary}
         # What the narrative and the composer may cite: every id the state's
         # ledger issued, and the ids this node added to it (the undrained
         # entries and the static provider's), which the report cites and the
@@ -8628,7 +8644,7 @@ def make_report_node(
         # add — leaving it untouched preserves the mock-mode contract
         # (state.run_summary remains None when the judge node skipped
         # RunSummaryBuilder, exercised by test_run_summary_is_none_in_mock_mode).
-        _state_summary: dict[str, Any] = {}
+        _state_summary: dict[str, Any] = dict(_static_summary)
         # The block the report carries is the base, because it already holds
         # the ``verdict.fallback`` note when the judge never answered. What is
         # stored is then compared against what the judge stored: an amendment
@@ -8849,6 +8865,11 @@ def make_report_node(
         # skipped the RunSummaryBuilder and the column is legitimately null.
         if _state_summary:
             result["run_summary"] = {**(state.get("run_summary") or {}), **_state_summary}
+        if _static_summary:
+            # The state's own flag and reasons, on the channels the judge node
+            # writes them to, for every reader of the state after this node.
+            result["degraded_mode"] = True
+            result["degradation_reasons"] = list(_static_summary["degradation_reasons"])
         if own:
             result["stage_results"] = own
         # Every stage announces its own end from the node that closes it, so

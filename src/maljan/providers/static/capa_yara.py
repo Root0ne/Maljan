@@ -567,6 +567,7 @@ class CapaYaraStaticProvider(StaticProvider):
         rules_dir = Path(resolve_data(self._capa.rules_dir))
         if not rules_dir.is_dir() or not any(rules_dir.rglob("*.yml")):
             from maljan.core.paths import host_paths_masked
+            from maljan.pipeline.operator_choice import provider_pass_reason
             from maljan.tools.sidecar_needs import CAPA_RULES
 
             logger.warning(
@@ -574,8 +575,12 @@ class CapaYaraStaticProvider(StaticProvider):
             )
             shown = host_paths_masked(str(rules_dir))
             self._unavailable = (
-                f"static provider '{self.id}' did not run capa: no rule was loaded from "
-                f"{shown}, which is missing or holds none; {CAPA_RULES.remedy}",
+                provider_pass_reason(
+                    self.id,
+                    "capa",
+                    f"no rule was loaded from {shown}, which is missing or holds none",
+                    CAPA_RULES.remedy,
+                ),
             )
             return None
 

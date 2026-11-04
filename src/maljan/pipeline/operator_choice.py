@@ -48,6 +48,24 @@ _AGENT_TOOL = re.compile(
 )
 # What an agent reference names for every tool of its server.
 _EVERY_TOOL = "*"
+# ``static provider '<id>' did not run <tool>: <why>; <remedy>``: a pass an
+# evidence-only static provider was configured for and did not make
+# (:func:`provider_pass_reason`).
+_PROVIDER_PASS = re.compile(
+    r"^static provider '(?P<provider>[^']+)' did not run (?P<tool>[^\s:]+): (?P<why>.*?)(?:; |$)",
+    re.DOTALL,
+)
+
+
+def provider_pass_reason(provider: str, tool: str, why: str, remedy: str = "") -> str:
+    """The degradation reason of a pass a static provider did not make, with its remedy.
+
+    The one spelling :func:`lost_tools` and :func:`lost_tool_rows` read back:
+    the tool by its bare name and ``why`` up to the remedy, so ``why`` holds
+    no ``"; "`` of its own.
+    """
+    text = f"static provider '{provider}' did not run {tool}: {why}"
+    return f"{text}; {remedy}" if remedy else text
 
 
 def _manifest_reason(reason: str) -> str | None:
@@ -162,6 +180,9 @@ def _tool_of(reason: str) -> _Named | None:
     withheld = withheld_tool(reason)
     if withheld:
         return _Named(withheld, kind="withheld")
+    provided = _PROVIDER_PASS.match(reason)
+    if provided is not None:
+        return _Named(provided.group("tool"), kind="provider")
     return None
 
 
@@ -298,6 +319,9 @@ def lost_tool_rows(
             # ``…_unavailable(<why>)``, then ``; still answers …`` and the remedy.
             inner = given.split(marker, 1)[1] if given else ""
             said = inner.split("); ", 1)[0] if "); " in inner else inner.removesuffix(")")
+        if not said:
+            passes = (_PROVIDER_PASS.match(text) for text in texts)
+            said = next((m.group("why") for m in passes if m and m.group("tool") == tool), "")
         rows.append({"tool": tool, "reason": " ".join(host_paths_masked(said).split())})
     return rows
 

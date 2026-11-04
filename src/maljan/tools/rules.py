@@ -60,6 +60,13 @@ def _cached(
     the warning its load logs is said once per change of the corpus, and one
     put in place later is read without a restart. ``count`` counts a layer's
     rules.
+
+    "As it was read" is the corpus path's own modification time (``_stamp``),
+    following a link: it changes when the path appears or goes, when a file
+    corpus is rewritten, and when an entry is added to or removed from a
+    directory corpus's top level. A file added or edited only inside a
+    subdirectory of an existing directory leaves it as it was, so that corpus
+    is read again only after a restart or ``reset_rule_caches``.
     """
     with _CACHE_LOCK:
         held = cache.get(str(path))
@@ -107,7 +114,15 @@ def corpus_roots() -> tuple[Path, ...]:
     return tuple(roots)
 
 
-def _not_loaded(tool: str, path: Path, corpus: str, *, chosen: bool = False) -> dict[str, Any]:
+def _not_loaded(
+    tool: str,
+    path: Path,
+    corpus: str,
+    *,
+    chosen: bool = False,
+    unread: list[dict[str, str]] | None = None,
+    files: int = 0,
+) -> dict[str, Any]:
     """The answer of a rule engine that loaded no rule: it did not run.
 
     An empty corpus scans nothing, and "0 hits" from it reads as a sample no
@@ -116,6 +131,10 @@ def _not_loaded(tool: str, path: Path, corpus: str, *, chosen: bool = False) -> 
     check before a job names the same path (``sidecar_needs``), with the
     declared data path's remedy (``capabilities.Requirement.remedy``).
     ``corpus`` is the attribute of ``sidecar_needs`` that declares it.
+    ``unread`` are the corpus's files that could not be read, of ``files``
+    in all: the answer names them (``files_not_loaded``) and says that none
+    could be read, or that the rest held no rule, rather than that the corpus
+    is missing.
     ``chosen`` is a ruleset the caller named in place of the corpus (a model's
     ``ruleset`` argument): its own argument, not the host, is what to change.
     """
@@ -134,14 +153,26 @@ def _not_loaded(tool: str, path: Path, corpus: str, *, chosen: bool = False) -> 
         named = need.override if overridden else need.setting or need.override
         shown = "the ruleset named" if chosen else f"the path {named} names"
     message = f"no rule was loaded from {shown}, which is missing or holds none, so no rule was run"
+    if unread:
+        said = (
+            f"none of its {files} rule files could be read"
+            if len(unread) >= files
+            else f"{len(unread)} of its {files} rule files could not be read and the rest hold "
+            "no rule"
+        )
+        message = f"no rule was loaded from {shown}: {said}, so no rule was run"
     if chosen:
-        return tool_error(
+        answer = tool_error(
             BAD_ARGUMENT,
             message,
             tool=tool,
             remediation="name a ruleset that holds rules, or 'default' for the platform's corpus",
         )
-    return tool_error(MISSING_DEPENDENCY, message, tool=tool, remediation=need.remedy)
+    else:
+        answer = tool_error(MISSING_DEPENDENCY, message, tool=tool, remediation=need.remedy)
+    if unread:
+        answer["files_not_loaded"] = list(unread)
+    return answer
 
 
 def _resolve_ruleset(ruleset: str, default: str, env_var: str = "") -> Path:
@@ -185,7 +216,7 @@ def _yara_layer(ruleset: str) -> Any:
         layer = YaraLayer.from_yaml(path)
     elif path.is_dir():
         parsed = []
-        for rule_file in sorted([*path.rglob("*.yml"), *path.rglob("*.yaml")]):
+        for rule_file in _rule_files(path):
             try:
                 parsed.extend(YaraLayer.rules_from_yaml(rule_file))
             except Exception as exc:  # noqa: BLE001 — one bad file costs that file only
@@ -198,6 +229,13 @@ def _yara_layer(ruleset: str) -> Any:
     layer.files_not_loaded = skipped
     _keep(_YARA_CACHE, path, stamp, layer)
     return layer
+
+
+def _rule_files(path: Path) -> list[Path]:
+    """The rule files of a directory corpus, in name order; none for anything else."""
+    if not path.is_dir():
+        return []
+    return sorted([*path.rglob("*.yml"), *path.rglob("*.yaml")])
 
 
 def reset_rule_caches() -> None:
@@ -239,11 +277,15 @@ def yara_scan(
         }
     rule_count = len(getattr(layer, "_rules", []) or [])
     if not rule_count:
+        corpus = _resolve_ruleset(ruleset, DEFAULT_YARA_RULES, YARA_RULES_ENV)
+        unread = list(getattr(layer, "files_not_loaded", None) or [])
         return _not_loaded(
             "yara_scan",
-            _resolve_ruleset(ruleset, DEFAULT_YARA_RULES, YARA_RULES_ENV),
+            corpus,
             "YARA_RULES",
             chosen=ruleset not in ("", "default"),
+            unread=unread,
+            files=len(_rule_files(corpus)) if unread else 0,
         )
     compiled = getattr(layer, "_yara_rules", None)
     answer: dict[str, Any] = {"rule_count": rule_count, "filtered": 0}

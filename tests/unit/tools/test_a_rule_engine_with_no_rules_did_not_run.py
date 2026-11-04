@@ -28,7 +28,7 @@ from app.services.tool_availability import WORKER, as_rows, unavailable_tools
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.core.config import Settings
-from maljan.core.paths import OUTSIDE_PROJECT, get_project_root
+from maljan.core.paths import OUTSIDE_PROJECT, get_project_root, host_paths_masked
 from maljan.pipeline.operator_choice import SampleFacts, lost_tool_rows
 from maljan.pipeline.triage_pack import PIPELINE, run_is_degraded, run_pack
 from maljan.reporting.models import MalwareReport
@@ -181,6 +181,36 @@ class TestADirectoryCorpus:
         assert "broken.yml" in caplog.text
 
 
+class TestADirectoryCorpusNoneOfWhoseFilesReads:
+    def test_it_did_not_run_and_names_each_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        corpus = tmp_path / "yara"
+        corpus.mkdir()
+        (corpus / "a.yml").write_text("not: [a rule list\n", encoding="utf-8")
+        (corpus / "b.yaml").write_text("rules\n", encoding="utf-8")
+        monkeypatch.setenv(rules.YARA_RULES_ENV, str(corpus))
+        answer = rules.yara_scan(text="x")
+        code, message, _remedy = _failure(answer)
+        assert code == MISSING_DEPENDENCY
+        assert message == (
+            "no rule was loaded from the path MALJAN_YARA_RULES_DIR names: none of its 2 rule "
+            "files could be read, so no rule was run"
+        )
+        assert [row["file"] for row in answer["files_not_loaded"]] == ["a.yml", "b.yaml"]
+
+    def test_some_unread_and_the_rest_empty_says_so(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        corpus = tmp_path / "yara"
+        corpus.mkdir()
+        (corpus / "a.yml").write_text("not: [a rule list\n", encoding="utf-8")
+        (corpus / "b.yml").write_text("rules: []\n", encoding="utf-8")
+        monkeypatch.setenv(rules.YARA_RULES_ENV, str(corpus))
+        _code, message, _remedy = _failure(rules.yara_scan(text="x"))
+        assert "1 of its 2 rule files could not be read and the rest hold no rule" in message
+
+
 class TestAnEmptyCorpusIsReadAgainOnlyWhenItChanges:
     def test_the_warning_is_said_once_and_a_corpus_put_in_place_is_read(
         self, no_sigma: Path, caplog: pytest.LogCaptureFixture
@@ -303,6 +333,30 @@ class TestTheRunRecordsWhatItWentWithout:
         (row,) = lost_tool_rows(["triage.capa_failed"], facts)
         assert row["reason"] == (f"rules at data/capa-rules and {OUTSIDE_PROJECT} are missing")
 
+
+class TestOnlyAHostPathIsMasked:
+    def test_an_http_route_is_kept(self) -> None:
+        for text in (
+            "GET /api/v1/jobs failed",
+            "POST /live/ answered 404",
+            "see https://x.test/a/b",
+        ):
+            assert host_paths_masked(text) == text
+
+    def test_a_path_under_a_host_root_or_the_projects_parents_is_masked(self) -> None:
+        parent = get_project_root().parent
+        said = host_paths_masked(f"read /tmp/x/rules.yml, /etc/passwd and {parent}/other/r.yml")
+        assert said == f"read {OUTSIDE_PROJECT}, {OUTSIDE_PROJECT} and {OUTSIDE_PROJECT}"
+
+    def test_a_path_that_exists_here_is_masked(self, tmp_path: Path) -> None:
+        assert host_paths_masked(f"at {tmp_path}") == f"at {OUTSIDE_PROJECT}"
+
+    def test_a_file_url_is_a_path(self) -> None:
+        root = get_project_root()
+        said = host_paths_masked(f"file://{root}/data/sigma_rules and file:///srv/x/r.yml")
+        assert said == f"data/sigma_rules and {OUTSIDE_PROJECT}"
+        assert host_paths_masked("file://localhost/opt/rules") == OUTSIDE_PROJECT
+
     def test_the_run_summary_keeps_them_and_leaves_them_out_when_none(self) -> None:
         rows = [{"tool": "capa", "reason": "x"}]
         with_rows = RunSummaryBuilder(start_time=0.0).set_lost_tools(rows).build().to_dict()
@@ -387,11 +441,35 @@ class TestTheCheckBeforeAJobNamesIt:
         assert _named(settings) == [("pipeline", "sigma_match_sandbox")]
 
     def test_the_server_and_the_worker_are_each_named_where_each_reads(self, host: Path) -> None:
-        assert _named(Settings()) == [
+        found = unavailable_tools(Settings())
+        assert [(u.server, u.tool) for u in found] == [
             ("analysis", "sigma_match"),
             ("analysis", "sigma_match_sandbox"),
             ("pipeline", "sigma_match_sandbox"),
         ]
+        # The same lack and remedy in two places is one row naming both.
+        assert _named(Settings()) == [
+            ("analysis", "sigma_match"),
+            ("analysis, pipeline", "sigma_match_sandbox"),
+        ]
+
+    def test_rows_that_differ_stay_apart(self) -> None:
+        from maljan.tools.capabilities import Unavailable
+
+        def row(server: str, reason: str, remedy: str = "fetch it") -> Unavailable:
+            return Unavailable(server=server, tool="t", reason=reason, remediation=remedy)
+
+        rows = as_rows(
+            [row("a", "gone"), row("b", "gone"), row("c", "empty"), row("d", "gone", "x")]
+        )
+        assert [(r["server"], r["reason"], r["remediation"]) for r in rows] == [
+            ("a, b", "gone", "fetch it"),
+            ("c", "empty", "fetch it"),
+            ("d", "gone", "x"),
+        ]
+        assert rows[0]["degradation_reason"] == (
+            "server.a.t_unavailable(gone); fetch it; server.b.t_unavailable(gone); fetch it"
+        )
 
     def test_the_workers_label_is_the_server_its_entries_are_recorded_under(self) -> None:
         assert WORKER == PIPELINE

@@ -158,29 +158,53 @@ def _rooted(value: str, project_root: Path | None = None) -> tuple[str, bool]:
     return str(rooted), False
 
 
-# An absolute POSIX path in free text: a slash not after a word character, a
-# colon, a dot or another slash (a URL's ``//`` and a relative ``a/b`` are not
-# one), then path characters.
-_ABSOLUTE_PATH = re.compile(r"(?<![\w:./])/[\w.@%+~-]+(?:/[\w.@%+~-]+)*/?")
+# An absolute POSIX path in free text: a ``file://`` URL, or a slash not after
+# a word character, a colon, a dot or another slash (a URL's ``//`` and a
+# relative ``a/b`` are not one), then path characters.
+_ABSOLUTE_PATH = re.compile(
+    r"file://(?:localhost)?(?P<url>/[^\s'\"<>()]*)"
+    r"|(?<![\w:./])(?P<path>/[\w.@%+~-]+(?:/[\w.@%+~-]+)*/?)"
+)
+
+# The directories a host keeps its own files under. A path that starts with one
+# of them, or that exists on this host, is the host's layout; anything else
+# that reads as one (an HTTP route, ``/api/v1/jobs``) is left as written.
+HOST_ROOTS = ("/home", "/tmp", "/opt", "/var", "/root", "/srv", "/mnt", "/media", "/usr", "/etc")
 
 # What a path off the project is shown as: the host's layout is not the reader's.
 OUTSIDE_PROJECT = "a path outside the project"
 
 
 def host_paths_masked(text: str, project_root: Path | None = None) -> str:
-    """``text`` with each absolute path shown from the project root, or masked outside it.
+    """``text`` with each host path shown from the project root, or masked outside it.
 
     For words a report or an answer to any signed-in user carries: a path in
     the project reads as the operator wrote it relative to the root
-    (``data/sigma_rules``), and one outside it as :data:`OUTSIDE_PROJECT`,
-    never as the host's own layout.
+    (``data/sigma_rules``), and a host path outside it as
+    :data:`OUTSIDE_PROJECT`, never as the host's own layout. A host path is
+    one under :data:`HOST_ROOTS` or one of the project's parents, or one that
+    exists here; a ``file://`` URL is read as its path. Anything else that
+    starts with a slash (an HTTP route) is kept.
     """
     root = get_project_root() if project_root is None else project_root
+    parents = tuple(str(parent) for parent in root.parents if parent != Path(parent.anchor))
 
     def shown(match: re.Match[str]) -> str:
-        path = Path(os.path.normpath(match.group(0)))
+        written = match.group("url") or match.group("path")
+        path = Path(os.path.normpath(written))
         if path.is_relative_to(root) and path != root:
             return path.relative_to(root).as_posix()
-        return OUTSIDE_PROJECT
+        text = str(path)
+        held = any(text == top or text.startswith(top + "/") for top in (*HOST_ROOTS, *parents))
+        if held or match.group("url") or _exists(path):
+            return OUTSIDE_PROJECT
+        return match.group(0)
 
     return _ABSOLUTE_PATH.sub(shown, str(text or ""))
+
+
+def _exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except (OSError, ValueError):
+        return False
