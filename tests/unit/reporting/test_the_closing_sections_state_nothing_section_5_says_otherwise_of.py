@@ -34,9 +34,11 @@ from maljan.reporting.models import (
 from maljan.reporting.section_agreement import (
     CLAIM_LED,
     DROPPED_CODE,
+    HELD_UNLISTED_CODE,
     REWRITE_CITES_ELSEWHERE_CODE,
     REWRITTEN_CODE,
     SECTION_5,
+    UNKNOWN_SOURCE_CODE,
     ask_section_agreement,
     passages_of,
     prompt_text,
@@ -46,7 +48,7 @@ from tests.unit.reporting._report_inventory import stored_runs
 OPEN_MUTEX = "The mutex the gate routine creates was not named [ev_0004]."
 OPEN_GATE = "Whether the environment read gates execution was not determined."
 KEPT = "No sandbox contact with the hosts was observed [ev_0005]."
-CONCLUDED = "The text 'alphaname' remains unexplained [ev_0004]."
+CONCLUDED = "The gate's text remains unexplained [ev_0004]."
 CITABLE = [f"ev_{n:04d}" for n in range(1, 10)]
 
 
@@ -244,3 +246,88 @@ def test_haiku10_s_closing_sentences_are_shown_beside_what_states_otherwise() ->
         ("command_and_control", "Littlehw"),
     ):
         assert passages[pid].kind == SECTION_5 and words in passages[pid].text, pid
+
+
+# ---------------------------------------------------------------------------
+# Held sentences: each one is listed, as the model decides
+# ---------------------------------------------------------------------------
+
+HELD = "The mutex 'alphaname' was not named [ev_0004]."
+
+
+def _held_report(body: str = f"{HELD} {KEPT}") -> MalwareReport:
+    report = _report()
+    report.technical_analysis.analyst_limitations.body = body  # type: ignore[union-attr]
+    return report
+
+
+def _limitations(report: MalwareReport) -> str:
+    return report.technical_analysis.analyst_limitations.body  # type: ignore[union-attr]
+
+
+def _keep(sentence: str, sources: list[str]) -> dict[str, Any]:
+    return {"passage": "limitations", "sentence": sentence, "sources": sources, "decision": "keep"}
+
+
+def test_a_closing_sentence_calling_a_stated_value_open_is_held_and_shown_so() -> None:
+    passages = {p.id: p for p in passages_of(_held_report())}
+    assert passages["limitations"].held == (HELD,)
+    assert passages["conclusion"].held == ()
+    prompt = prompt_text(list(passages.values()))
+    assert '[limitations] list each of these sentences: "' in prompt
+    # A report holding nothing asks as before: no such line.
+    assert "list each of these sentences" not in prompt_text(passages_of(_report()))
+
+
+def test_a_held_sentence_left_unlisted_is_asked_once_more_and_then_kept() -> None:
+    report = _held_report()
+    done, reporter = _ask(report, {"sentences": []}, {"sentences": [_keep(HELD, ["bound.1"])]})
+    assert len(reporter.asked) == 2
+    assert HELD_UNLISTED_CODE in str(reporter.asked[1][-1].content)
+    # Kept on the model's reading: never left out on the platform's read alone.
+    assert _limitations(report) == f"{HELD} {KEPT}"
+    assert done.summary["kept"] == 1 and done.summary["dropped"] == 0
+    assert HELD_UNLISTED_CODE not in [r["code"] for r in done.tally.unresolved]
+
+
+def test_a_held_sentence_never_listed_stays_and_the_finding_is_recorded() -> None:
+    report = _held_report()
+    done, _ = _ask(report, {"sentences": []}, {"sentences": []})
+    assert _limitations(report) == f"{HELD} {KEPT}"
+    assert HELD_UNLISTED_CODE in [r["code"] for r in done.tally.unresolved]
+    assert done.summary["dropped"] == 0
+
+
+def test_mixed_valid_and_unknown_sources_on_a_failing_rewrite_leave_it_out() -> None:
+    report = _held_report()
+    row = _row("limitations", HELD, ["bound.1", "conclusion"], "It is 'alphaname' [ev_0002].")
+    done, _ = _ask(report, {"sentences": [row]}, {"sentences": [row]})
+    assert _limitations(report) == KEPT
+    assert done.summary["dropped"] == 1
+    assert UNKNOWN_SOURCE_CODE in [r["code"] for r in done.tally.unresolved]
+
+
+def test_a_closing_section_whose_every_sentence_is_left_out_is_empty() -> None:
+    report = _held_report(HELD)
+    row = _row("limitations", HELD, ["bound.1"], "It is 'alphaname' [ev_0009].")
+    done, _ = _ask(report, {"sentences": [row]}, {"sentences": [row]})
+    assert _limitations(report) == ""
+    (dropped,) = [r for r in done.tally.unresolved if r["code"] == DROPPED_CODE]
+    assert dropped["subject"] == "limitations"
+
+
+def test_an_address_only_a_closing_section_names_is_read_off_the_ledger() -> None:
+    from maljan.schemas.evidence import LedgerEntry
+
+    ledger = [
+        LedgerEntry(
+            id="ev_0003",
+            tool="lift_routine",
+            args={"address": "0x401a30"},
+            output="int FUN_401a30(int a)\n{\n  return a;\n}\n",
+            facts={"v": 1, "kind": "decompile", "reader": "listing"},
+        )
+    ]
+    report = _held_report("The code of routine 0x401a30 was not read [ev_0003].")
+    facts = [p for p in passages_of(report, entries=ledger) if p.id.startswith("listed.")]
+    assert facts and any("0x401a30" in p.text for p in facts)

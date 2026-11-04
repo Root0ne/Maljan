@@ -63,6 +63,11 @@ answer; a sentence kept, or a rewrite that still fails, stays as written, and
 the finding is recorded. A sentence of the conclusion or the limitations a row
 lists against a source, whose rewrite still fails, is left out instead, and
 recorded with what stood: neither states what section 5 says otherwise of.
+A sentence of either that calls open an address or a value a section 5
+passage or a fact states, or says the run's own reading left something open,
+is held (:func:`held_closing_sentences`): the prompt names it, and an answer
+listing no row for it is asked once more; what becomes of it is the model's
+answer, never this read's.
 
 Every step is one pass over the passages and the answer's rows.
 """
@@ -113,6 +118,7 @@ from maljan.reporting.models import (
     TechnicalSubsection,
 )
 from maljan.schemas.evidence import entry_ids_in
+from maljan.utils.sentence_cut import left_out_span
 from maljan.utils.written_forms import pack_escaped, pack_reads
 
 if TYPE_CHECKING:
@@ -161,6 +167,10 @@ FAILURE_REDONE_CODE = "agreement.failure_redone"
 # rewrite passed no check: left out of the section, which only sums up what
 # sections 4 to 6 state, and recorded here with what stood (T-554).
 DROPPED_CODE = "agreement.dropped"
+# A held sentence of the conclusion or the limitations (one calling open an
+# address or a value a section 5 passage or a fact states) that no row of the
+# answer lists: the model decides each one, and is asked once more (T-554).
+HELD_UNLISTED_CODE = "agreement.held_unlisted"
 
 
 # The kinds of passage the round is shown, by who wrote them from what.
@@ -226,6 +236,10 @@ class Passage:
     # of it listed against a source whose rewrite passes no check is left out,
     # never kept as written (T-554).
     closing: bool = False
+    # The sentences of a closing passage that call open what a section 5
+    # passage or a fact states (:func:`held_closing_sentences`): each one is
+    # listed in the answer, as the model decides (T-554).
+    held: tuple[str, ...] = ()
 
 
 def _ids(*sources: Any) -> frozenset[str]:
@@ -487,6 +501,14 @@ def passages_of(
                 write=_setter(report, "intro_background"),
             )
         )
+    # The conclusion and the limitations paragraph sum up what sections 4 to 6
+    # state, written without them: each is asked like every other such passage
+    # (T-554), and the ledger's facts are read for what they name too.
+    closing: list[Passage] = []
+    if ta is not None:
+        closing.extend(_closing_passage(ta.analyst_conclusion, "conclusion", "7. Conclusion"))
+        closing.extend(_closing_passage(ta.analyst_limitations, "limitations", "11. Limitations"))
+    uncoded.extend(closing)
     held = list(entries or ())
     found = None
     if held:
@@ -497,18 +519,9 @@ def passages_of(
     facts.extend(_ledger_passages(held, shown, found))
     # The limitations paragraph is held to the failed calls only where a
     # sentence of it says a call failed that the ledger says otherwise of
-    # (T-526), its facts after the ledger's own, which it leaves as they were.
+    # (T-526), its facts after the ledger's own, which it leaves as they were;
+    # it then stands where the paragraph alone stood.
     limitations, limitation_facts, limited = _limitation_passages(report, held, found, facts)
-    # The conclusion and the limitations paragraph sum up what sections 4 to 6
-    # state, written without them: each is asked like every other such
-    # passage, the limitations as the paragraph above where it is held to the
-    # failed calls (T-554).
-    if ta is not None:
-        uncoded.extend(_closing_passage(ta.analyst_conclusion, "conclusion", "7. Conclusion"))
-        if not limitations:
-            uncoded.extend(
-                _closing_passage(ta.analyst_limitations, "limitations", "11. Limitations")
-            )
     if limitations:
         # A false failure is wrong in any section: while the limitation facts
         # are shown, a rewrite of any other passage adds none. A section 5
@@ -518,10 +531,17 @@ def passages_of(
         added = _failure_added_check(limited)
         cited = _failure_cited_check(limited)
         for passage in (*coded, *uncoded):
+            if passage.id == "limitations":
+                continue
             if _writable(passage) and passage.sourced_check is None:
                 passage.sourced_check = cited if passage.kind == SECTION_5 else added
-    uncoded.extend(limitations)
+        uncoded[:] = [p for p in uncoded if p.id != "limitations"]
+        uncoded.extend(limitations)
     facts.extend(limitation_facts)
+    sources = [*facts, *coded]
+    for passage in uncoded:
+        if passage.closing:
+            passage.held = held_closing_sentences(passage.text, sources)
     return [*facts, *coded, *debate, *uncoded]
 
 
@@ -553,6 +573,67 @@ def _procedure_check(report: MalwareReport) -> Callable[[str], Callable[[str], l
         return _check
 
     return _for
+
+
+# A closing sentence calling something open: not determined, named, recovered,
+# resolved, visible or established; unexplained; unresolved (T-554). What it
+# is about is read from what it names, never from these words alone.
+_CALLS_OPEN = re.compile(
+    r"\b(?:not|never)\s+(?:been\s+|be\s+)?"
+    r"(?:determined|named|recovered|resolved|visible|established)\b"
+    r"|\bunexplained\b|\bunresolved\b",
+    re.IGNORECASE,
+)
+# A value a sentence quotes: the text between a pair of straight or curly
+# quotes, at least this long, so a quoted letter or digit names nothing.
+_QUOTED = re.compile(r"[\"'\u2018\u201c]([^\"'\u2019\u201d\n]{3,200})[\"'\u2019\u201d]")
+
+
+def held_closing_sentences(text: str, sources: Sequence[Passage]) -> tuple[str, ...]:
+    """The sentences of a closing passage that call open what a source states, in order.
+
+    A sentence is held where it calls something open (:data:`_CALLS_OPEN`) and
+    names an address, or quotes a value, that a section 5 passage or a bound
+    value's fact states: the address among those the passage names, the value
+    in its text or the fact's own value; or, naming no address, where it says
+    the run's own reading left that open (:func:`_unsettled_by_reading`: "the
+    claims were not visible in this review"), beside a section 5 written from
+    that reading. Holding only obliges the answer to
+    list the sentence; whether a source says otherwise, and what becomes of
+    the sentence, is the model's answer and the checks', never this read's.
+    One pass over the sentences; the sources are read once.
+    """
+    named: set[int] = set()
+    texts: list[str] = []
+    values: set[str] = set()
+    for source in sources:
+        if source.kind == SECTION_5:
+            named.update(_addresses_named(source.text))
+            texts.append(source.text)
+        elif source.kind == FACT and source.value:
+            named.update(source.addresses)
+            values.add(source.value)
+    if not named and not texts and not values:
+        return ()
+    joined = "\n".join(texts)
+    out: list[str] = []
+    for sentence in _sentences_of(text):
+        if not _CALLS_OPEN.search(sentence):
+            continue
+        addresses = set(_addresses_named(sentence))
+        if (
+            addresses & named
+            or any(
+                quoted in values or quoted in joined
+                for quoted in (m.group(1).strip() for m in _QUOTED.finditer(sentence))
+                if quoted
+            )
+            # Naming nothing, it says the run's own reading left something open,
+            # which section 5, written from that reading, may state.
+            or (texts and not addresses and _unsettled_by_reading(sentence))
+        ):
+            out.append(sentence)
+    return tuple(dict.fromkeys(out))
 
 
 def _closing_passage(sub: TechnicalSubsection | None, pid: str, label: str) -> list[Passage]:
@@ -1985,8 +2066,43 @@ def agreement_violations(payload: Any, passages: Sequence[Passage]) -> list[Viol
         return cut[passage.id]
 
     out: list[Violation] = []
+    listed: set[tuple[str, int]] = set()
     for index, row in _rows(payload):
         out.extend(_row_violations(row, index, by_id, _sentences))
+        passage = by_id.get(_form(row.passage))
+        span = _sentences(passage).span(row.sentence) if passage is not None else None
+        if passage is not None and span is not None:
+            listed.add((passage.id, span[0]))
+    if isinstance(payload, dict):
+        out.extend(_held_unlisted(passages, listed, _sentences))
+    return out
+
+
+def _held_unlisted(
+    passages: Sequence[Passage],
+    listed: set[tuple[str, int]],
+    sentences_of: Callable[[Passage], _Sentences],
+) -> list[Violation]:
+    """Each held sentence of a closing passage no row lists, in the passages' order."""
+    out: list[Violation] = []
+    for passage in passages:
+        for sentence in passage.held:
+            span = sentences_of(passage).span(sentence)
+            if span is None or (passage.id, span[0]) in listed:
+                continue
+            out.append(
+                Violation(
+                    code=HELD_UNLISTED_CODE,
+                    message=(
+                        f"{safe_finding_value(passage.id)} calls open what a section 5 "
+                        "passage or a fact may state, and no row lists this sentence: "
+                        f"{safe_finding_value(sentence)!r}. List it: rewrite it on the source "
+                        "that states otherwise, or keep it naming the source you read and "
+                        "found agreeing."
+                    ),
+                    path=f"held.{passage.id}",
+                )
+            )
     return out
 
 
@@ -2115,6 +2231,12 @@ def prompt_text(passages: Sequence[Passage]) -> str:
                 else ""
             )
             lines.append(f"- [{passage.id}] {passage.label}{shown}{cites}: {text}")
+            if passage.held:
+                # Read off the passage by code: each one is listed, as the model decides.
+                lines.append(
+                    f"  [{passage.id}] list each of these sentences: "
+                    + "; ".join(quoted_value(sentence) for sentence in passage.held)
+                )
         lines.append("")
     lines.extend(
         [
@@ -2153,20 +2275,6 @@ def _rests_on_a_source(row: AgreementRow, by_id: dict[str, Passage]) -> bool:
         (source := by_id.get(_form(name))) is not None and source.kind in (FACT, SECTION_5, DEBATE)
         for name in row.sources
     )
-
-
-def _dropped_span(text: str, start: int, end: int) -> tuple[int, int]:
-    """A sentence's span with the spaces after it, or, where a line break or the text's
-    end follows it, the spaces before it: what leaving it out takes away."""
-    after = end
-    while after < len(text) and text[after] in " \t":
-        after += 1
-    if after > end:
-        return start, after
-    before = start
-    while before > 0 and text[before - 1] in " \t":
-        before -= 1
-    return before, end
 
 
 def apply_rows(
@@ -2256,7 +2364,7 @@ def apply_rows(
             if passage.closing and _rests_on_a_source(row, by_id):
                 # A closing sentence a source says otherwise than is never kept
                 # as written: left out, and recorded with what stood.
-                taken.append((*_dropped_span(passage.text, span[0], span[1]), ""))
+                taken.append((*left_out_span(passage.text, span[0], span[1]), ""))
                 counts["dropped"] += 1
                 written.append(
                     Violation(
@@ -2269,6 +2377,8 @@ def apply_rows(
                             f"section: {safe_finding_value(span[2])!r}."
                         ),
                         path=f"sentences.{index}",
+                        # The section it was left out of, which the analyst report counts.
+                        subject=passage.id,
                     )
                 )
             else:

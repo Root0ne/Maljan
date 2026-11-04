@@ -141,8 +141,31 @@ class _Reporter:
         return AIMessage(content=self.answers.pop(0) if self.answers else '{"sentences": []}')
 
 
+def _with_held(
+    report: MalwareReport, ledger: list[LedgerEntry], answers: tuple[Any, ...]
+) -> list[Any]:
+    """Each answer with a keep row for every held closing sentence it does not list (T-554),
+    so a test of the failed calls answers the listing the round now asks for too."""
+    passages = passages_of(report, entries=ledger)
+    source = next((p.id for p in passages if p.kind == FACT and p.cites), None)
+    out: list[Any] = []
+    for answer in answers:
+        if isinstance(answer, dict) and source is not None:
+            rows = list(answer.get("sentences") or [])
+            listed = {str(row.get("sentence")) for row in rows}
+            rows.extend(
+                {"passage": p.id, "sentence": held, "sources": [source], "decision": "keep"}
+                for p in passages
+                for held in p.held
+                if held not in listed
+            )
+            answer = {**answer, "sentences": rows}
+        out.append(answer)
+    return out
+
+
 def _ask(report: MalwareReport, ledger: list[LedgerEntry], *answers: Any) -> tuple[Any, _Reporter]:
-    reporter = _Reporter(*answers)
+    reporter = _Reporter(*_with_held(report, ledger, answers))
     done = asyncio.run(
         ask_section_agreement(
             reporter,
