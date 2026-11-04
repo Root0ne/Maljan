@@ -72,9 +72,9 @@ def test_an_inline_technique_ends_at_an_emphasised_confidence_label(spelling: st
 
 
 def test_a_technique_ends_before_a_label_whose_emphasis_closes_after_the_colon() -> None:
-    # What follows the colon is the evidence as written, as at a line start.
+    # The emphasis closing after the colon is no part of the evidence (T-550).
     text = f"CLAIM: {SENTENCE}\nTECHNIQUE: T1027 **EVIDENCE:** [ev_0002]\nCONFIDENCE: 0.8\n"
-    assert _read(text) == [(SENTENCE, "** [ev_0002]", 0.8, "T1027", None)]
+    assert _read(text) == [(SENTENCE, "[ev_0002]", 0.8, "T1027", None)]
 
 
 @pytest.mark.parametrize(
