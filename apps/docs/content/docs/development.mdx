@@ -12,8 +12,8 @@ expected to follow.
 Maljan/
 ├── apps/
 │   ├── api/           FastAPI app, arq worker, Alembic migrations ("maljan-api")
-│   ├── docs/          this documentation site: pages under content/docs/,
-│   │                  images under public/assets/
+│   ├── docs/          these documentation pages: content/docs/, images under
+│   │                  public/assets/, and the content check (npm run check)
 │   └── web/           Next.js console, Playwright specs under e2e/
 ├── src/maljan/        the core package: agents, pipeline, analysis layers,
 │                      providers, memory, reporting, core (config, container)
@@ -177,13 +177,23 @@ backend image already runs under `LANG=C.UTF-8`.
 
 ## Documentation site
 
-The pages are MDX files under `apps/docs/content/docs/`, built into a static
-site with Fumadocs on Next.js, and published to GitHub Pages from `main` by
-[`.github/workflows/docs.yml`](https://github.com/Root0ne/Maljan/blob/dev/.github/workflows/docs.yml).
-The sidebar's order and groups are `content/docs/meta.json`. Preview it locally
-from `apps/docs` with `npm ci` and `npm run dev`; `npm run build` writes the
-static site to `apps/docs/out/` and fails if any address the site has served
-before no longer leads to a page (`scripts/old-urls.mjs`).
+The pages are MDX files under `apps/docs/content/docs/`, their images are in
+`apps/docs/public/assets/`, and the files served under `/examples/` are in
+`docs/examples/`. The website at [malspark.com](https://malspark.com) is built and published
+separately on Cloudflare Pages: production reads these three directories from
+`main`, previews from `dev`, so they stay where they are. Pages link to each
+other as `/docs/<page>/`. The sidebar's order and groups are
+`content/docs/meta.json`.
+
+[`.github/workflows/docs.yml`](https://github.com/Root0ne/Maljan/blob/dev/.github/workflows/docs.yml)
+checks the content on every pull request that touches it; run the same check
+from `apps/docs` with `npm ci` and `npm run check`. It fails if a page does not
+compile as MDX or has no title, a `meta.json` does not parse or lists a page
+that is not there, or a link to `/docs/...`, `/assets/...` or `/examples/...`,
+anchor included, leads nowhere. On `main` the workflow also publishes a
+redirect site to GitHub Pages, so the old address
+`https://root0ne.github.io/Maljan/<page>/` leads to the same page under
+`https://malspark.com/docs/`.
 
 [Validation codes](/docs/validation-codes/) is generated, not written. Run
 `uv run python scripts/validation_codes/run.py` and commit the page after any of

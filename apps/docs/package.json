@@ -1,35 +1,16 @@
 {
-  "name": "docs",
+  "name": "docs-content-check",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build && node scripts/old-urls.mjs",
-    "postinstall": "fumadocs-mdx",
-    "types:check": "next typegen && tsc --noEmit",
-    "lint": "eslint"
+    "check": "node scripts/check.mjs"
   },
   "dependencies": {
-    "fumadocs-core": "16.17.9",
-    "fumadocs-mdx": "15.4.10",
-    "fumadocs-ui": "16.17.9",
-    "lucide-react": "1.65.0",
-    "next": "16.4.3",
-    "react": "19.3.1",
-    "react-dom": "19.3.1",
-    "shiki": "4.5.0",
-    "zod": "4.6.7"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "4.3.3",
-    "@types/mdx": "2.0.14",
-    "@types/node": "22.20.5",
-    "@types/react": "19.3.0",
-    "@types/react-dom": "19.3.0",
-    "eslint": "9.39.4",
-    "eslint-config-next": "16.4.3",
-    "postcss": "8.5.32",
-    "tailwindcss": "4.3.3",
-    "typescript": "5.9.3"
+    "@mdx-js/mdx": "3.1.1",
+    "mdast-util-to-string": "4.0.0",
+    "remark-frontmatter": "5.0.0",
+    "remark-gfm": "4.0.1",
+    "unist-util-visit": "5.2.0"
   }
 }

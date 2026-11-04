@@ -1,15 +1,16 @@
 name: Docs
 
 on:
-  # The site is apps/docs; docs/examples/ is copied into it at build time.
+  # The pages are apps/docs/content/docs with their images in
+  # apps/docs/public/assets and the files under docs/examples; the website that
+  # renders them is built and published separately, at malspark.com.
   pull_request:
     branches: ["main", "dev"]
     paths: ["apps/docs/**", "docs/**", ".github/workflows/docs.yml"]
   push:
     branches: ["main"]
     paths: ["apps/docs/**", "docs/**", ".github/workflows/docs.yml"]
-  # A release that changes no page still needs a first publication, and a
-  # failed deployment needs a way to run again without an empty commit.
+  # A failed deployment needs a way to run again without an empty commit.
   workflow_dispatch:
 
 permissions:
@@ -22,8 +23,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build
+  check:
+    name: Check the docs content
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -38,37 +39,33 @@ jobs:
           cache: "npm"
           cache-dependency-path: apps/docs/package-lock.json
 
-      - name: Install docs dependencies
+      - name: Install the checker
         working-directory: apps/docs
         run: npm ci
 
-      - name: Type-check and lint
+      # Every page compiles as MDX, every meta.json parses, and every link to
+      # /docs/..., /assets/... or /examples/... leads to a page, heading or file.
+      - name: Check the pages
         working-directory: apps/docs
-        run: |
-          npm run types:check
-          npm run lint
+        run: npm run check
 
-      # A static export under /Maljan, where GitHub Pages serves the site until
-      # it is retired in favour of malspark.com (a build with the variable unset
-      # serves the domain's root). The build fails if an address the site
-      # served before no longer leads to a page (scripts/old-urls.mjs).
-      - name: Build the site
+      # The old address, https://root0ne.github.io/Maljan/, now only sends
+      # readers on to the same page on malspark.com.
+      - name: Write the redirect site
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         working-directory: apps/docs
-        env:
-          NEXT_TELEMETRY_DISABLED: "1"
-          NEXT_PUBLIC_BASE_PATH: /Maljan
-        run: npm run build
+        run: node scripts/pages-redirect.mjs "$RUNNER_TEMP/pages-redirect"
 
-      - name: Upload the site
+      - name: Upload the redirect site
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: apps/docs/out
+          path: ${{ runner.temp }}/pages-redirect
 
   deploy:
     name: Deploy to GitHub Pages
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: build
+    needs: check
     runs-on: ubuntu-latest
     permissions:
       pages: write

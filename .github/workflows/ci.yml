@@ -207,8 +207,9 @@ jobs:
   # from each lockfile with no install. A job of its own and not a required
   # check: an advisory published overnight must not block an unrelated merge,
   # and the registry being unreachable is not a finding. The console fails at
-  # high or critical, and so does the docs site. Each audit is retried once
-  # for the network.
+  # high or critical, and the audit is retried once for the network. The
+  # package in apps/docs is only the docs content check, which runs in CI and
+  # ships nothing, so it is not audited.
   npm-audit:
     name: npm audit
     runs-on: ubuntu-latest
@@ -226,15 +227,6 @@ jobs:
 
       - name: Audit the console (high and above fail)
         working-directory: apps/web
-        run: |
-          npm audit --audit-level=high --omit=dev || {
-            sleep 20
-            npm audit --audit-level=high --omit=dev
-          }
-
-      - name: Audit the docs site (high and above fail)
-        if: ${{ !cancelled() }}
-        working-directory: apps/docs
         run: |
           npm audit --audit-level=high --omit=dev || {
             sleep 20
