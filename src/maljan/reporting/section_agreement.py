@@ -61,7 +61,8 @@ its sentence's place, read against the passage as it was written, its new ids
 added to the record's own list, and what it replaced is recorded as the model's
 answer; a sentence kept, or a rewrite that still fails, stays as written, and
 the finding is recorded. A sentence of the conclusion or the limitations a row
-lists against a source, whose rewrite still fails, is left out instead, and
+lists against sources it may rest on, whose rewrite still fails, is left out
+instead, and
 recorded with what stood: neither states what section 5 says otherwise of.
 A sentence of either that calls open an address or a value a section 5
 passage or a fact states, or says the run's own reading left something open,
@@ -584,6 +585,9 @@ _CALLS_OPEN = re.compile(
     r"|\bunexplained\b|\bunresolved\b",
     re.IGNORECASE,
 )
+# The run's own reading named by a closing sentence: what a held sentence naming
+# no address must name ("the claims were not visible in this review").
+_OWN_READING = re.compile(r"\b(?:claims?|review|reading|listings?|decompil\w*)\b", re.I)
 # A value a sentence quotes: the text between a pair of straight or curly
 # quotes, at least this long, so a quoted letter or digit names nothing.
 _QUOTED = re.compile(r"[\"'\u2018\u201c]([^\"'\u2019\u201d\n]{3,200})[\"'\u2019\u201d]")
@@ -628,9 +632,15 @@ def held_closing_sentences(text: str, sources: Sequence[Passage]) -> tuple[str, 
                 for quoted in (m.group(1).strip() for m in _QUOTED.finditer(sentence))
                 if quoted
             )
-            # Naming nothing, it says the run's own reading left something open,
-            # which section 5, written from that reading, may state.
-            or (texts and not addresses and _unsettled_by_reading(sentence))
+            # Naming nothing, it says the run's own reading (a claim, the review,
+            # a listing) left something open, which section 5, written from that
+            # reading, may state.
+            or (
+                texts
+                and not addresses
+                and _OWN_READING.search(sentence)
+                and _unsettled_by_reading(sentence)
+            )
         ):
             out.append(sentence)
     return tuple(dict.fromkeys(out))
@@ -2269,9 +2279,9 @@ class AgreementRound:
 
 
 def _rests_on_a_source(row: AgreementRow, by_id: dict[str, Passage]) -> bool:
-    """Whether a row names a source a passage written without the code is answered by:
-    a fact, a section 5 passage or a debate round it was shown."""
-    return any(
+    """Whether every source a row names is one a passage written without the code is
+    answered by: a fact, a section 5 passage or a debate round it was shown."""
+    return bool(row.sources) and all(
         (source := by_id.get(_form(name))) is not None and source.kind in (FACT, SECTION_5, DEBATE)
         for name in row.sources
     )
@@ -2297,8 +2307,8 @@ def apply_rows(
     kept, and returned the same way (``LISTED_CODE``). A section 5 rewrite
     resting on a routine whose code no entry lists is the platform's
     (``_platform_rewrites``). A sentence of a closing passage (the conclusion,
-    the limitations) whose rewrite still fails, on a row naming a source it may
-    rest on, is left out of the passage and returned with what stood
+    the limitations) whose rewrite still fails, on a row every source of which it
+    may rest on, is left out of the passage and returned with what stood
     (``DROPPED_CODE``).
     """
     by_id = {passage.id: passage for passage in passages}

@@ -8977,7 +8977,7 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
     entries it was read in. The whole value is looked for in each cited entry
     under the citation check's own normalisation (:meth:`EntryTexts.holds`),
     a number also in decimal and hex (:func:`_stated_spellings`); a value that
-    lists items joined by ", " is held where cited entries hold each item.
+    lists items joined by ", " is held where one cited entry holds every item.
     Held by one, the row stands. Held by none, the row is asked about once, together with
     the other rows of its table that cite the same entries; each row is named
     by its number, which is how the report marks a row kept after it.
@@ -9018,12 +9018,15 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
                 if _held_by(value, set(cited), list_key == "items"):
                     continue
                 # A list the row writes as one value ("extra, follower, run"):
-                # held where a cited entry holds each of its items (T-555).
+                # held where one cited entry holds every item of it (T-555).
                 parts = [part.strip() for part in value.split(", ")]
                 if (
                     len(parts) > 1
                     and all(len(part) >= _LISTED_PART_FLOOR for part in parts)
-                    and all(_held_by(part, set(cited), list_key == "items") for part in parts)
+                    and any(
+                        all(_held_by(part, {ref}, list_key == "items") for part in parts)
+                        for ref in cited
+                    )
                 ):
                     continue
                 if value not in held_elsewhere:

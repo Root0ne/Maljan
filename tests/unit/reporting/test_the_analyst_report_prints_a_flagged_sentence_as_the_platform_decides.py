@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from maljan.reporting.models import (
     CapabilityBullet,
     CapabilityCell,
@@ -73,6 +75,41 @@ def test_an_unpublished_value_s_sentence_stands_where_it_states_the_value_s_stat
     bundle = MarkdownRenderer(layout=BUNDLE).render(report)
     assert "**[not published by this run: x" in bundle
     assert "**[not published by this run: y" in bundle
+
+
+def test_a_bracket_restating_the_table_s_reason_states_the_publish_state() -> None:
+    # As haiku10's c.pki.goog sentence did: the table's "no: no row of this run's IOC
+    # table holds it", restated under a negation.
+    sentence = "Its Host header is cdn.example.org (not a row of this run's IOC table) today."
+    report = _report(
+        command_and_control=TechnicalSubsection(title="C2", body=f"It beacons. {sentence}")
+    )
+    report.flagged_statements = [
+        FlaggedStatement(sentence=sentence, code="report.unpublished_value", label="x")
+    ]
+    c2 = _section(_analyst(report), "## 6. Command and control")
+    assert "cdn[.]example[.]org (not a row of this run's IOC table) today." in c2
+    assert "left out" not in c2 and "**[" not in c2
+
+
+@pytest.mark.parametrize(
+    "bracket",
+    [
+        "(a published indicator)",
+        "(UDP 53)",
+    ],
+)
+def test_a_bracket_not_saying_unpublished_states_no_publish_state(bracket: str) -> None:
+    sentence = f"The beacon also reaches 192.0.2.7 {bracket} on port 80."
+    report = _report(
+        command_and_control=TechnicalSubsection(title="C2", body=f"It beacons. {sentence}")
+    )
+    report.flagged_statements = [
+        FlaggedStatement(sentence=sentence, code="report.unpublished_value", label="x")
+    ]
+    c2 = _section(_analyst(report), "## 6. Command and control")
+    assert "192[.]0[.]2[.]7" not in c2 and "**[" not in c2
+    assert "_1 sentence of this section was left out" in c2
 
 
 def test_a_numeric_confidence_is_worded_and_another_flag_leaves_its_sentence_out() -> None:

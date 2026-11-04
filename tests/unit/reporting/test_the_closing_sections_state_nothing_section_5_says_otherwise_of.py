@@ -223,6 +223,57 @@ HAIKU10_SAID = {
 }
 
 
+# The held sentences of two stored runs, by their opening words (T-554): haiku10's
+# are the five D2 statements, haiku8's the one naming an address section 5 states.
+STORED_HELD = {
+    "haiku10": {
+        "conclusion": ("Two routines, the wait loop at 0x1030 and the 'runnung' string",),
+        "limitations": (
+            "The indirect call through pointer slot 0x10b38 was not resolved",
+            "The RC4 PRGA routine at 0xcaac and the FNV routine at 0xc99c",
+            "The reverser-stage claims about task registration",
+            "Whether the PEB read at 0x8690 gates execution was not determined",
+        ),
+    },
+    "haiku8": {
+        "conclusion": (),
+        "limitations": ("Whether the 0xad34 routine allocates executable memory",),
+    },
+}
+
+
+@pytest.mark.parametrize("name", sorted(STORED_HELD))
+def test_the_stored_runs_hold_exactly_these_closing_sentences(name: str) -> None:
+    root = stored_runs()
+    if root is None or not (root / name / "report.json").is_file():
+        pytest.skip(f"the stored benchmark run {name} is not on this machine")
+    from maljan.reporting.follow_up import stored_ledger
+
+    run = root / name
+    report = MalwareReport.model_validate(json.loads((run / "report.json").read_text()))
+    document = json.loads((run / "evidence.json").read_text())
+    rows = document.get("items") or document.get("entries") if isinstance(document, dict) else []
+    ledger, _unread = stored_ledger(rows)
+    passages = {p.id: p for p in passages_of(report, entries=ledger)}
+    for pid, openings in STORED_HELD[name].items():
+        held = passages[pid].held
+        assert len(held) == len(openings), (pid, held)
+        assert all(h.startswith(o) for h, o in zip(held, openings, strict=True)), (pid, held)
+
+
+def test_a_sentence_naming_no_address_is_held_only_where_it_names_the_run_s_reading() -> None:
+    report = _held_report(
+        "APIs outside that set are not established as absent. "
+        "The analysts' claims about the gate were not visible in this review, so that "
+        "behaviour is not established."
+    )
+    held = {p.id: p for p in passages_of(report)}["limitations"].held
+    assert held == (
+        "The analysts' claims about the gate were not visible in this review, so that "
+        "behaviour is not established.",
+    )
+
+
 def test_haiku10_s_closing_sentences_are_shown_beside_what_states_otherwise() -> None:
     root = stored_runs()
     if root is None or not (root / "haiku10" / "report.json").is_file():
@@ -298,12 +349,13 @@ def test_a_held_sentence_never_listed_stays_and_the_finding_is_recorded() -> Non
     assert done.summary["dropped"] == 0
 
 
-def test_mixed_valid_and_unknown_sources_on_a_failing_rewrite_leave_it_out() -> None:
+def test_mixed_valid_and_unknown_sources_on_a_failing_rewrite_keep_the_sentence() -> None:
     report = _held_report()
     row = _row("limitations", HELD, ["bound.1", "conclusion"], "It is 'alphaname' [ev_0002].")
     done, _ = _ask(report, {"sentences": [row]}, {"sentences": [row]})
-    assert _limitations(report) == KEPT
-    assert done.summary["dropped"] == 1
+    # Left out only where every source the row names is one it may rest on.
+    assert _limitations(report) == f"{HELD} {KEPT}"
+    assert done.summary["dropped"] == 0 and done.summary["not_applied"] == 1
     assert UNKNOWN_SOURCE_CODE in [r["code"] for r in done.tally.unresolved]
 
 

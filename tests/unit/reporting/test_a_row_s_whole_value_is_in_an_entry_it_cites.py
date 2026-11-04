@@ -111,6 +111,22 @@ class TestTheWholeValue:
         # An item too short to be read on its own holds nothing.
         assert stated_value_violations(_identifiers("alpha, xy", "ev_0006"), texts)
 
+    def test_a_listed_value_is_held_by_one_entry_holding_every_item(self) -> None:
+        texts = EntryTexts.from_ledger(
+            [
+                _entry("ev_0006", "list_exports", json.dumps({"exports": ["alpha", "bravo"]})),
+                _entry("ev_0007", "strings", json.dumps({"strings": ["charlie"]})),
+            ]
+        )
+        # Each item held, but by different entries: no one entry holds the list.
+        (found,) = stated_value_violations(
+            _identifiers("alpha, bravo, charlie", "ev_0006", "ev_0007"), texts
+        )
+        assert found.code == STATED_VALUE_UNHELD_CODE
+        assert (
+            stated_value_violations(_identifiers("alpha, bravo", "ev_0006", "ev_0007"), texts) == []
+        )
+
     def test_a_partial_cited_entry_is_not_said_to_lack_it(self) -> None:
         assert stated_value_violations(_items("7000", "ev_0022"), _texts(partial=True)) == []
 

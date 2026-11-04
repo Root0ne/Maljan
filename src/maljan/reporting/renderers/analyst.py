@@ -470,6 +470,51 @@ _CONFIDENCE_NUMBER = re.compile(
 )
 
 
+# What a bracket says of a value the run does not publish, as the IOC table does.
+_SAYS_UNPUBLISHED = re.compile(
+    r"\b(?:not"
+    + _PIPE
+    + r"never)\s+(?:(?:a"
+    + _PIPE
+    + r"an"
+    + _PIPE
+    + r"the)\s+)?(?:published"
+    + _PIPE
+    + r"exported)\b"
+    + _PIPE
+    + r"\bunpublished\b",
+    re.IGNORECASE,
+)
+
+
+def _states_unpublished(sentence: str, value: str, state: str) -> bool:
+    """Whether ``value`` stands in ``sentence`` with a bracket right after it that agrees
+    with the IOC table's answer ``state`` for it: it says the value is not published ("8.8.8.8
+    (not a published indicator)"), or, under a negation, restates most of the words of the
+    table's reason ("(… not a row of this run's IOC table)" beside "no: no row of this run's
+    IOC table holds it"). A bracket saying anything else ("(UDP 53)", "(a published
+    indicator)") states no publish state. One pass over the bracket, to its matching close.
+    """
+    found = re.search(re.escape(value) + r"\s*\(", sentence)
+    if found is None:
+        return False
+    depth, at = 1, found.end()
+    while at < len(sentence) and depth:
+        depth += {"(": 1, ")": -1}.get(sentence[at], 0)
+        at += 1
+    bracket = sentence[found.end() : at]
+    if _SAYS_UNPUBLISHED.search(bracket):
+        return True
+    reason = {w for w in _WORD.findall(state.lower().removeprefix("no:")) if len(w) >= 4}
+    said = set(_WORD.findall(bracket.lower()))
+    return bool(reason) and bool(_NEGATED.search(bracket)) and 2 * len(reason & said) >= len(reason)
+
+
+# A word of a publish state, and a negation in a bracket.
+_WORD = re.compile(r"[a-z0-9']+")
+_NEGATED = re.compile(r"\b(?:not" + _PIPE + "no" + _PIPE + r"never)\b", re.IGNORECASE)
+
+
 def _worded_confidence(sentence: str) -> str:
     """``sentence`` with each confidence written as a number written as its word
     (``composer_pro._NUMERIC_CONFIDENCE``, ``confidence_word``)."""
@@ -559,16 +604,14 @@ class _Analyst:
         it out (:meth:`_unflagged`): a value the run does not publish stated beside its
         own state, a confidence written as a number worded."""
         if codes == [UNPUBLISHED_VALUE_CODE]:
-            # Every value the run does not publish written with a state of its
-            # own right after it: the sentence stands, and the mark, which
+            # Every value the run does not publish written with a bracket right
+            # after it that says so: the sentence stands, and the mark, which
             # states the table's answer again, is the bundle's.
             try:
                 unstated = self.ctx._unstated(sentence)
             except Exception:  # noqa: BLE001 — a sentence not read is left out
                 return None
-            if all(
-                re.search(re.escape(value) + r"\s*\(", sentence) for _kind, value, _ in unstated
-            ):
+            if all(_states_unpublished(sentence, value, state) for _kind, value, state in unstated):
                 return sentence
             return None
         if codes == [NUMERIC_CONFIDENCE_CODE]:

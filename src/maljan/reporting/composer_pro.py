@@ -408,7 +408,7 @@ _NUMERIC_CONFIDENCE = re.compile(
 # debate's own words count too: a claim by its number ("Claim 44 is refuted",
 # "claims 12 and 13", "claim no. 44"), never a quantity a sample claims ("claims
 # 4 GB"), and the analysis the report revised ("the earlier analysis"), never
-# one by, from or of another party (T-555).
+# one by or from another party (T-555).
 _PROCESS_WORDS = re.compile(
     r"\b(?:(?:the|this run's|the run's) ledger(?!\s+of\b)|ledger entr(?:y|ies)"
     r"|per the judge|the judge (?:kept|ruled|stated|said|found|accepted|rejected|dropped|named)"
@@ -416,8 +416,8 @@ _PROCESS_WORDS = re.compile(
     r"|claims?\s+(?:no\.?\s*|#)?\d+(?:\s*(?:,|and|to)\s*#?\d+)*"
     # ... never a quantity: "claims 4 and 8 GB", "claims 3, 5 or 7 days", "Claim 1 BTC".
     r"(?![\s,#\d]*(?:(?:or|and|to)\s*[#\d][\s,#\d]*)?"
-    r"(?:(?:[KMGT]i?B|bytes?|days?|hours?|BTC|prizes?)\b|%))"
-    r"|(?:the|this) earlier analys[ie]s(?!\s+(?:by|from|of)\b))\b",
+    r"(?:(?:[KMGT]i?B|bytes?|days?|hours?|minutes?|seconds?|times|USD|EUR|BTC|prizes?)\b|%))"
+    r"|(?:the|this) earlier analys[ie]s(?!\s+(?:by|from)\b))\b",
     re.IGNORECASE,
 )
 # An agent's name is a process word where it is an identifier ("static_r2"):

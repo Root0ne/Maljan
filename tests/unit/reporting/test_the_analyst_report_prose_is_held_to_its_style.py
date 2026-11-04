@@ -233,6 +233,7 @@ class TestTheStyleCheck:
             "As claims 12 and 13 state, it sleeps.",
             "As claim no. 44 says, it sleeps.",
             "Claims 12 to 14 are withdrawn.",
+            "The earlier analysis of the loader is refuted.",
         ],
     )
     def test_the_debate_s_own_words_are_process_words(self, sentence: str) -> None:
@@ -251,6 +252,8 @@ class TestTheStyleCheck:
             "The lure offers claim #2 prize.",
             "It matches the earlier analysis by Proofpoint.",
             "This earlier analysis by ESET named the loader.",
+            "The lure says claim 500 USD today.",
+            "The page claims 10 minutes of setup.",
         ],
     )
     def test_a_sample_s_own_words_are_not(self, sentence: str) -> None:
