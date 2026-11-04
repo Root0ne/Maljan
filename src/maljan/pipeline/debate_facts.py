@@ -1546,6 +1546,8 @@ def line_round_facts(
     changed: Any,
     participants: Sequence[str],
     filed: Mapping[str, Sequence[str]] | None = None,
+    cited: Any = None,
+    carried_valid: Mapping[str, bool] | None = None,
 ) -> list[dict[str, Any]]:
     """One record per blocking line of the mediation a revision round answered.
 
@@ -1558,8 +1560,15 @@ def line_round_facts(
     .changed_anywhere``). An analyst that filed entries in the round (``filed``)
     read something new and is counted as changed; its claims citing those
     entries are read with the line's. ``entries`` and ``places`` keep what
-    the line is about, for the carried mark to be read against. Linear in
-    the lines, the analysts and the claims ``changed`` reads.
+    the line is about, for the carried mark to be read against.
+
+    Given ``cited``, ``cited_new`` is the analysts named on the line that
+    filed entries in the round and whose revised answer has a claim citing
+    one of them beside the line's entries or places (``cited(name, filed
+    ids, entry ids, places)``): they read something new on the point. Given
+    ``carried_valid``, ``carried_valid`` says whether the line's own carried
+    mark was one that counts (:func:`valid_carries`). Linear in the lines,
+    the analysts and the claims ``changed`` and ``cited`` read.
     """
     out: list[dict[str, Any]] = []
     stood = set(revised)
@@ -1590,6 +1599,50 @@ def line_round_facts(
                 "places": [_hex_text(p) for p in sorted(places)],
             }
         )
+        if cited is not None:
+            out[-1]["cited_new"] = [
+                n
+                for n in named
+                if n in stood and own_filed.get(n) and cited(n, own_filed[n], ids, places)
+            ]
+        if carried_valid is not None:
+            out[-1]["carried_valid"] = bool(carried_valid.get(text))
+    return out
+
+
+def carry_shares_point(line: str, fact: Mapping[str, Any], facts_now: Sequence[str] = ()) -> bool:
+    """Whether ``line`` shares an entry id or a place with the earlier line ``fact`` records.
+
+    Its own and its place facts' (``facts_now``); a carried mark naming a
+    line about other things is read as no mark.
+    """
+    ids, places = _about(str(line), facts_now)
+    earlier_ids = {str(i).lower() for i in fact.get("entries") or []}
+    earlier_places = {int(str(p), 16) for p in fact.get("places") or []}
+    return bool(ids & earlier_ids or places & earlier_places)
+
+
+def valid_carries(
+    lines: Sequence[str],
+    carried: Mapping[str, int],
+    record: Mapping[str, Any] | None,
+    facts_now: Sequence[str] = (),
+) -> dict[str, bool]:
+    """Per line, whether its carried mark counts: it names a line ``record`` holds, sharing a point.
+
+    A line not marked carried, or marked from a line the record does not
+    hold, is ``False``. Linear in the lines.
+    """
+    facts = record.get("lines") if isinstance(record, Mapping) else None
+    out: dict[str, bool] = {}
+    for line in lines:
+        number = carried.get(str(line))
+        fact = (
+            facts[int(number) - 1]
+            if isinstance(facts, list) and number is not None and 1 <= int(number) <= len(facts)
+            else None
+        )
+        out[str(line)] = isinstance(fact, Mapping) and carry_shares_point(line, fact, facts_now)
     return out
 
 
@@ -1678,12 +1731,7 @@ def carried_unmoved(
         if number is None or not 1 <= int(number) <= len(facts):
             return False
         fact = facts[int(number) - 1]
-        if not isinstance(fact, Mapping):
-            return False
-        ids, places = _about(str(line), facts_now)
-        earlier_ids = {str(i).lower() for i in fact.get("entries") or []}
-        earlier_places = {int(str(p), 16) for p in fact.get("places") or []}
-        if not (ids & earlier_ids or places & earlier_places):
+        if not isinstance(fact, Mapping) or not carry_shares_point(line, fact, facts_now):
             return False
         before = {str(n) for n in fact.get("named") or []}
         answered = {str(n) for n in fact.get("revised") or []}
@@ -1691,6 +1739,69 @@ def carried_unmoved(
         if not named or not set(named) <= before or not before <= answered:
             return False
         if fact.get("changed"):
+            return False
+    return True
+
+
+def carried_without_new_evidence(
+    lines: Sequence[str],
+    carried: Mapping[str, int],
+    record: Mapping[str, Any] | None,
+    facts_now: Sequence[str] = (),
+) -> bool:
+    """Whether every blocking line raises again, a second time, a point nothing new was read on.
+
+    Each of ``lines`` must be marked carried (``carried``) from a line of the
+    last mediation whose own carried mark counted (the record's
+    ``carried_valid``, :func:`valid_carries`): the point has been put to the
+    analysts in two revision rounds. The mark counts only where the line
+    shares an entry id or a place with that earlier line, as in
+    :func:`carried_unmoved`; every analyst the line's field names must have
+    been named on the earlier line, and every analyst named there must have
+    revised in the round. Nothing new may have been read on it: no analyst
+    named there cited in its revised answer, beside the line's entries or
+    places, an entry it filed in the round (the record's ``cited_new``); the
+    line writes no entry id the earlier line did not write; and neither it
+    nor its place facts (``facts_now``) reach an entry the round filed
+    (``record["filed"]``). A revision that rewrites its claims with nothing
+    new to read leaves the point where it was; a function the line names
+    that an older listing holds is nothing new. A line not marked, a first
+    carry, or a record without those facts is no such line; no line is not
+    either. Linear in the lines.
+    """
+    facts = record.get("lines") if isinstance(record, Mapping) else None
+    if not lines or not isinstance(facts, list) or not facts:
+        return False
+    participants = [
+        *map(str, record.get("revised") or []),  # type: ignore[union-attr]
+        *map(str, (record.get("not_revised") or {}).keys()),  # type: ignore[union-attr]
+    ]
+    filed = {
+        str(i).lower()
+        for ids in ((record.get("filed") or {}).values())  # type: ignore[union-attr]
+        for i in ids or ()
+    }
+    for line in lines:
+        number = carried.get(str(line))
+        if number is None or not 1 <= int(number) <= len(facts):
+            return False
+        fact = facts[int(number) - 1]
+        if (
+            not isinstance(fact, Mapping)
+            or fact.get("carried_valid") is not True
+            or not isinstance(fact.get("cited_new"), list)
+            or fact.get("cited_new")
+            or not carry_shares_point(line, fact, facts_now)
+        ):
+            return False
+        ids, _places = _about(str(line), facts_now)
+        written = set(line_entry_ids([str(line)]))
+        if not written <= set(line_entry_ids([str(fact.get("line") or "")])) or ids & filed:
+            return False
+        before = {str(n) for n in fact.get("named") or []}
+        answered = {str(n) for n in fact.get("revised") or []}
+        named = _named_in(str(line), participants)
+        if not named or not set(named) <= before or not before <= answered:
             return False
     return True
 
@@ -1914,6 +2025,30 @@ class UnplacedClaims:
     lowest: int = 0
 
 
+@dataclass(frozen=True)
+class OwnedClaim:
+    """A claim number of a blocking line, written for no analyst, read for its owner.
+
+    A "claim N" no analyst is read for ("Claim 35 (and claim 6 of the same
+    revision)") is read for the one analyst the line may mean (its field's,
+    or any participant where it has none) whose claim N in force shares a
+    ledger id or an address with the reference's own clause
+    (:func:`clause_tokens`) that no other claim of that answer writes.
+    ``line`` counts from 1, ``marked`` whether the line's blocking mark was
+    written, ``analyst`` the owner, ``claim`` the number and ``shared`` how
+    many such ids and addresses the two share. The claim is carried with the
+    line, never withdrawn by rule: the reading is the platform's, not the
+    mediator's. Where no candidate's claim, or more than one, has such a
+    token, the number stays unplaced (:class:`UnplacedClaims`), as before.
+    """
+
+    line: int
+    marked: bool
+    analyst: str
+    claim: int
+    shared: int
+
+
 # A ledger id or an address a line and a claim may share: a hex value of three
 # digits or more once its leading zeros are dropped (a small value such as
 # 0x1 is no evidence the two are about the same thing).
@@ -1962,12 +2097,19 @@ class ClaimReferences:
     (:func:`claims_named_by_lines`); ``unplaced`` each reference that names
     no claim (:class:`UnplacedClaims`), each once, in line order;
     ``expanded`` per analyst and claim the lines that reach it only by the
-    newer reading (:class:`ExpandedNaming`).
+    newer reading (:class:`ExpandedNaming`); ``owned`` each claim number no
+    analyst is written for that is read for its owner (:class:`OwnedClaim`),
+    in line order.
     """
 
     named: dict[str, dict[int, list[tuple[int, bool]]]]
     unplaced: tuple[UnplacedClaims, ...] = ()
     expanded: dict[str, dict[int, tuple[ExpandedNaming, ...]]] = field(default_factory=dict)
+    owned: tuple[OwnedClaim, ...] = ()
+
+    def owned_for(self, analyst: str) -> tuple[OwnedClaim, ...]:
+        """The claim numbers read for ``analyst`` as their owner, in line order."""
+        return tuple(o for o in self.owned if o.analyst == analyst)
 
     def unplaced_for(self, analyst: str) -> tuple[UnplacedClaims, ...]:
         """The unplaced references that may mean ``analyst``'s claims, in line order.
@@ -1987,7 +2129,8 @@ class NamedClaims(dict[int, list[tuple[int, bool]]]):
 
     It carries, for the merge (``revision_merge.merge_revision``), the
     references its merge states (``unplaced``) and the claims the lines
-    reach only by the newer reading (``expanded``).
+    reach only by the newer reading (``expanded``) and the claim numbers read
+    for it as their owner (``owned``).
     """
 
     def __init__(
@@ -1996,10 +2139,12 @@ class NamedClaims(dict[int, list[tuple[int, bool]]]):
         *,
         unplaced: Sequence[UnplacedClaims] = (),
         expanded: Mapping[int, tuple[ExpandedNaming, ...]] | None = None,
+        owned: Sequence[OwnedClaim] = (),
     ) -> None:
         super().__init__(rows or {})
         self.unplaced: tuple[UnplacedClaims, ...] = tuple(unplaced)
         self.expanded: dict[int, tuple[ExpandedNaming, ...]] = dict(expanded or {})
+        self.owned: tuple[OwnedClaim, ...] = tuple(owned)
 
 
 class NamedByLines(dict[str, dict[int, list[tuple[int, bool]]]]):
@@ -2017,6 +2162,7 @@ class NamedByLines(dict[str, dict[int, list[tuple[int, bool]]]]):
                     rows,
                     unplaced=references.unplaced_for(name),
                     expanded=references.expanded_for(name),
+                    owned=references.owned_for(name),
                 )
                 for name, rows in references.named.items()
             }
@@ -2201,7 +2347,37 @@ def unattributed_references(
     return out
 
 
-def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> ClaimReferences:
+def _owner_of(
+    claim: int,
+    tokens: frozenset[str],
+    candidates: Sequence[str],
+    owners: Mapping[str, Mapping[int, frozenset[str]]],
+) -> tuple[str, int] | None:
+    """``(analyst, ids and addresses shared)`` for the one candidate whose claim alone shares one.
+
+    A candidate's claim counts only with a ledger id or an address of the
+    reference's clause (``tokens``) that no other claim of the same answer
+    in force writes: a listing many claims cite is no sign of which one the
+    line means. ``None`` where no candidate's claim, or more than one, has
+    such a token.
+    """
+    found: list[tuple[str, int]] = []
+    for name in candidates:
+        claims = owners.get(name) or {}
+        shared = tokens & claims.get(claim, frozenset())
+        if not shared:
+            continue
+        others = frozenset().union(*(t for n, t in claims.items() if n != claim))
+        if shared - others:
+            found.append((name, len(shared - others)))
+    return found[0] if len(found) == 1 else None
+
+
+def read_claim_references(
+    lines: Sequence[str],
+    participants: Sequence[str],
+    owners: Mapping[str, Mapping[int, frozenset[str]]] | None = None,
+) -> ClaimReferences:
     """Per analyst, the claims each line names, and the references that name none.
 
     The merge's reading. A line names the claims :func:`claim_references_of`
@@ -2219,11 +2395,21 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
     absent. "claims" with a single number after it and no analyst named
     reads as a verb ("the dropper claims 3 hosts"), a "claim N" inside a mark
     is its reason and an earlier round's claim names another answer: none is
-    a reference. Linear in the lines.
+    a reference.
+
+    ``owners`` is, per analyst, the ledger ids and addresses each claim of its
+    answer in force writes, by claim number. Given, a "claim N" no analyst is
+    read for on a blocking line whose mark is read or absent is read for its
+    owner where exactly one analyst the line may mean has a claim N sharing
+    with the reference's clause an id or an address no other claim of its
+    answer writes (:class:`OwnedClaim`): it names that claim as a line that
+    does not block, so it is carried with the line and never withdrawn by
+    rule, and the merge says so. Linear in the lines and the claims.
     """
     names = [str(p) for p in participants if str(p).strip()]
     out: dict[str, dict[int, list[tuple[int, bool]]]] = {}
     unplaced: dict[UnplacedClaims, None] = {}
+    owned: dict[OwnedClaim, None] = {}
     expanded: dict[str, dict[int, list[ExpandedNaming]]] = {}
     for number, (line, mark) in enumerate(zip(lines, read_marks(lines), strict=True), 1):
         text = without_line_mark(str(line))
@@ -2291,8 +2477,28 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
         candidates = tuple(field_names) if field_names else tuple(names)
         if not stated or not candidates:
             continue
-        for _start, numbers in unattributed_references(text, names, references):
+        unattributed = unattributed_references(text, names, references)
+        # Where each reference starts, for a clause to end at the next one.
+        clause_starts = sorted([*starts, *(at for at, _n in unattributed)])
+        for start, numbers in unattributed:
             counted = [n for n in map(_as_claim_number, numbers.numbers) if n is not None]
+            if owners and counted:
+                tokens = clause_tokens(text, masked, start, numbers.end, clause_starts)
+                left: list[int] = []
+                for claim in counted:
+                    owner = _owner_of(claim, tokens, candidates, owners)
+                    if owner is None:
+                        left.append(claim)
+                        continue
+                    # Read, never withdrawn by rule: the claim is carried
+                    # with the line as one a line contests without blocking.
+                    rows = out.setdefault(owner[0], {}).setdefault(claim, [])
+                    if (number, False) not in rows:
+                        rows.append((number, False))
+                    owned.setdefault(
+                        OwnedClaim(number, mark.marked, owner[0], claim, owner[1]), None
+                    )
+                counted = left
             rendered = [_range_rendering(first, last) for first, last in numbers.unplaced]
             if counted:
                 kind = "claim " if len(counted) == 1 else "claims "
@@ -2313,19 +2519,23 @@ def read_claim_references(lines: Sequence[str], participants: Sequence[str]) -> 
         named=out,
         unplaced=tuple(unplaced),
         expanded={k: {n: tuple(v) for n, v in c.items()} for k, c in expanded.items()},
+        owned=tuple(owned),
     )
 
 
 def claims_named_by_lines(
-    lines: Sequence[str], participants: Sequence[str]
+    lines: Sequence[str],
+    participants: Sequence[str],
+    owners: Mapping[str, Mapping[int, frozenset[str]]] | None = None,
 ) -> dict[str, dict[int, list[tuple[int, bool]]]]:
     """``{analyst: {claim number: [(line number, blocking), ...]}}`` for the lines given.
 
-    The claims :func:`read_claim_references` reads each line to name, each
-    analyst's carrying what its merge reads besides (:class:`NamedClaims`).
-    Linear in the lines.
+    The claims :func:`read_claim_references` reads each line to name (a claim
+    number written for no analyst read for its owner where ``owners`` is
+    given), each analyst's carrying what its merge reads besides
+    (:class:`NamedClaims`). Linear in the lines.
     """
-    return NamedByLines(read_claim_references(lines, participants))
+    return NamedByLines(read_claim_references(lines, participants, owners))
 
 
 @dataclass(frozen=True)

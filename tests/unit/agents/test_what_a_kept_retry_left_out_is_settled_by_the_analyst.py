@@ -865,3 +865,52 @@ class TestTheQuestionIsAskedInPartsThatFit:
         self._settle(analyst)
 
         assert len(analyst.questions) == 1
+
+
+class TestAKeptClaimTheRetryWroteAgain:
+    """A claim answered KEEP takes the place of the one retry block that wrote it again."""
+
+    POLLING = (
+        "Routine 0x1030 polls the child. It calls slot 0x10d80 on the handle, tests 0x103, "
+        "sleeps through 0xc934 and ends with slot 0x10d90."
+    )
+    POLLING_AGAIN = (
+        "Routine 0x1030 runs its child until it exits: slot 0x10d80 on the process handle, a "
+        "test of 0x103, a sleep through 0xc934."
+    )
+    BEACON = "The beacon thread 0x5750 waits 180 s before its first request."
+
+    @staticmethod
+    def _text(*sentences: str) -> str:
+        return "".join(
+            f"CLAIM: {sentence}\nEVIDENCE: [ev_0001] listing\nCONFIDENCE: 0.8\n---\n"
+            for sentence in sentences
+        )
+
+    def test_keep_replaces_the_block_and_the_answer_states_the_claim_once(self) -> None:
+        analyst = _Analyst("static", ["KEEP C1: the end call is in the listing"])
+        first = analyst._text_to_isr(self._text(self.POLLING, self.BEACON), 0)
+        retry_text = self._text(self.BEACON, self.POLLING_AGAIN)
+        retried = analyst._text_to_isr(retry_text, 0)
+
+        result = analyst._settle_retry_drops(first, retried, retry_text, [], [], None)
+
+        (question,) = analyst.questions
+        assert "C1. CLAIM: Routine 0x1030 polls the child." in question
+        assert [c.claim for c in result.claims] == [self.BEACON, self.POLLING]
+        assert [row["state"] for row in _drop_rows(analyst)] == [RETRY_DROP_KEPT]
+
+    def test_an_unanswered_item_is_put_back_beside_the_retry_s_version(self) -> None:
+        analyst = _Analyst("static", ["I have nothing to add."])
+        first = analyst._text_to_isr(self._text(self.POLLING, self.BEACON), 0)
+        retry_text = self._text(self.BEACON, self.POLLING_AGAIN)
+        retried = analyst._text_to_isr(retry_text, 0)
+
+        result = analyst._settle_retry_drops(first, retried, retry_text, [], [], None)
+
+        assert [c.claim for c in result.claims] == [
+            self.BEACON,
+            self.POLLING_AGAIN,
+            self.POLLING,
+        ]
+        assert [row["state"] for row in _drop_rows(analyst)] == [RETRY_DROP_NOT_ANSWERED]

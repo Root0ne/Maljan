@@ -97,7 +97,8 @@ class NegotiationMetrics:
                              converged / convergence / not_applicable /
                              mediation_failed / not_mediated / not_revised /
                              no_contested_point / contested_points_unchanged /
-                             ledger_stated / reworded),
+                             carried_without_new_evidence / ledger_stated /
+                             reworded),
                              read
                              from the router's own rules
                              (``pipeline.routing.debate_route``).

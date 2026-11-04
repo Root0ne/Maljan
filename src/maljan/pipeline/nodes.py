@@ -108,12 +108,14 @@ from maljan.pipeline.debate_facts import (
     ledger_stated_sentence,
     line_entry_ids,
     line_round_facts,
+    line_tokens,
     names_an_unlisted_place,
     place_facts,
     place_facts_for,
     points_naming,
     round_facts_text,
     tools_taking_an_address,
+    valid_carries,
     with_ledger_facts,
     with_place_facts,
 )
@@ -142,7 +144,13 @@ from maljan.pipeline.outcome import (
     verdict_for_run,
     verdict_reading,
 )
-from maljan.pipeline.revision_merge import RevisionMerge, merge_revision, rule_sentence
+from maljan.pipeline.revision_merge import (
+    RevisionMerge,
+    claim_tokens_by_number,
+    merge_revision,
+    rule_sentence,
+    with_numbering_key,
+)
 from maljan.pipeline.routing import (
     revised_in,
     revision_round_before,
@@ -5827,12 +5835,16 @@ def _round_line_facts(
     after: Mapping[str, Any],
     participants: Sequence[str],
     round_ledger: Sequence[Mapping[str, Any]],
+    carried_valid: Mapping[str, bool] | None = None,
 ) -> dict[str, Any]:
     """What the round did on each blocking line it answered, for the next mediation. Never raises.
 
     ``lines`` per line (``debate_facts.line_round_facts``), and ``filed``,
-    the entries the round filed by agent. Nothing for a round that answered
-    no blocking line.
+    the entries the round filed by agent. Each line also records who cited
+    in its revised answer, beside the line's entries or places, an entry it
+    filed in the round (``cited_new``), and whether its own carried mark
+    counted (``carried_valid``). Nothing for a round that answered no
+    blocking line.
     """
     if not contested:
         return {}
@@ -5843,6 +5855,18 @@ def _round_line_facts(
             # a new claim that cites none of its entries may answer it.
             return changed_anywhere(before.get(name), after.get(name))
 
+        def _cited(name: str, new: Sequence[str], ids: Sequence[str], spots: set[int]) -> bool:
+            # A claim of the revised answer citing an entry filed in the round
+            # beside one of the line's entries or places.
+            fresh = {str(i).lower() for i in new}
+            for claim in getattr(after.get(name), "claims", None) or []:
+                text = getattr(claim, "claim", "") or ""
+                said = line_tokens(f"{text}\n{getattr(claim, 'evidence_ref', '') or ''}")
+                at = {int(t[2:], 16) for t in said if t.startswith("0x")}
+                if said & fresh and (said & set(ids) or at & spots):
+                    return True
+            return False
+
         filed: dict[str, list[str]] = {}
         for row in round_ledger:
             entry_id = str(row.get("id") or "")
@@ -5850,7 +5874,16 @@ def _round_line_facts(
                 filed.setdefault(str(row.get("agent") or ""), []).append(entry_id)
         return {
             "lines": line_round_facts(
-                contested, places, asked, revised, shown, _changed, participants, filed
+                contested,
+                places,
+                asked,
+                revised,
+                shown,
+                _changed,
+                participants,
+                filed,
+                cited=_cited,
+                carried_valid=dict(carried_valid or {}),
             ),
             "filed": filed,
         }
@@ -6175,9 +6208,15 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
 
         # Per analyst, the claims each line of the round's mediation named, and
         # whether the line blocks (``revision_merge``: a blocking line's claim
-        # the revision leaves unanswered is withdrawn by rule).
+        # the revision leaves unanswered is withdrawn by rule). A claim number
+        # written for no analyst is read for the one whose claim in force
+        # shares an id or an address with it (``debate_facts.OwnedClaim``).
         try:
-            named_by_lines = claims_named_by_lines(contested, list(agent_names))
+            named_by_lines = claims_named_by_lines(
+                contested,
+                list(agent_names),
+                {name: claim_tokens_by_number(kept_isrs.get(name)) for name in agent_names},
+            )
         except Exception as exc:  # noqa: BLE001 — no lines read is no claim named
             logger.debug("revision: the lines' claim numbers were not read (%s).", exc)
             named_by_lines = {}
@@ -6332,8 +6371,11 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     isr = merge.merged
                     # No text the analyst wrote holds the claims that stand:
                     # they are rendered as a summary, numbered, with what the
-                    # revision wrote besides its claims after them.
-                    report_now = answer_in_force_text(revised_text, ("", ()), isr)
+                    # revision wrote besides its claims after them, and the
+                    # key from the revision's own claim numbers to these.
+                    report_now = with_numbering_key(
+                        answer_in_force_text(revised_text, ("", ()), isr), merge
+                    )
                 revised[name] = report_now
                 revised_isrs[name] = isr
                 if name in not_asked:
@@ -6491,6 +6533,16 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     revised_isrs,
                     agent_names,
                     revision_ledger,
+                    # Whether each line's carried mark counted, against the
+                    # record the mediation was told (``debate_facts.valid_carries``).
+                    valid_carries(
+                        contested,
+                        dict(getattr(mediation, "carried", None) or {}),
+                        revision_round_before(
+                            state, mediations=iteration, stage=stage_key_of(stage, "debate")
+                        ),
+                        places,
+                    ),
                 ),
             }
         ]

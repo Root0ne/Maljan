@@ -16,7 +16,12 @@ before and after. Here a revision changes only what it states:
   a list or inside a bounded range ("claims 32-34",
   ``debate_facts.read_claim_numbers``); a reference that names no claim (a
   longer range, or a number no analyst is read for) withdraws nothing and
-  is stated, one sentence per reference (``unplaced_sentence``). A claim a
+  is stated, one sentence per reference (``unplaced_sentence``). A number
+  written for no analyst names the claim of its owner where exactly one
+  analyst the line may mean has a claim of that number sharing with the
+  reference's clause a ledger id or an address no other claim of its answer
+  writes; it is carried with the line, never withdrawn by rule, and that is
+  stated (``owned_sentence``). A claim a
   blocking line reaches only through a range or a list (no number of its
   own on the line, as the earlier reading read it) is withdrawn by rule only
   when it shares a ledger id or an address with that reference's clause;
@@ -74,6 +79,7 @@ from maljan.pipeline.claim_drops import (
 from maljan.pipeline.debate_facts import (
     RANGE_NOT_READ,
     ExpandedNaming,
+    OwnedClaim,
     UnplacedClaims,
     line_tokens,
     read_claim_numbers,
@@ -98,6 +104,9 @@ CORRECTED_SHARE = 0.34
 TRIVIAL_LENGTH = 3
 # A value this long, or a technique id, is one a match must include.
 STRONG_LENGTH = 4
+# The share of a claim's values one block of a validation retry must state
+# for the claim to be read as written again in other words, not left out.
+REWRITTEN_SHARE = 2 / 3
 
 # One line of the round's mediation that named a claim: its number (from 1)
 # and whether it blocks.
@@ -193,6 +202,46 @@ def _block_restates(earlier: _Block, reading: _Reading) -> bool:
     if share >= RESTATED_SHARE:
         return True
     return share >= CORRECTED_SHARE and bool(_techniques(earlier) & reading.techniques)
+
+
+def rewritten_in(claim: Any, retried: Any, others: Sequence[Any] = ()) -> int | None:
+    """The block of ``retried`` that writes ``claim`` again and nothing else, or ``None``.
+
+    The block, counted from 1, that writes the claim's sentence as it is, or
+    the one block that states four fifths of the claim's content words, or
+    two thirds of its values that are no mere small number with at least one
+    of them strong. It must also add nothing: every value and every ledger
+    id it writes is one of the claim's. And it must write again none of
+    ``others`` (the first answer's claims the retry still states): a block
+    that holds another claim is that claim's. Two blocks that both qualify
+    are no answer.
+    """
+    earlier = _Block(number=0, claims=[claim])
+    words = content_words(earlier.sentence)
+    values = _counted_values(earlier)
+    ids = _entry_ids(_text_of(earlier))
+    held = [_Block(number=0, claims=[other]) for other in others]
+    found: list[int] = []
+    for block in _blocks(list(getattr(retried, "claims", None) or [])):
+        reading = _read(block)
+        got = _stated(values, reading) if values else set()
+        if not (
+            block.sentence == earlier.sentence
+            or (words and len(words & reading.words) / len(words) >= WORDED_SHARE)
+            or (any(_strong(v) for v in got) and len(got) / len(values) >= REWRITTEN_SHARE)
+        ):
+            continue
+        if not _counted_values(block) <= values or not _entry_ids(_text_of(block)) <= ids:
+            continue
+        if any(_block_restates(other, reading) for other in held):
+            continue
+        found.append(block.number)
+    return found[0] if len(found) == 1 else None
+
+
+def _entry_ids(text: str) -> frozenset[str]:
+    """The ledger ids ``text`` writes, lower-cased."""
+    return frozenset(m.group(0).lower() for m in re.finditer(r"\bev_\d++\b", text, re.I))
 
 
 def _restated(earlier: _Block, readings: Sequence[_Reading]) -> tuple[bool, int | None]:
@@ -303,7 +352,11 @@ class RevisionMerge:
     (``debate_facts.UnplacedClaims``): no claim is withdrawn by rule on them;
     ``range_carried`` ``(number, sentence, line, reference)`` per claim a
     blocking line reached only through a range or a list, sharing no ledger
-    id or address with it, and carried for that.
+    id or address with it, and carried for that; ``owned`` the round's claim
+    numbers written for no analyst that are read as this analyst's
+    (``debate_facts.OwnedClaim``); ``numbering`` ``(a number the revision's
+    text may name a claim by, its number in the merged answer)``
+    (:func:`_numbering`, :func:`numbering_key`).
     """
 
     merged: Any | None = None
@@ -319,6 +372,8 @@ class RevisionMerge:
     after: int = 0
     unplaced: tuple[UnplacedClaims, ...] = ()
     range_carried: tuple[tuple[int, str, int, str], ...] = ()
+    owned: tuple[OwnedClaim, ...] = ()
+    numbering: tuple[tuple[int, int], ...] = ()
 
     def sentences(self, name: str, revision_round: int) -> list[str]:
         """The run summary's sentences: the merge, each withdrawal, each unplaced reference."""
@@ -357,6 +412,8 @@ class RevisionMerge:
             out.append(rule_sentence(name, r, number, sentence, reason))
         for number, sentence, line, reference in self.range_carried:
             out.append(range_carried_sentence(name, r, number, sentence, line, reference))
+        for owned_claim in self.owned:
+            out.append(owned_sentence(name, r, owned_claim))
         for unread_reference in self.unplaced:
             out.append(unplaced_sentence(name, r, unread_reference))
         return out
@@ -401,6 +458,131 @@ def unplaced_sentence(name: str, revision_round: int, reference: UnplacedClaims)
             "on that reference."
         )
     return f"{head} and {reference.why}: no claim is withdrawn by rule on that reference."
+
+
+def _own_numbers(revised: Sequence[_Block]) -> list[int] | None:
+    """The numbers the revision's headings gave its claim blocks, or ``None``.
+
+    Read only where every block wrote one: a revision that wrote none, or
+    some only, has no numbers read, and no key is written for it. A number
+    written on two blocks is read for the first only (:func:`_numbering`).
+    """
+    written = [_written_number(block) for block in revised]
+    if any(n is None for n in written):
+        return None
+    return [int(n or 0) for n in written]
+
+
+def _numbering(
+    placed_by: str,
+    revised: Sequence[_Block],
+    kept: Sequence[int],
+    merged: Sequence[Any],
+    carried_ids: Mapping[int, int],
+) -> tuple[tuple[int, int], ...]:
+    """``(a number the revision's text may name a claim by, its number in the merged answer)``.
+
+    Placed by number, the revision numbers claims as the answer in force
+    does: every claim carried keeps its number there, and every block its
+    written one. Placed by statement, only the revision's blocks have
+    numbers of the revision's own (:func:`_own_numbers`). One mapping per
+    number, either way: a number written on two blocks maps the first, in
+    the revision's order, which is the text's own block (a claim kept from a
+    first answer is put back after the retry's blocks); the revision's
+    blocks come before the claims carried. Sorted.
+    """
+    at = {id(block.claims[0]): block.number for block in _blocks(merged)}
+    if placed_by == "number":
+        own: list[int | None] = [_written_number(block) for block in revised]
+    else:
+        own = list(_own_numbers(revised) or [])
+        if not own:
+            return ()
+    found: list[tuple[int, int]] = [
+        (int(own[index] or 0), at[id(revised[index].claims[0])])
+        for index in sorted(kept)
+        if own[index] is not None and id(revised[index].claims[0]) in at
+    ]
+    if placed_by == "number":
+        found += [(n, at[i]) for n, i in carried_ids.items() if i in at]
+    first: dict[int, int] = {}
+    for number, now in found:
+        first.setdefault(number, now)
+    return tuple(sorted(first.items()))
+
+
+def numbering_key(merge: RevisionMerge) -> str:
+    """The sentence that maps the numbers the revision text uses onto the merged ones, or ``""``.
+
+    Said only where some number differs. Placed by number, the revision
+    names claims by the numbers of the answer it revised: every one that
+    moved is listed, carried claims included, and every claim withdrawn is
+    named. Placed by statement, it names them by its own numbers: every
+    pair is listed, and a number not listed names no claim the platform
+    read from the revision.
+    """
+    moved = [(own, now) for own, now in merge.numbering if own != now]
+    if not moved:
+        return ""
+    if merge.placed_by == "number":
+        pairs = "; ".join(f"its claim {own} is claim {now}" for own, now in moved)
+        gone = sorted({n for n, _s, _r in (*merge.withdrawn, *merge.withdrawn_by_rule)})
+        withdrawn = (
+            f" Claim{'s' if len(gone) != 1 else ''} {_spans(gone)} of that answer "
+            f"{'were' if len(gone) != 1 else 'was'} withdrawn."
+            if gone
+            else ""
+        )
+        return (
+            "(The text below names this analyst's claims by their numbers in the answer it "
+            f"revised. In the numbering above, {pairs}; every other number is the same."
+            f"{withdrawn})"
+        )
+    pairs = "; ".join(f"its claim {own} is claim {now}" for own, now in merge.numbering)
+    return (
+        "(The text below names this analyst's claims by the numbers its revision gave them. "
+        f"In the numbering above, {pairs}. A number not listed names no claim the platform read "
+        "from the revision.)"
+    )
+
+
+def with_numbering_key(text: str, merge: RevisionMerge) -> str:
+    """``text`` with :func:`numbering_key` right after the line that opens what it wrote besides.
+
+    A text without that line, or a merge whose numbers all agree, is
+    returned as it is.
+    """
+    from maljan.agents.base_agent import WRITTEN_BESIDES_CLAIMS
+
+    key = numbering_key(merge)
+    head = f"\n{WRITTEN_BESIDES_CLAIMS}\n"
+    if not key or head not in text:
+        return text
+    at = text.index(head) + len(head)
+    return f"{text[:at]}{key}\n{text[at:]}"
+
+
+def owned_sentence(name: str, revision_round: int, owned: OwnedClaim) -> str:
+    """The sentence for a claim number written for no analyst and read for its owner."""
+    shared = int(owned.shared)
+    return (
+        f"{'Blocking line' if owned.marked else 'Line'} L{int(owned.line)} of the "
+        f"round-{int(revision_round)} mediation writes claim {int(owned.claim)} with no analyst "
+        f"named for it; it is read as claim {int(owned.claim)} of the {name} analyst, the one "
+        f"analyst the line may mean whose claim {int(owned.claim)} alone shares {shared} ledger "
+        f"id{'s' if shared != 1 else ''} or address{'es' if shared != 1 else ''} with the line. "
+        "Read so, it is carried with the line and never withdrawn by rule."
+    )
+
+
+def claim_tokens_by_number(isr: Any) -> dict[int, frozenset[str]]:
+    """``{claim number: the ledger ids and addresses its block writes}`` of an answer in force.
+
+    Numbered by claim block, as the merge and the mediator number them
+    (``validation.claim_block_indexes``); an answer with no claims has none.
+    """
+    claims = list(getattr(isr, "claims", None) or [])
+    return {block.number: _tokens_of(block) for block in _blocks(claims)} if claims else {}
 
 
 def rule_sentence(name: str, revision_round: int, number: int, sentence: str, reason: str) -> str:
@@ -473,6 +655,7 @@ def merge_revision(
     named: Mapping[int, Sequence[NamingLine]] | None = None,
     unplaced: Sequence[UnplacedClaims] | None = None,
     expanded: Mapping[int, Sequence[ExpandedNaming]] | None = None,
+    owned: Sequence[OwnedClaim] | None = None,
 ) -> RevisionMerge:
     """``revision`` merged into ``in_force`` by claim (:class:`RevisionMerge`).
 
@@ -486,12 +669,15 @@ def merge_revision(
     (``ClaimReferences.expanded_for``): such a blocking line withdraws the
     claim by rule only when the claim shares a ledger id or an address with
     the reference's clause; otherwise the claim is carried with the line,
-    and that is stated. Where ``unplaced`` or ``expanded`` is not given, it
-    is read from ``named`` (``debate_facts.NamedClaims``). ``in_force`` is
-    not changed.
+    and that is stated. ``owned`` is each claim number written for no
+    analyst that the lines' reading read as this analyst's: it is stated.
+    Where ``unplaced``, ``expanded`` or ``owned`` is not given, it is read
+    from ``named`` (``debate_facts.NamedClaims``). ``in_force`` is not
+    changed.
     """
     if unplaced is None:
         unplaced = tuple(getattr(named, "unplaced", ()) or ())
+    owned = tuple(getattr(named, "owned", ()) or ()) if owned is None else tuple(owned)
     if expanded is None:
         expanded = dict(getattr(named, "expanded", {}) or {})
     first_claims = list(getattr(in_force, "claims", None) or [])
@@ -501,7 +687,7 @@ def merge_revision(
     # its claims, and is no question about this merge.
     unplaced = tuple(u for u in unplaced if u.why != RANGE_NOT_READ or int(u.lowest) <= len(first))
     if not first_claims or not revision_claims:
-        return RevisionMerge(unplaced=unplaced)
+        return RevisionMerge(unplaced=unplaced, owned=owned)
     named = named or {}
     expanded = expanded or {}
     revised = _blocks(revision_claims)
@@ -613,6 +799,7 @@ def merge_revision(
             after=len(kept_blocks),
             unplaced=unplaced,
             range_carried=tuple(range_carried),
+            owned=owned,
         )
 
     # In the order of the answer in force: each claim carried where it stood,
@@ -624,6 +811,8 @@ def merge_revision(
             at.setdefault(target[index], []).append(index)
     claims: list[Any] = []
     carried_numbers = {block.number for block in carried_blocks}
+    # The first claim each carried block stands with, for the numbering key.
+    carried_ids: dict[int, int] = {}
     for block in first:
         if block.number in carried_numbers:
             for claim in block.claims:
@@ -635,6 +824,7 @@ def merge_revision(
                     copy.carried_contested_by = [
                         f"L{n} (round {int(revision_round)})" for n in contested[block.number]
                     ]
+                carried_ids.setdefault(block.number, id(copy))
                 claims.append(copy)
         for index in at.get(block.number, ()):
             claims.extend(revised[index].claims)
@@ -643,6 +833,7 @@ def merge_revision(
             claims.extend(revised[index].claims)
     merged = revision.model_copy(update={"claims": claims})
     return RevisionMerge(
+        numbering=_numbering(placed_by, revised, kept_blocks, claims, carried_ids),
         merged=merged,
         placed_by=placed_by,
         replaced=replaced,
@@ -656,4 +847,5 @@ def merge_revision(
         after=len(kept_blocks) + len(carried_blocks),
         unplaced=unplaced,
         range_carried=tuple(range_carried),
+        owned=owned,
     )

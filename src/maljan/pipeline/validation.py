@@ -13077,6 +13077,26 @@ def retry_drops(
     return RetryDrops(claims=tuple(claims), findings=findings)
 
 
+def rewritten_pairs(first: Any, retried: Any, drops: RetryDrops) -> tuple[tuple[Any, int], ...]:
+    """Each claim of ``drops`` one block of ``retried`` writes again and nothing else, with it.
+
+    ``(claim, the block's number from 1)`` where ``revision_merge.rewritten_in``
+    finds the block beyond doubt against the first answer's other claims the
+    retry still states; in the order of ``drops``. A claim kept in answer to
+    the question then takes that block's place instead of standing beside it.
+    """
+    from maljan.pipeline.revision_merge import rewritten_in
+
+    dropped = {id(claim) for claim, _missing in drops.claims}
+    others = [c for c in getattr(first, "claims", None) or [] if id(c) not in dropped]
+    out: list[tuple[Any, int]] = []
+    for claim, _missing in drops.claims:
+        block = rewritten_in(claim, retried, others)
+        if block is not None:
+            out.append((claim, block))
+    return tuple(out)
+
+
 def retry_drop_cited(item: Any) -> list[str]:
     """The entry ids one dropped claim or finding cites, lower-cased, in the order written."""
     if hasattr(item, "claim"):

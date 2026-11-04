@@ -319,6 +319,7 @@ const ENDINGS: Record<string, string> = {
   not_revised: "No analyst was revised in the last round, so the answers in force went to the judge",
   no_contested_point: "The last mediation listed no blocking line, so no revision round was needed",
   contested_points_unchanged: "The last revision round changed none of the contested points",
+  carried_without_new_evidence: "Every remaining blocking line was raised again a second time with no new evidence, so it was left open",
   reworded: "The last revisions only reworded the claims in force",
   ledger_stated: "Every remaining blocking line stated only counts the ledger already states",
   not_applicable: "No agreement was measured: fewer than two analysts produced claims, or the debate did not run",

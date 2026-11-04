@@ -168,6 +168,7 @@ from maljan.pipeline.validation import (
     retry_unplaced_question,
     retry_with_feedback_sync,
     retry_withdrawn_row,
+    rewritten_pairs,
     run_image_bases,
     settle_validation_marks,
     unparsed_answer_rows,
@@ -11407,6 +11408,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 f"{len(drops.findings)} finding(s) of the first answer; each is named to the "
                 "analyst once, to keep or withdraw with a reason."
             )
+        answered_keep: set[int] = set()
         withdrawn = BaseAnalyst._ask_retry_drops(  # type: ignore[arg-type]
             self,
             drops,
@@ -11417,6 +11419,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             left,
             int(retried.revision_round or 0),
             restated=restated_said,
+            kept=answered_keep,
         )
         restored_claims: list[ClaimEvidence] = []
         restored_findings: list[Finding] = []
@@ -11431,10 +11434,71 @@ class BaseAnalyst(BudgetMeter, ABC):
             return retried
         return retried.model_copy(
             update={
-                "claims": [*retried.claims, *restored_claims],
+                "claims": BaseAnalyst._with_restored_claims(  # type: ignore[arg-type]
+                    self, first_answer, retried, restored_claims, drops, answered_keep
+                ),
                 "findings": [*(retried.findings or []), *restored_findings],
             }
         )
+
+    def _with_restored_claims(
+        self,
+        first_answer: AgentISR,
+        retried: AgentISR,
+        restored: list[ClaimEvidence],
+        drops: RetryDrops,
+        answered_keep: set[int] | frozenset[int] = frozenset(),
+    ) -> list[ClaimEvidence]:
+        """The retry's claims with the kept ones of the first answer put back.
+
+        A claim the analyst answered KEEP for (``answered_keep``; an item it
+        did not answer for is not one) that one block of the retry writes
+        again and nothing else (``validation.rewritten_pairs``) takes that
+        block's place: the answer states the claim once, as the analyst kept
+        it, and each such replacement is logged by claim number. A kept claim whose sentence that block writes
+        as it is (a technique claim of the same block) and every other kept
+        claim follow the retry's claims, as before. A block two kept claims
+        write again is replaced by both, in the first answer's order.
+        """
+        kept = {id(claim) for claim in restored if id(claim) in answered_keep}
+        indexes = claim_block_indexes(list(retried.claims))
+        sentences: dict[int, set[str]] = {}
+        for claim, index in zip(retried.claims, indexes, strict=True):
+            sentences.setdefault(index + 1, set()).add(" ".join(str(claim.claim).split()))
+        at: dict[int, list[ClaimEvidence]] = {}
+        for claim, block in rewritten_pairs(first_answer, retried, drops):
+            # A claim whose sentence the block writes as it is (one of a
+            # block's technique claims) adds to it: it is put back as before.
+            if id(claim) in kept and " ".join(str(claim.claim).split()) not in sentences.get(
+                int(block), set()
+            ):
+                at.setdefault(int(block), []).append(claim)
+        placed = {id(claim) for rows in at.values() for claim in rows}
+        out: list[ClaimEvidence] = []
+        done: set[int] = set()
+        for claim, index in zip(retried.claims, indexes, strict=True):
+            number = index + 1
+            if number not in at:
+                out.append(claim)
+            elif number not in done:
+                done.add(number)
+                out.extend(at[number])
+        first_blocks = {
+            id(c): i + 1
+            for c, i in zip(
+                first_answer.claims, claim_block_indexes(list(first_answer.claims)), strict=True
+            )
+        }
+        for number in sorted(at):
+            firsts = sorted({first_blocks.get(id(c), 0) for c in at[number]})
+            self.logger.info(
+                "Validation: for '%s', the first answer's claim(s) %s, kept, take the place of "
+                "the retry's claim %d, which wrote them again in other words.",
+                self.name,
+                ", ".join(map(str, firsts)),
+                number,
+            )
+        return [*out, *(claim for claim in restored if id(claim) not in placed)]
 
     def _restated_few(
         self,
@@ -11794,8 +11858,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         *,
         merged: bool = False,
         restated: str = "",
+        kept: set[int] | None = None,
     ) -> set[int]:
         """Ask about ``drops``, record every item, and return the ids of the items withdrawn.
+
+        ``kept``, where given, receives the ids of the items the analyst
+        answered KEEP for.
 
         The question follows the retry as the analyst wrote it, and shows the
         ledger entries the items cite that the conversation does not hold,
@@ -12009,6 +12077,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                 withdrawn.add(id(item))
             else:
                 state = RETRY_DROP_KEPT if decision == "KEEP" else RETRY_DROP_NOT_ANSWERED
+                if decision == "KEEP" and kept is not None:
+                    kept.add(id(item))
             text = str(item.claim if kind == "claim" else item.title)
             row = retry_drop_row(
                 str(self.name),
