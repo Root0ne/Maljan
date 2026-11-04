@@ -8965,14 +8965,20 @@ def _stated_spellings(value: str, *, numbers: bool = False) -> list[str]:
     return spellings
 
 
+# The shortest item of a listed value read on its own: a shorter one ("a", "1")
+# is held by almost any text, and holds nothing.
+_LISTED_PART_FLOOR = 3
+
+
 def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Violation]:
     """Table rows whose whole value is in none of the entries the row cites.
 
     A configuration item or a host identifier states one value and cites the
     entries it was read in. The whole value is looked for in each cited entry
     under the citation check's own normalisation (:meth:`EntryTexts.holds`),
-    a number also in decimal and hex (:func:`_stated_spellings`). Held by one,
-    the row stands. Held by none, the row is asked about once, together with
+    a number also in decimal and hex (:func:`_stated_spellings`); a value that
+    lists items joined by ", " is held where cited entries hold each item.
+    Held by one, the row stands. Held by none, the row is asked about once, together with
     the other rows of its table that cite the same entries; each row is named
     by its number, which is how the report marks a row kept after it.
 
@@ -9010,6 +9016,15 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
                 continue
             try:
                 if _held_by(value, set(cited), list_key == "items"):
+                    continue
+                # A list the row writes as one value ("extra, follower, run"):
+                # held where a cited entry holds each of its items (T-555).
+                parts = [part.strip() for part in value.split(", ")]
+                if (
+                    len(parts) > 1
+                    and all(len(part) >= _LISTED_PART_FLOOR for part in parts)
+                    and all(_held_by(part, set(cited), list_key == "items") for part in parts)
+                ):
                     continue
                 if value not in held_elsewhere:
                     held_elsewhere[value] = decidable(value) and any(

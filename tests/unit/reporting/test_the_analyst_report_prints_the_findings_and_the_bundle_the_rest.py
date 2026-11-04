@@ -340,13 +340,16 @@ class TestThePlatformsCaveats:
         assert "1 further host identifier row is not printed here" in analyst
         assert "450 s" in bundle and "unique-mutex-name" in bundle
 
-    def test_a_flagged_table_cell_keeps_its_row_whole(self) -> None:
+    def test_a_row_whose_value_a_check_flagged_whole_is_counted_not_printed_empty(
+        self,
+    ) -> None:
         from maljan.reporting.models import FlaggedStatement
 
         report = _checked_report()
         report.run_summary = {}
         report.technical_analysis.configuration = [  # type: ignore[union-attr]
-            ConfigItem(key="sleep", value="450 s", evidence_refs=["ev_0003"])
+            ConfigItem(key="sleep", value="450 s", evidence_refs=["ev_0003"]),
+            ConfigItem(key="jitter", value="10 s", evidence_refs=["ev_0003"]),
         ]
         report.flagged_statements = [
             FlaggedStatement(
@@ -354,12 +357,13 @@ class TestThePlatformsCaveats:
             )
         ]
         analyst = MarkdownRenderer(layout=ANALYST).render(report)
-        table = analyst.split("### 6.2 Configuration", 1)[1].split("\n\n", 2)[1]
-        rows = table.splitlines()
-        assert len(rows) == 3  # header, divider, the one row
-        assert rows[2].count(" | ") == rows[0].count(" | ") == 2
-        assert "| sleep | - |" in rows[2]
-        assert "next line" not in analyst and "450 s" not in rows[2]
+        config = analyst.split("### 6.2 Configuration", 1)[1].split("\n### ", 1)[0]
+        rows = [line for line in config.splitlines() if line.startswith("|")]
+        assert len(rows) == 3  # header, divider, the one row left
+        assert "| jitter | 10 s" in rows[2] and "| - |" not in config
+        assert "450 s" not in config and "next line" not in analyst
+        assert "1 further configuration row is not printed here" in config
+        assert "450 s" in MarkdownRenderer(layout=BUNDLE).render(report)
 
     def test_an_unexported_value_says_why(self) -> None:
         report = _checked_report()

@@ -31,7 +31,9 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from maljan.pipeline.validation import NUMERIC_CONFIDENCE_CODE, UNPUBLISHED_VALUE_CODE
 from maljan.reporting.composer_pro import (
+    _NUMERIC_CONFIDENCE,
     ValueReader,
     carrying_form,
     sentences,
@@ -77,6 +79,9 @@ from maljan.reporting.renderers.markdown import (
     report_title,
     started_by_the_sample,
 )
+from maljan.reporting.renderers.markdown import _cell as _table_safe
+from maljan.schemas.isr_models import judge_kept_note
+from maljan.utils.sentence_cut import left_out_span
 
 if TYPE_CHECKING:
     from maljan.reporting.renderers.markdown import MarkdownRenderer, _Context
@@ -262,20 +267,31 @@ def analyst_sections(
     sections: list[str] = []
     for key, build in plan:
         layout.notes.section = key
-        sections.append(renderer._safe_section(f"analyst_{key}", build))
+        sections.append(layout.counted(key, renderer._safe_section(f"analyst_{key}", build)))
         layout.written.append(sections[-1])
     if layout.composed():
         # The sections where composed prose replaces the platform's text are
         # written again, now that the whole report is known: the replaced text
-        # that names a value printed nowhere else in it stays (``_keeps``).
-        layout.elsewhere = carrying_form("\n".join(sections))
+        # that names a value printed nowhere else in it stays (``_keeps``). A
+        # value only a sentence the analyst report leaves out names is printed
+        # in the bundle beside it, so it brings no replaced text back.
+        flagged = "\n".join(sentence for sentence, _mark in ctx.flagged)
+        layout.elsewhere = carrying_form("\n".join([*sections, flagged]))
         for index, (key, build) in enumerate(plan):
             if key in _REPLACING:
                 layout.notes.section = key
-                sections[index] = renderer._safe_section(f"analyst_{key}", build)
+                sections[index] = layout.counted(
+                    key, renderer._safe_section(f"analyst_{key}", build)
+                )
     return sections, list(layout.notes.notes)
 
 
+# What a closing section says when every sentence the report model wrote of it
+# was left out (T-555).
+_LEFT_OUT_WHOLE = (
+    "The {what} the report model wrote {verb} left out; the bundle lists each of its "
+    "sentences with the reason."
+)
 # The sections in which a composed section replaces the platform's own text.
 _REPLACING = frozenset({"summary", "conclusion", "attack"})
 
@@ -430,28 +446,57 @@ def _value_words(value: str) -> str:
     return ", then ".join(said)
 
 
-def _cut_span(text: str, start: int, end: int) -> tuple[int, int]:
-    """A sentence's span with the spaces after it, or, where a line break or the text's
-    end follows it, the spaces before it: what leaving it out takes away."""
-    after = end
-    while after < len(text) and text[after] in " \t":
-        after += 1
-    if after > end:
-        return start, after
-    while start > 0 and text[start - 1] in " \t":
-        start -= 1
-    return start, end
-
-
 def _left_out_rows(count: int, what: str) -> str:
     """The line under a table some of whose rows only the bundle prints (T-555)."""
     one = count == 1
     return (
         f"{count} further {what}{'' if one else 's'} {'is' if one else 'are'} not printed "
-        f"here: {'it cites' if one else 'each cites'} no evidence, or a value "
-        f"{'its' if one else 'their'} cited entries do not hold; the bundle lists "
+        f"here: a check left a finding on {'it' if one else 'each'}; the bundle lists "
         f"{'it' if one else 'each'} with the reason."
     )
+
+
+def _left_out_sentences(count: int) -> str:
+    """The line a section ends with where sentences of it only the bundle prints (T-555)."""
+    one = count == 1
+    return (
+        f"_{count} sentence{'' if one else 's'} of this section {'was' if one else 'were'} "
+        "left out; the bundle lists each with the reason._"
+    )
+
+
+# A sentence's closing punctuation, before which a publish state is written.
+_SENTENCE_CLOSE = re.compile(r"[.!?]+[\"')\]\u2019\u201d]*\s*$")
+# The number a written confidence holds, a percentage read as its fraction.
+_CONFIDENCE_NUMBER = re.compile(
+    r"(\d{1,3}(?:\.\d+)?)\s?%" + _PIPE + r"(\d?\.\d{1,3}" + _PIPE + r"1\.0{1,3})"
+)
+
+
+def _worded_confidence(sentence: str) -> str:
+    """``sentence`` with each confidence written as a number written as its word
+    (``composer_pro._NUMERIC_CONFIDENCE``, ``confidence_word``)."""
+
+    def _word(match: re.Match[str]) -> str:
+        said = match.group(0)
+        found = _CONFIDENCE_NUMBER.search(said)
+        if found is None:
+            return said
+        value = float(found.group(1)) / 100 if found.group(1) else float(found.group(2))
+        return confidence_word(min(max(value, 0.0), 1.0))
+
+    out: list[str] = []
+    at = 0
+    for match in _NUMERIC_CONFIDENCE.finditer(sentence):
+        end = match.end()
+        # An opening bracket the match took is closed by the one after it.
+        if "(" in match.group(0) and sentence[end : end + 1] == ")":
+            end += 1
+        start = match.start()
+        out.extend([sentence[at:start], _word(match)])
+        at = end
+    out.append(sentence[at:])
+    return "".join(out)
 
 
 class _Analyst:
@@ -472,34 +517,85 @@ class _Analyst:
         self.values = ValueReader.of(report)
         # What the sections before the one being written printed.
         self.written: list[str] = []
+        # How many sentences the section being written left out (``counted``).
+        self.left = 0
 
     # -- shared writing ---------------------------------------------------
 
-    def _unflagged(self, text: str) -> str:
-        """``text`` without each sentence a check left standing (T-555).
+    def _unflagged(self, text: str, *, count: bool = True) -> str:
+        """``text`` as the analyst report prints each sentence a check left standing (T-555).
 
         The single-file report, which the bundle prints whole, prints each
         such sentence with its mark (``_Context.marked``); the analyst report
-        prints neither the sentence nor a mark. A sentence is left out with
-        the spaces after it, or, where a line break or the text's end follows
-        it, the spaces before it. One pass over the flagged sentences.
+        prints no mark. A sentence flagged only for a value the run does not
+        publish stands with the IOC table's state of each value written before
+        its closing punctuation; one flagged only for a confidence written as
+        a number stands with the confidence in words; any other is left out,
+        with the spaces ``left_out_span`` takes, and counted where ``count``.
+        A sentence is found as written and with its citations taken out, as
+        a procedure's first sentence is printed. One pass over the flagged
+        sentences, the longest first.
         """
-        spans: list[tuple[int, int]] = []
+        edits: list[tuple[int, int, str | None]] = []
         for sentence, _mark in self.ctx.flagged:
-            start = text.find(sentence) if sentence else -1
-            while start != -1:
-                spans.append((start, start + len(sentence)))
-                start = text.find(sentence, start + 1)
-        merged: list[list[int]] = []
-        for start, end in sorted(spans):
-            if merged and start <= merged[-1][1]:
-                merged[-1][1] = max(merged[-1][1], end)
-            else:
-                merged.append([start, end])
-        for start, end in reversed(merged):
-            start, end = _cut_span(text, start, end)
-            text = text[:start] + text[end:]
+            if not sentence:
+                continue
+            codes = self.ctx.flag_codes.get(sentence, [])
+            for form in dict.fromkeys((sentence, _CITATION_RUN.sub("", sentence).strip())):
+                start = text.find(form) if form else -1
+                while start != -1:
+                    end = start + len(form)
+                    if not any(a < end and start < b for a, b, _ in edits):
+                        edits.append((start, end, self._flag_rewrite(form, codes)))
+                    start = text.find(form, start + 1)
+        for start, end, rewrite in sorted(edits, reverse=True):
+            if rewrite is None:
+                start, end = left_out_span(text, start, end)
+                rewrite = ""
+                if count:
+                    self.left += 1
+            text = text[:start] + rewrite + text[end:]
         return text
+
+    def _flag_rewrite(self, sentence: str, codes: list[str]) -> str | None:
+        """What the analyst report prints for one flagged sentence, or ``None`` to leave
+        it out (:meth:`_unflagged`): a value the run does not publish stated beside its
+        publish state, a confidence written as a number worded."""
+        if codes == [UNPUBLISHED_VALUE_CODE]:
+            state = self.ctx.publish_state(sentence)
+            if not state:
+                return sentence
+            close = _SENTENCE_CLOSE.search(sentence)
+            at = close.start() if close else len(sentence)
+            # Kept from the closing pass, so made safe here as a cell makes it.
+            kept = self.ctx.keep(_table_safe(_one_line(state.strip())))
+            return f"{sentence[:at]} {kept}{sentence[at:]}"
+        if codes == [NUMERIC_CONFIDENCE_CODE]:
+            return _worded_confidence(sentence)
+        return None
+
+    def counted(self, key: str, section: str) -> str:
+        """``section`` with the line saying how many of its sentences were left out, before
+        the line linking the bundle; the count starts over for the next section.
+
+        The conclusion and the limitations also count the sentences the agreement
+        question left out of them (``section_agreement.DROPPED_CODE``).
+        """
+        from maljan.reporting.section_agreement import DROPPED_CODE
+
+        left = self.left + sum(
+            1
+            for row in self.ctx.unresolved
+            if row.get("code") == DROPPED_CODE and row.get("subject") == key
+        )
+        self.left = 0
+        if not left:
+            return section
+        said = _left_out_sentences(left)
+        head, sep, tail = section.rpartition("\n_In the evidence bundle: ")
+        if sep:
+            return f"{head}\n{said}\n{sep.lstrip(chr(10))}{tail}"
+        return f"{section}\n\n{said}"
 
     def composed(self) -> bool:
         """Whether the composer wrote any section that replaces the platform's text."""
@@ -519,9 +615,12 @@ class _Analyst:
         """The sentences of replaced text that stay (:meth:`_keeps`), as written, in order."""
         return [sentence for sentence in sentences(text) if self._keeps(sentence)]
 
-    def _flagged_whole(self, text: str) -> bool:
+    def _flagged_whole(self, text: Any) -> bool:
         """Whether nothing of ``text`` is left once its flagged sentences are left out."""
-        return bool(str(text or "").strip()) and not self._unflagged(_one_line(text)).strip()
+        return (
+            bool(str(text or "").strip())
+            and not self._unflagged(_one_line(text), count=False).strip()
+        )
 
     def _prose(self, text: str, ids: Iterable[Any] = ()) -> str:
         """Model prose as a paragraph: its flagged sentences left out, defanged, its
@@ -646,8 +745,12 @@ class _Analyst:
         findings = [f for f in report.key_findings if not self._flagged_whole(f.text)]
         if bullets:
             findings = [f for f in findings if self._keeps(f.text)]
+        else:
+            self.left += len(report.key_findings) - len(findings)
         for bullet in bullets:
-            if not self._flagged_whole(bullet.text):
+            if self._flagged_whole(bullet.text):
+                self.left += 1
+            else:
                 lines.append(_item(self._line(bullet.text, bullet.evidence_refs)))
         for finding in findings:
             lines.append(_item(self._line(finding.text, finding.evidence_ids)))
@@ -1000,7 +1103,12 @@ class _Analyst:
                 # A row that cites nothing, or whose value none of its cited
                 # entries holds whole, is the bundle's, which prints it with the
                 # finding (T-555); the IOC table's state of each value stays.
-                if index in ctx.config_findings or index in ctx.config_unheld:
+                if (
+                    index in ctx.config_findings
+                    or index in ctx.config_unheld
+                    or self._flagged_whole(item.key)
+                    or self._flagged_whole(item.value)
+                ):
                     left += 1
                     continue
                 body.append(
@@ -1017,9 +1125,16 @@ class _Analyst:
             blocks.extend([_subheading("6.2", "Configuration"), "", *body, ""])
         if ta is not None and (ta.commands or ta.cli_flags):
             body = []
-            if ta.commands:
+            # A row whose value a check left standing whole is the bundle's,
+            # counted under its table (T-555).
+            commands = [
+                cmd
+                for cmd in ta.commands
+                if not (self._flagged_whole(cmd.id) or self._flagged_whole(cmd.name))
+            ]
+            if commands:
                 body.extend([_row("ID", "Command", "Description"), _divider(3)])
-                for cmd in ta.commands:
+                for cmd in commands:
                     body.append(
                         _row(
                             self._cell(cmd.id or "-"),
@@ -1028,9 +1143,12 @@ class _Analyst:
                         )
                     )
                 body.append("")
-            if ta.cli_flags:
+            if len(commands) < len(ta.commands):
+                body.extend([_left_out_rows(len(ta.commands) - len(commands), "command row"), ""])
+            flags = [flag for flag in ta.cli_flags if not self._flagged_whole(flag.flag)]
+            if flags:
                 body.extend(["Command-line flags:", "", _row("Flag", "Meaning"), _divider(2)])
-                for flag in ta.cli_flags:
+                for flag in flags:
                     body.append(
                         _row(
                             _code_span(ctx.plain(flag.flag)),
@@ -1038,6 +1156,8 @@ class _Analyst:
                         )
                     )
                 body.append("")
+            if len(flags) < len(ta.cli_flags):
+                body.extend([_left_out_rows(len(ta.cli_flags) - len(flags), "flag row"), ""])
             blocks.extend([_subheading("6.3", "Commands"), "", *body])
         lines = [_heading(6, "Command and control"), ""]
         lines.extend(
@@ -1156,15 +1276,24 @@ class _Analyst:
             said += f", at {_one_line(severity.rating).lower()} severity"
         lines.append(_paragraph_line(said + "."))
         composed = self.ta.analyst_conclusion if self.ta is not None else None
-        if composed is not None and composed.body.strip():
+        if composed is not None:
             # The platform's verdict sentence, then the composer's paragraphs in
             # place of the judge's words, which are the bundle's; the platform's
-            # findings on the verdict stay.
+            # findings on the verdict stay. A conclusion every sentence of which
+            # was left out says so, and the judge's words stay the bundle's (T-555).
             lines.append("")
             paragraphs = [p for p in re.split(r"\n\s*\n", composed.body.strip()) if p.strip()]
-            for index, paragraph in enumerate(paragraphs):
-                last = index == len(paragraphs) - 1
-                lines.extend([self._prose(paragraph, composed.evidence_refs if last else ()), ""])
+            written = [
+                self._prose(
+                    paragraph, composed.evidence_refs if index == len(paragraphs) - 1 else ()
+                )
+                for index, paragraph in enumerate(paragraphs)
+            ]
+            written = [paragraph for paragraph in written if paragraph.strip()]
+            if not written:
+                written = [_LEFT_OUT_WHOLE.format(what="conclusion", verb="was")]
+            for paragraph in written:
+                lines.extend([paragraph, ""])
             # A sentence of the words it replaces that a check left a mark on, or
             # that names a value printed nowhere else.
             severity, stored = report.severity, report.conclusion
@@ -1290,7 +1419,11 @@ class _Analyst:
                 continue
             # A row that cites nothing, or whose value none of its cited entries
             # holds whole, is the bundle's, which prints it with the finding (T-555).
-            if index in ctx.identifier_findings or index in ctx.identifier_unheld:
+            if (
+                index in ctx.identifier_findings
+                or index in ctx.identifier_unheld
+                or self._flagged_whole(item.value)
+            ):
                 left += 1
                 continue
             seen.add(item.value.strip().lower())
@@ -1541,7 +1674,9 @@ class _Analyst:
         rule_only = self.ctx.rule_only.get(technique_id)
         if rule_only:
             said.append(self.ctx.plain(_one_line(rule_only)))
-        if note:
+        # The judge's answer when asked is how the row was decided, the
+        # bundle's (T-555).
+        if note and not note.lower().startswith(judge_kept_note("").lower()):
             said.append(self.ctx.plain(judge_reasons_shown(note)[0]))
         return f" _({'; '.join(said)})_" if said else ""
 
@@ -1549,6 +1684,12 @@ class _Analyst:
         """The composer's procedure for the technique, else its first claim's first sentence."""
         written = self._procedures.get(technique_id.strip().upper())
         sentence = _first_sentence(_CITATION_RUN.sub("", claim))
+        # A first sentence a check left standing is the bundle's: the written
+        # procedure stands, or nothing (T-555).
+        if self._flagged_whole(_first_sentence(claim)) or self._flagged_whole(sentence):
+            if written is not None:
+                return self._line(written.procedure, written.evidence_refs)
+            return "-"
         # A first sentence naming a value printed nowhere else stays in place
         # of the written procedure.
         if written is not None and not self._keeps(sentence):
@@ -1588,12 +1729,15 @@ class _Analyst:
                 f"{'are' if undiscussed != 1 else 'is'} printed whole in the bundle."
             )
         composed = self.ta.analyst_limitations if self.ta is not None else None
-        if composed is not None and composed.body.strip():
+        if composed is not None:
             # The composer's scoped paragraph, then every sentence of the
             # platform's own: its caveats, its counts and what the report leaves
-            # to the bundle.
+            # to the bundle. A paragraph every sentence of which was left out
+            # says so (T-555).
             kept = said
             paragraph = self._prose(" ".join(composed.body.split()), composed.evidence_refs)
+            if not paragraph.strip():
+                paragraph = _LEFT_OUT_WHOLE.format(what="limitations", verb="were")
             if kept:
                 paragraph += " " + _paragraph_line(" ".join(kept))
             lines = [_heading(11, ANALYST_LIMITATIONS_TITLE), "", paragraph]

@@ -98,6 +98,19 @@ class TestTheWholeValue:
         # ``wrong_entry_citations`` already asks this one, with the entry offered.
         assert stated_value_violations(_identifiers(KEY, "ev_0006"), _texts()) == []
 
+    def test_a_listed_value_is_held_where_its_cited_entries_hold_each_item(self) -> None:
+        exports = json.dumps({"exports": ["alpha", "bravo", "charlie"]})
+        texts = EntryTexts.from_ledger([_entry("ev_0006", "list_exports", exports)])
+        # Each item held: the list the row writes as one value is no finding (T-555).
+        assert (
+            stated_value_violations(_identifiers("alpha, bravo, charlie", "ev_0006"), texts) == []
+        )
+        # One item no cited entry holds: the row is asked about as before.
+        (found,) = stated_value_violations(_identifiers("alpha, bravo, delta", "ev_0006"), texts)
+        assert found.code == STATED_VALUE_UNHELD_CODE
+        # An item too short to be read on its own holds nothing.
+        assert stated_value_violations(_identifiers("alpha, xy", "ev_0006"), texts)
+
     def test_a_partial_cited_entry_is_not_said_to_lack_it(self) -> None:
         assert stated_value_violations(_items("7000", "ev_0022"), _texts(partial=True)) == []
 

@@ -231,6 +231,8 @@ class TestTheStyleCheck:
             "Claim 44 is refuted.",
             "Two readings in the earlier analysis are refuted by the code.",
             "As claims 12 and 13 state, it sleeps.",
+            "As claim no. 44 says, it sleeps.",
+            "Claims 12 to 14 are withdrawn.",
         ],
     )
     def test_the_debate_s_own_words_are_process_words(self, sentence: str) -> None:
@@ -243,6 +245,12 @@ class TestTheStyleCheck:
             "The sample claims 4 GB of memory at start.",
             "An earlier analysis by the vendor named the family.",
             "It checks the claim token before 0x401000.",
+            "The note claims 4 and 8 GB of free space.",
+            "The page claims 3, 5 or 7 days of grace.",
+            "The lure reads Claim 1 BTC now.",
+            "The lure offers claim #2 prize.",
+            "It matches the earlier analysis by Proofpoint.",
+            "This earlier analysis by ESET named the loader.",
         ],
     )
     def test_a_sample_s_own_words_are_not(self, sentence: str) -> None:
@@ -507,7 +515,7 @@ class TestTheAnalystReportPrintsTheComposedProse:
         bundle = MarkdownRenderer(layout=BUNDLE).render(report)
         assert bundle.count("**[names how the report was made: x]**") >= 2
 
-    def test_a_marked_first_sentence_keeps_its_row_over_a_written_procedure(self) -> None:
+    def test_a_marked_first_sentence_gives_way_to_the_written_procedure(self) -> None:
         report = _composed(
             technique_procedures=[TechniqueProcedure(technique_id="T1486", procedure="Encrypts.")]
         )
@@ -520,7 +528,9 @@ class TestTheAnalystReportPrintsTheComposedProse:
         ]
         markdown = MarkdownRenderer(layout=ANALYST).render(report)
         row = next(line for line in markdown.splitlines() if "| T1486 |" in line)
-        assert "Encrypts each file with ChaCha20" in row
+        # A first sentence a check flagged is the bundle's: the written procedure stands.
+        assert "Encrypts each file with ChaCha20" not in row
+        assert "| Encrypts. |" in row
 
     def test_without_bullets_the_key_findings_stand(self) -> None:
         markdown = MarkdownRenderer(layout=ANALYST).render(_report())
