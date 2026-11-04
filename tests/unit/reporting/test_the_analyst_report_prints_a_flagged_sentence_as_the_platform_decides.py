@@ -1,7 +1,7 @@
 """The analyst report prints a sentence a check left standing as the platform decides (T-555).
 
-A sentence flagged only for a value the run does not publish stands with the
-IOC table's state of each value beside it; one flagged only for a confidence
+A sentence flagged only for a value the run does not publish stands where it
+writes a state right after each such value; one flagged only for a confidence
 written as a number stands with the confidence in words; any other is left
 out, and the section says how many it left out. A value only a left-out
 sentence names brings no replaced text back; a closing section every sentence
@@ -52,17 +52,27 @@ def _section(markdown: str, heading: str) -> str:
     return markdown.split(heading, 1)[1].split("\n## ", 1)[0]
 
 
-def test_an_unpublished_value_s_sentence_stands_with_the_table_s_state() -> None:
+def test_an_unpublished_value_s_sentence_stands_where_it_states_the_value_s_state() -> None:
+    stated = "The beacon also reaches 192.0.2.7 (not a published indicator) on port 80."
     report = _report(
-        command_and_control=TechnicalSubsection(title="C2", body=f"It beacons. {UNPUBLISHED}")
+        command_and_control=TechnicalSubsection(
+            title="C2", body=f"It beacons. {stated} {UNPUBLISHED}"
+        )
     )
     report.flagged_statements = [
-        FlaggedStatement(sentence=UNPUBLISHED, code="report.unpublished_value", label="x")
+        FlaggedStatement(sentence=stated, code="report.unpublished_value", label="x"),
+        FlaggedStatement(sentence=UNPUBLISHED, code="report.unpublished_value", label="y"),
     ]
     c2 = _section(_analyst(report), "## 6. Command and control")
-    assert "The beacon also reaches 192[.]0[.]2[.]7 on port 80 (no:" in c2
-    assert "**[" not in c2 and "left out" not in c2
-    assert "**[not published by this run: x" in MarkdownRenderer(layout=BUNDLE).render(report)
+    # Stated beside its value: the sentence stands, the mark is the bundle's.
+    assert "192[.]0[.]2[.]7 (not a published indicator) on port 80." in c2
+    # Named bare: the sentence is left out and counted.
+    assert "on port 80. The beacon" not in c2 and c2.count("192[.]0[.]2[.]7") == 1
+    assert "_1 sentence of this section was left out" in c2
+    assert "**[" not in c2
+    bundle = MarkdownRenderer(layout=BUNDLE).render(report)
+    assert "**[not published by this run: x" in bundle
+    assert "**[not published by this run: y" in bundle
 
 
 def test_a_numeric_confidence_is_worded_and_another_flag_leaves_its_sentence_out() -> None:

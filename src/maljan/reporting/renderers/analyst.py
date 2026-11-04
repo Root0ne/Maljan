@@ -79,7 +79,6 @@ from maljan.reporting.renderers.markdown import (
     report_title,
     started_by_the_sample,
 )
-from maljan.reporting.renderers.markdown import _cell as _table_safe
 from maljan.schemas.isr_models import judge_kept_note
 from maljan.utils.sentence_cut import left_out_span
 
@@ -465,8 +464,6 @@ def _left_out_sentences(count: int) -> str:
     )
 
 
-# A sentence's closing punctuation, before which a publish state is written.
-_SENTENCE_CLOSE = re.compile(r"[.!?]+[\"')\]\u2019\u201d]*\s*$")
 # The number a written confidence holds, a percentage read as its fraction.
 _CONFIDENCE_NUMBER = re.compile(
     r"(\d{1,3}(?:\.\d+)?)\s?%" + _PIPE + r"(\d?\.\d{1,3}" + _PIPE + r"1\.0{1,3})"
@@ -528,8 +525,8 @@ class _Analyst:
         The single-file report, which the bundle prints whole, prints each
         such sentence with its mark (``_Context.marked``); the analyst report
         prints no mark. A sentence flagged only for a value the run does not
-        publish stands with the IOC table's state of each value written before
-        its closing punctuation; one flagged only for a confidence written as
+        publish stands where it writes a state right after each such value;
+        one flagged only for a confidence written as
         a number stands with the confidence in words; any other is left out,
         with the spaces ``left_out_span`` takes, and counted where ``count``.
         A sentence is found as written and with its citations taken out, as
@@ -560,16 +557,20 @@ class _Analyst:
     def _flag_rewrite(self, sentence: str, codes: list[str]) -> str | None:
         """What the analyst report prints for one flagged sentence, or ``None`` to leave
         it out (:meth:`_unflagged`): a value the run does not publish stated beside its
-        publish state, a confidence written as a number worded."""
+        own state, a confidence written as a number worded."""
         if codes == [UNPUBLISHED_VALUE_CODE]:
-            state = self.ctx.publish_state(sentence)
-            if not state:
+            # Every value the run does not publish written with a state of its
+            # own right after it: the sentence stands, and the mark, which
+            # states the table's answer again, is the bundle's.
+            try:
+                unstated = self.ctx._unstated(sentence)
+            except Exception:  # noqa: BLE001 — a sentence not read is left out
+                return None
+            if all(
+                re.search(re.escape(value) + r"\s*\(", sentence) for _kind, value, _ in unstated
+            ):
                 return sentence
-            close = _SENTENCE_CLOSE.search(sentence)
-            at = close.start() if close else len(sentence)
-            # Kept from the closing pass, so made safe here as a cell makes it.
-            kept = self.ctx.keep(_table_safe(_one_line(state.strip())))
-            return f"{sentence[:at]} {kept}{sentence[at:]}"
+            return None
         if codes == [NUMERIC_CONFIDENCE_CODE]:
             return _worded_confidence(sentence)
         return None
