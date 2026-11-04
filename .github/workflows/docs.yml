@@ -43,8 +43,9 @@ jobs:
         working-directory: apps/docs
         run: npm ci
 
-      # Every page compiles as MDX, every meta.json parses, and every link to
-      # /docs/..., /assets/... or /examples/... leads to a page, heading or file.
+      # Every page compiles as MDX with the frontmatter and components the site
+      # reads, every meta.json parses, every link leads to a page, heading or
+      # file, and every address the old site served still leads to a page.
       - name: Check the pages
         working-directory: apps/docs
         run: npm run check

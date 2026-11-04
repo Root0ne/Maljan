@@ -188,12 +188,17 @@ other as `/docs/<page>/`. The sidebar's order and groups are
 [`.github/workflows/docs.yml`](https://github.com/Root0ne/Maljan/blob/dev/.github/workflows/docs.yml)
 checks the content on every pull request that touches it; run the same check
 from `apps/docs` with `npm ci` and `npm run check`. It fails if a page does not
-compile as MDX or has no title, a `meta.json` does not parse or lists a page
-that is not there, or a link to `/docs/...`, `/assets/...` or `/examples/...`,
-anchor included, leads nowhere. On `main` the workflow also publishes a
-redirect site to GitHub Pages, so the old address
-`https://root0ne.github.io/Maljan/<page>/` leads to the same page under
-`https://malspark.com/docs/`.
+compile as MDX, its frontmatter has no title or a field of the wrong type, or it
+uses a component it neither imports nor gets from the site (the list in
+`scripts/check.mjs` must match the site's component map); if a `meta.json` does
+not parse or lists a page that is not there; if a link to `/docs/...`,
+`/assets/...` or `/examples/...`, anchor included, leads nowhere, or a link is
+relative, outside those three, or points at the old GitHub Pages address; and
+if an address the old site served (`scripts/old-addresses.mjs`) no longer
+leads to a page. On `main` the workflow also publishes a redirect site to
+GitHub Pages, so the old address `https://root0ne.github.io/Maljan/<page>/`
+leads to the same page under `https://malspark.com/docs/`, and a page that
+moved, such as `/paper/`, to the page that holds its text now.
 
 [Validation codes](/docs/validation-codes/) is generated, not written. Run
 `uv run python scripts/validation_codes/run.py` and commit the page after any of
