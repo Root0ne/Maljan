@@ -22,6 +22,16 @@ Decision priority (highest to lowest), in ``debate_route``:
      last mediation (``[carried: L<n>]``) and the round's record shows no
      analyst the line names changed a claim on that earlier line
      (``debate_facts.carried_unmoved``); a line not marked is read as before.
+     Carried without new evidence — every blocking line is marked carried
+     from a line of the last mediation that was itself marked carried, every
+     analyst it names revised on that line, and it writes no entry id the
+     earlier line did not write and reaches, by itself or its place facts,
+     none the round filed
+     (``debate_facts.carried_without_new_evidence``): the point was put to
+     the analysts in two rounds with nothing new to read, and a third would
+     argue it again. Judge (``carried_without_new_evidence``); no consensus
+     is claimed, and the lines stay standing disagreements for the judge and
+     the report.
      Ledger stated — every blocking line of this mediation states only counts
      the ledger states, and an earlier mediation told the analysts those
      counts (``debate_facts.ledger_stated``): another round would argue
@@ -148,6 +158,10 @@ NO_CONTESTED_POINT = "no_contested_point"
 # blocking lines are the last mediation's contested points, none resolved and
 # none new: the round changed none of them.
 POINTS_UNCHANGED = "contested_points_unchanged"
+# Every blocking line of this mediation raises again, a second time, a point
+# of the last mediation, writes no entry id the earlier line did not write and
+# reaches none the round filed: two rounds argued it with nothing new to read.
+CARRIED_NO_NEW_EVIDENCE = "carried_without_new_evidence"
 # Every revision of the round before this mediation states the claims in
 # force again, wording aside: the round changed no value, entry id, technique,
 # negation, confidence step or technical term.
@@ -323,6 +337,30 @@ def points_unchanged(state: Any, record: dict[str, Any] | None = None) -> bool:
     )
 
 
+def carried_without_evidence(state: Any, record: dict[str, Any] | None = None) -> bool:
+    """Whether every blocking line of the last mediation is a second carry with nothing new read.
+
+    Read from the last mediation's structured answer (``contradictions``,
+    its carried marks and place facts), and only where it was made
+    (``status`` complete), against the record of the revision round before
+    it (``debate_facts.carried_without_new_evidence``).
+    """
+    from maljan.pipeline.debate_facts import carried_without_new_evidence
+
+    pair = last_two_mediations(state.get("discussion_history") or [])
+    if pair is None:
+        return False
+    _before, after = pair
+    if getattr(after, "status", "complete") != "complete":
+        return False
+    return carried_without_new_evidence(
+        list(getattr(after, "contradictions", None) or []),
+        dict(getattr(after, "carried", None) or {}),
+        record,
+        [str(f) for f in getattr(after, "place_facts", None) or []],
+    )
+
+
 def only_ledger_stated(state: Any) -> bool:
     """Whether every blocking line of the last mediation is one the ledger states, told before.
 
@@ -445,6 +483,23 @@ def route_within_limit(
             iteration,
         )
         return "judge", POINTS_UNCHANGED
+
+    # Every blocking line raises again, a second time, a point the analysts
+    # were asked to revise over twice, and cites nothing new: the revisions
+    # rewrote their claims with nothing new to read. The lines stand as
+    # disagreements for the judge and the report; no agreement is claimed.
+    if (
+        revised is not None
+        and int(revised.get("made") or 0) > 0
+        and carried_without_evidence(state, revised)
+    ):
+        say(
+            "Every blocking line of round %d raises again, a second time, a point of the last "
+            "mediation with no entry id the earlier line did not write and none the round filed; "
+            "routing to judge with the answers in force.",
+            iteration,
+        )
+        return "judge", CARRIED_NO_NEW_EVIDENCE
 
     # Every blocking line of this mediation states only counts the ledger
     # states, and the analysts it names were told them by an earlier

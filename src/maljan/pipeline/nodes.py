@@ -142,7 +142,12 @@ from maljan.pipeline.outcome import (
     verdict_for_run,
     verdict_reading,
 )
-from maljan.pipeline.revision_merge import RevisionMerge, merge_revision, rule_sentence
+from maljan.pipeline.revision_merge import (
+    RevisionMerge,
+    claim_tokens_by_number,
+    merge_revision,
+    rule_sentence,
+)
 from maljan.pipeline.routing import (
     revised_in,
     revision_round_before,
@@ -6175,9 +6180,15 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
 
         # Per analyst, the claims each line of the round's mediation named, and
         # whether the line blocks (``revision_merge``: a blocking line's claim
-        # the revision leaves unanswered is withdrawn by rule).
+        # the revision leaves unanswered is withdrawn by rule). A claim number
+        # written for no analyst is read for the one whose claim in force
+        # shares an id or an address with it (``debate_facts.OwnedClaim``).
         try:
-            named_by_lines = claims_named_by_lines(contested, list(agent_names))
+            named_by_lines = claims_named_by_lines(
+                contested,
+                list(agent_names),
+                {name: claim_tokens_by_number(kept_isrs.get(name)) for name in agent_names},
+            )
         except Exception as exc:  # noqa: BLE001 — no lines read is no claim named
             logger.debug("revision: the lines' claim numbers were not read (%s).", exc)
             named_by_lines = {}
