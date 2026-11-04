@@ -48,10 +48,11 @@ def root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 @pytest.fixture
 def host(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
-    """Every declared library and FLOSS present, and the Sigma corpus."""
+    """Every declared library and FLOSS present, the Sigma corpus and the tracked YARA one."""
     monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a, **k: object())
     monkeypatch.setattr(emulated_strings, "find_floss", lambda environ=None: ("floss", ""))
     _populated(root / "data" / "sigma_rules")
+    (root / "data" / "yara_ttp_rules.yaml").write_text("rules: []\n", encoding="utf-8")
     return root
 
 

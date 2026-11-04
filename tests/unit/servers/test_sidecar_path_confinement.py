@@ -237,7 +237,7 @@ class TestARulesetNamesACorpus:
     ) -> None:
         """The environment override is set on the server, not passed to it."""
         corpus = tmp_path / "our-rules.yaml"
-        corpus.write_text("rules: []\n")
+        corpus.write_text("rules:\n  - id: ours\n    technique_id: T1059\n    patterns: [x]\n")
         monkeypatch.setenv("MALJAN_YARA_RULES_DIR", str(corpus))
 
         answer = analysis.yara_scan(text="anything", ruleset=str(corpus))
@@ -437,7 +437,7 @@ class TestAnArgumentIsBoundedBeforeItIsRead:
                 return []
 
         class _Layer:
-            _rules: list[Any] = []
+            _rules: list[Any] = [object()]
             _yara_rules = _Compiled()
 
         monkeypatch.setattr(rules, "_yara_layer", lambda ruleset: _Layer())

@@ -55,10 +55,13 @@ class Requirement:
     # (``static.capa.rules_dir``), and the server environment variable that
     # overrides ``name``, the default path, where the tool reads one instead.
     # Either may be empty. ``pattern`` is what a file in a directory must match
-    # for the directory to hold the data.
+    # for the directory to hold the data. ``fetched`` is data kept out of
+    # version control, which a fresh clone or worktree lacks until it is
+    # fetched; otherwise the default is tracked and only an override can miss.
     setting: str = ""
     override: str = ""
     pattern: str = "*"
+    fetched: bool = True
 
     def probe(self) -> str | None:
         """``None`` when present, else the reason it is not.
@@ -190,6 +193,8 @@ class Requirement:
         """What puts a missing data path in place, in words naming no one tool."""
         named = " or ".join(name for name in (self.setting, self.override) if name)
         point = f", or point {named} at a populated copy" if named else ""
+        if not self.fetched:
+            return f"restore {self.name} from version control{point}"
         return (
             f"put the data in {self.name}{point}: it is not in version control, so a "
             "fresh clone or git worktree has it only once make external has fetched it "
@@ -244,7 +249,14 @@ def env(name: str) -> Requirement:
     return Requirement("env", name)
 
 
-def data(default: str, *, setting: str = "", override: str = "", pattern: str = "*") -> Requirement:
+def data(
+    default: str,
+    *,
+    setting: str = "",
+    override: str = "",
+    pattern: str = "*",
+    fetched: bool = True,
+) -> Requirement:
     """A file or directory the tool reads its rules or signatures from.
 
     ``default`` is the path the tool reads when nothing names another;
@@ -256,9 +268,12 @@ def data(default: str, *, setting: str = "", override: str = "", pattern: str = 
     and ``pattern`` what a file of a directory must match to count. A path
     that is missing or holds nothing is named before a job (``installed``)
     with what named it: a tool reading an empty corpus answers nothing, and
-    says so only once the run has paid for it.
+    says so only once the run has paid for it. ``fetched`` is ``False`` for a
+    default that version control keeps (``Requirement.remedy``).
     """
-    return Requirement("data", default, setting=setting, override=override, pattern=pattern)
+    return Requirement(
+        "data", default, setting=setting, override=override, pattern=pattern, fetched=fetched
+    )
 
 
 @dataclass(frozen=True)

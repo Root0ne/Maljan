@@ -3261,6 +3261,56 @@ def _joined(names: list[str]) -> str:
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
+def _lost_tools(report: MalwareReport) -> dict[str, str]:
+    """Each tool the run went without, by its bare name, with why, in order.
+
+    The same facts the judge node decided the run degraded on, as the run
+    summary kept them; a summary written before it kept them reads its
+    tool-failure rows and the shipped declarations. Why is the tool's own
+    error where a failed call of it is on record, else what the reason says
+    in its brackets, else empty.
+    """
+    from maljan.pipeline.operator_choice import facts_from_record, lost_tools
+
+    summary = report.run_summary or {}
+    rows = (summary.get("evidence") or {}).get("failures") or []
+    failures = [r for r in rows if isinstance(r, dict)]
+    facts = facts_from_record(summary.get("loss_facts"), report.identity.file_type or "", failures)
+    # The first failed call of each tool, by the tool its row records.
+    errors: dict[str, str] = {}
+    for row in failures:
+        errors.setdefault(str(row.get("tool") or ""), str(row.get("error") or ""))
+    lost: dict[str, str] = {}
+    for tool in lost_tools(report.degradation_reasons, facts):
+        said = errors.get(tool, "")
+        if not said:
+            held = next(
+                (str(r) for r in report.degradation_reasons if f".{tool}_unavailable(" in str(r)),
+                "",
+            )
+            # ``…_unavailable(<why>)``, then ``; still answers …`` and the remedy.
+            inner = held.split("_unavailable(", 1)[1] if held else ""
+            said = inner.split("); ", 1)[0] if "); " in inner else inner.removesuffix(")")
+        lost[tool] = _one_line(said)
+    return lost
+
+
+def lost_tools_sentence(report: MalwareReport) -> str:
+    """The scope's sentence on what the run went without and why, ``""`` for a run that was whole.
+
+    Said only of a degraded run, as the header's banner is: a rule engine
+    that loaded no rule did not run, and the scope says so beside what was
+    examined rather than leaving its silence to read as no match.
+    """
+    if not report.degraded_mode:
+        return ""
+    lost = _lost_tools(report)
+    if not lost:
+        return ""
+    said = "; ".join(f"{tool} ({why})" if why else tool for tool, why in lost.items())
+    return f"The run went without {said}."
+
+
 def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
     """The header's one sentence about a degraded run, built from what ran.
 
@@ -3270,24 +3320,12 @@ def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
     listed whole in the limitations section, which the sentence names by its
     rendered number.
     """
-    from maljan.pipeline.operator_choice import facts_from_record, lost_tools
-
     parts = ctx.analysts.clauses()
     if not ctx.sandbox_observed and ctx.sandbox_state in ("empty", "not_called"):
         parts.append(ctx.no_sandbox_clause())
     # A tool the run went without, by its bare name: capa missing on its host
     # is the run's loss even when nothing else was, and the header says so.
-    # The same facts the judge node decided the run degraded on, as the run
-    # summary kept them; a summary written before it kept them reads its
-    # tool-failure rows and the shipped declarations.
-    summary = report.run_summary or {}
-    failures = (summary.get("evidence") or {}).get("failures") or []
-    facts = facts_from_record(
-        summary.get("loss_facts"),
-        report.identity.file_type or "",
-        [r for r in failures if isinstance(r, dict)],
-    )
-    lost = lost_tools(report.degradation_reasons, facts)
+    lost = list(_lost_tools(report))
     if lost:
         parts.append(f"the run went without {_joined(lost)}")
     if not parts:

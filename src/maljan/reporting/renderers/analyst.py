@@ -75,6 +75,7 @@ from maljan.reporting.renderers.markdown import (
     _whole,
     confidence_word,
     is_carve_note,
+    lost_tools_sentence,
     not_started_by_the_sample_line,
     report_title,
     started_by_the_sample,
@@ -967,6 +968,9 @@ class _Analyst:
             + " A step or finding read from the code is marked assessed; one a sandbox watched "
             "is marked observed."
         )
+        lost = lost_tools_sentence(report)
+        if lost:
+            said += " " + lost
         lines = [_heading(2, "Introduction and scope"), "", _paragraph_line(said)]
         background = report.intro_background.strip()
         if background:

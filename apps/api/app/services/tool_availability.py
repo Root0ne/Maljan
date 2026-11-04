@@ -25,7 +25,10 @@ every submit and every status read, and linear in the tools declared.
   and reached at an address (``pipeline.nodes._reader_servers``). Those are
   checked whatever the declaring server's block says (switched off, another
   command, a narrowed tool list), because none of it changes where the
-  reading runs. A tool already named for its server is not named twice.
+  reading runs. An enabled in-process step with no reading whose tool a
+  sidecar declares (the Sigma pass over the sandbox report) always runs in
+  the worker, and is checked the same way. A tool already named for its
+  server is not named twice.
 
 A server reached at an address, or launched on another interpreter, is not
 checked here: its own manifest, read when a run attaches it and by the
@@ -127,7 +130,9 @@ def _in_process_readings(
 
     The readings of every enabled in-process step, each but the ones whose
     declaring server is switched on and reached at an address, where the
-    reading runs instead (``pipeline.nodes._reader_servers``). ``server`` is
+    reading runs instead (``pipeline.nodes._reader_servers``), and every
+    enabled in-process step no reading stands in for whose tool a sidecar
+    declares, which always runs here. ``server`` is
     the declaring server's key, else the sidecar's name; the environment is
     the declaring server's, which the pack lends its in-process steps, else
     ``None`` (this process's own); one mapping per server, so a reading's
@@ -173,6 +178,16 @@ def _in_process_readings(
         if config is not None and key not in lent:
             lent[key] = _environ(key, config)
         yield label, need, lent.get(key) if config is not None else None
+    # A step of the platform's own that no reading stands in for calls the
+    # implementation the sidecar serves in this process, whatever any server's
+    # block says (``triage_pack._sigma_match_sandbox``): what that sidecar
+    # declares of the tool is checked here, in this process's environment.
+    read = {spec.stands_for for spec in READERS.values()}
+    for tool in sorted(run - read):
+        held = _reading_needs(None, tool)
+        if held is not None:
+            directory, need = held
+            yield directory.removesuffix("-mcp"), need, None
 
 
 def _missing(
@@ -216,7 +231,9 @@ def _missing(
         tool=need.name,
         reason="; ".join(reasons),
         remediation=remedy_for(need, absent),
-        without=need.without,
+        # A tool without its data answers nothing: what it does without a
+        # library is no answer without the rules it reads.
+        without="" if any(req.kind == "data" for req in absent) else need.without,
         # Only a module, an executable or data is checked here: a setting is
         # the server's own to read (``Requirement.installed``).
         code=MISSING_DEPENDENCY,
