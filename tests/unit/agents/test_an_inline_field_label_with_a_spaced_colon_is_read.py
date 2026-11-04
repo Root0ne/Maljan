@@ -37,8 +37,8 @@ def _read(text: str) -> list[tuple[str, str, float, str | None, str | None]]:
     ]
 
 
-# The spellings of the colon; a technique value ends at a label written
-# without opening emphasis, as it did before.
+# The spellings of the colon; a technique value that ends at a label with
+# opening emphasis is read in its own tests (T-548).
 COLONS = ["{} ", "{}\t", "{}**", "{} ** "]
 SPELLINGS = [*COLONS, "**{}**", "**{}** "]
 
