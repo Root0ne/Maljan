@@ -1835,9 +1835,12 @@ UNREADABLE_CONFIDENCE_MARK = "(empty)"
 # The whole TECHNIQUE value as written: one id is a claimed technique, and
 # anything more (a qualifier, a negation, a second id) is the analyst's line,
 # kept and asked about rather than read for the first id in it. It ends at the
-# line's end or at a CONFIDENCE or EVIDENCE label written after it, tried
-# where a run of spaces begins, so a long run is read once.
-_TECHNIQUE_VALUE = r"[ \t]*(.*?)(?=(?<![ \t])[ \t]+(?:CONFIDENCE|EVIDENCE)" + _LABEL_COLON + r"|$)"
+# line's end or at a CONFIDENCE or EVIDENCE label written after it, with or
+# without opening emphasis ("**EVIDENCE**:"), tried where a run of spaces
+# begins, so a long run is read once.
+_TECHNIQUE_VALUE = (
+    r"[ \t]*(.*?)(?=(?<![ \t])[ \t]++[*_]*+(?:CONFIDENCE|EVIDENCE)" + _LABEL_COLON + r"|$)"
+)
 _LINE_TECHNIQUE_RE = re.compile(
     r"^" + LINE_PREFIX + r"(?i:TECHNIQUE)" + _LABEL_COLON + _TECHNIQUE_VALUE, re.MULTILINE
 )
