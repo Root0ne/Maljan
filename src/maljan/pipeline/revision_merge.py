@@ -465,8 +465,7 @@ def _own_numbers(revised: Sequence[_Block]) -> list[int] | None:
 
     Read only where every block wrote one: a revision that wrote none, or
     some only, has no numbers read, and no key is written for it. A number
-    written on two blocks (a claim the analyst kept from its first answer
-    beside a retry's) is read for both, and the key names both.
+    written on two blocks is read for the first only (:func:`_numbering`).
     """
     written = [_written_number(block) for block in revised]
     if any(n is None for n in written):
@@ -486,23 +485,30 @@ def _numbering(
     Placed by number, the revision numbers claims as the answer in force
     does: every claim carried keeps its number there, and every block its
     written one. Placed by statement, only the revision's blocks have
-    numbers of the revision's own (:func:`_own_numbers`). Sorted.
+    numbers of the revision's own (:func:`_own_numbers`). One mapping per
+    number, either way: a number written on two blocks maps the first, in
+    the revision's order, which is the text's own block (a claim kept from a
+    first answer is put back after the retry's blocks); the revision's
+    blocks come before the claims carried. Sorted.
     """
     at = {id(block.claims[0]): block.number for block in _blocks(merged)}
-    pairs: list[tuple[int, int]] = []
     if placed_by == "number":
-        pairs += [(n, at[i]) for n, i in carried_ids.items() if i in at]
-        own = [_written_number(block) for block in revised]
+        own: list[int | None] = [_written_number(block) for block in revised]
     else:
         own = list(_own_numbers(revised) or [])
         if not own:
             return ()
-    pairs += [
+    found: list[tuple[int, int]] = [
         (int(own[index] or 0), at[id(revised[index].claims[0])])
-        for index in kept
+        for index in sorted(kept)
         if own[index] is not None and id(revised[index].claims[0]) in at
     ]
-    return tuple(sorted(pairs))
+    if placed_by == "number":
+        found += [(n, at[i]) for n, i in carried_ids.items() if i in at]
+    first: dict[int, int] = {}
+    for number, now in found:
+        first.setdefault(number, now)
+    return tuple(sorted(first.items()))
 
 
 def numbering_key(merge: RevisionMerge) -> str:
@@ -512,8 +518,8 @@ def numbering_key(merge: RevisionMerge) -> str:
     names claims by the numbers of the answer it revised: every one that
     moved is listed, carried claims included, and every claim withdrawn is
     named. Placed by statement, it names them by its own numbers: every
-    pair is listed (a number written on two blocks names both), and a number
-    not listed names no claim the platform read from the revision.
+    pair is listed, and a number not listed names no claim the platform
+    read from the revision.
     """
     moved = [(own, now) for own, now in merge.numbering if own != now]
     if not moved:
@@ -532,13 +538,7 @@ def numbering_key(merge: RevisionMerge) -> str:
             f"revised. In the numbering above, {pairs}; every other number is the same."
             f"{withdrawn})"
         )
-    grouped: dict[int, list[int]] = {}
-    for own, now in merge.numbering:
-        grouped.setdefault(own, []).append(now)
-    pairs = "; ".join(
-        f"its claim {own} is " + " or ".join(f"claim {n}" for n in nows)
-        for own, nows in grouped.items()
-    )
+    pairs = "; ".join(f"its claim {own} is claim {now}" for own, now in merge.numbering)
     return (
         "(The text below names this analyst's claims by the numbers its revision gave them. "
         f"In the numbering above, {pairs}. A number not listed names no claim the platform read "

@@ -536,12 +536,25 @@ class TestTheNumberingKey:
             "OPEN ITEMS\n- to close claim 6."
         )
 
-    def test_a_number_written_on_two_blocks_names_both(self) -> None:
-        merge = RevisionMerge(placed_by="statement", numbering=((6, 26), (6, 35), (7, 27)))
-
-        assert "its claim 6 is claim 26 or claim 35; its claim 7 is claim 27." in (
-            numbering_key(merge)
+    def test_a_number_written_on_two_blocks_maps_the_first_only(self) -> None:
+        in_force = _isr(
+            "static",
+            _claim("Mutex runnung is created at 0x3962.", "[ev_0011]"),
+            _claim("Beacon thread 0x5750 waits 180 s.", "[ev_0060]"),
         )
+        # The retry's own block 2, then a first-answer claim kept with the same number.
+        revision = _isr(
+            "static",
+            _numbered("Routine 0x7b98 returns the AppData path 0x1a.", "[ev_0122]", 1),
+            _numbered("Routine 0x1030 polls the pipe until the child exits.", "[ev_0056]", 2),
+            _numbered("Routine 0x1030 polls slot 0x10d80 and sleeps 0xc934.", "[ev_0057]", 2),
+        )
+
+        merge = merge_revision(in_force, revision, "the revision", 1, {})
+
+        assert merge.placed_by == "statement"
+        assert merge.numbering == ((1, 3), (2, 4))
+        assert "its claim 1 is claim 3; its claim 2 is claim 4." in numbering_key(merge)
 
     def test_numbers_that_agree_leave_the_text_byte_identical(self) -> None:
         text = f"  Claim 1: x\n{WRITTEN_BESIDES_CLAIMS}\nprose"
