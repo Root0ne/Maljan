@@ -470,49 +470,43 @@ _CONFIDENCE_NUMBER = re.compile(
 )
 
 
-# What a bracket says of a value the run does not publish, as the IOC table does.
-_SAYS_UNPUBLISHED = re.compile(
-    r"\b(?:not"
-    + _PIPE
-    + r"never)\s+(?:(?:a"
-    + _PIPE
-    + r"an"
-    + _PIPE
-    + r"the)\s+)?(?:published"
-    + _PIPE
-    + r"exported)\b"
-    + _PIPE
-    + r"\bunpublished\b",
+# The state the analyst report writes after a value the run does not publish, in
+# its own fixed words: never the model's, never the table's reason (T-555).
+UNPUBLISHED_STATE = "not a published indicator"
+# A bracket that speaks of publication: what the model wrote of a value's publish
+# state, which the platform's own state replaces. Any other bracket ("(UDP 53)")
+# is the model's description of the value, and stays.
+_ABOUT_PUBLICATION = re.compile(
+    r"publish" + _PIPE + r"indicator" + _PIPE + r"\bIOCs?\b" + _PIPE + r"export" + _PIPE + r"STIX",
     re.IGNORECASE,
 )
 
 
-def _states_unpublished(sentence: str, value: str, state: str) -> bool:
-    """Whether ``value`` stands in ``sentence`` with a bracket right after it that agrees
-    with the IOC table's answer ``state`` for it: it says the value is not published ("8.8.8.8
-    (not a published indicator)"), or, under a negation, restates most of the words of the
-    table's reason ("(… not a row of this run's IOC table)" beside "no: no row of this run's
-    IOC table holds it"). A bracket saying anything else ("(UDP 53)", "(a published
-    indicator)") states no publish state. One pass over the bracket, to its matching close.
-    """
-    found = re.search(re.escape(value) + r"\s*\(", sentence)
-    if found is None:
-        return False
-    depth, at = 1, found.end()
-    while at < len(sentence) and depth:
-        depth += {"(": 1, ")": -1}.get(sentence[at], 0)
-        at += 1
-    bracket = sentence[found.end() : at]
-    if _SAYS_UNPUBLISHED.search(bracket):
-        return True
-    reason = {w for w in _WORD.findall(state.lower().removeprefix("no:")) if len(w) >= 4}
-    said = set(_WORD.findall(bracket.lower()))
-    return bool(reason) and bool(_NEGATED.search(bracket)) and 2 * len(reason & said) >= len(reason)
-
-
-# A word of a publish state, and a negation in a bracket.
-_WORD = re.compile(r"[a-z0-9']+")
-_NEGATED = re.compile(r"\b(?:not" + _PIPE + "no" + _PIPE + r"never)\b", re.IGNORECASE)
+def _with_unpublished_state(sentence: str, values: Iterable[str]) -> str:
+    """``sentence`` with the platform's state written after the first place each value
+    stands: a bracket right after it that speaks of publication is replaced, any other
+    is kept with the state after it. Deterministic: the words are fixed, whatever the
+    model wrote. A value that does not stand in the sentence as written is left alone."""
+    edits: list[tuple[int, int, str]] = []
+    for value in dict.fromkeys(v for v in values if v):
+        at = sentence.find(value)
+        if at == -1:
+            continue
+        end = at + len(value)
+        bracket = re.match(r"\s*\(", sentence[end:])
+        if bracket is not None:
+            depth, close = 1, end + bracket.end()
+            while close < len(sentence) and depth:
+                depth += {"(": 1, ")": -1}.get(sentence[close], 0)
+                close += 1
+            if _ABOUT_PUBLICATION.search(sentence[end + bracket.end() : close]):
+                edits.append((end, close, f" ({UNPUBLISHED_STATE})"))
+                continue
+            end = close
+        edits.append((end, end, f" ({UNPUBLISHED_STATE})"))
+    for begin, stop, said in sorted(edits, reverse=True):
+        sentence = sentence[:begin] + said + sentence[stop:]
+    return sentence
 
 
 def _worded_confidence(sentence: str) -> str:
@@ -570,8 +564,9 @@ class _Analyst:
         The single-file report, which the bundle prints whole, prints each
         such sentence with its mark (``_Context.marked``); the analyst report
         prints no mark. A sentence flagged only for a value the run does not
-        publish stands where it writes a state right after each such value;
-        one flagged only for a confidence written as
+        publish stands with the platform's fixed state after each such value,
+        in place of any bracket of the model's on publication; one flagged only
+        for a confidence written as
         a number stands with the confidence in words; any other is left out,
         with the spaces ``left_out_span`` takes, and counted where ``count``.
         A sentence is found as written and with its citations taken out, as
@@ -601,19 +596,17 @@ class _Analyst:
 
     def _flag_rewrite(self, sentence: str, codes: list[str]) -> str | None:
         """What the analyst report prints for one flagged sentence, or ``None`` to leave
-        it out (:meth:`_unflagged`): a value the run does not publish stated beside its
-        own state, a confidence written as a number worded."""
+        it out (:meth:`_unflagged`): a value the run does not publish given the
+        platform's own state, a confidence written as a number worded."""
         if codes == [UNPUBLISHED_VALUE_CODE]:
-            # Every value the run does not publish written with a bracket right
-            # after it that says so: the sentence stands, and the mark, which
-            # states the table's answer again, is the bundle's.
+            # The sentence stands with the platform's own state after each value
+            # the run does not publish, in place of what the model wrote of it;
+            # the mark, with the table's reason, is the bundle's.
             try:
                 unstated = self.ctx._unstated(sentence)
             except Exception:  # noqa: BLE001 — a sentence not read is left out
                 return None
-            if all(_states_unpublished(sentence, value, state) for _kind, value, state in unstated):
-                return sentence
-            return None
+            return _with_unpublished_state(sentence, (value for _kind, value, _ in unstated))
         if codes == [NUMERIC_CONFIDENCE_CODE]:
             return _worded_confidence(sentence)
         return None

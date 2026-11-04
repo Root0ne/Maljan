@@ -1,7 +1,8 @@
 """The analyst report prints a sentence a check left standing as the platform decides (T-555).
 
-A sentence flagged only for a value the run does not publish stands where it
-writes a state right after each such value; one flagged only for a confidence
+A sentence flagged only for a value the run does not publish stands with the
+platform's fixed state after each such value, in place of any bracket the model
+wrote on its publication; one flagged only for a confidence
 written as a number stands with the confidence in words; any other is left
 out, and the section says how many it left out. A value only a left-out
 sentence names brings no replaced text back; a closing section every sentence
@@ -16,6 +17,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from maljan.reporting.defang import defang
 from maljan.reporting.models import (
     CapabilityBullet,
     CapabilityCell,
@@ -28,6 +30,7 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
+from maljan.reporting.renderers.analyst import UNPUBLISHED_STATE
 from maljan.reporting.renderers.layout import ANALYST, BUNDLE
 from maljan.reporting.renderers.markdown import MarkdownRenderer
 from maljan.schemas.isr_models import judge_kept_note
@@ -54,33 +57,7 @@ def _section(markdown: str, heading: str) -> str:
     return markdown.split(heading, 1)[1].split("\n## ", 1)[0]
 
 
-def test_an_unpublished_value_s_sentence_stands_where_it_states_the_value_s_state() -> None:
-    stated = "The beacon also reaches 192.0.2.7 (not a published indicator) on port 80."
-    report = _report(
-        command_and_control=TechnicalSubsection(
-            title="C2", body=f"It beacons. {stated} {UNPUBLISHED}"
-        )
-    )
-    report.flagged_statements = [
-        FlaggedStatement(sentence=stated, code="report.unpublished_value", label="x"),
-        FlaggedStatement(sentence=UNPUBLISHED, code="report.unpublished_value", label="y"),
-    ]
-    c2 = _section(_analyst(report), "## 6. Command and control")
-    # Stated beside its value: the sentence stands, the mark is the bundle's.
-    assert "192[.]0[.]2[.]7 (not a published indicator) on port 80." in c2
-    # Named bare: the sentence is left out and counted.
-    assert "on port 80. The beacon" not in c2 and c2.count("192[.]0[.]2[.]7") == 1
-    assert "_1 sentence of this section was left out" in c2
-    assert "**[" not in c2
-    bundle = MarkdownRenderer(layout=BUNDLE).render(report)
-    assert "**[not published by this run: x" in bundle
-    assert "**[not published by this run: y" in bundle
-
-
-def test_a_bracket_restating_the_table_s_reason_states_the_publish_state() -> None:
-    # As haiku10's c.pki.goog sentence did: the table's "no: no row of this run's IOC
-    # table holds it", restated under a negation.
-    sentence = "Its Host header is cdn.example.org (not a row of this run's IOC table) today."
+def _c2(sentence: str) -> str:
     report = _report(
         command_and_control=TechnicalSubsection(title="C2", body=f"It beacons. {sentence}")
     )
@@ -88,28 +65,50 @@ def test_a_bracket_restating_the_table_s_reason_states_the_publish_state() -> No
         FlaggedStatement(sentence=sentence, code="report.unpublished_value", label="x")
     ]
     c2 = _section(_analyst(report), "## 6. Command and control")
-    assert "cdn[.]example[.]org (not a row of this run's IOC table) today." in c2
-    assert "left out" not in c2 and "**[" not in c2
+    assert "**[" not in c2 and "left out" not in c2
+    assert "**[not published by this run: x" in MarkdownRenderer(layout=BUNDLE).render(report)
+    return c2
 
 
-@pytest.mark.parametrize(
-    "bracket",
-    [
-        "(a published indicator)",
-        "(UDP 53)",
-    ],
-)
-def test_a_bracket_not_saying_unpublished_states_no_publish_state(bracket: str) -> None:
-    sentence = f"The beacon also reaches 192.0.2.7 {bracket} on port 80."
-    report = _report(
-        command_and_control=TechnicalSubsection(title="C2", body=f"It beacons. {sentence}")
-    )
-    report.flagged_statements = [
-        FlaggedStatement(sentence=sentence, code="report.unpublished_value", label="x")
-    ]
-    c2 = _section(_analyst(report), "## 6. Command and control")
-    assert "192[.]0[.]2[.]7" not in c2 and "**[" not in c2
-    assert "_1 sentence of this section was left out" in c2
+# The model's brackets on a value's publication, each contradicting the IOC table
+# somewhere; whatever they say, the platform's own state replaces them.
+CONTRADICTING = [
+    (
+        "8.8.8.8",
+        "(a published indicator; the sandbox report does say which process made the flows, "
+        "no doubt)",
+    ),
+    (
+        "8.8.8.8",
+        "(published indicator, though the sandbox report does not say which process made the "
+        "flows)",
+    ),
+    ("c.pki.goog", "(a row of this run's IOC table, no doubt)"),
+    ("c.pki.goog", "(published: it is a row of this run's IOC table; not benign)"),
+    ("8.8.8.8", "(a published indicator, not exported to STIX)"),
+]
+
+
+@pytest.mark.parametrize(("value", "bracket"), CONTRADICTING)
+def test_the_model_s_bracket_on_publication_gives_way_to_the_platform_s_state(
+    value: str, bracket: str
+) -> None:
+    c2 = _c2(f"The flow goes to {value} {bracket} at start.")
+    shown = defang(value, "ip" if value[0].isdigit() else "domain")
+    assert f"The flow goes to {shown} ({UNPUBLISHED_STATE}) at start." in c2
+    # Nothing of the model's bracket is left: the state is the platform's alone.
+    line = next(line for line in c2.splitlines() if "The flow goes to" in line)
+    assert line == f"It beacons. The flow goes to {shown} ({UNPUBLISHED_STATE}) at start."
+
+
+def test_a_bare_value_is_given_the_platform_s_state() -> None:
+    c2 = _c2(UNPUBLISHED)
+    assert f"192[.]0[.]2[.]7 ({UNPUBLISHED_STATE}) on port 80." in c2
+
+
+def test_a_bracket_not_on_publication_stays_with_the_state_after_it() -> None:
+    c2 = _c2("The beacon also reaches 192.0.2.7 (UDP 53) at start.")
+    assert f"192[.]0[.]2[.]7 (UDP 53) ({UNPUBLISHED_STATE}) at start." in c2
 
 
 def test_a_numeric_confidence_is_worded_and_another_flag_leaves_its_sentence_out() -> None:
