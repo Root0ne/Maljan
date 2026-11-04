@@ -495,7 +495,10 @@ def unread_callees_violation(found: CalleesFound) -> Violation | None:
         return None
     shown = ranked[:CALLEES_SHOWN]
     left = len(ranked) - len(shown)
-    listed = "; ".join(f"{hex(c.address)} ({c.reason()})" for c in shown)
+    # Each item is the platform's own words (addresses and counts), held to
+    # the row rule all the same, item by item, so a bound cuts one reason and
+    # never the list.
+    listed = "; ".join(safe_finding_value(f"{hex(c.address)} ({c.reason()})") for c in shown)
     bound = (
         f" The first {len(shown)} of {len(ranked)} are listed (the question lists at most "
         f"{CALLEES_SHOWN}); the other {left} are not."
@@ -507,7 +510,8 @@ def unread_callees_violation(found: CalleesFound) -> Violation | None:
         message=(
             f"{len(ranked)} function(s) around the routines you read have code none of your "
             "listings holds: callees of those routines, and functions on the path from where "
-            f"the code starts down to them. Where the code starts: {found.starts}. Ranked by "
+            "the code starts down to them. Where the code starts: "
+            f"{safe_finding_value(found.starts)}. Ranked by "
             "distance from those starts (the calls between, plus one for each further "
             "function calling it, since a routine called from many places is a shared "
             f"helper): {listed}.{bound} Decide whether any matters to this analysis: you may "
@@ -543,13 +547,14 @@ def callees_asked_record(
         "shown_at_most": CALLEES_SHOWN,
         "read_after": read,
     }
+    left_unread = len(shown) - len(read)
     answered = Violation(
         code=UNREAD_CALLEES_CODE,
         message=(
             f"Asked once about {len(found.ranked)} unread function(s) around the routines it "
-            f"read ({len(shown)} listed), the analyst read {len(read)} of those listed"
-            + (f" ({', '.join(read)})" if read else "")
-            + f" and left {len(shown) - len(read)} unread by its own choice."
+            f"read ({len(shown)} listed), the analyst read {len(read)} of those listed "
+            f"({', '.join(safe_finding_value(a) for a in read) or 'none'}) and left "
+            f"{left_unread} unread by its own choice."
         ),
         answered=True,
     )
