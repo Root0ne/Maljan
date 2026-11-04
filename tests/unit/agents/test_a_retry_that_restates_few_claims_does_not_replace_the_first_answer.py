@@ -108,9 +108,7 @@ def _settle_asked(
 
 
 def _codes(analyst: _Analyst) -> list[str]:
-    # The validation lines; a note the room makes (why a question was not
-    # asked, T-558) carries no code.
-    return [payload["code"] for kind, payload in analyst.events if kind == "validation_feedback"]
+    return [payload["code"] for _kind, payload in analyst.events]
 
 
 def _rows(analyst: _Analyst) -> list[dict[str, str]]:

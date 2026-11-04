@@ -61,9 +61,7 @@ def test_the_analyst_checks_run_on_a_moved_default(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         validation, "analyst_answer_checks", lambda _isr, inputs, **_kw: handed.append(inputs) or []
     )
-    own = SimpleNamespace(
-        listed=[], ledger_ids=set(), items=[], decompiled={}, image_bases={}, entries=[]
-    )
+    own = SimpleNamespace(listed=[], ledger_ids=set(), items=[], decompiled={}, image_bases={})
     run = _run({})
     run.identity = {"file_type": "pe", "platform": "windows"}
     with replay_environment({}):

@@ -1,22 +1,27 @@
-"""The unread callees of the routines an analyst describes are listed to it, once (T-558).
+"""The unread functions around the routines an analyst read are listed to it, once (T-558).
 
-A reverser stopped on its own with the routine that reads its configuration
-file, the one that writes it and the cipher wrapper of its channel unread. Each
-was a callee of a routine its claims described, and the function map listed
-it as named and not read. Before the answer stands, the platform now lists
-those callees in one question:
+An analyst reading code stopped on its own with the routine that reads its
+configuration file, the one that writes it and the cipher wrapper of its
+channel unread. Each was a callee of a routine it had read, and the function
+map listed it as named and not read. Before the answer stands, the platform
+now lists those functions in one question:
 
-- a routine is described when a claim names its address or cites the entry
-  that lists it; only the callees of described routines are listed;
+- every routine a listing of the analyst holds counts, whether or not a claim
+  names it; a listing at an address inside a function reads that function;
+- the unread callees of those routines are listed, and so are the unread
+  functions on the path from a stated start down to them;
 - the list is ranked by distance from where the code starts (the entry point
-  and exports a PE header answer states, the threads the function index
+  and exports any format header states, the threads the function index
   states), a further caller counting one call, so a shared helper comes last;
 - at most :data:`CALLEES_SHOWN` are listed, and the question says how many
   there are and that the rest are not;
 - it carries addresses and counts only, never a name or a string the sample
   or a tool wrote;
-- it is asked once per analyst and job; the analyst reads what it chooses,
-  and the loop's record and an answered row say what it read;
+- it is asked once per analyst and job, only where the turn after the loop can
+  carry the analyst's tools; the analyst reads what it chooses, and the loop's
+  record and an answered row say what it read;
+- an analyst that reads no code is not asked and nothing is said; where the
+  platform cannot tell, it says why once;
 - an answer with nothing unread sends exactly what it sent before.
 
 Every address, name and sentence here is made up for the test.
@@ -25,6 +30,7 @@ Every address, name and sentence here is made up for the test.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -39,6 +45,7 @@ from maljan.agents.callees_question import (
     STARTS_NONE,
     STARTS_STATED,
     UNREAD_CALLEES_CODE,
+    CalleesFound,
     callees_asked_record,
     callees_to_read,
     reads_code,
@@ -53,7 +60,8 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 BASE = 0x180000000
 START = BASE + 0x1000  # the export and entry point
-OUTER = BASE + 0x2000  # called by the start; described
+GATE = BASE + 0x1800  # called by the start; never read; calls the outer routine
+OUTER = BASE + 0x2000  # read
 STEP = BASE + 0x3000  # a step the outer routine calls; calls two more
 SIDE = BASE + 0x4000  # another step it calls; calls nothing
 HELPER = BASE + 0x9000  # called from six places
@@ -70,13 +78,13 @@ def _listing(address: int, *calls: int) -> str:
     return f'\nundefined8 {_fun(address)}(void)\n\n{{\n  x = "{SECRET}";\n{body}  return 0;\n}}\n'
 
 
-def _batch(entry: str, listings: dict[int, str], facts: Any = None) -> LedgerEntry:
+def _batch(entry: str, listings: dict[int, str], facts: Any = None, **kw: Any) -> LedgerEntry:
     return LedgerEntry(
         id=entry,
-        tool="batch_decompile",
+        tool=kw.pop("tool", "batch_decompile"),
         args={"functions": ",".join(hex(a) for a in listings)},
         output=json.dumps({hex(a): text for a, text in listings.items()}),
-        **({"source": "provider:ghidra", "facts": facts} if facts is not None else {}),
+        **({"source": kw.pop("source", "provider:x"), "facts": facts} if facts is not None else kw),
     )
 
 
@@ -89,9 +97,10 @@ def _decompile(entry: str, address: int, *calls: int) -> LedgerEntry:
     )
 
 
-def _index(facts: Any = None, *, threads: bool = False) -> LedgerEntry:
+def _index(*, threads: bool = False, entry: bool = False) -> LedgerEntry:
     others = {
-        hex(START): [hex(OUTER)],
+        hex(START): [hex(GATE)],
+        hex(GATE): [hex(OUTER)],
         hex(OUTER): [hex(STEP), hex(SIDE), hex(HELPER)],
         hex(STEP): [hex(BASE + 0x5000), hex(BASE + 0x6000)],
         **{hex(o): [hex(HELPER)] for o in OTHERS},
@@ -99,7 +108,11 @@ def _index(facts: Any = None, *, threads: bool = False) -> LedgerEntry:
     data: dict[str, Any] = {
         "tool": "function_index",
         "image_base": hex(BASE),
-        "rows": [],
+        "rows": (
+            [{"function": hex(START), "offset": "0x1000", "entry_point": True, "callees": []}]
+            if entry
+            else []
+        ),
         "other_callees": others,
     }
     if threads:
@@ -111,22 +124,22 @@ def _index(facts: Any = None, *, threads: bool = False) -> LedgerEntry:
         tool="function_index",
         args={"path": "/x/s.dll", "carved_path": ""},
         output=json.dumps(data),
-        **({"source": "pack", "facts": facts} if facts is not None else {}),
     )
 
 
-def _header(facts: Any = None) -> LedgerEntry:
+def _header(tool: str = "pe_info", entry_point: Any = 0x1000) -> LedgerEntry:
     data = {
         "image_base": hex(BASE),
-        "entry_point": 0x1000,
+        "entry_point": entry_point,
         "export_rows": [{"name": SECRET, "ordinal": 1, "rva": "0x1000"}],
     }
     return LedgerEntry(
         id="ev_0004",
-        tool="pe_info",
+        tool=tool,
         args={"path": "/x/s.dll", "carved_path": ""},
         output=json.dumps(data),
-        **({"source": "pack", "facts": facts} if facts is not None else {}),
+        source="pack",
+        facts={"v": 1, "kind": "format_info"},
     )
 
 
@@ -144,108 +157,127 @@ def _shipped() -> tuple[Any, Any, Any]:
 
 
 OWN = [
-    _batch("ev_0003", {START: _listing(START, OUTER), OUTER: _listing(OUTER, STEP, SIDE, HELPER)})
+    _batch("ev_0003", {START: _listing(START, GATE), OUTER: _listing(OUTER, STEP, SIDE, HELPER)})
 ]
 PACK = [_header(), _index()]
-DESCRIBED = [_claim(f"{OUTER:#x} decrypts the configuration.")]
+CLAIMS = [_claim("The loader decrypts its settings.", "[ev_0004]")]
+
+
+def _addresses(found: CalleesFound) -> list[int]:
+    return [c.address for c in found.ranked]
 
 
 class TestWhatIsListed:
-    def test_the_callees_of_a_described_routine_are_ranked_by_the_main_path(self) -> None:
-        found = callees_to_read(DESCRIBED, OWN, PACK)
+    def test_the_functions_around_what_was_read_are_ranked_by_the_main_path(self) -> None:
+        found = callees_to_read(CLAIMS, OWN, PACK)
 
-        assert [c.address for c in found.ranked] == [STEP, SIDE, HELPER]
+        # The gate is on the path from the start to the routine read; the
+        # steps are its callees; the helper, called from six places, is last.
+        assert _addresses(found) == [GATE, STEP, SIDE, HELPER]
         assert found.starts == STARTS_STATED
-        step = found.ranked[0]
+        gate, step = found.ranked[0], found.ranked[1]
+        assert gate.on_path and gate.callers == (START,) and gate.depth == 1
         assert (step.callers, step.depth, step.start, step.called_from, step.calls) == (
             (OUTER,),
-            2,
+            3,
             START,
             1,
             2,
         )
-        # Six functions call the helper: five more than one, five calls further.
-        assert found.ranked[-1].distance() == 2 + 5
+        assert found.ranked[-1].distance() == 3 + 5
 
-    def test_a_routine_no_claim_describes_has_its_callees_left_out(self) -> None:
-        # The start is read and named, by a claim citing no listing; the outer
-        # routine it calls is read, so nothing the start calls is unread.
-        found = callees_to_read([_claim(f"{START:#x} is the export.", "[ev_0004]")], OWN, PACK)
-
-        assert found.ranked == ()
-
-    def test_a_cited_listing_describes_every_routine_it_holds(self) -> None:
-        found = callees_to_read([_claim("The loader decrypts its settings.")], OWN, PACK)
-
-        assert [c.address for c in found.ranked] == [STEP, SIDE, HELPER]
+    def test_a_routine_no_claim_names_still_has_its_callees_listed(self) -> None:
+        assert _addresses(callees_to_read([], OWN, PACK)) == [GATE, STEP, SIDE, HELPER]
 
     def test_a_thread_the_index_states_is_a_start(self) -> None:
-        found = callees_to_read(DESCRIBED, OWN, [_index(threads=True)])
+        found = callees_to_read(CLAIMS, OWN, [_index(threads=True)])
 
         assert found.starts == STARTS_STATED
-        assert (found.ranked[0].depth, found.ranked[0].start) == (1, OUTER)
+        step = found.ranked[0]
+        assert (step.address, step.depth, step.start) == (STEP, 1, OUTER)
 
-    def test_with_no_start_stated_the_routine_a_claim_calls_main_stands_in(self) -> None:
-        claims = [_claim(f"{OUTER:#x} is the main dispatcher of commands.")]
+    def test_any_format_header_states_its_entry_point_and_exports(self) -> None:
+        header = _header(tool="elf_info", entry_point="0x1000")
+
+        found = callees_to_read(CLAIMS, OWN, [header, _index()])
+
+        assert found.starts == STARTS_STATED
+        assert found.ranked[0].start == START
+
+    def test_with_no_start_stated_the_read_routine_a_claim_calls_main_stands_in(self) -> None:
+        claims = [_claim(f"{START:#x} calls {OUTER:#x}, the main dispatcher of commands.")]
 
         found = callees_to_read(claims, OWN, [_index()])
 
         assert found.starts == STARTS_CLAIMED
-        assert (found.ranked[0].depth, found.ranked[0].start) == (1, OUTER)
+        # Only the address nearest the word is the claim's central routine.
+        step = next(c for c in found.ranked if c.address == STEP)
+        assert (step.depth, step.start) == (1, OUTER)
 
-    def test_with_no_start_at_all_the_list_is_still_given_unranked_by_path(self) -> None:
-        found = callees_to_read(DESCRIBED, OWN, [])
+    def test_with_no_start_at_all_the_list_is_given_unranked_by_path(self) -> None:
+        found = callees_to_read(CLAIMS, OWN, [])
 
         assert found.starts == STARTS_NONE
-        assert {c.address for c in found.ranked} == {STEP, SIDE, HELPER}
+        assert set(_addresses(found)) == {GATE, STEP, SIDE, HELPER}
         assert all(c.depth is None for c in found.ranked)
 
     def test_a_read_callee_is_not_listed(self) -> None:
-        own = [*OWN, _decompile("ev_0005", STEP)]
+        found = callees_to_read(CLAIMS, [*OWN, _decompile("ev_0005", STEP)], PACK)
 
-        found = callees_to_read(DESCRIBED, own, PACK)
+        # Read now, its own callees are what is unread around it.
+        assert _addresses(found) == [GATE, SIDE, BASE + 0x5000, BASE + 0x6000, HELPER]
 
-        assert [c.address for c in found.ranked] == [SIDE, HELPER]
+    def test_a_listing_inside_a_function_reads_that_function(self) -> None:
+        inside = LedgerEntry(
+            id="ev_0006",
+            tool="disassemble",
+            args={"address": hex(STEP + 0x40)},
+            output="0x180003040  mov eax, 1\n0x180003045  ret\n",
+        )
+
+        found = callees_to_read(CLAIMS, [*OWN, inside], PACK)
+
+        assert STEP not in _addresses(found)
 
     def test_an_analyst_that_listed_no_code_is_not_read_at_all(self) -> None:
         with patch("maljan.agents.callees_question.build_function_map") as built:
-            found = callees_to_read(DESCRIBED, [], PACK)
+            found = callees_to_read(CLAIMS, [], PACK)
 
-        assert found.ranked == ()
+        assert found.ranked == () and found.not_run == NOT_RUN_NO_LISTING
+        assert not found.says_why()
         built.assert_not_called()
 
     def test_the_order_is_the_same_whatever_order_the_pack_is_in(self) -> None:
-        one = callees_to_read(DESCRIBED, OWN, PACK)
-        two = callees_to_read(DESCRIBED, OWN, list(reversed(PACK)))
-
-        assert one == two
+        assert callees_to_read(CLAIMS, OWN, PACK) == callees_to_read(
+            CLAIMS, OWN, list(reversed(PACK))
+        )
 
 
 class TestTheQuestion:
     def test_it_lists_each_with_its_reason_and_forces_nothing(self) -> None:
-        violation = unread_callees_violation(callees_to_read(DESCRIBED, OWN, PACK))
+        violation = unread_callees_violation(callees_to_read(CLAIMS, OWN, PACK))
 
         assert violation is not None
-        assert violation.code == UNREAD_CALLEES_CODE
+        assert violation.code == UNREAD_CALLEES_CODE and violation.advisory
         assert (
-            f"{STEP:#x} (called by {OUTER:#x}; 2 call(s) from the start {START:#x}; "
+            f"{STEP:#x} (called by {OUTER:#x}; 3 call(s) from the start {START:#x}; "
             "1 caller(s); calls 2)"
         ) in violation.message
+        assert f"{GATE:#x} (called by {START:#x}; on the path from a start" in violation.message
         assert "leave them unread and change nothing" in violation.message
         assert "This is asked once." in violation.message
 
     def test_it_carries_no_text_the_sample_or_a_tool_wrote(self) -> None:
-        violation = unread_callees_violation(callees_to_read(DESCRIBED, OWN, PACK))
+        violation = unread_callees_violation(callees_to_read(CLAIMS, OWN, PACK))
 
         assert violation is not None
-        assert SECRET not in violation.message
-        assert "FUN_" not in violation.message
+        assert SECRET not in violation.message and "FUN_" not in violation.message
 
     def test_a_longer_list_is_bounded_and_says_so(self) -> None:
         many = [BASE + 0x20000 + 0x10 * i for i in range(CALLEES_SHOWN + 3)]
         own = [_batch("ev_0003", {OUTER: _listing(OUTER, *many)})]
 
-        found = callees_to_read(DESCRIBED, own, [])
+        found = callees_to_read(CLAIMS, own, [])
         violation = unread_callees_violation(found)
 
         assert len(found.ranked) == CALLEES_SHOWN + 3
@@ -257,7 +289,7 @@ class TestTheQuestion:
         assert hex(many[CALLEES_SHOWN]) not in violation.message
 
     def test_nothing_unread_is_no_question(self) -> None:
-        assert unread_callees_violation(callees_to_read(DESCRIBED, [], PACK)) is None
+        assert unread_callees_violation(callees_to_read(CLAIMS, [], PACK)) is None
 
 
 class TestTheShippedDeclarations:
@@ -269,14 +301,17 @@ class TestTheShippedDeclarations:
         own = [
             _batch(
                 "ev_0003",
-                {START: _listing(START, OUTER), OUTER: _listing(OUTER, STEP, SIDE, HELPER)},
+                {START: _listing(START, GATE), OUTER: _listing(OUTER, STEP, SIDE, HELPER)},
                 batch,
+                source="provider:ghidra",
             )
         ]
+        shipped_index = _index().model_copy(update={"source": "pack", "facts": index})
+        shipped_header = _header().model_copy(update={"facts": header})
 
-        found = callees_to_read(DESCRIBED, own, [_header(header), _index(index)])
+        found = callees_to_read(CLAIMS, own, [shipped_header, shipped_index])
 
-        assert [c.address for c in found.ranked] == [STEP, SIDE, HELPER]
+        assert _addresses(found) == [GATE, STEP, SIDE, HELPER]
         assert found.starts == STARTS_STATED
 
     def test_the_shipped_reverser_is_served_the_provider_s_decompiler(self) -> None:
@@ -289,7 +324,7 @@ class TestTheShippedDeclarations:
         assert batch is not None and batch["kind"] == "decompile_batch"
 
 
-def _inputs(entries: list[Any], pack: list[Any]) -> AnswerCheckInputs:
+def _inputs() -> AnswerCheckInputs:
     return AnswerCheckInputs(
         attck=None,
         ledger_ids=["ev_0003"],
@@ -301,55 +336,33 @@ def _inputs(entries: list[Any], pack: list[Any]) -> AnswerCheckInputs:
         alignment=None,
         alignment_threshold=0.3,
         alignment_margin=0.4,
-        entries=entries,
-        pack=pack,
     )
 
 
 class TestTheComposition:
-    def test_the_question_is_one_of_the_answer_s_checks_only_when_asked_for(self) -> None:
-        isr = AgentISR(agent_id="reverser", domain="code", claims=DESCRIBED)
+    def test_the_question_is_one_of_the_answer_s_checks_only_when_handed_a_list(self) -> None:
+        isr = AgentISR(agent_id="a", domain="code", claims=CLAIMS)
 
-        def _codes(asked: bool) -> list[str]:
+        def _codes(callees: Any) -> list[str]:
             with patch("maljan.pipeline.validation.validate_isr", return_value=[]):
                 found = analyst_answer_checks(
                     isr,
-                    _inputs(OWN, PACK),
+                    _inputs(),
                     whole_answer=[],
                     unread=[],
                     functions=[],
                     weak_alignment_challenges=False,
-                    callees_question=asked,
+                    callees=callees,
                 )
             return [v.code for v in found]
 
-        assert UNREAD_CALLEES_CODE in _codes(True)
-        assert UNREAD_CALLEES_CODE not in _codes(False)
-
-    def test_a_check_that_raises_asks_nothing_and_keeps_the_others(self) -> None:
-        isr = AgentISR(agent_id="reverser", domain="code", claims=DESCRIBED)
-        with (
-            patch("maljan.pipeline.validation.validate_isr", return_value=[]),
-            patch(
-                "maljan.agents.callees_question.callees_to_read",
-                side_effect=RuntimeError("x"),
-            ),
-        ):
-            found = analyst_answer_checks(
-                isr,
-                _inputs(OWN, PACK),
-                whole_answer=[],
-                unread=[],
-                functions=[],
-                weak_alignment_challenges=False,
-                callees_question=True,
-            )
-
-        assert found == []
+        assert UNREAD_CALLEES_CODE in _codes(callees_to_read(CLAIMS, OWN, PACK))
+        assert UNREAD_CALLEES_CODE not in _codes(None)
+        assert UNREAD_CALLEES_CODE not in _codes(CalleesFound())
 
 
 FIRST = (
-    f"CLAIM 1: {START:#x} is the export, and it calls {OUTER:#x}.\n"
+    f"CLAIM 1: {START:#x} is the export, and it calls {GATE:#x}.\n"
     "EVIDENCE: [ev_0003]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
     f"CLAIM 2: {OUTER:#x} decrypts the configuration.\n"
     "EVIDENCE: [ev_0003]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
@@ -358,16 +371,20 @@ RETRY = (
     f"CLAIM 3: {STEP:#x} reads the settings file.\n"
     "EVIDENCE: [ev_0007]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
 )
+HOST_ANSWER = (
+    "CLAIM 1: The host resolves.\nEVIDENCE: [ev_0003]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
+)
 
 
 class _Analyst(BaseAnalyst):
     def __init__(self, replies: list[str], entries: list[LedgerEntry]) -> None:
-        super().__init__(llm=MagicMock(), name="reverser")
+        super().__init__(llm=MagicMock(), name="my_code_reader")
         self._evidence_entries = list(entries)
         self._replies = list(replies)
         self.seen_turns: list[list[Any]] = []
         self.pack_entries = list(PACK)
         self.read_on_retry: LedgerEntry | None = None
+        self._budget_records = [{"steps_used": 3}]
 
     def analyze(self, data: str) -> str:  # pragma: no cover - unused
         return ""
@@ -377,7 +394,7 @@ class _Analyst(BaseAnalyst):
 
     def _invoke_llm_with_timeout(self, messages: list, timeout: float, **_: Any) -> str:
         self.seen_turns.append(list(messages))
-        # What the analyst's own tools would file when it reads a callee.
+        # What the analyst's own tools would file when it reads a function.
         if self.read_on_retry is not None:
             self._evidence_entries.append(self.read_on_retry)
             self.read_on_retry = None
@@ -386,127 +403,166 @@ class _Analyst(BaseAnalyst):
         return text
 
 
-def _check(analyst: _Analyst, first: str = FIRST) -> AgentISR:
+@pytest.fixture
+def tools() -> Iterator[None]:
+    """The turn after the loop carries the analyst's tools, its loop answered by the fake."""
+    with (
+        patch.object(BaseAnalyst, "_turns_carry_tools", return_value=True),
+        patch.object(
+            BaseAnalyst,
+            "_answer_after_loop",
+            lambda self, messages, timeout, **kw: self._invoke_llm_with_timeout(
+                kw.get("plain") or messages, timeout
+            ),
+        ),
+    ):
+        yield
+
+
+def _events(analyst: _Analyst, first: str = FIRST) -> list[tuple[str, dict[str, Any]]]:
+    recorded: list[tuple[str, dict[str, Any]]] = []
     isr = analyst._text_to_isr(first, 0)
     with (
         patch("maljan.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+        patch.object(
+            BaseAnalyst,
+            "_event_sink",
+            lambda _self: lambda kind, data: recorded.append((kind, data)),
+        ),
     ):
-        return analyst._validate_isr(isr, "evidence")
+        analyst.result = analyst._validate_isr(isr, "evidence")  # type: ignore[attr-defined]
+    return recorded
 
 
-@pytest.fixture
-def one_loop(monkeypatch: pytest.MonkeyPatch) -> Any:
-    def _give(analyst: _Analyst) -> _Analyst:
-        analyst._budget_records = [{"steps_used": 3}]
-        return analyst
-
-    return _give
+def _notes(recorded: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
+    return [d for kind, d in recorded if kind == "agent_message"]
 
 
+@pytest.mark.usefixtures("tools")
 class TestTheValidationTurn:
-    def test_it_is_asked_once_and_what_the_analyst_read_is_recorded(self, one_loop: Any) -> None:
-        analyst = one_loop(_Analyst([RETRY], list(OWN)))
+    def test_it_is_asked_once_and_what_the_analyst_read_is_recorded(self) -> None:
+        analyst = _Analyst([RETRY], list(OWN))
         analyst.read_on_retry = _decompile("ev_0007", STEP, BASE + 0x5000, BASE + 0x6000)
 
-        result = _check(analyst)
+        recorded = _events(analyst)
 
         (turns,) = analyst.seen_turns
         question = str(turns[-1].content)
         assert UNREAD_CALLEES_CODE in question
         assert f"{STEP:#x}" in question and f"{HELPER:#x}" in question
-        assert any(f"{STEP:#x}" in c.claim for c in result.claims)
+        assert any(f"{STEP:#x}" in c.claim for c in analyst.result.claims)
         record = analyst._budget_records[-1]["callees_question"]
         assert record == {
-            "listed": 3,
-            "shown": [hex(STEP), hex(SIDE), hex(HELPER)],
+            "listed": 4,
+            "shown": [hex(GATE), hex(STEP), hex(SIDE), hex(HELPER)],
             "shown_at_most": CALLEES_SHOWN,
             "read_after": [hex(STEP)],
         }
         (row,) = [v for v in analyst.validation_findings if v.code == UNREAD_CALLEES_CODE]
         assert row.answered
-        assert "read 1 of those listed" in row.message and "left 2 unread" in row.message
+        assert "read 1 of those listed" in row.message and "left 3 unread" in row.message
+        states = [
+            d["state"]
+            for kind, d in recorded
+            if kind == "validation_feedback" and d["code"] == UNREAD_CALLEES_CODE
+        ]
+        assert states == ["retried", "answered"]
 
-    def test_a_later_turn_of_the_same_job_is_not_asked_again(self, one_loop: Any) -> None:
-        analyst = one_loop(_Analyst([RETRY], list(OWN)))
-        _check(analyst)
+    def test_a_later_turn_of_the_same_job_is_not_asked_again(self) -> None:
+        analyst = _Analyst([RETRY], list(OWN))
+        _events(analyst)
         analyst._replies = []
 
-        _check(analyst)
+        _events(analyst)
 
         assert len(analyst.seen_turns) == 1
 
-    def test_another_job_is_asked_again(self, one_loop: Any) -> None:
-        analyst = one_loop(_Analyst([RETRY, RETRY], list(OWN)))
-        _check(analyst)
+    def test_another_job_is_asked_again(self) -> None:
+        analyst = _Analyst([RETRY, RETRY], list(OWN))
+        _events(analyst)
         analyst._job_id = "another job"
 
-        _check(analyst)
+        _events(analyst)
 
         assert len(analyst.seen_turns) == 2
 
-    def test_it_rides_the_turn_another_question_already_takes(self, one_loop: Any) -> None:
-        # A decompiled routine no claim names is asked about in the same turn:
-        # one model call carries both questions.
+    def test_it_rides_the_turn_another_question_already_takes(self) -> None:
         own = [*OWN, _decompile("ev_0006", BASE + 0x7000)]
-        analyst = one_loop(_Analyst([RETRY], own))
+        analyst = _Analyst([RETRY], own)
 
-        _check(analyst)
+        _events(analyst)
 
         (turns,) = analyst.seen_turns
         question = str(turns[-1].content)
         assert UNREAD_CALLEES_CODE in question and "isr.decompiled_not_described" in question
 
-    def test_an_answer_with_nothing_unread_sends_nothing_new(self, one_loop: Any) -> None:
+    def test_an_answer_with_nothing_unread_sends_nothing_new(self) -> None:
         own = [
-            *OWN,
-            _decompile("ev_0005", STEP),
-            _decompile("ev_0006", SIDE),
-            _decompile("ev_0007", HELPER),
+            _batch("ev_0003", {START: _listing(START, OUTER), OUTER: _listing(OUTER)}),
         ]
-        first = FIRST + (
-            f"CLAIM 3: {STEP:#x}, {SIDE:#x} and {HELPER:#x} copy and free buffers.\n"
-            "EVIDENCE: [ev_0005]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
-        )
-        analyst = one_loop(_Analyst([], own))
-        # No index: what the read callees call is not stated, so nothing is unread.
+        analyst = _Analyst([], own)
         analyst.pack_entries = [_header()]
 
-        _check(analyst, first)
+        recorded = _events(analyst)
 
         assert analyst.seen_turns == []
         assert "callees_question" not in analyst._budget_records[-1]
+        assert _notes(recorded) == []
+
+    def test_a_check_that_raises_says_so_and_asks_nothing(self) -> None:
+        analyst = _Analyst([], list(OWN))
+        with patch("maljan.agents.base_agent.callees_to_read", side_effect=RuntimeError("x")):
+            recorded = _events(analyst)
+
+        assert analyst.seen_turns == []
+        (said,) = _notes(recorded)
+        assert said["text"].endswith("the check could not run (RuntimeError).")
+
+
+class TestATurnWithoutTools:
+    def test_a_turn_that_cannot_carry_tools_is_not_asked_and_says_why(self) -> None:
+        analyst = _Analyst([], list(OWN))
+
+        recorded = _events(analyst)
+
+        assert analyst.seen_turns == []
+        (said,) = _notes(recorded)
+        assert "carries no tools (the agent has no tools" in said["text"]
+        assert "not_run" in analyst._budget_records[-1]["callees_question"]
+
+    def test_too_few_steps_left_is_not_asked_and_says_why(self) -> None:
+        analyst = _Analyst([], list(OWN))
+        analyst._last_loop_steps_known = True
+        analyst._last_loop_steps_left = 2
+        with patch.object(BaseAnalyst, "_turns_carry_tools", return_value=True):
+            recorded = _events(analyst)
+
+        assert analyst.seen_turns == []
+        (said,) = _notes(recorded)
+        assert "2 step(s) of its loop were left" in said["text"]
 
 
 class TestTheRecord:
     def test_the_record_lists_what_was_asked_and_what_was_read(self) -> None:
-        record, answered = callees_asked_record(
-            DESCRIBED, OWN, [*OWN, _decompile("ev_0007", SIDE)], PACK
-        )
+        found = callees_to_read(CLAIMS, OWN, PACK)
+
+        record, answered = callees_asked_record(found, [*OWN, _decompile("ev_0007", SIDE)], PACK)
 
         assert record["read_after"] == [hex(SIDE)]
         assert answered is not None and answered.answered
 
     def test_nothing_asked_is_no_record(self) -> None:
-        assert callees_asked_record(DESCRIBED, [], [], PACK) == ({}, None)
+        assert callees_asked_record(CalleesFound(), OWN, PACK) == ({}, None)
 
     def test_the_run_summary_carries_it_per_agent(self) -> None:
         row = {"listed": 3, "shown": ["0x1"], "shown_at_most": 12, "read_after": []}
         builder = RunSummaryBuilder(start_time=0.0)
 
-        builder.set_budget({"reverser": [{"steps_used": 3, "callees_question": row}]})
+        builder.set_budget({"my_code_reader": [{"steps_used": 3, "callees_question": row}]})
 
         assert builder._budget is not None
-        assert builder._budget["reverser"]["callees_question"] == [row]
-
-
-def _events(analyst: _Analyst, first: str = FIRST) -> list[tuple[str, dict[str, Any]]]:
-    recorded: list[tuple[str, dict[str, Any]]] = []
-    with patch.object(
-        BaseAnalyst, "_event_sink", lambda _self: lambda kind, data: recorded.append((kind, data))
-    ):
-        _check(analyst, first)
-    return recorded
+        assert builder._budget["my_code_reader"]["callees_question"] == [row]
 
 
 def _acme(tool: str, kind: str) -> Any:
@@ -532,7 +588,7 @@ def _acme(tool: str, kind: str) -> Any:
 
 
 def _served(tool: str, facts: Any, source: str = "mcp:acme") -> LedgerEntry:
-    listings = {START: _listing(START, OUTER), OUTER: _listing(OUTER, STEP, SIDE, HELPER)}
+    listings = {START: _listing(START, GATE), OUTER: _listing(OUTER, STEP, SIDE, HELPER)}
     return LedgerEntry(
         id="ev_0003",
         tool=tool,
@@ -543,63 +599,42 @@ def _served(tool: str, facts: Any, source: str = "mcp:acme") -> LedgerEntry:
     )
 
 
-HOST_ANSWER = (
-    "CLAIM 1: The host resolves.\nEVIDENCE: [ev_0003]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n---\n"
-)
-
-
 class TestAnyAnalystAndAnyTool:
-    def test_a_user_s_analyst_with_a_declared_decompiler_of_its_own_is_asked(
-        self, one_loop: Any
-    ) -> None:
+    @pytest.mark.usefixtures("tools")
+    def test_a_user_s_analyst_with_a_declared_decompiler_of_its_own_is_asked(self) -> None:
         facts = _acme("lift_routines", "decompile_batch")
         assert facts is not None and facts["kind"] == "decompile_batch"
-        analyst = one_loop(_Analyst([RETRY], [_served("lift_routines", facts)]))
-        analyst.name = "my_code_reader"
+        analyst = _Analyst([RETRY], [_served("lift_routines", facts)])
 
         recorded = _events(analyst)
 
         (turns,) = analyst.seen_turns
         assert UNREAD_CALLEES_CODE in str(turns[-1].content)
-        states = [
-            d["state"]
-            for kind, d in recorded
-            if kind == "validation_feedback" and d["code"] == UNREAD_CALLEES_CODE
-        ]
-        assert states == ["retried", "answered"]
         assert {d["agent"] for kind, d in recorded if kind == "validation_feedback"} == {
             "my_code_reader"
         }
 
-    def test_an_undeclared_server_s_decompiler_is_read_by_what_its_name_says(
-        self, one_loop: Any
-    ) -> None:
-        entry = _served("decompile_many", None, source="mcp:unknown")
-        analyst = one_loop(_Analyst([RETRY], [entry]))
-        analyst.name = "my_code_reader"
+    @pytest.mark.usefixtures("tools")
+    def test_an_undeclared_server_s_decompiler_is_read_by_what_its_name_says(self) -> None:
+        analyst = _Analyst([RETRY], [_served("decompile_many", None, source="mcp:unknown")])
 
         _events(analyst)
 
         (turns,) = analyst.seen_turns
         assert UNREAD_CALLEES_CODE in str(turns[-1].content)
 
-    def test_an_undeclared_tool_nothing_says_lists_code_is_named_in_the_event(
-        self, one_loop: Any
-    ) -> None:
-        analyst = one_loop(_Analyst([], [_served("lift_all", None, source="mcp:unknown")]))
-        analyst.name = "my_code_reader"
+    def test_an_undeclared_tool_nothing_says_lists_code_is_named_in_the_note(self) -> None:
+        analyst = _Analyst([], [_served("lift_all", None, source="mcp:unknown")])
 
         recorded = _events(analyst)
 
         assert analyst.seen_turns == []
-        (said,) = [d for kind, d in recorded if kind == "agent_message"]
+        (said,) = _notes(recorded)
         assert said["speaker"] == "my_code_reader" and said["kind"] == "system"
         assert "1 undeclared tool(s) it called (lift_all)" in said["text"]
         assert "not_run" in analyst._budget_records[-1]["callees_question"]
 
-    def test_an_analyst_with_no_code_reading_source_is_not_asked_and_told_why(
-        self, one_loop: Any
-    ) -> None:
+    def test_an_analyst_that_reads_no_code_is_not_asked_and_nothing_is_said(self) -> None:
         lookup = LedgerEntry(
             id="ev_0003",
             tool="resolve_host",
@@ -608,25 +643,24 @@ class TestAnyAnalystAndAnyTool:
             source="mcp:acme",
             facts=_acme("resolve_host", "dns"),
         )
-        analyst = one_loop(_Analyst([], [lookup]))
+        analyst = _Analyst([], [lookup])
         analyst.name = "my_network_reader"
         analyst.pack_entries = []
 
         recorded = _events(analyst, HOST_ANSWER)
 
         assert analyst.seen_turns == []
-        (said,) = [d for kind, d in recorded if kind == "agent_message"]
-        assert said["text"].endswith(f"{NOT_RUN_NO_LISTING}.")
-        assert analyst._budget_records[-1]["callees_question"] == {"not_run": NOT_RUN_NO_LISTING}
+        assert _notes(recorded) == []
+        assert "callees_question" not in analyst._budget_records[-1]
 
-    def test_why_it_was_not_asked_is_said_once_per_job(self, one_loop: Any) -> None:
-        analyst = one_loop(_Analyst([], [_served("lift_all", None, source="mcp:unknown")]))
+    def test_why_it_was_not_asked_is_said_once_per_job(self) -> None:
+        analyst = _Analyst([], [_served("lift_all", None, source="mcp:unknown")])
 
         first = _events(analyst)
         second = _events(analyst)
 
-        assert len([k for k, _d in first if k == "agent_message"]) == 1
-        assert [k for k, _d in second if k == "agent_message"] == []
+        assert len(_notes(first)) == 1
+        assert _notes(second) == []
 
 
 class TestTheSeam:

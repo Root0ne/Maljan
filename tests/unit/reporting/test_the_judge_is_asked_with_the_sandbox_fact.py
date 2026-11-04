@@ -345,7 +345,9 @@ class TestTheVerdictAsksOnce:
         assert (row.subject, row.answered, row.asked) == (f"domain:{TLS_ONLY}", True, True)
 
     @pytest.mark.asyncio
-    async def test_the_conversation_shows_the_answered_question_as_resolved(self) -> None:
+    async def test_the_conversation_shows_the_answered_question_as_answered(self) -> None:
+        # A question answered as it allows is published ``answered``, as the
+        # analysts' loop publishes it (T-558), not as a fix.
         kept = self._answer(f"[domain-name:value = '{TLS_ONLY}']")
         published: list[tuple[str, Any]] = []
 
@@ -356,7 +358,7 @@ class TestTheVerdictAsksOnce:
             for kind, data in published
             if kind == "validation_feedback" and data["code"] == UNATTRIBUTED_INDICATOR_CODE
         ]
-        assert states == ["retried", "resolved"]
+        assert states == ["retried", "answered"]
 
     @pytest.mark.asyncio
     async def test_an_indicator_removed_after_the_question_leaves_no_row(self) -> None:

@@ -229,7 +229,7 @@ No comment names its meaning, and `maljan.pipeline.validation:schema_violations`
 
 ### `isr.callees_not_read`
 
-An analyst reading code stopped on its own with the main-path callees of routines it described unread. Those callees, ranked by the main path, are listed to it, once per job, and it decides whether to read them.
+An analyst reading code stopped on its own with the main-path callees of routines it read unread. Those functions, ranked by the main path, are listed to it, once per job, and it decides whether to read them.
 
 - **Raised at** `maljan.agents.callees_question:callees_asked_record`, `maljan.agents.callees_question:unread_callees_violation`
 - **Constant** `maljan.agents.callees_question:UNREAD_CALLEES_CODE`

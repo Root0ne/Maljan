@@ -12711,8 +12711,9 @@ async def retry_with_feedback[T](
 
     ``answered`` maps what is left, given what the producer was shown, before
     the conversation is told the outcome: a question the producer answered as
-    the question allows (``Violation.answered``) is published ``resolved``,
-    not ``survived``, and the mapped rows are what is returned.
+    the question allows (``Violation.answered``) is published ``answered``,
+    not ``survived``, as the synchronous loop publishes it, and the mapped rows
+    are what is returned.
 
     ``reply_to_calls`` is for a caller whose retries offer again the tool its
     first answer was asked with, and which sends nothing after the loop: an
@@ -12764,7 +12765,7 @@ async def retry_with_feedback[T](
     if answered is not None:
         violations = answered(violations, shown)
     if feed is not None:
-        feed.outcome(shown, [v for v in violations if not v.answered], retries)
+        feed.outcome(shown, violations, retries)
     return parsed, violations, retries
 
 
@@ -14303,10 +14304,6 @@ class AnswerCheckInputs:
     alignment: Any
     alignment_threshold: float
     alignment_margin: float
-    # The analyst's own entries and the triage pack's: the routines its claims
-    # describe whose callees no listing holds (``agents.callees_question``).
-    entries: Sequence[Any]
-    pack: Sequence[Any]
 
 
 def analyst_ledger_ids(
@@ -14352,24 +14349,6 @@ def whole_answer_questions(
     ]
 
 
-def unread_callees_question(candidate: Any, inputs: AnswerCheckInputs) -> Violation | None:
-    """The question about the unread callees of what ``candidate`` describes, or ``None``.
-
-    A check that raises asks nothing and says so in the log: the turn's other
-    questions are not lost to it.
-    """
-    from maljan.agents.callees_question import callees_to_read, unread_callees_violation
-
-    try:
-        found = callees_to_read(
-            getattr(candidate, "claims", None) or (), inputs.entries, inputs.pack
-        )
-    except Exception as exc:  # noqa: BLE001 — a fact left out never costs the turn
-        logger.warning("validation: the unread-callees check could not run (%s).", exc)
-        return None
-    return unread_callees_violation(found)
-
-
 def analyst_answer_checks(
     candidate: Any,
     inputs: AnswerCheckInputs,
@@ -14378,26 +14357,31 @@ def analyst_answer_checks(
     unread: Sequence[Violation],
     functions: Sequence[Violation],
     weak_alignment_challenges: bool,
-    callees_question: bool,
+    callees: Any,
 ) -> list[Violation]:
     """Every finding of the validation turn about one answer, in the turn's order.
 
     ``whole_answer`` (:func:`whole_answer_questions`), ``unread`` (the parse's
     findings, which the caller records) and ``functions`` (the function-claim
     check's) are computed by the caller, which keeps what they record.
-    ``callees_question`` asks about the unread callees of the routines the
-    answer describes; the turn asks it once per analyst and job.
+    ``callees`` is what the caller found around the routines the analyst read
+    (``agents.callees_question.CalleesFound``), asked about when it lists any;
+    ``None`` where the turn does not ask it (once per analyst and job).
     """
     undescribed = decompiled_not_described_violation(
         undescribed_decompiles(candidate, inputs.decompiled, inputs.image_bases)
     )
-    callees = unread_callees_question(candidate, inputs) if callees_question else None
+    callees_asked = None
+    if callees is not None:
+        from maljan.agents.callees_question import unread_callees_violation
+
+        callees_asked = unread_callees_violation(callees)
     library_only = library_only_claims_violation(candidate)
     return [
         *whole_answer,
         *unread,
         *([undescribed] if undescribed is not None else []),
-        *([callees] if callees is not None else []),
+        *([callees_asked] if callees_asked is not None else []),
         *([library_only] if library_only is not None else []),
         *functions,
         *validate_isr(

@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 from langchain_core.messages import AIMessage
 
 from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.callees_question import CalleesFound
 from maljan.agents.function_map import function_artefacts
 from maljan.pipeline.function_claims import FUNCTION_CLAIM_UNHELD_CODE
 from maljan.pipeline.validation import FUNCTION_CHECK_HEAD, technique_check_note
@@ -131,7 +132,7 @@ def _check(analyst: _Analyst, first: str = GUARD + WRONG) -> AgentISR:
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         # The listing's helper is a callee no listing holds: the question
         # about it (T-558) is tested apart, and here only this check asks.
-        patch("maljan.pipeline.validation.unread_callees_question", return_value=None),
+        patch("maljan.agents.base_agent.callees_to_read", return_value=CalleesFound()),
     ):
         return analyst._validate_isr(isr, "evidence")
 
@@ -141,6 +142,38 @@ def _left(analyst: _Analyst) -> list[Any]:
 
 
 class TestTheTurn:
+    def test_it_rides_one_turn_with_the_unread_functions_question_through_the_keep(
+        self,
+    ) -> None:
+        # The listing's helper is unread (T-558): both questions go in one
+        # turn, the retry is merged by claim number, and the unread-functions
+        # question ends answered, not unresolved.
+        from maljan.agents.callees_question import UNREAD_CALLEES_CODE
+
+        analyst = _Analyst([FIXED])
+        isr = analyst._text_to_isr(GUARD + WRONG, 0)
+        with (
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+            patch.object(BaseAnalyst, "_turns_carry_tools", return_value=True),
+            patch.object(
+                BaseAnalyst,
+                "_answer_after_loop",
+                lambda self, messages, timeout, **kw: self._invoke_llm_with_timeout(
+                    kw.get("plain") or messages, timeout
+                ),
+            ),
+        ):
+            result = analyst._validate_isr(isr, "evidence")
+
+        (turns,) = analyst.seen_turns
+        question = str(turns[-1].content)
+        assert FUNCTION_CLAIM_UNHELD_CODE in question and UNREAD_CALLEES_CODE in question
+        assert "GetTickCount" in result.claims[1].claim
+        assert _left(analyst) == []
+        (row,) = [v for v in analyst.validation_findings if v.code == UNREAD_CALLEES_CODE]
+        assert row.answered and "left 1 unread by its own choice" in row.message
+
     def test_the_question_is_asked_once_and_a_correction_stands(self) -> None:
         analyst = _Analyst([GUARD + FIXED])
 
