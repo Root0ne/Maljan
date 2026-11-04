@@ -1727,10 +1727,20 @@ def describe_exception_for_log(exc: BaseException) -> str:
 # Structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block parsing
 # (``read_claim_blocks``), the one reader every path that reads claims uses.
 _BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULTILINE)
+# The colon after a field label that begins a line, as ``_FIELD_LINE_RE``
+# reads it: closing emphasis or spaces may stand before it ("**TECHNIQUE**:",
+# "EVIDENCE :"). Read possessively, so a long run of spaces is read once.
+_LABEL_COLON = r"[ \t]*+(?:\*\*)?+[ \t]*+:"
 # The sentence ends where ``_TAIL_START_RE`` begins the fields, in the same
-# casing, so a line read as the technique is never also the sentence's.
+# casing, so a line read as the technique is never also the sentence's. Its
+# end is tried where a run of whitespace begins, so a long run is read once,
+# not once per character of it.
 _BLOCK_CLAIM_RE = re.compile(
-    r"CLAIM:\s*(.+?)(?=\s*\n" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE)):|\Z)",
+    r"CLAIM:\s*(.+?)(?=(?<!\s)\s*\n"
+    + LINE_PREFIX
+    + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE))"
+    + _LABEL_COLON
+    + r"|\Z)",
     re.DOTALL,
 )
 # A field line, as a claim's sentence would begin if its heading wrote none:
@@ -1772,7 +1782,7 @@ _FIELD_VALUE_START_RE = re.compile(
 # models write a claim's fields on one line as well as on three
 # ("EVIDENCE: [ev_0309]. CONFIDENCE: 0.65 TECHNIQUE: T1071.001").
 _TAIL_START_RE = re.compile(
-    r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE)):", re.MULTILINE
+    r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|(?i:TECHNIQUE))" + _LABEL_COLON, re.MULTILINE
 )
 _INLINE = r"(?:^|(?<=[\s*_>#]))"
 # EVIDENCE runs to the next CONFIDENCE or TECHNIQUE label that starts a line
@@ -1781,9 +1791,13 @@ _INLINE = r"(?:^|(?<=[\s*_>#]))"
 # id written after them stays cited. Only when no such line follows does it
 # end at a label written later on its own line, spelled in capitals as the
 # labels are ("EVIDENCE: [ev_0309]. CONFIDENCE: 0.65 TECHNIQUE: T1071.001").
-_BLOCK_EVIDENCE_LABEL_RE = re.compile(_INLINE + r"EVIDENCE:[ \t]*", re.MULTILINE)
+# A label that begins a line is read in the spellings ``_LABEL_COLON`` reads.
+_BLOCK_EVIDENCE_LABEL_RE = re.compile(
+    r"(?:^" + LINE_PREFIX + r"EVIDENCE" + _LABEL_COLON + r"|" + _INLINE + r"EVIDENCE:)[ \t]*",
+    re.MULTILINE,
+)
 _EVIDENCE_ENDS_AT_LINE_START_RE = re.compile(
-    r"\n" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE)):"
+    r"\n" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE))" + _LABEL_COLON
 )
 # A run of whitespace is read from its start and possessively, so a long run
 # is read once, not once per character of it.
@@ -1791,7 +1805,9 @@ _EVIDENCE_ENDS_INLINE_RE = re.compile(r"(?<!\s)\s++" + LINE_PREFIX + r"(?:CONFID
 # The CONFIDENCE value as written: what follows the label on its line, read
 # by ``_stated_confidence``. A label present with nothing readable after it is
 # a confidence the reader could not read, not one the analyst left out.
-_LINE_CONFIDENCE_RE = re.compile(r"^" + LINE_PREFIX + r"CONFIDENCE:[ \t]*(.*)$", re.MULTILINE)
+_LINE_CONFIDENCE_RE = re.compile(
+    r"^" + LINE_PREFIX + r"CONFIDENCE" + _LABEL_COLON + r"[ \t]*(.*)$", re.MULTILINE
+)
 _BLOCK_CONFIDENCE_RE = re.compile(_INLINE + r"CONFIDENCE:[ \t]*(.*)$", re.MULTILINE)
 # The number that opens the value: digits with at most one decimal point, and
 # a percent sign after it where one is written. What follows the number (a
@@ -1809,13 +1825,18 @@ UNREADABLE_CONFIDENCE_MARK = "(empty)"
 # The whole TECHNIQUE value as written: one id is a claimed technique, and
 # anything more (a qualifier, a negation, a second id) is the analyst's line,
 # kept and asked about rather than read for the first id in it. It ends at the
-# line's end or at a CONFIDENCE or EVIDENCE label written after it.
+# line's end or at a CONFIDENCE or EVIDENCE label written after it, tried
+# where a run of spaces begins, so a long run is read once.
 _LINE_TECHNIQUE_RE = re.compile(
-    r"^" + LINE_PREFIX + r"(?i:TECHNIQUE):[ \t]*(.*?)(?=[ \t]+(?:CONFIDENCE|EVIDENCE):|$)",
+    r"^"
+    + LINE_PREFIX
+    + r"(?i:TECHNIQUE)"
+    + _LABEL_COLON
+    + r"[ \t]*(.*?)(?=(?<![ \t])[ \t]+(?:CONFIDENCE|EVIDENCE):|$)",
     re.MULTILINE,
 )
 _BLOCK_TECHNIQUE_LINE_RE = re.compile(
-    _INLINE + r"TECHNIQUE:[ \t]*(.*?)(?=[ \t]+(?:CONFIDENCE|EVIDENCE):|$)", re.MULTILINE
+    _INLINE + r"TECHNIQUE:[ \t]*(.*?)(?=(?<![ \t])[ \t]+(?:CONFIDENCE|EVIDENCE):|$)", re.MULTILINE
 )
 
 
