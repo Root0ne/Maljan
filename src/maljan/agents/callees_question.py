@@ -347,15 +347,16 @@ def _reading(entries: Sequence[Any], pack: Sequence[Any]) -> _Reading:
                 held[to] = None
                 callers_of.setdefault(to, set()).add(at)
     known = {*graph, *callers_of}
-    starts = sorted(known)
+    # The function starts the index's own rows state: a function no row is
+    # (a leaf no call was stated for) is never one an address is placed in.
+    starts = sorted(_index_starts(every, bases))
     # A decompiled listing names its own function; an instruction listing is
     # of the address it was asked for, which may stand inside one.
     decompiled = {str(getattr(e, "id", "") or "") for e in entries if entry_decompiles(e)}
-    indexed = any(_map_kind(e) == _INDEX_KIND for e in every)
     read: dict[int, list[str]] = {}
     for address, listed in read_routines(every, mapped, edges).items():
         key = _held_in(address, known, bases)
-        if key is None and indexed and not decompiled.issuperset(listed):
+        if key is None and starts and not decompiled.issuperset(listed):
             # An address inside a function: the function whose start is the
             # last one the index states before it, where a later start bounds it.
             at = bisect_right(starts, address)
@@ -364,6 +365,20 @@ def _reading(entries: Sequence[Any], pack: Sequence[Any]) -> _Reading:
         held_listed = read.setdefault(key, [])
         held_listed.extend(e for e in listed if e not in held_listed)
     return _Reading(context, bases, graph, callers_of, read)
+
+
+def _index_starts(entries: Iterable[Any], bases: Sequence[int]) -> set[int]:
+    """The function starts the function index answers state as their rows."""
+    out: set[int] = set()
+    for entry in entries:
+        data = _parsed(entry) if _map_kind(entry) == _INDEX_KIND else None
+        rows = data.get("rows") if isinstance(data, Mapping) else None
+        for row in rows if isinstance(rows, list) else ():
+            if isinstance(row, Mapping):
+                function = _hex(row.get("function")) or _hex(row.get("offset"))
+                if function is not None:
+                    out.add(one_spelling(function, bases))
+    return out
 
 
 def callees_to_read(

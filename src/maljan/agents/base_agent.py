@@ -37,11 +37,13 @@ if TYPE_CHECKING:
 
 from maljan.agents.callees_question import (
     NOT_RUN_FAILED,
+    NOT_RUN_NO_LISTING,
     NOT_RUN_NO_TOOLS,
     UNREAD_CALLEES_CODE,
     CalleesFound,
     callees_asked_record,
     callees_to_read,
+    reads_code,
 )
 from maljan.agents.claim_headings import (
     LINE_PREFIX,
@@ -6330,21 +6332,32 @@ class BaseAnalyst(BudgetMeter, ABC):
         live = getattr(self, "_live_map_entries", None) or []
         return [*rows, *live]
 
-    def _callees_to_ask(self, isr: AgentISR, entries: Sequence[Any], job: str) -> Any:
+    def _callees_to_ask(
+        self, isr: AgentISR, own: Sequence[Any], entries: Callable[[], Sequence[Any]], job: str
+    ) -> Any:
         """What the unread-functions question would list for ``isr``, or ``None`` to ask nothing.
 
-        ``None`` where nothing is unread, where the analyst reads no code
-        (nothing is said), and where the platform could not tell or the turn
-        after the loop cannot carry the analyst's tools to read with: then why
-        is said once per job, in the analyst's conversation and on its loop's
-        record (``callees_question.not_run``). Never raises.
+        Whether the analyst reads code is read off this loop's own entries
+        (``own``) first; only when it does are ``entries``, every entry of the
+        job the map kept, fetched, so an analyst that reads no code pays nothing. ``None`` where nothing is unread, where the analyst
+        reads no code (nothing is said), and where the platform could not
+        tell: then why is said once per job, in the analyst's conversation and
+        on its loop's record (``callees_question.not_run``). Whether the turn
+        can carry the tools to read with is decided where the turn is asked
+        (:meth:`_callees_without_tools`). Never raises.
         """
+        definition = getattr(self, "_resolved", None)
         try:
+            code, why = reads_code(definition, own)
+            if not code:
+                if why != NOT_RUN_NO_LISTING:
+                    BaseAnalyst._state_callees_not_run(self, why, job)
+                return None
             found = callees_to_read(
                 isr.claims,
-                entries,
+                entries(),
                 list(getattr(self, "pack_entries", None) or ()),
-                definition=getattr(self, "_resolved", None),
+                definition=definition,
             )
         except Exception as exc:  # noqa: BLE001 — a fact left out never costs the turn
             self.logger.warning("%s: the unread-callees check could not run (%s).", self.name, exc)
@@ -6356,20 +6369,25 @@ class BaseAnalyst(BudgetMeter, ABC):
             if found.says_why():
                 BaseAnalyst._state_callees_not_run(self, found.not_run, job)
             return None
-        why = ""
-        if not BaseAnalyst._turns_carry_tools(self, VALIDATION_RETRY_CALL):
-            why = "the agent has no tools, or its model could not bind them"
-        elif bool(getattr(self, "_last_loop_steps_known", False)):
+        return found
+
+    def _callees_without_tools(self, tooled: bool) -> str:
+        """Why the turn being asked cannot carry the tools to read a function with, or ``""``.
+
+        ``tooled`` is the turn's own :meth:`_turns_carry_tools`, read once
+        where the turn is asked; with fewer than three steps of the loop left
+        its questions are asked without tools too (:meth:`_answer_after_loop`).
+        """
+        if not tooled:
+            return "the agent has no tools, or its model could not bind them"
+        if bool(getattr(self, "_last_loop_steps_known", False)):
             steps = getattr(self, "_last_loop_steps_left", None)
             if isinstance(steps, int) and steps < 3:
-                why = (
+                return (
                     f"{steps} step(s) of its loop were left, and a turn that may call a tool "
                     "needs three"
                 )
-        if why:
-            BaseAnalyst._state_callees_not_run(self, NOT_RUN_NO_TOOLS.format(why=why), job)
-            return None
-        return found
+        return ""
 
     def _state_callees_not_run(self, reason: str, job: str) -> None:
         """Say why the unread-functions question was not put, once per job. Never raises."""
@@ -10388,7 +10406,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             return [*kept_for_map[0], *_ledger().own]
 
         callees_to_ask: CalleesFound | None = (
-            BaseAnalyst._callees_to_ask(self, isr, _code_entries(), job)  # type: ignore[arg-type]
+            BaseAnalyst._callees_to_ask(  # type: ignore[arg-type]
+                self, isr, _ledger().own, _code_entries, job
+            )
             if not only_cut and _callees_open()
             else None
         )
@@ -10488,6 +10508,18 @@ class BaseAnalyst(BudgetMeter, ABC):
         # model binds them (``_answer_after_loop``), and the prompt says which.
         tooled = BaseAnalyst._turns_carry_tools(self, VALIDATION_RETRY_CALL)  # type: ignore[arg-type]
         self._questions_carry_tools = tooled
+        # The unread-functions question asks the analyst to read: a turn that
+        # cannot carry its tools does not put it, and says why.
+        if callees_to_ask is not None and any(v.code == UNREAD_CALLEES_CODE for v in initial):
+            no_tools = BaseAnalyst._callees_without_tools(self, tooled)  # type: ignore[arg-type]
+            if no_tools:
+                callees_to_ask = None
+                initial = [v for v in initial if v.code != UNREAD_CALLEES_CODE]
+                BaseAnalyst._state_callees_not_run(  # type: ignore[arg-type]
+                    self, NOT_RUN_NO_TOOLS.format(why=no_tools), job
+                )
+                if not initial:
+                    return isr
         prompt = self._system_prompt("", tools=None if tooled else ())
         messages: list[BaseMessage] = []
         if prompt:

@@ -97,7 +97,9 @@ def _decompile(entry: str, address: int, *calls: int) -> LedgerEntry:
     )
 
 
-def _index(*, threads: bool = False, entry: bool = False) -> LedgerEntry:
+def _index(
+    *, threads: bool = False, entry: bool = False, rows: list[int] | None = None
+) -> LedgerEntry:
     others = {
         hex(START): [hex(GATE)],
         hex(GATE): [hex(OUTER)],
@@ -112,7 +114,8 @@ def _index(*, threads: bool = False, entry: bool = False) -> LedgerEntry:
             [{"function": hex(START), "offset": "0x1000", "entry_point": True, "callees": []}]
             if entry
             else []
-        ),
+        )
+        + [{"function": hex(a), "offset": hex(a - BASE), "callees": []} for a in rows or ()],
         "other_callees": others,
     }
     if threads:
@@ -235,9 +238,15 @@ class TestWhatIsListed:
             output="0x180003040  mov eax, 1\n0x180003045  ret\n",
         )
 
-        found = callees_to_read(CLAIMS, [*OWN, inside], PACK)
+        # The index's own rows state where each function starts.
+        index = _index(rows=[STEP, SIDE])
+
+        found = callees_to_read(CLAIMS, [*OWN, inside], [_header(), index])
 
         assert STEP not in _addresses(found)
+        # With no row stating where the function starts, the address is
+        # placed in no function: a call graph key alone is not a start.
+        assert STEP in _addresses(callees_to_read(CLAIMS, [*OWN, inside], PACK))
 
     def test_an_analyst_that_listed_no_code_is_not_read_at_all(self) -> None:
         with patch("maljan.agents.callees_question.build_function_map") as built:
@@ -541,6 +550,31 @@ class TestATurnWithoutTools:
         assert analyst.seen_turns == []
         (said,) = _notes(recorded)
         assert "2 step(s) of its loop were left" in said["text"]
+
+    def test_a_turn_never_asked_reads_no_tools_and_records_no_reason(self) -> None:
+        # The loop left no time for an answer: no turn is asked, so whether one
+        # could carry tools is never read, and no degradation is recorded.
+        analyst = _Analyst([], list(OWN))
+        with (
+            patch.object(BaseAnalyst, "_turns_carry_tools") as carries,
+            patch.object(BaseAnalyst, "_seconds_the_last_loop_left", return_value=0.0),
+            patch.object(BaseAnalyst, "seconds_an_answer_needs", return_value=10.0),
+        ):
+            recorded = _events(analyst)
+
+        carries.assert_not_called()
+        assert analyst.seen_turns == []
+        assert _notes(recorded) == []
+        (row,) = [v for v in analyst.validation_findings if v.code == UNREAD_CALLEES_CODE]
+        assert row.advisory and not row.asked
+
+    def test_an_analyst_that_reads_no_code_reads_no_kept_entries(self) -> None:
+        lookup = LedgerEntry(id="ev_0003", tool="resolve_host", args={}, output="{}")
+        analyst = _Analyst([], [lookup])
+        with patch.object(BaseAnalyst, "_kept_map_entries") as kept:
+            _events(analyst, HOST_ANSWER)
+
+        kept.assert_not_called()
 
 
 class TestTheRecord:
