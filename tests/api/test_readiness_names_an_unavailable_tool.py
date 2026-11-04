@@ -26,6 +26,11 @@ from app.deps import get_current_user, optional_current_user
 from maljan.core.config import Settings
 from maljan.tools import capabilities, emulated_strings
 
+# A corpus that holds: the check before a job looks for a non-empty file, and
+# the scan for a rule, so a fixture that means "held" writes one.
+YARA_RULE = "rules:\n  - id: held\n    technique_id: T1059\n    patterns: [held]\n"
+
+
 CAPA_ROW = {
     "server": "analysis",
     "tool": "capa",
@@ -186,7 +191,7 @@ def _host_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     monkeypatch.setattr(capabilities, "_data_root", lambda: tmp_path)
     (tmp_path / "data" / "sigma_rules").mkdir(parents=True)
     (tmp_path / "data" / "sigma_rules" / "r.yml").write_text("title: r\n", encoding="utf-8")
-    (tmp_path / "data" / "yara_ttp_rules.yaml").write_text("rules: []\n", encoding="utf-8")
+    (tmp_path / "data" / "yara_ttp_rules.yaml").write_text(YARA_RULE, encoding="utf-8")
     return Settings()
 
 
@@ -240,7 +245,7 @@ class TestAnInProcessRuleEngine:
         response = _submit(settings=settings)
         assert response.status_code == 201
         (row,) = response.json()["unavailable_tools"]
-        assert (row["server"], row["tool"]) == ("analysis", "sigma_match_sandbox")
+        assert (row["server"], row["tool"]) == ("pipeline", "sigma_match_sandbox")
         assert row["reason"] == "data/sigma_rules is missing or empty (named by the default)"
         assert row["manifest_code"] == "missing_dependency"
         assert _status(MagicMock(role="user"), settings)["unavailable_tools"] == [row]

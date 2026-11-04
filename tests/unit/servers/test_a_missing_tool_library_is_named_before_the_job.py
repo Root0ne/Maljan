@@ -152,7 +152,11 @@ class TestReadinessNamesWhatTheJobWouldCall:
     ) -> None:
         asked = _without(monkeypatch, "sigma")
         found = unavailable_tools(Settings())
-        assert [u.tool for u in found] == ["sigma_match", "sigma_match_sandbox"]
+        assert [(u.server, u.tool) for u in found] == [
+            ("analysis", "sigma_match"),
+            ("analysis", "sigma_match_sandbox"),
+            ("pipeline", "sigma_match_sandbox"),
+        ]
         # Once for the server and once for the worker, where the pack's Sigma
         # pass runs: two tools needing it in one place ask once.
         assert asked.count("sigma") == 2

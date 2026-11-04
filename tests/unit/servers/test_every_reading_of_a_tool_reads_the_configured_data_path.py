@@ -38,6 +38,11 @@ def _populated(directory: Path) -> Path:
     return directory
 
 
+# A corpus that holds: the check before a job looks for a non-empty file, and
+# the scan for a rule, so a fixture that means "held" writes one.
+YARA_RULE = "rules:\n  - id: held\n    technique_id: T1059\n    patterns: [held]\n"
+
+
 @pytest.fixture
 def root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """A project root of its own for relative data paths, holding nothing yet."""
@@ -52,7 +57,7 @@ def host(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
     monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a, **k: object())
     monkeypatch.setattr(emulated_strings, "find_floss", lambda environ=None: ("floss", ""))
     _populated(root / "data" / "sigma_rules")
-    (root / "data" / "yara_ttp_rules.yaml").write_text("rules: []\n", encoding="utf-8")
+    (root / "data" / "yara_ttp_rules.yaml").write_text(YARA_RULE, encoding="utf-8")
     return root
 
 

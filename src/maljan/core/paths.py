@@ -10,6 +10,7 @@ against the current working directory.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from maljan.core.exceptions import ProjectRootNotFoundError
@@ -155,3 +156,31 @@ def _rooted(value: str, project_root: Path | None = None) -> tuple[str, bool]:
     except (OSError, ValueError):
         return value, False
     return str(rooted), False
+
+
+# An absolute POSIX path in free text: a slash not after a word character, a
+# colon, a dot or another slash (a URL's ``//`` and a relative ``a/b`` are not
+# one), then path characters.
+_ABSOLUTE_PATH = re.compile(r"(?<![\w:./])/[\w.@%+~-]+(?:/[\w.@%+~-]+)*/?")
+
+# What a path off the project is shown as: the host's layout is not the reader's.
+OUTSIDE_PROJECT = "a path outside the project"
+
+
+def host_paths_masked(text: str, project_root: Path | None = None) -> str:
+    """``text`` with each absolute path shown from the project root, or masked outside it.
+
+    For words a report or an answer to any signed-in user carries: a path in
+    the project reads as the operator wrote it relative to the root
+    (``data/sigma_rules``), and one outside it as :data:`OUTSIDE_PROJECT`,
+    never as the host's own layout.
+    """
+    root = get_project_root() if project_root is None else project_root
+
+    def shown(match: re.Match[str]) -> str:
+        path = Path(os.path.normpath(match.group(0)))
+        if path.is_relative_to(root) and path != root:
+            return path.relative_to(root).as_posix()
+        return OUTSIDE_PROJECT
+
+    return _ABSOLUTE_PATH.sub(shown, str(text or ""))

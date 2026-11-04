@@ -220,7 +220,13 @@ def _data_root() -> Path:
 
 
 def data_held(path: str | os.PathLike[str], pattern: str = "*") -> bool:
-    """Whether ``path`` holds data: a non-empty file, or a directory with a file of ``pattern``."""
+    """Whether ``path`` holds data: a non-empty file, or a directory with a file of ``pattern``.
+
+    A look, not a load: nothing is parsed, so it stays cheap enough for every
+    submit and status read. A file that is there and holds no rule (a YARA
+    corpus of ``rules: []``) passes it; the engine that reads it answers that
+    it did not run (``tools.rules._not_loaded``), and the run is degraded then.
+    """
     target = Path(path)
     try:
         if target.is_file():

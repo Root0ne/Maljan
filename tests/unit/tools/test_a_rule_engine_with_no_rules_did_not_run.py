@@ -17,14 +17,19 @@ before a job looks at the corpus of every in-process step a sidecar declares.
 from __future__ import annotations
 
 import importlib.util
+import json
+import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from app.services.tool_availability import as_rows, unavailable_tools
+from app.services.tool_availability import WORKER, as_rows, unavailable_tools
 from maljan.agents.evidence_recorder import EvidenceRecorder
+from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.core.config import Settings
+from maljan.core.paths import OUTSIDE_PROJECT, get_project_root
+from maljan.pipeline.operator_choice import SampleFacts, lost_tool_rows
 from maljan.pipeline.triage_pack import PIPELINE, run_is_degraded, run_pack
 from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers import MarkdownRenderer
@@ -35,6 +40,11 @@ from maljan.tools.errors import BAD_ARGUMENT, MISSING_DEPENDENCY, error_parts
 from tests.unit.pipeline.test_triage_pack import SANDBOX_REPORT, _inputs, _write
 from tests.unit.tools.test_binary import _pe
 from tests.unit.tools.test_rules import SIGMA_RULE
+
+FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "reporting"
+SIGMA_REASON = (
+    "no rule was loaded from data/sigma_rules, which is missing or holds none, so no rule was run"
+)
 
 YARA_RULES = """
 rules:
@@ -123,6 +133,108 @@ class TestTheEngineAnswer:
         assert "no rule was loaded from" in message
         assert remedy == sidecar_needs.CAPA_RULES.remedy
 
+    def test_a_path_outside_the_project_is_named_by_what_named_it(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv(rules.SIGMA_RULES_ENV, str(tmp_path / "gone"))
+        _code, message, _remedy = _failure(rules.sigma_match([]))
+        assert message.startswith("no rule was loaded from the path MALJAN_SIGMA_RULES_DIR names,")
+        assert str(tmp_path) not in message
+        _code, message, _remedy = _failure(rules.sigma_match([], ruleset=str(tmp_path / "x")))
+        assert message.startswith("no rule was loaded from the ruleset named,")
+        sample = tmp_path / "s.exe"
+        sample.write_bytes(b"MZ")
+        _code, message, _remedy = _failure(rules.capa(str(sample), rules_dir=str(tmp_path / "x")))
+        assert message.startswith("no rule was loaded from the path static.capa.rules_dir names,")
+
+
+class TestADirectoryCorpus:
+    def test_its_files_are_compiled_once_and_a_bad_one_is_named_and_skipped(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from maljan.analysis import yara_layer
+
+        corpus = tmp_path / "yara"
+        corpus.mkdir()
+        (corpus / "a.yaml").write_text(YARA_RULES, encoding="utf-8")
+        (corpus / "b.yml").write_text(YARA_RULES.replace("marker_rule", "second"), "utf-8")
+        (corpus / "broken.yml").write_text("not: [a rule list\n", encoding="utf-8")
+        monkeypatch.setenv(rules.YARA_RULES_ENV, str(corpus))
+        compiled: list[int] = []
+        real = yara_layer.YaraLayer.__init__
+
+        def counting(self: Any, rules: list[Any]) -> None:
+            compiled.append(len(rules))
+            real(self, rules)
+
+        monkeypatch.setattr(yara_layer.YaraLayer, "__init__", counting)
+        sample = tmp_path / "s.bin"
+        sample.write_bytes(b"xx MARKER yy")
+
+        answer = rules.yara_scan(path=str(sample))
+
+        assert compiled == [2]
+        assert answer["rule_count"] == 2
+        (skipped,) = answer["files_not_loaded"]
+        assert skipped["file"] == "broken.yml"
+        assert str(tmp_path) not in skipped["error"]
+        assert "broken.yml" in caplog.text
+
+
+class TestAnEmptyCorpusIsReadAgainOnlyWhenItChanges:
+    def test_the_warning_is_said_once_and_a_corpus_put_in_place_is_read(
+        self, no_sigma: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        for _ in range(3):
+            assert "error" in rules.sigma_match_sandbox(SANDBOX_REPORT)
+        assert caplog.text.count("rules directory not found") == 1
+        no_sigma.mkdir()
+        (no_sigma / "rundll32.yml").write_text(SIGMA_RULE, encoding="utf-8")
+        assert rules.sigma_match_sandbox(SANDBOX_REPORT)["rule_count"] == 1
+
+
+class TestTheEvidenceOnlyProvider:
+    """``capa_yara``, for a run with no triage pack: missing rules are a pass not made."""
+
+    def test_missing_capa_rules_are_a_reason_the_bundle_carries(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import sys
+        import types
+
+        from maljan.core.config import StaticCapaConfig, StaticYaraConfig
+        from maljan.providers.static.capa_yara import CapaYaraStaticProvider
+
+        # capa's modules present, so the rules are what is missing.
+        for name in (
+            "capa",
+            "capa.capabilities",
+            "capa.capabilities.common",
+            "capa.helpers",
+            "capa.loader",
+            "capa.render",
+            "capa.render.result_document",
+            "capa.rules",
+            "capa.rules.cache",
+        ):
+            monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+        provider = CapaYaraStaticProvider(
+            StaticCapaConfig(rules_dir=str(tmp_path / "capa-rules")),
+            StaticYaraConfig(rules_dir=str(tmp_path / "no-yara")),
+        )
+        sample = tmp_path / "s.exe"
+        sample.write_bytes(b"MZ")
+
+        bundle = provider.collect_evidence(str(sample))
+
+        assert bundle is not None
+        (reason,) = bundle.unavailable
+        assert reason.startswith("static provider 'capa_yara' did not run capa: no rule was loaded")
+        assert str(tmp_path) not in reason
+        assert sidecar_needs.CAPA_RULES.remedy in reason
+        assert provider.capabilities.provides_evidence, "rules put in place later are read"
+        assert provider.capabilities.degrade_on_failure
+
 
 class TestTheRunIsDegraded:
     def test_the_pack_records_the_step_failed_and_the_run_is_degraded(
@@ -140,11 +252,7 @@ class TestTheRunIsDegraded:
         assert run_is_degraded(["triage.sigma_match_sandbox_failed"])
 
 
-def _degraded_report() -> MalwareReport:
-    error = (
-        "no rule was loaded from data/sigma_rules, which is missing or holds none, "
-        "so no rule was run"
-    )
+def _degraded_report(reason: str = SIGMA_REASON) -> MalwareReport:
     return MalwareReport.model_validate(
         {
             "verdict": "Malware",
@@ -153,50 +261,93 @@ def _degraded_report() -> MalwareReport:
             "identity": {"hashes": {"sha256": "e" * 64}, "file_type": "pe"},
             "degradation_reasons": ["triage.sigma_match_sandbox_failed"],
             "run_summary": {
-                "evidence": {
-                    "failures": [
-                        {
-                            "tool": "sigma_match_sandbox",
-                            "count": 1,
-                            "error": error,
-                            "server": "pipeline",
-                            "entry_id": "ev_0009",
-                        }
-                    ]
-                }
+                "lost_tools": [{"tool": "sigma_match_sandbox", "reason": reason}],
             },
         }
     )
 
 
+def _scope(report: MalwareReport) -> str:
+    markdown = MarkdownRenderer(layout=ANALYST).render(report)
+    return markdown.split("## 2. Introduction and scope", 1)[1].split("\n## ", 1)[0]
+
+
+class TestTheRunRecordsWhatItWentWithout:
+    def test_each_lost_tool_with_its_own_error(self) -> None:
+        facts = SampleFacts(
+            file_type="pe",
+            failures=(
+                {"tool": "sigma_match_sandbox", "ok": False, "error": SIGMA_REASON},
+                {"tool": "strings", "ok": True, "error": None},
+            ),
+        )
+        rows = lost_tool_rows(["triage.sigma_match_sandbox_failed"], facts)
+        assert rows == [{"tool": "sigma_match_sandbox", "reason": SIGMA_REASON}]
+
+    def test_a_servers_tool_with_what_its_reason_brackets(self) -> None:
+        reason = (
+            "server.analysis.sigma_match_unavailable(data/sigma_rules is missing or empty "
+            "(named by the default)); put the data in data/sigma_rules"
+        )
+        assert lost_tool_rows([reason]) == [
+            {
+                "tool": "sigma_match",
+                "reason": "data/sigma_rules is missing or empty (named by the default)",
+            }
+        ]
+
+    def test_a_host_path_is_shown_from_the_project_or_masked(self) -> None:
+        root = get_project_root()
+        error = f"rules at {root}/data/capa-rules and /srv/elsewhere/capa-rules are missing"
+        facts = SampleFacts(failures=({"tool": "capa", "ok": False, "error": error},))
+        (row,) = lost_tool_rows(["triage.capa_failed"], facts)
+        assert row["reason"] == (f"rules at data/capa-rules and {OUTSIDE_PROJECT} are missing")
+
+    def test_the_run_summary_keeps_them_and_leaves_them_out_when_none(self) -> None:
+        rows = [{"tool": "capa", "reason": "x"}]
+        with_rows = RunSummaryBuilder(start_time=0.0).set_lost_tools(rows).build().to_dict()
+        assert with_rows["lost_tools"] == rows
+        assert "lost_tools" not in RunSummaryBuilder(start_time=0.0).build().to_dict()
+
+
 class TestTheReportSaysItDidNotRun:
     def test_the_scope_says_what_the_run_went_without_and_why(self) -> None:
-        markdown = MarkdownRenderer(layout=ANALYST).render(_degraded_report())
-        scope = markdown.split("## 2. Introduction and scope", 1)[1].split("\n## ", 1)[0]
         assert (
-            "The run went without sigma_match_sandbox (no rule was loaded from data/sigma_rules, "
-            "which is missing or holds none, so no rule was run)."
-        ) in scope
-        assert "**[DEGRADED RUN]** The run went without sigma_match_sandbox" in markdown
+            "The run went without sigma_match_sandbox (no rule was loaded from "
+            "data/sigma_rules, which is missing or holds none, so no rule was run)."
+        ) in _scope(_degraded_report())
 
     def test_a_run_that_is_not_degraded_says_nothing_of_it(self) -> None:
         report = _degraded_report()
         report.degraded_mode = False
-        markdown = MarkdownRenderer(layout=ANALYST).render(report)
-        assert "went without" not in markdown
+        assert "went without" not in _scope(report)
 
-    def test_an_unavailable_servers_tool_is_said_with_its_reason(self) -> None:
-        report = _degraded_report()
-        report.run_summary = {}
-        report.degradation_reasons = [
-            "server.analysis.sigma_match_unavailable(data/sigma_rules is missing or empty "
-            "(named by the default)); put the data in data/sigma_rules"
-        ]
-        markdown = MarkdownRenderer(layout=ANALYST).render(report)
+    def test_a_tools_words_are_escaped_and_defanged(self) -> None:
+        probe = "[click](http://evil.example/x) <img onerror=alert(1)> **bold**"
+        scope = _scope(_degraded_report(probe))
         assert (
-            "The run went without sigma_match (data/sigma_rules is missing or empty "
-            "(named by the default))."
-        ) in markdown
+            "The run went without sigma_match_sandbox (\\[click\\](hxxp://evil[.]example/x) "
+            "\\<img onerror=alert(1)\\> \\*\\*bold\\*\\*)."
+        ) in scope
+        # Nothing of it reads as a link, a tag or emphasis.
+        assert not re.search(r"(?<!\\)\[click(?<!\\)\]\(", scope)
+        assert not re.search(r"(?<!\\)<img", scope)
+        assert not re.search(r"(?<!\\)\*\*bold", scope)
+
+    def test_a_host_path_in_a_stored_reason_is_masked(self) -> None:
+        scope = _scope(_degraded_report("rules at /srv/run-hk8/data/capa-rules are missing"))
+        assert "/srv/run-hk8" not in scope
+        assert OUTSIDE_PROJECT in scope
+
+    def test_a_stored_run_renders_byte_for_byte_as_it_did(self) -> None:
+        """A summary written before ``lost_tools`` says nothing new (haiku8's shape)."""
+        stored = json.loads((FIXTURES / "stored_degraded_run.json").read_text(encoding="utf-8"))
+        before = json.loads(
+            (FIXTURES / "stored_degraded_run.rendered_on_dev.json").read_text(encoding="utf-8")
+        )
+        report = MalwareReport.model_validate(stored)
+        assert MarkdownRenderer(layout=ANALYST).render(report) == before["analyst"]
+        assert MarkdownRenderer().render(report) == before["full"]
 
 
 @pytest.fixture
@@ -223,7 +374,7 @@ class TestTheCheckBeforeAJobNamesIt:
         settings = Settings()
         settings.mcp.servers["analysis"].enabled = False
         rows = as_rows(unavailable_tools(settings))
-        assert [(r["server"], r["tool"]) for r in rows] == [("analysis", "sigma_match_sandbox")]
+        assert [(r["server"], r["tool"]) for r in rows] == [("pipeline", "sigma_match_sandbox")]
         (row,) = rows
         assert row["reason"] == "data/sigma_rules is missing or empty (named by the default)"
         assert row["remediation"] == sidecar_needs.SIGMA_RULES.remedy
@@ -233,13 +384,17 @@ class TestTheCheckBeforeAJobNamesIt:
     def test_it_is_named_beside_a_server_with_its_own_import_path(self, host: Path) -> None:
         settings = Settings()
         settings.mcp.servers["analysis"].env = {"PYTHONPATH": "/opt/libs"}
-        assert _named(settings) == [("analysis", "sigma_match_sandbox")]
+        assert _named(settings) == [("pipeline", "sigma_match_sandbox")]
 
-    def test_the_servers_rows_and_the_workers_are_one_row_per_tool(self, host: Path) -> None:
+    def test_the_server_and_the_worker_are_each_named_where_each_reads(self, host: Path) -> None:
         assert _named(Settings()) == [
             ("analysis", "sigma_match"),
             ("analysis", "sigma_match_sandbox"),
+            ("pipeline", "sigma_match_sandbox"),
         ]
+
+    def test_the_workers_label_is_the_server_its_entries_are_recorded_under(self) -> None:
+        assert WORKER == PIPELINE
 
     def test_a_corpus_in_place_names_nothing(self, host: Path) -> None:
         (host / "data" / "sigma_rules").mkdir()

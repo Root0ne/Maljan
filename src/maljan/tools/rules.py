@@ -16,11 +16,12 @@ from __future__ import annotations
 import os
 import re
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from maljan.core.logger import logger
-from maljan.core.paths import get_project_root, resolve_data
+from maljan.core.paths import get_project_root, host_paths_masked, resolve_data
 
 # The corpora the pipeline itself ships. ``ruleset="default"`` means these; any
 # other value is taken as a path, resolved against the repository root the same
@@ -36,8 +37,43 @@ DEFAULT_CAPA_SIGNATURES = "data/capa-signatures"
 _MAX_MATCH_BYTES = 64
 
 _CACHE_LOCK = threading.Lock()
-_YARA_CACHE: dict[str, Any] = {}
-_SIGMA_CACHE: dict[str, Any] = {}
+# By path: the layer and the corpus's stamp when it was read (``_stamp``).
+_YARA_CACHE: dict[str, tuple[int | None, Any]] = {}
+_SIGMA_CACHE: dict[str, tuple[int | None, Any]] = {}
+
+
+def _stamp(path: Path) -> int | None:
+    """When the corpus at ``path`` last changed, ``None`` while there is none."""
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _cached(
+    cache: dict[str, tuple[int | None, Any]], path: Path, count: Callable[[Any], int]
+) -> Any:
+    """The layer kept for ``path``, or ``None`` when it has to be read (again).
+
+    A layer that loaded rules is kept for the process's lifetime, as before.
+    One that loaded none is kept only while the corpus is as it was read, so
+    the warning its load logs is said once per change of the corpus, and one
+    put in place later is read without a restart. ``count`` counts a layer's
+    rules.
+    """
+    with _CACHE_LOCK:
+        held = cache.get(str(path))
+    if held is None:
+        return None
+    stamp, layer = held
+    return layer if count(layer) or stamp == _stamp(path) else None
+
+
+def _keep(
+    cache: dict[str, tuple[int | None, Any]], path: Path, stamp: int | None, layer: Any
+) -> None:
+    with _CACHE_LOCK:
+        cache[str(path)] = (stamp, layer)
 
 
 # The environment names that override where "default" points. This is the whole
@@ -86,12 +122,17 @@ def _not_loaded(tool: str, path: Path, corpus: str, *, chosen: bool = False) -> 
     from maljan.tools import sidecar_needs
     from maljan.tools.errors import BAD_ARGUMENT, MISSING_DEPENDENCY, tool_error
 
+    need = getattr(sidecar_needs, corpus)
     # Inside the project the path is shown from its root, which is how the
-    # check before a job names it; one outside is the operator's own, as set.
+    # check before a job names it; one outside is named by what named it, as
+    # the check does (``Requirement.installed``): the host's layout is not
+    # the reader's.
     try:
         shown = Path(os.path.abspath(path)).relative_to(get_project_root()).as_posix()
     except ValueError:
-        shown = str(path)
+        overridden = bool(need.override and os.environ.get(need.override, "").strip())
+        named = need.override if overridden else need.setting or need.override
+        shown = "the ruleset named" if chosen else f"the path {named} names"
     message = f"no rule was loaded from {shown}, which is missing or holds none, so no rule was run"
     if chosen:
         return tool_error(
@@ -100,7 +141,6 @@ def _not_loaded(tool: str, path: Path, corpus: str, *, chosen: bool = False) -> 
             tool=tool,
             remediation="name a ruleset that holds rules, or 'default' for the platform's corpus",
         )
-    need = getattr(sidecar_needs, corpus)
     return tool_error(MISSING_DEPENDENCY, message, tool=tool, remediation=need.remedy)
 
 
@@ -123,31 +163,40 @@ def _resolve_ruleset(ruleset: str, default: str, env_var: str = "") -> Path:
 
 
 def _yara_layer(ruleset: str) -> Any:
-    """The compiled layer for one corpus, built once per path.
+    """The compiled layer for one corpus, built once per path (``_cached``).
 
     A corpus is one rule file, or a directory whose ``*.yml`` and ``*.yaml``
-    files are read in name order, as the override's name says it may be. A
-    corpus that loaded no rule is not kept, so one put in place later is read
-    without a restart.
+    files are read in name order, as the override's name says it may be: each
+    file's rules are parsed, joined and compiled once. A file of a directory
+    that cannot be read is skipped with a warning naming it, and named in the
+    scan's answer (``files_not_loaded``): an operator's one malformed file
+    costs that file's rules, not every other file's, and is never silent. A
+    lone file that cannot be read raises, as before, and the scan says so.
     """
     path = _resolve_ruleset(ruleset, DEFAULT_YARA_RULES, YARA_RULES_ENV)
-    key = str(path)
-    with _CACHE_LOCK:
-        cached = _YARA_CACHE.get(key)
-        if cached is not None:
-            return cached
+    cached = _cached(_YARA_CACHE, path, lambda layer: len(layer._rules))
+    if cached is not None:
+        return cached
     from maljan.analysis.yara_layer import YaraLayer
 
+    stamp = _stamp(path)
+    skipped: list[dict[str, str]] = []
     if path.is_file():
         layer = YaraLayer.from_yaml(path)
     elif path.is_dir():
-        files = sorted([*path.rglob("*.yml"), *path.rglob("*.yaml")])
-        layer = YaraLayer(rules=[rule for f in files for rule in YaraLayer.from_yaml(f)._rules])
+        parsed = []
+        for rule_file in sorted([*path.rglob("*.yml"), *path.rglob("*.yaml")]):
+            try:
+                parsed.extend(YaraLayer.rules_from_yaml(rule_file))
+            except Exception as exc:  # noqa: BLE001 — one bad file costs that file only
+                said = host_paths_masked(f"{type(exc).__name__}: {exc}")
+                logger.warning("yara_scan: rule file %s not loaded (%s)", rule_file.name, said)
+                skipped.append({"file": rule_file.relative_to(path).as_posix(), "error": said})
+        layer = YaraLayer(rules=parsed)
     else:
         layer = YaraLayer(rules=[])
-    if layer._rules:
-        with _CACHE_LOCK:
-            _YARA_CACHE[key] = layer
+    layer.files_not_loaded = skipped
+    _keep(_YARA_CACHE, path, stamp, layer)
     return layer
 
 
@@ -198,6 +247,9 @@ def yara_scan(
         )
     compiled = getattr(layer, "_yara_rules", None)
     answer: dict[str, Any] = {"rule_count": rule_count, "filtered": 0}
+    skipped = getattr(layer, "files_not_loaded", None)
+    if skipped:
+        answer["files_not_loaded"] = list(skipped)
     if compiled is not None:
         try:
             hits = compiled.match(data=data, timeout=max(1, int(timeout_s)))
@@ -335,19 +387,16 @@ def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
 
 
 def _sigma_layer(ruleset: str) -> Any:
-    """The layer for one corpus, built once per path; one that loaded no rule is not kept."""
+    """The layer for one corpus, built once per path (``_cached``)."""
     path = _resolve_ruleset(ruleset, DEFAULT_SIGMA_RULES, SIGMA_RULES_ENV)
-    key = str(path)
-    with _CACHE_LOCK:
-        cached = _SIGMA_CACHE.get(key)
-        if cached is not None:
-            return cached
+    cached = _cached(_SIGMA_CACHE, path, lambda layer: int(layer.rule_count))
+    if cached is not None:
+        return cached
     from maljan.analysis.sigma_layer import SigmaLayer
 
+    stamp = _stamp(path)
     layer = SigmaLayer.from_rules_dir(path)
-    if layer.rule_count:
-        with _CACHE_LOCK:
-            _SIGMA_CACHE[key] = layer
+    _keep(_SIGMA_CACHE, path, stamp, layer)
     return layer
 
 

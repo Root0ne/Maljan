@@ -54,6 +54,12 @@ from maljan.tools.capabilities import ToolNeeds, Unavailable
 
 from app.logsafe import log_safe
 
+# The server the pack's own in-process entries are recorded under
+# (``triage_pack.PIPELINE``), which names a step the worker runs itself. Kept
+# here rather than imported, so a status read does not load the pack; a test
+# holds the two together.
+WORKER = "pipeline"
+
 
 def _same_interpreter(command: str) -> bool:
     """Whether ``command`` is this process's interpreter, as written (links not followed).
@@ -132,7 +138,7 @@ def _in_process_readings(
     declaring server is switched on and reached at an address, where the
     reading runs instead (``pipeline.nodes._reader_servers``), and every
     enabled in-process step no reading stands in for whose tool a sidecar
-    declares, which always runs here. ``server`` is
+    declares, which always runs here and is named under :data:`WORKER`. ``server`` is
     the declaring server's key, else the sidecar's name; the environment is
     the declaring server's, which the pack lends its in-process steps, else
     ``None`` (this process's own); one mapping per server, so a reading's
@@ -181,13 +187,13 @@ def _in_process_readings(
     # A step of the platform's own that no reading stands in for calls the
     # implementation the sidecar serves in this process, whatever any server's
     # block says (``triage_pack._sigma_match_sandbox``): what that sidecar
-    # declares of the tool is checked here, in this process's environment.
+    # declares of the tool is checked here, in this process's environment,
+    # and named under the server its entries are recorded under.
     read = {spec.stands_for for spec in READERS.values()}
     for tool in sorted(run - read):
         held = _reading_needs(None, tool)
         if held is not None:
-            directory, need = held
-            yield directory.removesuffix("-mcp"), need, None
+            yield WORKER, held[1], None
 
 
 def _missing(

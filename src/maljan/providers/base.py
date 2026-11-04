@@ -183,6 +183,12 @@ class StaticEvidenceBundle:
     # rules), read by :meth:`answers` for a bundle built before ``entries``.
     capa_rules: list[dict[str, Any]] = field(default_factory=list)
     yara_matches: list[dict[str, Any]] = field(default_factory=list)
+    # What the provider could not run, each a degradation reason with its
+    # remedy: a pass it was configured for and did not make (an engine whose
+    # corpus loaded no rule). A provider that degrades on failure
+    # (``StaticCapabilities.degrade_on_failure``) has the report node add them
+    # to the run's reasons; it is never "no match".
+    unavailable: tuple[str, ...] = ()
 
     def answers(self, source: str) -> tuple[EvidenceAnswer, ...]:
         """Every answer of the bundle: ``entries``, then the legacy rule fields as answers.

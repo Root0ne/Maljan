@@ -103,7 +103,15 @@ COMPOSE_IDS = \
 docker-build:
 	cd docker && POSTGRES_PORT=$${POSTGRES_PORT:-5433} docker compose build
 
+# The shipped compose file bind-mounts ./data over the image's /app/data, so the
+# stack reads this checkout's rule corpora, not the ones the image fetched: the
+# fetched ones (data/sigma_rules, data/capa-rules, data/capa-signatures) are in
+# place only after `make external` (or `make setup`). Each one missing is named
+# here, and a run without it is degraded.
 docker-up:
+	@for d in data/sigma_rules data/capa-rules data/capa-signatures; do \
+		[ -d "$$d" ] || echo "warning: $$d is missing; the stack mounts ./data over the image's copy, so run make external first" >&2; \
+	done
 	$(COMPOSE_IDS) cd docker && POSTGRES_PORT=$${POSTGRES_PORT:-5433} docker compose up -d
 
 # `--profile '*'` so a down also stops the optional services (ghidra, qdrant)

@@ -56,9 +56,10 @@ apps/web/.env.*.local
 **/data/uploads/
 **/data/cape_reports/
 data/external/
+# The image fetches its own Sigma corpus, capa rules and capa signatures at the
+# pinned versions (Dockerfile.backend, sigma-data and capa-data); a
+# workstation's copies would merge into them.
 data/sigma_rules/
-# The image fetches its own capa rules and signatures at the pinned version
-# (Dockerfile.backend, capa-data); a workstation's copies would merge into them.
 data/capa-rules/
 data/capa-signatures/
 models/

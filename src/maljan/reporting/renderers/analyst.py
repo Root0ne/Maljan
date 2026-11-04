@@ -968,7 +968,7 @@ class _Analyst:
             + " A step or finding read from the code is marked assessed; one a sandbox watched "
             "is marked observed."
         )
-        lost = lost_tools_sentence(report)
+        lost = lost_tools_sentence(report, ctx)
         if lost:
             said += " " + lost
         lines = [_heading(2, "Introduction and scope"), "", _paragraph_line(said)]

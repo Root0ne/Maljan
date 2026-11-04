@@ -134,7 +134,12 @@ from maljan.pipeline.mediation_models import (
     MEDIATOR_NO_ANSWER,
     consensus_applies,
 )
-from maljan.pipeline.operator_choice import SampleFacts, facts_record, split_operator_choices
+from maljan.pipeline.operator_choice import (
+    SampleFacts,
+    facts_record,
+    lost_tool_rows,
+    split_operator_choices,
+)
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
     corrected_reasons,
@@ -7611,6 +7616,11 @@ def make_judge_node(
                         getattr(container, "ignore_earlier_runs", False) is True
                     )
                     .set_loss_facts(facts_record(_sample_facts))
+                    .set_lost_tools(
+                        lost_tool_rows(_degradation_reasons, _sample_facts)
+                        if _degraded_mode
+                        else []
+                    )
                     .set_failed_analysts(_failed_analysts)
                     .set_profile(
                         container.config.agents.profile,
@@ -8061,6 +8071,23 @@ def make_report_node(
                 logger.warning("report_node: static provider evidence not recorded (%s).", exc)
         _ledger.extend(_capa_entries)
         _ledger.sort(key=lambda entry: entry.seq)
+        # A pass the evidence-only static provider was configured for and did
+        # not make (its rules missing, say) is a loss the verdict stage could
+        # not see: a provider that degrades on failure has it said, and the
+        # run degraded, rather than reading as no match.
+        _static_reasons: list[str] = []
+        with suppress(Exception):
+            if _static_bundle is not None and _static_provider.capabilities.degrade_on_failure:
+                _static_reasons = [str(r) for r in _static_bundle.unavailable if str(r).strip()]
+        if _static_reasons:
+            logger.warning("report_node: %s", "; ".join(_static_reasons))
+            # The run summary the report carries says it too, as the judge's would.
+            _held = [str(r) for r in (run_summary_state.get("degradation_reasons") or [])]
+            run_summary_state = {
+                **run_summary_state,
+                "degraded_mode": True,
+                "degradation_reasons": [*_held, *(r for r in _static_reasons if r not in _held)],
+            }
         # What the narrative and the composer may cite: every id the state's
         # ledger issued, and the ids this node added to it (the undrained
         # entries and the static provider's), which the report cites and the
@@ -8091,12 +8118,19 @@ def make_report_node(
                 malware_category=malware_category,
                 # Degraded-run signalling: surfaced as a banner so a numerically
                 # high verdict/severity on a low-data run is not read as authoritative.
-                degraded_mode=bool(state.get("degraded_mode")),
+                degraded_mode=bool(state.get("degraded_mode")) or bool(_static_reasons),
                 # Corrected against the whole ledger: the evidence-only static
                 # provider's entries are collected above, after the verdict
                 # stage read the ledger, so a run that carries them must not
                 # ship a report saying no analysis was performed.
-                degradation_reasons=corrected_reasons(state.get("degradation_reasons"), _ledger),
+                degradation_reasons=[
+                    *corrected_reasons(state.get("degradation_reasons"), _ledger),
+                    *(
+                        r
+                        for r in _static_reasons
+                        if r not in (state.get("degradation_reasons") or [])
+                    ),
+                ],
                 operator_choices=list(state.get("operator_choices") or []),
                 # The routing minimum, which stands in for the identity block
                 # when no agent called an identification tool.
