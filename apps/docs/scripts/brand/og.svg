@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <!-- The Open Graph card (public/og.png); scripts/brand/render.sh draws it. -->
+  <defs>
+    <linearGradient id="mBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#1d4ed8"/></linearGradient>
+    <linearGradient id="mBolt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fde047"/><stop offset="1" stop-color="#f59e0b"/></linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0 H0 V40" fill="none" stroke="#afc4f2" stroke-opacity="0.05" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="630" fill="#0b1020"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect x="40.5" y="40.5" width="1119" height="549" rx="3" fill="none" stroke="#232e4d"/>
+
+  <!-- the logo in its bracketed frame -->
+  <g fill="none" stroke="#38bdf8" stroke-width="3">
+    <path d="M90 225 V200 H115"/>
+    <path d="M285 200 H310 V225"/>
+    <path d="M90 405 V430 H115"/>
+    <path d="M285 430 H310 V405"/>
+  </g>
+  <svg x="122" y="236" width="156" height="164" viewBox="0 0 168 176">
+    <path fill="url(#mBody)" d="M24 26 L44 26 L84 68 L124 26 L144 26 L144 96 L120 96 L120 62 L84 104 L48 62 L48 96 L24 96 Z"/>
+    <path fill="url(#mBolt)" d="M24 96 H48 L34 124 H48 L18 168 L28 130 H10 Z"/>
+    <path fill="url(#mBolt)" d="M120 96 H144 L130 124 H144 L114 168 L124 130 H106 Z"/>
+  </svg>
+
+  <g font-family="JetBrains Mono, monospace">
+    <text x="360" y="262" fill="#e6edff" font-size="92" font-weight="800" letter-spacing="13">MALSPARK</text>
+    <text x="362" y="320" fill="#afc4f2" font-size="29" font-weight="500">Multi-agent malware analysis,</text>
+    <text x="362" y="360" fill="#afc4f2" font-size="29" font-weight="500">cited to the tool call.</text>
+
+    <g font-size="18" font-weight="500">
+      <rect x="362.5" y="404.5" width="194" height="35" rx="17.5" fill="none" stroke="#34426b"/>
+      <text x="459.5" y="428" fill="#38bdf8" text-anchor="middle">Evidence ledger</text>
+      <rect x="570.5" y="404.5" width="162" height="35" rx="17.5" fill="none" stroke="#34426b"/>
+      <text x="651.5" y="428" fill="#38bdf8" text-anchor="middle">MITRE ATT&amp;CK</text>
+      <rect x="746.5" y="404.5" width="118" height="35" rx="17.5" fill="none" stroke="#34426b"/>
+      <text x="805.5" y="428" fill="#38bdf8" text-anchor="middle">STIX 2.1</text>
+      <rect x="878.5" y="404.5" width="205" height="35" rx="17.5" fill="none" stroke="#34426b"/>
+      <text x="981" y="428" fill="#38bdf8" text-anchor="middle">MCP tool servers</text>
+    </g>
+
+    <line x1="40" y1="510.5" x2="1160" y2="510.5" stroke="#232e4d"/>
+    <text x="90" y="557" fill="#f59e0b" font-size="22" font-weight="700" letter-spacing="2">malspark.com</text>
+    <rect x="888.5" y="533.5" width="222" height="33" rx="16.5" fill="#0f2a2c" stroke="#34d399" stroke-opacity="0.5"/>
+    <circle cx="912" cy="550" r="4" fill="#34d399"/>
+    <text x="928" y="556.5" fill="#34d399" font-size="17" font-weight="500">Open source, MIT</text>
+  </g>
+</svg>

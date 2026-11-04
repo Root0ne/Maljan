@@ -2,19 +2,26 @@
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
 
+/* One monospace family for prose and code alike, and small square corners on
+ * every panel, as on the home page. */
 @theme {
-  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-sans: var(--font-brand);
+  --font-mono: var(--font-brand);
+  --radius-md: 3px;
+  --radius-lg: 3px;
+  --radius-xl: 4px;
+  --radius-2xl: 4px;
 }
 
 /*
- * Palette. Every colour on the site is defined here, once per scheme, from
- * two sources only: the logo's four colours (deep blue, sky, amber, yellow)
- * and neutral slate greys. Every other shade is mixed from those with
- * color-mix(). Light mode leads with the deep blue and warns in amber; dark
- * mode leads with sky on a navy-black surface and warns in yellow and amber.
- * Text meets 4.5:1 against the surface it sits on, icons 3:1. The layout's
- * own variables (--color-fd-*) are set from these and nothing else.
+ * Palette. Every colour on the docs is defined here, once per scheme, from
+ * the brand tokens in brand.css (the logo's four colours and the navy
+ * surfaces) and neutral slate greys for the light scheme. Every other shade
+ * is mixed from those with color-mix(). Light mode leads with the deep blue
+ * and warns in amber; dark mode leads with sky on the brand navy and warns in
+ * yellow and amber. Text meets 4.5:1 against the surface it sits on, icons
+ * 3:1. The layout's own variables (--color-fd-*) are set from these and
+ * nothing else.
  */
 
 :root {
@@ -56,15 +63,15 @@
 }
 
 .dark {
-  --mj-bg: #0b1120;
-  --mj-surface: #0f172a;
-  --mj-sidebar-bg: #0e1628;
-  --mj-code-bg: #0d1526;
-  --mj-border: #1e293b;
-  --mj-border-strong: #334155;
-  --mj-fg: #e2e8f0;
-  --mj-fg-muted: #94a3b8;
-  --mj-fg-faint: #7c8ca2;
+  --mj-bg: var(--ms-bg);
+  --mj-surface: var(--ms-surface);
+  --mj-sidebar-bg: #0d1325;
+  --mj-code-bg: var(--ms-surface);
+  --mj-border: var(--ms-border);
+  --mj-border-strong: var(--ms-border-strong);
+  --mj-fg: var(--ms-fg);
+  --mj-fg-muted: var(--ms-fg-muted);
+  --mj-fg-faint: #7a8cba;
   --mj-accent: var(--mj-logo-sky);
   --mj-accent-fg: var(--mj-bg);
   --mj-accent-tint: color-mix(in srgb, var(--mj-logo-sky) 9%, transparent);
@@ -190,6 +197,20 @@ body::before {
   align-self: flex-start;
 }
 
+/* Headings in the brand's manner: the page title and the sections under it
+ * bold, upper case and tracked out; the smaller headings stay as written. */
+#nd-page h1,
+.mj-hero h1,
+.prose h2 {
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.prose h2 {
+  font-size: 1.15em;
+}
+
 /* Prose: links, marks and inline code in the palette. */
 .prose {
   --tw-prose-links: var(--mj-accent);
@@ -232,7 +253,7 @@ figure.shiki {
   margin: 0;
   font-size: 2.5rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.08em;
   line-height: 1.1;
 }
 

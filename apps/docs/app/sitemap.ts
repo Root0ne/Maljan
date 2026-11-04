@@ -1,11 +1,13 @@
 import type { MetadataRoute } from 'next';
 import { source } from '@/lib/source';
-import { basePath } from '@/lib/shared';
+import { absolute } from '@/lib/shared';
 
 export const dynamic = 'force-static';
 
+/* The home page and every docs page, at their malspark.com addresses. */
 export default function sitemap(): MetadataRoute.Sitemap {
-  return source.getPages().map((page) => ({
-    url: `https://root0ne.github.io${basePath}${page.url === '/' ? '/' : `${page.url}/`}`,
-  }));
+  return [
+    { url: absolute('/'), priority: 1 },
+    ...source.getPages().map((page) => ({ url: absolute(`${page.url}/`) })),
+  ];
 }

@@ -1,0 +1,722 @@
+/*
+ * The home page. Its colours, type and radius are the brand tokens in
+ * brand.css; it loads neither the docs' stylesheet nor any client script of
+ * its own. Dense and flat: thin bordered panels on a slightly lighter navy,
+ * upper-case tracked headings, small pills, one bright button per call.
+ */
+
+.ms-home {
+  min-height: 100vh;
+  background: var(--ms-bg);
+  color: var(--ms-fg);
+  font-family: var(--font-brand);
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+}
+
+.ms-home *,
+.ms-home *::before,
+.ms-home *::after {
+  box-sizing: border-box;
+}
+
+.ms-home a {
+  color: var(--ms-link);
+  text-decoration: none;
+}
+
+.ms-home a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ms-home :focus-visible {
+  outline: 2px solid var(--ms-logo-sky);
+  outline-offset: 2px;
+}
+
+.ms-home code {
+  font-family: inherit;
+  color: var(--ms-fg-strong);
+}
+
+.ms-home p {
+  margin: 0;
+}
+
+.ms-home .ms-skip {
+  position: absolute;
+  left: 16px;
+  top: -40px;
+  padding: 6px 10px;
+  background: var(--ms-primary);
+  color: var(--ms-on-primary);
+  border-radius: var(--ms-radius);
+}
+
+.ms-home .ms-skip:focus {
+  top: 8px;
+}
+
+/* Every block shares one column: 1180px wide, a 16px gutter on a phone. */
+.ms-header,
+.ms-home main,
+.ms-footer {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+@media (min-width: 768px) {
+  .ms-header,
+  .ms-home main,
+  .ms-footer {
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+}
+
+/* ---- Header ---------------------------------------------------------- */
+
+.ms-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 64px;
+}
+
+.ms-home .ms-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ms-fg-strong);
+}
+
+.ms-home .ms-brand:hover {
+  text-decoration: none;
+}
+
+.ms-wordmark {
+  font-weight: 800;
+  font-size: 0.95rem;
+  letter-spacing: var(--ms-tracking);
+  text-transform: uppercase;
+}
+
+.ms-nav {
+  display: flex;
+  gap: 4px;
+}
+
+.ms-home .ms-nav a {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ms-fg);
+  font-size: 0.8125rem;
+}
+
+.ms-home .ms-nav a:hover {
+  border-color: var(--ms-border-strong);
+  text-decoration: none;
+}
+
+/* ---- The bracketed frame around the logo ------------------------------ */
+
+.ms-frame {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ms-frame-sm {
+  padding: 5px;
+}
+
+.ms-frame-lg {
+  padding: 18px;
+  margin-bottom: 28px;
+}
+
+.ms-frame-corner {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 0 solid var(--ms-logo-sky);
+}
+
+.ms-frame-lg .ms-frame-corner {
+  width: 16px;
+  height: 16px;
+}
+
+/* On a phone the logo gives the headline the first screen. */
+@media (max-width: 639px) {
+  .ms-frame-lg {
+    padding: 12px;
+    margin-bottom: 20px;
+  }
+
+  .ms-frame-lg img {
+    width: 52px;
+    height: auto;
+  }
+
+  .ms-frame-lg .ms-frame-corner {
+    width: 11px;
+    height: 11px;
+  }
+
+  .ms-home .ms-nav a {
+    padding: 4px 6px;
+  }
+}
+
+.ms-tl {
+  top: 0;
+  left: 0;
+  border-top-width: 2px;
+  border-left-width: 2px;
+}
+
+.ms-tr {
+  top: 0;
+  right: 0;
+  border-top-width: 2px;
+  border-right-width: 2px;
+}
+
+.ms-bl {
+  bottom: 0;
+  left: 0;
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+}
+
+.ms-br {
+  bottom: 0;
+  right: 0;
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+}
+
+/* ---- Hero ------------------------------------------------------------ */
+
+.ms-hero {
+  display: grid;
+  gap: 40px;
+  padding: 48px 0 56px;
+  border-top: 1px solid var(--ms-border);
+  border-bottom: 1px solid var(--ms-border);
+}
+
+@media (min-width: 1000px) {
+  .ms-hero {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    gap: 56px;
+    padding: 72px 0;
+    align-items: start;
+  }
+}
+
+.ms-hero h1 {
+  margin: 0 0 20px;
+  max-width: 22ch;
+  color: var(--ms-fg-strong);
+  font-size: clamp(1.5rem, 1rem + 2.2vw, 2.25rem);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ms-home .ms-lede {
+  max-width: 60ch;
+  margin-bottom: 14px;
+}
+
+.ms-lede-muted {
+  color: var(--ms-fg-muted);
+}
+
+.ms-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.ms-home .ms-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid var(--ms-border-strong);
+  border-radius: var(--ms-radius);
+  color: var(--ms-fg-strong);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.ms-home .ms-button:hover {
+  border-color: var(--ms-fg-muted);
+  text-decoration: none;
+}
+
+.ms-home .ms-button-primary {
+  background: var(--ms-primary);
+  border-color: var(--ms-primary);
+  color: var(--ms-on-primary);
+}
+
+.ms-home .ms-button-primary:hover {
+  background: var(--ms-primary-hover);
+  border-color: var(--ms-primary-hover);
+}
+
+/* ---- Panels, pills, badges ------------------------------------------- */
+
+.ms-panel {
+  background: var(--ms-surface);
+  border: 1px solid var(--ms-border);
+  border-radius: var(--ms-radius);
+}
+
+.ms-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 9px;
+  border: 1px solid var(--ms-border-strong);
+  border-radius: 999px;
+  color: var(--ms-fg-muted);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.6;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.ms-pill-active {
+  border-color: color-mix(in srgb, var(--ms-active) 45%, transparent);
+  background: var(--ms-active-tint);
+  color: var(--ms-active);
+}
+
+.ms-pill-code {
+  border-color: color-mix(in srgb, var(--ms-highlight) 45%, transparent);
+  color: var(--ms-highlight);
+}
+
+.ms-pill-agents {
+  border-color: color-mix(in srgb, var(--ms-logo-sky) 40%, transparent);
+  color: var(--ms-logo-sky);
+}
+
+.ms-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ms-active) 25%, transparent);
+}
+
+/* ---- The run panel ----------------------------------------------------- */
+
+.ms-run {
+  margin: 0;
+}
+
+.ms-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ms-border);
+  background: var(--ms-surface-2);
+}
+
+.ms-panel-head figcaption {
+  color: var(--ms-fg-strong);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: var(--ms-tracking);
+  text-transform: uppercase;
+}
+
+.ms-panel-head figcaption code {
+  color: var(--ms-logo-sky);
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.ms-stages {
+  margin: 0;
+  padding: 8px 16px;
+  list-style: none;
+}
+
+.ms-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.ms-stage + .ms-stage {
+  border-top: 1px dashed var(--ms-border);
+}
+
+/* The line that joins one stage to the next. */
+.ms-stage:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 9px;
+  top: 38px;
+  bottom: -12px;
+  width: 1px;
+  background: var(--ms-border-strong);
+}
+
+.ms-stage-index {
+  color: var(--ms-fg-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.9;
+}
+
+.ms-stage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.ms-stage-head code {
+  font-weight: 700;
+}
+
+.ms-stage p {
+  color: var(--ms-fg-muted);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.ms-cite {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--ms-border);
+  background: var(--ms-surface-2);
+  font-size: 0.75rem;
+}
+
+.ms-cite-claim {
+  color: var(--ms-fg);
+}
+
+.ms-home .ms-cite-id {
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--ms-highlight) 50%, transparent);
+  border-radius: var(--ms-radius);
+  color: var(--ms-logo-yellow);
+}
+
+.ms-cite-arrow {
+  position: relative;
+  width: 22px;
+  height: 1px;
+  background: var(--ms-fg-muted);
+}
+
+.ms-cite-arrow::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -3px;
+  border: 3.5px solid transparent;
+  border-left: 5px solid var(--ms-fg-muted);
+  border-right: 0;
+}
+
+/* ---- Sections -------------------------------------------------------- */
+
+.ms-section {
+  padding: 56px 0;
+  border-bottom: 1px solid var(--ms-border);
+}
+
+.ms-section h2 {
+  margin: 0 0 24px;
+  color: var(--ms-fg-strong);
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: var(--ms-tracking);
+  text-transform: uppercase;
+}
+
+.ms-split {
+  align-items: start;
+  display: grid;
+  gap: 24px;
+}
+
+@media (min-width: 900px) {
+  .ms-split {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 40px;
+  }
+}
+
+.ms-split > p {
+  max-width: 62ch;
+}
+
+.ms-home .ms-note {
+  margin-top: 16px;
+  color: var(--ms-fg-muted);
+  font-size: 0.8125rem;
+}
+
+.ms-grid,
+.ms-plugins {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 640px) {
+  .ms-grid,
+  .ms-plugins {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1000px) {
+  .ms-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ms-plugins {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.ms-card,
+.ms-plugin {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px;
+}
+
+.ms-card h3,
+.ms-plugin h3 {
+  margin: 0;
+  color: var(--ms-fg-strong);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ms-card p,
+.ms-plugin p {
+  color: var(--ms-fg-muted);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.ms-more {
+  margin-top: auto;
+  font-size: 0.8125rem;
+}
+
+.ms-home .ms-plugin h3 a {
+  color: var(--ms-fg-strong);
+}
+
+.ms-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ms-badge {
+  padding: 1px 8px;
+  border: 1px solid var(--ms-border);
+  border-radius: var(--ms-radius);
+  background: var(--ms-surface-2);
+  color: var(--ms-fg);
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+
+.ms-home .ms-plugin p {
+  margin-top: auto;
+}
+
+/* ---- Tables ---------------------------------------------------------- */
+
+.ms-table-wrap {
+  overflow-x: auto;
+}
+
+/* Narrower than this, a table scrolls sideways inside its panel rather than
+ * folding a word to a line. */
+.ms-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.ms-table caption {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ms-border);
+  background: var(--ms-surface-2);
+  color: var(--ms-fg-strong);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: var(--ms-tracking);
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.ms-table th,
+.ms-table td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--ms-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ms-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.ms-table thead th {
+  color: var(--ms-fg-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ms-table tbody th {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ms-table tbody th code {
+  color: var(--ms-logo-sky);
+}
+
+.ms-table td {
+  color: var(--ms-fg-muted);
+}
+
+.ms-table-num {
+  min-width: 460px;
+}
+
+.ms-table-num tbody th {
+  white-space: normal;
+  color: var(--ms-fg);
+}
+
+.ms-table-num td,
+.ms-table-num thead th:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ms-table-num td:nth-child(2) {
+  color: var(--ms-fg-strong);
+  font-weight: 700;
+}
+
+/* ---- Quick start ----------------------------------------------------- */
+
+.ms-code {
+  margin: 0;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 0.8125rem;
+  line-height: 1.8;
+}
+
+.ms-code code {
+  color: var(--ms-fg);
+  white-space: pre;
+}
+
+.ms-prompt {
+  color: var(--ms-highlight);
+  user-select: none;
+}
+
+.ms-start .ms-actions {
+  margin-top: 20px;
+}
+
+/* ---- Footer ---------------------------------------------------------- */
+
+.ms-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px 32px;
+  padding-top: 28px;
+  padding-bottom: 40px;
+  color: var(--ms-fg-muted);
+  font-size: 0.8125rem;
+}
+
+.ms-warn {
+  max-width: 64ch;
+}
+
+.ms-footer-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+/* ---- Not found ------------------------------------------------------- */
+
+.ms-home .ms-notfound {
+  padding-top: 96px;
+  padding-bottom: 96px;
+}
+
+.ms-notfound h1 {
+  margin: 0 0 16px;
+  color: var(--ms-fg-strong);
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: var(--ms-tracking);
+  text-transform: uppercase;
+}

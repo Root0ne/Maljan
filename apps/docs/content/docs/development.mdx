@@ -101,10 +101,10 @@ on loopback port 8080.
   platform's deterministic rules over a stored run with no model call, and
   `--compare REF_A REF_B` names every difference a rule change makes between
   two refs. Run it before and after a change to a check, the report builder or
-  a publish rule; see [Replaying a stored run](/replay/).
+  a publish rule; see [Replaying a stored run](/docs/replay/).
 
 The evaluation harness behind the earlier measurements is no longer part of
-this tree; the [benchmark](/benchmark/) holds the current results.
+this tree; the [benchmark](/docs/benchmark/) holds the current results.
 
 ### Heavy local runs in a capped scope
 
@@ -185,7 +185,7 @@ from `apps/docs` with `npm ci` and `npm run dev`; `npm run build` writes the
 static site to `apps/docs/out/` and fails if any address the site has served
 before no longer leads to a page (`scripts/old-urls.mjs`).
 
-[Validation codes](/validation-codes/) is generated, not written. Run
+[Validation codes](/docs/validation-codes/) is generated, not written. Run
 `uv run python scripts/validation_codes/run.py` and commit the page after any of
 these edits:
 

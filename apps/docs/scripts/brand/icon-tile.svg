@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- The logo on the site's navy, for the square icons (apple-touch-icon,
+       icon-192, icon-512, favicon.ico); scripts/brand/render.sh draws them. -->
+  <defs>
+    <linearGradient id="mBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#1d4ed8"/></linearGradient>
+    <linearGradient id="mBolt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fde047"/><stop offset="1" stop-color="#f59e0b"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#0b1020"/>
+  <svg x="96" y="88" width="320" height="336" viewBox="0 0 168 176">
+    <path fill="url(#mBody)" d="M24 26 L44 26 L84 68 L124 26 L144 26 L144 96 L120 96 L120 62 L84 104 L48 62 L48 96 L24 96 Z"/>
+    <path fill="url(#mBolt)" d="M24 96 H48 L34 124 H48 L18 168 L28 130 H10 Z"/>
+    <path fill="url(#mBolt)" d="M120 96 H144 L130 124 H144 L114 168 L124 130 H106 Z"/>
+  </svg>
+</svg>

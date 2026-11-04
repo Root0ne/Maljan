@@ -514,7 +514,7 @@ the `minio_data` volume while the stack is down.
 A database dump is not enough on its own: every secret in the settings store is
 encrypted with `SETTINGS_ENCRYPTION_KEY`, which is not in the dump. Store the
 key with the backup, or the restored instance comes up with every credential
-unreadable. A JSON export (see [configuration.md](/configuration/)) is a
+unreadable. A JSON export (see [configuration.md](/docs/configuration/)) is a
 useful complement — it is safe to keep next to the dump precisely because it
 carries no credentials.
 

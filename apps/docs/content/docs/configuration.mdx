@@ -3,7 +3,7 @@ title: "Configuration"
 description: "The bootstrap environment contract, Settings → Configuration, the setup guides, connection probes, JSON export and import, secret storage."
 ---
 
-Maljan is configured in two places and no others. A small bootstrap contract
+Malspark is configured in two places and no others. A small bootstrap contract
 comes from the process environment and is validated once at startup; every
 other application setting lives in the settings store in Postgres and is edited
 from the web console. This document describes both, the export and import
@@ -265,7 +265,7 @@ label (a compose service's name), a `.internal` name and the shared range
 `100.64.0.0/10` get `standard` here, because a proxy in front of a hosted API
 sits there as often as llama.cpp does and refuses the extras, while the
 disclosure block takes those hosts as inside the deployment
-([What left this machine](/usage/reports-and-exports/#what-left-this-machine)).
+([What left this machine](/docs/usage/reports-and-exports/#what-left-this-machine)).
 
 `deepseek` is a value of its own because no one body serves both APIs. OpenAI's
 clients send the output cap as `max_completion_tokens`, which DeepSeek's chat
@@ -567,7 +567,7 @@ nothing*, so that failure and a timeout both carry a sentence naming the
 setting and what it does. A measured 12B reasoning model failed the probe in
 55 s at the default and passed in 243 ms with the setting on; with
 `llm.require_probe` on, every job is refused in between. See the low-memory
-option in [getting-started.md](/getting-started/).
+option in [getting-started.md](/docs/getting-started/).
 Ollama's body also carries `options.num_ctx` and `keep_alive` from
 `llm.ollama.num_ctx` and `llm.ollama.keep_alive`, the two fields a run sends
 with every call that decide which instance Ollama keeps loaded. Ollama loads a
@@ -1153,7 +1153,7 @@ room was sized and how many messages were dropped are on the loop's budget
 record. Each gets only what is left of its loop's time. An
 analyst's salvage is also held to what that time can read and answer at the
 model's measured rates, and is not sent when not even the task fits (see the
-time cap in [architecture](/architecture/)).
+time cap in [architecture](/docs/architecture/)).
 
 The window itself is learned free of charge and without asking the operator
 anything. In order:
@@ -1434,7 +1434,7 @@ identical in tool and arguments to one already answered; a served retry and a
 call that differs in any argument or page never count), the conversation's room (a tool answer that no longer fits the window),
 and the job's spend ceiling below. The job timeout below, when you set one, is
 the last resort. A loop with no time limit has no clock of its own. Every model request still has
-a whole-call deadline Maljan enforces itself: the request timeout sized in the
+a whole-call deadline Malspark enforces itself: the request timeout sized in the
 section above (its output cap at the model's measured pace, prompt read
 included), or the client's own timeout — `PROVIDER_REQUEST_TIMEOUT_SECONDS`,
 1,800 s — where nothing is measured. The client's timeout stays as a second
@@ -1983,7 +1983,7 @@ redeploying with a different environment.
 
 Four tool servers are enabled out of the box, and a fifth (`virustotal`)
 ships ready to enable. What each offers is in
-[architecture.md](/architecture/); what an operator changes here is the
+[architecture.md](/docs/architecture/); what an operator changes here is the
 binding, the exposure (`tools`) and whether the server runs at all (`enabled`).
 
 There are two ways a server reaches an agent, and the built-ins use both.
@@ -2128,7 +2128,7 @@ The lookups are ticked by default and are read-only:
 `get_analysis` and `get_submission`. `submit_file` is advertised and stays
 **unticked**: uploading a sample publishes it to VirusTotal, which is a
 disclosure an operator opts into, so it takes a deliberate tick in the Tools
-step. See [security.md](/security/) for what that changes.
+step. See [security.md](/docs/security/) for what that changes.
 
 The token is subject to VirusTotal's published quotas. Over quota, the server
 answers the tool call with a 429 carrying `Retry-After`; the analyst records
@@ -2172,7 +2172,7 @@ the same agent token from `VTAI_TOKEN`, and that form offers one tool the
 remote one cannot: `submit_local_file`, which uploads by path. The remote
 server has no view of this host's filesystem, so it offers `submit_file`
 (the bytes, base64) instead. Operators who want the local-path upload install
-it as described in [deployment.md](/deployment/) and add a second server
+it as described in [deployment.md](/docs/deployment/) and add a second server
 entry with transport `stdio`.
 
 ### The identification servers
@@ -2189,7 +2189,7 @@ with `sample_mount` `/data/samples` and `reads_staged_sample`, every tool
 declared read-only and running nothing. Switching one on takes its container
 (its profile and its token in `docker/.env`) and the same token as the
 block's `auth_token`; then its tools are offered and its pack step runs. See
-[Identification servers](/tools/identification/).
+[Identification servers](/docs/tools/identification/).
 
 ### The rule and document servers
 
@@ -2205,7 +2205,7 @@ with `sample_mount` `/data/samples` and `reads_staged_sample`, every tool
 declared read-only and running nothing. `yarax_scan` is declared as
 `yara_scan` is (kind `signature_rules`, source `yara`): its matches count as
 signature rule hits and corroborate as the one YARA layer. See
-[Rule and document servers](/tools/rules-and-documents/).
+[Rule and document servers](/docs/tools/rules-and-documents/).
 
 ### The container and Android servers
 
@@ -2223,7 +2223,7 @@ directory of its own in its container, never beside the sample, and stops at
 the larger of the sample's size and the sample upload bound (`UPLOAD_MAX_BYTES`
 in `docker/.env`, 100 MiB unless set) or past `UNBLOB_MAX_ENTRIES` entries,
 in a `/tmp` tmpfs sized below its memory ceiling (`UNBLOB_TMPFS_SIZE`). See
-[Container and Android servers](/tools/containers-and-android/).
+[Container and Android servers](/docs/tools/containers-and-android/).
 
 ## Teams and stages
 
@@ -2524,7 +2524,7 @@ with the same layout.
 `triage_pack` is a stage of kind `triage`: the pipeline itself running the
 deterministic tools over the sample and writing each result to the evidence
 ledger before any analyst starts (see *The triage pack* in
-[architecture.md](/architecture/)). Every team but `measurement` ships with
+[architecture.md](/docs/architecture/)). Every team but `measurement` ships with
 it first, a team written by hand may leave it out, and a stored team gains it
 on upgrade (`make migrate`). Its six settings sit in the Analysis layers
 group: `triage.enabled` (off leaves the stage in place and makes it decline
@@ -2547,7 +2547,7 @@ the server, or `triage.reputation = off`, keeps such a run offline.
 
 The pack is a list of steps (`maljan.core.pack_steps`), each declared as
 data. The shipped list is the pack described in
-[architecture.md](/architecture/), in that order; `triage.steps` holds your
+[architecture.md](/docs/architecture/), in that order; `triage.steps` holds your
 own, laid over it (the console edits them as a form, see *Adding a step in the
 console* below):
 
@@ -2694,7 +2694,7 @@ its answer names taken in: copied under the job's own staging directory
 `art_<sha256>`; its name is kept to its last part in safe characters, never
 deciding where it lands. The bytes come over the producing server's
 `get_artefact` tool where it offers one (see
-[MCP servers](/integrations/mcp-servers/#files-a-server-wrote)), whatever its
+[MCP servers](/docs/integrations/mcp-servers/#files-a-server-wrote)), whatever its
 transport, and otherwise, for a server on the worker's filesystem (stdio, no
 `sample_mount`), from inside that server's own job staging directory only,
 opened component by component beneath it with no link followed anywhere (a
@@ -2812,7 +2812,7 @@ at one correction turn per batch), `validation.alignment_threshold` (0.05, the
 paper's gate) and `validation.alignment_margin` (0.20, how far a candidate from
 the sample's own domain and another tactic must beat the claimed id before it
 is questioned). The measurement behind the default off is in *The technique
-check* in [architecture.md](/architecture/).
+check* in [architecture.md](/docs/architecture/).
 
 `validation.claim_repeat_margin` (empty) is how many claims an analyst's
 answer may write again before it is asked once for a whole answer
@@ -3026,7 +3026,7 @@ deprecated and operator-only: they ship empty, and an entry you write is still
 read for an agent whose definition sets neither, before the deployment's
 value; a definition's own value wins over them. A map entry that is not a
 whole number of at least one is dropped with a warning when the settings are
-built, the same bound the definition's own fields carry. See *Delegation* in [architecture.md](/architecture/) for
+built, the same bound the definition's own fields carry. See *Delegation* in [architecture.md](/docs/architecture/) for
 what the ledger and the transcript record.
 
 ### A name a later release takes
@@ -3361,7 +3361,7 @@ system turn — sample, identity, signature, reputation, stages run or skipped,
 ledger count, failed tools, remaining steps and seconds — regenerated on every
 turn. Neither is a setting of the stage: a team without a triage stage has no
 pack and its agents see only the run state. See *The triage pack* in
-[architecture.md](/architecture/).
+[architecture.md](/docs/architecture/).
 
 Which slice of the job an agent reads is its own setting,
 `agents.definitions.<key>.data_sources`. Empty means the slice the agent's
@@ -3452,7 +3452,7 @@ uploaded; the mount in your compose file and the declared `sample_mount` have
 to agree.
 
 **The `put_sample` convention.** A server reached over HTTP advertises
-`put_sample` on its manifest, and Maljan uploads the sample to it before the
+`put_sample` on its manifest, and Malspark uploads the sample to it before the
 agent's first tool call:
 
 | tool | arguments | returns |
@@ -3596,7 +3596,7 @@ environment rather than the worker's own: the general-purpose names (`PATH`,
 `HOME`, the locale and temp ones), then exactly the names that server's
 `env_allow` lists, then its `env` map. `MALJAN_SAMPLE_ROOTS` is therefore named
 on the two file-reading built-ins and on no others — a variable that says where
-this host keeps malware is not something every child Maljan starts has any
+this host keeps malware is not something every child Malspark starts has any
 business reading. A tool server an operator adds receives it only when they
 put the name in its own `env_allow`, which is the same switch a server of
 theirs that takes paths would need anyway.
@@ -3885,7 +3885,7 @@ are ever removed.
 | `reference_urls` | sample lookup URL templates, `https://` and naming `{sha256}`, `{md5}` or `{sha1}`; a report links them, under the name its lookup's record gives (else the server's label), only when the run recorded an entry from this server. `reporting.reference_urls` holds the lookups linked on every report (shipped with VirusTotal's and MalwareBazaar's) |
 | `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
 | `credential_bootstrap` | how the server's credential is obtained by one request (below); empty when its token is typed in |
-| `launcher_depth` | how many levels at the top of the process tree the worker starts for the server are a launcher that does not read the sample (1: the started process alone); the report's isolation part holds them only to carrying none of the platform's own variables and every process under them to every check ([Where the sample was read](/usage/reports-and-exports/#where-the-sample-was-read)). Empty declares no launcher |
+| `launcher_depth` | how many levels at the top of the process tree the worker starts for the server are a launcher that does not read the sample (1: the started process alone); the report's isolation part holds them only to carrying none of the platform's own variables and every process under them to every check ([Where the sample was read](/docs/usage/reports-and-exports/#where-the-sample-was-read)). Empty declares no launcher |
 | `default_effects` | what every tool of the server does beyond answering, unless the tool says otherwise: an `effects` value (`executes`, `network`, `third_party`, `when`), laid under the own `effects` of each tool its server listed, sub-field by sub-field (a tool nothing has listed has not said whether it does otherwise, so the statement says nothing of it). A tool that says otherwise keeps what it says: one read as emulating, as running whatever it is given (`why_undeclared`), or as sending the file. A block whose `default_effects` say what its tools send (`third_party`) and whose `roles` hold a program role drops the reading that a tool sends the file it opens (see "A decompiler's or disassembler's tools read from what it lists"); it never lifts that reading off another server's tools. The shipped Ghidra and radare2 blocks say their tools run nothing, reach no network and send nothing (`executes: no`, `network: false`, `third_party: no`); empty says nothing |
 | `analyse_effects` | what the tool `sample_open.analyse_tool` names does beyond answering, over `default_effects`: the server's analysis step as a whole, never a table of tools. radare2's block names `analyze` (with no open tool) and says it emulates the sample's code `when` the analysis level is 2 or above, where r2mcp runs `aaa`, whose type matching (`aaft`) emulates each function with ESIL; Ghidra's `run_analysis` gains nothing of it; empty says nothing |
 | `prepass_tools` | which of the server's tools the platform calls itself, once per job, when it is the server the `generic_mcp` provider drives (`static.generic.server`, or radare2's own block): `call_graph` (the program's whole call graph, read for the priority-functions pre-pass), `function_hashes` (a hash per function, read for function-hash attribution and the triage pack's function-hash step) and `anti_analysis` (the triage pack's anti-analysis scan). Empty, or a name left empty, declares nothing, and that pass is not made, as before (below) |
@@ -4781,7 +4781,7 @@ recorded fixtures and an attached report do; and `""`, the default, for one
 that does not say. A run's disclosure block records that host when the
 sample is submitted, and says it cannot tell where a submission went when
 the provider does not say
-([What left this machine](/usage/reports-and-exports/#what-left-this-machine)).
+([What left this machine](/docs/usage/reports-and-exports/#what-left-this-machine)).
 
 **Saving.** A built-in's stored block takes the shipped value of any field it
 never set, and one the operator set, empty included, is kept. A save stores
@@ -4938,7 +4938,7 @@ loop, and for a stdio server that is one child process per loop.
 
 ## Writing a tool server
 
-Any MCP server works: Maljan reads its manifest and calls its tools. Three
+Any MCP server works: Malspark reads its manifest and calls its tools. Three
 optional conventions make a server a better citizen of a run, and the four
 built-in sidecars follow all three; every other sidecar under `services/`
 declares its tools too.
@@ -5418,7 +5418,7 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
   operator can see what has to be re-entered on the other side. Those paths are
   informational, not catalog keys.
 - A stored row nested deeper than an answer can be written (the bound is the
-  JSON writers' own, never a depth Maljan sets) is left out and named under
+  JSON writers' own, never a depth Malspark sets) is left out and named under
   `unreadable` with why, which the console names beside the download; an import ignores that field. `GET /api/v1/settings`
   serves the same row with no value and its reason in `unreadable`, which the
   console shows on the row, and a warning is logged, so one such row never

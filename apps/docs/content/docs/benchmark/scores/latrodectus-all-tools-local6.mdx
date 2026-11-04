@@ -7,15 +7,15 @@ description: "The all-tools team on a local Qwen3.6-35B, scored key by key again
 The reference sample run under the importable all-tools team with a real
 sandbox, on a local model. `dev` @ `4d80c62e`, team `all_tools` (three static
 analysts, a Ghidra reverser, then the dynamic and network stages; see [An
-all-tools team](/configuration/#an-all-tools-team)), model
+all-tools team](/docs/configuration/#an-all-tools-team)), model
 Qwen3.6-35B-A3B on ik_llama.cpp with thinking off, a 131,072-token window
 probed from the server, output caps of 32,768 tokens for every analyst, the
 judge and the report model, no spend ceiling. The server had one slot, so the
 analysts ran one after another. **Sandbox: Hatching Triage, a 600 s run.** The
 job completed in 8,373 s.
 
-The method is the [benchmark's](/benchmark/#method), with the
-[all-tools series' scoring surface](/benchmark/#the-all-tools-series): the 57
+The method is the [benchmark's](/docs/benchmark/#method), with the
+[all-tools series' scoring surface](/docs/benchmark/#the-all-tools-series): the 57
 core items of K1–K10 (K1.1 split into family and loader), scored on the report
 body, the STIX bundle and the `/iocs` feed.
 
@@ -50,7 +50,7 @@ Proofpoint.
 **12 facts beyond the human reports** (below).
 
 - **The best local found count of the all-tools series, still with nothing
-  wrong**, and far below the [hosted run](/benchmark/scores/latrodectus-all-tools-run4/)'s 45.
+  wrong**, and far below the [hosted run](/docs/benchmark/scores/latrodectus-all-tools-run4/)'s 45.
 - **The gains are the C2 channel and the task.** The `POST` to `/live/`, the
   fixed User-Agent, and T1053.005, published from the sandbox's "Uses Task
   Scheduler COM API" signature.

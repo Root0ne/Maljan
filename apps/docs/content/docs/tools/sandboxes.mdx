@@ -17,7 +17,7 @@ pid, a substring, a signature or a list of ids. The `dynamic` analyst has it
 with the other sandbox tools and the `network` analyst has it on its own (the
 whole set where its definition asks for the sandbox tools); a claim cites an
 item by its id, in brackets or in its evidence field. See
-[the triage pack](/architecture/#the-triage-pack).
+[the triage pack](/docs/architecture/#the-triage-pack).
 
 ## One neutral report
 
@@ -104,7 +104,7 @@ document writes each value out once.
 
 <Callout type="warn" title="A sandbox runs the sample">
 
-Point Maljan only at a sandbox you are authorised to use, on a network
+Point Malspark only at a sandbox you are authorised to use, on a network
 isolated from production. What a submission discloses depends on the
 service: a cloud sandbox holds the sample under its own terms.
 
@@ -117,7 +117,7 @@ one for, marked `recorded_fixture`, and an empty stand-in marked `synthetic` for
 any other. Where no sandbox ran, the triage pack writes one `sandbox_status`
 entry with the sentence that says so, the dynamic and network analysts are
 skipped, the run carries the reason, and a stand-in's empty sections are never
-rendered as "0 processes". See [Providers](/architecture/#providers).
+rendered as "0 processes". See [Providers](/docs/architecture/#providers).
 
 ## CAPEv2
 
@@ -160,7 +160,7 @@ then name it on the job with `sandbox_report_id`, which also selects this
 provider. CAPEv2, Cuckoo and Triage formats are accepted by default
 (`sandbox.upload.allowed_formats`), up to 64 MiB (`sandbox.upload.max_report_bytes`).
 Only a report attached to the job's own sample is read. See [Running an
-analysis](/usage/running-an-analysis/).
+analysis](/docs/usage/running-an-analysis/).
 
 A report is read at any nesting depth. A body too deeply nested for the JSON
 reader is read again by an iterative one, and every container nested more than
@@ -280,7 +280,7 @@ image, a capture or a lookup answers with. The shipped CAPE MCP block carries
 the role. A connection test of a server without it, some of whose tools' rows
 read like a sandbox run's, proposes no sandbox kind and says so in the
 proposals' notes, naming those tools. See
-[proposed declarations](/configuration/) for what each kind reads.
+[proposed declarations](/docs/configuration/) for what each kind reads.
 
 ### Report formats are declarations
 
@@ -478,7 +478,7 @@ is drawn as it always was, from the sandbox provider in its settings snapshot.
 
 ## Any REST sandbox
 
-The `rest` provider describes a sandbox Maljan has never heard of, rather than
+The `rest` provider describes a sandbox Malspark has never heard of, rather than
 coding it:
 
 | Block | What it says |
@@ -497,7 +497,7 @@ channel names as written); a report stored when the list said `calls` or
 `generic_events` is printed as stored and read as the ids those words meant. `mapping.channels` maps a channel name of your own to a JSONPath for
 anything the schema has no field for; namespace it by platform, e.g.
 `{"android.permissions": "$.apk.permissions[*]"}`. See [Format routing and the
-sandbox](/configuration/#format-routing-and-the-sandbox).
+sandbox](/docs/configuration/#format-routing-and-the-sandbox).
 
 ## Connection tests
 

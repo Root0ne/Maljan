@@ -10,7 +10,7 @@ of its own. Rehearse three or four times before any paid run, and again after
 any change to the pipeline, the providers or the settings.
 
 Everything lives in `scripts/rehearsal/` and none of it ships in the product.
-Maljan reaches the stub only through its own settings: the OpenAI base URL, or
+Malspark reaches the stub only through its own settings: the OpenAI base URL, or
 `core.llm.anthropic.base_url` for the Anthropic wire.
 
 ## The gate: your own paid configuration, against the stub
@@ -167,7 +167,7 @@ is taken only where exactly one model lacks a window, and is that model's.
 
 By default the stub stands for a hosted API. Its model list names each model
 with no window, and it serves no runtime metadata (no llama.cpp `/props`, no
-`/info`), so Maljan learns each window and output cap as it would from the paid
+`/info`), so Malspark learns each window and output cap as it would from the paid
 API: the Models API's answer, the vendored table, or your own
 `core.llm.openai.context_size`. `--runtime llama` stands for a local llama.cpp
 server instead: `/props` reports the window and the slots, and the model list

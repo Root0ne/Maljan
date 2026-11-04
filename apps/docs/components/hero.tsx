@@ -10,11 +10,11 @@ export function Hero({ tagline, children }: { tagline: string; children: ReactNo
   return (
     <div className="mj-hero not-prose">
       <Image src={logo} alt={appName} width={88} height={88} priority />
-      <h1 id="maljan">{appName}</h1>
+      <h1 id="malspark">{appName}</h1>
       <p className="mj-tagline">{tagline}</p>
       <div className="mj-hero-text">{children}</div>
       <div className="mj-hero-actions">
-        <Link href="/getting-started/" className="mj-button mj-button-primary">
+        <Link href="/docs/getting-started/" className="mj-button mj-button-primary">
           Quick start
         </Link>
         <a href={repoUrl} className="mj-button" rel="noreferrer noopener" target="_blank">

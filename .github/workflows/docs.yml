@@ -48,12 +48,15 @@ jobs:
           npm run types:check
           npm run lint
 
-      # A static export under /Maljan; the build fails if an address the site
+      # A static export under /Maljan, where GitHub Pages serves the site until
+      # it is retired in favour of malspark.com (a build with the variable unset
+      # serves the domain's root). The build fails if an address the site
       # served before no longer leads to a page (scripts/old-urls.mjs).
       - name: Build the site
         working-directory: apps/docs
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_PUBLIC_BASE_PATH: /Maljan
         run: npm run build
 
       - name: Upload the site

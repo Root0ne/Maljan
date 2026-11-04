@@ -6,7 +6,7 @@ description: "Settings for the openai provider, from api.openai.com to DeepSeek 
 The `openai` provider calls an OpenAI-compatible chat API through LangChain's
 `ChatOpenAI`. With no `base_url` it calls api.openai.com; with one, it calls
 whatever serves that address — DeepSeek, another hosted OpenAI-compatible API,
-or a server on your own machine (see [Local llama.cpp](/providers/llama-cpp/)).
+or a server on your own machine (see [Local llama.cpp](/docs/providers/llama-cpp/)).
 
 ## Settings
 
@@ -50,7 +50,7 @@ block places a host by: a compose service's name, a `.internal` name and the
 shared range `100.64.0.0/10` get `standard` here, since a proxy in front of a
 hosted API sits there as often as llama.cpp does, while the disclosure block
 takes them as inside the deployment
-([What left this machine](/usage/reports-and-exports/#what-left-this-machine)).
+([What left this machine](/docs/usage/reports-and-exports/#what-left-this-machine)).
 
 ## DeepSeek
 
@@ -87,8 +87,8 @@ returned and sent back on its turn on every later request that carries tools,
 which DeepSeek's API requires. DeepSeek takes `low`, `high` and `max` as
 `reasoning_effort`; empty leaves its own default. The complete behaviour is in
 [Which dialect an OpenAI-compatible endpoint
-speaks](/configuration/#which-dialect-an-openai-compatible-endpoint-speaks)
-and [Reasoning effort](/configuration/#reasoning-effort).
+speaks](/docs/configuration/#which-dialect-an-openai-compatible-endpoint-speaks)
+and [Reasoning effort](/docs/configuration/#reasoning-effort).
 
 <Callout type="idea" title="Price the models before a paid run">
 

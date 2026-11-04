@@ -155,7 +155,7 @@ A claim that cites no evidence.
 
 - **Raised at** `demo.checks:check`
 - **Constant** `demo.checks:EMPTY_CODE`
-- **Docs** [Checks](/)
+- **Docs** [Checks](/docs/)
 
 ### `demo.fed`
 

@@ -3,7 +3,7 @@ title: "Benchmark"
 description: "The benchmark: samples, models, the scoring key, results across iterations and against a human report, the findings beyond it, the false-positive control and limitations."
 ---
 
-This page reports how Maljan's teams perform on a small set of real samples,
+This page reports how Malspark's teams perform on a small set of real samples,
 how their reports compare, item by item, with published human analyses of the
 same sample, and which facts they establish that the human analyses do not
 hold. It covers two series:
@@ -24,16 +24,16 @@ The reference sample, 57 core items:
 
 | Run | Model | Found | Partly | Missed | Wrong | Beyond human |
 | :-- | :-- | --: | --: | --: | --: | --: |
-| [All-tools, hosted, run 5](/benchmark/scores/latrodectus-all-tools-run5/) | `deepseek-flash` | 43 | 11 | 2 | 1 | **27** |
-| [All-tools, hosted, run 4](/benchmark/scores/latrodectus-all-tools-run4/) | `deepseek-flash` | **45** | 9 | 2 | 1 | **19** |
-| [All-tools, local](/benchmark/scores/latrodectus-all-tools-local6/) | Qwen3.6-35B | 15 | 21 | 21 | 0 | **12** |
-| [Default, it. 6](/benchmark/scores/latrodectus-iteration6-default/) | Qwen3.6-35B | 12 | 28 | 17 | 0 | — |
-| [Default, it. 5](/benchmark/scores/latrodectus-iteration5-default/) | Qwen3.6-35B | 14 | 25 | 18 | 0 | — |
-| [Default, it. 4](/benchmark/scores/latrodectus-iteration4-default/) | Qwen3.6-35B | 15 | 25 | 17 | 0 | — |
-| [Default, it. 2](/benchmark/scores/latrodectus-iteration2-default/) | Qwen3.6-35B | 12 | 25 | 20 | 0 | — |
-| [Default, it. 2, with r2](/benchmark/scores/latrodectus-iteration2-r2/) | Qwen3.6-35B | 11 | 24 | 21 | 1 | — |
-| [Default, it. 1](/benchmark/scores/latrodectus-iteration1-default/) | Qwen3.6-35B | 12 | 29 | 16 | 0 | — |
-| [Default, it. 1, small model](/benchmark/scores/latrodectus-iteration1-small/) | qwen3.8:27b | 10 | 28 | 19 | 0 | — |
+| [All-tools, hosted, run 5](/docs/benchmark/scores/latrodectus-all-tools-run5/) | `deepseek-flash` | 43 | 11 | 2 | 1 | **27** |
+| [All-tools, hosted, run 4](/docs/benchmark/scores/latrodectus-all-tools-run4/) | `deepseek-flash` | **45** | 9 | 2 | 1 | **19** |
+| [All-tools, local](/docs/benchmark/scores/latrodectus-all-tools-local6/) | Qwen3.6-35B | 15 | 21 | 21 | 0 | **12** |
+| [Default, it. 6](/docs/benchmark/scores/latrodectus-iteration6-default/) | Qwen3.6-35B | 12 | 28 | 17 | 0 | — |
+| [Default, it. 5](/docs/benchmark/scores/latrodectus-iteration5-default/) | Qwen3.6-35B | 14 | 25 | 18 | 0 | — |
+| [Default, it. 4](/docs/benchmark/scores/latrodectus-iteration4-default/) | Qwen3.6-35B | 15 | 25 | 17 | 0 | — |
+| [Default, it. 2](/docs/benchmark/scores/latrodectus-iteration2-default/) | Qwen3.6-35B | 12 | 25 | 20 | 0 | — |
+| [Default, it. 2, with r2](/docs/benchmark/scores/latrodectus-iteration2-r2/) | Qwen3.6-35B | 11 | 24 | 21 | 1 | — |
+| [Default, it. 1](/docs/benchmark/scores/latrodectus-iteration1-default/) | Qwen3.6-35B | 12 | 29 | 16 | 0 | — |
+| [Default, it. 1, small model](/docs/benchmark/scores/latrodectus-iteration1-small/) | qwen3.8:27b | 10 | 28 | 19 | 0 | — |
 
 "Beyond human" counts the facts a run's report states that no
 human-report item holds and that the run's own evidence proves; the rule is in
@@ -51,7 +51,7 @@ In short, for the default-team iterations:
 - The score has plateaued within rerun noise. Iterations 5 and 6 found 14 and
   12 items, and across the five scored runs of the default model found stayed
   at 12–15 and wrong at 0.
-- The remaining gap is on the model's side. What Maljan still misses is mostly
+- The remaining gap is on the model's side. What Malspark still misses is mostly
   control flow: the anti-analysis checks, the bot-ID derivation, the beacon
   interval and the command IDs. Strings alone cannot recover these, and a
   disassembler did not help in the one run that had one. The rest is the
@@ -173,7 +173,7 @@ rests on and names the human report section it is scored against:
   the appendix only hints at counts as missed, not partly.
 - **Wrong**: the report states the item in a way the human report contradicts.
 
-Each score file also lists the **reverse direction**: claims in Maljan's report
+Each score file also lists the **reverse direction**: claims in Malspark's report
 that no human report supports, marked as contradicted, unsupported, or correct
 but new.
 
@@ -205,7 +205,7 @@ The same reference sample, key and verdict words as the iterations, with five
 differences:
 
 - **Team.** The importable all-tools team (`docs/examples/profiles/all-tools.json`,
-  see [An all-tools team](/configuration/#an-all-tools-team)): the triage
+  see [An all-tools team](/docs/configuration/#an-all-tools-team)): the triage
   pack and the triage agent; three static analysts, each on a tool of its own
   (the analysis and knowledge servers, radare2, and a generic analysis server);
   a reverser on Ghidra; the dynamic and network stages; the debate, the verdict
@@ -313,7 +313,7 @@ report model of both models read the same pack.
 
 Latrodectus, 57 core items, found / partly / missed / wrong:
 
-| Maljan report | Found | Partly | Missed | Wrong |
+| Malspark report | Found | Partly | Missed | Wrong |
 | :-- | --: | --: | --: | --: |
 | Baseline, before decoded strings and VirusTotal labels reached the triage pack | 3 | 7 | 46 | 1 |
 | Small model, iteration 1 | 10 | 28 | 19 | 0 |
@@ -433,13 +433,13 @@ did not cause those moves. The remaining gap is on the model's side:
   report body, and their roles are unstated or guessed.
 
 Item by item, with the quoted sentence and the human report section for each:
-[iteration 6](/benchmark/scores/latrodectus-iteration6-default/),
-[iteration 5](/benchmark/scores/latrodectus-iteration5-default/),
-[iteration 4](/benchmark/scores/latrodectus-iteration4-default/),
-[iteration 2](/benchmark/scores/latrodectus-iteration2-default/),
-[iteration 2 with r2](/benchmark/scores/latrodectus-iteration2-r2/),
-[iteration 1](/benchmark/scores/latrodectus-iteration1-default/) and
-[iteration 1, small model](/benchmark/scores/latrodectus-iteration1-small/).
+[iteration 6](/docs/benchmark/scores/latrodectus-iteration6-default/),
+[iteration 5](/docs/benchmark/scores/latrodectus-iteration5-default/),
+[iteration 4](/docs/benchmark/scores/latrodectus-iteration4-default/),
+[iteration 2](/docs/benchmark/scores/latrodectus-iteration2-default/),
+[iteration 2 with r2](/docs/benchmark/scores/latrodectus-iteration2-r2/),
+[iteration 1](/docs/benchmark/scores/latrodectus-iteration1-default/) and
+[iteration 1, small model](/docs/benchmark/scores/latrodectus-iteration1-small/).
 
 ## What changed between iterations
 
@@ -689,13 +689,13 @@ not stop an analyst's technique from being published. The rest of the report:
 
 | File | Run |
 | :-- | :-- |
-| [latrodectus-all-tools-run5.md](/benchmark/scores/latrodectus-all-tools-run5/) | All-tools team, hosted `deepseek-flash` (DeepSeek), Triage sandbox, no spend ceiling, parallel analysts |
-| [latrodectus-all-tools-run4.md](/benchmark/scores/latrodectus-all-tools-run4/) | All-tools team, hosted `deepseek-flash` (DeepSeek), Triage sandbox (`dev` @ `ceb4244a`) |
-| [latrodectus-all-tools-local6.md](/benchmark/scores/latrodectus-all-tools-local6/) | All-tools team, local Qwen3.6-35B-A3B, Triage sandbox (`dev` @ `4d80c62e`) |
-| [latrodectus-iteration6-default.md](/benchmark/scores/latrodectus-iteration6-default/) | Default model, iteration 6 (`dev` @ `ed57265b`) |
-| [latrodectus-iteration5-default.md](/benchmark/scores/latrodectus-iteration5-default/) | Default model, iteration 5 (`dev` @ `2a93b02d`) |
-| [latrodectus-iteration4-default.md](/benchmark/scores/latrodectus-iteration4-default/) | Default model, iteration 4 (`dev` @ `1eb7312f`) |
-| [latrodectus-iteration2-default.md](/benchmark/scores/latrodectus-iteration2-default/) | Default model, iteration 2 (`dev` @ `39b07c65`) |
-| [latrodectus-iteration2-r2.md](/benchmark/scores/latrodectus-iteration2-r2/) | Default model with the r2 disassembler, iteration 2 |
-| [latrodectus-iteration1-default.md](/benchmark/scores/latrodectus-iteration1-default/) | Default model, iteration 1 (`dev` @ `9019db82`) |
-| [latrodectus-iteration1-small.md](/benchmark/scores/latrodectus-iteration1-small/) | Small model, iteration 1 |
+| [latrodectus-all-tools-run5.md](/docs/benchmark/scores/latrodectus-all-tools-run5/) | All-tools team, hosted `deepseek-flash` (DeepSeek), Triage sandbox, no spend ceiling, parallel analysts |
+| [latrodectus-all-tools-run4.md](/docs/benchmark/scores/latrodectus-all-tools-run4/) | All-tools team, hosted `deepseek-flash` (DeepSeek), Triage sandbox (`dev` @ `ceb4244a`) |
+| [latrodectus-all-tools-local6.md](/docs/benchmark/scores/latrodectus-all-tools-local6/) | All-tools team, local Qwen3.6-35B-A3B, Triage sandbox (`dev` @ `4d80c62e`) |
+| [latrodectus-iteration6-default.md](/docs/benchmark/scores/latrodectus-iteration6-default/) | Default model, iteration 6 (`dev` @ `ed57265b`) |
+| [latrodectus-iteration5-default.md](/docs/benchmark/scores/latrodectus-iteration5-default/) | Default model, iteration 5 (`dev` @ `2a93b02d`) |
+| [latrodectus-iteration4-default.md](/docs/benchmark/scores/latrodectus-iteration4-default/) | Default model, iteration 4 (`dev` @ `1eb7312f`) |
+| [latrodectus-iteration2-default.md](/docs/benchmark/scores/latrodectus-iteration2-default/) | Default model, iteration 2 (`dev` @ `39b07c65`) |
+| [latrodectus-iteration2-r2.md](/docs/benchmark/scores/latrodectus-iteration2-r2/) | Default model with the r2 disassembler, iteration 2 |
+| [latrodectus-iteration1-default.md](/docs/benchmark/scores/latrodectus-iteration1-default/) | Default model, iteration 1 (`dev` @ `9019db82`) |
+| [latrodectus-iteration1-small.md](/docs/benchmark/scores/latrodectus-iteration1-small/) | Small model, iteration 1 |

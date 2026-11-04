@@ -17,7 +17,7 @@ export function baseOptions(): BaseLayoutProps {
       title: (
         <>
           <Image src={logo} alt="" width={26} height={26} priority />
-          <span className="font-semibold tracking-tight">{appName}</span>
+          <span className="font-extrabold uppercase tracking-[0.14em]">{appName}</span>
         </>
       ),
       url: '/',

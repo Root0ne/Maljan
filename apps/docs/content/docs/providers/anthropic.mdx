@@ -13,7 +13,7 @@ Claude Haiku 5.5 (`claude-haiku-5-5`) included.
 | :-- | :-- | :-- |
 | `core.llm.provider` | `openai` | Set to `anthropic`. |
 | `core.llm.anthropic.api_key` | — | Required; the provider refuses to build a model without it. Stored encrypted. |
-| `core.llm.anthropic.base_url` | empty | Where every Anthropic request goes — a job's calls, the Models API question and the connection test — written without `/v1`: a proxy, or the loopback stub of a [rehearsal](/usage/rehearsal/). **The API key is sent to this address** with every request, so `https` is required unless the host is loopback (127.0.0.0/8, `::1`, `localhost`), or a Docker host gateway when `core.llm.anthropic.allow_plain_http_to_docker_host` is on; a user name, a query, a fragment or a `/v1` ending is refused on save. Empty is the Anthropic API. |
+| `core.llm.anthropic.base_url` | empty | Where every Anthropic request goes — a job's calls, the Models API question and the connection test — written without `/v1`: a proxy, or the loopback stub of a [rehearsal](/docs/usage/rehearsal/). **The API key is sent to this address** with every request, so `https` is required unless the host is loopback (127.0.0.0/8, `::1`, `localhost`), or a Docker host gateway when `core.llm.anthropic.allow_plain_http_to_docker_host` is on; a user name, a query, a fragment or a `/v1` ending is refused on save. Empty is the Anthropic API. |
 | `core.llm.anthropic.allow_plain_http_to_docker_host` | off | Also takes a plain-http base URL on a Docker host gateway (`host.docker.internal`, `gateway.docker.internal`, 172.17.0.0 to 172.31.255.255), the address a containerised worker reaches a stub or proxy on the host by. **The API key then crosses that hop in clear text**, and those names and addresses can be another machine on a LAN that uses 172.16.0.0/12: turn it on only for a rehearsal stub on this host. |
 | `core.llm.anthropic.expert_model` | `claude-sonnet-4-20250514` | The analysts' model. Name the model you run, such as `claude-haiku-5-5`. |
 | `core.llm.anthropic.judge_model` | `claude-sonnet-4-20250514` | The judge's model. |
@@ -88,7 +88,7 @@ core.llm.anthropic.effort       = max
     stays.
 - **No forced tool choice, no prefill.** Structured output offers the schema's
   tool without forcing it, and an answer that calls no tool is asked again in
-  text. Maljan's requests end on a user turn; a request that ended on an
+  text. Malspark's requests end on a user turn; a request that ended on an
   assistant turn (a prefill, which a thinking model refuses) would be named in
   the log.
 - **Tool replies.** A turn's `tool_use` blocks are each answered by a
@@ -116,4 +116,4 @@ row in `core.llm.model_prices` takes the same fields: `cache_write_input_usd_per
 The connection test asks through `/v1/messages` with the configured effort, and
 a model that answers only with a thinking block has answered. A per-agent entry
 may put one agent on Anthropic while the rest run elsewhere; see [Per-agent
-models and fallbacks](/providers/#per-agent-models-and-fallbacks).
+models and fallbacks](/docs/providers/#per-agent-models-and-fallbacks).

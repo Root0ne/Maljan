@@ -7,7 +7,7 @@ description: "Iteration 4 on the default model, scored key by key against the hu
 Default model (Qwen3.6-35B-A3B on ik_llama.cpp, 32,768-token context, 1 GiB prompt cache, 8 context checkpoints per
 slot), `dev` @ `1eb7312f`, default profile, **mock sandbox (nothing executed)**. Iterations 2 and 3 used 32 checkpoints,
 and iteration 1 used the 8 GiB prompt-cache default. The method is exactly as on the
-[benchmark page](/benchmark/#method) and in the [iteration-2 score](/benchmark/scores/latrodectus-iteration2-default/): 57 core items of
+[benchmark page](/docs/benchmark/#method) and in the [iteration-2 score](/docs/benchmark/scores/latrodectus-iteration2-default/): 57 core items of
 K1–K10 (with K1.1 split), build items as consistency checks only, chain and later items not scored.
 - **partly (body)**: the body states part of the item, or states it with the wrong purpose.
 - **partly (appendix)**: the value is printed only in Appendix A › Floss: strings.
@@ -40,7 +40,7 @@ appendix-only items gives **15 / 23 / 19 / 0**, against 12 / 20 / 25 / 0 in both
 ## Item by item
 
 ### K1
-| # | Score | Maljan (quoted) | Human source |
+| # | Score | Malspark (quoted) | Human source |
 |---|---|---|---|
 | K1.1a family | found | "**Family:** Latrodectus (moderate-to-high confidence, 0.85, stated by the judge) [ev_0011, ev_0008]" | B intro |
 | K1.1b loader | **partly (body)** (it. 2: found) | "Category: Trojan/Backdoor"; §4 step 4 "Drops additional payloads (DLLs or EXEs) to disk". The word "loader" and the download-and-run purpose are missing | B intro |
@@ -49,7 +49,7 @@ appendix-only items gives **15 / 23 / 19 / 0**, against 12 / 20 / 25 / 0 in both
 | K1.5 four exports, one address | found | §7 "All 4 exports share one address, 0x3ce4." | E |
 
 ### K2
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K2.1 APIs by hash | partly (body) | §5.2 capa rows "resolve function by parsing PE exports" and "hash data with CRC32"; §5.1 "imports only kernel32.dll and user32.dll … relying on dynamic behavior for its malicious functions". The report never says "by hash" | B *Windows API resolution* |
 | K2.2 abort on failed check | missed | — | B *Anti analysis* |
@@ -59,7 +59,7 @@ appendix-only items gives **15 / 23 / 19 / 0**, against 12 / 20 / 25 / 0 in both
 | K2.6 `update_data.dat` for new C2s | partly (body) | §5.3 "Local Data Files · \update_data.dat, files/bp.dat"; §9 "Local configuration or payload file"; §4 "may write update data files". Named, but its purpose (replacement C2s) is not stated | B *The update data .dat file* |
 
 ### K3
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K3.1 PEB BeingDebugged | partly (body) | §5.2 capa row "PEB access · B0001.019"; §7 "Debugger Detection::Process Environment Block"; §4 step 1 "accessing the PEB". §8 maps it to **T1003 OS Credential Dumping** ("accesses the PEB … to bypass sandboxing"), a wrong technique (see reverse direction) | B *Debugger check* |
 | K3.2 process count | missed | — | B |
@@ -70,7 +70,7 @@ appendix-only items gives **15 / 23 / 19 / 0**, against 12 / 20 / 25 / 0 in both
 | K3.7 self-deletion via ADS | missed | `:wtfbbq` appears only in the appendix | E *Self-deletion* |
 
 ### K4–K6
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K4.1 bot ID | partly (appendix) | `%04X%04X%04X%04X%08X%04X` appears only in Appendix A | B *Bot ID* |
 | K4.2 group → FNV-1a | partly (body) | §5.2 capa row "hash data using fnv". `Littlehw` is now in the §9 body ("Unknown string, possibly part of a key or identifier"), and `group=%lu` is in the beacon format row. The three are not linked | B *Group and Group ID* |

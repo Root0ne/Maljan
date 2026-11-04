@@ -17,7 +17,7 @@ is checked against the sample it was drafted from, through probe rules written
 from the same string declarations, and what that found is written on the
 rule's own record (`matches_sample`, `matched_by`, `sample_strings`,
 `sample_not_checked`), not to the ledger. See
-[Reporting](/architecture/#reporting).
+[Reporting](/docs/architecture/#reporting).
 
 ## The `capa_yara` provider
 
@@ -103,7 +103,7 @@ that server's `env` (**Settings → Tool servers → `analysis` → `env`**):
 A path that does not exist means an empty corpus and no matches, not a failure.
 A YARA pattern must be a fact about a sample rather than a word that describes
 one; how the shipped rules are written, and how a rule asserts nothing when it
-cannot be that specific, is in [Rule corpora](/configuration/#rule-corpora).
+cannot be that specific, is in [Rule corpora](/docs/configuration/#rule-corpora).
 
 ## A rule match is not a claim
 
@@ -111,4 +111,4 @@ A technique that only a deterministic rule asserted, and no analyst claimed, is
 marked as such in the report's ATT&CK table — "rule match only" with the rule
 and its string count — and grounds no capability word in the report's prose.
 capa's place in the triage pack is described in [The triage
-pack](/architecture/#the-triage-pack).
+pack](/docs/architecture/#the-triage-pack).

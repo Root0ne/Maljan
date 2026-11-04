@@ -7,7 +7,7 @@ Three built-in tool servers match the operator's own YARA rules, read an
 Office or RTF document's macros, objects and links, and turn an obfuscated
 JavaScript dropper back into readable code. Each wraps one program in an image
 of its own under `services/`, over the same plumbing as the
-[identification servers](/tools/identification/); each ships **switched
+[identification servers](/docs/tools/identification/); each ships **switched
 off**, and each is used at full strength once it is on: agents are offered
 every tool it advertises, and its triage pack steps run.
 
@@ -19,7 +19,7 @@ every tool it advertises, and its triage pack steps run.
 
 Each step is taken by its tool's declared kind and runs on the formats its
 tool declares, by the format the router gave the sample, never on a server's
-or a tool's name (see [Configuration](/configuration/#the-packs-steps)). None
+or a tool's name (see [Configuration](/docs/configuration/#the-packs-steps)). None
 of the programs runs what it reads:
 
 - YARA-X compiles the rule files and matches them against the file's bytes.
@@ -102,7 +102,7 @@ these servers runs the pack exactly as before.
 ## What each container is held to
 
 Each is held as the identification servers are (see
-[Identification servers](/tools/identification/#what-each-container-is-held-to)):
+[Identification servers](/docs/tools/identification/#what-each-container-is-held-to)):
 the worker's unprivileged ids, no Linux capability, a pids limit, a read-only
 root with a tmpfs for each run's scratch directory, the samples directory
 read-only at `/data/samples`, its own token as its only secret, a memory

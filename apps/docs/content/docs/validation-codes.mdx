@@ -138,7 +138,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:absence
 
 - **Raised at** `maljan.pipeline.validation:absence_claim_violation`
 - **Constant** `maljan.pipeline.validation:ABSENCE_CLAIM_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `attck.claim_does_not_describe`
 
@@ -146,7 +146,7 @@ No comment names its meaning, and `maljan.pipeline.validation:claim_does_not_des
 
 - **Raised at** `maljan.pipeline.validation:claim_does_not_describe_violation`
 - **Constant** `maljan.pipeline.validation:CLAIM_DOES_NOT_DESCRIBE_CODE`
-- **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/benchmark/scores/latrodectus-iteration6-default/)
+- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/docs/benchmark/scores/latrodectus-iteration6-default/)
 
 ### `attck.missing_id`
 
@@ -154,7 +154,7 @@ A technique named with no id. Its own code because the answer is different from 
 
 - **Raised at** `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** `maljan.pipeline.validation:MISSING_ID_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `attck.platform_mismatch`
 
@@ -162,7 +162,7 @@ No comment names its meaning, and `maljan.pipeline.validation:validate_isr` pass
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`, `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** `maljan.pipeline.validation:PLATFORM_MISMATCH_CODE`
-- **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 2, default model](/benchmark/scores/latrodectus-iteration2-default/)
+- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 2, default model](/docs/benchmark/scores/latrodectus-iteration2-default/)
 
 ### `attck.unknown_id`
 
@@ -171,7 +171,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 - **Raised at** `maljan.pipeline.validation:validate_isr`
 - **Passes on** `maljan.agents.base_agent:BaseAnalyst._validation_turn`, `maljan.pipeline.nodes:make_judge_node.node_fn`
 - **Constant** `maljan.pipeline.validation:VALIDITY_CODE`
-- **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/benchmark/scores/latrodectus-iteration6-default/)
+- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/docs/benchmark/scores/latrodectus-iteration6-default/)
 
 ### `attck.weak_alignment`
 
@@ -179,7 +179,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`
 - **Constant** `maljan.pipeline.validation:WEAK_ALIGNMENT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ## attribution
 
@@ -207,7 +207,7 @@ A report section answer the output cap ended. Its JSON is cut before it closes, 
 
 - **Raised at** `maljan.pipeline.validation:section_cut_violation`
 - **Constant** `maljan.pipeline.validation:SECTION_CUT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `composer.repeated_items`
 
@@ -215,7 +215,7 @@ A report section answer that writes one item again. Every list section's contrac
 
 - **Raised at** `maljan.pipeline.validation:repeated_item_violations`
 - **Constant** `maljan.pipeline.validation:REPEATED_ITEMS_CODE`
-- **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 4, default model](/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/benchmark/scores/latrodectus-iteration6-default/)
+- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 4, default model](/docs/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/docs/benchmark/scores/latrodectus-iteration6-default/)
 
 ### `composer.schema`
 
@@ -223,7 +223,7 @@ No comment names its meaning, and `maljan.pipeline.validation:schema_violations`
 
 - **Raised at** `maljan.pipeline.validation:schema_violations`, `maljan.reporting.composer:ReportComposer._invoke._validate`
 - **Constant** none: the code is written as a literal
-- **Docs** [Latrodectus score: iteration 4, default model](/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/)
+- **Docs** [Latrodectus score: iteration 4, default model](/docs/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/)
 
 ## isr
 
@@ -233,7 +233,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:confide
 
 - **Raised at** `maljan.pipeline.validation:confidence_violation`
 - **Constant** `maljan.pipeline.validation:CLAIM_WITHOUT_CONFIDENCE_CODE`
-- **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/benchmark/scores/latrodectus-iteration2-r2/)
+- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/docs/benchmark/scores/latrodectus-iteration2-r2/)
 
 ### `isr.claims_repeated`
 
@@ -241,7 +241,7 @@ An analyst's answer that writes the same claims again and again: the same whole-
 
 - **Raised at** `maljan.pipeline.validation:analyst_repeated_violation`
 - **Constant** `maljan.pipeline.validation:ANALYST_REPEATED_CODE`
-- **Docs** [Architecture](/architecture/), [Configuration](/configuration/)
+- **Docs** [Architecture](/docs/architecture/), [Configuration](/docs/configuration/)
 
 ### `isr.claims_under_disputes`
 
@@ -249,7 +249,7 @@ Claim headings under the DISPUTES section, beside the analyst's own claims. Not 
 
 - **Raised at** `maljan.pipeline.validation:claims_kept_under_disputes_finding`, `maljan.pipeline.validation:claims_under_disputes_violation`
 - **Constant** `maljan.pipeline.validation:CLAIMS_UNDER_DISPUTES_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `isr.confidence_range`
 
@@ -265,7 +265,7 @@ An analyst's answer the output cap ended. The judge and the composer were asked 
 
 - **Raised at** `maljan.pipeline.validation:analyst_cut_violation`
 - **Constant** `maljan.pipeline.validation:ANALYST_CUT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `isr.decompiled_not_described`
 
@@ -273,7 +273,7 @@ A reverser decompiled two routines that held half of what the analysis needed, k
 
 - **Raised at** `maljan.pipeline.validation:decompiled_not_described_violation`
 - **Constant** `maljan.pipeline.validation:DECOMPILED_NOT_DESCRIBED_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `isr.empty_evidence`
 
@@ -289,7 +289,7 @@ A claim naming a call or a string for a function whose own facts hold none.
 
 - **Raised at** `maljan.pipeline.function_claims:_question`
 - **Constant** `maljan.pipeline.function_claims:FUNCTION_CLAIM_UNHELD_CODE`, `maljan.pipeline.validation:FUNCTION_CLAIM_UNHELD`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `isr.library_only_claims`
 
@@ -297,7 +297,7 @@ A reverser's answer was mostly one-line claims of the form "uses `x.dll` APIs fo
 
 - **Raised at** `maljan.pipeline.validation:library_only_claims_violation`
 - **Constant** `maljan.pipeline.validation:LIBRARY_ONLY_CLAIMS_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `isr.retry_dropped`
 
@@ -305,7 +305,7 @@ A retry kept as the analyst's answer that no longer states claims or findings it
 
 - **Raised at** `maljan.agents.base_agent:BaseAnalyst._ask_retry_drops._emit`, `maljan.pipeline.events:emit_validation_feedback`
 - **Constant** `maljan.pipeline.validation:RETRY_DROPPED_CODE`
-- **Docs** [Architecture](/architecture/), [Replaying a stored run](/replay/)
+- **Docs** [Architecture](/docs/architecture/), [Replaying a stored run](/docs/replay/)
 
 ### `isr.retry_restated_few`
 
@@ -313,7 +313,7 @@ A whole retry that restates fewer of the first answer's claims than it leaves ou
 
 - **Raised at** `maljan.agents.base_agent:BaseAnalyst._ask_retry_drops._emit`, `maljan.pipeline.events:emit_validation_feedback`
 - **Constant** `maljan.pipeline.validation:RETRY_RESTATED_FEW_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `isr.technique_line_unread`
 
@@ -321,7 +321,7 @@ A claim whose TECHNIQUE line is more than ids or NONE. No id is read from it, an
 
 - **Raised at** `maljan.pipeline.validation:technique_line_violation`
 - **Constant** `maljan.pipeline.validation:TECHNIQUE_LINE_UNREAD_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `isr.ungrounded_technique`
 
@@ -329,7 +329,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`
 - **Constant** `maljan.pipeline.validation:UNGROUNDED_TECHNIQUE_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `isr.unparsed_answer`
 
@@ -337,7 +337,7 @@ No comment names its meaning, and `maljan.pipeline.validation:parse_violations` 
 
 - **Raised at** `maljan.pipeline.validation:parse_violations`
 - **Constant** `maljan.pipeline.validation:UNPARSED_ANSWER_CODE`
-- **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/benchmark/scores/latrodectus-iteration2-r2/)
+- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/docs/benchmark/scores/latrodectus-iteration2-r2/)
 
 ## narrative
 
@@ -355,7 +355,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:ungroun
 
 - **Raised at** `maljan.pipeline.validation:section_capability_violations`, `maljan.pipeline.validation:ungrounded_capabilities`
 - **Constant** `maljan.pipeline.validation:UNGROUNDED_CAPABILITY_CODE`
-- **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 1, small model](/benchmark/scores/latrodectus-iteration1-small/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/benchmark/scores/latrodectus-iteration2-r2/), [Latrodectus score: iteration 4, default model](/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/)
+- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 1, small model](/docs/benchmark/scores/latrodectus-iteration1-small/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/docs/benchmark/scores/latrodectus-iteration2-r2/), [Latrodectus score: iteration 4, default model](/docs/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/)
 
 ### `narrative.ungrounded_finding`
 
@@ -363,7 +363,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:key_fin
 
 - **Raised at** `maljan.pipeline.validation:key_finding_citation_violations`
 - **Constant** `maljan.pipeline.validation:UNGROUNDED_FINDING_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `narrative.unpublished_indicator`
 
@@ -371,7 +371,7 @@ A recommendation or hunting note that acts on a value this run does not publish.
 
 - **Raised at** `maljan.pipeline.validation:recommendation_indicator_violations`
 - **Constant** `maljan.pipeline.validation:UNPUBLISHED_RECOMMENDATION_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `narrative.unpublished_technique`
 
@@ -379,7 +379,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:recomme
 
 - **Raised at** `maljan.pipeline.validation:recommendation_technique_violations`
 - **Constant** `maljan.pipeline.validation:UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ## question
 
@@ -463,7 +463,7 @@ A report sentence that says a routine was not read (or its decompile not obtaine
 
 - **Raised at** `maljan.pipeline.validation:ledger_absence_contradictions`
 - **Constant** `maljan.pipeline.validation:ABSENCE_CONTRADICTS_LEDGER_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `report.category_type_unstated`
 
@@ -487,7 +487,7 @@ No comment names its meaning, and the message at `maljan.pipeline.validation:cit
 
 - **Raised at** `maljan.pipeline.validation:citation_violations`
 - **Constant** `maljan.pipeline.validation:CITATION_NOT_EVIDENCE_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `report.citation_wrong_entry`
 
@@ -495,7 +495,7 @@ No comment names its meaning, and `maljan.pipeline.validation:wrong_entry_citati
 
 - **Raised at** `maljan.pipeline.validation:wrong_entry_citations`
 - **Constant** `maljan.pipeline.validation:CITATION_WRONG_ENTRY_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `report.configuration_uncited`
 
@@ -503,7 +503,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:configu
 
 - **Raised at** `maljan.pipeline.validation:configuration_citation_violations`
 - **Constant** `maljan.pipeline.validation:UNCITED_CONFIGURATION_CODE`
-- **Docs** [Architecture](/architecture/), [The console](/console/)
+- **Docs** [Architecture](/docs/architecture/), [The console](/docs/console/)
 
 ### `report.entry_contents_misstated`
 
@@ -511,7 +511,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:misstat
 
 - **Raised at** `maljan.pipeline.validation:misstated_entry_contents`
 - **Constant** `maljan.pipeline.validation:ENTRY_CONTENTS_MISSTATED_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `report.flow_voice`
 
@@ -519,7 +519,7 @@ No comment names its meaning, and `maljan.pipeline.validation:flow_voice_violati
 
 - **Raised at** `maljan.pipeline.validation:flow_voice_violations`, `maljan.pipeline.validation:persistence_not_observed_violations`
 - **Constant** `maljan.pipeline.validation:FLOW_VOICE_CODE`
-- **Docs** [Architecture](/architecture/), [The console](/console/)
+- **Docs** [Architecture](/docs/architecture/), [The console](/docs/console/)
 
 ### `report.identifier_uncited`
 
@@ -527,7 +527,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:identif
 
 - **Raised at** `maljan.pipeline.validation:identifier_citation_violations`
 - **Constant** `maljan.pipeline.validation:UNCITED_IDENTIFIER_CODE`
-- **Docs** [Architecture](/architecture/), [The console](/console/)
+- **Docs** [Architecture](/docs/architecture/), [The console](/docs/console/)
 
 ### `report.numeric_confidence`
 
@@ -543,7 +543,7 @@ A section's prose states persistence where the sandbox, watching the registry an
 
 - **Raised at** `maljan.pipeline.validation:persistence_not_observed_violations`
 - **Constant** `maljan.pipeline.validation:PERSISTENCE_NOT_OBSERVED_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `report.process_words`
 
@@ -575,7 +575,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:rule_ma
 
 - **Raised at** `maljan.pipeline.validation:rule_match_statement_violations`
 - **Constant** `maljan.pipeline.validation:RULE_MATCH_AS_ACTION_CODE`
-- **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 4, default model](/benchmark/scores/latrodectus-iteration4-default/)
+- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 4, default model](/docs/benchmark/scores/latrodectus-iteration4-default/)
 
 ### `report.technique_name`
 
@@ -583,7 +583,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:techniq
 
 - **Raised at** `maljan.pipeline.validation:technique_name_violations`
 - **Constant** `maljan.pipeline.validation:TECHNIQUE_NAME_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `report.unpublished_value`
 
@@ -591,7 +591,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unpubli
 
 - **Raised at** `maljan.pipeline.validation:unpublished_value_violations`
 - **Constant** `maljan.pipeline.validation:UNPUBLISHED_VALUE_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `report.value_not_carried`
 
@@ -607,7 +607,7 @@ A table row whose whole value is in none of the entries it cites (`stated_value_
 
 - **Raised at** `maljan.pipeline.validation:stated_value_violations`
 - **Constant** `maljan.pipeline.validation:STATED_VALUE_UNHELD_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ## stix
 
@@ -617,7 +617,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:annotat
 
 - **Raised at** `maljan.pipeline.validation:annotation_out_of_schema_violations`
 - **Constant** `maljan.pipeline.validation:ANNOTATION_OUT_OF_SCHEMA_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.credit_without_claim`
 
@@ -625,7 +625,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:credit_
 
 - **Raised at** `maljan.pipeline.validation:credit_without_claim_violations`
 - **Constant** `maljan.pipeline.validation:CREDIT_WITHOUT_CLAIM_CODE`
-- **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 5, default model](/benchmark/scores/latrodectus-iteration5-default/)
+- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/)
 
 ### `stix.duplicate_label`
 
@@ -633,7 +633,7 @@ No comment names its meaning; the message at `maljan.agents.judge_postprocess:du
 
 - **Raised at** `maljan.agents.judge_postprocess:duplicate_label_violations`
 - **Constant** `maljan.agents.judge_postprocess:DUPLICATE_LABEL_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.evidence_ref_not_in_ledger`
 
@@ -641,7 +641,7 @@ A ledger id the run's record cites for an exported object that the run's ledger 
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:ExtendedSTIXRenderer._family_refs`
 - **Constant** `maljan.reporting.renderers.stix_renderer:EVIDENCE_REF_NOT_IN_LEDGER_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.file_unidentified`
 
@@ -657,7 +657,7 @@ A judge indicator naming a value the one publish rule refuses — a host only th
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:_judge_indicator_unpublished`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHED_VALUE_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.indicator_type_contradicts_verdict`
 
@@ -665,7 +665,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:indicat
 
 - **Raised at** `maljan.pipeline.validation:indicator_type_contradicts_verdict`
 - **Constant** `maljan.pipeline.validation:INDICATOR_TYPE_CONTRADICTS_VERDICT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.indicator_type_vocabulary`
 
@@ -673,7 +673,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:indicat
 
 - **Raised at** `maljan.pipeline.validation:indicator_type_vocabulary_violations`
 - **Constant** `maljan.pipeline.validation:INDICATOR_TYPE_VOCABULARY_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.indicator_unattributed_flow`
 
@@ -681,7 +681,7 @@ A judge indicator naming a value the sandbox recorded and attributes no flow, or
 
 - **Raised at** `maljan.pipeline.validation:unattributed_indicator_violations`
 - **Constant** `maljan.pipeline.validation:UNATTRIBUTED_INDICATOR_CODE`
-- **Docs** [HTTP API](/api/), [Architecture](/architecture/)
+- **Docs** [HTTP API](/docs/api/), [Architecture](/docs/architecture/)
 
 ### `stix.is_family_contradicts_family`
 
@@ -689,7 +689,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:malware
 
 - **Raised at** `maljan.pipeline.validation:malware_object_violations`
 - **Constant** `maljan.pipeline.validation:IS_FAMILY_CONTRADICTS_FAMILY_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.is_family_missing`
 
@@ -697,7 +697,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** `maljan.pipeline.validation:IS_FAMILY_MISSING_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.malformed_hash`
 
@@ -705,7 +705,7 @@ A digest literal that is not a digest of the algorithm it is written under.
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:_judge_indicator_problem`
 - **Constant** `maljan.reporting.renderers.stix_renderer:MALFORMED_HASH_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.malware_object_under_benign`
 
@@ -713,7 +713,7 @@ No comment names its meaning; the message at `maljan.reporting.renderers.stix_re
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:ExtendedSTIXRenderer._render`
 - **Constant** `maljan.reporting.renderers.stix_renderer:MALWARE_UNDER_BENIGN_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.malware_type_vocabulary`
 
@@ -721,7 +721,7 @@ No comment names its meaning, and `maljan.pipeline.validation:malware_object_vio
 
 - **Raised at** `maljan.pipeline.validation:malware_object_violations`
 - **Constant** `maljan.pipeline.validation:MALWARE_TYPE_VOCABULARY_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.pattern_refused`
 
@@ -729,7 +729,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unknown
 
 - **Raised at** `maljan.pipeline.validation:unknown_observable_type_violations`
 - **Constant** `maljan.pipeline.validation:PATTERN_REFUSED_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.property_not_carried`
 
@@ -737,7 +737,7 @@ A property of a judge object that the platform's model for its type does not dec
 
 - **Raised at** `maljan.agents.judge_postprocess:lift_misplaced_extensions`, `maljan.reporting.renderers.stix_renderer:ExtendedSTIXRenderer._normalize_judge_timestamps`
 - **Constant** `maljan.agents.judge_postprocess:PROPERTY_NOT_CARRIED_CODE`, `maljan.schemas.stix_models:PROPERTY_NOT_CARRIED_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.shape_names_a_value`
 
@@ -745,7 +745,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:shape_n
 
 - **Raised at** `maljan.pipeline.validation:shape_names_a_value_violations`
 - **Constant** `maljan.pipeline.validation:SHAPE_NAMES_A_VALUE_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.unescaped_backslash`
 
@@ -753,7 +753,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unknown
 
 - **Raised at** `maljan.pipeline.validation:unknown_observable_type_violations`
 - **Constant** `maljan.pipeline.validation:STRAY_BACKSLASH_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.ungrounded_indicator`
 
@@ -761,7 +761,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** none: the code is written as a literal
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.unknown_object`
 
@@ -769,7 +769,7 @@ An object inside `objects` that no STIX type in the bundle's union matches. Set 
 
 - **Raised at** `maljan.agents.judge_postprocess:lift_misplaced_extensions`
 - **Constant** `maljan.agents.judge_postprocess:UNKNOWN_OBJECT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.unknown_object_path`
 
@@ -777,7 +777,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unknown
 
 - **Raised at** `maljan.pipeline.validation:unknown_observable_type_violations`
 - **Constant** `maljan.pipeline.validation:UNKNOWN_OBJECT_PATH_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.unknown_observable_type`
 
@@ -785,7 +785,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unknown
 
 - **Raised at** `maljan.pipeline.validation:unknown_observable_type_violations`
 - **Constant** `maljan.pipeline.validation:UNKNOWN_OBSERVABLE_TYPE_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.unknown_technique`
 
@@ -801,7 +801,7 @@ What the run summary calls a judge annotation whose technique did not survive va
 
 - **Raised at** `maljan.pipeline.nodes:_note_unlinked_techniques`
 - **Constant** `maljan.pipeline.nodes:UNLINKED_TECHNIQUE_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.unpublishable_artefact`
 
@@ -809,7 +809,7 @@ An indicator over something that is not an endpoint: a mailbox that is not one, 
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:_judge_indicator_problem`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHABLE_ARTEFACT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.unpublishable_credit`
 
@@ -817,7 +817,7 @@ A judge credit naming an agent that did not name the technique, which the judge 
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:_without_unconfirmed_credit`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHABLE_CREDIT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.unpublishable_domain`
 
@@ -825,7 +825,7 @@ No comment of its own names its meaning; the comment over the group of constants
 
 - **Raised at** nothing: kept for stored runs, as `maljan.reporting.renderers.stix_renderer:LEGACY_UNPUBLISHABLE_CODES` says
 - **Listed in** `maljan.reporting.renderers.stix_renderer:LEGACY_UNPUBLISHABLE_CODES`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.unpublishable_endpoint`
 
@@ -833,7 +833,7 @@ One endpoint question, one code. A URL, a name and an address that fail the same
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:ExtendedSTIXRenderer._render`, `maljan.reporting.renderers.stix_renderer:_judge_indicator_problem`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHABLE_ENDPOINT_CODE`
-- **Docs** [Architecture](/architecture/), [Latrodectus score: iteration 6, default model](/benchmark/scores/latrodectus-iteration6-default/)
+- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 6, default model](/docs/benchmark/scores/latrodectus-iteration6-default/)
 
 ### `stix.unpublishable_object`
 
@@ -849,7 +849,7 @@ A pattern over an object type STIX does not have, which the judge was asked abou
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:_judge_indicator_problem`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHABLE_PATTERN_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.unpublishable_producer`
 
@@ -865,7 +865,7 @@ No comment of its own names its meaning; the comment over the group of constants
 
 - **Raised at** nothing: kept for stored runs, as `maljan.reporting.renderers.stix_renderer:LEGACY_UNPUBLISHABLE_CODES` says
 - **Listed in** `maljan.reporting.renderers.stix_renderer:LEGACY_UNPUBLISHABLE_CODES`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ## tool
 
@@ -875,7 +875,7 @@ The question a call is answered with when an argument's value is the name of its
 
 - **Raised at** `maljan.agents.evidence_recorder:_record_tool._names_its_own_parameter`
 - **Constant** `maljan.agents.evidence_recorder:SELF_NAMED_ARGUMENT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ## validation
 
@@ -896,7 +896,7 @@ What is recorded when the judge's own ceiling (`llm.agents.judge`) refused the v
 - **Raised at** `maljan.agents.judge_agent:JudgeAgent.give_verdict`
 - **Passes on** `maljan.pipeline.nodes:make_judge_node.node_fn`
 - **Constant** `maljan.agents.judge_agent:VERDICT_AGENT_CEILING_CODE`
-- **Docs** [Configuration](/configuration/)
+- **Docs** [Configuration](/docs/configuration/)
 
 ### `verdict.assessment_conflict`
 
@@ -904,7 +904,7 @@ No comment names its meaning, and `maljan.pipeline.validation:assessment_conflic
 
 - **Raised at** `maljan.pipeline.validation:assessment_conflict_violations`
 - **Constant** `maljan.pipeline.validation:ASSESSMENT_CONFLICT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `verdict.assessment_missing`
 
@@ -928,7 +928,7 @@ No comment names its meaning; the message at `maljan.agents.judge_postprocess:li
 
 - **Raised at** `maljan.agents.judge_postprocess:lift_misplaced_extensions`
 - **Constant** `maljan.agents.judge_postprocess:ASSESSMENT_RELOCATED_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `verdict.assessment_unreadable`
 
@@ -944,7 +944,7 @@ The correction for an answer the output cap cut off. The benchmark's large model
 
 - **Raised at** `maljan.agents.judge_agent:verdict_cut_violation`
 - **Constant** `maljan.agents.judge_agent:VERDICT_CUT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `verdict.fallback`
 
@@ -953,7 +953,7 @@ What is recorded when even the retry was not a bundle. The code lands in `run_su
 - **Raised at** `maljan.agents.judge_agent:JudgeAgent.give_verdict`, `maljan.pipeline.nodes:with_verdict_fallback`
 - **Passes on** `maljan.pipeline.nodes:make_judge_node.node_fn`
 - **Constant** `maljan.agents.judge_agent:VERDICT_FALLBACK_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `verdict.not_json`
 
@@ -986,7 +986,7 @@ What is recorded when the judge never answered at all. A retry would cost a seco
 - **Raised at** `maljan.agents.judge_agent:JudgeAgent.give_verdict`
 - **Passes on** `maljan.pipeline.nodes:make_judge_node.node_fn`
 - **Constant** `maljan.agents.judge_agent:VERDICT_TIMEOUT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `verdict.unrecognised`
 
@@ -994,7 +994,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:stated_
 
 - **Raised at** `maljan.pipeline.validation:stated_verdict_violations`
 - **Constant** `maljan.pipeline.validation:UNRECOGNISED_VERDICT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `verdict.unstated`
 
@@ -1002,7 +1002,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:stated_
 
 - **Raised at** `maljan.pipeline.validation:stated_verdict_violations`
 - **Constant** `maljan.pipeline.validation:UNSTATED_VERDICT_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `verdict.unsupported_benign`
 
@@ -1010,7 +1010,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unsuppo
 
 - **Raised at** `maljan.pipeline.validation:unsupported_benign_violations`
 - **Constant** `maljan.pipeline.validation:UNSUPPORTED_BENIGN_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `verdict.unsupported_malware`
 
@@ -1018,7 +1018,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:unsuppo
 
 - **Raised at** `maljan.pipeline.validation:unsupported_malware_violations`
 - **Constant** `maljan.pipeline.validation:UNSUPPORTED_MALWARE_CODE`
-- **Docs** [Architecture](/architecture/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ## Unresolved code positions
 

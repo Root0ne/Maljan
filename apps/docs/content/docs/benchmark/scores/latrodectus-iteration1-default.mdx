@@ -5,7 +5,7 @@ description: "Iteration 1 on the default model, scored key by key against the hu
 ---
 
 Default model (Qwen3.6-35B-A3B on ik_llama.cpp), `dev` @ `9019db82`, default profile, **mock sandbox (nothing
-executed)**. The method is described on the [benchmark page](/benchmark/#method): every core item of K1–K10 (K1.1 split
+executed)**. The method is described on the [benchmark page](/docs/benchmark/#method): every core item of K1–K10 (K1.1 split
 into family and class), 57 items; build items only as consistency checks; chain and later items not scored. Human
 sources: **B** Bitsight (names this hash), **E** Elastic, **P** Proofpoint.
 
@@ -40,7 +40,7 @@ In the baseline's four columns: **12 found / 29 partly / 16 missed / 0 wrong** (
 ## Item by item
 
 ### K1
-| # | Score | Maljan (quoted) | Human source |
+| # | Score | Malspark (quoted) | Human source |
 |---|---|---|---|
 | K1.1a family | found | "**Family:** Latrodectus (moderate-to-high confidence, 0.85) [ev_0011]"; title "Latrodectus loader analysis" | B intro |
 | K1.1b loader | found | "**Category:** loader"; "potential secondary payload delivery" | B intro |
@@ -49,7 +49,7 @@ In the baseline's four columns: **12 found / 29 partly / 16 missed / 0 wrong** (
 | K1.5 four exports, one address | found | §7 "All 4 exports share one address, 0x3ce4." | E *LATRODECTUS analysis* |
 
 ### K2
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K2.1 APIs by hash | partly (body) | §5.2 capa rows "resolve function by parsing PE exports", "hash data with CRC32"; §5.7 "the network functionality is obfuscated or dynamically resolved". "By hash" is never said; CRC32 is read as "data integrity or identification" | B *Windows API resolution* |
 | K2.2 abort on failed check | missed | — | B *Anti analysis* |
@@ -59,7 +59,7 @@ In the baseline's four columns: **12 found / 29 partly / 16 missed / 0 wrong** (
 | K2.6 `update_data.dat` read for new C2s | partly (body) | "strings related to file operations (`%d.dat`, `\update_data.dat`, `files/bp.dat`) … drops additional payloads or updates itself" — named, purpose wrong | B *The update data .dat file* |
 
 ### K3
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K3.1 PEB BeingDebugged | partly (body) | §5.2 capa row "PEB access · B0001.019"; §7 "Debugger Detection::Process Environment Block". Never stated as a debugger check | B *Debugger check* |
 | K3.2 process count | missed | — | B |
@@ -70,7 +70,7 @@ In the baseline's four columns: **12 found / 29 partly / 16 missed / 0 wrong** (
 | K3.7 self-deletion via ADS | missed | `:wtfbbq` only in the appendix (a hint, not the behaviour) | E *Self-deletion* |
 
 ### K4–K6
-| # | Score | Maljan | Source |
+| # | Score | Malspark | Source |
 |---|---|---|---|
 | K4.1 bot ID | partly (appendix) | `%04X%04X%04X%04X%08X%04X` in Appendix A only; no volume serial, no constant | B *Bot ID* |
 | K4.2 group → FNV-1a | partly (body) | §5.2 capa row "hash data using fnv · C0030.005"; the group name `Littlehw` only in the appendix | B *Group and Group ID* |

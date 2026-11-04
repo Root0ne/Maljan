@@ -1,9 +1,10 @@
 <p align="center">
-  <img src="apps/docs/public/assets/logo.svg" alt="Maljan" width="112">
+  <img src="apps/docs/public/assets/logo.svg" alt="Malspark" width="112">
 </p>
 
-<h1 align="center">Maljan</h1>
-<p align="center"><em>Multi-Agent Malware Analysis Framework</em></p>
+<h1 align="center">Malspark</h1>
+<p align="center"><em>Multi-agent malware analysis, with plug-in tools, models and sandboxes</em></p>
+<p align="center"><a href="https://malspark.com">malspark.com</a></p>
 
 [![CI](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml/badge.svg)](https://github.com/Root0ne/Maljan/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/Root0ne/Maljan/actions/workflows/codeql.yml/badge.svg)](https://github.com/Root0ne/Maljan/actions/workflows/codeql.yml)
@@ -11,7 +12,7 @@
 [![Python](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/)
 [![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
-Maljan connects LLM agent teams to malware-analysis tools. A team is an ordered
+Malspark connects LLM agent teams to malware-analysis tools. A team is an ordered
 list of **stages** — triage, then the passes the sample is worth, then a debate,
 a verdict and a report — and each stage runs the agents it names over the tools
 they are given: signature scanners, rule engines, binary and capture readers, a
@@ -34,6 +35,9 @@ Nothing is bound to Windows. Routing is by the sample's own format, and a
 format nothing recognises gets the neutral path and a report that says so
 rather than a rejection.
 
+Malspark was called Maljan, and the code still is: the Python package, the
+`maljan` command, the environment variables and the repository keep that name.
+
 ## The teams that ship
 
 | Team | Stages | For |
@@ -55,7 +59,7 @@ Samples are submitted, tracked and read in a web console; the whole
 configuration of a deployment lives in that console as well, not in environment
 files.
 
-## How Maljan compares
+## How Malspark compares
 
 We ran the `default` team six times on a small set of samples, with fixes in
 between, and scored the reference sample's report item by item against a
@@ -74,7 +78,7 @@ The reference sample is a Latrodectus bot DLL (`6091f258…`) that
 lists among the samples it analysed. From that report we drew 57 core items,
 from identity and execution flow to C2, IOCs and ATT&CK:
 
-| Maljan report on the reference sample | Found | Partly | Missed | Wrong |
+| Malspark report on the reference sample | Found | Partly | Missed | Wrong |
 | :-- | --: | --: | --: | --: |
 | Baseline, before decoded strings and VirusTotal labels reached the triage pack | 3 | 7 | 46 | 1 |
 | Small model (qwen3.8:27b), iteration 1 | 10 | 28 | 19 | 0 |
@@ -110,7 +114,7 @@ control and the item-by-item score files are in
 
 ## Quick start
 
-The compose stack is the supported way to run Maljan. It needs Docker with the
+The compose stack is the supported way to run Malspark. It needs Docker with the
 Compose plugin, and `make setup` once to fetch the third-party trees the
 `ghidra-mcp` image is built from.
 
@@ -161,6 +165,6 @@ Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). The third-party rule sets Maljan can use carry
+MIT — see [LICENSE](LICENSE). The third-party rule sets Malspark can use carry
 their own licences and are not redistributed here; `make external` fetches
 them, licence files included.

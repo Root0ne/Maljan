@@ -5,7 +5,7 @@ description: "Compose services and healthchecks, required secrets, health endpoi
 
 How the stack is assembled, what it refuses to start without, how to check that
 it is healthy, and how to upgrade it. For the meaning of individual settings
-see [configuration.md](/configuration/).
+see [configuration.md](/docs/configuration/).
 
 ## The compose stack
 
@@ -21,13 +21,13 @@ applies both.
 | `redis` | `redis:7-alpine` | Queue, events, rate-limit counters. Password-protected; the healthcheck asserts an actual `PONG`. |
 | `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. Runs under the `qdrant` profile, which the shipped `docker/.env` turns on; without `QDRANT_API_KEY` it restarts, logging the variable to set. |
 | `minio` | `minio/minio:RELEASE.2025-09-07T16-13-09Z` | Sample storage, with its own console. |
-| `ghidra-mcp` | built from `external/ghidra-mcp` | A static analyser. Runs (and is built) under the `ghidra` profile, which the shipped `docker/.env` turns on; without `GHIDRA_MCP_AUTH_TOKEN` it refuses to bind and restarts. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [configuration.md](/configuration/). |
+| `ghidra-mcp` | built from `external/ghidra-mcp` | A static analyser. Runs (and is built) under the `ghidra` profile, which the shipped `docker/.env` turns on; without `GHIDRA_MCP_AUTH_TOKEN` it refuses to bind and restarts. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [configuration.md](/docs/configuration/). |
 | `ghidra-port` | `alpine/socat` (pinned by digest) | Publishes Ghidra's port on `BIND_ADDRESS` for a worker run on the host, under the `ghidra` profile; `ghidra-mcp` itself is on an internal network only. See *The container that opens the sample* below. |
-| `die-mcp`, `ilspy-mcp`, `goresym-mcp` | built from `services/<name>/Dockerfile` | The identification servers (Detect It Easy, ILSpy, GoReSym), each under its own profile (`die`, `ilspy`, `goresym`), which the shipped `docker/.env` does not turn on; each refuses to start without its token. Capped at 2 GB, 4 GB and 2 GB of memory and swap (`DIE_MEM_LIMIT`, `ILSPY_MEM_LIMIT`, `GORESYM_MEM_LIMIT`). See [Identification servers](/tools/identification/). |
+| `die-mcp`, `ilspy-mcp`, `goresym-mcp` | built from `services/<name>/Dockerfile` | The identification servers (Detect It Easy, ILSpy, GoReSym), each under its own profile (`die`, `ilspy`, `goresym`), which the shipped `docker/.env` does not turn on; each refuses to start without its token. Capped at 2 GB, 4 GB and 2 GB of memory and swap (`DIE_MEM_LIMIT`, `ILSPY_MEM_LIMIT`, `GORESYM_MEM_LIMIT`). See [Identification servers](/docs/tools/identification/). |
 | `die-port`, `ilspy-port`, `goresym-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8090, 8091, 8092) on `BIND_ADDRESS` for a worker run on the host, under the server's profile, as `ghidra-port` does. |
-| `yarax-mcp`, `oletools-mcp`, `webcrack-mcp` | built from `services/<name>/Dockerfile` | The rule and document servers (YARA-X, oletools, webcrack), each under its own profile (`yarax`, `oletools`, `webcrack`), off in the shipped `docker/.env`; each refuses to start without its token. Capped at 2 GB of memory and swap each (`YARAX_MEM_LIMIT`, `OLETOOLS_MEM_LIMIT`, `WEBCRACK_MEM_LIMIT`). `yarax-mcp` reads the operator's rule files from `data/yara-x-rules` (or `YARA_X_RULES_DIR`), mounted read-only. See [Rule and document servers](/tools/rules-and-documents/). |
+| `yarax-mcp`, `oletools-mcp`, `webcrack-mcp` | built from `services/<name>/Dockerfile` | The rule and document servers (YARA-X, oletools, webcrack), each under its own profile (`yarax`, `oletools`, `webcrack`), off in the shipped `docker/.env`; each refuses to start without its token. Capped at 2 GB of memory and swap each (`YARAX_MEM_LIMIT`, `OLETOOLS_MEM_LIMIT`, `WEBCRACK_MEM_LIMIT`). `yarax-mcp` reads the operator's rule files from `data/yara-x-rules` (or `YARA_X_RULES_DIR`), mounted read-only. See [Rule and document servers](/docs/tools/rules-and-documents/). |
 | `yarax-port`, `oletools-port`, `webcrack-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8093, 8094, 8095) on `BIND_ADDRESS` for a worker run on the host, under the server's profile. |
-| `unblob-mcp`, `jadx-mcp` | built from `services/<name>/Dockerfile` | The container and Android servers (unblob, JADX), each under its own profile (`unblob`, `jadx`), off in the shipped `docker/.env`; each refuses to start without its token. Capped at 2 GB and 4 GB of memory and swap (`UNBLOB_MEM_LIMIT`, `JADX_MEM_LIMIT`). Each has a `/tmp` tmpfs of its own, sized below its ceiling (`UNBLOB_TMPFS_SIZE`, `JADX_TMPFS_SIZE`). `unblob-mcp` writes what it extracts there, never beside the sample, and is handed `UPLOAD_MAX_BYTES`, `UNBLOB_MAX_ENTRIES` and `CARVED_KEEP_SECONDS`. See [Container and Android servers](/tools/containers-and-android/). |
+| `unblob-mcp`, `jadx-mcp` | built from `services/<name>/Dockerfile` | The container and Android servers (unblob, JADX), each under its own profile (`unblob`, `jadx`), off in the shipped `docker/.env`; each refuses to start without its token. Capped at 2 GB and 4 GB of memory and swap (`UNBLOB_MEM_LIMIT`, `JADX_MEM_LIMIT`). Each has a `/tmp` tmpfs of its own, sized below its ceiling (`UNBLOB_TMPFS_SIZE`, `JADX_TMPFS_SIZE`). `unblob-mcp` writes what it extracts there, never beside the sample, and is handed `UPLOAD_MAX_BYTES`, `UNBLOB_MAX_ENTRIES` and `CARVED_KEEP_SECONDS`. See [Container and Android servers](/docs/tools/containers-and-android/). |
 | `unblob-port`, `jadx-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8096, 8097) on `BIND_ADDRESS` for a worker run on the host, under the server's profile. |
 | `analysis-mcp`, `network-mcp` | `maljan-backend` | The platform's own analysis and network servers, each in a container of its own under its profile (`analysis`, `network`), off in the shipped `docker/.env`; each refuses to listen without its token (`ANALYSIS_MCP_AUTH_TOKEN`, `NETWORK_MCP_AUTH_TOKEN`). They run the worker's image and source read-only, with no platform credential. With a server's built-in block pointed at its container (transport `streamable-http`, url `http://analysis-mcp:8098/mcp` or `http://network-mcp:8099/mcp`, the token, `sample_mount` `/data/samples`), the triage pack's own readings of the sample run there. The worker still reads the sample for its hashes and routing, and for the few readings `tests/unit/test_sample_reading_guard.py` lists as left for a later change. Each job's staging directory in the container's `/tmp` (capa's and FLOSS's scratch, the unpacked program, a capture handed over) is removed when the job ends, the worker calling the server's `release_job` with the job's id; a release that fails leaves it to the server's own sweep `MALJAN_STAGING_TTL_HOURS` (24 h unless set) after it last changed, and it counts against the tmpfs and the memory ceiling until then. Capped at 8 GB and 2 GB of memory and swap (`ANALYSIS_MEM_LIMIT`, `NETWORK_MEM_LIMIT`), with a `/tmp` tmpfs for each job's staging (`ANALYSIS_TMPFS_SIZE` 2g, `NETWORK_TMPFS_SIZE` 512m). |
 | `analysis-port`, `network-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8098, 8099) on `BIND_ADDRESS` for a worker run on the host, under the server's profile. |
@@ -221,7 +221,7 @@ server its copy under it. Ghidra's ships `/data/samples`, the mount the
 `ghidra-mcp` service writes (read-only), whether or not the worker itself runs
 in Compose. A server on the worker's own filesystem (a stdio sidecar) declares
 none and is handed the host path. See [What a server declares about its
-tools](/configuration/#what-a-server-declares-about-its-tools).
+tools](/docs/configuration/#what-a-server-declares-about-its-tools).
 
 Set to a path the container does not have, Ghidra answers every load with
 `File not found: ...`, the Ghidra agent stops before its first model turn with
@@ -273,7 +273,7 @@ in, so the end of it is something you write down.
 
 Nothing rotates on its own. The point of the timestamp is that a secret you
 forget stops being honoured rather than being honoured for the life of the
-deployment. See [security.md](/security/) for where signing sits among the
+deployment. See [security.md](/docs/security/) for where signing sits among the
 rest of the auth posture.
 
 ## Health
@@ -345,7 +345,7 @@ A server added this way is started with exactly the names it lists. A built-in
 is the one case where that field has a floor: `analysis` and `network` are
 always passed the sample roots and the staging directory, whatever the stored
 registry holds, because a child without them refuses the run's own sample. See
-[configuration.md](/configuration/#which-directories-a-sidecar-may-read).
+[configuration.md](/docs/configuration/#which-directories-a-sidecar-may-read).
 
 ## Upgrades and migrations
 

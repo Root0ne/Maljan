@@ -4,8 +4,8 @@ description: "Serving a local model with llama.cpp behind the OpenAI-compatible 
 ---
 
 A llama.cpp server — or a fork such as ik_llama.cpp — is reached through the
-[OpenAI-compatible](/providers/openai-compatible/) provider, pointed at the server's
-`/v1` address. It is how the [Benchmark](/benchmark/)'s local model,
+[OpenAI-compatible](/docs/providers/openai-compatible/) provider, pointed at the server's
+`/v1` address. It is how the [Benchmark](/docs/benchmark/)'s local model,
 Qwen3.6-35B-A3B on ik_llama.cpp, was served.
 
 ## Settings
@@ -85,7 +85,7 @@ A per-agent entry can name its own `base_url`, so two agents can sit on two
 different local servers while `core.llm.openai.base_url` stays the fallback
 for everything that sets none. The llama.cpp extras and the structured-output
 decision follow the endpoint the agent will actually call. See [Per-agent
-models and fallbacks](/providers/#per-agent-models-and-fallbacks).
+models and fallbacks](/docs/providers/#per-agent-models-and-fallbacks).
 
 ## The server the measurements used
 
@@ -100,4 +100,4 @@ llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf -c 131072 -t 16 -fa on \
 ```
 
 Host-specific helpers — a launcher, a memory guard — live outside the
-repository; see [Development](/development/#repository-layout).
+repository; see [Development](/docs/development/#repository-layout).

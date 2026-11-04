@@ -66,7 +66,7 @@ switched on with no container behind it is a step that fails, said as such.
 ## What each container is held to
 
 Each is held as the Ghidra container is (see
-[Deployment](/deployment/#the-container-that-opens-the-sample)): the worker's
+[Deployment](/docs/deployment/#the-container-that-opens-the-sample)): the worker's
 unprivileged ids, no Linux capability and no way to gain one, a pids limit, a
 read-only root whose only writable place is a tmpfs for each run's scratch
 directory, the samples directory mounted read-only at `/data/samples` (the
@@ -108,7 +108,7 @@ show (`shows`, `does_not_show`), so the console, the docs and, with
 Every tool is read-only, runs nothing, reaches no network and sends nothing to
 a third party. Each pack step is taken by its tool's declaration (its kind,
 read-only, its `path` argument and its effects; see
-[Configuration](/configuration/#the-packs-steps)), never by a server's or a
+[Configuration](/docs/configuration/#the-packs-steps)), never by a server's or a
 tool's name. `die_scan` declares the `runtime` value of each detection, the
 code runtime its name is in the platform's words (`dotnet`, `go`), and ILSpy's
 and GoReSym's tools declare the runtime each reads (`runtimes`): their steps'

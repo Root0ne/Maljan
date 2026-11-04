@@ -1,23 +1,26 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
-import { DocsLayout } from 'fumadocs-ui/layouts/docs';
-import { baseOptions } from '@/lib/layout.shared';
-import { source } from '@/lib/source';
+import './home.css';
 
+export const metadata: Metadata = {
+  title: 'Page not found',
+  robots: { index: false },
+};
+
+/* Every address the site does not have. It is drawn like the home page and
+ * loads nothing of the docs: this boundary sits under the root layout, so
+ * whatever it imports, every page would load. */
 export default function NotFound() {
   return (
-    <DocsLayout tree={source.getPageTree()} {...baseOptions()}>
-      <main className="flex flex-1 flex-col items-start gap-4 px-8 py-24">
-        <p className="mj-eyebrow">404</p>
-        <h1 className="text-3xl font-semibold">This page does not exist</h1>
-        <p className="text-fd-muted-foreground">
-          The address may be mistyped, or the page may have been removed. Search from the left
-          column, or start from the{' '}
-          <Link href="/" className="text-fd-primary underline">
-            introduction
-          </Link>
-          .
+    <div className="ms-home">
+      <main id="main" className="ms-notfound">
+        <h1>This page does not exist</h1>
+        <p>
+          The address may be mistyped, or the page may have been removed. Start from the{' '}
+          <Link href="/">home page</Link> or the <Link href="/docs/">documentation</Link>, where
+          the search box finds any page.
         </p>
       </main>
-    </DocsLayout>
+    </div>
   );
 }

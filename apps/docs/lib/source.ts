@@ -17,7 +17,7 @@ const sidebarTitles: LoaderPlugin = {
 };
 
 export const source = loader({
-  baseUrl: '/',
+  baseUrl: '/docs',
   source: docs.toFumadocsSource(),
   plugins: [sidebarTitles],
 });
