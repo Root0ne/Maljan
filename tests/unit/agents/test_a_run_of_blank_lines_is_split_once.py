@@ -23,15 +23,18 @@ def _split(text: str) -> list[tuple[str, str | None, str | None]]:
 def test_a_run_of_blank_lines_is_split_in_linear_time() -> None:
     assert_scales(lambda n: "CLAIM: a" + "\n" * n + "b", 2_000, _split)
     assert_scales(lambda n: "CLAIM: a" + "\n  " * n + "b", 2_000, _split)
+    # Chains of separators: the old pattern was linear on these. They guard
+    # the new pattern's chain of ``---`` lines against backtracking.
     assert_scales(lambda n: "CLAIM: a" + "\n---" * n + "x\n" + _CLAIM, 2_000, _split)
     assert_scales(lambda n: "CLAIM: a" + "\n---\n\n  " * n + "b", 2_000, _split)
 
 
 def test_an_answer_with_a_run_of_blank_lines_is_read_in_linear_time() -> None:
-    # The runs sit in a block with no claim in it, so the cost measured is the
-    # split's: the claim sentence's own reading is not part of it.
+    assert_scales(lambda n: "CLAIM: a" + "\n" * n + "b", 2_000, read_claim_blocks)
+    assert_scales(lambda n: "CLAIM: a" + "\n  " * n + "b", 2_000, read_claim_blocks)
     assert_scales(lambda n: "x" + "\n" * n + "y\n---\n" + _CLAIM, 2_000, read_claim_blocks)
     assert_scales(lambda n: "x" + "\n  " * n + "y\n---\n" + _CLAIM, 2_000, read_claim_blocks)
+    # Guards the new pattern's chain against backtracking, not the old bug.
     assert_scales(lambda n: "x" + "\n---\n  " * n + "y\n---\n" + _CLAIM, 2_000, read_claim_blocks)
 
 
