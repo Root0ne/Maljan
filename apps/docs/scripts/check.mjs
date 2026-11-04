@@ -145,6 +145,8 @@ for (const file of files.filter((f) => f.endsWith('.mdx'))) {
           for (const declaration of statement.declaration?.declarations ?? []) {
             if (declaration.id.name) imported.add(declaration.id.name);
           }
+          // export function Foo() {} / export class Foo {}
+          if (statement.declaration?.id?.name) imported.add(statement.declaration.id.name);
         }
       } else if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
         if (node.name && /^[A-Z]/.test(node.name)) used.add(node.name.split('.')[0]);

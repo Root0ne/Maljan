@@ -28,7 +28,7 @@ const home = `${site}/docs/`;
 const script = `<script>
 (function () {
   var moved = ${JSON.stringify(MOVED)};
-  var rest = location.pathname.replace(/^\\/Maljan(?=\\/|$)/, '') || '/';
+  var rest = location.pathname.replace(/^\\/Maljan(?=\\/|$)/, '').replace(/\\/index\\.html$/, '/') || '/';
   var key = rest.replace(/\\/?$/, '/');
   var path = moved[key] || (/^\\/(docs|examples|assets)(\\/|$)/.test(rest) ? rest : '/docs' + rest);
   location.replace('${site}' + path + location.search + location.hash);
