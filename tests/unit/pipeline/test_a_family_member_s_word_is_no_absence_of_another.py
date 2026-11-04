@@ -28,6 +28,7 @@ from maljan.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     _another_member_s_word,
     _family_name_stems,
+    _negated_after,
     absence_claim_violation,
     name_stem_families,
 )
@@ -160,3 +161,131 @@ def test_a_silent_e_verb_s_inflection_of_the_rarest_own_word_affirms(
     if families.get(child, 0) < min(families.get(stem, 0) for stem in own):
         # Where only the rarest-own-word rule could set it aside, the bare verb does not.
         assert not _another_member_s_word(technique, f"The {word[:-1]} step.")(child)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Not packed; strings are obfuscated so that none show in plain text.",
+        "Not packed; the obfuscation leaves no imports.",
+        "Not packed; the strings are obfuscated so no string is readable.",
+        "Not packed; strings obfuscated so the strings are not visible.",
+        "Not packed; obfuscation keeps no strings in clear text.",
+        "Not packed; obfuscation leaves no names resolvable.",
+        "Not packed; obfuscation leaves no API calls observable.",
+    ],
+)
+def test_a_negation_of_another_object_leaves_the_rarest_own_word_affirmed(text: str) -> None:
+    # The negation after the word denies the result clause's subject or the
+    # verb's own object, not the obfuscation.
+    assert absence_claim_violation(_claim(text, "T1027"), "T1027", knowledge) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Not packed; obfuscation is so unlikely.",
+        "Not packed; obfuscated strings: no hits.",
+        "Not packed; obfuscated strings no longer exist.",
+        "Not packed; obfuscated strings show no imports.",
+        "Not packed; obfuscation shows no evidence.",
+        "Not packed; obfuscation plays no role.",
+        "Not packed; obfuscation plays no part.",
+        "Not packed; obfuscation yielded no results.",
+        "Not packed; obfuscation returned no hits.",
+        "Not packed; obfuscation shows no indicators.",
+        "Not packed; obfuscation shows no artifacts.",
+        "Not packed; obfuscation shows no hint.",
+        "Not packed; obfuscation shows no presence.",
+        "Not packed; obfuscation exhibits no signals.",
+        "Not packed; obfuscation seems no issue.",
+        "Not packed; obfuscation appears no longer.",
+        "Not packed; obfuscation remains no factor.",
+        "Not packed; obfuscation makes no difference.",
+        "Not packed; obfuscation matters no more.",
+        "Not packed; obfuscation found no matches.",
+        "Not packed; obfuscation detected no strings.",
+        "Not packed; obfuscation means no packing.",
+        "Not packed; obfuscation shows no proof.",
+        "Not packed; obfuscation gives no signal.",
+        "Not packed; obfuscated sections no.",
+        "Not packed; obfuscation would raise entropy so it is not present.",
+        "Not packed; obfuscation was checked so none is present.",
+        "Not packed; obfuscated so the analysis found none.",
+        "Not packed; obfuscation was sought so that none was found.",
+        "Not packed; obfuscation would show high entropy so it is absent.",
+        "Not packed; obfuscation leaves no trace.",
+        "Not packed; obfuscation performs no write.",
+        "Not packed; obfuscation uses no packing.",
+        "Not packed; obfuscation creates no key.",
+        "Not packed; obfuscation has no effect.",
+        "Not packed; obfuscation is no concern.",
+        "Not packed; obfuscation 's no",
+        "Not packed; obfuscation does not apply.",
+        "Not packed; obfuscation detection no hits.",
+        "Not packed; obfuscation scan no hits.",
+        "Not packed; obfuscation checks no hits.",
+        "Not packed; obfuscation present no.",
+        "Not packed; obfuscation found: no.",
+        "Not packed; obfuscation detected NO.",
+        "Not packed; obfuscation applied no.",
+        "Not packed; obfuscation observed no; strings in clear.",
+        "Not packed; obfuscation occurs no where.",
+        "Not packed; obfuscation was no factor.",
+        "Not packed; obfuscation seemed no factor.",
+        "Not packed; obfuscation became no issue.",
+        "Not packed; obfuscation contributes no entropy.",
+        "Not packed; obfuscation requires no key.",
+        "Not packed; obfuscation shows no sign of use.",
+        "Not packed; obfuscated payload absent.",
+        "Not packed; obfuscation shows no evidence and none is present.",
+        # A verb that may deny what the word does, or an object that is no
+        # part of the sample the word leaves.
+        "Not packed; obfuscation hides no payload.",
+        "Not packed; obfuscation hides no strings.",
+        "Not packed; obfuscation conceals no code.",
+        "Not packed; obfuscation removes no imports.",
+        "Not packed; obfuscation strips no symbols.",
+        "Not packed; obfuscation leaves no evidence.",
+        "Not packed; obfuscation leaves no artifacts.",
+        "Not packed; obfuscation leaves no indicators.",
+        "Not packed; obfuscation leaves no footprint.",
+        "Not packed; obfuscation leaves no marks.",
+        "Not packed; obfuscation left no hint.",
+        "Not packed; obfuscation left no residue.",
+        # A left object followed by a word that may say the word again.
+        "Not packed; obfuscation leaves no strings obfuscated.",
+        "Not packed; obfuscation left no strings encoded.",
+        "Not packed; obfuscation leaves no string encrypted.",
+        "Not packed; obfuscation leaves no strings unreadable.",
+        "Not packed; obfuscation keeps no strings hidden.",
+        "Not packed; obfuscation keeps no imports concealed.",
+        "Not packed; obfuscation keeps no names obscured.",
+        # A result that denies a presence or the word again.
+        "Not packed; obfuscation checked so the obfuscation is not applied.",
+        "Not packed; obfuscation checked so the obfuscation is not evident.",
+        "Not packed; obfuscation checked so no obfuscation was identified.",
+        "Not packed; obfuscation checked so the sample is not obfuscated.",
+        "Not packed; obfuscation checked so no obfuscation is visible.",
+        "Not packed; obfuscation looked for so no obfuscation was confirmed.",
+        "Not packed; obfuscation looked for so the result was no.",
+        "Not packed; obfuscated so it is not present.",
+        "Not packed; obfuscation so not present.",
+        "Not packed; obfuscation so that obfuscation is not involved.",
+    ],
+)
+def test_a_negation_of_the_word_s_own_phrase_still_keeps_it_from_affirming(text: str) -> None:
+    found = absence_claim_violation(_claim(text, "T1027"), "T1027", knowledge)
+    assert found is not None and found.code == ABSENCE_CLAIM_CODE
+
+
+def test_the_negation_after_a_word_is_read_in_linear_time() -> None:
+    from tests.linear_cost import assert_scales
+
+    def build(size: int) -> str:
+        return (
+            "obfuscated" + " " * size + "leaves" + " so   x" * size + " so that none" + " x" * size
+        ) + " found"
+
+    assert _negated_after(build(10), 0, 10)
+    assert_scales(build, 20_000, lambda text: _negated_after(text, 0, 10))
