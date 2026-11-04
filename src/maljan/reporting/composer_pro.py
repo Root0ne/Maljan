@@ -404,11 +404,15 @@ _NUMERIC_CONFIDENCE = re.compile(
 )
 # The phrasings of how the report was produced, never of what the sample does:
 # a word alone ("ledger", "producer", "model", "tool") is a sample's term as
-# often, so only the phrasings that name the run's own record are read.
+# often, so only the phrasings that name the run's own record are read. The
+# debate's own words count too: a claim by its number ("Claim 44 is refuted",
+# "claims 12 and 13", never "claims 4 GB") and the analysis the report revised
+# ("the earlier analysis", never "an earlier analysis" by a vendor; T-555).
 _PROCESS_WORDS = re.compile(
     r"\b(?:(?:the|this run's|the run's) ledger(?!\s+of\b)|ledger entr(?:y|ies)"
     r"|per the judge|the judge (?:kept|ruled|stated|said|found|accepted|rejected|dropped|named)"
-    r"|tool calls?|claim numbers?|analyst claims?|language models?|report models?)\b",
+    r"|tool calls?|claim numbers?|analyst claims?|language models?|report models?"
+    r"|claim\s+#?\d+|claims\s+#?\d+\s*(?:,|and)\s*#?\d+|(?:the|this) earlier analys[ie]s)\b",
     re.IGNORECASE,
 )
 # An agent's name is a process word where it is an identifier ("static_r2"):
@@ -531,7 +535,8 @@ def style_violations(
                         f"{safe_finding_value(path)} names how this report was made "
                         f"({safe_finding_value(said)}). State the finding itself, in the "
                         "sample's terms: no ledger, judge, mediator, producer, "
-                        "model, agent or tool call, and no analyst's name or claim number."
+                        "model, agent or tool call, and no analyst's name, claim number or "
+                        "earlier analysis."
                     ),
                     path=path,
                     quoted=tuple(s for s, _f in words),

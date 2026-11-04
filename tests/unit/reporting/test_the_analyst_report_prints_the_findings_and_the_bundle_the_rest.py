@@ -267,38 +267,84 @@ def _checked_report() -> MalwareReport:
     return report
 
 
-class TestThePlatformsCaveats:
-    """Every mark the single-file report prints beside a finding, the analyst report prints."""
+def _sentence_marks(text: str) -> list[str]:
+    """Each mark the single-file report prints after a flagged sentence, found in ``text``."""
+    from maljan.reporting.prose_decisions import CATEGORY_TYPE_UNSTATED_CODE
+    from maljan.reporting.renderers.markdown import _FLAG_WORDS
 
-    def test_each_validation_code_s_mark_is_in_the_analyst_report(self) -> None:
+    words = [w for code, w in _FLAG_WORDS.items() if code != CATEGORY_TYPE_UNSTATED_CODE]
+    return [w for w in [*words, "asked about and kept"] if f"**[{w}" in text]
+
+
+# What a check leaves on a value, a row or a sentence: the bundle prints it, with the
+# value, row or sentence it is about; the analyst report prints none of them (T-555).
+PIPELINE_MARKERS = (
+    "(unresolved: report.flow_voice)",
+    "(unresolved: report.flow_voice; no sandbox observation in this run)",
+    "(unresolved: report.configuration_uncited)",
+    "(unresolved: report.value_not_in_cited_entry)",
+    "(unresolved: report.identifier_uncited)",
+    "unresolved: attck.platform",
+)
+
+
+class TestThePlatformsCaveats:
+    """The verdict's and the summary's findings stand in the analyst report; what a check
+    left on a value, a row or a sentence is the bundle's, which prints it whole (T-555)."""
+
+    def test_each_validation_code_s_mark_is_in_the_bundle_and_not_in_the_analyst_report(
+        self,
+    ) -> None:
         report = _checked_report()
         full = MarkdownRenderer().render(report)
+        bundle = MarkdownRenderer(layout=BUNDLE).render(report)
         analyst = MarkdownRenderer(layout=ANALYST).render(report)
         for marker in (
             "verdict.unsupported",  # under the title and in the conclusion
             "narrative.uncited",  # in the executive summary
-            "(unresolved: report.flow_voice)",
-            "(unresolved: report.flow_voice; no sandbox observation in this run)",
-            "(unresolved: report.configuration_uncited)",
-            "(unresolved: report.value_not_in_cited_entry)",
-            "(unresolved: report.identifier_uncited)",
-            "unresolved: attck.platform",
             "(no evidence cited)",  # a family the judge grounded on nothing
         ):
             assert marker in full, marker
             assert marker in analyst, marker
         assert analyst.count("verdict.unsupported") >= 2
+        for marker in PIPELINE_MARKERS:
+            assert marker in full and marker in bundle, marker
+            assert marker not in analyst, marker
+        assert _sentence_marks(analyst) == []
 
-    def test_a_flagged_sentence_keeps_its_mark_and_the_mark_is_no_citation(self) -> None:
+    def test_a_flagged_sentence_is_left_out_and_its_mark_is_the_bundle_s(self) -> None:
         report = _checked_report()
         analyst, notes = MarkdownRenderer(layout=ANALYST).render_with_notes(report)
-        assert re.search(r"It is not packed\. \*\*\[[^\]]+\]\*\*", analyst)
+        bundle = MarkdownRenderer(layout=BUNDLE).render(report)
+        assert "It is not packed." not in analyst
+        assert re.search(r"It is not packed\. \*\*\[[^\]]+\]\*\*", bundle)
+        # The sentence before it stands, cited as before.
+        assert "decodes each string[[" in analyst
         assert all("ev_" in i for note in notes for i in note.evidence_ids)
 
-    def test_a_mark_in_a_table_cell_cannot_split_its_row(self) -> None:
+    def test_a_step_called_observed_with_a_finding_is_printed_as_assessed(self) -> None:
+        analyst = MarkdownRenderer(layout=ANALYST).render(_checked_report())
+        flow = analyst.split("## 4. Execution flow", 1)[1].split("\n## ", 1)[0]
+        assert "_(observed)_" not in flow
+        assert "It is watched. _(assessed)_" in flow
+
+    def test_a_row_a_check_left_a_finding_on_is_counted_and_the_bundle_s(self) -> None:
+        report = _checked_report()
+        analyst = MarkdownRenderer(layout=ANALYST).render(report)
+        bundle = MarkdownRenderer(layout=BUNDLE).render(report)
+        config = analyst.split("### 6.2 Configuration", 1)[1].split("\n### ", 1)[0]
+        # Its only row is the bundle's: no empty table, the count said.
+        assert "| Key |" not in config and "450 s" not in config
+        assert "1 further configuration row is not printed here" in config
+        assert "unique-mutex-name" not in analyst
+        assert "1 further host identifier row is not printed here" in analyst
+        assert "450 s" in bundle and "unique-mutex-name" in bundle
+
+    def test_a_flagged_table_cell_keeps_its_row_whole(self) -> None:
         from maljan.reporting.models import FlaggedStatement
 
         report = _checked_report()
+        report.run_summary = {}
         report.technical_analysis.configuration = [  # type: ignore[union-attr]
             ConfigItem(key="sleep", value="450 s", evidence_refs=["ev_0003"])
         ]
@@ -312,11 +358,13 @@ class TestThePlatformsCaveats:
         rows = table.splitlines()
         assert len(rows) == 3  # header, divider, the one row
         assert rows[2].count(" | ") == rows[0].count(" | ") == 2
-        assert "a \\| b" in rows[2]
-        assert "next line" in rows[2]
+        assert "| sleep | - |" in rows[2]
+        assert "next line" not in analyst and "450 s" not in rows[2]
 
     def test_an_unexported_value_says_why(self) -> None:
-        analyst = MarkdownRenderer(layout=ANALYST).render(_checked_report())
+        report = _checked_report()
+        report.run_summary = {}
+        analyst = MarkdownRenderer(layout=ANALYST).render(report)
         row = next(line for line in analyst.splitlines() if "unique-mutex-name" in line)
         assert "not exported: the report model's identifier table publishes nothing itself" in row
 
@@ -477,10 +525,15 @@ CAVEATS = (
     "[NO VERDICT]",
     "[NO CONFIDENCE ASSESSED]",
     "[DEGRADED RUN]",
-    "not published by this run",
-    "unresolved:",
-    "report.flow_voice",
     "The evidence is partial",
+)
+# The marks a check leaves on a value, a row or a sentence: the bundle prints each
+# one the single-file body prints, and the analyst report none (T-555).
+MARKS = (
+    "not published by this run",
+    "(unresolved: ",
+    "unresolved: attck.",
+    "report.flow_voice",
 )
 
 
@@ -542,6 +595,24 @@ def test_each_caveat_stands_in_the_analyst_report_as_often_as_in_the_single_file
         marker: (analyst.count(marker), body.count(marker))
         for marker in CAVEATS
         if analyst.count(marker) < body.count(marker)
+    }
+    assert short == {}
+
+
+@pytest.mark.parametrize("run", _stored())
+def test_no_mark_a_check_left_stands_in_the_analyst_report_and_the_bundle_holds_each(
+    run: str,
+) -> None:
+    report = _load(run)
+    body = MarkdownRenderer().render(report).split("\n## 13. ", 1)[0]
+    analyst = MarkdownRenderer(layout=ANALYST).render(report)
+    bundle = MarkdownRenderer(layout=BUNDLE).render(report)
+    assert {marker: analyst.count(marker) for marker in MARKS if marker in analyst} == {}
+    assert _sentence_marks(analyst) == []
+    short = {
+        marker: (bundle.count(marker), body.count(marker))
+        for marker in MARKS
+        if bundle.count(marker) < body.count(marker)
     }
     assert short == {}
 

@@ -77,9 +77,6 @@ from maljan.reporting.renderers.markdown import (
     report_title,
     started_by_the_sample,
 )
-from maljan.reporting.renderers.markdown import (
-    _cell as _table_safe,
-)
 
 if TYPE_CHECKING:
     from maljan.reporting.renderers.markdown import MarkdownRenderer, _Context
@@ -433,6 +430,30 @@ def _value_words(value: str) -> str:
     return ", then ".join(said)
 
 
+def _cut_span(text: str, start: int, end: int) -> tuple[int, int]:
+    """A sentence's span with the spaces after it, or, where a line break or the text's
+    end follows it, the spaces before it: what leaving it out takes away."""
+    after = end
+    while after < len(text) and text[after] in " \t":
+        after += 1
+    if after > end:
+        return start, after
+    while start > 0 and text[start - 1] in " \t":
+        start -= 1
+    return start, end
+
+
+def _left_out_rows(count: int, what: str) -> str:
+    """The line under a table some of whose rows only the bundle prints (T-555)."""
+    one = count == 1
+    return (
+        f"{count} further {what}{'' if one else 's'} {'is' if one else 'are'} not printed "
+        f"here: {'it cites' if one else 'each cites'} no evidence, or a value "
+        f"{'its' if one else 'their'} cited entries do not hold; the bundle lists "
+        f"{'it' if one else 'each'} with the reason."
+    )
+
+
 class _Analyst:
     """The sections of one analyst report, over one render's context."""
 
@@ -454,30 +475,30 @@ class _Analyst:
 
     # -- shared writing ---------------------------------------------------
 
-    def _marked(self, text: str) -> str:
-        """``text`` with the mark of each sentence a check left standing after it, as the
-        single-file report marks it (``_Context.marked``).
+    def _unflagged(self, text: str) -> str:
+        """``text`` without each sentence a check left standing (T-555).
 
-        Each mark is set aside under a token, so neither the defanger nor the
-        citation move reads it: a mark's own brackets are no citation.
+        The single-file report, which the bundle prints whole, prints each
+        such sentence with its mark (``_Context.marked``); the analyst report
+        prints neither the sentence nor a mark. A sentence is left out with
+        the spaces after it, or, where a line break or the text's end follows
+        it, the spaces before it. One pass over the flagged sentences.
         """
-        claimed: list[tuple[int, int]] = []
-        inserts: list[tuple[int, str]] = []
-        for sentence, mark in self.ctx.flagged:
-            start = text.find(sentence)
+        spans: list[tuple[int, int]] = []
+        for sentence, _mark in self.ctx.flagged:
+            start = text.find(sentence) if sentence else -1
             while start != -1:
-                end = start + len(sentence)
-                inside = any(a <= start and end <= b for a, b in claimed)
-                if not inside and not text.startswith(f" {mark}", end):
-                    claimed.append((start, end))
-                    inserts.append((end, mark))
+                spans.append((start, start + len(sentence)))
                 start = text.find(sentence, start + 1)
-        for end, mark in sorted(inserts, reverse=True):
-            # Kept from the closing pass, so made safe here as a cell makes it
-            # (``_cell``): on one line, its separators escaped, so a mark in a
-            # table cell cannot end the row or add a column.
-            safe = _table_safe(_one_line(mark))
-            text = f"{text[:end]} {self.ctx.keep(safe)}{text[end:]}"
+        merged: list[list[int]] = []
+        for start, end in sorted(spans):
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        for start, end in reversed(merged):
+            start, end = _cut_span(text, start, end)
+            text = text[:start] + text[end:]
         return text
 
     def composed(self) -> bool:
@@ -488,44 +509,33 @@ class _Analyst:
         )
 
     def _keeps(self, text: str) -> bool:
-        """Whether replaced text stays: a check marked it, or it names a value printed
-        nowhere else in the report (``composer_pro.carried_values``)."""
-        if self._carries_a_mark(text):
-            return True
+        """Whether replaced text stays: it names a value printed nowhere else in the
+        report (``composer_pro.carried_values``)."""
         if self.elsewhere is None or not str(text or "").strip():
             return False
         return bool(values_not_carried(self.values(text), self.elsewhere, formed=True))
 
     def _kept_sentences(self, text: str) -> list[str]:
         """The sentences of replaced text that stay (:meth:`_keeps`), as written, in order."""
-        kept = list(self._marked_sentences(text))
-        for sentence in sentences(text):
-            if not any(sentence in k or k in sentence for k in kept) and self._keeps(sentence):
-                kept.append(sentence)
-        return sorted(kept, key=lambda k: text.find(k))
+        return [sentence for sentence in sentences(text) if self._keeps(sentence)]
 
-    def _carries_a_mark(self, text: str) -> bool:
-        """Whether a sentence a check left standing, with its mark, is in ``text``."""
-        return bool(text) and any(sentence in text for sentence, _mark in self.ctx.flagged)
-
-    def _marked_sentences(self, text: str) -> list[str]:
-        """The sentences of ``text`` a check left a mark on, as written, in order."""
-        found: list[tuple[int, str]] = []
-        for sentence, _mark in self.ctx.flagged:
-            at = text.find(sentence) if sentence else -1
-            if at != -1 and not any(sentence in kept for _at, kept in found):
-                found.append((at, sentence))
-        return [sentence for _at, sentence in sorted(found)]
+    def _flagged_whole(self, text: str) -> bool:
+        """Whether nothing of ``text`` is left once its flagged sentences are left out."""
+        return bool(str(text or "").strip()) and not self._unflagged(_one_line(text)).strip()
 
     def _prose(self, text: str, ids: Iterable[Any] = ()) -> str:
-        """Model prose as a paragraph: marked, defanged, its citations moved to note markers."""
-        marked = self._marked(str(text or "").strip())
-        return _escape_block(self.notes.moved(self.ctx.plain(marked), ids))
+        """Model prose as a paragraph: its flagged sentences left out, defanged, its
+        citations moved to note markers."""
+        kept = self._unflagged(str(text or "").strip())
+        return _escape_block(self.notes.moved(self.ctx.plain(kept), ids))
 
     def _line(self, text: Any, ids: Iterable[Any] = ()) -> str:
-        """Model prose on one line, for an item, a step or a cell."""
-        marked = self._marked(_one_line(text))
-        return _one_line(self.notes.moved(self.ctx.plain(marked), ids))
+        """Model prose on one line, for an item, a step or a cell; ``-`` where every
+        sentence of it was flagged."""
+        kept = self._unflagged(_one_line(text))
+        if not kept.strip():
+            return "-"
+        return _one_line(self.notes.moved(self.ctx.plain(kept), ids))
 
     def _findings(self, rows: list[dict[str, str]]) -> list[str]:
         """The platform's unresolved findings on a section, one item each."""
@@ -631,12 +641,14 @@ class _Analyst:
         bullets = list(self.ta.capability_summary) if self.ta is not None else []
         # The composer's capability bullets where it wrote them; the key
         # findings and the summary paragraph are then the bundle's, but for a
-        # finding a check left a mark on, which stays where a reader sees it.
-        findings = list(report.key_findings)
+        # finding naming a value printed nowhere else. A bullet or finding a
+        # check flagged whole is the bundle's alone (T-555).
+        findings = [f for f in report.key_findings if not self._flagged_whole(f.text)]
         if bullets:
             findings = [f for f in findings if self._keeps(f.text)]
         for bullet in bullets:
-            lines.append(_item(self._line(bullet.text, bullet.evidence_refs)))
+            if not self._flagged_whole(bullet.text):
+                lines.append(_item(self._line(bullet.text, bullet.evidence_refs)))
         for finding in findings:
             lines.append(_item(self._line(finding.text, finding.evidence_ids)))
         summary = report.executive_summary.strip()
@@ -823,15 +835,16 @@ class _Analyst:
             edges = [f"    s{n} --> s{n + 1}" for n in range(1, len(labels))]
             lines.extend([*_fenced("\n".join(["flowchart TD", *nodes, *edges]), "mermaid"), ""])
         for index, step in enumerate(sorted(steps, key=lambda s: s.order), start=1):
-            mark = "observed" if step.voice == "observed" else "assessed"
-            # The platform's note beside a step, as the single-file report prints it.
-            if str(step.order) in self.ctx.flow_findings:
-                note = " _(unresolved: report.flow_voice)_"
-            elif step.voice == "observed" and not self.ctx.sandbox_observed:
-                note = " _(unresolved: report.flow_voice; no sandbox observation in this run)_"
-            else:
-                note = ""
-            said = f"{self._line(step.action, step.evidence_refs)} _({mark})_{note}"
+            # A step called observed that the voice check left standing, or that
+            # no sandbox observation stands behind, is printed as assessed; the
+            # single-file report, which the bundle prints, keeps the finding (T-555).
+            observed = (
+                step.voice == "observed"
+                and str(step.order) not in self.ctx.flow_findings
+                and self.ctx.sandbox_observed
+            )
+            mark = "observed" if observed else "assessed"
+            said = f"{self._line(step.action, step.evidence_refs)} _({mark})_"
             lines.append(_step(index, said))
         return "\n".join([*lines, "", _behind("flow")])
 
@@ -982,22 +995,25 @@ class _Analyst:
             blocks.extend(self._subsection("6.1", "Protocol and endpoints", prose, protocol))
         if ta is not None and ta.configuration:
             body = [_row("Key", "Value", "How obtained"), _divider(3)]
+            left = 0
             for index, item in enumerate(ta.configuration, start=1):
-                # The platform's marks, as the single-file report prints them:
-                # the IOC table's state of each value, an uncited row, a value
-                # none of its cited entries holds whole.
-                how: str = item.how_obtained
-                if index in ctx.config_findings:
-                    how += " (unresolved: report.configuration_uncited)"
-                if index in ctx.config_unheld:
-                    how += " (unresolved: report.value_not_in_cited_entry)"
+                # A row that cites nothing, or whose value none of its cited
+                # entries holds whole, is the bundle's, which prints it with the
+                # finding (T-555); the IOC table's state of each value stays.
+                if index in ctx.config_findings or index in ctx.config_unheld:
+                    left += 1
+                    continue
                 body.append(
                     _row(
                         self._cell(item.key),
                         self._line(item.value, item.evidence_refs) + ctx.publish_state(item.value),
-                        how,
+                        item.how_obtained,
                     )
                 )
+            if left:
+                said = _left_out_rows(left, "configuration row")
+                # Every row the bundle's: the line alone, with no empty table.
+                body = [*body, "", said] if len(body) > 2 else [said]
             blocks.extend([_subheading("6.2", "Configuration"), "", *body, ""])
         if ta is not None and (ta.commands or ta.cli_flags):
             body = []
@@ -1268,16 +1284,17 @@ class _Analyst:
                 role += f" _({_inline_safe(answer, pipes=False, plain=ctx.plain)})_"
             rows.append((ioc.type, value, role or "-"))
         identifiers = list(self.ta.host_identifiers) if self.ta is not None else []
+        left = 0
         for index, item in enumerate(identifiers, start=1):
             if item.value.strip().lower() in seen:
                 continue
+            # A row that cites nothing, or whose value none of its cited entries
+            # holds whole, is the bundle's, which prints it with the finding (T-555).
+            if index in ctx.identifier_findings or index in ctx.identifier_unheld:
+                left += 1
+                continue
             seen.add(item.value.strip().lower())
             role = self._line(item.purpose, item.evidence_refs) if item.purpose.strip() else "-"
-            # The marks the single-file report prints beside the row.
-            if index in ctx.identifier_findings:
-                role += " (unresolved: report.identifier_uncited)"
-            if index in ctx.identifier_unheld:
-                role += " (unresolved: report.value_not_in_cited_entry)"
             state = ctx.publish_state(item.value).strip()
             role += f" _({_IDENTIFIER_NOT_EXPORTED}" + (f"; {state[1:-1]}" if state else "") + ")_"
             rows.append((self._cell(item.kind), ctx.plain(_one_line(item.value)), role))
@@ -1289,6 +1306,8 @@ class _Analyst:
             for kind, value, role in rows:
                 lines.append(_row(kind, _code_span(value), role))
             lines.append("")
+        if left:
+            lines.extend([_left_out_rows(left, "host identifier row"), ""])
         if recorded:
             lines.extend(
                 [
@@ -1515,38 +1534,24 @@ class _Analyst:
         """What the single-file report says beside a published row's status, or ``""``.
 
         How little a rule match stands behind a technique only a rule matched,
-        the row's own note, and the platform's unresolved findings about it.
+        and the row's own note. The platform's unresolved findings about it are
+        the bundle's, which prints the single-file report's status whole (T-555).
         """
-        from maljan.reporting.renderers.markdown import (
-            _TECHNIQUE_FINDING_CODES,
-            _finding_technique,
-        )
-
         said: list[str] = []
         rule_only = self.ctx.rule_only.get(technique_id)
         if rule_only:
             said.append(self.ctx.plain(_one_line(rule_only)))
         if note:
             said.append(self.ctx.plain(judge_reasons_shown(note)[0]))
-        codes = [
-            str(row.get("code"))
-            for row in self.ctx.unresolved
-            if str(row.get("code", "")).startswith(_TECHNIQUE_FINDING_CODES)
-            and _finding_technique(row) == technique_id.upper()
-        ]
-        if codes:
-            said.append("unresolved: " + ", ".join(dict.fromkeys(codes)))
         return f" _({'; '.join(said)})_" if said else ""
 
     def _procedure(self, claim: str, ids: list[str], technique_id: str = "") -> str:
         """The composer's procedure for the technique, else its first claim's first sentence."""
         written = self._procedures.get(technique_id.strip().upper())
         sentence = _first_sentence(_CITATION_RUN.sub("", claim))
-        # A first sentence a check left a mark on stays, with its mark.
-        first = _first_sentence(claim)
-        # A first sentence a check marked, or naming a value printed nowhere
-        # else, stays in place of the written procedure.
-        if written is not None and not (self._keeps(sentence) or self._carries_a_mark(first)):
+        # A first sentence naming a value printed nowhere else stays in place
+        # of the written procedure.
+        if written is not None and not self._keeps(sentence):
             return self._line(written.procedure, written.evidence_refs)
         if not sentence:
             return "-" + self.notes.marker(ids)
