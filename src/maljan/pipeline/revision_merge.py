@@ -204,29 +204,44 @@ def _block_restates(earlier: _Block, reading: _Reading) -> bool:
     return share >= CORRECTED_SHARE and bool(_techniques(earlier) & reading.techniques)
 
 
-def rewritten_in(claim: Any, retried: Any) -> int | None:
-    """The block of ``retried`` that writes ``claim`` again, or ``None``.
+def rewritten_in(claim: Any, retried: Any, others: Sequence[Any] = ()) -> int | None:
+    """The block of ``retried`` that writes ``claim`` again and nothing else, or ``None``.
 
-    The block, counted from 1, that writes the claim's sentence as it is;
-    otherwise the one block that states four fifths of the claim's content
-    words, or two thirds of its values that are no mere small number with at
-    least one of them strong: a stricter bar than the revision merge's. Two
-    blocks that both meet it are no answer.
+    The block, counted from 1, that writes the claim's sentence as it is, or
+    the one block that states four fifths of the claim's content words, or
+    two thirds of its values that are no mere small number with at least one
+    of them strong. It must also add nothing: every value and every ledger
+    id it writes is one of the claim's. And it must write again none of
+    ``others`` (the first answer's claims the retry still states): a block
+    that holds another claim is that claim's. Two blocks that both qualify
+    are no answer.
     """
     earlier = _Block(number=0, claims=[claim])
     words = content_words(earlier.sentence)
     values = _counted_values(earlier)
+    ids = _entry_ids(_text_of(earlier))
+    held = [_Block(number=0, claims=[other]) for other in others]
     found: list[int] = []
     for block in _blocks(list(getattr(retried, "claims", None) or [])):
-        if block.sentence == earlier.sentence:
-            return block.number
         reading = _read(block)
         got = _stated(values, reading) if values else set()
-        if (words and len(words & reading.words) / len(words) >= WORDED_SHARE) or (
-            any(_strong(v) for v in got) and len(got) / len(values) >= REWRITTEN_SHARE
+        if not (
+            block.sentence == earlier.sentence
+            or (words and len(words & reading.words) / len(words) >= WORDED_SHARE)
+            or (any(_strong(v) for v in got) and len(got) / len(values) >= REWRITTEN_SHARE)
         ):
-            found.append(block.number)
+            continue
+        if not _counted_values(block) <= values or not _entry_ids(_text_of(block)) <= ids:
+            continue
+        if any(_block_restates(other, reading) for other in held):
+            continue
+        found.append(block.number)
     return found[0] if len(found) == 1 else None
+
+
+def _entry_ids(text: str) -> frozenset[str]:
+    """The ledger ids ``text`` writes, lower-cased."""
+    return frozenset(m.group(0).lower() for m in re.finditer(r"\bev_\d++\b", text, re.I))
 
 
 def _restated(earlier: _Block, readings: Sequence[_Reading]) -> tuple[bool, int | None]:
@@ -339,10 +354,9 @@ class RevisionMerge:
     blocking line reached only through a range or a list, sharing no ledger
     id or address with it, and carried for that; ``owned`` the round's claim
     numbers written for no analyst that are read as this analyst's
-    (``debate_facts.OwnedClaim``); ``numbering`` ``(the revision's own
-    number, its number in the merged answer)`` per revision claim block that
-    stands, where the revision's own numbers are read beyond doubt
-    (:func:`numbering_key`).
+    (``debate_facts.OwnedClaim``); ``numbering`` ``(a number the revision's
+    text may name a claim by, its number in the merged answer)``
+    (:func:`_numbering`, :func:`numbering_key`).
     """
 
     merged: Any | None = None
@@ -447,48 +461,84 @@ def unplaced_sentence(name: str, revision_round: int, reference: UnplacedClaims)
 
 
 def _own_numbers(revised: Sequence[_Block]) -> list[int] | None:
-    """The numbers the revision gave its claim blocks, or ``None`` where they are in doubt.
+    """The numbers the revision's headings gave its claim blocks, or ``None``.
 
-    The numbers its headings wrote where every block wrote one, each once;
-    its places, counted from 1, where none wrote one. A revision that wrote
-    numbers on some blocks only, or one number twice, has none read.
+    Read only where every block wrote one: a revision that wrote none, or
+    some only, has no numbers read, and no key is written for it. A number
+    written on two blocks (a claim the analyst kept from its first answer
+    beside a retry's) is read for both, and the key names both.
     """
     written = [_written_number(block) for block in revised]
-    if all(n is None for n in written):
-        return list(range(1, len(revised) + 1))
-    if any(n is None for n in written) or len(set(written)) != len(written):
+    if any(n is None for n in written):
         return None
     return [int(n or 0) for n in written]
 
 
 def _numbering(
-    revised: Sequence[_Block], kept: Sequence[int], merged: Sequence[Any]
+    placed_by: str,
+    revised: Sequence[_Block],
+    kept: Sequence[int],
+    merged: Sequence[Any],
+    carried_ids: Mapping[int, int],
 ) -> tuple[tuple[int, int], ...]:
-    """``(the revision's own number, its number in the merged answer)`` per block that stands."""
-    own = _own_numbers(revised)
-    if own is None:
-        return ()
+    """``(a number the revision's text may name a claim by, its number in the merged answer)``.
+
+    Placed by number, the revision numbers claims as the answer in force
+    does: every claim carried keeps its number there, and every block its
+    written one. Placed by statement, only the revision's blocks have
+    numbers of the revision's own (:func:`_own_numbers`). Sorted.
+    """
     at = {id(block.claims[0]): block.number for block in _blocks(merged)}
-    pairs = [
-        (own[index], at[id(revised[index].claims[0])])
+    pairs: list[tuple[int, int]] = []
+    if placed_by == "number":
+        pairs += [(n, at[i]) for n, i in carried_ids.items() if i in at]
+        own = [_written_number(block) for block in revised]
+    else:
+        own = list(_own_numbers(revised) or [])
+        if not own:
+            return ()
+    pairs += [
+        (int(own[index] or 0), at[id(revised[index].claims[0])])
         for index in kept
-        if id(revised[index].claims[0]) in at
+        if own[index] is not None and id(revised[index].claims[0]) in at
     ]
     return tuple(sorted(pairs))
 
 
 def numbering_key(merge: RevisionMerge) -> str:
-    """The sentence that maps the revision's own claim numbers onto the merged answer's, or ``""``.
+    """The sentence that maps the numbers the revision text uses onto the merged ones, or ``""``.
 
-    The answer in force numbers its claims as the merge placed them; what the
-    revision wrote besides its claims names them by the numbers the revision
-    gave them. Said only where some number differs; every pair is listed, in
-    the revision's order, and a number not listed names no claim the
-    platform read from the revision.
+    Said only where some number differs. Placed by number, the revision
+    names claims by the numbers of the answer it revised: every one that
+    moved is listed, carried claims included, and every claim withdrawn is
+    named. Placed by statement, it names them by its own numbers: every
+    pair is listed (a number written on two blocks names both), and a number
+    not listed names no claim the platform read from the revision.
     """
-    if not any(own != now for own, now in merge.numbering):
+    moved = [(own, now) for own, now in merge.numbering if own != now]
+    if not moved:
         return ""
-    pairs = "; ".join(f"its claim {own} is claim {now}" for own, now in merge.numbering)
+    if merge.placed_by == "number":
+        pairs = "; ".join(f"its claim {own} is claim {now}" for own, now in moved)
+        gone = sorted({n for n, _s, _r in (*merge.withdrawn, *merge.withdrawn_by_rule)})
+        withdrawn = (
+            f" Claim{'s' if len(gone) != 1 else ''} {_spans(gone)} of that answer "
+            f"{'were' if len(gone) != 1 else 'was'} withdrawn."
+            if gone
+            else ""
+        )
+        return (
+            "(The text below names this analyst's claims by their numbers in the answer it "
+            f"revised. In the numbering above, {pairs}; every other number is the same."
+            f"{withdrawn})"
+        )
+    grouped: dict[int, list[int]] = {}
+    for own, now in merge.numbering:
+        grouped.setdefault(own, []).append(now)
+    pairs = "; ".join(
+        f"its claim {own} is " + " or ".join(f"claim {n}" for n in nows)
+        for own, nows in grouped.items()
+    )
     return (
         "(The text below names this analyst's claims by the numbers its revision gave them. "
         f"In the numbering above, {pairs}. A number not listed names no claim the platform read "
@@ -761,6 +811,8 @@ def merge_revision(
             at.setdefault(target[index], []).append(index)
     claims: list[Any] = []
     carried_numbers = {block.number for block in carried_blocks}
+    # The first claim each carried block stands with, for the numbering key.
+    carried_ids: dict[int, int] = {}
     for block in first:
         if block.number in carried_numbers:
             for claim in block.claims:
@@ -772,6 +824,7 @@ def merge_revision(
                     copy.carried_contested_by = [
                         f"L{n} (round {int(revision_round)})" for n in contested[block.number]
                     ]
+                carried_ids.setdefault(block.number, id(copy))
                 claims.append(copy)
         for index in at.get(block.number, ()):
             claims.extend(revised[index].claims)
@@ -780,7 +833,7 @@ def merge_revision(
             claims.extend(revised[index].claims)
     merged = revision.model_copy(update={"claims": claims})
     return RevisionMerge(
-        numbering=_numbering(revised, kept_blocks, claims),
+        numbering=_numbering(placed_by, revised, kept_blocks, claims, carried_ids),
         merged=merged,
         placed_by=placed_by,
         replaced=replaced,

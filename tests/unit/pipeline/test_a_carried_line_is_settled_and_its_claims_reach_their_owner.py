@@ -19,9 +19,10 @@ cannot place. Four rules answer it:
 - A merged answer in force whose numbers differ from the ones the revision
   gave its claims carries a key from one to the other, right where the
   revision's own words begin.
-- A claim the analyst keeps after a validation retry left it out takes the
-  place of the one retry block that wrote it again in other words, instead
-  of standing beside it.
+- A claim the analyst answers KEEP for, after a validation retry left it
+  out, takes the place of the one retry block that wrote it again and added
+  nothing, and that holds no other claim the retry kept, instead of standing
+  beside it.
 
 Every value is synthetic.
 """
@@ -62,7 +63,7 @@ from maljan.pipeline.routing import (
     debate_route,
 )
 from maljan.pipeline.state import AgentArgument
-from maljan.pipeline.validation import retry_drops
+from maljan.pipeline.validation import retry_drops, rewritten_pairs
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 NAMES = ["static", "reverser"]
@@ -535,6 +536,13 @@ class TestTheNumberingKey:
             "OPEN ITEMS\n- to close claim 6."
         )
 
+    def test_a_number_written_on_two_blocks_names_both(self) -> None:
+        merge = RevisionMerge(placed_by="statement", numbering=((6, 26), (6, 35), (7, 27)))
+
+        assert "its claim 6 is claim 26 or claim 35; its claim 7 is claim 27." in (
+            numbering_key(merge)
+        )
+
     def test_numbers_that_agree_leave_the_text_byte_identical(self) -> None:
         text = f"  Claim 1: x\n{WRITTEN_BESIDES_CLAIMS}\nprose"
 
@@ -553,27 +561,68 @@ class TestTheNumberingKey:
         # The revision writes the polling claim again first and adds a new one.
         revision = _isr(
             "static",
-            _claim("Routine 0x1030 polls the pipe until the child exits.", "[ev_0056]"),
-            _claim("Routine 0x7b98 returns the AppData path 0x1a.", "[ev_0122]"),
+            _numbered("Routine 0x1030 polls the pipe until the child exits.", "[ev_0056]", 1),
+            _numbered("Routine 0x7b98 returns the AppData path 0x1a.", "[ev_0122]", 2),
         )
 
         merge = merge_revision(in_force, revision, "the revision", 1, {})
 
+        assert merge.placed_by == "statement"
         assert merge.numbering == ((1, 2), (2, 4))
 
-    def test_numbers_written_on_some_blocks_only_give_no_key(self) -> None:
+    def test_numbers_written_on_no_block_or_some_blocks_only_give_no_key(self) -> None:
         in_force = _isr("static", _claim("Mutex at 0x3962.", "[ev_0011]"), _claim("Other.", ""))
-        first = _claim("Mutex at 0x3962 again.", "[ev_0011]")
-        first.note_number("4")
+        first = _numbered("Mutex at 0x3962 again.", "[ev_0011]", 4)
         second = _claim("A new claim on 0x7b98.", "[ev_0122]")
+        unnumbered = _claim("Mutex at 0x3962 again.", "[ev_0011]")
 
-        merge = merge_revision(in_force, _isr("static", first, second), "rev", 1, {})
+        for revision in (_isr("static", first, second), _isr("static", unnumbered, second)):
+            merge = merge_revision(in_force, revision, "rev", 1, {})
+            assert merge.placed_by == "statement"
+            assert merge.numbering == ()
 
-        assert merge.numbering == ()
+    def test_placed_by_number_every_claim_that_moved_and_every_one_withdrawn_is_named(
+        self,
+    ) -> None:
+        in_force = _isr(
+            "static",
+            _claim("Mutex Global\\abc is created at 0x4f00.", "[ev_0011]"),
+            _claim("Routine 0x2200 decodes strings with RC4 key 0x55aa.", "[ev_0020]"),
+            _claim("Routine 0x3300 sets the Run key persistence.", "[ev_0030]"),
+            _claim("Routine 0x4400 beacons to port 8443.", "[ev_0040]"),
+            _claim("Routine 0x1030 polls slot 0x10d80 until exit.", "[ev_0056]"),
+        )
+        revision = _isr(
+            "static",
+            _numbered(
+                "Routine 0x1030 polls slot 0x10d80 once and returns; corrected.", "[ev_0056]", 5
+            ),
+        )
+        answer = (
+            "CLAIM 5: ...\nI withdraw claim 2: the RC4 reading was wrong.\nClaim 4 still holds."
+        )
+
+        merge = merge_revision(in_force, revision, answer, 2, {2: [(1, True)]})
+
+        assert merge.placed_by == "number"
+        assert [n for n, _s, _r in merge.withdrawn_by_rule] == [2]
+        assert merge.numbering == ((1, 1), (3, 2), (4, 3), (5, 4))
+        assert numbering_key(merge) == (
+            "(The text below names this analyst's claims by their numbers in the answer it "
+            "revised. In the numbering above, its claim 3 is claim 2; its claim 4 is claim 3; "
+            "its claim 5 is claim 4; every other number is the same. Claim 2 of that answer "
+            "was withdrawn.)"
+        )
+
+
+def _numbered(text: str, ref: str, number: int) -> ClaimEvidence:
+    claim = _claim(text, ref)
+    claim.note_number(str(number))
+    return claim
 
 
 # ---------------------------------------------------------------------------
-# A claim a validation retry writes again is not put back beside it
+# A kept claim a validation retry wrote again takes its place, beyond doubt only
 # ---------------------------------------------------------------------------
 
 POLLING = (
@@ -586,8 +635,19 @@ POLLING_AGAIN = (
 )
 
 
+def _restore(first: AgentISR, retried: AgentISR, kept: list[Any], answered: list[Any]) -> list:
+    from maljan.agents.base_agent import BaseAnalyst
+
+    agent = MagicMock()
+    drops = retry_drops(first, retried, "")
+    claims = BaseAnalyst._with_restored_claims(
+        agent, first, retried, kept, drops, {id(c) for c in answered}
+    )
+    return [c.claim for c in claims]
+
+
 class TestARetryThatRewritesAClaim:
-    def test_a_claim_written_again_is_still_asked_about_and_paired_with_its_block(self) -> None:
+    def test_a_claim_written_again_and_nothing_else_is_paired_with_its_block(self) -> None:
         first = _isr(
             "static",
             _claim(POLLING, "[ev_0056]"),
@@ -605,7 +665,9 @@ class TestARetryThatRewritesAClaim:
             ("Routine 0x", ("0x10d90",)),
             ("The mutex ", ("0x3962", "0xfa00")),
         ]
-        assert [(c.claim[:10], block) for c, block in drops.rewritten] == [("Routine 0x", 2)]
+        assert [(c.claim[:10], b) for c, b in rewritten_pairs(first, retried, drops)] == [
+            ("Routine 0x", 2)
+        ]
 
     def test_a_claim_sharing_less_than_two_thirds_of_its_values_is_paired_with_none(
         self,
@@ -614,22 +676,63 @@ class TestARetryThatRewritesAClaim:
         retried = _isr("static", _claim("Routine 0x1030 calls 0x10d80.", "[ev_0056]"))
 
         assert rewritten_in(claim, retried) is None
-        assert retry_drops(_isr("static", claim), retried, "").rewritten == ()
 
-    def test_kept_it_takes_the_place_of_the_block_that_wrote_it_again(self) -> None:
-        from maljan.agents.base_agent import BaseAnalyst
+    def test_a_block_that_adds_a_value_or_an_entry_is_paired_with_none(self) -> None:
+        claim = _claim(POLLING, "[ev_0056]")
+        more_values = _isr("static", _claim(POLLING_AGAIN + " Then 0x10d88.", "[ev_0056]"))
+        more_ids = _isr("static", _claim(POLLING_AGAIN, "[ev_0056]; ev_0060"))
 
+        assert rewritten_in(claim, _isr("static", _claim(POLLING_AGAIN, "[ev_0056]"))) == 1
+        assert rewritten_in(claim, more_values) is None
+        assert rewritten_in(claim, more_ids) is None
+
+    def test_a_block_holding_another_claim_the_retry_kept_is_not_taken(self) -> None:
+        # The reviewer's case: A is dropped and shares two of three values with
+        # B', which is B written again; keeping A must not cost B.
+        walk = ClaimEvidence(
+            claim="Routine 0x1030 reads slot 0x10d80 to walk the process list (T1057).",
+            evidence_ref="[ev_0056]",
+            confidence=0.7,
+            technique_id="T1057",
+        )
+        polls = _claim(
+            "Routine 0x1030 polls slot 0x10d80 until the child process exits.", "[ev_0056]"
+        )
+        mutex = _claim("Mutex Global\\abc is created at 0x4f00.", "[ev_0011]")
+        first = _isr("static", walk, polls, mutex)
+        polls_again = _claim(
+            "The loop in 0x1030 waits on slot 0x10d80 and returns once the child has finished.",
+            "[ev_0056]",
+        )
+        retried = _isr("static", polls_again, mutex)
+        drops = retry_drops(first, retried, "")
+
+        assert [c.claim[:20] for c, _m in drops.claims] == [walk.claim[:20]]
+        assert rewritten_pairs(first, retried, drops) == ()
+        assert _restore(first, retried, [walk], [walk]) == [
+            polls_again.claim,
+            mutex.claim,
+            walk.claim,
+        ]
+
+    def test_answered_keep_takes_the_place_of_the_block_that_wrote_it_again(self) -> None:
         kept = _claim(POLLING, "[ev_0056]")
         other = _claim("The mutex is runnung at 0x3962 and 0xfa00.", "[ev_0011]")
         first = _isr("static", kept, other)
         beacon = _claim("Beacon thread 0x5750 waits 180 s.", "[ev_0060]")
         retried = _isr("static", beacon, _claim(POLLING_AGAIN, "[ev_0056]"))
-        drops = retry_drops(first, retried, "")
-        agent = MagicMock()
-
-        claims = BaseAnalyst._with_restored_claims(agent, first, retried, [kept, other], drops)
 
         # The polling claim is stated once, as kept; the other kept claim follows.
-        assert [c.claim for c in claims] == [beacon.claim, POLLING, other.claim]
-        agent.logger.info.assert_called_once()
-        assert agent.logger.info.call_args.args[2:] == ("1", 2)
+        assert _restore(first, retried, [kept, other], [kept, other]) == [
+            beacon.claim,
+            POLLING,
+            other.claim,
+        ]
+
+    def test_an_item_left_unanswered_is_put_back_beside_as_before(self) -> None:
+        kept = _claim(POLLING, "[ev_0056]")
+        first = _isr("static", kept)
+        again = _claim(POLLING_AGAIN, "[ev_0056]")
+        retried = _isr("static", again)
+
+        assert _restore(first, retried, [kept], []) == [again.claim, POLLING]

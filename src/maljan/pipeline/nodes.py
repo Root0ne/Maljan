@@ -6538,7 +6538,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     valid_carries(
                         contested,
                         dict(getattr(mediation, "carried", None) or {}),
-                        revision_round_before(state, mediations=iteration),
+                        revision_round_before(
+                            state, mediations=iteration, stage=stage_key_of(stage, "debate")
+                        ),
                         places,
                     ),
                 ),
