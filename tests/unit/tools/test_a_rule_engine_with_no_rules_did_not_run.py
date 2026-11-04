@@ -348,8 +348,11 @@ class TestOnlyAHostPathIsMasked:
         said = host_paths_masked(f"read /tmp/x/rules.yml, /etc/passwd and {parent}/other/r.yml")
         assert said == f"read {OUTSIDE_PROJECT}, {OUTSIDE_PROJECT} and {OUTSIDE_PROJECT}"
 
-    def test_a_path_that_exists_here_is_masked(self, tmp_path: Path) -> None:
-        assert host_paths_masked(f"at {tmp_path}") == f"at {OUTSIDE_PROJECT}"
+    def test_the_words_alone_decide_never_the_host(self) -> None:
+        # Under a host root, whether or not it is there; elsewhere, kept even
+        # where it is there (``/proc`` is on every Linux host).
+        assert host_paths_masked("at /opt/no-such-dir-t556") == f"at {OUTSIDE_PROJECT}"
+        assert host_paths_masked("read /proc/self/status") == "read /proc/self/status"
 
     def test_a_file_url_is_a_path(self) -> None:
         root = get_project_root()
@@ -388,10 +391,18 @@ class TestTheReportSaysItDidNotRun:
         assert not re.search(r"(?<!\\)<img", scope)
         assert not re.search(r"(?<!\\)\*\*bold", scope)
 
-    def test_a_host_path_in_a_stored_reason_is_masked(self) -> None:
-        scope = _scope(_degraded_report("rules at /srv/run-hk8/data/capa-rules are missing"))
-        assert "/srv/run-hk8" not in scope
-        assert OUTSIDE_PROJECT in scope
+    def test_a_stored_run_renders_the_same_on_any_host(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The reason was masked when written; rendering reads no host and no project root."""
+        from maljan.core import paths
+
+        report = _degraded_report("rules at /srv/run-hk8/data/capa-rules are missing")
+        here = MarkdownRenderer(layout=ANALYST).render(report)
+        for root in (tmp_path, Path("/srv/run-hk8")):
+            monkeypatch.setattr(paths, "get_project_root", lambda root=root: root)
+            assert MarkdownRenderer(layout=ANALYST).render(report) == here
+        assert "rules at /srv/run-hk8/data/capa-rules are missing" in _scope(report)
 
     def test_a_stored_run_renders_byte_for_byte_as_it_did(self) -> None:
         """A summary written before ``lost_tools`` says nothing new (haiku8's shape)."""

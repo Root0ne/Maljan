@@ -326,6 +326,40 @@ def lost_tool_rows(
     return rows
 
 
+def with_reasons(held: Iterable[Any] | None, added: Iterable[str]) -> list[str]:
+    """``held`` as text, then each of ``added`` not already among them, in order."""
+    kept = [str(reason) for reason in held or ()]
+    for reason in added:
+        if reason not in kept:
+            kept.append(reason)
+    return kept
+
+
+def static_pass_summary(
+    run_summary: Mapping[str, Any] | None, reasons: Iterable[str]
+) -> dict[str, Any]:
+    """What a run summary says of the passes a static provider did not make, ``{}`` for none.
+
+    ``reasons`` are the provider's (:func:`provider_pass_reason`), which the
+    report node reads once the verdict stage has set the degraded flag: the
+    run is degraded, the reasons follow ``run_summary``'s own, and each tool
+    goes on ``lost_tools`` after the ones already there (:func:`lost_tool_rows`,
+    which masks host paths when the row is written). The keys to lay over
+    ``run_summary``; pure, so the report and the state's summary say the same.
+    """
+    added = [str(reason) for reason in reasons if str(reason).strip()]
+    if not added:
+        return {}
+    held = run_summary or {}
+    lost = [dict(row) for row in held.get("lost_tools") or () if isinstance(row, Mapping)]
+    named = {str(row.get("tool") or "") for row in lost}
+    return {
+        "degraded_mode": True,
+        "degradation_reasons": with_reasons(held.get("degradation_reasons"), added),
+        "lost_tools": [*lost, *(row for row in lost_tool_rows(added) if row["tool"] not in named)],
+    }
+
+
 def facts_record(facts: SampleFacts) -> dict[str, Any] | None:
     """What the run summary keeps of ``facts`` (``loss_facts``), ``None`` when there is nothing.
 

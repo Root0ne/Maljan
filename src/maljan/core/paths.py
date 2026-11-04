@@ -167,8 +167,9 @@ _ABSOLUTE_PATH = re.compile(
 )
 
 # The directories a host keeps its own files under. A path that starts with one
-# of them, or that exists on this host, is the host's layout; anything else
-# that reads as one (an HTTP route, ``/api/v1/jobs``) is left as written.
+# of them is the host's layout; anything else that reads as one (an HTTP route,
+# ``/api/v1/jobs``) is left as written. Nothing is looked up on the host, so
+# the same words mask the same way wherever they are rendered.
 HOST_ROOTS = ("/home", "/tmp", "/opt", "/var", "/root", "/srv", "/mnt", "/media", "/usr", "/etc")
 
 # What a path off the project is shown as: the host's layout is not the reader's.
@@ -182,9 +183,10 @@ def host_paths_masked(text: str, project_root: Path | None = None) -> str:
     the project reads as the operator wrote it relative to the root
     (``data/sigma_rules``), and a host path outside it as
     :data:`OUTSIDE_PROJECT`, never as the host's own layout. A host path is
-    one under :data:`HOST_ROOTS` or one of the project's parents, or one that
-    exists here; a ``file://`` URL is read as its path. Anything else that
-    starts with a slash (an HTTP route) is kept.
+    one under :data:`HOST_ROOTS` or one of the project's parents; a ``file://``
+    URL is read as its path. Anything else that starts with a slash (an HTTP
+    route) is kept. Read from the words alone, never from the host's files, so
+    a reason masked when it is written reads the same wherever it is shown.
     """
     root = get_project_root() if project_root is None else project_root
     parents = tuple(str(parent) for parent in root.parents if parent != Path(parent.anchor))
@@ -196,15 +198,8 @@ def host_paths_masked(text: str, project_root: Path | None = None) -> str:
             return path.relative_to(root).as_posix()
         text = str(path)
         held = any(text == top or text.startswith(top + "/") for top in (*HOST_ROOTS, *parents))
-        if held or match.group("url") or _exists(path):
+        if held or match.group("url"):
             return OUTSIDE_PROJECT
         return match.group(0)
 
     return _ABSOLUTE_PATH.sub(shown, str(text or ""))
-
-
-def _exists(path: Path) -> bool:
-    try:
-        return path.exists()
-    except (OSError, ValueError):
-        return False

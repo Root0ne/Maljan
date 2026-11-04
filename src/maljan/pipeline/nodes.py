@@ -139,6 +139,8 @@ from maljan.pipeline.operator_choice import (
     facts_record,
     lost_tool_rows,
     split_operator_choices,
+    static_pass_summary,
+    with_reasons,
 )
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
@@ -8079,30 +8081,11 @@ def make_report_node(
         with suppress(Exception):
             if _static_bundle is not None and _static_provider.capabilities.degrade_on_failure:
                 _static_reasons = [str(r) for r in _static_bundle.unavailable if str(r).strip()]
-        # What the run summary says of them, as the judge's would have: the
-        # degraded flag, the reasons and the tools the run went without. The
-        # report carries it, and the state's summary below, so the stored run,
-        # the API's column and the console say it as the report does.
-        _static_summary: dict[str, Any] = {}
-        if _static_reasons:
+        # What the run summary says of them, as the judge's would have; the
+        # report carries it, and the state's summary below.
+        _static_summary = static_pass_summary(run_summary_state, _static_reasons)
+        if _static_summary:
             logger.warning("report_node: %s", "; ".join(_static_reasons))
-            _held = [str(r) for r in (run_summary_state.get("degradation_reasons") or [])]
-            _lost = [
-                dict(r) for r in run_summary_state.get("lost_tools") or [] if isinstance(r, dict)
-            ]
-            _lost_names = {str(r.get("tool") or "") for r in _lost}
-            _static_summary = {
-                "degraded_mode": True,
-                "degradation_reasons": [*_held, *(r for r in _static_reasons if r not in _held)],
-                "lost_tools": [
-                    *_lost,
-                    *(
-                        row
-                        for row in lost_tool_rows(_static_reasons)
-                        if row["tool"] not in _lost_names
-                    ),
-                ],
-            }
             run_summary_state = {**run_summary_state, **_static_summary}
         # What the narrative and the composer may cite: every id the state's
         # ledger issued, and the ids this node added to it (the undrained
@@ -8139,14 +8122,9 @@ def make_report_node(
                 # provider's entries are collected above, after the verdict
                 # stage read the ledger, so a run that carries them must not
                 # ship a report saying no analysis was performed.
-                degradation_reasons=[
-                    *corrected_reasons(state.get("degradation_reasons"), _ledger),
-                    *(
-                        r
-                        for r in _static_reasons
-                        if r not in (state.get("degradation_reasons") or [])
-                    ),
-                ],
+                degradation_reasons=with_reasons(
+                    corrected_reasons(state.get("degradation_reasons"), _ledger), _static_reasons
+                ),
                 operator_choices=list(state.get("operator_choices") or []),
                 # The routing minimum, which stands in for the identity block
                 # when no agent called an identification tool.
@@ -8866,10 +8844,12 @@ def make_report_node(
         if _state_summary:
             result["run_summary"] = {**(state.get("run_summary") or {}), **_state_summary}
         if _static_summary:
-            # The state's own flag and reasons, on the channels the judge node
-            # writes them to, for every reader of the state after this node.
+            # The state's own flag and reasons, its own first, on the channels
+            # the judge node writes them to, for every reader after this node.
             result["degraded_mode"] = True
-            result["degradation_reasons"] = list(_static_summary["degradation_reasons"])
+            result["degradation_reasons"] = with_reasons(
+                state.get("degradation_reasons"), _static_reasons
+            )
         if own:
             result["stage_results"] = own
         # Every stage announces its own end from the node that closes it, so

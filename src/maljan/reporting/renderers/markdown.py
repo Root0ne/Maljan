@@ -3270,11 +3270,11 @@ def lost_tools_sentence(report: MalwareReport, ctx: _Context) -> str:
     degraded run, as the header's banner is: a rule engine that loaded no
     rule did not run, and the scope says so beside what was examined rather
     than leaving its silence to read as no match. Each name and reason is a
-    tool's own text, escaped and defanged (``_Context.inline``), and an
-    absolute path in a reason is shown from the project root or masked.
+    tool's own text, escaped and defanged (``_Context.inline``). Its host
+    paths were masked when the row was written (``lost_tool_rows``), and
+    nothing here reads the rendering host, so a stored run renders the same
+    wherever it is rendered.
     """
-    from maljan.core.paths import host_paths_masked
-
     rows = (report.run_summary or {}).get("lost_tools")
     if not report.degraded_mode or not isinstance(rows, list):
         return ""
@@ -3283,7 +3283,7 @@ def lost_tools_sentence(report: MalwareReport, ctx: _Context) -> str:
         if not isinstance(row, dict) or not str(row.get("tool") or "").strip():
             continue
         name = ctx.inline(_one_line(row["tool"]))
-        why = ctx.inline(_one_line(host_paths_masked(str(row.get("reason") or ""))))
+        why = ctx.inline(_one_line(str(row.get("reason") or "")))
         said.append(f"{name} ({why})" if why else name)
     return f"The run went without {'; '.join(said)}." if said else ""
 

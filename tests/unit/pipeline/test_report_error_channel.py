@@ -273,6 +273,41 @@ class TestAPassTheProviderDidNotMakeDegradesTheRun:
         assert "went without capa;" in markdown.split("\n## 1.", 1)[0]
 
     @pytest.mark.asyncio
+    async def test_the_states_own_reasons_come_first_without_a_run_summary(
+        self, fake_container: Any
+    ) -> None:
+        """Mock mode, or a judge that skipped the builder: the state's reasons are kept."""
+        from maljan.pipeline.nodes import make_report_node
+        from maljan.pipeline.operator_choice import provider_pass_reason
+        from maljan.providers.base import StaticEvidenceBundle
+
+        reason = provider_pass_reason("capa_yara", "capa", "why", "fix")
+        container = fake_container
+        container.is_mock = False
+        container.get_narrative_agent.return_value = None
+        container.get_report_composer.return_value = None
+        provider = container.get_static_provider.return_value
+        provider.capabilities.provides_evidence = True
+        provider.capabilities.degrade_on_failure = True
+        provider.declaration_source = "provider:capa_yara"
+        provider.id = "capa_yara"
+        provider.collect_evidence.return_value = StaticEvidenceBundle(unavailable=(reason,))
+        state = {
+            **_initial_state(),
+            "sample_path": "/tmp/s.bin",
+            "evidence_ledger": [],
+            "degraded_mode": True,
+            "degradation_reasons": ["triage.sigma_match_sandbox_failed"],
+            "run_summary": None,
+        }
+
+        result = await make_report_node(container)(state)  # type: ignore[arg-type]
+
+        assert result["degradation_reasons"] == ["triage.sigma_match_sandbox_failed", reason]
+        said = result["malware_report"]["degradation_reasons"]
+        assert said.index("triage.sigma_match_sandbox_failed") < said.index(reason)
+
+    @pytest.mark.asyncio
     async def test_a_whole_pass_changes_nothing(self, fake_container: Any) -> None:
         from maljan.providers.base import StaticEvidenceBundle
 
