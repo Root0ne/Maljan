@@ -34,6 +34,7 @@ from maljan.reporting.models import (
 )
 from maljan.reporting.section_agreement import (
     CLAIM_LED,
+    DROPPED_CODE,
     FACT,
     FAILURE_REDONE_CODE,
     REWRITTEN_CODE,
@@ -280,25 +281,32 @@ def test_an_open_question_s_path_names_no_address() -> None:
     assert "redone:" not in text
 
 
-def test_a_correct_paragraph_is_not_asked_and_the_request_is_unchanged() -> None:
-    ledger = _ledger()
-    without = _report()
+def _plain_limitations(report: MalwareReport, ledger: list[LedgerEntry]) -> None:
+    """The paragraph is shown as a closing passage alone (T-554): every other passage is the
+    one shown without it, in its order, and none of the failure facts joins."""
+    without = report.model_copy(deep=True)
     without.technical_analysis.analyst_limitations = None
-    expected = prompt_text(passages_of(without, entries=ledger))
+    shown = passages_of(report, entries=ledger)
+    assert [(p.id, p.text) for p in shown if p.id != "limitations"] == [
+        (p.id, p.text) for p in passages_of(without, entries=ledger)
+    ]
+    (limitations,) = [p for p in shown if p.id == "limitations"]
+    assert limitations.label == "11. Limitations" and limitations.closing
+    assert limitations.sourced_check is None
+
+
+def test_a_correct_paragraph_is_shown_without_the_failure_facts() -> None:
+    ledger = _ledger()
     for body in (f"{TRUE} {OTHER}", OTHER, "The decompiler failed and was redone [ev_0003]."):
-        assert prompt_text(passages_of(_report(body), entries=ledger)) == expected
+        _plain_limitations(_report(body), ledger)
 
 
-def test_a_paragraph_is_byte_identical_where_no_call_failed() -> None:
+def test_a_paragraph_is_left_as_written_where_no_call_failed() -> None:
     ledger = _ledger(failures=False)
     report = _report()
     before = report.model_dump_json()
-    without = _report()
-    without.technical_analysis.analyst_limitations = None
-    # No failed call: no sentence is held, the request is the one without it.
-    assert prompt_text(passages_of(report, entries=ledger)) == prompt_text(
-        passages_of(without, entries=ledger)
-    )
+    # No failed call: no sentence is held, the paragraph is a closing passage alone.
+    _plain_limitations(report, ledger)
     _ask(report, ledger)
     assert report.model_dump_json() == before
 
@@ -391,12 +399,17 @@ def test_a_rewrite_repeating_the_false_claim_is_not_put_in(
     report = _report()
     row = _row(FALSE, sources, rewrite)
     done, reporter = _ask(report, _ledger(), {"sentences": [row]}, {"sentences": [row]})
-    assert report.technical_analysis.analyst_limitations.body == f"{FALSE} {OTHER}"
-    assert done.summary["rewritten"] == 0 and done.summary["not_applied"] == 1
+    # The false sentence is not kept either: a closing paragraph leaves it out (T-554).
+    assert report.technical_analysis.analyst_limitations.body == OTHER
+    assert done.summary["rewritten"] == 0 and done.summary["not_applied"] == 0
+    assert done.summary["dropped"] == 1
     # The model was told why, and asked once more.
     assert len(reporter.asked) == 2
     assert FAILURE_REDONE_CODE in str(reporter.asked[1][-1].content)
-    assert FAILURE_REDONE_CODE in [r["code"] for r in done.tally.unresolved]
+    codes = [r["code"] for r in done.tally.unresolved]
+    assert FAILURE_REDONE_CODE in codes and DROPPED_CODE in codes
+    (dropped,) = [r for r in done.tally.unresolved if r["code"] == DROPPED_CODE]
+    assert FALSE in dropped["message"]
 
 
 def test_a_bare_listing_is_not_held_by_the_gate_but_rejects_a_rewrite() -> None:
@@ -458,6 +471,12 @@ HAIKU8_SENTENCE = (
 )
 
 
+def _left_out(body: str, sentence: str) -> str:
+    """``body`` with ``sentence`` and the space after it left out."""
+    assert f"{sentence} " in body
+    return body.replace(f"{sentence} ", "", 1)
+
+
 def _stored(name: str) -> tuple[MalwareReport, list[LedgerEntry]]:
     from maljan.reporting.follow_up import stored_ledger
 
@@ -488,10 +507,14 @@ def _stored_names() -> list[str]:
 
 
 @pytest.mark.parametrize("name", _stored_names())
-def test_no_stored_run_but_haiku8_asks_its_limitations(name: str) -> None:
+def test_no_stored_run_but_haiku8_holds_its_limitations_to_the_failed_calls(name: str) -> None:
     report, ledger = _stored(name)
-    shown = [p.id for p in passages_of(report, entries=ledger) if p.id == "limitations"]
-    assert shown == (["limitations"] if name == "haiku8" else [])
+    held = [
+        p.id
+        for p in passages_of(report, entries=ledger)
+        if p.id == "limitations" and p.sourced_check is not None
+    ]
+    assert held == (["limitations"] if name == "haiku8" else [])
 
 
 def test_a_call_a_later_call_answered_but_did_not_redo_is_not_redone() -> None:
@@ -558,18 +581,21 @@ def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> Non
     )
     row = _row(HAIKU8_SENTENCE, [batch], false)
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
-    assert report.technical_analysis.analyst_limitations.body == body
-    assert done.summary["not_applied"] == 1
+    # Not put in, and not kept: the closing paragraph leaves the sentence out (T-554).
+    assert report.technical_analysis.analyst_limitations.body == _left_out(body, HAIKU8_SENTENCE)
+    assert done.summary["not_applied"] == 0 and done.summary["dropped"] == 1
     # The same claim covered by the emulation call that stands is not put in either.
     covered = (
         "The reversing tools for emulation, batch decompilation and disassembly failed, so the "
         "control flow of the dispatch routines was read from the function index "
         "[ev_0025][ev_0122]."
     )
+    report, ledger = _haiku8()
     row = _row(HAIKU8_SENTENCE, [emulation, batch], covered)
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
-    assert report.technical_analysis.analyst_limitations.body == body
-    assert done.summary["not_applied"] == 1
+    assert report.technical_analysis.analyst_limitations.body == _left_out(body, HAIKU8_SENTENCE)
+    assert done.summary["dropped"] == 1
+    report, ledger = _haiku8()
     # The clause that names the batch decompile cites the call that redid it: it
     # accounts for decompiling, and names no other decompile.
     true = (
@@ -586,8 +612,8 @@ def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> Non
     row = _row(HAIKU8_SENTENCE, [emulation], covered)
     report, ledger = _haiku8()
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
-    assert report.technical_analysis.analyst_limitations.body == body
-    assert done.summary["not_applied"] == 1
+    assert report.technical_analysis.analyst_limitations.body == _left_out(body, HAIKU8_SENTENCE)
+    assert done.summary["dropped"] == 1
 
 
 @pytest.mark.parametrize(
@@ -637,7 +663,7 @@ def test_a_denial_of_its_own_is_about_the_call_before_it(rewrite: str) -> None:
     body = report.technical_analysis.analyst_limitations.body
     row = _row(HAIKU8_SENTENCE, ["failed.3"], rewrite)
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
-    assert report.technical_analysis.analyst_limitations.body == body
+    assert report.technical_analysis.analyst_limitations.body == _left_out(body, HAIKU8_SENTENCE)
     assert FAILURE_REDONE_CODE in [r["code"] for r in done.tally.unresolved]
 
 
