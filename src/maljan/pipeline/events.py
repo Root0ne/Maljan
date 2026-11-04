@@ -58,14 +58,18 @@ ROSTER = "roster"
 # What became of one violation. ``retried`` is the correction turn as it
 # happens; the other two are what the run knows once the producer has answered
 # again — and a violation the retry itself introduced is announced once, as
-# ``survived``, because nobody was ever shown it.
+# ``survived``, because nobody was ever shown it. ``answered`` is a question
+# the producer answered as the question allows (``Violation.answered``): what
+# it chose is the line's message, and nothing was left unfixed.
 VALIDATION_RETRIED = "retried"
 VALIDATION_RESOLVED = "resolved"
 VALIDATION_SURVIVED = "survived"
+VALIDATION_ANSWERED = "answered"
 VALIDATION_STATES: tuple[str, ...] = (
     VALIDATION_RETRIED,
     VALIDATION_RESOLVED,
     VALIDATION_SURVIVED,
+    VALIDATION_ANSWERED,
 )
 
 # What an ``agent_message`` is. ``says`` is the default and is what every

@@ -16,7 +16,7 @@
  */
 
 import { useState } from "react";
-import { Info, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
+import { Info, MessageSquareReply, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import type { ConversationItem, FeedbackEntry, ValidationState } from "@/lib/conversation";
@@ -38,6 +38,13 @@ const STATE: Record<ValidationState, { word: string; icon: LucideIcon; tone: str
     word: "not fixed",
     icon: ShieldX,
     tone: "border-status-red/30 bg-status-red/10 text-status-red",
+  },
+  /* A question the agent answers as it chooses (which unread callees to
+   * read): neither fixed nor failed, so it is drawn apart from both. */
+  answered: {
+    word: "answered by the agent",
+    icon: MessageSquareReply,
+    tone: "border-status-blue/30 bg-status-blue/10 text-status-blue",
   },
 };
 

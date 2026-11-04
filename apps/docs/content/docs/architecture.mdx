@@ -2700,7 +2700,7 @@ from the heading patterns, so its memory grows only with the distinct claims. A
 tool-call tag or a JSON fence still open is read as kept, as the check keeps it,
 and cut back to the reading before it only if it resolves as removed.
 
-Three more questions are asked of an analyst's answer in the same validation
+Four more questions are asked of an analyst's answer in the same validation
 turn, each once, and what the analyst answers stands.
 
 - **Decompiled but not described** (`isr.decompiled_not_described`).
@@ -2747,6 +2747,39 @@ turn, each once, and what the analyst answers stands.
     line naming them.
   - *Why.* A reverser had decompiled two routines holding half of what the
     analysis needed and described neither.
+- **Callees not read** (`isr.callees_not_read`, `agents/callees_question.py`).
+  - *Which routines.* A routine is described when a claim names its address
+    (in its sentence or its evidence line) or cites the entry that lists it.
+    Its callees no listing of the analyst holds are read from its own
+    listings and from the pack's function index.
+  - *The rank.* Distance from where the code starts: the entry point and the
+    exports the PE header answer states and the threads the function index
+    states. Where none is stated, the routines a claim calls an entry, main,
+    dispatcher, beacon, start-up or command routine stand in. Each further
+    function calling a callee counts one more call, so a shared helper comes
+    last; ties go to the callee calling more, then to the lower address.
+  - *The question.* At most 12 callees, each with its reason in addresses and
+    counts only, never a name or a string the sample or a tool wrote. It says
+    how many there are and that the rest are not listed, and that the analyst
+    may read any with its tools or none. It is asked once per analyst and
+    job, in the first validation turn that has any, and rides that turn with
+    the other questions.
+  - *The record.* The loop's record (`run_summary.budget.<agent>.callees_question`)
+    keeps how many were listed, those shown and those read after it; an
+    answered row in the validation findings says the same. In the console the
+    list is the agent's correction line, its reads are its own tool calls, and
+    the line ends `answered` with what it chose. An answer with nothing unread
+    sends what it sent before.
+  - *Any agent, any tool.* Nothing reads an agent's or a tool's name: a code
+    listing is an entry whose tool declares a decompile, disassembly or
+    function-listing kind, or, for a tool that declares nothing, whose name
+    says it is one, as every undeclared reading does. Where the platform cannot
+    tell (no listing, no claim naming a routine it read, no call stated for
+    one), it says why once per job, as a note in the agent's conversation and
+    as `callees_question.not_run` on its loop's record.
+  - *Why.* A reverser stopped on its own with the reader and the writer of
+    its configuration file and its channel's cipher wrapper unread, each a
+    callee of a routine it described.
 - **Library-only claims** (`isr.library_only_claims`).
   - *What counts.* A claim of one sentence whose subject (the sample, or none)
     uses, imports, calls or loads libraries or their APIs. It may add a short
@@ -4539,7 +4572,10 @@ is published once. `(agent, code, path)` is the key those two lines share, so a
 reader that draws one line per violation folds on it, and two violations of one
 code on different claims stay apart. A finding the producer was never shown —
 the judge appends its timeout, its fallback and its two verdict checks after
-the loop — is published once, as `survived`.
+the loop — is published once, as `survived`. A question the producer answered
+as the question allows (which unread callees it chose to read,
+`isr.callees_not_read`) is published as `answered`, its message saying what it
+chose; the console draws it apart from a fix and from a failure.
 
 **Sequence.** The publisher stamps every event with `seq`, a per-job counter
 taken from a Redis `INCR`. Nothing in `src/maljan` numbers anything: the core

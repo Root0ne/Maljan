@@ -129,6 +129,9 @@ def _check(analyst: _Analyst, first: str = GUARD + WRONG) -> AgentISR:
     with (
         patch("maljan.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+        # The listing's helper is a callee no listing holds: the question
+        # about it (T-558) is tested apart, and here only this check asks.
+        patch("maljan.pipeline.validation.unread_callees_question", return_value=None),
     ):
         return analyst._validate_isr(isr, "evidence")
 

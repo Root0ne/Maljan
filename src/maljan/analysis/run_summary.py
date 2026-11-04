@@ -2033,6 +2033,13 @@ class RunSummaryBuilder:
                 for row in loops
                 if isinstance(row.get("function_claims"), dict)
             ]
+            # What the question about the unread callees of what it described
+            # listed, at most how many, and which of them it read after it.
+            callees_question = [
+                dict(row["callees_question"])
+                for row in loops
+                if isinstance(row.get("callees_question"), dict)
+            ]
             out[str(agent)] = {
                 "loops": len(loops),
                 "steps_used": sum(int(row.get("steps_used") or 0) for row in loops),
@@ -2049,6 +2056,7 @@ class RunSummaryBuilder:
                 "caps": caps,
                 **({"salvages": salvages} if salvages else {}),
                 **({"function_claims": function_claims} if function_claims else {}),
+                **({"callees_question": callees_question} if callees_question else {}),
                 # A validation turn a loop's time could not hold, and why.
                 **(
                     {"validation_not_asked": skipped}

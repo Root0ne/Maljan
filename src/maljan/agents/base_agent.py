@@ -35,6 +35,11 @@ from langchain_core.language_models.chat_models import BaseChatModel
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
+from maljan.agents.callees_question import (
+    UNREAD_CALLEES_CODE,
+    callees_asked_record,
+    callees_to_read,
+)
 from maljan.agents.claim_headings import (
     LINE_PREFIX,
     claims_headed_with_notes,
@@ -4260,6 +4265,7 @@ def _not_asked(initial: Sequence[Violation], detail: str) -> list[Violation]:
             ANALYST_REPEATED_CODE,
             CLAIMS_UNDER_DISPUTES_CODE,
             DECOMPILED_NOT_DESCRIBED_CODE,
+            UNREAD_CALLEES_CODE,
             LIBRARY_ONLY_CLAIMS_CODE,
             FUNCTION_CLAIM_UNHELD_CODE,
         )
@@ -6320,6 +6326,61 @@ class BaseAnalyst(BudgetMeter, ABC):
         rows, _claims = self._function_map_sources()
         live = getattr(self, "_live_map_entries", None) or []
         return [*rows, *live]
+
+    def _state_callees_not_asked(
+        self,
+        isr: AgentISR,
+        initial: Sequence[Violation],
+        entries: Sequence[Any],
+        job: str,
+        open_question: bool,
+    ) -> None:
+        """Say once per job why the unread-callees question could not be put, never silently.
+
+        Where the question is still open and this answer raised none, the
+        platform could not tell which callees are unread or found none; the
+        first is stated in the analyst's own conversation and on its loop's
+        record (``callees_question.not_run``), with why. Never raises.
+        """
+        if not open_question or getattr(self, "_callees_stated_job", None) == job:
+            return
+        if any(v.code == UNREAD_CALLEES_CODE for v in initial):
+            return
+        try:
+            found = callees_to_read(
+                isr.claims,
+                entries,
+                list(getattr(self, "pack_entries", None) or ()),
+                definition=getattr(self, "_resolved", None),
+            )
+        except Exception as exc:  # noqa: BLE001 — a fact left out never costs the turn
+            self.logger.warning("%s: the unread-callees check could not run (%s).", self.name, exc)
+            return
+        if not found.not_run:
+            return
+        from maljan.pipeline.events import emit_agent_message
+
+        self._callees_stated_job = job
+        BaseAnalyst._note_on_last_loop(self, "callees_question", {"not_run": found.not_run})
+        emit_agent_message(
+            BaseAnalyst._event_sink(self),
+            speaker=str(self.name),
+            role="system",
+            kind="system",
+            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+            text=(
+                "The platform did not ask about the unread callees of the routines this "
+                f"answer describes: {found.not_run}."
+            ),
+        )
+
+    def _kept_map_entries(self) -> list[LedgerEntry]:
+        """The entries the map kept for this job, or none where they cannot be read."""
+        try:
+            return list(self._function_map_entries())
+        except Exception as exc:  # noqa: BLE001 — a fact left out never costs a turn
+            self.logger.debug("%s: the map's entries were not read (%s).", self.name, exc)
+            return []
 
     def _function_map_text(self, room: int | None = None) -> str:
         """The function map block for this agent as of now, or ``""``; never raises."""
@@ -10104,6 +10165,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             listed: Any
             facts: Any
             facts_failed: str
+            entries: Any
 
         read: dict[int, _Ledger] = {}
 
@@ -10156,7 +10218,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                     facts_failed = facts_unread(exc)
                     self.logger.warning("%s: function claims %s.", self.name, facts_failed)
                     facts = None
-            held = _Ledger(ledger_ids, decompiled, image_bases, listed, facts, facts_failed)
+            # Every entry of this job's loops the map kept, then this loop's:
+            # the callees of what the answer describes are read against them.
+            entries = [*BaseAnalyst._kept_map_entries(self), *own_entries]  # type: ignore[arg-type]
+            held = _Ledger(
+                ledger_ids, decompiled, image_bases, listed, facts, facts_failed, entries
+            )
             read[len(own_entries)] = held
             return held
 
@@ -10282,7 +10349,33 @@ class BaseAnalyst(BudgetMeter, ABC):
                 alignment=gate,
                 alignment_threshold=threshold,
                 alignment_margin=margin,
+                entries=ledger.entries,
+                pack=list(getattr(self, "pack_entries", None) or ()),
             )
+
+        # The unread callees of what the answer describes are asked once per
+        # analyst and job: in the first turn that has any, and not again by
+        # the retry's own check or a later round's turn. Asked in this turn,
+        # the retry's check states what the analyst read since, as an
+        # answered finding (``callees_question.callees_asked_record``).
+        job = str(getattr(self, "_job_id", None) or "job")
+        callees_asked_here: list[int] = []
+
+        def _callees_open() -> bool:
+            return getattr(self, "_callees_asked_job", None) != job
+
+        def _callees_answered() -> list[Violation]:
+            if not callees_asked_here:
+                return []
+            pack = list(getattr(self, "pack_entries", None) or ())
+            record, answered = callees_asked_record(
+                isr.claims, _ledger(callees_asked_here[0]).entries, _ledger().entries, pack
+            )
+            if record:
+                BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
+                    self, "callees_question", record
+                )
+            return [answered] if answered is not None else []
 
         def _validator(candidate: AgentISR) -> list[Violation]:
             if only_cut:
@@ -10291,14 +10384,18 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Every answer checked that no claim could be read from, the first
             # and its retry alike, goes to the run record whole.
             self._keep_unparsed_answers(unread, candidate.revision_round)
-            return analyst_answer_checks(
-                candidate,
-                _inputs(),
-                whole_answer=_whole_answer_questions(candidate),
-                unread=unread,
-                functions=_function_check(candidate).violations,
-                weak_alignment_challenges=challenges and candidate is isr,
-            )
+            return [
+                *analyst_answer_checks(
+                    candidate,
+                    _inputs(),
+                    whole_answer=_whole_answer_questions(candidate),
+                    unread=unread,
+                    functions=_function_check(candidate).violations,
+                    weak_alignment_challenges=challenges and candidate is isr,
+                    callees_question=_callees_open(),
+                ),
+                *_callees_answered(),
+            ]
 
         if nudged and not only_cut:
             unasked = parse_violations(isr, techniques=techniques)
@@ -10331,6 +10428,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
                     self, "function_claims", checked.record()
                 )
+        BaseAnalyst._state_callees_not_asked(  # type: ignore[arg-type]
+            self, isr, initial, _ledger().entries, job, _callees_open() and not only_cut
+        )
         if not initial:
             return isr
 
@@ -11164,6 +11264,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             def _fed_back(violations: Sequence[Violation]) -> None:
                 if not fed_at:
                     fed_at.append(len(getattr(self, "_evidence_entries", None) or []))
+                if any(v.code == UNREAD_CALLEES_CODE for v in violations):
+                    self._callees_asked_job = job
+                    callees_asked_here.append(fed_at[0])
                 shown.extend(violations)
                 tally.count(violations)
                 round_asked[:] = [list(violations)]

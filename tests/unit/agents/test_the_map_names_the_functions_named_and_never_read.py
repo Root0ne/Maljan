@@ -16,6 +16,7 @@ import logging
 import re
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -408,7 +409,10 @@ def _run_loop(window_tokens: int) -> tuple[list[dict[str, Any]], str]:
     analyst.run_state_block = "sample: test"
     analyst._job_id = "job-1"
     analyst._container = _Container(window_tokens)
-    analyst.safe_analyze_isr("the task")
+    # The question about the unread callees after the loop (T-558) is tested
+    # apart; here the loop's own calls are counted.
+    with patch("maljan.pipeline.validation.unread_callees_question", return_value=None):
+        analyst.safe_analyze_isr("the task")
     last = [str(m.content) for m in model.seen[-1] if isinstance(m, ToolMessage)][-1]
     return calls, last
 
