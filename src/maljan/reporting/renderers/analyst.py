@@ -509,20 +509,62 @@ def _url_host(value: str) -> re.Pattern[str]:
     )
 
 
+# A Markdown link, its text and its target: a value in either is written in the
+# link, and the state goes after it.
+_MARKDOWN_LINK = re.compile(r"\[[^\]\n]*\]\([^)\s]*\)")
+# What may follow a closing single quote: a space, a clause's or a sentence's
+# punctuation, a bracket, or the end.
+_AFTER_CLOSING_QUOTE = frozenset(".,;:!?)]")
+
+
+def _single_quoted_close(sentence: str, start: int) -> int:
+    """Where the single quotation ``start`` stands in closes, or ``-1``: an opening ``'``
+    after a space or at the start, a closing one before a space, punctuation or the end
+    and not after a space. An apostrophe ("the sample's", "it's") is neither."""
+    opened = -1
+    for at, char in enumerate(sentence):
+        if char != "'":
+            continue
+        opening = at == 0 or sentence[at - 1].isspace()
+        closing = (
+            at > 0
+            and not sentence[at - 1].isspace()
+            and (
+                at + 1 == len(sentence)
+                or sentence[at + 1].isspace()
+                or sentence[at + 1] in _AFTER_CLOSING_QUOTE
+            )
+        )
+        if at < start:
+            if opened != -1 and closing:
+                opened = -1
+            elif opening:
+                opened = at
+        elif opened != -1 and closing:
+            return at
+    return -1
+
+
 def _past_open_span(sentence: str, start: int, end: int) -> int:
-    """``end``, or just past the closing mark where ``start`` stands inside an open code
-    span (an odd count of backticks before it) or an open double quotation, straight or
-    curly: the state is never written inside one."""
-    before = sentence[:start]
-    for closer, inside in (
-        ("`", before.count("`") % 2 == 1),
-        ('"', before.count('"') % 2 == 1),
-        ("\u201d", before.rfind("\u201c") > before.rfind("\u201d")),
-    ):
-        if inside:
-            close = sentence.find(closer, start)
-            if close != -1:
-                return max(end, close + 1)
+    """``end``, or just past the close of what ``start`` stands inside: a code span or a
+    double quotation, straight or curly, open before it and closed after it (an odd
+    count of its marks on each side, so a stray mark moves nothing); a single
+    quotation that is no apostrophe (:func:`_single_quoted_close`); a Markdown link,
+    text or target. The state is never written inside one."""
+    before, after = sentence[:start], sentence[start:]
+    for mark in ("`", '"'):
+        if before.count(mark) % 2 == 1 and after.count(mark) % 2 == 1:
+            return max(end, sentence.find(mark, start) + 1)
+    if before.rfind("\u201c") > before.rfind("\u201d"):
+        close = sentence.find("\u201d", start)
+        if close != -1:
+            return max(end, close + 1)
+    close = _single_quoted_close(sentence, start)
+    if close != -1:
+        return max(end, close + 1)
+    for link in _MARKDOWN_LINK.finditer(sentence):
+        if link.start() < start < link.end():
+            return max(end, link.end())
     return end
 
 

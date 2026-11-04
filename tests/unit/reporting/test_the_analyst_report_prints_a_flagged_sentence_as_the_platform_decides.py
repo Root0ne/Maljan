@@ -160,6 +160,29 @@ STATE = f"({UNPUBLISHED_STATE})"
             'The string "connect to evil.example.com now" is decoded.',
             f'The string "connect to evil[.]example[.]com now" {STATE} is decoded.',
         ),
+        # A stray mark opens no span: the state stays after the value.
+        (
+            "A stray ` mark, then 8.8.8.8 and `cmd /c x` run.",
+            f"A stray ` mark, then 8[.]8[.]8[.]8 {STATE} and `cmd /c x` run.",
+        ),
+        (
+            'A 3.5" disk then 8.8.8.8 and "quoted" text.',
+            f'A 3.5" disk then 8[.]8[.]8[.]8 {STATE} and "quoted" text.',
+        ),
+        # A single quotation is a span; an apostrophe is none.
+        (
+            "It decodes 'connect to evil.example.com now' at start.",
+            f"It decodes 'connect to evil[.]example[.]com now' {STATE} at start.",
+        ),
+        (
+            "The sample's C2 is evil.example.com and it's polled.",
+            f"The sample's C2 is evil[.]example[.]com {STATE} and it's polled.",
+        ),
+        # A Markdown link: the state after its target.
+        (
+            "It links [evil.example.com](https://evil.example.com) here.",
+            f"It links [evil[.]example[.]com](hxxps://evil[.]example[.]com) {STATE} here.",
+        ),
     ],
 )
 def test_the_state_is_written_after_the_whole_token(sentence: str, printed: str) -> None:
