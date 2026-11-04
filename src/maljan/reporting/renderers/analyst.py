@@ -492,6 +492,40 @@ def _whole_value(value: str) -> re.Pattern[str]:
     )
 
 
+def _url_host(value: str) -> re.Pattern[str]:
+    """``value`` as the host of a URL or a path, in any case: after ``://`` or at the start
+    of its token, and before ``/``, ``:`` or the end of its token
+    ("https://evil.example.com/gate.php", "evil.example.com/gate"); never part of a longer
+    host."""
+    return re.compile(
+        r"(?:(?<=://)"
+        + _PIPE
+        + r"(?<![^\s`'\"(\[<\u2018\u201c]))"
+        + re.escape(value)
+        + r"(?![\w\-]"
+        + _PIPE
+        + r"\.\w)",
+        re.IGNORECASE,
+    )
+
+
+def _past_open_span(sentence: str, start: int, end: int) -> int:
+    """``end``, or just past the closing mark where ``start`` stands inside an open code
+    span (an odd count of backticks before it) or an open double quotation, straight or
+    curly: the state is never written inside one."""
+    before = sentence[:start]
+    for closer, inside in (
+        ("`", before.count("`") % 2 == 1),
+        ('"', before.count('"') % 2 == 1),
+        ("\u201d", before.rfind("\u201c") > before.rfind("\u201d")),
+    ):
+        if inside:
+            close = sentence.find(closer, start)
+            if close != -1:
+                return max(end, close + 1)
+    return end
+
+
 # What a token ends with that the state is written before: a sentence's or a
 # clause's punctuation, and a closing bracket.
 _TOKEN_TAIL = ".,;:)"
@@ -512,18 +546,24 @@ def _token_end(sentence: str, end: int) -> int:
 def _with_unpublished_state(sentence: str, values: Iterable[str]) -> str | None:
     """``sentence`` with the platform's state written after the first place each value
     stands as a whole token (:func:`_whole_value`) that no earlier value's place
-    overlaps, at the end of its token: a bracket right after it that speaks of
-    publication is replaced, any other is kept with the state after it.
-    Deterministic: the words are fixed, whatever the model wrote. ``None`` where a value
-    stands nowhere as a whole token: the sentence is then left out."""
+    overlaps, or else as a URL's or a path's host (:func:`_url_host`), at the end of
+    its token and past a code span or a quotation it stands in: a bracket right after
+    it that speaks of publication is replaced, any other is kept with the state after
+    it. Deterministic: the words are fixed, whatever the model wrote. ``None`` where a
+    value stands nowhere: the sentence is then left out."""
     edits: list[tuple[int, int, str]] = []
     claimed: list[tuple[int, int]] = []
     for value in dict.fromkeys(v for v in values if v):
         found = None
-        for match in _whole_value(value).finditer(sentence):
-            stop = _token_end(sentence, match.end())
-            if not any(a < stop and match.start() < b for a, b in claimed):
-                found = (match.start(), stop)
+        # A value standing alone first; else as a URL's or a path's host, the
+        # state after the whole URL.
+        for pattern in (_whole_value(value), _url_host(value)):
+            for match in pattern.finditer(sentence):
+                stop = _past_open_span(sentence, match.start(), _token_end(sentence, match.end()))
+                if not any(a < stop and match.start() < b for a, b in claimed):
+                    found = (match.start(), stop)
+                    break
+            if found is not None:
                 break
         if found is None:
             return None

