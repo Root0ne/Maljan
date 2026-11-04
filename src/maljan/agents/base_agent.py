@@ -1836,10 +1836,18 @@ UNREADABLE_CONFIDENCE_MARK = "(empty)"
 # anything more (a qualifier, a negation, a second id) is the analyst's line,
 # kept and asked about rather than read for the first id in it. It ends at the
 # line's end or at a CONFIDENCE or EVIDENCE label written after it, with or
-# without opening emphasis ("**EVIDENCE**:"), tried where a run of spaces
-# begins, so a long run is read once.
+# without a mark a line may begin with before it ("**EVIDENCE**:",
+# "- EVIDENCE:", "1. CONFIDENCE:"), as the evidence value ends; a number with
+# a closing bracket right after the spaces ends a note ("T1027 (step 2)
+# CONFIDENCE:"), not a list. The end is tried where a run of spaces begins,
+# and the rest of a run of spaces and marks is then passed over whole, since
+# it ends there the same way: a long run is read once.
 _TECHNIQUE_VALUE = (
-    r"[ \t]*(.*?)(?=(?<![ \t])[ \t]++[*_]*+(?:CONFIDENCE|EVIDENCE)" + _LABEL_COLON + r"|$)"
+    r"[ \t]*((?:[^ \t\n]|[ \t][ \t>*_#]*+)*?)(?=(?<![ \t])[ \t]++(?!\d++\))"
+    + LINE_PREFIX
+    + r"(?:CONFIDENCE|EVIDENCE)"
+    + _LABEL_COLON
+    + r"|$)"
 )
 _LINE_TECHNIQUE_RE = re.compile(
     r"^" + LINE_PREFIX + r"(?i:TECHNIQUE)" + _LABEL_COLON + _TECHNIQUE_VALUE, re.MULTILINE
