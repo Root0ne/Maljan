@@ -13017,11 +13017,15 @@ class RetryDrops:
     nowhere (``pipeline.claim_drops.dropped_values``), the technique ids the
     retry was asked about aside: taking such an id off is the answer to the
     question, not lost work. ``findings`` are the first answer's findings no
-    finding of the retry carries the title of.
+    finding of the retry carries the title of. ``rewritten`` pairs each of
+    ``claims`` that one block of the retry writes again in other words
+    (``revision_merge.rewritten_in``) with that block's number: kept, the
+    claim takes that block's place instead of standing beside it.
     """
 
     claims: tuple[tuple[Any, tuple[str, ...]], ...] = ()
     findings: tuple[Any, ...] = ()
+    rewritten: tuple[tuple[Any, int], ...] = ()
 
     def __bool__(self) -> bool:
         return bool(self.claims or self.findings)
@@ -13056,16 +13060,23 @@ def retry_drops(
     the answer to it.
     """
     from maljan.pipeline.claim_drops import dropped_claims
+    from maljan.pipeline.revision_merge import rewritten_in
 
     asked = {str(value).strip().upper() for value in asked_about if str(value).strip()}
     aside = {id(item) for item in set_aside}
     claims: list[tuple[Any, tuple[str, ...]]] = []
+    rewritten: list[tuple[Any, int]] = []
     for claim, missing in dropped_claims(first, retried, answer):
         if id(claim) in aside:
             continue
         kept_values = tuple(value for value in missing if value.upper() not in asked)
         if kept_values:
             claims.append((claim, kept_values))
+            # Written again in other words: put back beside the retry's own
+            # version, the answer would state the claim twice.
+            block = rewritten_in(claim, retried)
+            if block is not None:
+                rewritten.append((claim, block))
     titles = {
         _folded_title(getattr(f, "title", "")) for f in getattr(retried, "findings", None) or []
     }
@@ -13074,7 +13085,7 @@ def retry_drops(
         for finding in getattr(first, "findings", None) or []
         if _folded_title(getattr(finding, "title", "")) not in titles and id(finding) not in aside
     )
-    return RetryDrops(claims=tuple(claims), findings=findings)
+    return RetryDrops(claims=tuple(claims), findings=findings, rewritten=tuple(rewritten))
 
 
 def retry_drop_cited(item: Any) -> list[str]:

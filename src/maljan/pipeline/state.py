@@ -107,9 +107,10 @@ class AgentArgument(BaseModel):
             "numbered those lines for it (``debate_facts.carried_marks``). A line marked [new] "
             "or not marked is not in it. When every blocking line is in it and no analyst a "
             "line names changed a claim on the earlier line, the debate ends as "
-            "``contested_points_unchanged``; when every one raises again a line itself marked "
-            "carried, writes no entry id the earlier line did not write and reaches none the "
-            "round filed, as "
+            "``contested_points_unchanged``; when every one raises again a line whose own "
+            "carried mark counted, on which no analyst cited an entry it filed in the round, "
+            "and writes no entry id the earlier line did not write and reaches none the round "
+            "filed, as "
             "``carried_without_new_evidence``."
         ),
     )

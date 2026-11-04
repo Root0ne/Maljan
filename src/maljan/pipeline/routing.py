@@ -23,10 +23,11 @@ Decision priority (highest to lowest), in ``debate_route``:
      analyst the line names changed a claim on that earlier line
      (``debate_facts.carried_unmoved``); a line not marked is read as before.
      Carried without new evidence — every blocking line is marked carried
-     from a line of the last mediation that was itself marked carried, every
-     analyst it names revised on that line, and it writes no entry id the
-     earlier line did not write and reaches, by itself or its place facts,
-     none the round filed
+     from a line of the last mediation whose own carried mark counted, every
+     analyst it names revised on that line and none of them cited, beside
+     the line's points, an entry it filed in the round, and the line writes
+     no entry id the earlier line did not write and reaches, by itself or its
+     place facts, none the round filed
      (``debate_facts.carried_without_new_evidence``): the point was put to
      the analysts in two rounds with nothing new to read, and a third would
      argue it again. Judge (``carried_without_new_evidence``); no consensus

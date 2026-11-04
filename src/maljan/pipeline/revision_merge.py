@@ -18,9 +18,10 @@ before and after. Here a revision changes only what it states:
   longer range, or a number no analyst is read for) withdraws nothing and
   is stated, one sentence per reference (``unplaced_sentence``). A number
   written for no analyst names the claim of its owner where exactly one
-  analyst the line may mean has a claim of that number sharing a ledger id
-  or an address with the reference's clause, and that is stated
-  (``owned_sentence``). A claim a
+  analyst the line may mean has a claim of that number sharing with the
+  reference's clause a ledger id or an address no other claim of its answer
+  writes; it is carried with the line, never withdrawn by rule, and that is
+  stated (``owned_sentence``). A claim a
   blocking line reaches only through a range or a list (no number of its
   own on the line, as the earlier reading read it) is withdrawn by rule only
   when it shares a ledger id or an address with that reference's clause;
@@ -103,6 +104,9 @@ CORRECTED_SHARE = 0.34
 TRIVIAL_LENGTH = 3
 # A value this long, or a technique id, is one a match must include.
 STRONG_LENGTH = 4
+# The share of a claim's values one block of a validation retry must state
+# for the claim to be read as written again in other words, not left out.
+REWRITTEN_SHARE = 2 / 3
 
 # One line of the round's mediation that named a claim: its number (from 1)
 # and whether it blocks.
@@ -198,6 +202,31 @@ def _block_restates(earlier: _Block, reading: _Reading) -> bool:
     if share >= RESTATED_SHARE:
         return True
     return share >= CORRECTED_SHARE and bool(_techniques(earlier) & reading.techniques)
+
+
+def rewritten_in(claim: Any, retried: Any) -> int | None:
+    """The block of ``retried`` that writes ``claim`` again, or ``None``.
+
+    The block, counted from 1, that writes the claim's sentence as it is;
+    otherwise the one block that states four fifths of the claim's content
+    words, or two thirds of its values that are no mere small number with at
+    least one of them strong: a stricter bar than the revision merge's. Two
+    blocks that both meet it are no answer.
+    """
+    earlier = _Block(number=0, claims=[claim])
+    words = content_words(earlier.sentence)
+    values = _counted_values(earlier)
+    found: list[int] = []
+    for block in _blocks(list(getattr(retried, "claims", None) or [])):
+        if block.sentence == earlier.sentence:
+            return block.number
+        reading = _read(block)
+        got = _stated(values, reading) if values else set()
+        if (words and len(words & reading.words) / len(words) >= WORDED_SHARE) or (
+            any(_strong(v) for v in got) and len(got) / len(values) >= REWRITTEN_SHARE
+        ):
+            found.append(block.number)
+    return found[0] if len(found) == 1 else None
 
 
 def _restated(earlier: _Block, readings: Sequence[_Reading]) -> tuple[bool, int | None]:
@@ -310,7 +339,10 @@ class RevisionMerge:
     blocking line reached only through a range or a list, sharing no ledger
     id or address with it, and carried for that; ``owned`` the round's claim
     numbers written for no analyst that are read as this analyst's
-    (``debate_facts.OwnedClaim``).
+    (``debate_facts.OwnedClaim``); ``numbering`` ``(the revision's own
+    number, its number in the merged answer)`` per revision claim block that
+    stands, where the revision's own numbers are read beyond doubt
+    (:func:`numbering_key`).
     """
 
     merged: Any | None = None
@@ -327,6 +359,7 @@ class RevisionMerge:
     unplaced: tuple[UnplacedClaims, ...] = ()
     range_carried: tuple[tuple[int, str, int, str], ...] = ()
     owned: tuple[OwnedClaim, ...] = ()
+    numbering: tuple[tuple[int, int], ...] = ()
 
     def sentences(self, name: str, revision_round: int) -> list[str]:
         """The run summary's sentences: the merge, each withdrawal, each unplaced reference."""
@@ -413,6 +446,72 @@ def unplaced_sentence(name: str, revision_round: int, reference: UnplacedClaims)
     return f"{head} and {reference.why}: no claim is withdrawn by rule on that reference."
 
 
+def _own_numbers(revised: Sequence[_Block]) -> list[int] | None:
+    """The numbers the revision gave its claim blocks, or ``None`` where they are in doubt.
+
+    The numbers its headings wrote where every block wrote one, each once;
+    its places, counted from 1, where none wrote one. A revision that wrote
+    numbers on some blocks only, or one number twice, has none read.
+    """
+    written = [_written_number(block) for block in revised]
+    if all(n is None for n in written):
+        return list(range(1, len(revised) + 1))
+    if any(n is None for n in written) or len(set(written)) != len(written):
+        return None
+    return [int(n or 0) for n in written]
+
+
+def _numbering(
+    revised: Sequence[_Block], kept: Sequence[int], merged: Sequence[Any]
+) -> tuple[tuple[int, int], ...]:
+    """``(the revision's own number, its number in the merged answer)`` per block that stands."""
+    own = _own_numbers(revised)
+    if own is None:
+        return ()
+    at = {id(block.claims[0]): block.number for block in _blocks(merged)}
+    pairs = [
+        (own[index], at[id(revised[index].claims[0])])
+        for index in kept
+        if id(revised[index].claims[0]) in at
+    ]
+    return tuple(sorted(pairs))
+
+
+def numbering_key(merge: RevisionMerge) -> str:
+    """The sentence that maps the revision's own claim numbers onto the merged answer's, or ``""``.
+
+    The answer in force numbers its claims as the merge placed them; what the
+    revision wrote besides its claims names them by the numbers the revision
+    gave them. Said only where some number differs; every pair is listed, in
+    the revision's order, and a number not listed names no claim the
+    platform read from the revision.
+    """
+    if not any(own != now for own, now in merge.numbering):
+        return ""
+    pairs = "; ".join(f"its claim {own} is claim {now}" for own, now in merge.numbering)
+    return (
+        "(The text below names this analyst's claims by the numbers its revision gave them. "
+        f"In the numbering above, {pairs}. A number not listed names no claim the platform read "
+        "from the revision.)"
+    )
+
+
+def with_numbering_key(text: str, merge: RevisionMerge) -> str:
+    """``text`` with :func:`numbering_key` right after the line that opens what it wrote besides.
+
+    A text without that line, or a merge whose numbers all agree, is
+    returned as it is.
+    """
+    from maljan.agents.base_agent import WRITTEN_BESIDES_CLAIMS
+
+    key = numbering_key(merge)
+    head = f"\n{WRITTEN_BESIDES_CLAIMS}\n"
+    if not key or head not in text:
+        return text
+    at = text.index(head) + len(head)
+    return f"{text[:at]}{key}\n{text[at:]}"
+
+
 def owned_sentence(name: str, revision_round: int, owned: OwnedClaim) -> str:
     """The sentence for a claim number written for no analyst and read for its owner."""
     shared = int(owned.shared)
@@ -420,8 +519,9 @@ def owned_sentence(name: str, revision_round: int, owned: OwnedClaim) -> str:
         f"{'Blocking line' if owned.marked else 'Line'} L{int(owned.line)} of the "
         f"round-{int(revision_round)} mediation writes claim {int(owned.claim)} with no analyst "
         f"named for it; it is read as claim {int(owned.claim)} of the {name} analyst, the one "
-        f"analyst the line may mean whose claim {int(owned.claim)} shares {shared} ledger "
-        f"id{'s' if shared != 1 else ''} or address{'es' if shared != 1 else ''} with the line."
+        f"analyst the line may mean whose claim {int(owned.claim)} alone shares {shared} ledger "
+        f"id{'s' if shared != 1 else ''} or address{'es' if shared != 1 else ''} with the line. "
+        "Read so, it is carried with the line and never withdrawn by rule."
     )
 
 
@@ -680,6 +780,7 @@ def merge_revision(
             claims.extend(revised[index].claims)
     merged = revision.model_copy(update={"claims": claims})
     return RevisionMerge(
+        numbering=_numbering(revised, kept_blocks, claims),
         merged=merged,
         placed_by=placed_by,
         replaced=replaced,
