@@ -1816,7 +1816,7 @@ _EVIDENCE_ENDS_AT_LINE_START_RE = re.compile(
 # mark a line may begin with but a number. After words on a line, "443." and
 # "2)" end a sentence or a note ("on port 443. EVIDENCE:", "(step 2)
 # CONFIDENCE:"), so a number leads a label as a list mark only at a line's
-# start.
+# start. A numbered label after a line break other than "\n" stays in the value.
 _INLINE_LABEL_LEAD = r"(?![ \t>*_#]*+\d)" + LINE_PREFIX
 # Matched from the value's start, it ends where the value does. The end is
 # tried where a run of whitespace begins and after its last mark, and the

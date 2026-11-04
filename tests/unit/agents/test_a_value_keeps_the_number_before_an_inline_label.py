@@ -15,6 +15,7 @@ Every value here is made up for the test.
 
 from __future__ import annotations
 
+import random
 import re
 from collections.abc import Callable
 
@@ -175,7 +176,54 @@ def test_a_long_run_of_marks_in_an_evidence_value_is_read_in_linear_time(
     def build(size: int) -> str:
         return "[ev_0001]" + run(size) + label + end
 
-    assert_scales(build, 4000, pattern.search)
+    assert_scales(build, 4000, pattern.match)
+
+
+PLAIN_EVIDENCE_END = re.compile(
+    r"(?<!\s)\s++"
+    + base_agent._INLINE_LABEL_LEAD
+    + r"(?:CONFIDENCE|TECHNIQUE)"
+    + base_agent._LABEL_COLON
+)
+PIECES = [
+    "[ev_1]",
+    "x",
+    "443",
+    "2",
+    "12",
+    ".",
+    ")",
+    "(",
+    ":",
+    "-",
+    "+",
+    ">",
+    "#",
+    "*",
+    "**",
+    "_",
+    " ",
+    " ",
+    " ",
+    "\t",
+    "\n",
+    "\r",
+    "\xa0",
+    "CONFIDENCE",
+    "TECHNIQUE",
+    "Confidence",
+]
+
+
+def test_the_evidence_end_is_where_a_plain_search_of_it_begins() -> None:
+    # The match from the value's start only reads a long run once: it ends
+    # where the first end the plain form finds begins, on every text.
+    rng = random.Random(551)
+    for _ in range(5000):
+        text = "".join(rng.choice(PIECES) for _ in range(rng.randint(1, 24)))
+        found = base_agent._EVIDENCE_ENDS_INLINE_RE.match(text)
+        plain = PLAIN_EVIDENCE_END.search(text)
+        assert (found and found.end()) == (plain and plain.start()), repr(text)
 
 
 @pytest.mark.parametrize("run", RUNS, ids=RUN_IDS)
