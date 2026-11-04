@@ -30,7 +30,7 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.renderers.analyst import UNPUBLISHED_STATE
+from maljan.reporting.renderers.analyst import UNPUBLISHED_STATE, _with_unpublished_state
 from maljan.reporting.renderers.layout import ANALYST, BUNDLE
 from maljan.reporting.renderers.markdown import MarkdownRenderer
 from maljan.schemas.isr_models import judge_kept_note
@@ -109,6 +109,52 @@ def test_a_bare_value_is_given_the_platform_s_state() -> None:
 def test_a_bracket_not_on_publication_stays_with_the_state_after_it() -> None:
     c2 = _c2("The beacon also reaches 192.0.2.7 (UDP 53) at start.")
     assert f"192[.]0[.]2[.]7 (UDP 53) ({UNPUBLISHED_STATE}) at start." in c2
+
+
+STATE = f"({UNPUBLISHED_STATE})"
+
+
+# Each value is placed as a whole token, in any case, after its enclosing token.
+@pytest.mark.parametrize(
+    ("sentence", "printed"),
+    [
+        (
+            "It contacts 18.8.8.81 and 8.8.8.8.",
+            f"It contacts 18[.]8[.]8[.]81 {STATE} and 8[.]8[.]8[.]8 {STATE}.",
+        ),
+        (
+            "It fetches https://evil.example.com/gate.php from evil.example.com.",
+            f"It fetches hxxps://evil[.]example[.]com/gate.php from evil[.]example[.]com {STATE}.",
+        ),
+        (
+            "It reaches notevil.example.com and evil.example.com.",
+            f"It reaches notevil[.]example[.]com {STATE} and evil[.]example[.]com {STATE}.",
+        ),
+        (
+            "It resolves `evil.example.com` at start.",
+            f"It resolves `evil[.]example[.]com` {STATE} at start.",
+        ),
+        (
+            "It resolves 'evil.example.com' at start.",
+            f"It resolves 'evil[.]example[.]com' {STATE} at start.",
+        ),
+        (
+            "It resolves EVIL.example.com at start.",
+            f"It resolves EVIL[.]example[.]com {STATE} at start.",
+        ),
+    ],
+)
+def test_the_state_is_written_after_the_whole_token(sentence: str, printed: str) -> None:
+    line = next(line for line in _c2(sentence).splitlines() if line.startswith("It beacons."))
+    assert line == f"It beacons. {printed}"
+
+
+def test_a_value_standing_nowhere_as_a_whole_token_leaves_its_sentence_out() -> None:
+    assert _with_unpublished_state("It contacts 18.8.8.81.", ["8.8.8.8"]) is None
+    assert (
+        _with_unpublished_state("It fetches https://evil.example.com/a.", ["evil.example.com"])
+        is None
+    )
 
 
 def test_a_numeric_confidence_is_worded_and_another_flag_leaves_its_sentence_out() -> None:

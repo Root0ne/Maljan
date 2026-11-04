@@ -482,27 +482,65 @@ _ABOUT_PUBLICATION = re.compile(
 )
 
 
-def _with_unpublished_state(sentence: str, values: Iterable[str]) -> str:
+def _whole_value(value: str) -> re.Pattern[str]:
+    """``value`` as a whole token, in any case: never part of a longer address, host, path
+    or URL ("8.8.8.8" in "18.8.8.81", "evil.example.com" in "notevil.example.com" or in
+    "https://evil.example.com/gate.php")."""
+    return re.compile(
+        r"(?<![\w.\-/:@])" + re.escape(value) + r"(?![\w\-]" + _PIPE + r"\.\w" + _PIPE + r"/)",
+        re.IGNORECASE,
+    )
+
+
+# What a token ends with that the state is written before: a sentence's or a
+# clause's punctuation, and a closing bracket.
+_TOKEN_TAIL = ".,;:)"
+
+
+def _token_end(sentence: str, end: int) -> int:
+    """Where the token a value ends at ``end`` ends: up to the next space, then back over
+    trailing punctuation, so the state lands past a closing backtick or quote and never
+    inside a code span, a quotation or a URL."""
+    stop = end
+    while stop < len(sentence) and not sentence[stop].isspace():
+        stop += 1
+    while stop > end and sentence[stop - 1] in _TOKEN_TAIL:
+        stop -= 1
+    return stop
+
+
+def _with_unpublished_state(sentence: str, values: Iterable[str]) -> str | None:
     """``sentence`` with the platform's state written after the first place each value
-    stands: a bracket right after it that speaks of publication is replaced, any other
-    is kept with the state after it. Deterministic: the words are fixed, whatever the
-    model wrote. A value that does not stand in the sentence as written is left alone."""
+    stands as a whole token (:func:`_whole_value`) that no earlier value's place
+    overlaps, at the end of its token: a bracket right after it that speaks of
+    publication is replaced, any other is kept with the state after it.
+    Deterministic: the words are fixed, whatever the model wrote. ``None`` where a value
+    stands nowhere as a whole token: the sentence is then left out."""
     edits: list[tuple[int, int, str]] = []
+    claimed: list[tuple[int, int]] = []
     for value in dict.fromkeys(v for v in values if v):
-        at = sentence.find(value)
-        if at == -1:
-            continue
-        end = at + len(value)
+        found = None
+        for match in _whole_value(value).finditer(sentence):
+            stop = _token_end(sentence, match.end())
+            if not any(a < stop and match.start() < b for a, b in claimed):
+                found = (match.start(), stop)
+                break
+        if found is None:
+            return None
+        begin, end = found
         bracket = re.match(r"\s*\(", sentence[end:])
         if bracket is not None:
             depth, close = 1, end + bracket.end()
             while close < len(sentence) and depth:
                 depth += {"(": 1, ")": -1}.get(sentence[close], 0)
                 close += 1
+            claimed.append((begin, close))
             if _ABOUT_PUBLICATION.search(sentence[end + bracket.end() : close]):
                 edits.append((end, close, f" ({UNPUBLISHED_STATE})"))
                 continue
             end = close
+        else:
+            claimed.append((begin, end))
         edits.append((end, end, f" ({UNPUBLISHED_STATE})"))
     for begin, stop, said in sorted(edits, reverse=True):
         sentence = sentence[:begin] + said + sentence[stop:]
@@ -565,7 +603,8 @@ class _Analyst:
         such sentence with its mark (``_Context.marked``); the analyst report
         prints no mark. A sentence flagged only for a value the run does not
         publish stands with the platform's fixed state after each such value,
-        in place of any bracket of the model's on publication; one flagged only
+        in place of any bracket of the model's on publication, and is left out
+        where such a value stands nowhere as a whole token; one flagged only
         for a confidence written as
         a number stands with the confidence in words; any other is left out,
         with the spaces ``left_out_span`` takes, and counted where ``count``.
