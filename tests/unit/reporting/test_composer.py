@@ -298,6 +298,19 @@ class TestFactsOutrankClaimsInThePrompt:
         assert "outrank" in lowered
         assert "deterministic facts" in lowered
 
+    def test_a_contradicted_claim_is_answered_in_the_sample_s_terms(self) -> None:
+        """Asked to name and refute the claim, the model wrote debate prose
+        ("Claim 44 is refuted") that the style check then retried or left out
+        (T-560)."""
+        from maljan.reporting.composer import _SYSTEM
+
+        assert (
+            "Either drop the claim, or state what the fact shows, in the sample's terms, "
+            "without naming the claim, its number or an earlier analysis.\n"
+        ) in _SYSTEM
+        assert "refute it" not in _SYSTEM
+        assert "name it and" not in _SYSTEM
+
     def test_duplicate_keys_are_not_printed_twice(self) -> None:
         """The introduction repeats identity in ``facts`` because identity is
         its subject; the shared block must not restate it."""
