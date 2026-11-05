@@ -156,6 +156,7 @@ from maljan.pipeline.own_entries import (
     SETTLED_FOR_YOU_HEAD,
     SETTLED_REASON,
     raised_again,
+    rows_in_force,
     settle_own_entry_lines,
     with_settled_by_rule,
 )
@@ -6029,13 +6030,27 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # Every claim a mediation of the run held by rule: its analyst's
         # revision is told, and a revision stating it again above its held
         # figure is recorded.
-        held_rows = [
-            row
-            for arg in history
-            if arg.agent_name == MEDIATOR_AGENT_NAME
-            for row in getattr(arg, "settled_claims", None) or []
-            if isinstance(row, dict)
-        ]
+        held_rows = rows_in_force(
+            [
+                row
+                for arg in history
+                if arg.agent_name == MEDIATOR_AGENT_NAME
+                for row in getattr(arg, "settled_claims", None) or []
+                if isinstance(row, dict)
+            ],
+            [r for r in state.get("revision_rounds") or [] if isinstance(r, dict)],
+        )
+        # The holds a revision of this round stated again above: recorded once.
+        raised_here: list[dict[str, str]] = []
+
+        def _record_raises(name: str, answer: Any) -> None:
+            for raised in raised_again(name, iteration, held_rows, answer):
+                logger.warning("%s", raised.sentence)
+                revision_replacements.append(raised.sentence)
+                raised_here.append(
+                    {"analyst": raised.analyst, "claim_sentence": raised.claim_sentence}
+                )
+
         contested = [
             as_not_blocking(line, SETTLED_REASON) if line in settled_lines else line
             for line in getattr(mediation, "contradictions", None) or []
@@ -6432,6 +6447,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                         iteration,
                     )
                     revised_isrs[name] = combined
+                    _record_raises(name, combined)
                     if name in not_asked:
                         not_revised[name] = not_loaded.get(name, NOT_ASKED_TO_REVISE)
                     else:
@@ -6500,9 +6516,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 revised_isrs[name] = isr
                 # A claim held by rule that the revision states again above
                 # its held figure: the revision's figure stands, and is said.
-                for said in raised_again(name, iteration, held_rows, isr):
-                    logger.warning("%s", said)
-                    revision_replacements.append(said)
+                _record_raises(name, isr)
                 if name in not_asked:
                     # Its answer from before the round, handed back unasked:
                     # not a revision, and not counted as one.
@@ -6640,6 +6654,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 ),
                 **({"asked_all": asked_all} if asked_all else {}),
                 **({"retry_added": retry_added} if retry_added else {}),
+                # The holds by rule a revision stated again above: not told again.
+                **({"raised_again": raised_here} if raised_here else {}),
                 **({"peers": peers_record} if peers_record else {}),
                 # The entries each revision was shown, for the claims of later
                 # rounds to be read against (``_mark_claims_on_shown_entries``).

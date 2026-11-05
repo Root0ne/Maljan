@@ -20,10 +20,13 @@ opened for the line:
   (``AgentISR.dissent_items``) is about the same point as the claim and the
   line: the three share a ledger id, an address or a quoted value of four
   characters or more, matched as whole words;
-- **the figure**: read only from the entry's own sentences, the ones that
-  name no other participant and no claim read for anyone else, the entry
-  states exactly one figure, as a confidence ("hold ... 0.50", "at 0.50", "my
-  figure is 0.50"), the line states it too, and it is below the claim's.
+- **the figure**: an entry any sentence of which names another participant,
+  a claim read for anyone else, or a third or unnamed party ("they", "the
+  sandbox") is refused whole; the entry states exactly one figure, in a
+  first-person clause ("I hold ... at 0.50", "my figure is 0.50"), as a
+  confidence and not a measurement ("ratio", "share", "detections"); the line
+  states it too after a cue of its own ("entry", "figure", "hold"), and it is
+  below the claim's. In doubt, nothing is settled.
 
 The lower figure stands: the claim is held at it. A claim is never raised and
 never withdrawn here. Where anything above fails, the line is not settled and
@@ -38,7 +41,7 @@ import bisect
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 from maljan.pipeline.claim_drops import defanged
 from maljan.pipeline.debate_facts import (
@@ -69,6 +72,27 @@ _FIGURE = re.compile(r"(?<![\w.])(?:0?\.\d{1,3}|1\.0{1,3})(?![\w%]|\.\d)")
 _CONFIDENCE_CUE = re.compile(
     r"\b(?:at|confidence|figure|hold|holds|held|holding|reduce|reduced|reduces|lower|lowered|"
     r"lowers)\b[^.;\d\n]{0,30}$",
+    re.IGNORECASE,
+)
+# A clause whose subject is the analyst itself.
+_FIRST_PERSON = re.compile(r"\b(?:I|my|me|we|our|us)\b", re.IGNORECASE)
+# A third or unnamed party an entry may give a figure to.
+_THIRD_PARTY = re.compile(
+    r"\b(?:they|them|their|theirs|he|she|his|her|another|others|the\s++(?:sandbox|tool|other|"
+    r"peer|engine|vendor|scanner))\b",
+    re.IGNORECASE,
+)
+# A word that makes a figure near it a measurement, not a confidence.
+_MEASURE_NEAR = re.compile(
+    r"\b(?:ratio|ratios|rate|rates|share|shares|entropy|score|scores|percent|percentage|"
+    r"detections?|engines?|out\s++of)\b|\bof\s++\d",
+    re.IGNORECASE,
+)
+# How far either side of a figure a measure word is looked for.
+_MEASURE_SPAN = 40
+# What the line writes right before a figure it gives an entry or a claim.
+_LINE_CUE = re.compile(
+    r"\b(?:entry|entries|figure|figures|confidence|hold|holds|held|holding)\b[^.;\d\n]{0,30}$",
     re.IGNORECASE,
 )
 # Where an entry's sentences and clauses end.
@@ -143,6 +167,8 @@ class SettledLine:
                 "was": c.was,
                 "now": c.now,
                 "claim_sentence": c.sentence,
+                "claim_values": sorted(claim_values(c.sentence)),
+                "mediation": int(mediation),
                 "sentence": said,
             }
             for c in self.claims
@@ -290,26 +316,48 @@ def _numbers_written(text: str, participants: Sequence[str]) -> set[int] | None:
 def _own_figure(
     entry: str, owner: str, participants: Sequence[str], labels: Mapping[str, Sequence[str]]
 ) -> float | None:
-    """The one confidence figure the entry's own sentences state, or ``None``.
+    """The one confidence figure the entry states as the analyst's own, or ``None``.
 
-    Its own sentences are those that name no other participant and no claim
-    read for anyone else: a figure quoted from a peer is the peer's. They must
-    state exactly one figure of [0, 1], and as a confidence (``_CONFIDENCE_CUE``):
-    "raised from 0.40 to 0.95" or "a ratio of 0.30" is no figure of its own.
+    The whole entry is refused when any sentence of it names another
+    participant (key or label), a claim read for anyone else, another analyst
+    or report, or a third or unnamed party ("they", "the sandbox", "the
+    other", ``_THIRD_PARTY``): a figure in it may be someone else's. The
+    entry must then state exactly one figure of [0, 1], in a clause with a
+    first-person subject ("I", "my", "we", "our"), after a confidence cue
+    (``_CONFIDENCE_CUE``) and with no measure word near it
+    (``_MEASURE_NEAR``): "raised from 0.40 to 0.95", "a ratio of 0.30" or
+    "the detection ratio stands at 0.30" is no figure of its own. In doubt,
+    nothing is settled: the dispute stays the agents'.
     """
     figures: list[float] = []
     for clause in _CLAUSE_END.split(entry):
         if not clause.strip():
             continue
         if any(ref.analyst != owner for ref in claim_references_of(clause, participants, None)):
-            continue
+            return None
         if _names_someone_else(clause, owner, participants, labels):
-            continue
+            return None
+        if _THIRD_PARTY.search(clause) is not None:
+            return None
         for value, at in _figures(clause):
-            if _CONFIDENCE_CUE.search(clause[max(0, at - 60) : at]) is None:
+            if (
+                _FIRST_PERSON.search(clause) is None
+                or _CONFIDENCE_CUE.search(clause[max(0, at - 60) : at]) is None
+                or _MEASURE_NEAR.search(clause[max(0, at - _MEASURE_SPAN) : at + _MEASURE_SPAN])
+            ):
                 return None
             figures.append(value)
     return figures[0] if len(figures) == 1 else None
+
+
+def _line_figures(text: str) -> set[float]:
+    """The figures the line states as an entry's or a claim's figure, after a cue."""
+    return {
+        value
+        for value, at in _figures(text)
+        if _LINE_CUE.search(text[max(0, at - 60) : at]) is not None
+        and _MEASURE_NEAR.search(text[max(0, at - _MEASURE_SPAN) : at + _MEASURE_SPAN]) is None
+    }
 
 
 def _settle_claim(
@@ -331,7 +379,7 @@ def _settle_claim(
     was = round(float(stated), 2)
     sentence = str(getattr(first, "claim", "") or "")
     said = f"{sentence}\n{getattr(first, 'evidence_ref', '') or ''}"
-    on_line = {value for value, _at in _figures(text)}
+    on_line = _line_figures(text)
     best: tuple[float, str] | None = None
     for entry in getattr(isr, "dissent_items", None) or []:
         entry_text = str(entry or "")
@@ -419,33 +467,95 @@ def with_settled_by_rule(text: str, sentences: Sequence[str], head: str = SETTLE
     return f"{text}\n\n{block}" if text else block
 
 
+def claim_values(sentence: str) -> frozenset[str]:
+    """The addresses and quoted values a claim's sentence writes: what a reworded claim keeps.
+
+    Ledger ids are left out, since a revision cites its evidence anew. A
+    quoted value counts from four characters.
+    """
+    return frozenset(
+        [
+            *(t for t in line_tokens(sentence) if t.startswith("0x")),
+            *(f'"{v}"' for v in _quoted_values(sentence)),
+        ]
+    )
+
+
+class Raised(NamedTuple):
+    """A claim held by rule that a revision states again above its held figure."""
+
+    sentence: str
+    analyst: str
+    claim_sentence: str
+
+
 def raised_again(
     name: str, revision_round: int, held: Sequence[Mapping[str, Any]], isr: Any
-) -> list[str]:
-    """One sentence per claim held by rule that ``isr`` states again above its held figure.
+) -> list[Raised]:
+    """Each claim held by rule that ``isr`` states again above its held figure, with its record.
 
     ``held`` are the settlement records of ``name``'s claims
-    (:meth:`SettledLine.records`); a claim is matched by its sentence,
-    whitespace collapsed. Recorded, never undone: the revision decides.
+    (:meth:`SettledLine.records`). A claim is matched by its sentence,
+    whitespace collapsed; failing that, by its values (:func:`claim_values`:
+    every address and quoted value the held claim wrote, at least one), when
+    exactly one claim of the revision writes them all, and the sentence says
+    the match was made so. Recorded, never undone: the revision decides.
     """
-    by_sentence: dict[str, Mapping[str, Any]] = {}
-    for row in held:
-        if row.get("analyst") == name and row.get("claim_sentence"):
-            by_sentence[str(row["claim_sentence"])] = row
-    out: list[str] = []
-    for claim in getattr(isr, "claims", None) or []:
-        found = by_sentence.get(" ".join(str(getattr(claim, "claim", "") or "").split()))
-        stated = getattr(claim, "confidence", None)
-        if found is None or not isinstance(stated, int | float) or isinstance(stated, bool):
-            continue
-        row = found
-        if round(float(stated), 2) > float(row["now"]):
-            out.append(
-                defanged(
-                    f"The {name} analyst's round-{int(revision_round)} revision states claim "
-                    f'"{_quoted(str(row["claim_sentence"]))}" at {float(stated):.2f} again, '
-                    f"above the {float(row['now']):.2f} it was held at by rule (its own dispute "
-                    "entry's figure); the revision's figure stands."
-                )
+    rows = [r for r in held if r.get("analyst") == name and r.get("claim_sentence")]
+    claims = list(getattr(isr, "claims", None) or [])
+    said_of = [" ".join(str(getattr(c, "claim", "") or "").split()) for c in claims]
+    out: list[Raised] = []
+    for row in rows:
+        held_sentence = str(row["claim_sentence"])
+        found = [c for c, s in zip(claims, said_of, strict=True) if s == held_sentence]
+        how = ""
+        if not found:
+            values = frozenset(
+                str(v) for v in row.get("claim_values") or claim_values(held_sentence)
             )
+            if values:
+                found = [
+                    c for c, s in zip(claims, said_of, strict=True) if values <= claim_values(s)
+                ]
+                how = " (matched by the addresses and quoted values it writes, reworded)"
+                if len(found) != 1:
+                    found = []
+        # The claim held and a retry's restatement of it may stand side by
+        # side: the highest figure the answer gives it is the one compared.
+        stated = [
+            float(c.confidence)
+            for c in found
+            if isinstance(getattr(c, "confidence", None), int | float)
+            and not isinstance(c.confidence, bool)
+        ]
+        if stated and round(max(stated), 2) > float(row["now"]):
+            sentence = defanged(
+                f"The {name} analyst's round-{int(revision_round)} revision states claim "
+                f'"{_quoted(held_sentence)}"{how} at {max(stated):.2f} again, above the '
+                f"{float(row['now']):.2f} it was held at by rule (its own dispute entry's "
+                "figure); the revision's figure stands."
+            )
+            out.append(Raised(sentence, name, held_sentence))
     return out
+
+
+def rows_in_force(
+    held: Sequence[Mapping[str, Any]], rounds: Sequence[Mapping[str, Any]]
+) -> list[Mapping[str, Any]]:
+    """The settlement records still held: none whose raise a later round recorded.
+
+    A hold a revision stated again above is told and recorded once; a newer
+    mediation that holds the claim again starts a new hold.
+    """
+    raised: dict[tuple[str, str], int] = {}
+    for record in rounds:
+        for row in record.get("raised_again") or []:
+            if isinstance(row, Mapping):
+                key = (str(row.get("analyst")), str(row.get("claim_sentence")))
+                raised[key] = max(raised.get(key, -1), int(record.get("round") or 0))
+    return [
+        r
+        for r in held
+        if int(r.get("mediation") or 0)
+        > raised.get((str(r.get("analyst")), str(r.get("claim_sentence"))), -1)
+    ]

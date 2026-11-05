@@ -2,8 +2,9 @@
 
 haiku11's debate ran five rounds to its limit. Its round-3 mediation blocked on
 two lines: the dynamic analyst's claim against a listing, and an analyst's
-mutex claim at 0.85 against its own dispute entry at 0.50. The second is
-settled by rule, so the round asks the dynamic analyst alone. Its round-4
+mutex claim at 0.85 against its own dispute entry at 0.50. The second is not
+settled: each entry stating 0.50 also quotes peers' claims and figures, so
+its figure may be someone else's, and the line stays the agents'. Its round-4
 mediation blocked on a line that set the analyst's "Claim 27" against "its
 claim 40": both are now read for that analyst, and nothing is left unplaced.
 That line is not settled: claim 40 has no lower figure of its own to settle
@@ -85,21 +86,17 @@ def _mediations(run: Path) -> list[tuple[list[str], dict[str, AgentISR]]]:
     return out
 
 
-def test_haiku11_round_3_asks_the_dynamic_analyst_alone() -> None:
+def test_haiku11_round_3_settles_nothing_its_entries_name_peers() -> None:
+    # The mutex line's figure, 0.50, is in two of the analyst's entries, and
+    # both quote peers' claims and figures beside it: a figure there may be
+    # someone else's, so the line stays the agents'.
     run = _run("haiku11")
     names = list(json.loads((run / "report-byjob.json").read_text())["agent_reports"])
-    mediations = _mediations(run)
-    lines, isrs = mediations[2]
+    lines, isrs = _mediations(run)[2]
 
-    settled, held = settle_own_entry_lines(lines, names, isrs)
-
-    assert [s.line for s in settled] == [2]
-    [claim] = settled[0].claims
-    assert (claim.claim, claim.was, claim.now) == (10, 0.85, 0.5)
-    assert held[claim.analyst].claims[10].confidence == 0.5
-    rest = [line for line in lines if line not in {s.text for s in settled}]
-    assert analysts_to_revise(lines, names)[0] == ["dynamic", claim.analyst]
-    assert analysts_to_revise(rest, names)[0] == ["dynamic"]
+    assert settle_own_entry_lines(lines, names, isrs) == ([], {})
+    [owner] = read_claim_references(lines[1:2], names).named
+    assert any("I hold the name link at 0.50" in d for d in isrs[owner].dissent_items)
 
 
 def test_haiku11_round_4_reads_its_claim_for_the_analyst() -> None:
@@ -155,7 +152,7 @@ def test_the_stored_mediations_are_read_as_pinned(name: str) -> None:
     assert readings(run) == json.loads(GOLDEN.read_text())[name]
 
 
-@pytest.mark.parametrize("name", ["haiku10", "haiku9", "haiku8", "haiku7"])
+@pytest.mark.parametrize("name", ["haiku11", "haiku10", "haiku9", "haiku8", "haiku7"])
 def test_a_debate_with_no_own_entry_line_is_read_as_before(name: str) -> None:
     run = _run(name)
     names = list(json.loads((run / "report-byjob.json").read_text())["agent_reports"])

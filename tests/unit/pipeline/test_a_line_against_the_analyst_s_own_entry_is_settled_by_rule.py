@@ -45,6 +45,7 @@ from maljan.pipeline.own_entries import (
     SETTLED_HEAD,
     SETTLED_REASON,
     raised_again,
+    rows_in_force,
     settle_own_entry_lines,
     with_settled_by_rule,
 )
@@ -84,7 +85,7 @@ PACKER = _isr(
         _claim("No key use on the traffic is shown.", 0.9, "ev_0040"),
     ],
     [
-        'Static claim 5 (event "qzvent" at 0.85): disputed. ev_0031 shows two arguments only. '
+        'The event "qzvent": ev_0031 shows two arguments only. '
         "I hold the name link at 0.40 until the disassembly is read.",
         "Dynamic claim 2 (the thread start): not disputed.",
     ],
@@ -163,7 +164,7 @@ class TestTheLineIsSettled:
             "Some-Odd_key 7": _isr(
                 "Some-Odd_key 7",
                 [_claim("Address 0x5a10 decodes the key.", 0.9)],
-                ["0x5a10 decoding is held at 0.60 by me."],
+                ["I hold the 0x5a10 decoding at 0.60."],
             )
         }
         line = (
@@ -332,11 +333,62 @@ def test_the_review_s_false_positives_are_left_to_the_agents(
     assert settle_own_entry_lines([line], NAMES, isrs, labels) == ([], {})
 
 
+# The review's second round: a figure that is someone else's or a measurement.
+_LINE_G = (
+    '[analysts: packer_scan_x2] Claim 2 holds "qzvent" at 0.85 (ev_0031) while its own dispute '
+    "entry gives 0.30 [blocking: own words]"
+)
+
+
+@pytest.mark.parametrize(
+    ("entry", "labels"),
+    [
+        pytest.param(
+            'Dynamic claim 3 disputes "qzvent" (ev_0031). They hold it at 0.30; I do not agree.',
+            None,
+            id="a peer's figure under a pronoun",
+        ),
+        pytest.param(
+            'ev_0031: "qzvent" appears in 1 of 3 runs; the VT detection ratio stands at 0.30.',
+            None,
+            id="a ratio after at",
+        ),
+        pytest.param(
+            'ev_0031 "qzvent": entropy share lower than 0.30 of the section, so I doubt packing.',
+            None,
+            id="a share after lower",
+        ),
+        pytest.param(
+            'ev_0031: the sandbox holds "qzvent" at 0.30.', {}, id="an unnamed party with no labels"
+        ),
+        pytest.param(
+            'ev_0031: "qzvent" is held at 0.30 by the trace.', None, id="no first-person subject"
+        ),
+    ],
+)
+def test_a_figure_that_is_not_the_analyst_s_own_settles_nothing(
+    entry: str, labels: dict[str, list[str]] | None
+) -> None:
+    assert settle_own_entry_lines([_LINE_G], NAMES, _packer_with([entry]), labels) == ([], {})
+
+
+def test_the_analyst_s_own_first_person_figure_settles() -> None:
+    entry = 'ev_0031: I hold the "qzvent" link at 0.30 until the disassembly is read.'
+    [line], _held = settle_own_entry_lines([_LINE_G], NAMES, _packer_with([entry]))
+    assert [(c.claim, c.was, c.now) for c in line.claims] == [(2, 0.85, 0.3)]
+
+
+def test_the_line_s_figure_must_follow_a_cue_too() -> None:
+    entry = 'ev_0031: I hold the "qzvent" link at 0.30 until the disassembly is read.'
+    line = _LINE_G.replace("dispute entry gives 0.30", "dispute entry differs. The trace: 0.30")
+    assert settle_own_entry_lines([line], NAMES, _packer_with([entry])) == ([], {})
+
+
 def test_a_quoted_value_is_matched_as_a_whole_word() -> None:
     line = OWN_LINE.replace("ev_0031 shows", "it shows").replace("qzvent", "evnt1")
     isrs = _packer_with(['"evnt12" is another name: I hold 0.40.'], 'Routine opens "evnt1".')
     assert settle_own_entry_lines([line], NAMES, isrs) == ([], {})
-    isrs = _packer_with(['"evnt1" is the name: I hold 0.40.'], 'Routine opens "evnt1".')
+    isrs = _packer_with(['"evnt1" is the name: I hold it at 0.40.'], 'Routine opens "evnt1".')
     assert settle_own_entry_lines([line], NAMES, isrs)[0]
 
 
@@ -506,10 +558,34 @@ class TestTheHeldFigureReachesTheAnalyst:
 
         assert raised_again("packer_scan_x2", 4, records, held["packer_scan_x2"]) == []
         [said] = raised_again("packer_scan_x2", 4, records, PACKER)
-        assert "states claim" in said and "at 0.85 again, above the 0.40" in said
+        assert "states claim" in said.sentence and "at 0.85 again, above the 0.40" in said.sentence
+        assert "matched by" not in said.sentence
         assert raised_again("static", 4, records, PACKER) == []
 
-    def test_the_revision_is_told_and_the_raise_is_said(self) -> None:
+    def test_a_reworded_claim_is_matched_by_its_values_and_said_so(self) -> None:
+        [line], _held = settle_own_entry_lines([OWN_LINE], NAMES, ISRS)
+        reworded = PACKER.model_copy(
+            update={
+                "claims": [
+                    PACKER.claims[0],
+                    _claim('Slot 0x10c60 in 0x4410 opens "qzvent".', 0.85, "ev_0050"),
+                ]
+            }
+        )
+        [said] = raised_again("packer_scan_x2", 4, line.records(3), reworded)
+        assert "matched by the addresses and quoted values it writes" in said.sentence
+
+    def test_a_raise_is_recorded_once_and_a_newer_hold_starts_again(self) -> None:
+        [line], _held = settle_own_entry_lines([OWN_LINE], NAMES, ISRS)
+        rows = line.records(3)
+        key = {"analyst": "packer_scan_x2", "claim_sentence": rows[0]["claim_sentence"]}
+        rounds = [{"round": 3, "raised_again": [key]}]
+        assert rows_in_force(rows, []) == rows
+        assert rows_in_force(rows, rounds) == []
+        newer = [{**rows[0], "mediation": 5}]
+        assert rows_in_force(newer, rounds) == newer
+
+    def _mediation(self) -> tuple[AgentArgument, Any, dict[str, AgentISR]]:
         [line], held = settle_own_entry_lines([OWN_LINE], NAMES, ISRS)
         other = (
             "[analysts: PACKER_SCAN_X2 ANALYST] Claim 1 says a DLL; ev_0001 shows an EXE. "
@@ -525,19 +601,57 @@ class TestTheHeldFigureReachesTheAnalyst:
             settled_claims=line.records(3),
         )
         mediation.revise = ["packer_scan_x2"]
-        update, agent = _revise_after(mediation, {**ISRS, **held})
+        return mediation, line, {**ISRS, **held}
+
+    def test_a_retry_s_addition_above_the_held_figure_is_said(self) -> None:
+        mediation, _line, in_force = self._mediation()
+        retried = _isr("packer_scan_x2", [PACKER.claims[1]], [])
+        retried._revision_wrote_no_claim = True
+        update, _agent = _revise_after(mediation, in_force, {"packer_scan_x2": retried})
+
+        assert any(
+            "above the 0.40 it was held at by rule" in s for s in update["revision_replacements"]
+        )
+        [record] = update["revision_rounds"]
+        assert record["raised_again"][0]["analyst"] == "packer_scan_x2"
+
+    def test_a_recorded_raise_is_not_told_again(self) -> None:
+        mediation, line, in_force = self._mediation()
+        earlier = {
+            "round": 3,
+            "raised_again": [
+                {"analyst": "packer_scan_x2", "claim_sentence": PACKER.claims[1].claim}
+            ],
+        }
+        update, agent = _revise_after(mediation, in_force, rounds=[earlier])
+
+        assert SETTLED_FOR_YOU_HEAD not in agent.safe_revise_isr.call_args.args[3]
+        assert not any("held at by rule" in s for s in update.get("revision_replacements") or [])
+
+    def test_the_revision_is_told_and_the_raise_is_said(self) -> None:
+        mediation, line, in_force = self._mediation()
+        update, agent = _revise_after(mediation, in_force)
 
         directive = agent.safe_revise_isr.call_args.args[3]
         assert SETTLED_FOR_YOU_HEAD in directive and line.sentence(3) in directive
         said = update["revision_replacements"]
         assert any("above the 0.40 it was held at by rule" in s for s in said)
+        [record] = update["revision_rounds"]
+        assert record["raised_again"] == [
+            {"analyst": "packer_scan_x2", "claim_sentence": PACKER.claims[1].claim}
+        ]
         # The settled line withdraws nothing by rule.
         assert not any(
             "withdrawn by rule" in row["sentence"] for row in update.get("dropped_claims") or []
         )
 
 
-def _revise_after(mediation: AgentArgument, in_force: dict[str, AgentISR]) -> tuple[Any, Any]:
+def _revise_after(
+    mediation: AgentArgument,
+    in_force: dict[str, AgentISR],
+    answers: dict[str, AgentISR] | None = None,
+    rounds: list[dict[str, Any]] | None = None,
+) -> tuple[Any, Any]:
     from maljan.pipeline.nodes import RevisionInput, make_revision_node
 
     container = MagicMock()
@@ -552,7 +666,10 @@ def _revise_after(mediation: AgentArgument, in_force: dict[str, AgentISR]) -> tu
         agent = MagicMock()
         agent.tools = []
         # The revision states every claim again as its first answer had them.
-        agent.safe_revise_isr.return_value = (f"{name} revised", ISRS[name])
+        agent.safe_revise_isr.return_value = (
+            f"{name} revised",
+            (answers or {}).get(name, ISRS[name]),
+        )
         agent.drain_evidence_entries.return_value = []
         agent.validation_findings = []
         agent.validation_retries = 0
@@ -571,6 +688,7 @@ def _revise_after(mediation: AgentArgument, in_force: dict[str, AgentISR]) -> tu
         "sycophancy_detected": False,
         "discussion_history": [mediation],
         "evidence_ledger": [],
+        "revision_rounds": list(rounds or []),
     }
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
