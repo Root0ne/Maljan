@@ -830,6 +830,7 @@ export const MOCK_SETTINGS_SCHEMA = withServedDeclarations({
           description: "Every analyst Maljan can run, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "agent_definitions", subgroup: null, advanced: false,
+          agent_category_choices: ["code_reader", "static", "dynamic", "network", "intel", "other"],
           required_env: null,
         },
         {
@@ -1065,19 +1066,19 @@ export const MOCK_SETTINGS_VALUES = {
       value: {
         static: {
           role: "static", label: "Static analyst", prompt: null, tools: [],
-          static_provider: null, enabled: true,
+          static_provider: null, enabled: true, category: "code_reader",
         },
         dynamic: {
           role: "dynamic", label: "Dynamic analyst", prompt: null, tools: [],
-          static_provider: null, enabled: true,
+          static_provider: null, enabled: true, category: "dynamic",
         },
         network: {
           role: "network", label: "Network analyst", prompt: null, tools: [],
-          static_provider: null, enabled: true,
+          static_provider: null, enabled: true, category: "network",
         },
         judge: {
           role: "judge", label: "Judge", prompt: null, tools: [],
-          static_provider: null, enabled: true,
+          static_provider: null, enabled: true, category: "other",
         },
       },
       is_set: null,
@@ -1423,6 +1424,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = withServedDeclarations(
           description: "Every analyst Maljan can run, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "agent_definitions", subgroup: null, advanced: false,
+          agent_category_choices: ["code_reader", "static", "dynamic", "network", "intel", "other"],
           required_env: null,
         },
         {
