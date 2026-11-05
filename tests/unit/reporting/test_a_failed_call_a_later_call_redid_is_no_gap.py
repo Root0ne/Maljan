@@ -101,7 +101,7 @@ def test_a_failure_nothing_answered_later_is_not_redone() -> None:
     assert redone_failures(ledger) == []
 
 
-def test_a_failure_asked_for_no_address_is_never_redone() -> None:
+def test_a_failure_asked_for_no_address_is_not_redone_by_another_question() -> None:
     # Another call of the same tool with other arguments answers another question.
     ledger = [_failed("ev_0001", tool="scan_text"), _plain("ev_0002")]
     ledger.append(LedgerEntry(id="ev_0003", tool="scan_text", args={"pattern": "xyz"}, output="[]"))
@@ -627,12 +627,15 @@ def test_run7_s_decompile_is_not_redone_by_a_read_of_seventy_instructions() -> N
     # ev_0055 disassembled 70 instructions from 0x...1030: no redo of the decompile.
     # ev_0111, ev_0123 and ev_0174 set a timeout the failed decompiles left out
     # and their failures never named, but each lists the function whole, which
-    # redoes a failed listing of it (T-529).
+    # redoes a failed listing of it (T-529). ev_0191's emulation by a comma
+    # text, refused, was asked again by ev_0249 with a list holding every one of
+    # its candidates (T-562).
     assert redone == {
         "ev_0050": ["ev_0111"],
         "ev_0067": ["ev_0123"],
         "ev_0069": ["ev_0123"],
         "ev_0095": ["ev_0174"],
+        "ev_0191": ["ev_0249"],
     }
 
 
@@ -643,4 +646,8 @@ def test_haiku5_s_calls_refused_for_a_null_are_redone_by_the_calls_that_set_it()
     # whose answer is whole (T-529).
     assert redone["ev_0054"] == ["ev_0060"]
     assert redone["ev_0109"] == ["ev_0114"]
-    assert len(redone) == 10
+    # The import and export listings, asked for no address, refused for the null
+    # offset their messages name, and asked again with it set (T-562).
+    assert redone["ev_0052"] == ["ev_0057"]
+    assert redone["ev_0053"] == ["ev_0058"]
+    assert len(redone) == 12

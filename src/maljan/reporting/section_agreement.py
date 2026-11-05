@@ -70,6 +70,16 @@ is held (:func:`held_closing_sentences`): the prompt names it, and an answer
 listing no row for it is asked once more; what becomes of it is the model's
 answer, never this read's.
 
+A sentence of any passage that may be rewritten, section 5 and the body
+included, that calls code not read which an entry lists is held the same way
+(:func:`unread_listed_sentences`): haiku11 rewrote the limitations' "the body
+of 0x3728 was not read" and left section 5's twin standing, so the two sections
+then said opposite things (T-562). Where the statement's own clause names the
+routine, the ledger itself contradicts the sentence: one the answer leaves
+standing (no row, a kept row, a rewrite that failed) is qualified by the
+platform with the facts' own clauses and ids, and recorded
+(``QUALIFIED_CODE``); it is never left out.
+
 Every step is one pass over the passages and the answer's rows.
 """
 
@@ -95,6 +105,8 @@ from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
     _BARE_ADDRESS,
     _HEX_ADDRESS,
+    _MODIFIER_WORDS,
+    _ROUTINE_NOUNS,
     _SUFFIXED_ADDRESS,
     EntryTexts,
     ValidationTally,
@@ -172,6 +184,11 @@ DROPPED_CODE = "agreement.dropped"
 # address or a value a section 5 passage or a fact states) that no row of the
 # answer lists: the model decides each one, and is asked once more (T-554).
 HELD_UNLISTED_CODE = "agreement.held_unlisted"
+# A held sentence whose own clause calls code not read that an entry lists,
+# left standing by the answer (no row, a kept row, or a rewrite that failed):
+# the platform adds what the ledger shows to it, in the facts' own words, and
+# records what stood (T-562). Never left out, never left as written.
+QUALIFIED_CODE = "agreement.qualified"
 
 
 # The kinds of passage the round is shown, by who wrote them from what.
@@ -241,6 +258,15 @@ class Passage:
     # passage or a fact states (:func:`held_closing_sentences`): each one is
     # listed in the answer, as the model decides (T-554).
     held: tuple[str, ...] = ()
+    # A fact about a routine an entry lists, which contradicts a sentence that
+    # calls that routine's code not read (``listed.N``).
+    lists_code: bool = False
+    # The sentences of a writable passage that call code not read which a
+    # ``listed.N`` fact lists, each with those facts' ids and the ids of the
+    # ones about the routine its own clause names (:func:`unread_listed_sentences`):
+    # each one is held, and one its own clause names that the answer leaves
+    # standing is qualified by the platform on those facts (T-562).
+    unread_listed: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = ()
 
 
 def _ids(*sources: Any) -> frozenset[str]:
@@ -540,9 +566,15 @@ def passages_of(
         uncoded.extend(limitations)
     facts.extend(limitation_facts)
     sources = [*facts, *coded]
-    for passage in uncoded:
-        if passage.closing:
-            passage.held = held_closing_sentences(passage.text, sources)
+    listed = [fact for fact in facts if fact.lists_code]
+    for passage in (*coded, *uncoded):
+        holding = held_closing_sentences(passage.text, sources) if passage.closing else ()
+        if listed and _writable(passage):
+            # A sentence calling code not read that an entry lists, in any
+            # section, the body as well as the closing ones (T-562).
+            passage.unread_listed = unread_listed_sentences(passage.text, listed)
+            holding = (*holding, *(sentence for sentence, _ids, _own in passage.unread_listed))
+        passage.held = tuple(dict.fromkeys(holding))
     return [*facts, *coded, *debate, *uncoded]
 
 
@@ -815,16 +847,115 @@ def _said_unread(passages: Iterable[Passage]) -> set[int]:
         starts, _ends = _sentence_units(_UNREAD_CLAUSE.sub("", passage.text))
         ordered = [s for _at, s in sorted((at, s) for s, ats in starts.items() for at in ats)]
         for index, sentence in enumerate(ordered):
-            for match in _SAID_UNREAD.finditer(sentence):
-                before = sentence[: match.start()]
-                breaks = [m.end() for m in _CLAUSE_BREAK.finditer(before)]
-                after = _CLAUSE_BREAK.search(sentence, match.end())
-                clause = sentence[breaks[-1] if breaks else 0 : after.start() if after else None]
-                found = set(_addresses_named(clause)) or _addresses_before(before)
-                if not found and index:
-                    found = _addresses_before(ordered[index - 1])
-                out.update(found)
+            found, _own = _unread_addresses(sentence, ordered[index - 1] if index else "")
+            out.update(found)
     return out
+
+
+# Words that make the address after them a modifier of a statement's subject
+# ("the link from 0x4d20 to 0x5030", "the caller of 0x1400"), but for a routine's
+# code ("the body of 0x3728") and a routine at an address ("the routine at 0x3728").
+_MODIFYING = frozenset({*_MODIFIER_WORDS, "to", "into", "between"})
+_CODE_NOUNS = frozenset(
+    {
+        "body",
+        "bodies",
+        "code",
+        "listing",
+        "listings",
+        "decompile",
+        "decompiles",
+        "decompilation",
+        "disassembly",
+        "pseudocode",
+    }
+)
+
+
+# The words that open a relative clause whose subject the clause before names.
+_RELATIVE_OPENERS = frozenset({"which", "that"})
+
+
+def _subject_address(clause: str) -> set[int]:
+    """The address a statement's clause writes last, where it heads the subject.
+
+    Not one a modifier word puts after another noun ("the link from 0x4d20 to
+    0x5030"), unless the noun is a routine's code ("the body of 0x3728") or a
+    routine at the address ("the routine at 0x3728").
+    """
+    words = [word.strip(",;:()[]\"'`").lower() for word in clause.split()]
+    for at in range(len(words) - 1, -1, -1):
+        found = _addresses_named(words[at])
+        if not found:
+            continue
+        before = words[at - 1] if at else ""
+        head = words[at - 2] if at > 1 else ""
+        if before in _MODIFYING and not (
+            (before in ("of", "for") and head in _CODE_NOUNS)
+            or (before == "at" and head in _ROUTINE_NOUNS)
+        ):
+            return set()
+        return set(found)
+    return set()
+
+
+def _unread_addresses(sentence: str, previous: str) -> tuple[set[int], set[int]]:
+    """The addresses ``sentence`` says the code of is not read, as :func:`_said_unread`
+    reads them, and the one its statement's own clause writes last before it."""
+    found: set[int] = set()
+    own: set[int] = set()
+    for match in _SAID_UNREAD.finditer(sentence):
+        before = sentence[: match.start()]
+        breaks = [m.end() for m in _CLAUSE_BREAK.finditer(before)]
+        after = _CLAUSE_BREAK.search(sentence, match.end())
+        clause = sentence[breaks[-1] if breaks else 0 : after.start() if after else None]
+        named = set(_addresses_named(clause))
+        if match.group(0).lower() != "unread":
+            # The bare word may be said of anything ("the buffer is unread in
+            # 0x3728"); only a statement that code is not read names its own:
+            # the address its clause writes last before it, its subject's; for
+            # a clause a relative word opens ("routine 0x6634, which is not
+            # read"), the one the clause before it writes last.
+            subject = sentence[breaks[-1] if breaks else 0 : match.start()]
+            if subject.strip().lower() in _RELATIVE_OPENERS and breaks:
+                subject = sentence[breaks[-2] if len(breaks) > 1 else 0 : breaks[-1] - 1]
+            own |= _subject_address(subject)
+        here = named or _addresses_before(before)
+        if not here and previous:
+            here = _addresses_before(previous)
+        found |= here
+    return found, own
+
+
+def unread_listed_sentences(
+    text: str, listed: Sequence[Passage]
+) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]:
+    """Each sentence of ``text`` that calls code not read which a ``listed.N`` fact lists.
+
+    Read as :func:`_said_unread` reads a sentence (the statement's own clause,
+    else the nearest address before it, else the last of the sentence
+    before), each with the ids of the facts about those addresses and of the
+    ones about the address the statement's own clause names: such a sentence is
+    contradicted by the ledger itself ("The body of 0x3728 that performs the
+    registration is not read" beside an entry listing 0x3728, haiku11 §5.3),
+    where an address read from around it may be another routine's. The
+    platform's own clause on an unread callee is no part of a sentence here.
+    One pass over the sentences, in the order they stand.
+    """
+    out: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
+    ordered = _sentences_of(text)
+    for index, sentence in enumerate(ordered):
+        if not _SAID_UNREAD.search(sentence):
+            continue
+        found, own = _unread_addresses(
+            _UNREAD_CLAUSE.sub("", sentence),
+            _UNREAD_CLAUSE.sub("", ordered[index - 1]) if index else "",
+        )
+        facts = [fact for fact in listed if not fact.addresses.isdisjoint(found)]
+        if facts:
+            named = tuple(fact.id for fact in facts if not fact.addresses.isdisjoint(own))
+            out.append((sentence, tuple(fact.id for fact in facts), named))
+    return tuple(out)
 
 
 # How a listed routine's code was read, in the facts' words.
@@ -933,6 +1064,7 @@ def _ledger_passages(
                 addresses=_spelled_both([listed.address], bases),
                 on_absence=True,
                 qualifier=listed_routine_clause(_offsets([listed.address], bases), ids, verb),
+                lists_code=True,
             )
         )
     for index, link in enumerate(found.answered, 1):
@@ -2096,19 +2228,26 @@ def _held_unlisted(
     """Each held sentence of a closing passage no row lists, in the passages' order."""
     out: list[Violation] = []
     for passage in passages:
+        unread = {sentence: ids for sentence, ids, _own in passage.unread_listed}
         for sentence in passage.held:
             span = sentences_of(passage).span(sentence)
             if span is None or (passage.id, span[0]) in listed:
                 continue
+            ids = unread.get(sentence)
+            said = (
+                f"calls code not read that {safe_finding_value(', '.join(ids))} "
+                "states an entry lists"
+                if ids
+                else "calls open what a section 5 passage or a fact may state"
+            )
             out.append(
                 Violation(
                     code=HELD_UNLISTED_CODE,
                     message=(
-                        f"{safe_finding_value(passage.id)} calls open what a section 5 "
-                        "passage or a fact may state, and no row lists this sentence: "
-                        f"{safe_finding_value(sentence)!r}. List it: rewrite it on the source "
-                        "that states otherwise, or keep it naming the source you read and "
-                        "found agreeing."
+                        f"{safe_finding_value(passage.id)} {said}, and no row lists this "
+                        f"sentence: {safe_finding_value(sentence)!r}. List it: rewrite it on "
+                        "the source that states otherwise, or keep it naming the source you "
+                        "read and found agreeing."
                     ),
                     path=f"held.{passage.id}",
                 )
@@ -2331,6 +2470,7 @@ def apply_rows(
         "listed": 0,
         "not_applied": 0,
         "dropped": 0,
+        "qualified": 0,
     }
     listed: list[Violation] = []
     written: list[Violation] = []
@@ -2417,6 +2557,7 @@ def apply_rows(
                 answered=True,
             )
         )
+    written.extend(_qualify_unread_left(passages, by_id, spans, _sentences, counts))
     for pid, rewrites in spans.items():
         if not rewrites:
             continue
@@ -2427,6 +2568,57 @@ def apply_rows(
         if passage.write is not None:
             passage.write(text)
     return counts, [*listed, *written]
+
+
+def _qualify_unread_left(
+    passages: Sequence[Passage],
+    by_id: dict[str, Passage],
+    spans: dict[str, list[tuple[int, int, str]]],
+    sentences_of: Callable[[Passage], _Sentences],
+    counts: dict[str, int],
+) -> list[Violation]:
+    """Qualify each held sentence the ledger contradicts that the answer left standing.
+
+    A sentence whose own clause calls code not read that an entry lists
+    (:func:`unread_listed_sentences`) says the opposite of the ledger, in the
+    body as much as in the closing sections: where no row rewrote or left it
+    out, the platform adds the facts' own clauses and ids to it as it stands
+    (``_qualified``), so every section that names the routine says the ledger
+    lists it (T-562). The model's words are not read; what stood is recorded.
+    """
+    out: list[Violation] = []
+    for passage in passages:
+        if not passage.unread_listed or passage.write is None:
+            continue
+        taken = spans.setdefault(passage.id, [])
+        for sentence, _ids, own in passage.unread_listed:
+            facts = [by_id[i] for i in own if i in by_id and by_id[i].qualifier]
+            span = sentences_of(passage).span(sentence) if facts else None
+            if span is None or not facts:
+                continue
+            if any(span[0] < end and start < span[1] for start, end, _ in taken):
+                continue
+            facts = [f for f in facts if f.qualifier.lower() not in span[2].lower()]
+            if not facts:
+                continue
+            rewrite = _qualified(span[2], facts)
+            taken.append((span[0], span[1], rewrite))
+            counts["qualified"] += 1
+            out.append(
+                Violation(
+                    code=QUALIFIED_CODE,
+                    message=(
+                        "A sentence of "
+                        f"{safe_finding_value(passage.label)} calls code not read that "
+                        f"{safe_finding_value(', '.join(f.id for f in facts))} states an entry "
+                        "lists, and no row rewrote it: the platform adds what the ledger "
+                        f"shows: {safe_finding_value(span[2])!r} now reads "
+                        f"{safe_finding_value(rewrite)!r}."
+                    ),
+                    path=f"held.{passage.id}",
+                )
+            )
+    return out
 
 
 async def ask_section_agreement(
@@ -2549,7 +2741,8 @@ async def _ask(
         tally.record_unresolved(AGREEMENT_PRODUCER, listed)
     logger.info(
         "section agreement: %d passage(s) asked about; %d sentence(s) listed, %d rewritten, "
-        "%d kept, %d listed for reading, %d not applied, %d left out.",
+        "%d kept, %d listed for reading, %d not applied, %d left out, %d qualified on the "
+        "ledger.",
         counts["passages"],
         counts["sentences"],
         counts["rewritten"],
@@ -2557,5 +2750,6 @@ async def _ask(
         counts["listed"],
         counts["not_applied"],
         counts["dropped"],
+        counts["qualified"],
     )
     return AgreementRound(summary=counts, tally=tally, degradations=said())

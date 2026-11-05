@@ -529,15 +529,23 @@ def _stored_names() -> list[str]:
     )
 
 
+# The runs whose limitations say a call failed that a later call redid: haiku8's
+# reversing tools, and haiku10's "A batch emulation step did not complete", whose
+# emulation by a comma text was asked again with the list (T-562).
+_HELD_TO_FAILED_CALLS = ("haiku8", "haiku10")
+
+
 @pytest.mark.parametrize("name", _stored_names())
-def test_no_stored_run_but_haiku8_holds_its_limitations_to_the_failed_calls(name: str) -> None:
+def test_no_stored_run_but_haiku8_and_haiku10_hold_their_limitations_to_the_failed_calls(
+    name: str,
+) -> None:
     report, ledger = _stored(name)
     held = [
         p.id
         for p in passages_of(report, entries=ledger)
         if p.id == "limitations" and p.sourced_check is not None
     ]
-    assert held == (["limitations"] if name == "haiku8" else [])
+    assert held == (["limitations"] if name in _HELD_TO_FAILED_CALLS else [])
 
 
 def test_a_call_a_later_call_answered_but_did_not_redo_is_not_redone() -> None:
