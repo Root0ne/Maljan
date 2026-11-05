@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**121 codes in 12 families:** [agreement](#agreement) 12 · [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 15 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 19 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**124 codes in 12 families:** [agreement](#agreement) 15 · [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 15 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 19 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## agreement
 
@@ -66,6 +66,14 @@ A rewrite of a limitations sentence that still says a call failed, or a reading 
 - **Constant** `maljan.reporting.section_agreement:FAILURE_REDONE_CODE`
 - **Docs** none
 
+### `agreement.held_kept`
+
+A held sentence of the conclusion or the limitations that the answer kept, on the sources it named: it stands, and is recorded where a reader finds it.
+
+- **Raised at** `maljan.reporting.section_agreement:apply_rows`
+- **Constant** `maljan.reporting.section_agreement:HELD_KEPT_CODE`
+- **Docs** none
+
 ### `agreement.held_unlisted`
 
 A held sentence of the conclusion or the limitations (one calling open an address or a value a section 5 passage or a fact states) that no row of the answer lists: the model decides each one, and is asked once more (T-554).
@@ -80,6 +88,14 @@ A sentence of a passage shown for reading only (a section 5 passage, a record's 
 
 - **Raised at** `maljan.reporting.section_agreement:apply_rows`
 - **Constant** `maljan.reporting.section_agreement:LISTED_CODE`
+- **Docs** none
+
+### `agreement.qualified`
+
+A held sentence whose own clause calls code not read that an entry lists, left standing by the answer (no row, a kept row, or a rewrite that failed): the platform adds what the ledger shows to it, in the facts' own words, and records what stood (T-562). Never left out, never left as written.
+
+- **Raised at** `maljan.reporting.section_agreement:_qualify_unread_left`
+- **Constant** `maljan.reporting.section_agreement:QUALIFIED_CODE`
 - **Docs** none
 
 ### `agreement.rewrite_cites_elsewhere`
@@ -144,6 +160,14 @@ A row names a source the round was not shown, or answers a section 5 passage wit
 
 - **Raised at** `maljan.reporting.section_agreement:_row_violations`
 - **Constant** `maljan.reporting.section_agreement:UNKNOWN_SOURCE_CODE`
+- **Docs** none
+
+### `agreement.unread_standing`
+
+A held sentence whose own clause calls code not read that an entry lists, which the answer left standing or rewrote still calling it not read: the retry names the listing, so the model may state it in its own words (T-562).
+
+- **Raised at** `maljan.reporting.section_agreement:_unread_standing`
+- **Constant** `maljan.reporting.section_agreement:UNREAD_STANDING_CODE`
 - **Docs** none
 
 ## attck
