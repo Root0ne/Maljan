@@ -42,16 +42,19 @@ const WORDS: Record<ValidationState, string> = {
   retried: "sent back for correction",
   resolved: "fixed on the retry",
   survived: "not fixed",
+  answered: "answered by the agent",
 };
+
+const STATES = Object.keys(WORDS) as ValidationState[];
 
 describe("a correction", () => {
   it("says in words where the violation ended up", () => {
-    for (const state of ["retried", "resolved", "survived"] as ValidationState[]) {
+    for (const state of STATES) {
       const markup = render(
         correction([{ state, message: "cite a call", retryIndex: 1 }], "cite a call"),
       );
       expect(markup).toContain(WORDS[state]);
-      for (const other of ["retried", "resolved", "survived"] as ValidationState[]) {
+      for (const other of STATES) {
         if (other !== state) expect(markup).not.toContain(WORDS[other]);
       }
     }

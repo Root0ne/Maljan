@@ -68,6 +68,7 @@ from maljan.core.undeclared_tools import (
     entry_decompiles,
 )
 from maljan.pipeline.events import (
+    VALIDATION_ANSWERED,
     VALIDATION_RESOLVED,
     VALIDATION_RETRIED,
     VALIDATION_SURVIVED,
@@ -12587,8 +12588,11 @@ class _FeedbackFeed:
                 continue
             seen.add(key)
             self._emit(violation, retry_index, VALIDATION_RESOLVED)
+        # A question answered as it allows says what the producer chose; it is
+        # no finding left unfixed.
         for violation in remaining:
-            self._emit(violation, retry_index, VALIDATION_SURVIVED)
+            state = VALIDATION_ANSWERED if violation.answered else VALIDATION_SURVIVED
+            self._emit(violation, retry_index, state)
 
     def _emit(self, violation: Violation, retry_index: int, state: str) -> None:
         emit_validation_feedback(
@@ -12707,8 +12711,9 @@ async def retry_with_feedback[T](
 
     ``answered`` maps what is left, given what the producer was shown, before
     the conversation is told the outcome: a question the producer answered as
-    the question allows (``Violation.answered``) is published ``resolved``,
-    not ``survived``, and the mapped rows are what is returned.
+    the question allows (``Violation.answered``) is published ``answered``,
+    not ``survived``, as the synchronous loop publishes it, and the mapped rows
+    are what is returned.
 
     ``reply_to_calls`` is for a caller whose retries offer again the tool its
     first answer was asked with, and which sends nothing after the loop: an
@@ -12760,7 +12765,7 @@ async def retry_with_feedback[T](
     if answered is not None:
         violations = answered(violations, shown)
     if feed is not None:
-        feed.outcome(shown, [v for v in violations if not v.answered], retries)
+        feed.outcome(shown, violations, retries)
     return parsed, violations, retries
 
 
@@ -14352,21 +14357,31 @@ def analyst_answer_checks(
     unread: Sequence[Violation],
     functions: Sequence[Violation],
     weak_alignment_challenges: bool,
+    callees: Any,
 ) -> list[Violation]:
     """Every finding of the validation turn about one answer, in the turn's order.
 
     ``whole_answer`` (:func:`whole_answer_questions`), ``unread`` (the parse's
     findings, which the caller records) and ``functions`` (the function-claim
     check's) are computed by the caller, which keeps what they record.
+    ``callees`` is what the caller found around the routines the analyst read
+    (``agents.callees_question.CalleesFound``), asked about when it lists any;
+    ``None`` where the turn does not ask it (once per analyst and job).
     """
     undescribed = decompiled_not_described_violation(
         undescribed_decompiles(candidate, inputs.decompiled, inputs.image_bases)
     )
+    callees_asked = None
+    if callees is not None:
+        from maljan.agents.callees_question import unread_callees_violation
+
+        callees_asked = unread_callees_violation(callees)
     library_only = library_only_claims_violation(candidate)
     return [
         *whole_answer,
         *unread,
         *([undescribed] if undescribed is not None else []),
+        *([callees_asked] if callees_asked is not None else []),
         *([library_only] if library_only is not None else []),
         *functions,
         *validate_isr(

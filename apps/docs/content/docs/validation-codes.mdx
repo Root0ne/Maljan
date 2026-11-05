@@ -46,7 +46,7 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**118 codes in 12 families:** [agreement](#agreement) 10 · [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 14 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 19 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**119 codes in 12 families:** [agreement](#agreement) 10 · [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 15 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 19 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## agreement
 
@@ -226,6 +226,14 @@ No comment names its meaning, and `maljan.pipeline.validation:schema_violations`
 - **Docs** [Latrodectus score: iteration 4, default model](/docs/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/)
 
 ## isr
+
+### `isr.callees_not_read`
+
+An analyst reading code stopped on its own with the main-path callees of routines it read unread. Those functions, ranked by the main path, are listed to it, once per job, and it decides whether to read them.
+
+- **Raised at** `maljan.agents.callees_question:callees_asked_record`, `maljan.agents.callees_question:unread_callees_violation`
+- **Constant** `maljan.agents.callees_question:UNREAD_CALLEES_CODE`
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `isr.claim_without_confidence`
 

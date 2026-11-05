@@ -215,6 +215,59 @@ class TestTheRowsThatQuoteAnAnalyst:
         assert len(violations[0].message) < MESSAGE_LIMIT
 
 
+class TestTheRowsAboutUnreadFunctions:
+    """The unread-functions question (T-558) and why it was not put.
+
+    Its rows carry the platform's own addresses and counts, held to the helper
+    item by item all the same; the one place a tool's own text reaches it is
+    the not-run sentence, which names the undeclared tools an analyst called.
+    """
+
+    def test_the_question_s_fields_go_through_the_helper(self) -> None:
+        from maljan.agents.callees_question import (
+            CalleesFound,
+            CalleeToRead,
+            unread_callees_violation,
+        )
+
+        secret, url = credentialled_url()
+        one = CalleeToRead(
+            address=0x401000, callers=(0x400000,), depth=1, start=0x400000, called_from=1, calls=0
+        )
+        found = CalleesFound(ranked=(one,), starts=f"{url} {'H' * 3000}")
+
+        row = unread_callees_violation(found)
+
+        assert row is not None and secret not in row.message
+        assert len(row.message) < 2 * MESSAGE_LIMIT
+
+    def test_an_undeclared_tool_s_name_is_scrubbed_where_the_note_names_it(self) -> None:
+        from unittest.mock import MagicMock
+
+        from maljan.agents.base_agent import BaseAnalyst
+        from maljan.agents.callees_question import callees_to_read
+        from maljan.schemas.evidence import LedgerEntry
+
+        secret, url = credentialled_url()
+        entry = LedgerEntry(id="ev_0001", tool=f"{url}{'J' * 3000}", args={}, output="{}")
+        entry.source = "mcp:unknown"
+
+        found = callees_to_read([], [entry])
+
+        assert found.says_why() and secret not in found.not_run
+        assert len(found.not_run) < MESSAGE_LIMIT
+
+        said: list[tuple[str, dict[str, Any]]] = []
+        analyst = MagicMock(name="analyst")
+        analyst.name = "any_reader"
+        analyst._budget_records = []
+        analyst._container.event_sink = lambda kind, data: said.append((kind, data))
+        BaseAnalyst._state_callees_not_run(analyst, found.not_run, "job")
+
+        ((kind, data),) = said
+        assert kind == "agent_message" and secret not in data["text"]
+
+
 # ---------------------------------------------------------------------------
 # The class, rather than the instances
 # ---------------------------------------------------------------------------
@@ -225,6 +278,7 @@ WALKED: tuple[str, ...] = (
     "pipeline/validation.py",
     "pipeline/function_claims.py",
     "pipeline/nodes.py",
+    "agents/callees_question.py",
     "agents/delegation.py",
     "agents/judge_agent.py",
     "agents/judge_postprocess.py",
@@ -247,6 +301,11 @@ WALKED: tuple[str, ...] = (
 # module's top level is owned without being listed: it is this repository's own
 # source text.
 CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
+    # The unread-functions question: its list is a join of items each wrapped
+    # in the helper where it is built, and its bound sentence is counts and a
+    # module constant; the answered row's count of those left is a count.
+    ("agents/callees_question.py", "unread_callees_violation"): frozenset({"listed", "bound"}),
+    ("agents/callees_question.py", "callees_asked_record"): frozenset({"left_unread"}),
     # A bullet's place in the summary, counted from one.
     ("reporting/composer_pro.py", "summary_shape_violations"): frozenset({"number"}),
     # The ATT&CK catalogue's own answers about a technique, and the router's

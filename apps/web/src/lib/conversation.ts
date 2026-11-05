@@ -100,13 +100,15 @@ export interface ToolDetail {
  * What became of a violation, in the publisher's own words.
  *
  * `retried` is the producer being shown it, and `resolved` or `survived` is
- * the loop saying which way it went. A line that states nothing — a run
- * recorded before the outcome was published — is the correction turn, which
- * is what `retried` means.
+ * the loop saying which way it went. `answered` is a question the producer
+ * answered as the question allows (which unread callees it chose to read):
+ * its message says what it chose, and nothing was left unfixed. A line that
+ * states nothing — a run recorded before the outcome was published — is the
+ * correction turn, which is what `retried` means.
  */
-export type ValidationState = "retried" | "resolved" | "survived";
+export type ValidationState = "retried" | "resolved" | "survived" | "answered";
 
-const VALIDATION_STATES: ValidationState[] = ["retried", "resolved", "survived"];
+const VALIDATION_STATES: ValidationState[] = ["retried", "resolved", "survived", "answered"];
 
 /** One line the run published about one violation. */
 export interface FeedbackEntry {

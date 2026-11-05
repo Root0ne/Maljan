@@ -35,6 +35,16 @@ from langchain_core.language_models.chat_models import BaseChatModel
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
+from maljan.agents.callees_question import (
+    NOT_RUN_FAILED,
+    NOT_RUN_NO_LISTING,
+    NOT_RUN_NO_TOOLS,
+    UNREAD_CALLEES_CODE,
+    CalleesFound,
+    callees_asked_record,
+    callees_to_read,
+    reads_code,
+)
 from maljan.agents.claim_headings import (
     LINE_PREFIX,
     claims_headed_with_notes,
@@ -4260,6 +4270,7 @@ def _not_asked(initial: Sequence[Violation], detail: str) -> list[Violation]:
             ANALYST_REPEATED_CODE,
             CLAIMS_UNDER_DISPUTES_CODE,
             DECOMPILED_NOT_DESCRIBED_CODE,
+            UNREAD_CALLEES_CODE,
             LIBRARY_ONLY_CLAIMS_CODE,
             FUNCTION_CLAIM_UNHELD_CODE,
         )
@@ -6320,6 +6331,94 @@ class BaseAnalyst(BudgetMeter, ABC):
         rows, _claims = self._function_map_sources()
         live = getattr(self, "_live_map_entries", None) or []
         return [*rows, *live]
+
+    def _callees_to_ask(
+        self, isr: AgentISR, own: Sequence[Any], entries: Callable[[], Sequence[Any]], job: str
+    ) -> Any:
+        """What the unread-functions question would list for ``isr``, or ``None`` to ask nothing.
+
+        Whether the analyst reads code is read off this loop's own entries
+        (``own``) first; only when it does are ``entries``, every entry of the
+        job the map kept, fetched, so an analyst that reads no code pays nothing. ``None`` where nothing is unread, where the analyst
+        reads no code (nothing is said), and where the platform could not
+        tell: then why is said once per job, in the analyst's conversation and
+        on its loop's record (``callees_question.not_run``). Whether the turn
+        can carry the tools to read with is decided where the turn is asked
+        (:meth:`_callees_without_tools`). Never raises.
+        """
+        definition = getattr(self, "_resolved", None)
+        try:
+            code, why = reads_code(definition, own)
+            if not code:
+                if why != NOT_RUN_NO_LISTING:
+                    BaseAnalyst._state_callees_not_run(self, why, job)
+                return None
+            found = callees_to_read(
+                isr.claims,
+                entries(),
+                list(getattr(self, "pack_entries", None) or ()),
+                definition=definition,
+            )
+        except Exception as exc:  # noqa: BLE001 — a fact left out never costs the turn
+            self.logger.warning("%s: the unread-callees check could not run (%s).", self.name, exc)
+            BaseAnalyst._state_callees_not_run(
+                self, NOT_RUN_FAILED.format(kind=type(exc).__name__), job
+            )
+            return None
+        if not found.ranked:
+            if found.says_why():
+                BaseAnalyst._state_callees_not_run(self, found.not_run, job)
+            return None
+        return found
+
+    def _callees_without_tools(self, tooled: bool) -> str:
+        """Why the turn being asked cannot carry the tools to read a function with, or ``""``.
+
+        ``tooled`` is the turn's own :meth:`_turns_carry_tools`, read once
+        where the turn is asked; with fewer than three steps of the loop left
+        its questions are asked without tools too (:meth:`_answer_after_loop`).
+        """
+        if not tooled:
+            return "the agent has no tools, or its model could not bind them"
+        if bool(getattr(self, "_last_loop_steps_known", False)):
+            steps = getattr(self, "_last_loop_steps_left", None)
+            if isinstance(steps, int) and steps < 3:
+                return (
+                    f"{steps} step(s) of its loop were left, and a turn that may call a tool "
+                    "needs three"
+                )
+        return ""
+
+    def _state_callees_not_run(self, reason: str, job: str) -> None:
+        """Say why the unread-functions question was not put, once per job. Never raises."""
+        if getattr(self, "_callees_stated_job", None) == job:
+            return
+        self._callees_stated_job = job
+        try:
+            from maljan.pipeline.events import emit_agent_message
+
+            BaseAnalyst._note_on_last_loop(self, "callees_question", {"not_run": reason})
+            emit_agent_message(
+                BaseAnalyst._event_sink(self),
+                speaker=str(self.name),
+                role="system",
+                kind="system",
+                stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+                text=(
+                    "The platform did not ask about the unread functions around the routines "
+                    f"this analyst read: {reason}."
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 — a note never costs the turn
+            self.logger.debug("%s: the not-run note was not said (%s).", self.name, exc)
+
+    def _kept_map_entries(self) -> list[LedgerEntry]:
+        """The entries the map kept for this job, or none where they cannot be read."""
+        try:
+            return list(self._function_map_entries())
+        except Exception as exc:  # noqa: BLE001 — a fact left out never costs a turn
+            self.logger.debug("%s: the map's entries were not read (%s).", self.name, exc)
+            return []
 
     def _function_map_text(self, room: int | None = None) -> str:
         """The function map block for this agent as of now, or ``""``; never raises."""
@@ -10104,6 +10203,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             listed: Any
             facts: Any
             facts_failed: str
+            own: Any
 
         read: dict[int, _Ledger] = {}
 
@@ -10156,7 +10256,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                     facts_failed = facts_unread(exc)
                     self.logger.warning("%s: function claims %s.", self.name, facts_failed)
                     facts = None
-            held = _Ledger(ledger_ids, decompiled, image_bases, listed, facts, facts_failed)
+            held = _Ledger(
+                ledger_ids, decompiled, image_bases, listed, facts, facts_failed, own_entries
+            )
             read[len(own_entries)] = held
             return held
 
@@ -10284,6 +10386,44 @@ class BaseAnalyst(BudgetMeter, ABC):
                 alignment_margin=margin,
             )
 
+        # The unread callees of what the answer describes are asked once per
+        # analyst and job: in the first turn that has any, and not again by
+        # the retry's own check or a later round's turn. Asked in this turn,
+        # the retry's check states what the analyst read since, as an
+        # answered finding (``callees_question.callees_asked_record``).
+        job = str(getattr(self, "_job_id", None) or "job")
+        callees_asked_here: list[CalleesFound] = []
+        kept_for_map: list[list[Any]] = []
+
+        def _callees_open() -> bool:
+            return getattr(self, "_callees_asked_job", None) != job
+
+        def _code_entries() -> list[Any]:
+            # Every entry of this job's loops the map kept, then this loop's
+            # as it stands: read only where the question is computed.
+            if not kept_for_map:
+                kept_for_map.append(BaseAnalyst._kept_map_entries(self))  # type: ignore[arg-type]
+            return [*kept_for_map[0], *_ledger().own]
+
+        callees_to_ask: CalleesFound | None = (
+            BaseAnalyst._callees_to_ask(  # type: ignore[arg-type]
+                self, isr, _ledger().own, _code_entries, job
+            )
+            if not only_cut and _callees_open()
+            else None
+        )
+
+        def _callees_answered() -> list[Violation]:
+            if not callees_asked_here:
+                return []
+            pack = list(getattr(self, "pack_entries", None) or ())
+            record, answered = callees_asked_record(callees_asked_here[0], _code_entries(), pack)
+            if record:
+                BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
+                    self, "callees_question", record
+                )
+            return [answered] if answered is not None else []
+
         def _validator(candidate: AgentISR) -> list[Violation]:
             if only_cut:
                 return _whole_answer_questions(candidate)
@@ -10291,14 +10431,18 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Every answer checked that no claim could be read from, the first
             # and its retry alike, goes to the run record whole.
             self._keep_unparsed_answers(unread, candidate.revision_round)
-            return analyst_answer_checks(
-                candidate,
-                _inputs(),
-                whole_answer=_whole_answer_questions(candidate),
-                unread=unread,
-                functions=_function_check(candidate).violations,
-                weak_alignment_challenges=challenges and candidate is isr,
-            )
+            return [
+                *analyst_answer_checks(
+                    candidate,
+                    _inputs(),
+                    whole_answer=_whole_answer_questions(candidate),
+                    unread=unread,
+                    functions=_function_check(candidate).violations,
+                    weak_alignment_challenges=challenges and candidate is isr,
+                    callees=(callees_to_ask if candidate is isr and _callees_open() else None),
+                ),
+                *_callees_answered(),
+            ]
 
         if nudged and not only_cut:
             unasked = parse_violations(isr, techniques=techniques)
@@ -10364,6 +10508,18 @@ class BaseAnalyst(BudgetMeter, ABC):
         # model binds them (``_answer_after_loop``), and the prompt says which.
         tooled = BaseAnalyst._turns_carry_tools(self, VALIDATION_RETRY_CALL)  # type: ignore[arg-type]
         self._questions_carry_tools = tooled
+        # The unread-functions question asks the analyst to read: a turn that
+        # cannot carry its tools does not put it, and says why.
+        if callees_to_ask is not None and any(v.code == UNREAD_CALLEES_CODE for v in initial):
+            no_tools = BaseAnalyst._callees_without_tools(self, tooled)  # type: ignore[arg-type]
+            if no_tools:
+                callees_to_ask = None
+                initial = [v for v in initial if v.code != UNREAD_CALLEES_CODE]
+                BaseAnalyst._state_callees_not_run(  # type: ignore[arg-type]
+                    self, NOT_RUN_NO_TOOLS.format(why=no_tools), job
+                )
+                if not initial:
+                    return isr
         prompt = self._system_prompt("", tools=None if tooled else ())
         messages: list[BaseMessage] = []
         if prompt:
@@ -11164,6 +11320,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             def _fed_back(violations: Sequence[Violation]) -> None:
                 if not fed_at:
                     fed_at.append(len(getattr(self, "_evidence_entries", None) or []))
+                if callees_to_ask is not None and any(
+                    v.code == UNREAD_CALLEES_CODE for v in violations
+                ):
+                    self._callees_asked_job = job
+                    callees_asked_here.append(callees_to_ask)
                 shown.extend(violations)
                 tally.count(violations)
                 round_asked[:] = [list(violations)]

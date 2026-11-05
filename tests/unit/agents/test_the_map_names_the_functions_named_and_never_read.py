@@ -16,6 +16,7 @@ import logging
 import re
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -25,6 +26,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
 from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.callees_question import CalleesFound
 from maljan.agents.function_callees import named_unread
 from maljan.agents.function_map import (
     NAMED_IN_CLAIMS,
@@ -408,7 +410,10 @@ def _run_loop(window_tokens: int) -> tuple[list[dict[str, Any]], str]:
     analyst.run_state_block = "sample: test"
     analyst._job_id = "job-1"
     analyst._container = _Container(window_tokens)
-    analyst.safe_analyze_isr("the task")
+    # The question about the unread callees after the loop (T-558) is tested
+    # apart; here the loop's own calls are counted.
+    with patch("maljan.agents.base_agent.callees_to_read", return_value=CalleesFound()):
+        analyst.safe_analyze_isr("the task")
     last = [str(m.content) for m in model.seen[-1] if isinstance(m, ToolMessage)][-1]
     return calls, last
 

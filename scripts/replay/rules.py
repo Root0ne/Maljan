@@ -235,6 +235,9 @@ class _Run:
     # How the report's degradation was decided: counts only.
     degradation: dict[str, int] = field(default_factory=dict)
     not_replayed: list[dict[str, Any]] = field(default_factory=list)
+    # The analysts already asked about the unread callees of what they
+    # described: the platform asks once per analyst and job.
+    callees_asked: set[str] = field(default_factory=set)
     _named: set[tuple[str, str]] = field(default_factory=set)
 
     def name(self, part: str, why: str, *, error: bool = False) -> None:
@@ -569,13 +572,21 @@ def _parse_answer(run: _Run, agent: str, domain: str, text: str, revision_round:
     return analyst._drain_findings(isr)
 
 
-def _analyst_checks(run: _Run, isr: Any, own: _Own, techniques: bool, *, whole: bool) -> list[Any]:
+def _analyst_checks(
+    run: _Run, isr: Any, own: _Own, techniques: bool, *, whole: bool, agent: str = ""
+) -> list[Any]:
     """The analyst validation turn's checks over one answer, composed by the platform's function.
 
     ``whole`` asks the questions about the answer as a whole (its repeats; its
     cuts are not stored) and the parse's; the claims in force are asked
-    neither, as a turn asks them of no claim it did not parse.
+    neither, as a turn asks them of no claim it did not parse. The unread
+    functions around the routines an analyst read are asked of ``agent``'s
+    first answer that has any, as the turn asks them once; the claims in force
+    are not asked them, since a turn's own retry never raises them again.
+    Whether the analyst's turn could carry its tools is not stored: the replay
+    reads it as able to.
     """
+    from maljan.agents.callees_question import callees_to_read
     from maljan.pipeline import validation as v
     from maljan.tools import knowledge
 
@@ -620,14 +631,28 @@ def _analyst_checks(run: _Run, isr: Any, own: _Own, techniques: bool, *, whole: 
         alignment_threshold=float(_setting("validation.alignment_threshold")),
         alignment_margin=float(_setting("validation.alignment_margin")),
     )
-    return v.analyst_answer_checks(
+    callees = None
+    if whole and agent and agent not in run.callees_asked:
+        listed = callees_to_read(getattr(isr, "claims", None) or (), own.entries, run.pack)
+        callees = listed if listed.ranked else None
+    found = v.analyst_answer_checks(
         isr,
         inputs,
         whole_answer=whole_answer,
         unread=unread,
         functions=functions,
         weak_alignment_challenges=False,
+        callees=callees,
     )
+    if callees is not None:
+        run.callees_asked.add(agent)
+        run.name(
+            f"analyst {agent}",
+            "what the analyst read after the question about the unread functions around "
+            "the routines it read is a model turn the replay does not make; the question is "
+            "shown on its first replayed answer that has any",
+        )
+    return found
 
 
 def _answer_record(
@@ -651,7 +676,7 @@ def _answer_record(
             isr.findings = list(run.stored_findings.get(agent) or [])
             isr.artifacts = list(run.stored_artifacts.get(agent) or [])
     own = _own(run, agent, before)
-    found = _analyst_checks(run, isr, own, techniques, whole=True)
+    found = _analyst_checks(run, isr, own, techniques, whole=True, agent=agent)
     flags = _claim_flags(found, isr, show_text=run.show_text)
     record: dict[str, Any] = {
         "answer": f"round {revision_round}",
