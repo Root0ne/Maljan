@@ -281,15 +281,8 @@ export function useSettings() {
    *  `needs_current_password` (`keysNeedingPassword`); a caller that has none
    *  (a guide) is asked for it here. */
   const apply = useCallback(async (currentPassword?: string) => {
-    let password = currentPassword;
-    const policy = keysNeedingPassword(Object.keys(pending), entriesByKey);
-    if (policy.length > 0 && password === undefined) {
-      const answer = await askPassword(policy);
-      if (answer === null) return null;
-      password = answer;
-    }
-    // A new agent with no category is refused before anything is sent, under
-    // its field, in the API's own words (`missingCategoryErrors`).
+    // A new agent with no category is refused before anything is sent or a password is asked,
+    // under its field, in the API's own words (`missingCategoryErrors`).
     const definitionsEntry = entriesByKey[AGENT_DEFINITIONS_KEY];
     const uncategorised = missingCategoryErrors(
       pending[AGENT_DEFINITIONS_KEY],
@@ -301,6 +294,13 @@ export function useSettings() {
       setErrors(uncategorised);
       setActionError("Choose a category for each new agent before saving.");
       return null;
+    }
+    let password = currentPassword;
+    const policy = keysNeedingPassword(Object.keys(pending), entriesByKey);
+    if (policy.length > 0 && password === undefined) {
+      const answer = await askPassword(policy);
+      if (answer === null) return null;
+      password = answer;
     }
     setSaving(true);
     setErrors({});
