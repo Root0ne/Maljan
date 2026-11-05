@@ -982,10 +982,15 @@ server (Settings → Tool servers → `analysis` → `env`):
 | Name | What it names | Default |
 | :-- | :-- | :-- |
 | `MALJAN_SIGMA_RULES_DIR` | Directory of Sigma rule YAML, loaded recursively. | `data/sigma_rules` |
-| `MALJAN_YARA_RULES_DIR` | The YARA rule file the scan compiles. | `data/yara_ttp_rules.yaml` |
+| `MALJAN_YARA_RULES_DIR` | The YARA rule file the scan compiles, or a directory of them (`*.yml`, `*.yaml`, compiled as one corpus; a file that cannot be read is skipped and named in the answer). | `data/yara_ttp_rules.yaml` |
 
-An unset value means the corpus the project ships; a path that does not exist
-means an empty corpus and no matches, not a failure. `analysis.sigma_rules_dir`
+An unset value means the corpus the project ships. A corpus that loads no rule
+(a path that does not exist, an empty file, a directory holding no rule file) is
+a scan that did not run, never one that matched nothing: the scan answers with
+the `missing_dependency` code and how to put the corpus in place, the triage
+pack records the step failed, the run is degraded and the report's scope names
+the scan with why, and `POST /jobs` and the system status name it before the
+job. capa's rules are held to the same. `analysis.sigma_rules_dir`
 was the previous name for the first of these — a stored override moves into the
 server's `env` automatically on upgrade.
 
@@ -5003,10 +5008,21 @@ the lost tools from it.
 (`maljan.tools.capabilities.data`): the default path the tool reads, the core
 setting whose value a caller that reads it hands the tool instead, the server
 environment variable that replaces the default, and the file pattern a directory
-must hold. The built-in sidecars declare the corpora that are fetched rather than
-tracked: capa's rules (`*.yml`; `static.capa.rules_dir`, which the analysis
-server's `capa` tool reads as `MALJAN_CAPA_RULES_DIR`) and the Sigma corpus
-(`*.yml` or `*.yaml`; `MALJAN_SIGMA_RULES_DIR`, else `data/sigma_rules`).
+must hold. The built-in sidecars declare every rule engine's corpus: the ones
+fetched rather than tracked, capa's rules (`*.yml`; `static.capa.rules_dir`,
+which the analysis server's `capa` tool reads as `MALJAN_CAPA_RULES_DIR`) and
+the Sigma corpus (`*.yml` or `*.yaml`; `MALJAN_SIGMA_RULES_DIR`, else
+`data/sigma_rules`), and the tracked YARA corpus (`MALJAN_YARA_RULES_DIR`, else
+`data/yara_ttp_rules.yaml`), which only an override can name missing.
+
+Besides the servers a job calls and the pack's readings, the check looks at every
+enabled in-process pack step that no reading stands in for and whose tool a
+sidecar declares (the Sigma pass over the sandbox report): it runs in the worker
+whatever the server's block says, switched off, reached at an address or with an
+import path of its own, so its needs are looked at in the worker's environment
+and it is named under `pipeline`, the server its evidence entries are recorded
+under. When the server's tool lacks the same thing with the same remedy, the two
+are one row whose server reads `analysis, pipeline`.
 
 A data path declared with both a setting and a server variable is read in one
 place by every reading of the tool: when the setting names a path other than the
@@ -5024,7 +5040,10 @@ its override or default; for the worker's own reading, the setting. A tool whose
 file, or a directory holding no matching file is named as unavailable: the reason
 gives what named the path, and the path relative to the project root
 (`data/capa-rules is missing or empty (named by the default)`; a path outside the
-project is not shown), and the remedy says how to put it there. A server whose
+project is not shown), and the remedy says how to put it there. The check looks
+and does not load: a file that is there and holds no rule (a YARA corpus of
+`rules: []`) passes it, and the scan that reads it answers that it did not run,
+which degrades the run. A server whose
 block sets `PYTHONPATH` has neither its modules nor its data checked. A server
 does not probe a data path in its manifest. A tool that declares no data is
 checked as before.

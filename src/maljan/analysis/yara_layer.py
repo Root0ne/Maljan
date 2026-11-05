@@ -245,6 +245,10 @@ class YaraLayer:
         self._compiled_all_of: dict[str, list[re.Pattern[str]]] = {}
         # Platform-filter telemetry (parallel to SigmaLayer).
         self._filtered_count: int = 0
+        # The rule files of a directory corpus that could not be read, each
+        # ``{"file", "error"}``, set by whoever joined the files
+        # (``tools.rules._yara_layer``) so the scan's answer names them.
+        self.files_not_loaded: list[dict[str, str]] = []
 
         if _YARA_AVAILABLE and rules:
             compiled, id_map = self._compile_yara_rules(rules)
@@ -290,6 +294,15 @@ class YaraLayer:
             FileNotFoundError: If the rules file does not exist.
             ValueError: If the YAML structure is invalid.
         """
+        return cls(cls.rules_from_yaml(path))
+
+    @staticmethod
+    def rules_from_yaml(path: str | Path) -> list[YaraTTPRule]:
+        """The rules one YAML file holds, parsed and not compiled.
+
+        What :meth:`from_yaml` compiles, for a caller that joins several files
+        into one layer and compiles once. Raises as :meth:`from_yaml` does.
+        """
         try:
             import yaml  # type: ignore[import-untyped]
         except ImportError as exc:
@@ -315,7 +328,7 @@ class YaraLayer:
                 logger.warning("Skipping malformed YARA rule %s: %s", entry.get("id", "?"), exc)
 
         logger.info("YaraLayer: loaded %d rules from %s", len(rules), rules_path.name)
-        return cls(rules)
+        return rules
 
     @classmethod
     def from_default_rules(cls) -> YaraLayer:

@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-11-01T10:00:00Z",
+  "verdict": "Malware",
+  "overall_confidence": 0.8,
+  "degraded_mode": true,
+  "identity": {
+    "file_name": "sample.dll",
+    "file_type": "pe",
+    "file_size_bytes": 2048,
+    "hashes": {"sha256": "6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef"}
+  },
+  "degradation_reasons": ["triage.capa_failed"],
+  "run_summary": {
+    "degraded_mode": true,
+    "degradation_reasons": ["triage.capa_failed"],
+    "profile": {"name": "all_tools", "analysts": ["static", "dynamic", "network"]},
+    "evidence": {
+      "failures": [
+        {
+          "tool": "capa",
+          "count": 1,
+          "error": "capa rules directory /srv/run-hk8/data/capa-rules is missing or empty",
+          "server": "pipeline",
+          "entry_id": "ev_0008",
+          "remediation": "read the message; if it names nothing you can change, report it with the server log"
+        }
+      ]
+    }
+  }
+}

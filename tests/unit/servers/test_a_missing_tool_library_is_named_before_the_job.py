@@ -152,17 +152,24 @@ class TestReadinessNamesWhatTheJobWouldCall:
     ) -> None:
         asked = _without(monkeypatch, "sigma")
         found = unavailable_tools(Settings())
-        assert [u.tool for u in found] == ["sigma_match", "sigma_match_sandbox"]
-        assert asked.count("sigma") == 1
+        assert [(u.server, u.tool) for u in found] == [
+            ("analysis", "sigma_match"),
+            ("analysis", "sigma_match_sandbox"),
+            ("pipeline", "sigma_match_sandbox"),
+        ]
+        # Once for the server and once for the worker, where the pack's Sigma
+        # pass runs: two tools needing it in one place ask once.
+        assert asked.count("sigma") == 2
 
     def test_a_tool_the_servers_block_does_not_offer_is_not_named(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # sigma_match is an agent's tool and no pack reading stands in for it.
+        # sigma_match is an agent's tool and no pack reading stands in for it;
+        # the pack's own Sigma pass runs in the worker whatever the block offers.
         _without(monkeypatch, "sigma")
         settings = Settings()
         settings.mcp.servers["analysis"].tools = ["hashes", "pe_info", "capa"]
-        assert unavailable_tools(settings) == []
+        assert [u.tool for u in unavailable_tools(settings)] == ["sigma_match_sandbox"]
 
     def test_a_pack_reading_is_named_whatever_tools_the_block_offers(
         self, monkeypatch: pytest.MonkeyPatch
@@ -189,7 +196,8 @@ class TestReadinessNamesWhatTheJobWouldCall:
         _without(monkeypatch, "sigma")
         settings = Settings()
         settings.mcp.servers["analysis"].enabled = False
-        assert unavailable_tools(settings) == []
+        # Only the pack's own Sigma pass, which runs in the worker.
+        assert [u.tool for u in unavailable_tools(settings)] == ["sigma_match_sandbox"]
 
     def test_a_server_on_another_interpreter_is_left_to_its_own_manifest(
         self, monkeypatch: pytest.MonkeyPatch
@@ -198,8 +206,8 @@ class TestReadinessNamesWhatTheJobWouldCall:
         settings = Settings()
         settings.mcp.servers["analysis"].command = "/opt/elsewhere/bin/python"
         # Its agent tools are its own manifest's to say; the pack's reading of
-        # capa still runs in the worker.
-        assert [u.tool for u in unavailable_tools(settings)] == ["capa"]
+        # capa and its Sigma pass still run in the worker.
+        assert [u.tool for u in unavailable_tools(settings)] == ["capa", "sigma_match_sandbox"]
 
     def test_a_reading_runs_on_its_server_when_that_is_reached_at_an_address(
         self, monkeypatch: pytest.MonkeyPatch
@@ -235,8 +243,9 @@ class TestReadinessNamesWhatTheJobWouldCall:
         _without(monkeypatch, "sigma", "capa")
         settings = Settings()
         settings.mcp.servers["analysis"].env = {"PYTHONPATH": "/opt/libs"}
-        # The worker's own reading of capa is on the worker's import path.
-        assert [u.tool for u in unavailable_tools(settings)] == ["capa"]
+        # The worker's own reading of capa and its Sigma pass are on the
+        # worker's import path.
+        assert [u.tool for u in unavailable_tools(settings)] == ["capa", "sigma_match_sandbox"]
 
     def test_what_is_found_is_logged_at_the_level_asked(
         self, monkeypatch: pytest.MonkeyPatch

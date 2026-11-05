@@ -26,6 +26,11 @@ from app.deps import get_current_user, optional_current_user
 from maljan.core.config import Settings
 from maljan.tools import capabilities, emulated_strings
 
+# A corpus that holds: the check before a job looks for a non-empty file, and
+# the scan for a rule, so a fixture that means "held" writes one.
+YARA_RULE = "rules:\n  - id: held\n    technique_id: T1059\n    patterns: [held]\n"
+
+
 CAPA_ROW = {
     "server": "analysis",
     "tool": "capa",
@@ -181,11 +186,12 @@ _DATA_HELD = capabilities.data_held
 
 
 def _host_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
-    """A project root of ``tmp_path`` holding the Sigma corpus and no capa rules."""
+    """A project root of ``tmp_path`` holding the Sigma and YARA corpora and no capa rules."""
     monkeypatch.setattr(capabilities, "data_held", _DATA_HELD)
     monkeypatch.setattr(capabilities, "_data_root", lambda: tmp_path)
     (tmp_path / "data" / "sigma_rules").mkdir(parents=True)
     (tmp_path / "data" / "sigma_rules" / "r.yml").write_text("title: r\n", encoding="utf-8")
+    (tmp_path / "data" / "yara_ttp_rules.yaml").write_text(YARA_RULE, encoding="utf-8")
     return Settings()
 
 
@@ -218,5 +224,32 @@ class TestADeclaredDataPath:
         (tmp_path / "data" / "capa-rules").mkdir()
         (tmp_path / "data" / "capa-rules" / "r.yml").write_text("rule:\n", encoding="utf-8")
 
+        assert _submit(settings=settings).json()["unavailable_tools"] is None
+        assert _status(MagicMock(role="user"), settings)["unavailable_tools"] == []
+
+
+class TestAnInProcessRuleEngine:
+    """The haiku10 shape (T-556): the pack's Sigma pass runs in the worker with no corpus."""
+
+    def test_its_missing_corpus_is_named_by_the_gate_and_the_status(
+        self, host: set[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        settings = _host_data(tmp_path, monkeypatch)
+        (tmp_path / "data" / "capa-rules").mkdir()
+        (tmp_path / "data" / "capa-rules" / "r.yml").write_text("rule:\n", encoding="utf-8")
+        (tmp_path / "data" / "sigma_rules" / "r.yml").unlink()
+        # A server block whose data this process cannot check: only the
+        # worker's own pass is left to name the corpus.
+        settings.mcp.servers["analysis"].env = {"PYTHONPATH": "/opt/libs"}
+
+        response = _submit(settings=settings)
+        assert response.status_code == 201
+        (row,) = response.json()["unavailable_tools"]
+        assert (row["server"], row["tool"]) == ("pipeline", "sigma_match_sandbox")
+        assert row["reason"] == "data/sigma_rules is missing or empty (named by the default)"
+        assert row["manifest_code"] == "missing_dependency"
+        assert _status(MagicMock(role="user"), settings)["unavailable_tools"] == [row]
+
+        (tmp_path / "data" / "sigma_rules" / "r.yml").write_text("title: r\n", encoding="utf-8")
         assert _submit(settings=settings).json()["unavailable_tools"] is None
         assert _status(MagicMock(role="user"), settings)["unavailable_tools"] == []

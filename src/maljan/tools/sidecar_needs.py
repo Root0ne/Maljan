@@ -45,8 +45,9 @@ YARA_REMEDIATION = "install yara-python on the host that runs this server: uv sy
 # clone or worktree has none until they are fetched. The worker hands its own
 # reading of capa the operator's setting, and the server's tool the same value
 # through the override its launch is given (``handed_env``); Sigma's are the
-# server's default unless its environment names others. A tool whose data is
-# vendored declares none.
+# server's default unless its environment names others. A rule engine declares
+# its corpus even when it is vendored: an engine that loaded no rule did not
+# run (``rules._not_loaded``), and an override can name an empty one.
 CAPA_RULES = data(
     rules.DEFAULT_CAPA_RULES,
     setting="static.capa.rules_dir",
@@ -54,6 +55,10 @@ CAPA_RULES = data(
     pattern="*.yml",
 )
 SIGMA_RULES = data(rules.DEFAULT_SIGMA_RULES, override=rules.SIGMA_RULES_ENV, pattern="*.y*ml")
+# YARA's corpus is tracked, so only an override can name one that is missing.
+YARA_RULES = data(
+    rules.DEFAULT_YARA_RULES, override=rules.YARA_RULES_ENV, pattern="*.y*ml", fetched=False
+)
 
 # What each tool needs beyond the interpreter, probed once when the server
 # starts (a data path only before a job). A tool that is not listed always answers.
@@ -79,7 +84,7 @@ ANALYSIS: list[ToolNeeds] = [
     ToolNeeds("document_info", (module("olefile"),), without="the PDF and OOXML halves"),
     ToolNeeds(
         "yara_scan",
-        (module("yara"),),
+        (module("yara"), YARA_RULES),
         timeout_s=YARA_TIMEOUT_S,
         without="the regex fallback over the corpus",
         remediation=YARA_REMEDIATION,

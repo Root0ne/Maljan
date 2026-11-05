@@ -96,6 +96,52 @@ def test_setup_runs_the_capa_fetch() -> None:
     assert 'bash "$REPO_ROOT/scripts/dev/fetch_capa_data.sh"' in external
 
 
+# The Sigma corpus rides the same way (T-556): the image's ``sigma-data``
+# stage fetches the tag ``fetch_external.sh`` clones, checked by its digest,
+# and puts it where the in-process pass and the analysis server read it.
+SIGMA_PINS = ("SIGMA_REF", "SIGMA_ARCHIVE_SHA256")
+
+
+def _sigma_image_pins() -> dict[str, str]:
+    return dict(re.findall(r"^ARG (SIGMA_[A-Z0-9_]+)=(\S+)$", _text(DOCKERFILE), re.M))
+
+
+def test_the_image_fetches_the_sigma_tag_setup_clones() -> None:
+    from maljan.tools.rules import DEFAULT_SIGMA_RULES
+
+    pins = _sigma_image_pins()
+    external = _text(ROOT / "scripts" / "dev" / "fetch_external.sh")
+    (setup_ref,) = re.findall(r'^SIGMA_REF="([^"]+)"$', external, re.M)
+
+    assert sorted(pins) == sorted(SIGMA_PINS)
+    assert pins["SIGMA_REF"] == setup_ref
+    assert re.fullmatch(r"[0-9a-f]{64}", pins["SIGMA_ARCHIVE_SHA256"])
+    stage = _text(DOCKERFILE).split("AS sigma-data", 1)[1].split("\nFROM ", 1)[0]
+    assert "sha256sum -c -" in stage and "${SIGMA_ARCHIVE_SHA256}" in stage
+    assert "refs/tags/${SIGMA_REF}.tar.gz" in stage
+    copied = re.findall(r"^COPY --from=sigma-data \S+ (\S+)$", _text(DOCKERFILE), re.M)
+    assert copied == [DEFAULT_SIGMA_RULES]
+    assert f"{DEFAULT_SIGMA_RULES}/" in set(_text(ROOT / ".dockerignore").splitlines())
+    assert f"{DEFAULT_SIGMA_RULES}/" in set(_text(ROOT / ".gitignore").splitlines())
+
+
+def test_the_image_copies_the_fetched_corpora_after_the_context_s_data() -> None:
+    """A later ``COPY data/`` would lay the context over the pinned corpora."""
+    lines = _text(DOCKERFILE).splitlines()
+    context = lines.index("COPY data/ data/")
+    for stage in ("capa-data", "sigma-data"):
+        at = [i for i, line in enumerate(lines) if line.startswith(f"COPY --from={stage} ")]
+        assert at and min(at) > context
+
+
+def test_docker_up_names_a_missing_fetched_corpus() -> None:
+    """The compose stack mounts ./data over the image's, so the image's copies are not read."""
+    target = _text(ROOT / "Makefile").split("\ndocker-up:", 1)[1].split("\n\n", 1)[0]
+    for corpus in ("data/sigma_rules", "data/capa-rules", "data/capa-signatures"):
+        assert corpus in target
+    assert "make external" in target
+
+
 def _run_in(tree: Path) -> list[str]:
     """The script copied into ``tree`` and run: both directories exist, so nothing is fetched."""
     assert (tree / "data" / "capa-rules").is_dir() and (tree / "data" / "capa-signatures").is_dir()

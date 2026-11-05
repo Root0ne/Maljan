@@ -1282,6 +1282,9 @@ class RunSummary:
     # (``operator_choice.facts_record``): the tools that answered short of a
     # library and what each tool's missing part reads. ``None`` when nothing.
     loss_facts: dict[str, Any] | None = None
+    # Each tool the run went without, with why (``operator_choice.lost_tool_rows``):
+    # ``{"tool", "reason"}``, what the report's scope says. Empty when none.
+    lost_tools: list[dict[str, str]] = field(default_factory=list)
     failed_analysts: list[str] = field(default_factory=list)
     techniques_by_layer: dict[str, int] = field(default_factory=dict)
     profile: dict[str, Any] | None = None
@@ -1836,6 +1839,8 @@ class RunSummary:
             # existed, or a run with nothing left out, reads as it did.
             **({"operator_choices": list(self.operator_choices)} if self.operator_choices else {}),
             **({"loss_facts": dict(self.loss_facts)} if self.loss_facts else {}),
+            # Absent when none, so a summary stored before it reads as it did.
+            **({"lost_tools": [dict(row) for row in self.lost_tools]} if self.lost_tools else {}),
             "failed_analysts": list(self.failed_analysts),
             "techniques_by_layer": dict(self.techniques_by_layer),
             "profile": dict(self.profile) if self.profile else None,
@@ -1982,6 +1987,7 @@ class RunSummaryBuilder:
         self._degradation_reasons: list[str] = []
         self._operator_choices: list[str] = []
         self._loss_facts: dict[str, Any] | None = None
+        self._lost_tools: list[dict[str, str]] = []
         self._failed_analysts: list[str] = []
         self._techniques_by_layer: dict[str, int] = {}
         self._tokens: TokenUsageMetrics | None = None
@@ -2215,6 +2221,11 @@ class RunSummaryBuilder:
     def set_loss_facts(self, record: dict[str, Any] | None) -> RunSummaryBuilder:
         """What the degraded flag was decided on (``operator_choice.facts_record``)."""
         self._loss_facts = dict(record) if record else None
+        return self
+
+    def set_lost_tools(self, rows: list[dict[str, str]] | None) -> RunSummaryBuilder:
+        """The tools the run went without, with why (``operator_choice.lost_tool_rows``)."""
+        self._lost_tools = [dict(row) for row in rows or ()]
         return self
 
     def set_operator_choices(self, reasons: list[str] | None) -> RunSummaryBuilder:
@@ -2691,6 +2702,7 @@ class RunSummaryBuilder:
             degradation_reasons=self._degradation_reasons,
             operator_choices=self._operator_choices,
             loss_facts=self._loss_facts,
+            lost_tools=self._lost_tools,
             failed_analysts=self._failed_analysts,
             techniques_by_layer=self._techniques_by_layer,
             profile=self._profile,

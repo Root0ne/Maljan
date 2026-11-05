@@ -98,9 +98,13 @@ that server's `env` (**Settings → Tool servers → `analysis` → `env`**):
 | Name | What it names | Default |
 | :-- | :-- | :-- |
 | `MALJAN_SIGMA_RULES_DIR` | Directory of Sigma rule YAML, loaded recursively. | `data/sigma_rules` |
-| `MALJAN_YARA_RULES_DIR` | The YARA rule file the scan compiles. | `data/yara_ttp_rules.yaml` |
+| `MALJAN_YARA_RULES_DIR` | The YARA rule file the scan compiles, or a directory of them (`*.yml`, `*.yaml`, read in name order and compiled as one corpus; a file that cannot be read is skipped and named in the answer's `files_not_loaded`). | `data/yara_ttp_rules.yaml` |
 
-A path that does not exist means an empty corpus and no matches, not a failure.
+A corpus that loads no rule (a path that does not exist, an empty file, a
+directory holding no rule file) is a scan that did not run, never one that
+matched nothing: the answer is a `missing_dependency` failure with how to put
+the corpus in place, the run is degraded, and `POST /jobs` and the system status
+name it before the job.
 A YARA pattern must be a fact about a sample rather than a word that describes
 one; how the shipped rules are written, and how a rule asserts nothing when it
 cannot be that specific, is in [Rule corpora](/docs/configuration/#rule-corpora).

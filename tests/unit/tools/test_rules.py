@@ -285,7 +285,8 @@ class TestCapa:
         result = tool.capa(str(sample), rules_dir=str(empty))
 
         assert result["tool"] == "capa"
-        assert "missing or empty" in result["error"]
+        assert result["error"]["code"] == "missing_dependency"
+        assert "missing or holds none" in result["error"]["message"]
 
     def test_a_missing_sample_is_an_error_and_not_an_exception(self) -> None:
         assert tool.capa("/nonexistent/s.exe")["tool"] == "capa"

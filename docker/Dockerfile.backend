@@ -42,6 +42,23 @@ RUN python3 -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[
     tar -xzf sdist.tar.gz -C signatures --strip-components=1 "flare_capa-${CAPA_VERSION}/LICENSE.txt" && \
     rm rules.tar.gz sdist.tar.gz
 
+# The Sigma corpus the in-process Sigma pass and the analysis sidecar read by
+# default (data/sigma_rules): SigmaHQ's tag that scripts/dev/fetch_external.sh
+# clones (SIGMA_REF), as GitHub's archive of the tag, whose sha256 was computed
+# when it was pinned. The whole tree, as the clone has it, licence included, so
+# an image and a workstation load the same rules. Without it every Sigma scan
+# in an image that bind-mounts no data/ would not run and degrade the run.
+# Keep SIGMA_REF in step with fetch_external.sh; a test holds them together.
+FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS sigma-data
+ARG SIGMA_REF=r2026-07-01
+ARG SIGMA_ARCHIVE_SHA256=c9be92eecb216941f681504eb5cf917598377bee665b344a0456e90093f8023d
+WORKDIR /opt/sigma
+RUN python3 -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], '/tmp/sigma.tar.gz')" \
+        "https://github.com/SigmaHQ/sigma/archive/refs/tags/${SIGMA_REF}.tar.gz" && \
+    echo "${SIGMA_ARCHIVE_SHA256}  /tmp/sigma.tar.gz" | sha256sum -c - && \
+    tar -xzf /tmp/sigma.tar.gz -C /opt/sigma --strip-components=1 && \
+    rm /tmp/sigma.tar.gz
+
 FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS base
 
 WORKDIR /app
@@ -105,6 +122,8 @@ COPY services/ services/
 # the same pins.
 COPY --from=capa-data /opt/capa/rules data/capa-rules
 COPY --from=capa-data /opt/capa/signatures data/capa-signatures
+# The Sigma corpus at the pinned tag, likewise in place of the context's copy.
+COPY --from=sigma-data /opt/sigma data/sigma_rules
 
 # The extras must match the first sync exactly. ``uv sync`` is exact by
 # default, so a second sync naming fewer extras *prunes* the ones it left out —

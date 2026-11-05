@@ -21,7 +21,9 @@ Design decisions:
   - Self-contained: rules are parsed via pySigma into an AST and evaluated
     in-process; no out-of-process Sigma backend is required.
   - Graceful degradation: if the rules directory is missing, an empty
-    instance is returned and the caller keeps running.
+    instance is returned and the caller keeps running. The tools that scan
+    with it answer an empty one as not run, never as no match
+    (``tools.rules``).
   - Compiled once, indexed: each rule is compiled when the corpus loads,
     identical rules are evaluated as one, and a rule meets only the events
     its platform and the fields it tests let it match (``SigmaLayer.scan``).

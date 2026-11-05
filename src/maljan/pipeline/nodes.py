@@ -134,7 +134,14 @@ from maljan.pipeline.mediation_models import (
     MEDIATOR_NO_ANSWER,
     consensus_applies,
 )
-from maljan.pipeline.operator_choice import SampleFacts, facts_record, split_operator_choices
+from maljan.pipeline.operator_choice import (
+    SampleFacts,
+    facts_record,
+    lost_tool_rows,
+    split_operator_choices,
+    static_pass_summary,
+    with_reasons,
+)
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
     corrected_reasons,
@@ -7611,6 +7618,11 @@ def make_judge_node(
                         getattr(container, "ignore_earlier_runs", False) is True
                     )
                     .set_loss_facts(facts_record(_sample_facts))
+                    .set_lost_tools(
+                        lost_tool_rows(_degradation_reasons, _sample_facts)
+                        if _degraded_mode
+                        else []
+                    )
                     .set_failed_analysts(_failed_analysts)
                     .set_profile(
                         container.config.agents.profile,
@@ -8061,6 +8073,20 @@ def make_report_node(
                 logger.warning("report_node: static provider evidence not recorded (%s).", exc)
         _ledger.extend(_capa_entries)
         _ledger.sort(key=lambda entry: entry.seq)
+        # A pass the evidence-only static provider was configured for and did
+        # not make (its rules missing, say) is a loss the verdict stage could
+        # not see: a provider that degrades on failure has it said, and the
+        # run degraded, rather than reading as no match.
+        _static_reasons: list[str] = []
+        with suppress(Exception):
+            if _static_bundle is not None and _static_provider.capabilities.degrade_on_failure:
+                _static_reasons = [str(r) for r in _static_bundle.unavailable if str(r).strip()]
+        # What the run summary says of them, as the judge's would have; the
+        # report carries it, and the state's summary below.
+        _static_summary = static_pass_summary(run_summary_state, _static_reasons)
+        if _static_summary:
+            logger.warning("report_node: %s", "; ".join(_static_reasons))
+            run_summary_state = {**run_summary_state, **_static_summary}
         # What the narrative and the composer may cite: every id the state's
         # ledger issued, and the ids this node added to it (the undrained
         # entries and the static provider's), which the report cites and the
@@ -8091,12 +8117,14 @@ def make_report_node(
                 malware_category=malware_category,
                 # Degraded-run signalling: surfaced as a banner so a numerically
                 # high verdict/severity on a low-data run is not read as authoritative.
-                degraded_mode=bool(state.get("degraded_mode")),
+                degraded_mode=bool(state.get("degraded_mode")) or bool(_static_reasons),
                 # Corrected against the whole ledger: the evidence-only static
                 # provider's entries are collected above, after the verdict
                 # stage read the ledger, so a run that carries them must not
                 # ship a report saying no analysis was performed.
-                degradation_reasons=corrected_reasons(state.get("degradation_reasons"), _ledger),
+                degradation_reasons=with_reasons(
+                    corrected_reasons(state.get("degradation_reasons"), _ledger), _static_reasons
+                ),
                 operator_choices=list(state.get("operator_choices") or []),
                 # The routing minimum, which stands in for the identity block
                 # when no agent called an identification tool.
@@ -8594,7 +8622,7 @@ def make_report_node(
         # add — leaving it untouched preserves the mock-mode contract
         # (state.run_summary remains None when the judge node skipped
         # RunSummaryBuilder, exercised by test_run_summary_is_none_in_mock_mode).
-        _state_summary: dict[str, Any] = {}
+        _state_summary: dict[str, Any] = dict(_static_summary)
         # The block the report carries is the base, because it already holds
         # the ``verdict.fallback`` note when the judge never answered. What is
         # stored is then compared against what the judge stored: an amendment
@@ -8815,6 +8843,13 @@ def make_report_node(
         # skipped the RunSummaryBuilder and the column is legitimately null.
         if _state_summary:
             result["run_summary"] = {**(state.get("run_summary") or {}), **_state_summary}
+        if _static_summary:
+            # The state's own flag and reasons, its own first, on the channels
+            # the judge node writes them to, for every reader after this node.
+            result["degraded_mode"] = True
+            result["degradation_reasons"] = with_reasons(
+                state.get("degradation_reasons"), _static_reasons
+            )
         if own:
             result["stage_results"] = own
         # Every stage announces its own end from the node that closes it, so

@@ -48,6 +48,24 @@ _AGENT_TOOL = re.compile(
 )
 # What an agent reference names for every tool of its server.
 _EVERY_TOOL = "*"
+# ``static provider '<id>' did not run <tool>: <why>; <remedy>``: a pass an
+# evidence-only static provider was configured for and did not make
+# (:func:`provider_pass_reason`).
+_PROVIDER_PASS = re.compile(
+    r"^static provider '(?P<provider>[^']+)' did not run (?P<tool>[^\s:]+): (?P<why>.*?)(?:; |$)",
+    re.DOTALL,
+)
+
+
+def provider_pass_reason(provider: str, tool: str, why: str, remedy: str = "") -> str:
+    """The degradation reason of a pass a static provider did not make, with its remedy.
+
+    The one spelling :func:`lost_tools` and :func:`lost_tool_rows` read back:
+    the tool by its bare name and ``why`` up to the remedy, so ``why`` holds
+    no ``"; "`` of its own.
+    """
+    text = f"static provider '{provider}' did not run {tool}: {why}"
+    return f"{text}; {remedy}" if remedy else text
 
 
 def _manifest_reason(reason: str) -> str | None:
@@ -162,6 +180,9 @@ def _tool_of(reason: str) -> _Named | None:
     withheld = withheld_tool(reason)
     if withheld:
         return _Named(withheld, kind="withheld")
+    provided = _PROVIDER_PASS.match(reason)
+    if provided is not None:
+        return _Named(provided.group("tool"), kind="provider")
     return None
 
 
@@ -262,6 +283,81 @@ def lost_tools(
         if named is not None and named.tool not in found and is_loss(text, facts, not_configured):
             found.append(named.tool)
     return found
+
+
+def lost_tool_rows(
+    reasons: Iterable[str], facts: SampleFacts | None = None, not_configured: Iterable[str] = ()
+) -> list[dict[str, str]]:
+    """``{"tool", "reason"}`` for each tool the run went without (:func:`lost_tools`), in order.
+
+    What the run summary keeps (``lost_tools``) so the report's scope can say
+    what the run went without and why, from the record the degraded flag was
+    set on rather than from what a later reader of it decides. The reason is
+    the tool's own error on its first failed call where one is on record
+    (``facts.failures``), else what the degradation reason gives in its
+    brackets, else empty; every absolute path in it is shown from the project
+    root, or masked outside it (``core.paths.host_paths_masked``).
+    """
+    from maljan.core.paths import host_paths_masked
+
+    held = facts or SampleFacts()
+    errors: dict[str, str] = {}
+    for entry in held.failures:
+
+        def read(name: str, entry: Any = entry) -> Any:
+            return entry.get(name) if isinstance(entry, Mapping) else getattr(entry, name, None)
+
+        if read("ok") is not True and read("error"):
+            errors.setdefault(str(read("tool") or ""), str(read("error")))
+    texts = [str(reason) for reason in reasons or ()]
+    rows: list[dict[str, str]] = []
+    for tool in lost_tools(texts, held, not_configured):
+        said = errors.get(tool, "")
+        if not said:
+            marker = f".{tool}_unavailable("
+            given = next((text for text in texts if marker in text), "")
+            # ``…_unavailable(<why>)``, then ``; still answers …`` and the remedy.
+            inner = given.split(marker, 1)[1] if given else ""
+            said = inner.split("); ", 1)[0] if "); " in inner else inner.removesuffix(")")
+        if not said:
+            passes = (_PROVIDER_PASS.match(text) for text in texts)
+            said = next((m.group("why") for m in passes if m and m.group("tool") == tool), "")
+        rows.append({"tool": tool, "reason": " ".join(host_paths_masked(said).split())})
+    return rows
+
+
+def with_reasons(held: Iterable[Any] | None, added: Iterable[str]) -> list[str]:
+    """``held`` as text, then each of ``added`` not already among them, in order."""
+    kept = [str(reason) for reason in held or ()]
+    for reason in added:
+        if reason not in kept:
+            kept.append(reason)
+    return kept
+
+
+def static_pass_summary(
+    run_summary: Mapping[str, Any] | None, reasons: Iterable[str]
+) -> dict[str, Any]:
+    """What a run summary says of the passes a static provider did not make, ``{}`` for none.
+
+    ``reasons`` are the provider's (:func:`provider_pass_reason`), which the
+    report node reads once the verdict stage has set the degraded flag: the
+    run is degraded, the reasons follow ``run_summary``'s own, and each tool
+    goes on ``lost_tools`` after the ones already there (:func:`lost_tool_rows`,
+    which masks host paths when the row is written). The keys to lay over
+    ``run_summary``; pure, so the report and the state's summary say the same.
+    """
+    added = [str(reason) for reason in reasons if str(reason).strip()]
+    if not added:
+        return {}
+    held = run_summary or {}
+    lost = [dict(row) for row in held.get("lost_tools") or () if isinstance(row, Mapping)]
+    named = {str(row.get("tool") or "") for row in lost}
+    return {
+        "degraded_mode": True,
+        "degradation_reasons": with_reasons(held.get("degradation_reasons"), added),
+        "lost_tools": [*lost, *(row for row in lost_tool_rows(added) if row["tool"] not in named)],
+    }
 
 
 def facts_record(facts: SampleFacts) -> dict[str, Any] | None:

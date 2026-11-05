@@ -22,6 +22,10 @@ from maljan.core.config import Settings
 from maljan.tools import capabilities, emulated_strings, sidecar_needs
 from maljan.tools.capabilities import ToolNeeds, data, manifest, module, remedy_for
 
+# A corpus that holds: the check before a job looks for a non-empty file, and
+# the scan for a rule, so a fixture that means "held" writes one.
+YARA_RULE = "rules:\n  - id: held\n    technique_id: T1059\n    patterns: [held]\n"
+
 
 @pytest.fixture
 def root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
@@ -32,7 +36,8 @@ def root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
 @pytest.fixture
 def host(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
-    """Every declared library and FLOSS present, and the Sigma corpus: capa's rules are not."""
+    """Every declared library and FLOSS present, the Sigma corpus and the tracked YARA one:
+    capa's rules are not."""
 
     def find_spec(name: str, *args: Any, **kwargs: Any) -> Any:
         return object()
@@ -40,6 +45,7 @@ def host(monkeypatch: pytest.MonkeyPatch, root: Path) -> Path:
     monkeypatch.setattr(importlib.util, "find_spec", find_spec)
     monkeypatch.setattr(emulated_strings, "find_floss", lambda environ=None: ("floss", ""))
     _populated(root / "data" / "sigma_rules")
+    (root / "data" / "yara_ttp_rules.yaml").write_text(YARA_RULE, encoding="utf-8")
     return root
 
 

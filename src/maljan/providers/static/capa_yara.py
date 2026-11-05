@@ -441,6 +441,8 @@ class CapaYaraStaticProvider(StaticProvider):
         )
 
     _native_yara_ran = False
+    # The passes the last ``collect_evidence`` could not make (``_run_capa``).
+    _unavailable: tuple[str, ...] = ()
 
     def collect_evidence(self, sample_path: str) -> StaticEvidenceBundle | None:
         """capa and YARA over the sample, for a run whose triage pack did not run them.
@@ -458,7 +460,8 @@ class CapaYaraStaticProvider(StaticProvider):
         from maljan.core.ctype_locale import yara_case_folding_problem
 
         folding_problem = yara_case_folding_problem() if self._native_yara_ran else None
-        if capa_result is None and not yara_hits and not folding_problem:
+        unavailable = tuple(self._unavailable)
+        if capa_result is None and not yara_hits and not folding_problem and not unavailable:
             return None
 
         hits: list[dict[str, Any]] = []
@@ -527,6 +530,7 @@ class CapaYaraStaticProvider(StaticProvider):
             strings=[],
             technical_evidence=evidence,
             entries=tuple(answers),
+            unavailable=unavailable,
         )
 
     # ------------------------------------------------------------------
@@ -534,7 +538,15 @@ class CapaYaraStaticProvider(StaticProvider):
     # ------------------------------------------------------------------
 
     def _run_capa(self, sample_path: str) -> dict[str, Any] | None:
-        """Run capa, or return None and warn once when it is unavailable."""
+        """Run capa, or return None and warn once when it is unavailable.
+
+        Rules that are missing or hold none are a pass not made, never an
+        empty answer: the reason goes on ``_unavailable``, which the bundle
+        carries to the run's degradation reasons (``StaticEvidenceBundle.unavailable``).
+        It does not switch the provider's evidence off, as a missing library
+        does: rules put in place later are read on the next run.
+        """
+        self._unavailable = ()
         try:
             import capa.capabilities.common  # noqa: F401
             import capa.helpers  # noqa: F401
@@ -554,11 +566,22 @@ class CapaYaraStaticProvider(StaticProvider):
 
         rules_dir = Path(resolve_data(self._capa.rules_dir))
         if not rules_dir.is_dir() or not any(rules_dir.rglob("*.yml")):
-            if self._capa_available is not False:
-                logger.warning(
-                    "capa rules directory %s is missing or empty; no capa evidence.", rules_dir
-                )
-            self._capa_available = False
+            from maljan.core.paths import host_paths_masked
+            from maljan.pipeline.operator_choice import provider_pass_reason
+            from maljan.tools.sidecar_needs import CAPA_RULES
+
+            logger.warning(
+                "capa rules directory %s is missing or empty; capa did not run.", rules_dir
+            )
+            shown = host_paths_masked(str(rules_dir))
+            self._unavailable = (
+                provider_pass_reason(
+                    self.id,
+                    "capa",
+                    f"no rule was loaded from {shown}, which is missing or holds none",
+                    CAPA_RULES.remedy,
+                ),
+            )
             return None
 
         self._capa_available = True

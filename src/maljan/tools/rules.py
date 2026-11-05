@@ -16,11 +16,12 @@ from __future__ import annotations
 import os
 import re
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from maljan.core.logger import logger
-from maljan.core.paths import resolve_data
+from maljan.core.paths import get_project_root, host_paths_masked, resolve_data
 
 # The corpora the pipeline itself ships. ``ruleset="default"`` means these; any
 # other value is taken as a path, resolved against the repository root the same
@@ -36,8 +37,50 @@ DEFAULT_CAPA_SIGNATURES = "data/capa-signatures"
 _MAX_MATCH_BYTES = 64
 
 _CACHE_LOCK = threading.Lock()
-_YARA_CACHE: dict[str, Any] = {}
-_SIGMA_CACHE: dict[str, Any] = {}
+# By path: the layer and the corpus's stamp when it was read (``_stamp``).
+_YARA_CACHE: dict[str, tuple[int | None, Any]] = {}
+_SIGMA_CACHE: dict[str, tuple[int | None, Any]] = {}
+
+
+def _stamp(path: Path) -> int | None:
+    """When the corpus at ``path`` last changed, ``None`` while there is none."""
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _cached(
+    cache: dict[str, tuple[int | None, Any]], path: Path, count: Callable[[Any], int]
+) -> Any:
+    """The layer kept for ``path``, or ``None`` when it has to be read (again).
+
+    A layer that loaded rules is kept for the process's lifetime, as before.
+    One that loaded none is kept only while the corpus is as it was read, so
+    the warning its load logs is said once per change of the corpus, and one
+    put in place later is read without a restart. ``count`` counts a layer's
+    rules.
+
+    "As it was read" is the corpus path's own modification time (``_stamp``),
+    following a link: it changes when the path appears or goes, when a file
+    corpus is rewritten, and when an entry is added to or removed from a
+    directory corpus's top level. A file added or edited only inside a
+    subdirectory of an existing directory leaves it as it was, so that corpus
+    is read again only after a restart or ``reset_rule_caches``.
+    """
+    with _CACHE_LOCK:
+        held = cache.get(str(path))
+    if held is None:
+        return None
+    stamp, layer = held
+    return layer if count(layer) or stamp == _stamp(path) else None
+
+
+def _keep(
+    cache: dict[str, tuple[int | None, Any]], path: Path, stamp: int | None, layer: Any
+) -> None:
+    with _CACHE_LOCK:
+        cache[str(path)] = (stamp, layer)
 
 
 # The environment names that override where "default" points. This is the whole
@@ -47,7 +90,7 @@ _SIGMA_CACHE: dict[str, Any] = {}
 # ``Settings`` to find a rule file. capa's is handed to a sidecar of this
 # repository from the core setting its data declaration names
 # (``tools.sidecar_needs.handed_env``), so the server reads the operator's rules.
-_YARA_RULES_ENV = "MALJAN_YARA_RULES_DIR"
+YARA_RULES_ENV = "MALJAN_YARA_RULES_DIR"
 SIGMA_RULES_ENV = "MALJAN_SIGMA_RULES_DIR"
 CAPA_RULES_ENV = "MALJAN_CAPA_RULES_DIR"
 
@@ -64,11 +107,72 @@ def corpus_roots() -> tuple[Path, ...]:
     anything: the trust boundary is the server, not this module.
     """
     roots = [resolve_data("data")]
-    for env_var in (_YARA_RULES_ENV, SIGMA_RULES_ENV):
+    for env_var in (YARA_RULES_ENV, SIGMA_RULES_ENV):
         override = os.environ.get(env_var, "").strip()
         if override:
             roots.append(resolve_data(override))
     return tuple(roots)
+
+
+def _not_loaded(
+    tool: str,
+    path: Path,
+    corpus: str,
+    *,
+    chosen: bool = False,
+    unread: list[dict[str, str]] | None = None,
+    files: int = 0,
+) -> dict[str, Any]:
+    """The answer of a rule engine that loaded no rule: it did not run.
+
+    An empty corpus scans nothing, and "0 hits" from it reads as a sample no
+    rule matched. It is a failure with the code a missing library has
+    (``missing_dependency``), so the run that called it is degraded and the
+    check before a job names the same path (``sidecar_needs``), with the
+    declared data path's remedy (``capabilities.Requirement.remedy``).
+    ``corpus`` is the attribute of ``sidecar_needs`` that declares it.
+    ``unread`` are the corpus's files that could not be read, of ``files``
+    in all: the answer names them (``files_not_loaded``) and says that none
+    could be read, or that the rest held no rule, rather than that the corpus
+    is missing.
+    ``chosen`` is a ruleset the caller named in place of the corpus (a model's
+    ``ruleset`` argument): its own argument, not the host, is what to change.
+    """
+    from maljan.tools import sidecar_needs
+    from maljan.tools.errors import BAD_ARGUMENT, MISSING_DEPENDENCY, tool_error
+
+    need = getattr(sidecar_needs, corpus)
+    # Inside the project the path is shown from its root, which is how the
+    # check before a job names it; one outside is named by what named it, as
+    # the check does (``Requirement.installed``): the host's layout is not
+    # the reader's.
+    try:
+        shown = Path(os.path.abspath(path)).relative_to(get_project_root()).as_posix()
+    except ValueError:
+        overridden = bool(need.override and os.environ.get(need.override, "").strip())
+        named = need.override if overridden else need.setting or need.override
+        shown = "the ruleset named" if chosen else f"the path {named} names"
+    message = f"no rule was loaded from {shown}, which is missing or holds none, so no rule was run"
+    if unread:
+        said = (
+            f"none of its {files} rule files could be read"
+            if len(unread) >= files
+            else f"{len(unread)} of its {files} rule files could not be read and the rest hold "
+            "no rule"
+        )
+        message = f"no rule was loaded from {shown}: {said}, so no rule was run"
+    if chosen:
+        answer = tool_error(
+            BAD_ARGUMENT,
+            message,
+            tool=tool,
+            remediation="name a ruleset that holds rules, or 'default' for the platform's corpus",
+        )
+    else:
+        answer = tool_error(MISSING_DEPENDENCY, message, tool=tool, remediation=need.remedy)
+    if unread:
+        answer["files_not_loaded"] = list(unread)
+    return answer
 
 
 def _resolve_ruleset(ruleset: str, default: str, env_var: str = "") -> Path:
@@ -90,19 +194,48 @@ def _resolve_ruleset(ruleset: str, default: str, env_var: str = "") -> Path:
 
 
 def _yara_layer(ruleset: str) -> Any:
-    """The compiled layer for one corpus, built once per path."""
-    path = _resolve_ruleset(ruleset, DEFAULT_YARA_RULES, _YARA_RULES_ENV)
-    key = str(path)
-    with _CACHE_LOCK:
-        cached = _YARA_CACHE.get(key)
-        if cached is not None:
-            return cached
+    """The compiled layer for one corpus, built once per path (``_cached``).
+
+    A corpus is one rule file, or a directory whose ``*.yml`` and ``*.yaml``
+    files are read in name order, as the override's name says it may be: each
+    file's rules are parsed, joined and compiled once. A file of a directory
+    that cannot be read is skipped with a warning naming it, and named in the
+    scan's answer (``files_not_loaded``): an operator's one malformed file
+    costs that file's rules, not every other file's, and is never silent. A
+    lone file that cannot be read raises, as before, and the scan says so.
+    """
+    path = _resolve_ruleset(ruleset, DEFAULT_YARA_RULES, YARA_RULES_ENV)
+    cached = _cached(_YARA_CACHE, path, lambda layer: len(layer._rules))
+    if cached is not None:
+        return cached
     from maljan.analysis.yara_layer import YaraLayer
 
-    layer = YaraLayer.from_yaml(path) if path.is_file() else YaraLayer(rules=[])
-    with _CACHE_LOCK:
-        _YARA_CACHE[key] = layer
+    stamp = _stamp(path)
+    skipped: list[dict[str, str]] = []
+    if path.is_file():
+        layer = YaraLayer.from_yaml(path)
+    elif path.is_dir():
+        parsed = []
+        for rule_file in _rule_files(path):
+            try:
+                parsed.extend(YaraLayer.rules_from_yaml(rule_file))
+            except Exception as exc:  # noqa: BLE001 — one bad file costs that file only
+                said = host_paths_masked(f"{type(exc).__name__}: {exc}")
+                logger.warning("yara_scan: rule file %s not loaded (%s)", rule_file.name, said)
+                skipped.append({"file": rule_file.relative_to(path).as_posix(), "error": said})
+        layer = YaraLayer(rules=parsed)
+    else:
+        layer = YaraLayer(rules=[])
+    layer.files_not_loaded = skipped
+    _keep(_YARA_CACHE, path, stamp, layer)
     return layer
+
+
+def _rule_files(path: Path) -> list[Path]:
+    """The rule files of a directory corpus, in name order; none for anything else."""
+    if not path.is_dir():
+        return []
+    return sorted([*path.rglob("*.yml"), *path.rglob("*.yaml")])
 
 
 def reset_rule_caches() -> None:
@@ -143,8 +276,22 @@ def yara_scan(
             "tool": "yara_scan",
         }
     rule_count = len(getattr(layer, "_rules", []) or [])
+    if not rule_count:
+        corpus = _resolve_ruleset(ruleset, DEFAULT_YARA_RULES, YARA_RULES_ENV)
+        unread = list(getattr(layer, "files_not_loaded", None) or [])
+        return _not_loaded(
+            "yara_scan",
+            corpus,
+            "YARA_RULES",
+            chosen=ruleset not in ("", "default"),
+            unread=unread,
+            files=len(_rule_files(corpus)) if unread else 0,
+        )
     compiled = getattr(layer, "_yara_rules", None)
     answer: dict[str, Any] = {"rule_count": rule_count, "filtered": 0}
+    skipped = getattr(layer, "files_not_loaded", None)
+    if skipped:
+        answer["files_not_loaded"] = list(skipped)
     if compiled is not None:
         try:
             hits = compiled.match(data=data, timeout=max(1, int(timeout_s)))
@@ -282,18 +429,25 @@ def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
 
 
 def _sigma_layer(ruleset: str) -> Any:
+    """The layer for one corpus, built once per path (``_cached``)."""
     path = _resolve_ruleset(ruleset, DEFAULT_SIGMA_RULES, SIGMA_RULES_ENV)
-    key = str(path)
-    with _CACHE_LOCK:
-        cached = _SIGMA_CACHE.get(key)
-        if cached is not None:
-            return cached
+    cached = _cached(_SIGMA_CACHE, path, lambda layer: int(layer.rule_count))
+    if cached is not None:
+        return cached
     from maljan.analysis.sigma_layer import SigmaLayer
 
+    stamp = _stamp(path)
     layer = SigmaLayer.from_rules_dir(path)
-    with _CACHE_LOCK:
-        _SIGMA_CACHE[key] = layer
+    _keep(_SIGMA_CACHE, path, stamp, layer)
     return layer
+
+
+def _sigma_not_loaded(layer: Any, ruleset: str, tool: str) -> dict[str, Any] | None:
+    """The answer for a Sigma corpus that loaded no rule, else ``None`` (``_not_loaded``)."""
+    if int(getattr(layer, "rule_count", 0)):
+        return None
+    path = _resolve_ruleset(ruleset, DEFAULT_SIGMA_RULES, SIGMA_RULES_ENV)
+    return _not_loaded(tool, path, "SIGMA_RULES", chosen=ruleset not in ("", "default"))
 
 
 def sigma_match(events: list[dict[str, Any]], ruleset: str = "default") -> dict[str, Any]:
@@ -312,6 +466,9 @@ def sigma_match(events: list[dict[str, Any]], ruleset: str = "default") -> dict[
             "error": f"ruleset load failed: {type(exc).__name__}: {exc}",
             "tool": "sigma_match",
         }
+    absent = _sigma_not_loaded(layer, ruleset, "sigma_match")
+    if absent is not None:
+        return absent
     normalised = [
         {str(k): str(v) for k, v in row.items()} for row in events if isinstance(row, dict)
     ]
@@ -407,6 +564,9 @@ def sigma_match_sandbox(report: dict[str, Any] | None, ruleset: str = "default")
             "tool": "sigma_match",
             "event_count": len(events),
         }
+    absent = _sigma_not_loaded(layer, ruleset, "sigma_match_sandbox")
+    if absent is not None:
+        return {**absent, "event_count": len(events)}
     scan = layer.scan([dict(event) for event in events], contexts=read.contexts())
     result = _sigma_result(layer, scan)
     result["event_count"] = len(events)
@@ -472,7 +632,7 @@ def capa(
         return {"error": "no capa rules directory is named", "tool": "capa"}
     rules = _resolve_ruleset(rules_dir, DEFAULT_CAPA_RULES, CAPA_RULES_ENV)
     if not rules.is_dir() or not any(rules.rglob("*.yml")):
-        return {"error": f"capa rules directory {rules} is missing or empty", "tool": "capa"}
+        return _not_loaded("capa", rules, "CAPA_RULES")
 
     from maljan.providers.static.capa_yara import (
         _BACKEND_NAMES,
