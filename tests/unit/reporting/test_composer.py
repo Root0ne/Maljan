@@ -305,8 +305,9 @@ class TestFactsOutrankClaimsInThePrompt:
         from maljan.reporting.composer import _SYSTEM
 
         assert (
-            "Either drop the claim, or state what the fact shows, in the sample's terms, "
-            "without naming the claim, its number or an earlier analysis.\n"
+            "Either drop the claim, or, better, because a reader who was told the sample is "
+            "one thing deserves to know what it is, state what the fact shows, in the "
+            "sample's terms, without naming the claim, its number or an earlier analysis.\n"
         ) in _SYSTEM
         assert "refute it" not in _SYSTEM
         assert "name it and" not in _SYSTEM
