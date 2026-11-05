@@ -146,6 +146,18 @@ def without_line_mark(line: str) -> str:
     return _LINE_MARK.sub(" ", str(line))
 
 
+def as_not_blocking(line: str, reason: str) -> str:
+    """``line`` with every mark of it replaced by one ``[not blocking: <reason>]`` at its end.
+
+    The platform's own reading of a line it settled (``own_entries``): its
+    claims are no longer withdrawn by rule, and it asks nobody to revise.
+    ``reason`` holds no bracket.
+    """
+    said = " ".join(re.sub(r"[\[\]]", " ", str(reason)).split())
+    kept = " ".join(_ANY_MARK.sub(" ", str(line)).split())
+    return f"{kept} [not blocking: {said}]"
+
+
 # The head of the facts a revision round is told, after the mediator's feedback.
 LEDGER_FACTS_HEAD = "The evidence ledger states these counts for the lines the mediator listed:"
 
@@ -2236,6 +2248,40 @@ def _earlier_round(text: str, start: int, names: Sequence[str]) -> bool:
     return _short_named(text, max(0, start - 40) + found.start(), names) is not None
 
 
+# "its claim 40", "its own claims 3 and 4": the possessive right before "claim(s)".
+_ITS_BEFORE = re.compile(r"\bits(?:\s++own)?\s*+$", re.IGNORECASE)
+
+
+def _own_references(
+    text: str, names: Sequence[str], field_names: Sequence[str] | None, read: set[int]
+) -> list[tuple[str, int, bool]]:
+    """``(analyst, where its numbers start, False)`` per "its claim N" of a one-analyst line.
+
+    Only on a line whose field names one analyst, and only where no other
+    participant is named in the text before the reference, so "its" can stand
+    for nobody else. Read as the newer reading reads a reference, so a
+    blocking line withdraws such a claim by rule only where the reference's
+    clause shares a ledger id or an address with it (``ExpandedNaming``).
+    """
+    if field_names is None or len(field_names) != 1:
+        return []
+    owner = field_names[0]
+    others = [_name_pattern(n) for n in names if n != owner]
+    out: list[tuple[str, int, bool]] = []
+    for reference in _CLAIM_REFERENCE.finditer(text):
+        at = reference.start(1)
+        if (
+            at in read
+            or _ITS_BEFORE.search(text[max(0, reference.start() - 16) : reference.start()]) is None
+        ):
+            continue
+        before = text[: reference.start()]
+        if any(p.search(before) for p in others):
+            continue
+        out.append((owner, at, False))
+    return out
+
+
 class ClaimReference(NamedTuple):
     """One claim reference a line writes for a participant (:func:`claim_references_of`)."""
 
@@ -2261,9 +2307,11 @@ def claim_references_of(
     carried-or-new mark (``without_line_mark``). A reference is read for an
     analyst written by name right before "claim(s) N" (``_claims_named``),
     for the field's one analyst where "claim(s) N" follows the field
-    directly or after the mediator's marks written after it, and for an
+    directly or after the mediator's marks written after it, for an
     analyst a short form of whose name stands before "claim(s) N"
-    (``_short_named``). Its numbers are read whole (:func:`read_claim_numbers`).
+    (``_short_named``), and for the field's one analyst where "its" stands
+    before it and no other participant is named before (``_own_references``).
+    Its numbers are read whole (:func:`read_claim_numbers`).
 
     ``read_before`` says whether the earlier reading read the reference,
     ``in_mark`` whether it stands inside a ``[blocking: ...]`` or ``[not
@@ -2296,6 +2344,7 @@ def claim_references_of(
         short = _short_named(text, reference.start(), names)
         if short is not None:
             found.append((short, reference.start(1), bool(field_names)))
+    found.extend(_own_references(text, names, field_names, {at for _n, at, _o in found}))
     out: list[ClaimReference] = []
     for name, at, old in found:
         if any(start <= at < end for start, end in in_marks):
@@ -2482,6 +2531,13 @@ def read_claim_references(
         clause_starts = sorted([*starts, *(at for at, _n in unattributed)])
         for start, numbers in unattributed:
             counted = [n for n in map(_as_claim_number, numbers.numbers) if n is not None]
+            if len(candidates) == 1:
+                # A number the line already names for its one analyst is that
+                # claim written again ("... lower claim 27"), no other one.
+                again = out.get(candidates[0], {})
+                counted = [
+                    n for n in counted if not any(row[0] == number for row in again.get(n, []))
+                ]
             if owners and counted:
                 tokens = clause_tokens(text, masked, start, numbers.end, clause_starts)
                 left: list[int] = []

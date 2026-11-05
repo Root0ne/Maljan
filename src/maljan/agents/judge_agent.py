@@ -136,6 +136,7 @@ from maljan.pipeline.mediation_models import (
     consensus_applies,
     mediator_no_answer_note,
 )
+from maljan.pipeline.own_entries import with_settled_by_rule
 from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
@@ -2140,7 +2141,8 @@ def _last_ledger_facts(history: Sequence[Any], field: str = "ledger_facts") -> l
 
     ``ledger_facts`` are the ledger counts it stated; ``ledger_stated`` the
     blocking lines every count of which the ledger states and the analysts
-    were told before.
+    were told before; ``settled_by_rule`` the blocking lines it settled by
+    rule (``own_entries``).
     """
     for argument in reversed(list(history or [])):
         if getattr(argument, "agent_name", "") == MEDIATOR_AGENT_NAME:
@@ -3612,6 +3614,11 @@ class JudgeAgent(BudgetMeter):
         last_counts = with_ledger_stated(
             with_ledger_facts("", _last_ledger_facts(history)),
             _last_ledger_facts(history, "ledger_stated"),
+        )
+        # And the blocking lines of it the platform settled by rule, each with
+        # the claim it holds at the lower figure (``own_entries``).
+        last_counts = with_settled_by_rule(
+            last_counts, _last_ledger_facts(history, "settled_by_rule")
         )
         carried_facts = f"{last_counts}\n\n" if last_counts else ""
         if round_facts:

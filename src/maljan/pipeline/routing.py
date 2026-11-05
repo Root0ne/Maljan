@@ -38,6 +38,12 @@ Decision priority (highest to lowest), in ``debate_route``:
      counts (``debate_facts.ledger_stated``): another round would argue
      counts already told. Judge (``ledger_stated``); no consensus is claimed,
      and the lines stay standing disagreements for the judge and the report.
+     Settled by rule — every blocking line of this mediation only set an
+     analyst's claim against its own dispute entry, and the platform settled
+     each (``own_entries.settle_own_entry_lines``: the claim is held at the
+     lower figure its entry and the line both state). Judge
+     (``settled_by_rule``); no consensus is claimed. A mediation where only
+     some lines are so settled asks only the analysts the other lines name.
   4. Sycophancy is a fact told to the mediator, never a route of its own.
   5. Genuine LLM consensus (no listed line the mediator marked blocking, or
      left unmarked) — judge.
@@ -170,6 +176,9 @@ REWORDED = "reworded"
 # Every blocking line of this mediation states only counts the ledger states,
 # and the analysts were told them by an earlier mediation.
 LEDGER_STATED = "ledger_stated"
+# Every blocking line of this mediation only set an analyst's claim against its
+# own dispute entry, and the platform settled each by rule (``own_entries``).
+SETTLED_BY_RULE = "settled_by_rule"
 # Why a revision round opens.
 NO_CONSENSUS = "no_consensus"
 
@@ -380,6 +389,24 @@ def only_ledger_stated(state: Any) -> bool:
     return bool(lines) and len(stated) == len(lines)
 
 
+def only_settled_by_rule(state: Any) -> bool:
+    """Whether the platform settled every blocking line of the last mediation by rule.
+
+    Read from the mediation's own record (``AgentArgument.settled_lines``), and
+    only where the mediation was made (``status`` complete) and lists a
+    blocking line.
+    """
+    history = state.get("discussion_history") or []
+    last = history[-1] if history else None
+    if last is None or getattr(last, "agent_name", "") != MEDIATOR_AGENT_NAME:
+        return False
+    if getattr(last, "status", "complete") != "complete":
+        return False
+    lines = {str(line) for line in getattr(last, "contradictions", None) or []}
+    settled = {str(line) for line in getattr(last, "settled_lines", None) or []}
+    return bool(lines) and lines <= settled
+
+
 def route_within_limit(
     state: Any, *, sycophancy_check: bool = True, log: bool = True, stage: str | None = None
 ) -> tuple[str, str]:
@@ -513,6 +540,17 @@ def route_within_limit(
             iteration,
         )
         return "judge", LEDGER_STATED
+
+    # Every blocking line of this mediation only set an analyst's claim against
+    # its own dispute entry, and each was settled by rule: the claims are held
+    # at the lower figure, and a round would ask nobody about anything else.
+    if only_settled_by_rule(state):
+        say(
+            "Every blocking line of round %d set an analyst's claim against its own dispute "
+            "entry and was settled by rule; routing to judge with the answers in force.",
+            iteration,
+        )
+        return "judge", SETTLED_BY_RULE
 
     # Sycophancy is a fact told to the mediator (``sycophancy_detector``); it
     # never overrides the mediator's consensus or a block with no contested

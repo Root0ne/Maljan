@@ -99,6 +99,7 @@ from maljan.pipeline.conditions import (
 from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
     analysts_to_revise,
+    as_not_blocking,
     carried_marks,
     claims_named_by_lines,
     contested_input,
@@ -151,6 +152,7 @@ from maljan.pipeline.outcome import (
     verdict_for_run,
     verdict_reading,
 )
+from maljan.pipeline.own_entries import SETTLED_REASON, settle_own_entry_lines
 from maljan.pipeline.revision_merge import (
     RevisionMerge,
     claim_tokens_by_number,
@@ -5183,6 +5185,27 @@ def _ledger_stated_lines(
         return []
 
 
+def _own_entry_settlements(
+    state: AnalysisState, agent_names: Sequence[str], argument: Any, mediation: int
+) -> tuple[list[str], list[str], dict[str, AgentISR]]:
+    """``(settled lines, their sentences, the answers in force so held)``. Never raises.
+
+    The blocking lines that only set an analyst's claim against its own
+    dispute entry, settled by rule with no revision round
+    (``own_entries.settle_own_entry_lines``).
+    """
+    try:
+        settled, held = settle_own_entry_lines(
+            list(getattr(argument, "contradictions", None) or []),
+            list(agent_names),
+            dict(state.get("isr_reports") or {}),
+        )
+    except Exception as exc:  # noqa: BLE001 — a line not settled is read as before
+        logger.debug("negotiation: the own-entry lines were not settled (%s).", exc)
+        return [], [], {}
+    return [s.text for s in settled], [s.sentence(mediation) for s in settled], held
+
+
 def _last_mediation_lines(state: AnalysisState) -> tuple[list[str], list[str]]:
     """``(blocking lines, place facts)`` of the last mediation in the history, or empty."""
     for earlier in reversed(state.get("discussion_history") or []):
@@ -5549,14 +5572,47 @@ def make_negotiation_node(
                 argument.carried = carried_marks(
                     list(argument.contradictions or []), len(facts_told)
                 )
+            # A blocking line that only sets an analyst's claim against its own
+            # dispute entry is settled by rule: the lower figure stands, the
+            # claim is held at it, and the line asks nobody to revise. Each
+            # settlement is recorded and told to the room.
+            held_by_rule: dict[str, AgentISR] = {}
+            if (
+                measured
+                and argument.status == "complete"
+                and argument.note != CONTRADICTIONS_BLOCK_MISSING_NOTE
+            ):
+                argument.settled_lines, argument.settled_by_rule, held_by_rule = (
+                    _own_entry_settlements(state, agent_names, argument, iteration + 1)
+                )
+                if argument.settled_by_rule:
+                    for sentence in argument.settled_by_rule:
+                        logger.info("negotiation: %s", sentence)
+                    emit_agent_message(
+                        container.event_sink,
+                        speaker=ROOM_SPEAKER,
+                        role="system",
+                        text="\n".join(argument.settled_by_rule),
+                        round_index=iteration + 1,
+                        status="complete",
+                        stage=stage_key_of(stage, "debate"),
+                        kind="system",
+                    )
             # Who the mediation asks to revise: the analysts its blocking lines
-            # name in their [analysts: ...] field, read and never guessed.
+            # name in their [analysts: ...] field, read and never guessed. A
+            # line settled by rule names nobody.
             if measured and argument.status == "complete":
                 if argument.note == CONTRADICTIONS_BLOCK_MISSING_NOTE:
                     argument.revise, argument.revise_note = None, BLOCK_NOT_READ_NOTE
                 else:
+                    settled_here = set(argument.settled_lines)
                     argument.revise, argument.revise_note = analysts_to_revise(
-                        list(argument.contradictions or []), agent_names
+                        [
+                            line
+                            for line in argument.contradictions or []
+                            if line not in settled_here
+                        ],
+                        agent_names,
                     )
                 if argument.revise_note:
                     logger.info("negotiation: %s", argument.revise_note)
@@ -5626,6 +5682,9 @@ def make_negotiation_node(
                 ),
                 "sycophancy_detected": syco,
                 "discussion_history": [argument],
+                # The answers in force whose claims a settled line holds at
+                # the lower figure.
+                **({"isr_reports": held_by_rule} if held_by_rule else {}),
                 # Mediation is the only place a judge agent calls a tool, so
                 # this is where those calls have to leave the agent.
                 "evidence_ledger": _judge_evidence(),
@@ -5932,7 +5991,14 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         if named is None:
             asked_all = str(getattr(mediation, "revise_note", "") or "")
         asked = list(agent_names) if named is None else [n for n in agent_names if n in named]
-        contested = list(getattr(mediation, "contradictions", None) or [])
+        # A line settled by rule is read as not blocking: it withdraws no
+        # claim by rule, and it stays in its place, so every line keeps its
+        # number.
+        settled_lines = set(getattr(mediation, "settled_lines", None) or [])
+        contested = [
+            as_not_blocking(line, SETTLED_REASON) if line in settled_lines else line
+            for line in getattr(mediation, "contradictions", None) or []
+        ]
 
         original_reports = state.get("reports") or {}
         # The answer each analyst has in force before this round: its last

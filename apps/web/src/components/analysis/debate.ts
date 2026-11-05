@@ -322,6 +322,7 @@ const ENDINGS: Record<string, string> = {
   carried_without_new_evidence: "Every remaining blocking line was raised again a second time with no new evidence, so it was left open",
   reworded: "The last revisions only reworded the claims in force",
   ledger_stated: "Every remaining blocking line stated only counts the ledger already states",
+  settled_by_rule: "Every remaining blocking line set an analyst's claim against its own dispute entry, so the platform held the claim at the lower figure",
   not_applicable: "No agreement was measured: fewer than two analysts produced claims, or the debate did not run",
 };
 
