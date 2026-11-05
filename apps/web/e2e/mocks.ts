@@ -1604,11 +1604,11 @@ export const MOCK_SETTINGS_VALUES_FULL: SettingsValues = {
     "core.agents.profile": { value: "default", ...unset() },
     "core.agents.definitions": {
       value: {
-        static: { role: "static", label: "Static analyst", prompt: null, tools: [], static_provider: null, enabled: true },
-        dynamic: { role: "dynamic", label: "Dynamic analyst", prompt: null, tools: [], static_provider: null, enabled: true },
-        network: { role: "network", label: "Network analyst", prompt: null, tools: [], static_provider: null, enabled: true },
-        judge: { role: "judge", label: "Judge", prompt: null, tools: [], static_provider: null, enabled: true },
-        reporter: { role: "report", label: "Reporter", prompt: null, tools: [], static_provider: null, enabled: true },
+        static: { role: "static", label: "Static analyst", prompt: null, tools: [], static_provider: null, enabled: true, category: "code_reader" },
+        dynamic: { role: "dynamic", label: "Dynamic analyst", prompt: null, tools: [], static_provider: null, enabled: true, category: "dynamic" },
+        network: { role: "network", label: "Network analyst", prompt: null, tools: [], static_provider: null, enabled: true, category: "network" },
+        judge: { role: "judge", label: "Judge", prompt: null, tools: [], static_provider: null, enabled: true, category: "other" },
+        reporter: { role: "report", label: "Reporter", prompt: null, tools: [], static_provider: null, enabled: true, category: "other" },
       },
       ...unset(),
     },
