@@ -938,6 +938,7 @@ class _Words:
     breaks, read once, so every statement in it is read by bisection."""
 
     def __init__(self, text: str) -> None:
+        self.text = text
         spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
         self.starts = [a for a, _b in spans]
         self.ends = [b for _a, b in spans]
@@ -989,37 +990,73 @@ class _Words:
         return bisect.bisect_left(self.starts, at)
 
 
-def _subject_address(words: _Words, begin: int, end: int) -> set[int]:
+# How many words may stand between a routine's address and the noun that ends
+# its subject ("the 0x3728 task routine", "0x3728's body").
+_TRAILING_WORDS = 3
+# The words that may end a subject after its address: a routine or its code, or
+# the routine itself.
+_SUBJECT_ENDS = frozenset({*_ROUTINE_NOUNS, *_CODE_NOUNS, "itself"})
+# The marks that open and close an appositive after an address, and which closes
+# which: "0x3728 (the registration routine)", "0x3728, the routine,", "0x3728 — it —".
+_APPOSITIVES = {"(": ")", ",": ",", "\u2014": "\u2014", "\u2013": "\u2013"}
+
+
+def _subject_address(words: _Words, begin: int, end: int, stop: int | None = None) -> set[int]:
     """The address a statement's clause, from ``begin`` to the statement at ``end``, writes
     last, where it heads the subject.
 
-    Not one a modifier word puts after another noun ("the link from 0x4d20 to
-    0x5030", "the callee 0x5000 of routine 0x3728"), unless the noun is a
-    routine's code ("the body of 0x3728") or a routine at the address ("the
-    routine at 0x3728"); not one a relative word opens a clause with ("the
-    buffer that 0x2800 fills"); and not one words other than a relative clause
-    of its own stand after ("the registry value 0x2800 sets"). Read by
-    bisection over the sentence's words.
+    The words after it may be a relative clause of its own ("0x3728 that
+    performs the registration") or a few that end on a routine or its code ("the
+    0x3728 task routine", "0x3728's body", "function 0x3728 itself"); any others
+    make it a word inside another subject ("the registry value 0x2800 sets").
+    Not one a relative word puts in another clause ("the buffer that 0x2800
+    fills"), nor one a modifier word puts after another noun ("the link from
+    0x4d20 to 0x5030"), unless the noun is a routine's code ("the body of 0x3728",
+    "the code at 0x3728") or a routine at the address ("the routine at 0x3728");
+    a kind noun before it ("routine 0x3728") is a modifier only after "of" or
+    "for" that an address or a callee or caller noun stands before ("the callee
+    0x5000 of routine 0x3728"). Read by bisection over the sentence's words; the
+    words after the address are read up to ``stop`` where an aside follows it.
     """
     at = words.last_address(begin, end)
     if at is None:
         return set()
     first = words.first_word(begin)
-    after = words.first_word(end)
-    if at + 1 < after and words.lower[at + 1] not in _RELATIVE_OPENERS:
-        return set()
+    after = words.first_word(end if stop is None else stop)
+    trailing = words.lower[at + 1 : after]
+    if trailing and trailing[0] not in _RELATIVE_OPENERS:
+        if len(trailing) > _TRAILING_WORDS or trailing[-1] not in _SUBJECT_ENDS:
+            return set()
     before = words.lower[at - 1] if at - 1 >= first else ""
     head = words.lower[at - 2] if at - 2 >= first else ""
     if before in _RELATIVE_OPENERS:
         return set()
     if before in _MODIFYING and not (
         (before in ("of", "for") and head in _CODE_NOUNS)
-        or (before == "at" and head in _ROUTINE_NOUNS)
+        or (before == "at" and head in (_ROUTINE_NOUNS | _CODE_NOUNS))
     ):
         return set()
     if before in _KIND_NOUN_WORDS and head in ("of", "for"):
-        return set()
+        owner = words.lower[at - 3] if at - 3 >= first else ""
+        if owner in _KIND_NOUN_WORDS - _ROUTINE_NOUNS or (at - 3 >= first and words.found[at - 3]):
+            return set()
     return set(words.found[at])
+
+
+def _appositive_subject(words: _Words, b: int) -> tuple[int, int] | None:
+    """Where the subject before an appositive the break ``b`` closes stands, or ``None``.
+
+    "Routine 0x3728 (the registration routine) was not read": the statement's
+    own clause holds no word, and the pair of marks before it opens and closes
+    an aside on the subject before them.
+    """
+    if b < 1:
+        return None
+    opened = words.text[words.break_starts[b - 1] : words.break_ends[b - 1]].strip()
+    closed = words.text[words.break_starts[b] : words.break_ends[b]].strip()
+    if _APPOSITIVES.get(opened) != closed:
+        return None
+    return (words.break_ends[b - 2] if b >= 2 else 0, words.break_ends[b - 1])
 
 
 def _unread_addresses(sentence: str, previous: str) -> tuple[set[int], set[int]]:
@@ -1050,9 +1087,15 @@ def _unread_addresses(sentence: str, previous: str) -> tuple[set[int], set[int]]
             # read"), the one the clause before it writes last.
             first = words.first_word(begin)
             opener = words.first_word(match.start()) - first == 1
+            aside = (
+                _appositive_subject(words, b) if words.first_word(match.start()) == first else None
+            )
             if opener and words.lower[first] in _RELATIVE_OPENERS and b >= 0:
                 earlier = words.break_ends[b - 1] if b >= 1 else 0
                 own |= _subject_address(words, earlier, words.break_ends[b])
+            elif aside is not None:
+                # The aside says what the subject is; the subject stands before it.
+                own |= _subject_address(words, aside[0], aside[1], words.break_starts[b - 1])
             else:
                 own |= _subject_address(words, begin, match.start())
         here = set(named)
@@ -2209,7 +2252,14 @@ _IN_CLAUSE = rf"[^.;:()\u2014\u2013]{{0,{_CLAUSE_REACH}}}?"
 # whether a fact or section 5 says otherwise, is the model's to read; a
 # sentence naming an address is about that address and is held by what it names.
 _WHOLE_CODE_ABSENCE = re.compile(
-    r"\bno\b" + _IN_CLAUSE + r"\b(?:appears?|(?:is|are)\s+(?:present|found))\b",
+    r"\bno\b" + _IN_CLAUSE + r"\b(?:appears?|(?:is|are)\s+(?:present|found))\b"
+    # In the past only where the same clause names the code read ("no reference
+    # was found in the listings read"); never what a run saw or observed.
+    r"|\bno\b(?="
+    + _IN_CLAUSE
+    + r"\b(?:code|listings?|decompil\w*|disassembl\w*)\b)"
+    + _IN_CLAUSE
+    + r"\b(?:was|were)\s+(?:found|present)\b",
     re.IGNORECASE,
 )
 # A negation of the conclusion or the limitations: something not attributed,
@@ -2997,16 +3047,25 @@ def _qualify_unread_left(
     return out
 
 
-def _merged_rows(first: Any, last: Any, sound: Callable[[Any], bool] = bool) -> Any:
+def _merged_rows(
+    first: Any,
+    last: Any,
+    sound: Callable[[Any], bool] = bool,
+    where: Callable[[Any], tuple[str, str]] | None = None,
+) -> Any:
     """The retry's rows, with each sound row of the first answer the retry leaves out.
 
     A retry asked about one held sentence may answer that one alone: the first
     answer's rows that passed every check (``sound``) are kept, the retry's row
-    winning for the same passage and sentence. Either answer that is no object
-    stands for none.
+    winning for the same passage and sentence: where it stands in the passage
+    (``where``, the place :class:`_Sentences` locates it at, so the same sentence
+    copied with its escapes read back is one), else its words. Either answer that
+    is no object stands for none.
     """
 
     def _key(row: Any) -> tuple[str, str]:
+        if where is not None:
+            return where(row)
         return (_form(_field(row, "passage")), " ".join(str(_field(row, "sentence") or "").split()))
 
     before = first.get("sentences") if isinstance(first, dict) else None
@@ -3119,9 +3178,23 @@ async def _ask(
             return None
         # A retry answering only what it was asked keeps the first answer's rows
         # that passed every check; one that did not is the retry's to fix or leave.
-        parsed = _merged_rows(answered[0], parsed, _sound)
+        parsed = _merged_rows(answered[0], parsed, _sound, _where)
         answered[0] = parsed
         return _platform_rewrites(parsed, by_id)
+
+    located_in: dict[str, _Sentences] = {}
+
+    def _where(row: Any) -> tuple[str, str]:
+        pid = _form(_field(row, "passage"))
+        sentence = str(_field(row, "sentence") or "")
+        passage = by_id.get(pid)
+        if passage is not None:
+            if pid not in located_in:
+                located_in[pid] = _Sentences(passage.text)
+            span = located_in[pid].span(sentence)
+            if span is not None:
+                return (pid, str(span[0]))
+        return (pid, " ".join(sentence.split()))
 
     def _sound(row: Any) -> bool:
         try:

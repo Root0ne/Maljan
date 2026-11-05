@@ -200,7 +200,7 @@ def _program_argument(entry: Any) -> str:
 
 
 def _changed(
-    failed: Any, answering: Any, *, by_address: bool = True
+    failed: Any, answering: Any, *, by_address: bool = True, sample: Sequence[str] = ()
 ) -> Iterator[tuple[str, bool, bool]]:
     """Each argument a later call set to another value than the failed one.
 
@@ -218,9 +218,13 @@ def _changed(
     ``61440``, :func:`_same_value`) or the same items in another shape. A value
     the redo leaves absent or null is another question (a name looked up, a
     pattern searched), but for the program the tool declares an argument for,
-    whose refused value the failure's message names: left out, the server's
-    own program is asked the same question.
+    whose refused value the failure's message names and is the run's own
+    sample by the pipeline pack's record (``image_range._sample_names``): left
+    out, the server's own program, the sample, is asked the same question; a
+    refused other file (a dropped payload) left out asks about the sample, another
+    question.
     """
+    from maljan.agents.image_range import same_program
     from maljan.core.undeclared_tools import entry_address_arguments
     from maljan.pipeline.validation import _ADDRESS_LIST_ARGUMENTS
 
@@ -241,7 +245,10 @@ def _changed(
         if _empty(after):
             if by_address:
                 continue
-            yield str(name), False, named and bool(program) and str(name) == program
+            # Left out, the server's own program is asked: the same question
+            # only where the refused one is the run's own sample.
+            own = any(same_program(refused, held) for held in sample)
+            yield str(name), False, named and own and bool(program) and str(name) == program
             continue
         if _empty(before):
             yield str(name), True, _names_argument(message, str(name))
@@ -253,7 +260,9 @@ def _changed(
         yield str(name), False, fixed or _reshaped(before, after)
 
 
-def _same_question(failed: Any, answering: Any, *, by_address: bool = True) -> bool:
+def _same_question(
+    failed: Any, answering: Any, *, by_address: bool = True, sample: Sequence[str] = ()
+) -> bool:
     """Whether a later call of the failed call's tool asked what it asked, but for its addresses.
 
     Never a narrower question: an argument only the redo sets, unless the
@@ -262,7 +271,12 @@ def _same_question(failed: Any, answering: Any, *, by_address: bool = True) -> b
     one. Without ``by_address`` the addresses are read like every other
     argument.
     """
-    return all(fixed for _name, _added, fixed in _changed(failed, answering, by_address=by_address))
+    return all(
+        fixed
+        for _name, _added, fixed in _changed(
+            failed, answering, by_address=by_address, sample=sample
+        )
+    )
 
 
 def _changes_a_set_value(failed: Any, answering: Any) -> bool:
@@ -367,6 +381,18 @@ def redone_failures(ledger: Iterable[Any]) -> list[dict[str, Any]]:
 
     bases = tuple(build_function_map(entries, None, ()).image_bases)
     answers = [at for at, entry in enumerate(entries) if _answers(entry)]
+    held: list[tuple[str, ...]] = []
+
+    def _sample() -> tuple[str, ...]:
+        # The run's own sample by the platform's record: the names the
+        # pipeline's own pack answers read it by, never a failure's message.
+        if not held:
+            from maljan.agents.image_range import _sample_names
+            from maljan.pipeline.triage_pack import pack_entries
+
+            held.append(_sample_names(pack_entries(entries)))
+        return held[0]
+
     out: list[dict[str, Any]] = []
     for at in failed_at:
         failed = entries[at]
@@ -379,7 +405,7 @@ def redone_failures(ledger: Iterable[Any]) -> list[dict[str, Any]]:
                     for later in answers
                     if later > at
                     and getattr(entries[later], "tool", None) == getattr(failed, "tool", None)
-                    and _same_question(failed, entries[later], by_address=False)
+                    and _same_question(failed, entries[later], by_address=False, sample=_sample())
                 ),
                 None,
             )

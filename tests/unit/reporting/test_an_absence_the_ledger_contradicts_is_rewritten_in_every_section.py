@@ -33,6 +33,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from maljan.agents.tool_fence import quoted_value
 from maljan.core.config import Settings, get_settings, install_settings
 from maljan.pipeline.nodes import evidence_summary
+from maljan.pipeline.triage_pack import PIPELINE
 from maljan.pipeline.validation import EntryTexts
 from maljan.reporting.models import (
     FileHashes,
@@ -56,6 +57,7 @@ from maljan.reporting.section_agreement import (
     UNKNOWN_SOURCE_CODE,
     UNREAD_STANDING_CODE,
     Passage,
+    _merged_rows,
     _reports_a_claim,
     apply_rows,
     ask_section_agreement,
@@ -664,23 +666,49 @@ def test_a_refused_bare_hex_value_the_failure_names_is_redone_as_a_number() -> N
     assert [row["answered_by"] for row in redone_failures(ledger)] == [["ev_0002"]]
 
 
-def test_a_refused_program_left_out_is_a_redo_only_for_the_declared_program_argument() -> None:
-    facts = {"v": 1, "kind": "", "arguments": {"program": "program"}}
-    error = "Program not found: /work/sample.bin"
-    failed = LedgerEntry(
+# The pipeline's own identity answer: the platform's record of the run's sample.
+_IDENTITY = LedgerEntry(
+    id="ev_0000",
+    tool="identify",
+    agent=PIPELINE,
+    args={"path": "/work/sample.bin"},
+    output="{}",
+    facts={"v": 1, "kind": "identity", "arguments": {"path": "path"}},
+)
+_PROGRAM_FACTS = {"v": 1, "kind": "", "arguments": {"program": "program"}}
+
+
+def _program_refused(program: str, facts: dict[str, Any] = _PROGRAM_FACTS) -> LedgerEntry:
+    return LedgerEntry(
         id="ev_0001",
         tool="program_info",
-        args={"program": "/work/sample.bin"},
+        args={"program": program},
         ok=False,
-        error=error,
+        error=f"Program not found: {program}",
         facts=facts,
     )
-    again = LedgerEntry(
-        id="ev_0002", tool="program_info", args={"program": None}, output="{}", facts=facts
-    )
-    assert [row["answered_by"] for row in redone_failures([failed, again])] == [["ev_0002"]]
+
+
+_PROGRAM_AGAIN = LedgerEntry(
+    id="ev_0002", tool="program_info", args={"program": None}, output="{}", facts=_PROGRAM_FACTS
+)
+
+
+def test_a_refused_program_left_out_is_a_redo_only_for_the_declared_program_argument() -> None:
+    failed = _program_refused("/work/sample.bin")
+    ledger = [_IDENTITY, failed, _PROGRAM_AGAIN]
+    assert [row["answered_by"] for row in redone_failures(ledger)] == [["ev_0002"]]
     undeclared = failed.model_copy(update={"facts": {"v": 1, "kind": ""}})
-    assert redone_failures([undeclared, again.model_copy(update={"facts": None})]) == []
+    again = _PROGRAM_AGAIN.model_copy(update={"facts": None})
+    assert redone_failures([_IDENTITY, undeclared, again]) == []
+
+
+def test_a_refused_other_program_left_out_asks_about_the_sample_another_question() -> None:
+    # A dropped file refused, then the server's own program, the sample, asked.
+    ledger = [_IDENTITY, _program_refused("/work/dropped_payload.bin"), _PROGRAM_AGAIN]
+    assert redone_failures(ledger) == []
+    # Without the platform's record of the sample, no program left out is a redo.
+    assert redone_failures([_program_refused("/work/sample.bin"), _PROGRAM_AGAIN]) == []
 
 
 def test_a_whole_code_absence_never_rests_on_its_own_passage() -> None:
@@ -728,3 +756,58 @@ def test_a_section_5_whole_code_absence_is_quoted_once_in_the_prompt() -> None:
     passages = passages_of(_whole_report(), entries=_ledger())
     # Once, in the note: the held line leaves out what the note lists.
     assert prompt_text(passages).count(quoted_value(WHOLE)) == 1
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "The body of the 0x2800 task routine was not read [ev_0002].",
+        "The 0x2800 routine was not read [ev_0002].",
+        "0x2800's body is not read [ev_0002].",
+        "The body of routine 0x2800 is not read [ev_0002].",
+        "Function 0x2800 itself was not read [ev_0002].",
+        "Routine 0x2800 (the registration routine) was not read [ev_0002].",
+        "The body of 0x2800, the registration routine, was not read [ev_0002].",
+        "The body of 0x2800 \u2014 the task routine \u2014 was not read [ev_0002].",
+        "The code at 0x2800 is not read [ev_0002].",
+        "The function at 0x2800 has not been read [ev_0002].",
+    ],
+)
+def test_a_sentence_calling_the_routine_s_own_code_unread_names_its_subject(
+    sentence: str,
+) -> None:
+    listed = [p for p in passages_of(_report(), entries=_ledger()) if p.lists_code]
+    ((_sentence, ids, own),) = unread_listed_sentences(sentence, listed)
+    assert ids and own == ids, sentence
+
+
+def test_the_callee_of_a_routine_is_not_the_routine() -> None:
+    listed = [p for p in passages_of(_report(), entries=_ledger()) if p.lists_code]
+    text = "The callee 0x2c00 of routine 0x2800 was not read [ev_0002]."
+    ((_sentence, _ids, own),) = unread_listed_sentences(text, listed)
+    assert own == ()
+
+
+@pytest.mark.parametrize(
+    ("sentence", "held"),
+    [
+        ("No code reference to it was found in the listings read [ev_0002].", True),
+        ("No anti-debug call was present in the decompiled code [ev_0002].", True),
+        ("No C2 was seen in the run [ev_0002].", False),
+        ("No beacon was observed in the code [ev_0002].", False),
+        ("No sample was found on the reputation service [ev_0002].", False),
+    ],
+)
+def test_a_past_absence_is_whole_code_only_where_its_clause_names_the_code_read(
+    sentence: str, held: bool
+) -> None:
+    assert bool(whole_code_absences(sentence)) is held
+
+
+def test_a_retry_s_row_replaces_the_first_one_for_the_same_place_in_the_passage() -> None:
+    first = {"sentences": [{"passage": "a", "sentence": "x", "decision": "keep"}]}
+    retry = {"sentences": [{"passage": "a", "sentence": "x  copied", "decision": "rewrite"}]}
+    merged = _merged_rows(first, retry, where=lambda row: (row["passage"], "same place"))
+    assert merged["sentences"] == retry["sentences"]
+    # Without a place, two spellings are two sentences.
+    assert len(_merged_rows(first, retry)["sentences"]) == 2
