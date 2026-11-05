@@ -118,7 +118,14 @@ describe("the agent category in the editor", () => {
 
   it("carries the owner-approved help text word for word, tied to the select", () => {
     const help = renderToStaticMarkup(createElement(CategoryHelp, { id: "x" }));
-    expect(help.replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'")).toBe(HELP);
+    // The text between the tags, read by splitting rather than by stripping.
+    const text = help
+      .split("<")
+      .map((part) => part.slice(part.indexOf(">") + 1))
+      .join("")
+      .split("&#x27;")
+      .join("'");
+    expect(text).toBe(HELP);
     expect(help).toContain("<em>Reverser</em>");
     expect(help).toContain("<em>Other</em>");
     expect(identity("mine", base)).toContain('aria-describedby="mine-category-help"');
