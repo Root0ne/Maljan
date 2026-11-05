@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { getErrorMessage, isForbidden } from "@/lib/errors";
 import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
 import { deepEqual } from "./deepEqual";
+import { AGENT_DEFINITIONS_KEY, builtinAgentKeys, missingCategoryErrors } from "./agentStaging";
 import { keysNeedingPassword, passwordRefusal } from "./signInPolicy";
 import type {
   CatalogEntry,
@@ -280,6 +281,20 @@ export function useSettings() {
    *  `needs_current_password` (`keysNeedingPassword`); a caller that has none
    *  (a guide) is asked for it here. */
   const apply = useCallback(async (currentPassword?: string) => {
+    // A new agent with no category is refused before anything is sent or a password is asked,
+    // under its field, in the API's own words (`missingCategoryErrors`).
+    const definitionsEntry = entriesByKey[AGENT_DEFINITIONS_KEY];
+    const uncategorised = missingCategoryErrors(
+      pending[AGENT_DEFINITIONS_KEY],
+      values[AGENT_DEFINITIONS_KEY]?.value,
+      builtinAgentKeys(definitionsEntry?.builtin_agent_keys),
+      definitionsEntry?.agent_category_choices,
+    );
+    if (Object.keys(uncategorised).length > 0) {
+      setErrors(uncategorised);
+      setActionError("Choose a category for each new agent before saving.");
+      return null;
+    }
     let password = currentPassword;
     const policy = keysNeedingPassword(Object.keys(pending), entriesByKey);
     if (policy.length > 0 && password === undefined) {

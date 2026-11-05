@@ -88,6 +88,11 @@ class ResolvedAgent:
     # (``AgentDefinition.attck_techniques``). Read by the configurable analyst
     # only; a built-in role keeps its own claim format.
     attck_techniques: bool = True
+    # What the agent does (``AgentDefinition.category``), which decides the
+    # platform steps it is offered (``core.agent_category``). ``other`` is
+    # what an agent resolved without a definition reads: the steps worked
+    # out from its tools and what they returned.
+    category: str = "other"
 
 
 def active_profile(settings: Settings) -> ProfileDefinition:
@@ -1763,6 +1768,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
         degradation_reasons=tuple(dict.fromkeys(reasons)),
         path_by_server=staged,
         attck_techniques=definition.attck_techniques,
+        category=definition.category,
     )
 
 
@@ -1855,6 +1861,7 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         degradation_reasons=tuple(dict.fromkeys(reasons)),
         path_by_server=staged,
         attck_techniques=definition.attck_techniques,
+        category=definition.category,
     )
 
 

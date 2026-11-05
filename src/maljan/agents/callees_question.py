@@ -57,6 +57,7 @@ from maljan.agents.function_map import (
     one_spelling,
     same_function,
 )
+from maljan.core.agent_category import CODE_READER, declared_category
 from maljan.core.declared_reading import kind_of
 from maljan.core.undeclared_tools import (
     declares_a_kind,
@@ -81,6 +82,7 @@ __all__ = [
     "callees_asked_record",
     "callees_to_read",
     "reads_code",
+    "states_why",
     "unread_callees_violation",
 ]
 
@@ -177,6 +179,13 @@ NOT_RUN_NO_CALLS = (
     "neither its listings nor a function index state what the routines it read call, or the "
     "path from a start to them"
 )
+# Said for an analyst whose category is a code reader's when no entry of it
+# lists code: it is meant to read code, so where none is known is a gap.
+NOT_RUN_CODE_READER_NO_LISTING = (
+    "it is in the code reader category, and no entry of it lists code: no tool it called "
+    "declares a decompile, disassembly or function-listing kind, and no tool that declares "
+    "nothing is named as one"
+)
 # Said where the turn after the loop cannot carry the analyst's tools, so the
 # question could not be answered with a read.
 NOT_RUN_NO_TOOLS = "the turn after its loop carries no tools ({why}), so no function could be read"
@@ -200,8 +209,16 @@ class CalleesFound:
     not_run: str = ""
 
     def says_why(self) -> bool:
-        """Whether its reason is one the run states: every one but "reads no code"."""
-        return bool(self.not_run) and self.not_run != NOT_RUN_NO_LISTING
+        """Whether its reason is one the run states (:func:`states_why`)."""
+        return states_why(self.not_run)
+
+
+def states_why(not_run: str) -> bool:
+    """Whether a reason the question was not put is said: a gap, not a fact.
+
+    "Reads no code" is a fact about the analyst, and nothing is said for it.
+    """
+    return bool(not_run) and not_run != NOT_RUN_NO_LISTING
 
 
 def reads_code(
@@ -209,18 +226,24 @@ def reads_code(
 ) -> tuple[bool, str]:
     """Whether an analyst reads code, and, when it does not, why: the one place that decides.
 
-    Today from the ledger alone: an entry whose tool declares a decompile,
-    disassembly or function-listing kind (the declaration each entry stored),
-    or, for a tool that declares nothing, whose name says it is one. Neither
-    the analyst's name nor a tool's or a server's name is read.
-    ``definition`` (the analyst's definition) and ``declarations`` are taken
-    so that a reading keyed on them first can stand in front of this one;
-    neither is read yet.
+    From the ledger, whatever the analyst's category: an entry whose tool
+    declares a decompile, disassembly or function-listing kind (the
+    declaration each entry stored), or, for a tool that declares nothing,
+    whose name says it is one. The category declared on the definition
+    (``core.agent_category``) only adds: an analyst in ``code_reader`` none
+    of whose entries lists code is told why, where any other is left alone as
+    before. Neither the analyst's name nor a tool's or a server's name is
+    read. ``declarations`` is taken so that a reading keyed on them can stand
+    in front of the ledger's; it is not read yet.
     """
-    del definition, declarations
+    del declarations
+    category = declared_category(definition)
     if any(entry_decompiles(e) or entry_lists_any_code(e) for e in ledger):
         return True, ""
-    return False, _no_listing(ledger)
+    why = _no_listing(ledger)
+    if category == CODE_READER and why == NOT_RUN_NO_LISTING:
+        return False, NOT_RUN_CODE_READER_NO_LISTING
+    return False, why
 
 
 def _no_listing(entries: Sequence[Any]) -> str:

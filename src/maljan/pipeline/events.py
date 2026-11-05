@@ -2436,6 +2436,19 @@ def _field(obj: Any, name: str, fallback: Any = "") -> Any:
     return getattr(obj, name, fallback)
 
 
+def _category_of(definition: Any) -> str:
+    """A definition's category (``core.agent_category``); ``""`` for no definition.
+
+    A stored document written before the field existed reads the one its role
+    and tools fit, as the settings model reads it.
+    """
+    if definition is None:
+        return ""
+    from maljan.core.agent_category import declared_category, fitting_category
+
+    return declared_category(definition) or fitting_category(definition)[0]
+
+
 def _asks_of(definition: Any) -> list[str]:
     """Every agent this definition can task, from its ``ask_<key>`` tools."""
     asked: list[str] = []
@@ -2473,7 +2486,8 @@ def roster_payload(
     Read off the team the job runs rather than off the messages as they
     arrive, so the console can draw the participants before the first one
     says anything, and so a reader who cannot open the admin settings still
-    sees the label the operator gave an agent. An agent a stage names but no
+    sees the label the operator gave an agent, and its category beside its
+    role (``""`` for one with no definition). An agent a stage names but no
     definition describes is still listed: it is going to speak, and a roster
     that omits it sends the console back to the registry key it was trying to
     replace.
@@ -2529,6 +2543,7 @@ def roster_payload(
                     "key": member,
                     "label": str(field(definition, "label", "") or member),
                     "role": str(field(definition, "role", "") or ""),
+                    "category": _category_of(definition),
                     "stages": [],
                 },
             )
@@ -2558,6 +2573,7 @@ def roster_payload(
                         "key": callee,
                         "label": str(field(definition, "label", "") or callee),
                         "role": str(field(definition, "role", "") or ""),
+                        "category": _category_of(definition),
                         "stages": [],
                     },
                 )

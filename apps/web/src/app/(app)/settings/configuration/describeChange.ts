@@ -366,6 +366,7 @@ export const DEFINITION_FIELDS: [keyof AgentDefinitionEntry, string][] = [
   ["static_provider", "static provider"],
   ["label", "label"],
   ["role", "role"],
+  ["category", "category"],
   ["max_steps", "steps per loop"],
   ["timeout_seconds", "seconds per loop"],
   ["tab", "console tab"],

@@ -277,6 +277,8 @@ test.describe("agent definitions and profiles", () => {
     const detail = page.locator('[data-agent-detail="strings"]');
     await detail.getByLabel("strings label").fill("Strings reviewer");
     await detail.getByLabel("strings prompt").fill("Review the extracted strings for IOCs.");
+    // A new agent names its category before it can be saved.
+    await detail.getByLabel("strings category").selectOption("network");
     await detail.getByRole("button", { name: "List tools" }).first().click();
     await detail.getByLabel("strings tool network.extract_dns").check();
 
@@ -340,6 +342,8 @@ test.describe("agent definitions and profiles", () => {
     await page.getByRole("button", { name: "Add agent" }).click();
     const detail = page.locator('[data-agent-detail="decomp"]');
     await detail.getByLabel("decomp prompt").fill("Read the decompiled code.");
+    // A new agent names its category before it can be saved.
+    await detail.getByLabel("decomp category").selectOption("code_reader");
     await detail.getByLabel("decomp static provider").selectOption("r2");
     await detail.getByLabel("decomp provider tools").check();
 
@@ -522,6 +526,11 @@ test.describe("agent definitions and profiles", () => {
 
     await page.getByLabel("new agent name").fill("nameless");
     await page.getByRole("button", { name: "Add agent" }).click();
+    // A new agent names its category before it can be saved.
+    await page
+      .locator('[data-agent-detail="nameless"]')
+      .getByLabel("nameless category")
+      .selectOption("other");
 
     // 422 body shape per `app.api.v1.settings`: a top-level `errors` map
     // keyed by dotted path (`tests/api/test_settings_routes.py`), not
@@ -559,6 +568,11 @@ test.describe("agent definitions and profiles", () => {
     await page.goto(AGENTS_PATH);
     await page.getByLabel("new agent name").fill("nameless");
     await page.getByRole("button", { name: "Add agent" }).click();
+    // A new agent names its category before it can be saved.
+    await page
+      .locator('[data-agent-detail="nameless"]')
+      .getByLabel("nameless category")
+      .selectOption("other");
 
     // A rail-link switch keeps both editors' staged edits in the one
     // `SettingsProvider` the whole /settings/configuration tree shares — a

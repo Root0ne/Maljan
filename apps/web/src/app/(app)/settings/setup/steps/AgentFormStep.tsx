@@ -228,6 +228,7 @@ export default function AgentFormStep({
         builtinAgentKeys={entry?.builtin_agent_keys}
         alwaysEnabledAgentKeys={entry?.always_enabled_agent_keys}
         dataSourceChoices={entry?.data_source_choices ?? []}
+        categoryChoices={entry?.agent_category_choices}
       />
     </div>
   );

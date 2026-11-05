@@ -522,6 +522,7 @@ def _mcp_agent(tool: str) -> dict[str, Any]:
     return {
         "strings": {
             "role": "generic",
+            "category": "other",
             "prompt": "p",
             "tools": [{"kind": "mcp", "server": "mine", "name": tool}],
         }

@@ -40,6 +40,7 @@
    "entries": [
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -77,6 +78,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -114,6 +116,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -151,6 +154,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -188,6 +192,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -225,6 +230,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -262,6 +268,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -303,6 +310,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -448,6 +456,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -485,6 +494,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -525,6 +535,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -568,6 +579,7 @@
    "entries": [
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -605,6 +617,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -642,6 +655,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -679,6 +693,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -716,6 +731,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -753,6 +769,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -797,6 +814,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -834,6 +852,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -871,6 +890,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -912,6 +932,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -952,6 +973,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -989,6 +1011,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1026,6 +1049,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1063,6 +1087,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1100,6 +1125,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1137,6 +1163,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1174,6 +1201,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1211,6 +1239,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1248,6 +1277,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1285,6 +1315,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1322,6 +1353,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1359,6 +1391,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1396,6 +1429,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1438,6 +1472,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1475,6 +1510,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1512,6 +1548,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1549,6 +1586,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1586,6 +1624,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1623,6 +1662,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1660,6 +1700,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1697,6 +1738,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1734,6 +1776,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1771,6 +1814,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1808,6 +1852,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1851,6 +1896,7 @@
    "entries": [
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1888,6 +1934,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1925,6 +1972,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1962,6 +2010,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -1999,6 +2048,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2036,6 +2086,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2073,6 +2124,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2110,6 +2162,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2147,6 +2200,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2184,6 +2238,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2221,6 +2276,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2258,6 +2314,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2295,6 +2352,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2332,6 +2390,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2369,6 +2428,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2412,6 +2472,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2494,6 +2555,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2540,6 +2602,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2581,6 +2644,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2622,6 +2686,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2663,6 +2728,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2719,6 +2785,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2758,6 +2825,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2799,6 +2867,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2840,6 +2909,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2881,6 +2951,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2922,6 +2993,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -2963,6 +3035,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3004,6 +3077,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3043,6 +3117,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3084,6 +3159,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3125,6 +3201,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3166,6 +3243,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3207,6 +3285,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3248,6 +3327,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3289,6 +3369,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3330,6 +3411,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3369,6 +3451,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3410,6 +3493,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3451,6 +3535,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3492,6 +3577,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3533,6 +3619,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3574,6 +3661,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3615,6 +3703,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3656,6 +3745,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3697,6 +3787,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3738,6 +3829,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3779,6 +3871,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3820,6 +3913,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3861,6 +3955,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3902,6 +3997,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3943,6 +4039,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -3984,6 +4081,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4025,6 +4123,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4066,6 +4165,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4107,6 +4207,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4148,6 +4249,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4189,6 +4291,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4230,6 +4333,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4271,6 +4375,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4312,6 +4417,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4353,6 +4459,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4392,6 +4499,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4438,6 +4546,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4477,6 +4586,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4518,6 +4628,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4559,6 +4670,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4600,6 +4712,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4641,6 +4754,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4680,6 +4794,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4721,6 +4836,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4762,6 +4878,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4803,6 +4920,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4844,6 +4962,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4885,6 +5004,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4926,6 +5046,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -4967,6 +5088,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5006,6 +5128,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5047,6 +5170,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5088,6 +5212,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5129,6 +5254,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5170,6 +5296,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5211,6 +5338,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5252,6 +5380,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5293,6 +5422,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5332,6 +5462,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5373,6 +5504,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5414,6 +5546,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5455,6 +5588,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5496,6 +5630,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5537,6 +5672,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5578,6 +5714,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5619,6 +5756,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5660,6 +5798,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5701,6 +5840,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5742,6 +5882,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5783,6 +5924,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5824,6 +5966,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5865,6 +6008,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5906,6 +6050,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5947,6 +6092,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -5988,6 +6134,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6029,6 +6176,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6070,6 +6218,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6111,6 +6260,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6152,6 +6302,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6193,6 +6344,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6234,6 +6386,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6275,6 +6428,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6316,6 +6470,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6355,6 +6510,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6401,6 +6557,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6440,6 +6597,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6481,6 +6639,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6522,6 +6681,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6563,6 +6723,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6604,6 +6765,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6651,6 +6813,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6802,6 +6965,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6843,6 +7007,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6884,6 +7049,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6923,6 +7089,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -6964,6 +7131,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7005,6 +7173,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7046,6 +7215,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7087,6 +7257,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7128,6 +7299,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7169,6 +7341,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7208,6 +7381,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7249,6 +7423,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7290,6 +7465,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7331,6 +7507,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7372,6 +7549,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7413,6 +7591,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7454,6 +7633,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7495,6 +7675,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7534,6 +7715,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7575,6 +7757,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7616,6 +7799,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7657,6 +7841,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7698,6 +7883,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7739,6 +7925,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7780,6 +7967,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7821,6 +8009,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7862,6 +8051,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7903,6 +8093,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7944,6 +8135,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -7985,6 +8177,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8026,6 +8219,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8067,6 +8261,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8108,6 +8303,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8149,6 +8345,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8190,6 +8387,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8231,6 +8429,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8272,6 +8471,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8313,6 +8513,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8354,6 +8555,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8395,6 +8597,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8436,6 +8639,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8477,6 +8681,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8518,6 +8723,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8557,6 +8763,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8603,6 +8810,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8642,6 +8850,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8683,6 +8892,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8724,6 +8934,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8765,6 +8976,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8806,6 +9018,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8847,6 +9060,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8888,6 +9102,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8929,6 +9144,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -8970,6 +9186,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9007,6 +9224,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9048,6 +9266,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9089,6 +9308,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9130,6 +9350,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9171,6 +9392,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9215,6 +9437,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9259,6 +9482,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9303,6 +9527,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9347,6 +9572,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9391,6 +9617,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9435,6 +9662,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9479,6 +9707,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9523,6 +9752,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9567,6 +9797,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9611,6 +9842,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9655,6 +9887,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9699,6 +9932,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9743,6 +9977,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9787,6 +10022,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9831,6 +10067,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9872,6 +10109,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9918,6 +10156,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -9959,6 +10198,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10000,6 +10240,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10044,6 +10285,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10088,6 +10330,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10129,6 +10372,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10170,6 +10414,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10211,6 +10456,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10252,6 +10498,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10293,6 +10540,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10334,6 +10582,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10378,6 +10627,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10419,6 +10669,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10460,6 +10711,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10501,6 +10753,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10542,6 +10795,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10583,6 +10837,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10624,6 +10879,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10665,6 +10921,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10706,6 +10963,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10747,6 +11005,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10788,6 +11047,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10829,6 +11089,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10870,6 +11131,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10911,6 +11173,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10952,6 +11215,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -10999,6 +11263,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": [
       "android_static",
       "dynamic",
@@ -11103,6 +11368,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11140,6 +11406,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11177,6 +11444,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11214,6 +11482,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11251,6 +11520,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11288,6 +11558,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11331,6 +11602,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11373,6 +11645,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11414,6 +11687,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11455,6 +11729,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11496,6 +11771,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11537,6 +11813,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11580,6 +11857,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11617,6 +11895,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11658,6 +11937,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11695,6 +11975,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11732,6 +12013,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11769,6 +12051,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11806,6 +12089,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11843,6 +12127,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11880,6 +12165,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11917,6 +12203,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11954,6 +12241,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -11991,6 +12279,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12028,6 +12317,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12065,6 +12355,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12102,6 +12393,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12139,6 +12431,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12176,6 +12469,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12213,6 +12507,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12250,6 +12545,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12287,6 +12583,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12324,6 +12621,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12361,6 +12659,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12398,6 +12697,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12435,6 +12735,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12472,6 +12773,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12509,6 +12811,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -12549,6 +12852,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13371,6 +13675,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13408,6 +13713,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13448,6 +13754,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13485,6 +13792,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13522,6 +13830,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13559,6 +13868,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13596,6 +13906,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13633,6 +13944,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13670,6 +13982,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13713,6 +14026,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13750,6 +14064,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13793,6 +14108,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13830,6 +14146,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13867,6 +14184,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13910,6 +14228,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13947,6 +14266,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -13984,6 +14304,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14021,6 +14342,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14058,6 +14380,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14095,6 +14418,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14138,6 +14462,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14175,6 +14500,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14212,6 +14538,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14249,6 +14576,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14286,6 +14614,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -14323,6 +14652,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14360,6 +14690,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14397,6 +14728,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14434,6 +14766,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14471,6 +14804,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14508,6 +14842,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14545,6 +14880,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14588,6 +14924,14 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": [
+      "code_reader",
+      "static",
+      "dynamic",
+      "network",
+      "intel",
+      "other"
+     ],
      "agent_keys": null,
      "always_enabled_agent_keys": [
       "judge"
@@ -14649,6 +14993,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14692,6 +15037,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14729,6 +15075,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14766,6 +15113,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14803,6 +15151,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14840,6 +15189,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14877,6 +15227,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14914,6 +15265,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14951,6 +15303,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -14988,6 +15341,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -15025,6 +15379,7 @@
     },
     {
      "advanced": true,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -15062,6 +15417,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -15105,6 +15461,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15142,6 +15499,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -15185,6 +15543,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -15222,6 +15581,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -15259,6 +15619,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -15302,6 +15663,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15339,6 +15701,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15376,6 +15739,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15413,6 +15777,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15450,6 +15815,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15487,6 +15853,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15524,6 +15891,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15567,6 +15935,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -15604,6 +15973,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "next_job",
@@ -15647,6 +16017,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15684,6 +16055,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15721,6 +16093,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15758,6 +16131,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15795,6 +16169,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15832,6 +16207,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15869,6 +16245,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15906,6 +16283,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15943,6 +16321,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -15980,6 +16359,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -16017,6 +16397,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -16054,6 +16435,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -16091,6 +16473,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "live",
@@ -16134,6 +16517,7 @@
    "entries": [
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "restart",
@@ -16171,6 +16555,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "restart",
@@ -16208,6 +16593,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "restart",
@@ -16245,6 +16631,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "restart",
@@ -16282,6 +16669,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "restart",
@@ -16319,6 +16707,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "restart",
@@ -16356,6 +16745,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "restart",
@@ -16393,6 +16783,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "restart",
@@ -16430,6 +16821,7 @@
     },
     {
      "advanced": false,
+     "agent_category_choices": null,
      "agent_keys": null,
      "always_enabled_agent_keys": null,
      "applies": "restart",

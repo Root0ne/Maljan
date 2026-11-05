@@ -133,6 +133,7 @@ DEFAULT_AGENTS = {
     "definitions": {
         "static": {
             "role": "static",
+            "category": "code_reader",
             "label": "Static analyst",
             "prompt": None,
             "tools": [_mcp("analysis"), _mcp("knowledge"), _REPUTATION],
@@ -147,6 +148,7 @@ DEFAULT_AGENTS = {
         },
         "dynamic": {
             "role": "dynamic",
+            "category": "dynamic",
             "label": "Dynamic analyst",
             "prompt": None,
             "tools": [{"kind": "sandbox", "server": None, "name": None}, _mcp("knowledge")],
@@ -161,6 +163,7 @@ DEFAULT_AGENTS = {
         },
         "network": {
             "role": "network",
+            "category": "network",
             "label": "Network analyst",
             "prompt": None,
             "tools": [_mcp("network"), _mcp("knowledge"), _REPUTATION],
@@ -175,6 +178,7 @@ DEFAULT_AGENTS = {
         },
         "judge": {
             "role": "judge",
+            "category": "other",
             "label": "Judge",
             "prompt": None,
             # The mediator may read the sandbox report and ask the reverser
@@ -200,6 +204,7 @@ DEFAULT_AGENTS = {
         # the report is built from what the run already produced.
         "reporter": {
             "role": "report",
+            "category": "other",
             "label": "Reporter",
             "prompt": None,
             "tools": [],

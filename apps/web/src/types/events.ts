@@ -209,6 +209,9 @@ export interface RosterAgent {
   key: string;
   label: string;
   role: string;
+  /** What the agent does (`AgentDefinition.category`); `""` for an agent no
+   *  definition describes. Absent from a roster stored before the field. */
+  category?: string;
   /** The stages this agent speaks in. Empty for a specialist that no stage
    *  names — one a lead reaches through its `ask_<key>` tools. */
   stages: string[];

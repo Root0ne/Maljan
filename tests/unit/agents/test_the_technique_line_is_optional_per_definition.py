@@ -118,6 +118,7 @@ class TestTheField:
     def test_a_stored_definition_without_it_loads_on_and_dumps_unchanged(self) -> None:
         stored = {
             "role": "generic",
+            "category": "other",
             "label": "Checker",
             "prompt": "Check the configuration.",
             "tools": [],

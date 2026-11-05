@@ -82,6 +82,8 @@ test.describe("a custom agent", () => {
 
     const detail = page.locator('[data-agent-detail="ahmet"]');
     await detail.getByLabel("ahmet label").fill("Ahmet");
+    // A new agent names its category before it can be saved.
+    await detail.getByLabel("ahmet category").selectOption("other");
     await detail
       .getByLabel("ahmet prompt")
       .fill("Temporary audit agent. Summarise the sample in one sentence.");
@@ -190,6 +192,34 @@ test.describe("a custom agent", () => {
     await expect(picker().getByRole("option", { name: "Ahmet (ahmet)" })).toHaveCount(0);
   });
 
+  test("is not sent without a category, and says so under the field", async ({
+    authenticatedPage: page,
+  }) => {
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (route) => {
+      if (route.request().method() === "PATCH") {
+        patches.push(route.request().postDataJSON());
+        return route.fulfill({ json: { applied: [], applies: {} } });
+      }
+      return route.fallback();
+    });
+    await page.goto(AGENTS_PATH);
+
+    await page.getByLabel("new agent name").fill("ahmet");
+    await page.getByRole("button", { name: "Add agent" }).click();
+    const detail = page.locator('[data-agent-detail="ahmet"]');
+    await detail.getByLabel("ahmet prompt").fill("Summarise the sample.");
+
+    await page.getByRole("button", { name: "Review" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    // The API's own words, under the select the operator has to fill.
+    await expect(detail.getByRole("alert")).toContainText(
+      "choose the category that matches what this agent does",
+    );
+    expect(patches).toHaveLength(0);
+  });
+
   test("names every field the server refused, and clears each one as it is fixed", async ({
     authenticatedPage: page,
   }) => {
@@ -197,6 +227,11 @@ test.describe("a custom agent", () => {
 
     await page.getByLabel("new agent name").fill("ahmet");
     await page.getByRole("button", { name: "Add agent" }).click();
+    // A new agent names its category before it can be saved.
+    await page
+      .locator('[data-agent-detail="ahmet"]')
+      .getByLabel("ahmet category")
+      .selectOption("other");
 
     await page.route("**/api/v1/settings", (route) => {
       if (route.request().method() !== "PATCH") return route.fallback();

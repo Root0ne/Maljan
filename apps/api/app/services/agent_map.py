@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from maljan.core.agent_category import CATEGORY_REQUIRED, fitting_category
 from maljan.core.config import (
     AGENT_KEY_PATTERN,
     ALWAYS_ENABLED_AGENTS,
@@ -121,6 +122,7 @@ def validate_definitions(
     *,
     servers: dict[str, list[str] | None] | None = None,
     plugins_allowed: list[Any] | None = None,
+    stored_keys: Any = (),
 ) -> dict[str, Any]:
     """Return the definition map to store, or raise with one message per offender.
 
@@ -128,6 +130,11 @@ def validate_definitions(
     static provider id is a shipped one or an installed plugin it names, read
     from package metadata (``maljan.core.plugins.id_refusal``), never what
     the API process has loaded.
+
+    ``stored_keys`` are the definitions already stored. Any other definition
+    that is not a built-in is being created, and must name its category
+    (``core.agent_category``); a stored one that names none reads the one its
+    role and tools fit, as the settings model reads it.
     """
     from maljan.core.plugins import id_refusal, shipped_ids
 
@@ -140,6 +147,7 @@ def validate_definitions(
         )
 
     allow_lists = servers if servers is not None else {}
+    stored = {str(key) for key in stored_keys}
     errors: dict[str, str] = {}
     out: dict[str, Any] = {}
     seeds = {name: d.model_dump(mode="json") for name, d in _builtin_definitions().items()}
@@ -153,6 +161,9 @@ def validate_definitions(
             errors[name] = "an agent entry must be an object"
             continue
         seed = seeds.get(name)
+        if seed is None and name not in stored and entry.get("category") is None:
+            errors[f"{name}.category"] = CATEGORY_REQUIRED
+            continue
         # Fill in the seed's own values for whatever a built-in override left
         # out, exactly as ``AgentsConfig._merge_builtin_definition_defaults``
         # does at the Settings layer: an operator writing
@@ -260,6 +271,52 @@ def validate_definitions(
     if errors:
         raise AgentMapError(_qualified(AGENT_DEFINITIONS_KEY, errors))
     return out
+
+
+def with_imported_categories(
+    values: dict[str, Any], stored_keys: Any = ()
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """An imported document with a category on each new definition that names none.
+
+    A document exported before definitions carried a category names none on
+    any of them, and refusing it would make every such export impossible to
+    import. So an import, unlike an edit, gives each new definition that is
+    not a built-in the category its role and tools fit
+    (``core.agent_category.fitting_category``) and says so under that
+    definition's category, worded more strongly where the rule could not tell
+    and the category is ``other``. A definition already stored, a built-in and
+    one that names a category are left as written. Returns the document and
+    the warnings, keyed by the field.
+    """
+    definitions = values.get(AGENT_DEFINITIONS_KEY)
+    if not isinstance(definitions, dict):
+        return values, {}
+    stored = {str(key) for key in stored_keys}
+    seeds = _builtin_definitions()
+    fitted: dict[str, Any] = {}
+    warnings: dict[str, str] = {}
+    for key, entry in definitions.items():
+        name = str(key)
+        if (
+            not isinstance(entry, dict)
+            or name in seeds
+            or name in stored
+            or entry.get("category") is not None
+        ):
+            fitted[key] = entry
+            continue
+        category, told = fitting_category(entry)
+        fitted[key] = {**entry, "category": category}
+        warnings[f"{AGENT_DEFINITIONS_KEY}.{name}.category"] = (
+            f"set to {category} from its role and tools; pick the one that fits in Settings"
+            if told
+            else (
+                "set to other: its role and tools tell no category, so the platform works out "
+                "its steps from its tools and results; choose the category that matches what "
+                "this agent does in Settings"
+            )
+        )
+    return {**values, AGENT_DEFINITIONS_KEY: fitted}, warnings
 
 
 def finding_path(finding: TeamFinding) -> str:
@@ -636,12 +693,14 @@ def _validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict
         definitions_raw = stored.get(AGENT_DEFINITIONS_KEY) or {}
     elif definitions_raw is None:
         definitions_raw = {}
+    stored_definitions = stored.get(AGENT_DEFINITIONS_KEY)
     from app.services.settings_service import merged_allow_list
 
     definitions = validate_definitions(
         definitions_raw,
         servers=_server_allow_lists(_staged_over_stored(changes, stored)),
         plugins_allowed=merged_allow_list(changes, stored),
+        stored_keys=stored_definitions if isinstance(stored_definitions, dict) else (),
     )
     if AGENT_DEFINITIONS_KEY in changes and changes[AGENT_DEFINITIONS_KEY] is not None:
         out[AGENT_DEFINITIONS_KEY] = definitions

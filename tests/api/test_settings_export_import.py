@@ -396,3 +396,68 @@ def test_schema_response_no_longer_carries_secrets_available(client):
         r = client.get("/api/v1/settings/schema")
     assert r.status_code == 200
     assert "secrets_available" not in r.json()
+
+
+# ---- an export written before definitions carried a category -----------
+
+_LEGACY_DEFINITIONS = {
+    "my_sandbox": {"role": "generic", "prompt": "read the run", "tools": [{"kind": "sandbox"}]},
+    "my_checker": {"role": "generic", "prompt": "check", "tools": []},
+    "kept": {"role": "generic", "prompt": "mine", "tools": []},
+    "chosen": {"role": "generic", "prompt": "c", "category": "intel"},
+}
+
+
+def _import_legacy(client, stored: dict) -> tuple:
+    with (
+        patch(
+            "app.api.v1.settings.SettingsService.load_overrides",
+            AsyncMock(return_value=stored),
+        ),
+        patch(
+            "app.api.v1.settings.SettingsService.save",
+            AsyncMock(return_value=SaveResult(["core.agents.definitions"], {"next_job": 1})),
+        ) as save,
+        patch("app.api.v1.settings.audit_record", AsyncMock()),
+        patch("app.api.v1.settings._agent_warnings", AsyncMock(return_value={})),
+    ):
+        r = client.post(
+            "/api/v1/settings/import",
+            json={
+                "format": "maljan-settings/1",
+                "values": {"core.agents.definitions": _LEGACY_DEFINITIONS},
+            },
+        )
+    return r, save
+
+
+def test_an_export_without_categories_imports_with_the_fitted_ones_and_says_so(client):
+    from app.services.agent_map import validate_agent_map
+
+    stored = {"core.agents.definitions": {"kept": {"role": "generic", "prompt": "mine"}}}
+    r, save = _import_legacy(client, stored)
+
+    assert r.status_code == 200
+    sent = save.call_args.args[0]["core.agents.definitions"]
+    assert sent["my_sandbox"]["category"] == "dynamic"
+    assert sent["my_checker"]["category"] == "other"
+    # A stored definition reads the one it fits as before; a named one is kept.
+    assert "category" not in sent["kept"]
+    assert sent["chosen"]["category"] == "intel"
+    warnings = r.json()["warnings"]
+    assert warnings["core.agents.definitions.my_sandbox.category"] == (
+        "set to dynamic from its role and tools; pick the one that fits in Settings"
+    )
+    assert "tell no category" in warnings["core.agents.definitions.my_checker.category"]
+    assert "core.agents.definitions.kept.category" not in warnings
+    assert "core.agents.definitions.chosen.category" not in warnings
+    # What the import saves passes the edit's own strict check.
+    validate_agent_map({"core.agents.definitions": sent}, stored)
+
+
+def test_an_edit_without_a_category_is_still_refused():
+    from app.services.agent_map import AgentMapError, validate_agent_map
+
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map({"core.agents.definitions": _LEGACY_DEFINITIONS}, {})
+    assert "core.agents.definitions.my_sandbox.category" in exc.value.errors

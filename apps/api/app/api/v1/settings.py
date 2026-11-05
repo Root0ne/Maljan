@@ -64,6 +64,7 @@ from app.schemas.settings import (
     ValuesResponse,
 )
 from app.services import attck_cache, credential_bootstrap
+from app.services.agent_map import AGENT_DEFINITIONS_KEY, with_imported_categories
 from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.plugins import (
@@ -1001,6 +1002,14 @@ async def import_values(
     # formats are read alike: a map marked as changes is its changes, one
     # without the mark its whole map.
     values, left_out = lenient_imported_declarations(values)
+    # An export written before definitions carried a category still imports:
+    # each new definition is given the one its role and tools fit, and told so.
+    categorised: dict[str, str] = {}
+    if AGENT_DEFINITIONS_KEY in values:
+        held = (await SettingsService(db).load_overrides()).get(AGENT_DEFINITIONS_KEY)
+        values, categorised = with_imported_categories(
+            values, held if isinstance(held, dict) else ()
+        )
     refused = await _sign_in_policy_confirmed(values, body.current_password, user, request)
     if refused is not None:
         return refused
@@ -1026,7 +1035,7 @@ async def import_values(
     return PatchResponse(
         applied=res.applied,
         applies=res.applies,
-        warnings={**left_out, **await _agent_warnings(db)},
+        warnings={**left_out, **categorised, **await _agent_warnings(db)},
     )
 
 

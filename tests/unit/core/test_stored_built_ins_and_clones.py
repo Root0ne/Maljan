@@ -166,7 +166,7 @@ class TestAClonesMissingToolListIsItsRoleSeeds:
         """Stored as a list, so the rule is applied once and what the console
         shows is what the run reads."""
         stored = validate_definitions(
-            {"static_r2": {"role": "static", "static_provider": "r2"}},
+            {"static_r2": {"role": "static", "category": "code_reader", "static_provider": "r2"}},
             servers={"analysis": None, "knowledge": None, "virustotal": None},
         )
         assert stored["static_r2"]["tools"] == [
