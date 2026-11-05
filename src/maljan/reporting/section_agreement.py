@@ -26,12 +26,13 @@ So, after every section is written, the reporter's model is shown, once:
   row of the configuration, command and flag tables, with the ids it cites;
 - the debate's mediations, in round order, as the mediator wrote them;
 - every passage written without the code, under an id naming where it stands;
-  the composed limitations paragraph among them where a sentence of it says a
-  call failed or a reading could not be made and the ledger says otherwise
-  (a later call redid the call, or an entry lists the code), with the facts it
-  rests on: the failed calls and the later calls that answered them, the tools
-  not run, the recorded limitations and the open questions
-  (``reporting.limitation_facts``, T-526).
+  the composed conclusion and limitations paragraph among them, which sum up
+  what sections 4 to 6 state (T-554); the limitations paragraph, where a
+  sentence of it says a call failed or a reading could not be made and the
+  ledger says otherwise (a later call redid the call, or an entry lists the
+  code), with the facts it rests on: the failed calls and the later calls that
+  answered them, the tools not run, the recorded limitations and the open
+  questions (``reporting.limitation_facts``, T-526).
 
 It lists each sentence of a passage written without the code that calls
 absent, unknown or open, or states the opposite of, what a section 5 passage,
@@ -59,7 +60,15 @@ model is told what is wrong and asked once more. A rewrite that passes takes
 its sentence's place, read against the passage as it was written, its new ids
 added to the record's own list, and what it replaced is recorded as the model's
 answer; a sentence kept, or a rewrite that still fails, stays as written, and
-the finding is recorded.
+the finding is recorded. A sentence of the conclusion or the limitations a row
+lists against sources it may rest on, whose rewrite still fails, is left out
+instead, and
+recorded with what stood: neither states what section 5 says otherwise of.
+A sentence of either that calls open an address or a value a section 5
+passage or a fact states, or says the run's own reading left something open,
+is held (:func:`held_closing_sentences`): the prompt names it, and an answer
+listing no row for it is asked once more; what becomes of it is the model's
+answer, never this read's.
 
 Every step is one pass over the passages and the answer's rows.
 """
@@ -110,6 +119,7 @@ from maljan.reporting.models import (
     TechnicalSubsection,
 )
 from maljan.schemas.evidence import entry_ids_in
+from maljan.utils.sentence_cut import left_out_span
 from maljan.utils.written_forms import pack_escaped, pack_reads
 
 if TYPE_CHECKING:
@@ -153,6 +163,15 @@ LISTED_CODE = "agreement.listed"
 # A rewrite of a limitations sentence that still says a call failed, or a
 # reading could not be made, where a later call redid it (T-526).
 FAILURE_REDONE_CODE = "agreement.failure_redone"
+# A sentence of the conclusion or the limitations paragraph listed as saying
+# otherwise than a section 5 passage, a fact or a closed debate line, whose
+# rewrite passed no check: left out of the section, which only sums up what
+# sections 4 to 6 state, and recorded here with what stood (T-554).
+DROPPED_CODE = "agreement.dropped"
+# A held sentence of the conclusion or the limitations (one calling open an
+# address or a value a section 5 passage or a fact states) that no row of the
+# answer lists: the model decides each one, and is asked once more (T-554).
+HELD_UNLISTED_CODE = "agreement.held_unlisted"
 
 
 # The kinds of passage the round is shown, by who wrote them from what.
@@ -214,6 +233,14 @@ class Passage:
     # The same, for a check that reads the sources the row names beside the
     # rewrite (the limitations paragraph: a failure a later call redid).
     sourced_check: Callable[[str, Sequence[str], str], list[Violation]] | None = None
+    # A closing passage (the conclusion, the limitations paragraph): a sentence
+    # of it listed against a source whose rewrite passes no check is left out,
+    # never kept as written (T-554).
+    closing: bool = False
+    # The sentences of a closing passage that call open what a section 5
+    # passage or a fact states (:func:`held_closing_sentences`): each one is
+    # listed in the answer, as the model decides (T-554).
+    held: tuple[str, ...] = ()
 
 
 def _ids(*sources: Any) -> frozenset[str]:
@@ -475,6 +502,14 @@ def passages_of(
                 write=_setter(report, "intro_background"),
             )
         )
+    # The conclusion and the limitations paragraph sum up what sections 4 to 6
+    # state, written without them: each is asked like every other such passage
+    # (T-554), and the ledger's facts are read for what they name too.
+    closing: list[Passage] = []
+    if ta is not None:
+        closing.extend(_closing_passage(ta.analyst_conclusion, "conclusion", "7. Conclusion"))
+        closing.extend(_closing_passage(ta.analyst_limitations, "limitations", "11. Limitations"))
+    uncoded.extend(closing)
     held = list(entries or ())
     found = None
     if held:
@@ -483,10 +518,10 @@ def passages_of(
         found = ledger_facts(held)
     shown = [*facts, *coded, *debate, *uncoded]
     facts.extend(_ledger_passages(held, shown, found))
-    # The limitations paragraph joins only where a sentence of it says a call
-    # failed that the ledger says otherwise of (T-526), its facts after the
-    # ledger's own, which it leaves as they were: every other request stays
-    # as it was.
+    # The limitations paragraph is held to the failed calls only where a
+    # sentence of it says a call failed that the ledger says otherwise of
+    # (T-526), its facts after the ledger's own, which it leaves as they were;
+    # it then stands where the paragraph alone stood.
     limitations, limitation_facts, limited = _limitation_passages(report, held, found, facts)
     if limitations:
         # A false failure is wrong in any section: while the limitation facts
@@ -497,10 +532,17 @@ def passages_of(
         added = _failure_added_check(limited)
         cited = _failure_cited_check(limited)
         for passage in (*coded, *uncoded):
+            if passage.id == "limitations":
+                continue
             if _writable(passage) and passage.sourced_check is None:
                 passage.sourced_check = cited if passage.kind == SECTION_5 else added
-    uncoded.extend(limitations)
+        uncoded[:] = [p for p in uncoded if p.id != "limitations"]
+        uncoded.extend(limitations)
     facts.extend(limitation_facts)
+    sources = [*facts, *coded]
+    for passage in uncoded:
+        if passage.closing:
+            passage.held = held_closing_sentences(passage.text, sources)
     return [*facts, *coded, *debate, *uncoded]
 
 
@@ -532,6 +574,93 @@ def _procedure_check(report: MalwareReport) -> Callable[[str], Callable[[str], l
         return _check
 
     return _for
+
+
+# A closing sentence calling something open: not determined, named, recovered,
+# resolved, visible or established; unexplained; unresolved (T-554). What it
+# is about is read from what it names, never from these words alone.
+_CALLS_OPEN = re.compile(
+    r"\b(?:not|never)\s+(?:been\s+|be\s+)?"
+    r"(?:determined|named|recovered|resolved|visible|established)\b"
+    r"|\bunexplained\b|\bunresolved\b",
+    re.IGNORECASE,
+)
+# The run's own reading named by a closing sentence: what a held sentence naming
+# no address must name ("the claims were not visible in this review").
+_OWN_READING = re.compile(r"\b(?:claims?|review|reading|listings?|decompil\w*)\b", re.I)
+# A value a sentence quotes: the text between a pair of straight or curly
+# quotes, at least this long, so a quoted letter or digit names nothing.
+_QUOTED = re.compile(r"[\"'\u2018\u201c]([^\"'\u2019\u201d\n]{3,200})[\"'\u2019\u201d]")
+
+
+def held_closing_sentences(text: str, sources: Sequence[Passage]) -> tuple[str, ...]:
+    """The sentences of a closing passage that call open what a source states, in order.
+
+    A sentence is held where it calls something open (:data:`_CALLS_OPEN`) and
+    names an address, or quotes a value, that a section 5 passage or a bound
+    value's fact states: the address among those the passage names, the value
+    in its text or the fact's own value; or, naming no address, where it says
+    the run's own reading left that open (:func:`_unsettled_by_reading`: "the
+    claims were not visible in this review"), beside a section 5 written from
+    that reading. Holding only obliges the answer to
+    list the sentence; whether a source says otherwise, and what becomes of
+    the sentence, is the model's answer and the checks', never this read's.
+    One pass over the sentences; the sources are read once.
+    """
+    named: set[int] = set()
+    texts: list[str] = []
+    values: set[str] = set()
+    for source in sources:
+        if source.kind == SECTION_5:
+            named.update(_addresses_named(source.text))
+            texts.append(source.text)
+        elif source.kind == FACT and source.value:
+            named.update(source.addresses)
+            values.add(source.value)
+    if not named and not texts and not values:
+        return ()
+    joined = "\n".join(texts)
+    out: list[str] = []
+    for sentence in _sentences_of(text):
+        if not _CALLS_OPEN.search(sentence):
+            continue
+        addresses = set(_addresses_named(sentence))
+        if (
+            addresses & named
+            or any(
+                quoted in values or quoted in joined
+                for quoted in (m.group(1).strip() for m in _QUOTED.finditer(sentence))
+                if quoted
+            )
+            # Naming nothing, it says the run's own reading (a claim, the review,
+            # a listing) left something open, which section 5, written from that
+            # reading, may state.
+            or (
+                texts
+                and not addresses
+                and _OWN_READING.search(sentence)
+                and _unsettled_by_reading(sentence)
+            )
+        ):
+            out.append(sentence)
+    return tuple(dict.fromkeys(out))
+
+
+def _closing_passage(sub: TechnicalSubsection | None, pid: str, label: str) -> list[Passage]:
+    """A closing section the composer wrote (the conclusion, the limitations), or none."""
+    if not isinstance(sub, TechnicalSubsection) or not sub.body.strip():
+        return []
+    return [
+        Passage(
+            id=pid,
+            label=label,
+            text=sub.body,
+            kind=CLAIM_LED,
+            cites=_ids(sub.evidence_refs, sub.body),
+            write=_setter(sub, "body"),
+            closing=True,
+        )
+    ]
 
 
 def _one_line(text: Any, limit: int = 40) -> str:
@@ -1180,10 +1309,11 @@ def _limitation_passages(
 ) -> tuple[list[Passage], list[Passage], list[FailedCall]]:
     """The limitations paragraph, the facts it rests on and the failed calls, or none.
 
-    Shown only where a sentence of the composed paragraph is held to the
-    ledger (:func:`held_limitation_sentences`): a paragraph that agrees with
-    the ledger, or one written where no call failed, leaves the request as it
-    was. The facts are each failed call with the later calls that redid it
+    Held this way only where a sentence of the composed paragraph is held to
+    the ledger (:func:`held_limitation_sentences`): a paragraph that agrees
+    with the ledger, or one written where no call failed, is shown as a closing
+    passage alone (:func:`passages_of`), with none of these facts. The facts
+    are each failed call with the later calls that redid it
     (``redone_calls.redone_failures``), or, where none did, the ones that
     answered for some of its addresses,
     each tool not run, the count of tools withheld, each limitation the run
@@ -1285,6 +1415,7 @@ def _limitation_passages(
         cites=_ids(sub.evidence_refs, sub.body),
         write=_setter(sub, "body"),
         sourced_check=_failure_redone_check(read.failed, [*shown_facts, *facts], bases),
+        closing=True,
     )
     return [paragraph], facts, list(read.failed)
 
@@ -1945,8 +2076,43 @@ def agreement_violations(payload: Any, passages: Sequence[Passage]) -> list[Viol
         return cut[passage.id]
 
     out: list[Violation] = []
+    listed: set[tuple[str, int]] = set()
     for index, row in _rows(payload):
         out.extend(_row_violations(row, index, by_id, _sentences))
+        passage = by_id.get(_form(row.passage))
+        span = _sentences(passage).span(row.sentence) if passage is not None else None
+        if passage is not None and span is not None:
+            listed.add((passage.id, span[0]))
+    if isinstance(payload, dict):
+        out.extend(_held_unlisted(passages, listed, _sentences))
+    return out
+
+
+def _held_unlisted(
+    passages: Sequence[Passage],
+    listed: set[tuple[str, int]],
+    sentences_of: Callable[[Passage], _Sentences],
+) -> list[Violation]:
+    """Each held sentence of a closing passage no row lists, in the passages' order."""
+    out: list[Violation] = []
+    for passage in passages:
+        for sentence in passage.held:
+            span = sentences_of(passage).span(sentence)
+            if span is None or (passage.id, span[0]) in listed:
+                continue
+            out.append(
+                Violation(
+                    code=HELD_UNLISTED_CODE,
+                    message=(
+                        f"{safe_finding_value(passage.id)} calls open what a section 5 "
+                        "passage or a fact may state, and no row lists this sentence: "
+                        f"{safe_finding_value(sentence)!r}. List it: rewrite it on the source "
+                        "that states otherwise, or keep it naming the source you read and "
+                        "found agreeing."
+                    ),
+                    path=f"held.{passage.id}",
+                )
+            )
     return out
 
 
@@ -2075,6 +2241,12 @@ def prompt_text(passages: Sequence[Passage]) -> str:
                 else ""
             )
             lines.append(f"- [{passage.id}] {passage.label}{shown}{cites}: {text}")
+            if passage.held:
+                # Read off the passage by code: each one is listed, as the model decides.
+                lines.append(
+                    f"  [{passage.id}] list each of these sentences: "
+                    + "; ".join(quoted_value(sentence) for sentence in passage.held)
+                )
         lines.append("")
     lines.extend(
         [
@@ -2106,6 +2278,15 @@ class AgreementRound:
     degradations: list[str] = field(default_factory=list)
 
 
+def _rests_on_a_source(row: AgreementRow, by_id: dict[str, Passage]) -> bool:
+    """Whether every source a row names is one a passage written without the code is
+    answered by: a fact, a section 5 passage or a debate round it was shown."""
+    return bool(row.sources) and all(
+        (source := by_id.get(_form(name))) is not None and source.kind in (FACT, SECTION_5, DEBATE)
+        for name in row.sources
+    )
+
+
 def apply_rows(
     payload: Any,
     passages: Sequence[Passage],
@@ -2125,7 +2306,10 @@ def apply_rows(
     with what stood; a sentence of a passage shown for reading is listed:
     kept, and returned the same way (``LISTED_CODE``). A section 5 rewrite
     resting on a routine whose code no entry lists is the platform's
-    (``_platform_rewrites``).
+    (``_platform_rewrites``). A sentence of a closing passage (the conclusion,
+    the limitations) whose rewrite still fails, on a row every source of which it
+    may rest on, is left out of the passage and returned with what stood
+    (``DROPPED_CODE``).
     """
     by_id = {passage.id: passage for passage in passages}
     payload = _platform_rewrites(payload, by_id)
@@ -2146,6 +2330,7 @@ def apply_rows(
         "kept": 0,
         "listed": 0,
         "not_applied": 0,
+        "dropped": 0,
     }
     listed: list[Violation] = []
     written: list[Violation] = []
@@ -2179,12 +2364,35 @@ def apply_rows(
         span = _sentences(passage).span(row.sentence) if passage is not None else None
         taken = spans.setdefault(passage.id, []) if passage is not None else []
         if (
-            found
-            or passage is None
+            passage is None
             or span is None
             or any(span[0] < end and start < span[1] for start, end, _ in taken)
         ):
             counts["not_applied"] += 1
+            continue
+        if found:
+            if passage.closing and _rests_on_a_source(row, by_id):
+                # A closing sentence a source says otherwise than is never kept
+                # as written: left out, and recorded with what stood.
+                taken.append((*left_out_span(passage.text, span[0], span[1]), ""))
+                counts["dropped"] += 1
+                written.append(
+                    Violation(
+                        code=DROPPED_CODE,
+                        message=(
+                            "The agreement question lists a sentence of "
+                            f"{safe_finding_value(passage.label)} as saying otherwise than "
+                            f"{safe_finding_value(', '.join(_form(s) for s in row.sources))}, "
+                            "and no rewrite of it passed the checks: it is left out of the "
+                            f"section: {safe_finding_value(span[2])!r}."
+                        ),
+                        path=f"sentences.{index}",
+                        # The section it was left out of, which the analyst report counts.
+                        subject=passage.id,
+                    )
+                )
+            else:
+                counts["not_applied"] += 1
             continue
         # A section 5 rewrite is the platform's, built from the passage's own
         # text: put in as it stands, never read back.
@@ -2341,12 +2549,13 @@ async def _ask(
         tally.record_unresolved(AGREEMENT_PRODUCER, listed)
     logger.info(
         "section agreement: %d passage(s) asked about; %d sentence(s) listed, %d rewritten, "
-        "%d kept, %d listed for reading, %d not applied.",
+        "%d kept, %d listed for reading, %d not applied, %d left out.",
         counts["passages"],
         counts["sentences"],
         counts["rewritten"],
         counts["kept"],
         counts["listed"],
         counts["not_applied"],
+        counts["dropped"],
     )
     return AgreementRound(summary=counts, tally=tally, degradations=said())

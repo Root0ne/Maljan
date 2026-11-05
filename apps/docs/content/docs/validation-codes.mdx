@@ -46,9 +46,17 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**119 codes in 12 families:** [agreement](#agreement) 10 · [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 15 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 19 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**121 codes in 12 families:** [agreement](#agreement) 12 · [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 15 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 19 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## agreement
+
+### `agreement.dropped`
+
+A sentence of the conclusion or the limitations paragraph listed as saying otherwise than a section 5 passage, a fact or a closed debate line, whose rewrite passed no check: left out of the section, which only sums up what sections 4 to 6 state, and recorded here with what stood (T-554).
+
+- **Raised at** `maljan.reporting.section_agreement:apply_rows`
+- **Constant** `maljan.reporting.section_agreement:DROPPED_CODE`
+- **Docs** none
 
 ### `agreement.failure_redone`
 
@@ -56,6 +64,14 @@ A rewrite of a limitations sentence that still says a call failed, or a reading 
 
 - **Raised at** `maljan.reporting.section_agreement:_failure_redone_violation`
 - **Constant** `maljan.reporting.section_agreement:FAILURE_REDONE_CODE`
+- **Docs** none
+
+### `agreement.held_unlisted`
+
+A held sentence of the conclusion or the limitations (one calling open an address or a value a section 5 passage or a fact states) that no row of the answer lists: the model decides each one, and is asked once more (T-554).
+
+- **Raised at** `maljan.reporting.section_agreement:_held_unlisted`
+- **Constant** `maljan.reporting.section_agreement:HELD_UNLISTED_CODE`
 - **Docs** none
 
 ### `agreement.listed`
@@ -555,7 +571,7 @@ A section's prose states persistence where the sandbox, watching the registry an
 
 ### `report.process_words`
 
-No comment names its meaning; the message at `maljan.reporting.composer_pro:style_violations` reads: "\<path> names how this report was made (\<said>). State the finding itself, in the sample's terms: no ledger, judge, mediator, producer, model, agent or tool call, and no analyst's name or claim number."
+No comment names its meaning; the message at `maljan.reporting.composer_pro:style_violations` reads: "\<path> names how this report was made (\<said>). State the finding itself, in the sample's terms: no ledger, judge, mediator, producer, model, agent or tool call, and no analyst's name, claim number or earlier analysis."
 
 - **Raised at** `maljan.reporting.composer_pro:style_violations`
 - **Constant** `maljan.pipeline.validation:PROCESS_WORDS_CODE`

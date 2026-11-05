@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
 from maljan.pipeline.validation import (
@@ -70,7 +71,7 @@ from maljan.reporting.models import (
     TTPMapping,
 )
 from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.layout import ANALYST
+from maljan.reporting.renderers.layout import ANALYST, BUNDLE
 from maljan.reporting.renderers.markdown import MarkdownRenderer, confidence_word
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -206,7 +207,7 @@ class TestTheStyleCheck:
             assert code in KEPT_WITH_A_FINDING
             assert code not in MARKED_IN_PLACE
 
-    def test_a_kept_sentence_is_marked_in_the_analyst_report_and_its_words_stand(self) -> None:
+    def test_a_kept_sentence_is_the_bundle_s_with_its_mark_and_its_words_stand(self) -> None:
         sentence = "The ledger holds no listing of 0x5030."
         report = _report(
             technical_analysis=TechnicalAnalysis(
@@ -219,7 +220,44 @@ class TestTheStyleCheck:
             ],
         )
         markdown = MarkdownRenderer(layout=ANALYST).render(report)
-        assert f"{sentence} **[names how the report was made: ledger]**" in markdown
+        bundle = MarkdownRenderer(layout=BUNDLE).render(report)
+        # The analyst report leaves the sentence out, mark and all (T-555).
+        assert "It packs." in markdown and sentence not in markdown
+        assert f"{sentence} **[names how the report was made: ledger]**" in bundle
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "Claim 44 is refuted.",
+            "Two readings in the earlier analysis are refuted by the code.",
+            "As claims 12 and 13 state, it sleeps.",
+            "As claim no. 44 says, it sleeps.",
+            "Claims 12 to 14 are withdrawn.",
+            "The earlier analysis of the loader is refuted.",
+        ],
+    )
+    def test_the_debate_s_own_words_are_process_words(self, sentence: str) -> None:
+        (found,) = style_violations({"body": f"It sleeps 450 s. {sentence}"})
+        assert found.code == PROCESS_WORDS_CODE and found.quoted == (sentence,)
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "The sample claims 4 GB of memory at start.",
+            "An earlier analysis by the vendor named the family.",
+            "It checks the claim token before 0x401000.",
+            "The note claims 4 and 8 GB of free space.",
+            "The page claims 3, 5 or 7 days of grace.",
+            "The lure reads Claim 1 BTC now.",
+            "The lure offers claim #2 prize.",
+            "It matches the earlier analysis by Proofpoint.",
+            "This earlier analysis by ESET named the loader.",
+            "The lure says claim 500 USD today.",
+            "The page claims 10 minutes of setup.",
+        ],
+    )
+    def test_a_sample_s_own_words_are_not(self, sentence: str) -> None:
+        assert style_violations({"body": sentence}) == []
 
 
 # ---------------------------------------------------------------------------
@@ -459,7 +497,7 @@ class TestTheAnalystReportPrintsTheComposedProse:
         summary = markdown.split("## 1. Executive summary", 1)[1].split("\n## ", 1)[0]
         assert "QZ_MUTEX_771" not in summary
 
-    def test_a_key_finding_a_check_marked_stays_beside_the_bullets(self) -> None:
+    def test_a_key_finding_a_check_marked_is_the_bundle_s(self) -> None:
         marked = "It talks to 192.0.2.7."
         report = _composed(capability_summary=[CapabilityBullet(text="The sample encrypts files.")])
         report.key_findings = [
@@ -473,10 +511,14 @@ class TestTheAnalystReportPrintsTheComposedProse:
         markdown = MarkdownRenderer(layout=ANALYST).render(report)
         summary = markdown.split("## 1. Executive summary", 1)[1].split("\n## ", 1)[0]
         assert "It encrypts files." not in summary
-        assert summary.count("**[names how the report was made: x]**") == 2
+        # Neither the finding nor its mark stands beside the bullets (T-555).
+        assert "192.0.2" not in summary and "**[" not in summary
         assert "It packs." not in summary
+        assert "- The sample encrypts files." in summary
+        bundle = MarkdownRenderer(layout=BUNDLE).render(report)
+        assert bundle.count("**[names how the report was made: x]**") >= 2
 
-    def test_a_marked_first_sentence_keeps_its_row_over_a_written_procedure(self) -> None:
+    def test_a_marked_first_sentence_gives_way_to_the_written_procedure(self) -> None:
         report = _composed(
             technique_procedures=[TechniqueProcedure(technique_id="T1486", procedure="Encrypts.")]
         )
@@ -489,7 +531,9 @@ class TestTheAnalystReportPrintsTheComposedProse:
         ]
         markdown = MarkdownRenderer(layout=ANALYST).render(report)
         row = next(line for line in markdown.splitlines() if "| T1486 |" in line)
-        assert "Encrypts each file with ChaCha20" in row
+        # A first sentence a check flagged is the bundle's: the written procedure stands.
+        assert "Encrypts each file with ChaCha20" not in row
+        assert "| Encrypts. |" in row
 
     def test_without_bullets_the_key_findings_stand(self) -> None:
         markdown = MarkdownRenderer(layout=ANALYST).render(_report())

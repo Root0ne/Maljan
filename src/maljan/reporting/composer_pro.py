@@ -404,11 +404,20 @@ _NUMERIC_CONFIDENCE = re.compile(
 )
 # The phrasings of how the report was produced, never of what the sample does:
 # a word alone ("ledger", "producer", "model", "tool") is a sample's term as
-# often, so only the phrasings that name the run's own record are read.
+# often, so only the phrasings that name the run's own record are read. The
+# debate's own words count too: a claim by its number ("Claim 44 is refuted",
+# "claims 12 and 13", "claim no. 44"), never a quantity a sample claims ("claims
+# 4 GB"), and the analysis the report revised ("the earlier analysis"), never
+# one by or from another party (T-555).
 _PROCESS_WORDS = re.compile(
     r"\b(?:(?:the|this run's|the run's) ledger(?!\s+of\b)|ledger entr(?:y|ies)"
     r"|per the judge|the judge (?:kept|ruled|stated|said|found|accepted|rejected|dropped|named)"
-    r"|tool calls?|claim numbers?|analyst claims?|language models?|report models?)\b",
+    r"|tool calls?|claim numbers?|analyst claims?|language models?|report models?"
+    r"|claims?\s+(?:no\.?\s*|#)?\d+(?:\s*(?:,|and|to)\s*#?\d+)*"
+    # ... never a quantity: "claims 4 and 8 GB", "claims 3, 5 or 7 days", "Claim 1 BTC".
+    r"(?![\s,#\d]*(?:(?:or|and|to)\s*[#\d][\s,#\d]*)?"
+    r"(?:(?:[KMGT]i?B|bytes?|days?|hours?|minutes?|seconds?|times|USD|EUR|BTC|prizes?)\b|%))"
+    r"|(?:the|this) earlier analys[ie]s(?!\s+(?:by|from)\b))\b",
     re.IGNORECASE,
 )
 # An agent's name is a process word where it is an identifier ("static_r2"):
@@ -436,7 +445,8 @@ _VALUE_FIELDS = frozenset(
         "kind",
     }
 )
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9(\"'\[])")
+# A number after "no." numbers what stands before it ("claim no. 44"): no end.
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z(\"'\[])|(?<=[.!?])(?<!\b[Nn]o\.)\s+(?=[0-9])")
 
 
 def agent_names(report: MalwareReport) -> list[str]:
@@ -531,7 +541,8 @@ def style_violations(
                         f"{safe_finding_value(path)} names how this report was made "
                         f"({safe_finding_value(said)}). State the finding itself, in the "
                         "sample's terms: no ledger, judge, mediator, producer, "
-                        "model, agent or tool call, and no analyst's name or claim number."
+                        "model, agent or tool call, and no analyst's name, claim number or "
+                        "earlier analysis."
                     ),
                     path=path,
                     quoted=tuple(s for s, _f in words),

@@ -2713,6 +2713,9 @@ class _Context:
         # category's row is marked on the category line (``category_mark``),
         # not wherever its word stands in prose.
         marks: dict[str, list[str]] = {}
+        # The codes each marked sentence was flagged under, in the order found:
+        # what the analyst report reads to rewrite or leave a sentence out (T-555).
+        self.flag_codes: dict[str, list[str]] = {}
         self.category_mark = ""
         # The IOC table's answers, read on first use by ``publish_state``.
         self._answers: Any = None
@@ -2736,6 +2739,9 @@ class _Context:
                     continue
                 if mark not in marks.setdefault(statement.sentence, []):
                     marks[statement.sentence].append(mark)
+                codes = self.flag_codes.setdefault(statement.sentence, [])
+                if statement.code not in codes:
+                    codes.append(statement.code)
         self.flagged = sorted(
             ((sentence, " ".join(found)) for sentence, found in marks.items()),
             key=lambda pair: -len(pair[0]),
