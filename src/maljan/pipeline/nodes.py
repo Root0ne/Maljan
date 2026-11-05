@@ -152,7 +152,13 @@ from maljan.pipeline.outcome import (
     verdict_for_run,
     verdict_reading,
 )
-from maljan.pipeline.own_entries import SETTLED_REASON, settle_own_entry_lines
+from maljan.pipeline.own_entries import (
+    SETTLED_FOR_YOU_HEAD,
+    SETTLED_REASON,
+    raised_again,
+    settle_own_entry_lines,
+    with_settled_by_rule,
+)
 from maljan.pipeline.revision_merge import (
     RevisionMerge,
     claim_tokens_by_number,
@@ -5186,24 +5192,46 @@ def _ledger_stated_lines(
 
 
 def _own_entry_settlements(
-    state: AnalysisState, agent_names: Sequence[str], argument: Any, mediation: int
-) -> tuple[list[str], list[str], dict[str, AgentISR]]:
-    """``(settled lines, their sentences, the answers in force so held)``. Never raises.
+    container: ServiceContainer,
+    state: AnalysisState,
+    agent_names: Sequence[str],
+    argument: Any,
+    mediation: int,
+) -> tuple[list[str], list[str], list[dict[str, Any]], dict[str, AgentISR]]:
+    """``(settled lines, their sentences, per-claim records, the answers so held)``. Never raises.
 
     The blocking lines that only set an analyst's claim against its own
     dispute entry, settled by rule with no revision round
-    (``own_entries.settle_own_entry_lines``).
+    (``own_entries.settle_own_entry_lines``). Each participant's label and
+    spoken name are passed, so a line naming a peer by either is not settled.
     """
+    try:
+        labels = {
+            name: [
+                label_of(container, name),
+                spoken_name(container, name, _home_stage(container, name)),
+            ]
+            for name in agent_names
+        }
+    except Exception as exc:  # noqa: BLE001 — the keys alone are read
+        logger.debug("negotiation: the participants' labels were not read (%s).", exc)
+        labels = {}
     try:
         settled, held = settle_own_entry_lines(
             list(getattr(argument, "contradictions", None) or []),
             list(agent_names),
             dict(state.get("isr_reports") or {}),
+            labels,
         )
     except Exception as exc:  # noqa: BLE001 — a line not settled is read as before
         logger.debug("negotiation: the own-entry lines were not settled (%s).", exc)
-        return [], [], {}
-    return [s.text for s in settled], [s.sentence(mediation) for s in settled], held
+        return [], [], [], {}
+    return (
+        [s.text for s in settled],
+        [s.sentence(mediation) for s in settled],
+        [row for s in settled for row in s.records(mediation)],
+        held,
+    )
 
 
 def _last_mediation_lines(state: AnalysisState) -> tuple[list[str], list[str]]:
@@ -5582,9 +5610,12 @@ def make_negotiation_node(
                 and argument.status == "complete"
                 and argument.note != CONTRADICTIONS_BLOCK_MISSING_NOTE
             ):
-                argument.settled_lines, argument.settled_by_rule, held_by_rule = (
-                    _own_entry_settlements(state, agent_names, argument, iteration + 1)
-                )
+                (
+                    argument.settled_lines,
+                    argument.settled_by_rule,
+                    argument.settled_claims,
+                    held_by_rule,
+                ) = _own_entry_settlements(container, state, agent_names, argument, iteration + 1)
                 if argument.settled_by_rule:
                     for sentence in argument.settled_by_rule:
                         logger.info("negotiation: %s", sentence)
@@ -5995,6 +6026,16 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # claim by rule, and it stays in its place, so every line keeps its
         # number.
         settled_lines = set(getattr(mediation, "settled_lines", None) or [])
+        # Every claim a mediation of the run held by rule: its analyst's
+        # revision is told, and a revision stating it again above its held
+        # figure is recorded.
+        held_rows = [
+            row
+            for arg in history
+            if arg.agent_name == MEDIATOR_AGENT_NAME
+            for row in getattr(arg, "settled_claims", None) or []
+            if isinstance(row, dict)
+        ]
         contested = [
             as_not_blocking(line, SETTLED_REASON) if line in settled_lines else line
             for line in getattr(mediation, "contradictions", None) or []
@@ -6117,6 +6158,12 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             # each was listed. An analyst with tools is told it can read one
             # the ledger never listed, and its revision is given its tools.
             mine = place_facts_for(name, places, agent_names)
+            # The claims of its own a mediation held by rule, with the record.
+            directive = with_settled_by_rule(
+                directive,
+                [str(r.get("sentence") or "") for r in held_rows if r.get("analyst") == name],
+                SETTLED_FOR_YOU_HEAD,
+            )
             can_read = bool(tools_taking_an_address(getattr(agent, "tools", None) or ()))
             reads = can_read and names_an_unlisted_place(mine)
             # The stored text of the entries those lines cite and of the
@@ -6451,6 +6498,11 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     )
                 revised[name] = report_now
                 revised_isrs[name] = isr
+                # A claim held by rule that the revision states again above
+                # its held figure: the revision's figure stands, and is said.
+                for said in raised_again(name, iteration, held_rows, isr):
+                    logger.warning("%s", said)
+                    revision_replacements.append(said)
                 if name in not_asked:
                     # Its answer from before the round, handed back unasked:
                     # not a revision, and not counted as one.

@@ -6,11 +6,14 @@ the point at a lower figure. A revision round spent on it asks the analyst to
 pick one of its own two figures. The platform picks the lower one, holds the
 claim at it, records the settlement, and opens no round for the line:
 
-- the line has one ``[analysts: ...]`` field, says the contradiction is with
-  the analyst's own words, and names nobody else;
-- each named analyst's claim, the line and a dispute entry of the same answer
-  share a ledger id, an address or a quoted value, and the entry states a
-  figure the line states too, below the claim's;
+- the line's one ``[analysts: ...]`` field names one analyst, the line says
+  the contradiction is with the analyst's own words, names nobody else (by
+  key, label or as "the ... analyst") and writes no claim number it cannot
+  settle;
+- the claim, the line and a dispute entry of the same answer share a ledger
+  id, an address or a quoted value (four characters or more, whole words),
+  and the entry's own sentences state exactly one figure, as a confidence,
+  that the line states too and that is below the claim's;
 - when every blocking line is settled, the debate ends as ``settled_by_rule``;
   otherwise only the analysts of the other lines revise.
 
@@ -26,6 +29,8 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from maljan.core.config import Settings
 from maljan.pipeline.debate_facts import (
     NO_ANALYST_NAMED,
@@ -36,8 +41,10 @@ from maljan.pipeline.debate_facts import (
 )
 from maljan.pipeline.nodes import make_negotiation_node
 from maljan.pipeline.own_entries import (
+    SETTLED_FOR_YOU_HEAD,
     SETTLED_HEAD,
     SETTLED_REASON,
+    raised_again,
     settle_own_entry_lines,
     with_settled_by_rule,
 )
@@ -47,6 +54,7 @@ from maljan.pipeline.routing import (
     SETTLED_BY_RULE,
     ConsensusRouter,
     debate_route,
+    only_settled_by_rule,
 )
 from maljan.pipeline.state import AgentArgument
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -130,20 +138,6 @@ class TestTheLineIsSettled:
         [line], _held = settle_own_entry_lines([long_line], NAMES, ISRS)
         assert "…" in line.sentence(1)
         assert len(line.sentence(1)) < 1200
-
-    def test_two_analysts_each_against_their_own_entries(self) -> None:
-        line = (
-            "[analysts: PACKER_SCAN_X2 ANALYST, STATIC ANALYST] Packer claim 2 and static "
-            'claim 1 give the event "qzvent" at 0.85 and 0.80, while their own dispute entries '
-            "hold the link at 0.40 and 0.55. [blocking: each restates its own figure]"
-        )
-        [settled], held = settle_own_entry_lines([line], NAMES, ISRS)
-
-        assert {(c.analyst, c.claim, c.now) for c in settled.claims} == {
-            ("packer_scan_x2", 2, 0.4),
-            ("static", 1, 0.55),
-        }
-        assert held["static"].claims[0].confidence == 0.55
 
     def test_a_short_form_beside_another_participant_s_name_is_the_field_s(self) -> None:
         # "static" names a participant of its own, and stands right before the
@@ -237,6 +231,131 @@ class TestALineThatIsNotOnlyTheAnalystsOwnStaysForTheAgents:
 
     def test_a_claim_the_answer_does_not_hold(self) -> None:
         assert self._settled(OWN_LINE.replace("Claim 2", "Claim 9")) == []
+
+
+# The review's false positives: each is a line or an entry the rule must leave
+# to the agents.
+_LINE_A = (
+    '[analysts: packer_scan_x2] Claim 2 holds "qzvent" at 0.85 (ev_0031) while its own dispute '
+    "entry cites 0.50 [blocking: own words]"
+)
+_LINE_B = (
+    '[analysts: packer_scan_x2] Claim 2 holds "qzvent" at 0.85 while its own dispute entry moved '
+    "from 0.40 to 0.95 on ev_0031 [blocking: own]"
+)
+_LINE_C = (
+    '[analysts: packer_scan_x2] Claim 2 holds "qzvent" at 0.85 though its own dispute entry says '
+    "0.40 (ev_0031); claim 3 contradicts ledger ev_0040 which shows no key [blocking: own]"
+)
+_LINE_D = (
+    '[analysts: packer_scan_x2] Claim 2 holds "qzvent" at 0.85 against its own entry at 0.40, and '
+    "the sandbox analyst's report shows no such event (ev_0031) [blocking: own]"
+)
+_LINE_E = (
+    '[analysts: packer_scan_x2] Claim 2 holds "qzvent" at 0.85 but its own dispute entry notes the '
+    "ev_0031 section entropy ratio 0.30 contradicts packing [blocking: own]"
+)
+_LINE_F = (
+    '[analysts: packer_scan_x2, dynamic] packer claim 2 rates "qzvent" at 0.85 and dynamic claim 1 '
+    "at 0.60, each against its own dispute entry, which say 0.40 and 0.30 (ev_0031) "
+    "[blocking: own]"
+)
+_HELD_040 = ['ev_0031: "qzvent" link held at 0.40.']
+
+
+def _packer_with(dissent: list[str], claim_2: str = "") -> dict[str, AgentISR]:
+    update: dict[str, Any] = {"dissent_items": dissent}
+    if claim_2:
+        update["claims"] = [PACKER.claims[0], _claim(claim_2, 0.85)]
+    return {**ISRS, "packer_scan_x2": PACKER.model_copy(update=update)}
+
+
+@pytest.mark.parametrize(
+    ("line", "isrs", "labels"),
+    [
+        pytest.param(
+            _LINE_A,
+            _packer_with(
+                ['Dynamic\'s claim 3 rates "qzvent" (ev_0031) at 0.50; I disagree and hold 0.85.']
+            ),
+            None,
+            id="the entry quotes a peer's figure",
+        ),
+        pytest.param(
+            _LINE_B,
+            _packer_with(
+                ['ev_0031: I raised "qzvent" from 0.40 to 0.95 after reading the listing.']
+            ),
+            None,
+            id="the entry raised its figure",
+        ),
+        pytest.param(_LINE_C, _packer_with(_HELD_040), None, id="the line disputes another claim"),
+        pytest.param(_LINE_D, _packer_with(_HELD_040), None, id="a peer named as an analyst"),
+        pytest.param(
+            _LINE_D.replace("the sandbox analyst's report", "Detonation's trace"),
+            _packer_with(_HELD_040),
+            {"dynamic": ["Detonation"]},
+            id="a peer named by its label",
+        ),
+        pytest.param(
+            _LINE_E,
+            _packer_with(
+                ['ev_0031: "qzvent" region shows ratio 0.30 of printable bytes; it stands.']
+            ),
+            None,
+            id="a figure that is no confidence",
+        ),
+        pytest.param(
+            _LINE_F,
+            {
+                **_packer_with(_HELD_040),
+                "dynamic": _isr(
+                    "dynamic",
+                    [_claim('Event "qzvent" seen.', 0.6, "ev_0031")],
+                    ['ev_0031 "qzvent": held at 0.30 by me'],
+                ),
+            },
+            None,
+            id="a field of two analysts",
+        ),
+        pytest.param(
+            OWN_LINE.replace('"qzvent"', '"dll"').replace("ev_0031 shows", "it shows"),
+            _packer_with(['The "dll" link: I hold 0.40.'], 'Routine 0x4410 opens the "dll".'),
+            None,
+            id="a quoted value of three characters",
+        ),
+    ],
+)
+def test_the_review_s_false_positives_are_left_to_the_agents(
+    line: str, isrs: dict[str, AgentISR], labels: dict[str, list[str]] | None
+) -> None:
+    assert settle_own_entry_lines([line], NAMES, isrs, labels) == ([], {})
+
+
+def test_a_quoted_value_is_matched_as_a_whole_word() -> None:
+    line = OWN_LINE.replace("ev_0031 shows", "it shows").replace("qzvent", "evnt1")
+    isrs = _packer_with(['"evnt12" is another name: I hold 0.40.'], 'Routine opens "evnt1".')
+    assert settle_own_entry_lines([line], NAMES, isrs) == ([], {})
+    isrs = _packer_with(['"evnt1" is the name: I hold 0.40.'], 'Routine opens "evnt1".')
+    assert settle_own_entry_lines([line], NAMES, isrs)[0]
+
+
+def test_a_not_blocking_sibling_does_not_keep_the_debate_open() -> None:
+    sibling = "[analysts: STATIC ANALYST] claim 1 wording differs [not blocking: wording only]"
+    argument = AgentArgument(
+        agent_name="Mediator",
+        finding="x",
+        contradictions=[OWN_LINE, sibling],
+        settled_lines=[OWN_LINE],
+    )
+    assert only_settled_by_rule({"discussion_history": [argument]})
+    blocking_left = AgentArgument(
+        agent_name="Mediator",
+        finding="x",
+        contradictions=[OWN_LINE, REAL_LINE],
+        settled_lines=[OWN_LINE],
+    )
+    assert not only_settled_by_rule({"discussion_history": [blocking_left]})
 
 
 class TestItsClaimIsTheFieldAnalysts:
@@ -377,3 +496,105 @@ class TestTheRunSummaryAndTheReportKeepEverySettlement:
         assert negotiation["termination_reason"] == SETTLED_BY_RULE
         assert negotiation["settled_by_rule"] == result["discussion_history"][0].settled_by_rule
         assert "Blocking lines settled by rule" in summary.to_markdown()
+
+
+class TestTheHeldFigureReachesTheAnalyst:
+    def test_a_revision_stating_the_claim_again_higher_is_recorded(self) -> None:
+        [line], held = settle_own_entry_lines([OWN_LINE], NAMES, ISRS)
+        records = line.records(3)
+        assert records[0]["claim_sentence"] == PACKER.claims[1].claim
+
+        assert raised_again("packer_scan_x2", 4, records, held["packer_scan_x2"]) == []
+        [said] = raised_again("packer_scan_x2", 4, records, PACKER)
+        assert "states claim" in said and "at 0.85 again, above the 0.40" in said
+        assert raised_again("static", 4, records, PACKER) == []
+
+    def test_the_revision_is_told_and_the_raise_is_said(self) -> None:
+        [line], held = settle_own_entry_lines([OWN_LINE], NAMES, ISRS)
+        other = (
+            "[analysts: PACKER_SCAN_X2 ANALYST] Claim 1 says a DLL; ev_0001 shows an EXE. "
+            "[blocking: the type conflicts with ev_0001]"
+        )
+        mediation = AgentArgument(
+            agent_name="Mediator",
+            finding=f"Summary.\n\nContradictions: {OWN_LINE}; {other}\nConfidence: 0.5",
+            confidence_score=0.5,
+            contradictions=[OWN_LINE, other],
+            settled_lines=[OWN_LINE],
+            settled_by_rule=[line.sentence(3)],
+            settled_claims=line.records(3),
+        )
+        mediation.revise = ["packer_scan_x2"]
+        update, agent = _revise_after(mediation, {**ISRS, **held})
+
+        directive = agent.safe_revise_isr.call_args.args[3]
+        assert SETTLED_FOR_YOU_HEAD in directive and line.sentence(3) in directive
+        said = update["revision_replacements"]
+        assert any("above the 0.40 it was held at by rule" in s for s in said)
+        # The settled line withdraws nothing by rule.
+        assert not any(
+            "withdrawn by rule" in row["sentence"] for row in update.get("dropped_claims") or []
+        )
+
+
+def _revise_after(mediation: AgentArgument, in_force: dict[str, AgentISR]) -> tuple[Any, Any]:
+    from maljan.pipeline.nodes import RevisionInput, make_revision_node
+
+    container = MagicMock()
+    container.is_mock = False
+    container.event_sink = lambda *_a: None
+    container.analyst_keys.return_value = list(NAMES)
+    container.agent_role.side_effect = lambda n: n
+    container.config.llm.parallel_analysts = False
+    container.config.agents.definitions = {}
+    agents: dict[str, Any] = {}
+    for name in NAMES:
+        agent = MagicMock()
+        agent.tools = []
+        # The revision states every claim again as its first answer had them.
+        agent.safe_revise_isr.return_value = (f"{name} revised", ISRS[name])
+        agent.drain_evidence_entries.return_value = []
+        agent.validation_findings = []
+        agent.validation_retries = 0
+        agent.validation_fed_back = {}
+        agent.validation_not_run = []
+        agent.revision_entries_shown = ()
+        agents[name] = agent
+    container.get_agent.side_effect = lambda n: agents[n]
+    state = {
+        "iteration_count": 3,
+        "is_consensus": False,
+        "consensus_applicable": True,
+        "reports": {name: f"{name} first" for name in NAMES},
+        "revised_reports": {},
+        "isr_reports": in_force,
+        "sycophancy_detected": False,
+        "discussion_history": [mediation],
+        "evidence_ledger": [],
+    }
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
+        mp.setattr("maljan.pipeline.nodes.pack_text", lambda *a: "[ev_0001] identity: pe")
+        update = asyncio.run(make_revision_node(container)(state))
+    return update, agents["packer_scan_x2"]
+
+
+def test_the_report_prints_each_settlement() -> None:
+    from maljan.reporting.models import MalwareReport
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    [line], _held = settle_own_entry_lines([OWN_LINE], NAMES, ISRS)
+    report = MalwareReport.model_validate(
+        {
+            "identity": {"hashes": {"sha256": "0" * 64}},
+            "run_summary": {
+                "negotiation": {
+                    "rounds_completed": 3,
+                    "termination_reason": SETTLED_BY_RULE,
+                    "settled_by_rule": [line.sentence(3)],
+                }
+            },
+        }
+    )
+    rendered = MarkdownRenderer()._appendix_run(report)
+    assert line.sentence(3) in rendered

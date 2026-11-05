@@ -25,11 +25,14 @@ from maljan.agents.claim_headings import CLAIM_HEAD_RE, claim_blocks
 from maljan.agents.repeat_watch import ClaimRepeatReader
 from maljan.pipeline.claim_drops import claim_substance
 from maljan.pipeline.debate_facts import (
+    claim_references_of,
     fact_atoms,
     ledger_count_facts,
     ledger_stated,
+    read_claim_references,
     read_marks,
 )
+from maljan.pipeline.own_entries import settle_own_entry_lines
 from maljan.pipeline.validation import (
     EntryTexts,
     absence_holders_note,
@@ -210,6 +213,41 @@ LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 
         pytest.param(
             lambda t: read_marks(["[analysts: a] [not blocking: " + "[x] " * (len(t) // 4)]),
             id="a mark after the field whose reason never closes",
+        ),
+        pytest.param(
+            lambda t: claim_references_of(
+                "[analysts: a] " + "its claim 3 own " * (len(t) // 16), ["a", "b"], ["a"]
+            ),
+            id="its claims on a one-analyst line",
+        ),
+        pytest.param(
+            lambda t: read_claim_references(
+                ["[analysts: a] " + "its claim 3 own " * (len(t) // 16) + "[blocking: x]"],
+                ["a", "b"],
+            ),
+            id="the merge's reading of its claims",
+        ),
+        pytest.param(
+            lambda t: read_claim_references(
+                ["[analysts: a, b] " + "claim 3 " * (len(t) // 8) + "[blocking: x]"], ["a", "b"]
+            ),
+            id="claim numbers read for no analyst",
+        ),
+        pytest.param(
+            lambda t: settle_own_entry_lines(
+                ["[analysts: a] its own " + "b claim 3 " * (len(t) // 10) + "[blocking: x]"],
+                ["a", "b"],
+                {},
+            ),
+            id="an own-entry line naming a peer's claims",
+        ),
+        pytest.param(
+            lambda t: settle_own_entry_lines(
+                ["[analysts: a] its own " + "claim 3 at 0.50 " * (len(t) // 16) + "[blocking: x]"],
+                ["a", "b"],
+                {},
+            ),
+            id="an own-entry line of its own claims",
         ),
     ],
 )

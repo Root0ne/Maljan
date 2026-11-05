@@ -1,0 +1,2231 @@
+{
+ "haiku10": {
+  "M1": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "18": [
+      [
+       5,
+       true
+      ]
+     ],
+     "21": [
+      [
+       6,
+       true
+      ]
+     ],
+     "22": [
+      [
+       11,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "3": [
+      [
+       3,
+       true
+      ]
+     ],
+     "42": [
+      [
+       4,
+       true
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "18": [
+      [
+       2,
+       true
+      ]
+     ],
+     "3": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "dynamic": {
+     "3": [
+      [
+       9,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "all_tools_static_r2",
+    "all_tools_qu1cksc0pe",
+    "all_tools_reverser_ghidra"
+   ],
+   "unplaced": [
+    [
+     4,
+     [
+      "all_tools_reverser_ghidra"
+     ],
+     "claims 24-25",
+     "the platform reads no analyst for it"
+    ]
+   ]
+  },
+  "M2": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "3": [
+      [
+       1,
+       true
+      ]
+     ],
+     "43": [
+      [
+       4,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "28": [
+      [
+       3,
+       false
+      ]
+     ],
+     "32": [
+      [
+       2,
+       false
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "2": [
+      [
+       4,
+       false
+      ]
+     ]
+    },
+    "dynamic": {
+     "4": [
+      [
+       3,
+       false
+      ]
+     ]
+    },
+    "static": {
+     "7": [
+      [
+       3,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "5": [
+      [
+       4,
+       false
+      ]
+     ],
+     "7": [
+      [
+       3,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "all_tools_qu1cksc0pe"
+   ],
+   "unplaced": []
+  },
+  "M3": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "13": [
+      [
+       8,
+       false
+      ]
+     ],
+     "15": [
+      [
+       6,
+       false
+      ]
+     ],
+     "19": [
+      [
+       9,
+       false
+      ]
+     ],
+     "21": [
+      [
+       3,
+       false
+      ]
+     ],
+     "22": [
+      [
+       11,
+       false
+      ]
+     ],
+     "23": [
+      [
+       8,
+       false
+      ]
+     ],
+     "35": [
+      [
+       1,
+       true
+      ],
+      [
+       2,
+       false
+      ]
+     ],
+     "5": [
+      [
+       7,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "12": [
+      [
+       6,
+       false
+      ],
+      [
+       11,
+       false
+      ]
+     ],
+     "2": [
+      [
+       2,
+       false
+      ]
+     ],
+     "27": [
+      [
+       7,
+       false
+      ]
+     ],
+     "32": [
+      [
+       3,
+       false
+      ]
+     ],
+     "35": [
+      [
+       8,
+       false
+      ]
+     ],
+     "36": [
+      [
+       10,
+       false
+      ]
+     ],
+     "46": [
+      [
+       2,
+       false
+      ]
+     ],
+     "5": [
+      [
+       2,
+       false
+      ]
+     ],
+     "50": [
+      [
+       6,
+       false
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "18": [
+      [
+       3,
+       false
+      ]
+     ],
+     "2": [
+      [
+       7,
+       false
+      ]
+     ]
+    },
+    "dynamic": {
+     "16": [
+      [
+       8,
+       false
+      ]
+     ],
+     "21": [
+      [
+       9,
+       false
+      ]
+     ],
+     "3": [
+      [
+       7,
+       false
+      ]
+     ],
+     "9": [
+      [
+       11,
+       false
+      ]
+     ]
+    },
+    "static": {
+     "13": [
+      [
+       4,
+       false
+      ]
+     ],
+     "21": [
+      [
+       4,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "16": [
+      [
+       4,
+       false
+      ]
+     ],
+     "5": [
+      [
+       7,
+       false
+      ],
+      [
+       10,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "all_tools_qu1cksc0pe"
+   ],
+   "unplaced": [
+    [
+     1,
+     [
+      "all_tools_qu1cksc0pe"
+     ],
+     "claim 6",
+     "the platform reads no analyst for it"
+    ]
+   ]
+  },
+  "M4": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "13": [
+      [
+       7,
+       false
+      ]
+     ],
+     "19": [
+      [
+       2,
+       false
+      ]
+     ],
+     "22": [
+      [
+       10,
+       false
+      ]
+     ],
+     "23": [
+      [
+       7,
+       false
+      ]
+     ],
+     "35": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "12": [
+      [
+       10,
+       false
+      ]
+     ],
+     "32": [
+      [
+       2,
+       false
+      ]
+     ],
+     "35": [
+      [
+       7,
+       false
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "18": [
+      [
+       2,
+       false
+      ]
+     ]
+    },
+    "dynamic": {
+     "16": [
+      [
+       7,
+       false
+      ]
+     ],
+     "21": [
+      [
+       8,
+       false
+      ]
+     ],
+     "9": [
+      [
+       10,
+       false
+      ]
+     ]
+    },
+    "static": {
+     "13": [
+      [
+       3,
+       false
+      ]
+     ],
+     "21": [
+      [
+       3,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "16": [
+      [
+       3,
+       false
+      ]
+     ],
+     "5": [
+      [
+       9,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "all_tools_qu1cksc0pe"
+   ],
+   "unplaced": [
+    [
+     1,
+     [
+      "all_tools_qu1cksc0pe"
+     ],
+     "claim 6",
+     "the platform reads no analyst for it"
+    ]
+   ]
+  },
+  "M5": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "13": [
+      [
+       7,
+       false
+      ]
+     ],
+     "21": [
+      [
+       2,
+       false
+      ]
+     ],
+     "23": [
+      [
+       7,
+       false
+      ]
+     ],
+     "35": [
+      [
+       1,
+       true
+      ]
+     ],
+     "6": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "2": [
+      [
+       1,
+       true
+      ]
+     ],
+     "32": [
+      [
+       2,
+       false
+      ]
+     ],
+     "35": [
+      [
+       7,
+       false
+      ]
+     ],
+     "46": [
+      [
+       1,
+       true
+      ]
+     ],
+     "5": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "18": [
+      [
+       2,
+       false
+      ]
+     ]
+    },
+    "dynamic": {
+     "16": [
+      [
+       7,
+       false
+      ]
+     ],
+     "21": [
+      [
+       8,
+       false
+      ]
+     ]
+    },
+    "static": {
+     "13": [
+      [
+       3,
+       false
+      ]
+     ],
+     "21": [
+      [
+       3,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "16": [
+      [
+       3,
+       false
+      ]
+     ],
+     "5": [
+      [
+       10,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "all_tools_qu1cksc0pe",
+    "all_tools_reverser_ghidra"
+   ],
+   "unplaced": []
+  }
+ },
+ "haiku11": {
+  "M1": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "11": [
+      [
+       7,
+       false
+      ]
+     ],
+     "25": [
+      [
+       4,
+       true
+      ]
+     ],
+     "31": [
+      [
+       8,
+       false
+      ]
+     ],
+     "35": [
+      [
+       6,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "1": [
+      [
+       1,
+       true
+      ]
+     ],
+     "10": [
+      [
+       9,
+       false
+      ]
+     ],
+     "27": [
+      [
+       3,
+       true
+      ]
+     ],
+     "39": [
+      [
+       6,
+       false
+      ]
+     ],
+     "40": [
+      [
+       6,
+       false
+      ]
+     ],
+     "55": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "19": [
+      [
+       6,
+       false
+      ]
+     ]
+    },
+    "dynamic": {
+     "16": [
+      [
+       6,
+       false
+      ]
+     ],
+     "52": [
+      [
+       3,
+       true
+      ]
+     ]
+    },
+    "network": {
+     "18": [
+      [
+       3,
+       true
+      ]
+     ],
+     "5": [
+      [
+       6,
+       false
+      ]
+     ]
+    },
+    "static": {
+     "15": [
+      [
+       4,
+       true
+      ]
+     ],
+     "16": [
+      [
+       4,
+       true
+      ]
+     ],
+     "24": [
+      [
+       6,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "17": [
+      [
+       4,
+       true
+      ]
+     ],
+     "22": [
+      [
+       2,
+       true
+      ]
+     ],
+     "37": [
+      [
+       6,
+       false
+      ]
+     ],
+     "6": [
+      [
+       7,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "static",
+    "triage",
+    "dynamic",
+    "network",
+    "all_tools_static_r2",
+    "all_tools_qu1cksc0pe",
+    "all_tools_reverser_ghidra"
+   ],
+   "unplaced": [
+    [
+     4,
+     [
+      "all_tools_reverser_ghidra",
+      "all_tools_qu1cksc0pe",
+      "triage",
+      "static",
+      "all_tools_static_r2"
+     ],
+     "claims 14, 58",
+     "the platform reads no analyst for it"
+    ]
+   ]
+  },
+  "M2": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "40": [
+      [
+       3,
+       true
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "1": [
+      [
+       1,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "all_tools_qu1cksc0pe"
+   ],
+   "unplaced": []
+  },
+  "M3": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "10": [
+      [
+       2,
+       true
+      ]
+     ],
+     "36": [
+      [
+       5,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "1": [
+      [
+       4,
+       false
+      ]
+     ]
+    },
+    "dynamic": {
+     "25": [
+      [
+       9,
+       false
+      ]
+     ],
+     "36": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "network": {
+     "12": [
+      [
+       6,
+       false
+      ]
+     ],
+     "14": [
+      [
+       6,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "dynamic",
+    "all_tools_qu1cksc0pe"
+   ],
+   "unplaced": []
+  },
+  "M4": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "27": [
+      [
+       1,
+       true
+      ]
+     ],
+     "40": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "1": [
+      [
+       4,
+       false
+      ]
+     ],
+     "42": [
+      [
+       2,
+       true
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "14": [
+      [
+       2,
+       true
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "all_tools_static_r2",
+    "all_tools_qu1cksc0pe",
+    "all_tools_reverser_ghidra"
+   ],
+   "unplaced": []
+  },
+  "M5": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "10": [
+      [
+       3,
+       false
+      ]
+     ],
+     "38": [
+      [
+       5,
+       false
+      ]
+     ],
+     "50": [
+      [
+       4,
+       false
+      ]
+     ],
+     "9": [
+      [
+       4,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "10": [
+      [
+       1,
+       true
+      ]
+     ],
+     "46": [
+      [
+       11,
+       false
+      ]
+     ]
+    },
+    "dynamic": {
+     "33": [
+      [
+       5,
+       false
+      ]
+     ],
+     "4": [
+      [
+       3,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "21": [
+      [
+       7,
+       false
+      ]
+     ],
+     "26": [
+      [
+       3,
+       false
+      ]
+     ],
+     "27": [
+      [
+       2,
+       true
+      ]
+     ],
+     "6": [
+      [
+       4,
+       false
+      ]
+     ],
+     "7": [
+      [
+       4,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "triage",
+    "all_tools_reverser_ghidra"
+   ],
+   "unplaced": []
+  }
+ },
+ "haiku7": {
+  "M1": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "27": [
+      [
+       2,
+       true
+      ]
+     ],
+     "33": [
+      [
+       1,
+       true
+      ]
+     ],
+     "37": [
+      [
+       9,
+       false
+      ]
+     ],
+     "4": [
+      [
+       6,
+       false
+      ]
+     ],
+     "43": [
+      [
+       7,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "18": [
+      [
+       4,
+       true
+      ]
+     ],
+     "19": [
+      [
+       4,
+       true
+      ]
+     ],
+     "20": [
+      [
+       4,
+       true
+      ]
+     ],
+     "21": [
+      [
+       4,
+       true
+      ]
+     ],
+     "27": [
+      [
+       3,
+       true
+      ]
+     ],
+     "32": [
+      [
+       9,
+       false
+      ]
+     ],
+     "51": [
+      [
+       9,
+       false
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "22": [
+      [
+       8,
+       false
+      ]
+     ],
+     "6": [
+      [
+       3,
+       true
+      ]
+     ]
+    },
+    "dynamic": {
+     "34": [
+      [
+       7,
+       false
+      ]
+     ]
+    },
+    "network": {
+     "2": [
+      [
+       5,
+       true
+      ],
+      [
+       8,
+       false
+      ]
+     ],
+     "4": [
+      [
+       5,
+       true
+      ]
+     ]
+    },
+    "static": {
+     "19": [
+      [
+       1,
+       true
+      ]
+     ],
+     "21": [
+      [
+       2,
+       true
+      ]
+     ],
+     "26": [
+      [
+       7,
+       false
+      ]
+     ],
+     "7": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "triage": {
+     "26": [
+      [
+       1,
+       true
+      ]
+     ],
+     "34": [
+      [
+       7,
+       false
+      ]
+     ],
+     "6": [
+      [
+       6,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "static",
+    "triage",
+    "network",
+    "all_tools_static_r2",
+    "all_tools_qu1cksc0pe",
+    "all_tools_reverser_ghidra"
+   ],
+   "unplaced": []
+  },
+  "M2": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "24": [
+      [
+       1,
+       true
+      ]
+     ],
+     "31": [
+      [
+       7,
+       false
+      ]
+     ],
+     "32": [
+      [
+       7,
+       false
+      ]
+     ],
+     "36": [
+      [
+       8,
+       false
+      ]
+     ],
+     "37": [
+      [
+       6,
+       false
+      ]
+     ],
+     "42": [
+      [
+       2,
+       true
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "33": [
+      [
+       9,
+       false
+      ]
+     ],
+     "35": [
+      [
+       8,
+       false
+      ]
+     ]
+    },
+    "dynamic": {
+     "16": [
+      [
+       12,
+       false
+      ]
+     ],
+     "18": [
+      [
+       11,
+       false
+      ]
+     ],
+     "31": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "network": {
+     "2": [
+      [
+       4,
+       true
+      ]
+     ],
+     "8": [
+      [
+       1,
+       true
+      ]
+     ],
+     "9": [
+      [
+       3,
+       true
+      ]
+     ]
+    },
+    "static": {
+     "18": [
+      [
+       10,
+       false
+      ]
+     ],
+     "22": [
+      [
+       10,
+       false
+      ]
+     ],
+     "29": [
+      [
+       1,
+       true
+      ]
+     ],
+     "30": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "triage": {
+     "4": [
+      [
+       5,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "static",
+    "dynamic",
+    "network",
+    "all_tools_qu1cksc0pe"
+   ],
+   "unplaced": []
+  },
+  "M3": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "25": [
+      [
+       1,
+       true
+      ]
+     ],
+     "28": [
+      [
+       6,
+       false
+      ]
+     ],
+     "39": [
+      [
+       5,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "22": [
+      [
+       6,
+       false
+      ]
+     ],
+     "46": [
+      [
+       3,
+       false
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "3": [
+      [
+       2,
+       false
+      ]
+     ]
+    },
+    "network": {
+     "10": [
+      [
+       2,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "4": [
+      [
+       4,
+       false
+      ]
+     ],
+     "6": [
+      [
+       4,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "all_tools_qu1cksc0pe"
+   ],
+   "unplaced": []
+  },
+  "M4": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "15": [
+      [
+       7,
+       false
+      ]
+     ],
+     "28": [
+      [
+       1,
+       false
+      ]
+     ],
+     "3": [
+      [
+       5,
+       false
+      ],
+      [
+       6,
+       false
+      ]
+     ],
+     "39": [
+      [
+       6,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "48": [
+      [
+       1,
+       false
+      ]
+     ]
+    },
+    "network": {
+     "10": [
+      [
+       2,
+       false
+      ]
+     ],
+     "2": [
+      [
+       7,
+       false
+      ]
+     ]
+    },
+    "static": {
+     "3": [
+      [
+       2,
+       false
+      ]
+     ],
+     "34": [
+      [
+       7,
+       false
+      ]
+     ],
+     "8": [
+      [
+       3,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "4": [
+      [
+       5,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [],
+   "unplaced": []
+  }
+ },
+ "haiku8": {
+  "M1": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "15": [
+      [
+       5,
+       true
+      ]
+     ],
+     "26": [
+      [
+       4,
+       true
+      ]
+     ],
+     "30": [
+      [
+       9,
+       false
+      ]
+     ],
+     "35": [
+      [
+       6,
+       true
+      ]
+     ],
+     "39": [
+      [
+       5,
+       true
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "10": [
+      [
+       1,
+       true
+      ]
+     ],
+     "15": [
+      [
+       5,
+       true
+      ]
+     ]
+    },
+    "dynamic": {
+     "16": [
+      [
+       8,
+       false
+      ]
+     ],
+     "22": [
+      [
+       10,
+       false
+      ]
+     ],
+     "23": [
+      [
+       3,
+       true
+      ]
+     ]
+    },
+    "static": {
+     "18": [
+      [
+       3,
+       true
+      ]
+     ],
+     "21": [
+      [
+       10,
+       false
+      ]
+     ],
+     "25": [
+      [
+       2,
+       true
+      ]
+     ],
+     "30": [
+      [
+       9,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "13": [
+      [
+       5,
+       true
+      ]
+     ],
+     "15": [
+      [
+       3,
+       true
+      ]
+     ],
+     "17": [
+      [
+       7,
+       true
+      ]
+     ],
+     "21": [
+      [
+       10,
+       false
+      ]
+     ],
+     "28": [
+      [
+       9,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "static",
+    "triage",
+    "dynamic",
+    "all_tools_static_r2",
+    "all_tools_qu1cksc0pe"
+   ],
+   "unplaced": []
+  },
+  "M2": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "15": [
+      [
+       5,
+       true
+      ]
+     ],
+     "18": [
+      [
+       6,
+       false
+      ]
+     ],
+     "20": [
+      [
+       7,
+       false
+      ]
+     ],
+     "21": [
+      [
+       3,
+       true
+      ]
+     ],
+     "24": [
+      [
+       9,
+       false
+      ]
+     ],
+     "25": [
+      [
+       8,
+       false
+      ]
+     ],
+     "26": [
+      [
+       2,
+       true
+      ]
+     ],
+     "35": [
+      [
+       1,
+       true
+      ]
+     ],
+     "42": [
+      [
+       8,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "44": [
+      [
+       4,
+       true
+      ]
+     ],
+     "74": [
+      [
+       4,
+       true
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "13": [
+      [
+       4,
+       true
+      ]
+     ],
+     "19": [
+      [
+       11,
+       false
+      ]
+     ]
+    },
+    "dynamic": {
+     "11": [
+      [
+       13,
+       false
+      ]
+     ],
+     "20": [
+      [
+       13,
+       false
+      ]
+     ],
+     "21": [
+      [
+       10,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "14": [
+      [
+       12,
+       false
+      ]
+     ],
+     "19": [
+      [
+       4,
+       true
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "triage",
+    "all_tools_static_r2",
+    "all_tools_qu1cksc0pe",
+    "all_tools_reverser_ghidra"
+   ],
+   "unplaced": [
+    [
+     4,
+     [
+      "all_tools_reverser_ghidra",
+      "all_tools_static_r2",
+      "triage"
+     ],
+     "claim 45",
+     "the platform reads no analyst for it"
+    ]
+   ]
+  },
+  "M3": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "14": [
+      [
+       6,
+       false
+      ]
+     ],
+     "62": [
+      [
+       5,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "26": [
+      [
+       4,
+       false
+      ]
+     ],
+     "27": [
+      [
+       3,
+       true
+      ]
+     ]
+    },
+    "dynamic": {
+     "25": [
+      [
+       10,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "10": [
+      [
+       7,
+       false
+      ]
+     ],
+     "14": [
+      [
+       8,
+       false
+      ]
+     ],
+     "16": [
+      [
+       9,
+       false
+      ]
+     ],
+     "19": [
+      [
+       1,
+       true
+      ]
+     ],
+     "22": [
+      [
+       2,
+       true
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "triage",
+    "all_tools_reverser_ghidra"
+   ],
+   "unplaced": []
+  },
+  "M4": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "13": [
+      [
+       6,
+       false
+      ]
+     ],
+     "14": [
+      [
+       5,
+       false
+      ]
+     ],
+     "28": [
+      [
+       7,
+       false
+      ]
+     ],
+     "30": [
+      [
+       4,
+       true
+      ]
+     ],
+     "62": [
+      [
+       4,
+       true
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "1": [
+      [
+       1,
+       true
+      ]
+     ],
+     "16": [
+      [
+       2,
+       true
+      ]
+     ],
+     "9": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "all_tools_static_r2": {
+     "3": [
+      [
+       1,
+       true
+      ]
+     ],
+     "6": [
+      [
+       2,
+       true
+      ]
+     ]
+    },
+    "dynamic": {
+     "1": [
+      [
+       3,
+       true
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "dynamic",
+    "all_tools_static_r2",
+    "all_tools_qu1cksc0pe",
+    "all_tools_reverser_ghidra"
+   ],
+   "unplaced": []
+  },
+  "M5": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "4": [
+      [
+       1,
+       true
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "16": [
+      [
+       3,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "10": [
+      [
+       4,
+       false
+      ]
+     ],
+     "24": [
+      [
+       5,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "all_tools_qu1cksc0pe"
+   ],
+   "unplaced": []
+  }
+ },
+ "haiku9": {
+  "M1": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "23": [
+      [
+       3,
+       true
+      ]
+     ],
+     "27": [
+      [
+       1,
+       true
+      ]
+     ],
+     "8": [
+      [
+       8,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "11": [
+      [
+       7,
+       false
+      ]
+     ],
+     "24": [
+      [
+       3,
+       true
+      ]
+     ],
+     "29": [
+      [
+       6,
+       false
+      ]
+     ],
+     "3": [
+      [
+       9,
+       false
+      ]
+     ],
+     "30": [
+      [
+       5,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "22": [
+      [
+       1,
+       true
+      ]
+     ],
+     "27": [
+      [
+       2,
+       true
+      ]
+     ],
+     "9": [
+      [
+       8,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "triage",
+    "all_tools_qu1cksc0pe",
+    "all_tools_reverser_ghidra"
+   ],
+   "unplaced": []
+  },
+  "M2": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "11": [
+      [
+       13,
+       false
+      ]
+     ],
+     "35": [
+      [
+       8,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "11": [
+      [
+       6,
+       false
+      ]
+     ],
+     "12": [
+      [
+       5,
+       false
+      ]
+     ],
+     "29": [
+      [
+       7,
+       false
+      ]
+     ],
+     "3": [
+      [
+       13,
+       false
+      ]
+     ],
+     "64": [
+      [
+       8,
+       false
+      ]
+     ]
+    },
+    "dynamic": {
+     "22": [
+      [
+       2,
+       false
+      ]
+     ],
+     "23": [
+      [
+       4,
+       false
+      ]
+     ]
+    },
+    "network": {
+     "15": [
+      [
+       3,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "12": [
+      [
+       10,
+       false
+      ]
+     ],
+     "27": [
+      [
+       4,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [
+    "triage"
+   ],
+   "unplaced": []
+  },
+  "M3": {
+   "named": {
+    "all_tools_qu1cksc0pe": {
+     "12": [
+      [
+       7,
+       false
+      ]
+     ],
+     "22": [
+      [
+       1,
+       false
+      ]
+     ],
+     "26": [
+      [
+       5,
+       false
+      ]
+     ],
+     "37": [
+      [
+       4,
+       false
+      ]
+     ]
+    },
+    "all_tools_reverser_ghidra": {
+     "58": [
+      [
+       3,
+       false
+      ]
+     ],
+     "64": [
+      [
+       1,
+       false
+      ]
+     ]
+    },
+    "dynamic": {
+     "23": [
+      [
+       6,
+       false
+      ]
+     ]
+    },
+    "network": {
+     "2": [
+      [
+       2,
+       false
+      ]
+     ],
+     "3": [
+      [
+       2,
+       false
+      ],
+      [
+       7,
+       false
+      ]
+     ]
+    },
+    "static": {
+     "11": [
+      [
+       3,
+       false
+      ]
+     ]
+    },
+    "triage": {
+     "24": [
+      [
+       6,
+       false
+      ]
+     ],
+     "28": [
+      [
+       5,
+       false
+      ]
+     ],
+     "30": [
+      [
+       2,
+       false
+      ],
+      [
+       4,
+       false
+      ]
+     ]
+    }
+   },
+   "revise": [],
+   "unplaced": []
+  }
+ }
+}

@@ -98,6 +98,16 @@ class AgentArgument(BaseModel):
             "figures and the analyst's entry: the run's record of the settlement."
         ),
     )
+    settled_claims: list[dict[str, Any]] = Field(
+        default_factory=list,
+        repr=False,
+        description=(
+            "For the mediator: one record per claim a line of ``settled_lines`` holds (analyst, "
+            "claim number, both figures, the claim's sentence and the line's record), so that "
+            "analyst's next revision is told it and a revision stating the claim again above "
+            "its held figure is recorded."
+        ),
+    )
     converged: list[dict[str, Any]] = Field(
         default_factory=list,
         repr=False,

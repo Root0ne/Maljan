@@ -392,9 +392,9 @@ def only_ledger_stated(state: Any) -> bool:
 def only_settled_by_rule(state: Any) -> bool:
     """Whether the platform settled every blocking line of the last mediation by rule.
 
-    Read from the mediation's own record (``AgentArgument.settled_lines``), and
-    only where the mediation was made (``status`` complete) and lists a
-    blocking line.
+    Read from the mediation's own record (``AgentArgument.settled_lines``)
+    against its blocking lines (``debate_facts.read_marks``), and only where
+    the mediation was made (``status`` complete) and lists a blocking line.
     """
     history = state.get("discussion_history") or []
     last = history[-1] if history else None
@@ -402,7 +402,11 @@ def only_settled_by_rule(state: Any) -> bool:
         return False
     if getattr(last, "status", "complete") != "complete":
         return False
-    lines = {str(line) for line in getattr(last, "contradictions", None) or []}
+    from maljan.pipeline.debate_facts import read_marks
+
+    # Its blocking lines alone: a line it marked not blocking asks nobody.
+    listed = [str(line) for line in getattr(last, "contradictions", None) or []]
+    lines = {line for line, mark in zip(listed, read_marks(listed), strict=True) if mark.blocking}
     settled = {str(line) for line in getattr(last, "settled_lines", None) or []}
     return bool(lines) and lines <= settled
 
