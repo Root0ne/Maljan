@@ -78,7 +78,19 @@ then said opposite things (T-562). Where the statement's own clause names the
 routine, the ledger itself contradicts the sentence: one the answer leaves
 standing (no row, a kept row, a rewrite that failed) is qualified by the
 platform with the facts' own clauses and ids, and recorded
-(``QUALIFIED_CODE``); it is never left out.
+(``QUALIFIED_CODE``); it is never left out. A sentence that reports or refutes
+another's claim ("They say ... was not read", "... is also wrong") is held
+only: what it calls not read is that claim's, and the model answers it.
+
+Two more shapes are held, read by shape alone: a sentence of any writable
+passage that calls something absent from the whole code read, naming no
+address ("No X read appears in the analysed code", :func:`whole_code_absences`),
+which names nothing a fact is about, so one of section 5 may be rewritten in
+the model's words on a fact or another section 5 passage, its citations read as
+any rewrite's; and every negation of the conclusion and the limitations
+(:func:`closing_negations`), which the body may state otherwise of (haiku11's
+limitations said no command identifiers were known beside section 6's table).
+A held closing sentence the answer keeps is recorded (``HELD_KEPT_CODE``).
 
 Every step is one pass over the passages and the answer's rows.
 """
@@ -189,6 +201,9 @@ HELD_UNLISTED_CODE = "agreement.held_unlisted"
 # the platform adds what the ledger shows to it, in the facts' own words, and
 # records what stood (T-562). Never left out, never left as written.
 QUALIFIED_CODE = "agreement.qualified"
+# A held sentence of the conclusion or the limitations that the answer kept, on
+# the sources it named: it stands, and is recorded where a reader finds it.
+HELD_KEPT_CODE = "agreement.held_kept"
 
 
 # The kinds of passage the round is shown, by who wrote them from what.
@@ -267,6 +282,11 @@ class Passage:
     # each one is held, and one its own clause names that the answer leaves
     # standing is qualified by the platform on those facts (T-562).
     unread_listed: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = ()
+    # The sentences of a writable passage that call something absent from the
+    # whole code read, naming no address (:func:`whole_code_absences`): each
+    # is held, and one of section 5 may be rewritten in the model's words on a
+    # fact or a section 5 passage, as a passage written without the code is.
+    whole_code: tuple[str, ...] = ()
 
 
 def _ids(*sources: Any) -> frozenset[str]:
@@ -574,6 +594,14 @@ def passages_of(
             # section, the body as well as the closing ones (T-562).
             passage.unread_listed = unread_listed_sentences(passage.text, listed)
             holding = (*holding, *(sentence for sentence, _ids, _own in passage.unread_listed))
+        if _writable(passage):
+            # A sentence calling something absent from the whole code read, and
+            # a negation of the conclusion or the limitations, which the body
+            # may state otherwise: each one is the model's to answer (T-562).
+            passage.whole_code = whole_code_absences(passage.text)
+            holding = (*holding, *passage.whole_code)
+            if passage.closing:
+                holding = (*holding, *closing_negations(passage.text))
         passage.held = tuple(dict.fromkeys(holding))
     return [*facts, *coded, *debate, *uncoded]
 
@@ -1827,7 +1855,17 @@ def _row_violations(
             )
         )
     sources = [by_id.get(_form(source)) for source in row.sources]
-    allowed = (FACT,) if passage.kind == SECTION_5 else (FACT, SECTION_5, DEBATE)
+    # A section 5 sentence calling something absent from the whole code read
+    # names nothing a fact is about: it may rest on a fact or a section 5
+    # passage, never on another model's claim or a debate round (T-562).
+    whole = span is not None and _in_own_words(passage, span[2], sources)
+    allowed = (
+        (FACT, SECTION_5)
+        if span is not None and _whole_code_sentence(passage, span[2])
+        else (FACT,)
+        if passage.kind == SECTION_5
+        else (FACT, SECTION_5, DEBATE)
+    )
     wrong = [
         _form(name)
         for name, source in zip(row.sources, sources, strict=True)
@@ -1885,7 +1923,7 @@ def _row_violations(
         # Only a source the passage may rest on grounds its rewrite: a section
         # 5 sentence's, a fact about what the sentence or its rewrite names.
         grounds = [s for s in sources if s is not None and s.kind in allowed]
-        if passage.kind == SECTION_5:
+        if passage.kind == SECTION_5 and not whole:
             reading = _Reading(row.sentence, passage.text)
             about = [s for s in grounds if _grounds_section_5(s, reading)]
             if about and span is not None and row.rewrite != _qualified(span[2], about):
@@ -1918,6 +1956,28 @@ def _row_violations(
             grounds = about
         out.extend(_grounding_violations(row, index, passage, grounds, span))
     return out
+
+
+def _whole_code_sentence(passage: Passage, sentence: str) -> bool:
+    """Whether ``sentence``, as it stands, is one of a section 5 passage's whole-code
+    absences, rewritten in the model's words rather than qualified by the platform."""
+    return passage.kind == SECTION_5 and sentence in passage.whole_code
+
+
+def _in_own_words(passage: Passage, sentence: str, sources: Sequence[Passage | None]) -> bool:
+    """Whether a row on a section 5 whole-code absence is answered in the model's words.
+
+    Where every source it names is a fact that grounds the sentence, the
+    platform qualifies it as any section 5 sentence (``_qualified``); a section
+    5 passage, or a fact about nothing it names, leaves the words to the model,
+    its citations read as any passage's rewrite is (T-562).
+    """
+    if not _whole_code_sentence(passage, sentence):
+        return False
+    reading = _Reading(sentence, passage.text)
+    return not (
+        sources and all(s is not None and s.kind == FACT and _grounds(s, reading) for s in sources)
+    )
 
 
 def _grounds_section_5(fact: Passage, reading: _Reading) -> bool:
@@ -2003,6 +2063,46 @@ def _grounds(fact: Passage, reading: _Reading) -> bool:
 # farther from its verb than this, within one clause, is not read as one.
 _CLAUSE_REACH = 240
 _IN_CLAUSE = rf"[^.;:()\u2014\u2013]{{0,{_CLAUSE_REACH}}}?"
+# A sentence calling something absent from the whole code read: "no X ...
+# appears", "no Y is present" or "is found", in one clause. Which code, and
+# whether a fact or section 5 says otherwise, is the model's to read; a
+# sentence naming an address is about that address and is held by what it names.
+_WHOLE_CODE_ABSENCE = re.compile(
+    r"\bno\b"
+    + _IN_CLAUSE
+    + r"\b(?:appears?|appeared|(?:is|are|was|were)\s+(?:present|found|seen))\b",
+    re.IGNORECASE,
+)
+# A negation of the conclusion or the limitations: something not attributed,
+# known, tied, matched, identified, recovered, established, determined, named,
+# resolved, read, shown, confirmed, exercised, watched or observed; unknown; or
+# "no X is known". The body may state what it denies (T-562).
+_CLOSING_NEGATION = re.compile(
+    r"\b(?:not|never)\s+(?:been\s+|be\s+)?(?:\w+ly\s+)?(?:attributed|known|tied|matched|"
+    r"linked|identified|recovered|established|determined|named|resolved|read|shown|"
+    r"confirmed|exercised|watched|observed)\b"
+    r"|\bunknown\b"
+    r"|\bno\b" + _IN_CLAUSE + r"\b(?:is|are|was|were)\s+known\b",
+    re.IGNORECASE,
+)
+
+
+def whole_code_absences(text: str) -> tuple[str, ...]:
+    """The sentences of ``text`` that call something absent from the code read, naming
+    no address (:data:`_WHOLE_CODE_ABSENCE`), in the order they stand."""
+    return tuple(
+        sentence
+        for sentence in _sentences_of(text)
+        if _WHOLE_CODE_ABSENCE.search(sentence) and not _addresses_named(sentence)
+    )
+
+
+def closing_negations(text: str) -> tuple[str, ...]:
+    """The sentences of a closing passage that deny or call unknown something the body
+    may state (:data:`_CLOSING_NEGATION`), in the order they stand."""
+    return tuple(s for s in _sentences_of(text) if _CLOSING_NEGATION.search(s))
+
+
 _NEGATION_WORD = r"\b(?:no|not|never|none)\b"
 _NOT_DONE = r"(?:\b(?:does|do|did|can|could)\s+not\s+|\bcannot\s+|\b(?:doesn|don|didn)'t\s+)"
 _READ_VERB = (
@@ -2097,6 +2197,14 @@ def _platform_rewrites(payload: Any, by_id: dict[str, Passage]) -> Any:
         ):
             named = row.get("sources")
             standing = located(passage.text, str(row.get("sentence") or ""))
+            if standing and _in_own_words(
+                passage,
+                standing,
+                [by_id.get(_form(n)) for n in (named if isinstance(named, list) else [])],
+            ):
+                # The model's words, read as any passage's rewrite is.
+                out.append(row)
+                continue
             reading = _Reading(standing or "", passage.text)
             facts = [
                 fact
@@ -2238,6 +2346,8 @@ def _held_unlisted(
                 f"calls code not read that {safe_finding_value(', '.join(ids))} "
                 "states an entry lists"
                 if ids
+                else "calls something absent from the whole code read"
+                if sentence in passage.whole_code
                 else "calls open what a section 5 passage or a fact may state"
             )
             out.append(
@@ -2386,6 +2496,14 @@ def prompt_text(passages: Sequence[Passage]) -> str:
                     f"  [{passage.id}] list each of these sentences: "
                     + "; ".join(quoted_value(sentence) for sentence in passage.held)
                 )
+            if passage.kind == SECTION_5 and passage.whole_code:
+                # Read off the passage by code: no address names what they deny.
+                lines.append(
+                    f"  [{passage.id}] each of these calls something absent from the whole "
+                    "code read; if a fact or another section 5 passage shows it, rewrite it in "
+                    "your own words, citing an entry that source cites: "
+                    + "; ".join(quoted_value(sentence) for sentence in passage.whole_code)
+                )
         lines.append("")
     lines.extend(
         [
@@ -2499,6 +2617,25 @@ def apply_rows(
                 )
             else:
                 counts["kept"] += 1
+                standing = (
+                    _sentences(passage).span(row.sentence)
+                    if passage is not None and passage.closing and not found
+                    else None
+                )
+                if passage is not None and standing is not None and standing[2] in passage.held:
+                    listed.append(
+                        Violation(
+                            code=HELD_KEPT_CODE,
+                            message=(
+                                "The agreement question kept a held sentence of "
+                                f"{safe_finding_value(passage.label)} on "
+                                f"{safe_finding_value(', '.join(_form(s) for s in row.sources))}: "
+                                f"{safe_finding_value(standing[2])!r} stands as written."
+                            ),
+                            path=f"sentences.{index}",
+                            answered=True,
+                        )
+                    )
             continue
         found += _rewrite_violations(row.rewrite, citable, items, entries)
         span = _sentences(passage).span(row.sentence) if passage is not None else None
@@ -2536,8 +2673,11 @@ def apply_rows(
             continue
         # A section 5 rewrite is the platform's, built from the passage's own
         # text: put in as it stands, never read back.
-        rewrite = row.rewrite if passage.kind == SECTION_5 else " ".join(row.rewrite.split())
-        if span[3] >= 0 and passage.kind != SECTION_5:
+        platform = passage.kind == SECTION_5 and not _in_own_words(
+            passage, span[2], [by_id.get(_form(name)) for name in row.sources]
+        )
+        rewrite = row.rewrite if platform else " ".join(row.rewrite.split())
+        if span[3] >= 0 and not platform:
             # Read back as the sentence was: the model copied both from quoted text.
             reads = pack_reads(rewrite)
             rewrite = reads[min(span[3], len(reads) - 1)] if reads else rewrite
@@ -2570,6 +2710,27 @@ def apply_rows(
     return counts, [*listed, *written]
 
 
+# A sentence that reports or refutes another's claim ("They say 0x8690 was not
+# read", "The statement that ... were not read is also wrong", "claim 4 says",
+# "the static analyst holds"): what it says not read is that claim's, and the
+# platform adds no ledger clause to it; it stays held, the model's to answer.
+_REPORTED = re.compile(
+    r"\b(?:is|are|was|were)\s+(?:also\s+)?(?:wrong|incorrect|mistaken|refuted|false)\b"
+    r"|\brefut\w*"
+    r"|\b(?:is|are|was|were)\s+(?:said|claimed|reported)\b"
+    r"|\bclaims?\s+\d+"
+    r"|\b(?:they|analysts?|reports?|claims?|the\s+\w+\s+analyst)\s+(?:say|says|said|claim|"
+    r"claims|claimed|state|states|stated|hold|holds|held|argue|argues|argued)\b"
+    r"|\bthe\s+(?:statement|claim|reading|assertion|view)\s+that\b",
+    re.IGNORECASE,
+)
+
+
+def _reports_a_claim(sentence: str) -> bool:
+    """Whether a sentence reports or refutes another's claim, by its shape (:data:`_REPORTED`)."""
+    return _REPORTED.search(sentence) is not None
+
+
 def _qualify_unread_left(
     passages: Sequence[Passage],
     by_id: dict[str, Passage],
@@ -2594,7 +2755,7 @@ def _qualify_unread_left(
         for sentence, _ids, own in passage.unread_listed:
             facts = [by_id[i] for i in own if i in by_id and by_id[i].qualifier]
             span = sentences_of(passage).span(sentence) if facts else None
-            if span is None or not facts:
+            if span is None or not facts or _reports_a_claim(span[2]):
                 continue
             if any(span[0] < end and start < span[1] for start, end, _ in taken):
                 continue

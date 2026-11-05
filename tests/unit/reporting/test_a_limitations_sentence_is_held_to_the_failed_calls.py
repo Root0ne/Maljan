@@ -37,6 +37,7 @@ from maljan.reporting.section_agreement import (
     DROPPED_CODE,
     FACT,
     FAILURE_REDONE_CODE,
+    HELD_KEPT_CODE,
     REWRITTEN_CODE,
     _sentences_of,
     ask_section_agreement,
@@ -346,12 +347,15 @@ def test_a_paragraph_is_left_as_written_where_no_call_failed() -> None:
 )
 def test_a_rewrite_citing_the_call_that_redid_it_is_put_in(rewrite: str) -> None:
     report = _report()
-    done, _ = _ask(report, _ledger(), {"sentences": [_row(FALSE, ["failed.1"], rewrite)]})
+    # The other sentence denies an observation: it is held too (T-562), and kept.
+    kept = {"passage": "limitations", "sentence": OTHER, "sources": ["failed.1"]}
+    rows = [_row(FALSE, ["failed.1"], rewrite), {**kept, "decision": "keep"}]
+    done, _ = _ask(report, _ledger(), {"sentences": rows})
     body = report.technical_analysis.analyst_limitations.body
     assert body == f"{rewrite} {OTHER}"
     assert report.technical_analysis.analyst_limitations.evidence_refs == ["ev_0001", "ev_0003"]
     assert done.summary["rewritten"] == 1
-    assert [r["code"] for r in done.tally.unresolved] == [REWRITTEN_CODE]
+    assert [r["code"] for r in done.tally.unresolved] == [HELD_KEPT_CODE, REWRITTEN_CODE]
 
 
 @pytest.mark.parametrize(

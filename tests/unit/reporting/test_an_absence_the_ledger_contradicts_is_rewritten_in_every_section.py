@@ -35,6 +35,7 @@ from maljan.pipeline.nodes import evidence_summary
 from maljan.pipeline.validation import EntryTexts
 from maljan.reporting.models import (
     FileHashes,
+    KeyFinding,
     MalwareReport,
     SampleIdentity,
     TechnicalAnalysis,
@@ -44,15 +45,19 @@ from maljan.reporting.redone_calls import redone_failures
 from maljan.reporting.renderers import MarkdownRenderer
 from maljan.reporting.renderers.layout import ANALYST
 from maljan.reporting.section_agreement import (
+    HELD_KEPT_CODE,
     HELD_UNLISTED_CODE,
     QUALIFIED_CODE,
+    REWRITE_UNGROUNDED_CODE,
     REWRITTEN_CODE,
     SECTION_5,
+    UNKNOWN_SOURCE_CODE,
     apply_rows,
     ask_section_agreement,
     passages_of,
     prompt_text,
     unread_listed_sentences,
+    whole_code_absences,
 )
 from maljan.schemas.evidence import LedgerEntry
 from tests.unit.reporting._report_inventory import stored_runs
@@ -392,3 +397,152 @@ def test_haiku11_s_section_5_absence_is_held_and_states_the_listing() -> None:
     assert ta is not None and ta.persistence_detail is not None
     body = ta.persistence_detail.body
     assert "ev_0087, ev_0144 list the code of the routine at offset 0x3728" in body
+
+
+# -- round 2: whole-code absences, closing negations, reported claims ----------
+
+WHOLE = "No flag read appears in the analysed code [ev_0002]."
+STATED = "Routine 0x2800 reads the flag at the second byte [ev_0003]."
+WHOLE_REWRITE = "Routine 0x2800 reads the flag [ev_0003]; no other flag read appears [ev_0002]."
+
+
+def _whole_report(limitations: str = "Nothing else is open [ev_0002].") -> MalwareReport:
+    return MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="d" * 64), file_type="PE32+ DLL"),
+        verdict="Malware",
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        key_findings=[KeyFinding(text="The sample checks for a debugger [ev_0002].")],
+        technical_analysis=TechnicalAnalysis(
+            evasion_antiforensics=TechnicalSubsection(
+                title="Evasion", body=f"Routine 0x1400 starts [ev_0002]. {WHOLE}"
+            ),
+            string_resolution=TechnicalSubsection(title="Resolution", body=STATED),
+            analyst_limitations=TechnicalSubsection(title="Limitations", body=limitations),
+        ),
+    )
+
+
+def _whole_row(sources: list[str], rewrite: str = WHOLE_REWRITE) -> dict[str, Any]:
+    return {
+        "passage": "evasion_antiforensics",
+        "sentence": WHOLE,
+        "sources": sources,
+        "decision": "rewrite",
+        "rewrite": rewrite,
+    }
+
+
+def test_a_whole_code_absence_is_held_in_every_passage_by_its_shape() -> None:
+    passages = {p.id: p for p in passages_of(_whole_report(), entries=_ledger())}
+    assert passages["evasion_antiforensics"].whole_code == (WHOLE,)
+    assert WHOLE in passages["evasion_antiforensics"].held
+    prompt = prompt_text(list(passages.values()))
+    assert "[evasion_antiforensics] each of these calls something absent" in prompt
+    # One naming an address is about that address, not the whole code.
+    assert whole_code_absences("No flag read of 0x2800 appears in the code [ev_0002].") == ()
+
+
+def test_a_section_5_whole_code_absence_is_rewritten_on_section_5_in_the_model_s_words() -> None:
+    report = _whole_report()
+    done, reporter = _ask(report, {"sentences": [_whole_row(["string_resolution"])]})
+    assert len(reporter.asked) == 1
+    ta = report.technical_analysis
+    assert ta is not None and ta.evasion_antiforensics is not None
+    assert ta.evasion_antiforensics.body.endswith(WHOLE_REWRITE)
+    assert done.summary["rewritten"] == 1
+
+
+def test_a_whole_code_rewrite_rests_on_no_claim_and_cites_its_source() -> None:
+    for sources, rewrite in (
+        (["key_findings.1"], WHOLE_REWRITE),
+        (["string_resolution"], "No flag read appears in the code read [ev_0002]."),
+    ):
+        report = _whole_report()
+        row = _whole_row(sources, rewrite)
+        done, _reporter = _ask(report, {"sentences": [row]}, {"sentences": [row]})
+        ta = report.technical_analysis
+        assert ta is not None and ta.evasion_antiforensics is not None
+        assert ta.evasion_antiforensics.body.endswith(WHOLE), sources
+        codes = {r["code"] for r in done.tally.unresolved}
+        assert codes & {UNKNOWN_SOURCE_CODE, REWRITE_UNGROUNDED_CODE}, (sources, codes)
+
+
+def test_a_closing_negation_is_held_and_a_kept_one_is_recorded() -> None:
+    denial = "The flag read was not attributed to a routine [ev_0002]."
+    report = _whole_report(limitations=denial)
+    passages = {p.id: p for p in passages_of(report, entries=_ledger())}
+    assert denial in passages["limitations"].held
+    kept = {
+        "passage": "limitations",
+        "sentence": denial,
+        "sources": ["string_resolution"],
+        "decision": "keep",
+    }
+    done, reporter = _ask(report, {"sentences": [_whole_row(["string_resolution"]), kept]})
+    assert len(reporter.asked) == 1
+    assert HELD_KEPT_CODE in [r["code"] for r in done.tally.unresolved]
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "They say the call is unverified and that 0x2800 was not read.",
+        "The statement that 0x2800 was not read is also wrong [ev_0003].",
+        "Claim 4 holds that the body of 0x2800 was not read.",
+    ],
+)
+def test_a_sentence_reporting_or_refuting_a_claim_is_held_but_never_qualified(
+    sentence: str,
+) -> None:
+    report = _report(section_5=sentence, limitations="Nothing else is open [ev_0002].")
+    passages = passages_of(report, entries=_ledger())
+    (persistence,) = [p for p in passages if p.id == "persistence_detail"]
+    assert sentence in persistence.held
+    counts, found = apply_rows({"sentences": []}, passages)
+    assert counts["qualified"] == 0 and QUALIFIED_CODE not in [v.code for v in found]
+
+
+def test_haiku8_s_reported_claims_are_held_not_qualified() -> None:
+    report, ledger = _stored("haiku8")
+    passages = passages_of(report, entries=ledger)
+    (evasion,) = [p for p in passages if p.id == "evasion_antiforensics"]
+    reported = [s for s, _ids, own in evasion.unread_listed if own]
+    assert [s[:40] for s in reported] == [
+        "They say the call from 0x3074 to 0x309c ",
+        "The statement that the 0x6328 and 0x3074",
+    ]
+    assert all(s in evasion.held for s in reported)
+    counts, _found = apply_rows({"sentences": []}, passages)
+    assert counts["qualified"] == 0
+
+
+def test_haiku11_s_whole_code_absence_and_closing_denials_are_held() -> None:
+    report, ledger = _stored("haiku11")
+    passages = {p.id: p for p in passages_of(report, entries=ledger)}
+    (absence,) = passages["evasion_antiforensics"].whole_code
+    assert absence.startswith("No BeingDebugged or NtGlobalFlag read appears in the analysed")
+    held = passages["limitations"].held
+    assert any(s.startswith("The sandbox's process list was not attributed") for s in held)
+    assert any(s.startswith("The C2 replies were not recovered") for s in held)
+    # Answered on the section 5 passage that cites the listing, in the model's words.
+    rewrite = (
+        "A routine reads the flag at PEB+2 [ev_0143]; no NtGlobalFlag read and no anti-debug "
+        "API is present [ev_0088, ev_0024]."
+    )
+    row = {
+        "passage": "evasion_antiforensics",
+        "sentence": absence,
+        "sources": ["string_resolution"],
+        "decision": "rewrite",
+        "rewrite": rewrite,
+    }
+    counts, found = apply_rows(
+        {"sentences": [row]},
+        list(passages.values()),
+        citable=[str(e.id) for e in ledger],
+        entries=EntryTexts.from_ledger(ledger),
+    )
+    assert counts["rewritten"] == 1, [v.message for v in found]
+    ta = report.technical_analysis
+    assert ta is not None and ta.evasion_antiforensics is not None
+    assert rewrite in ta.evasion_antiforensics.body

@@ -34,12 +34,15 @@ from maljan.reporting.models import (
 from maljan.reporting.section_agreement import (
     CLAIM_LED,
     DROPPED_CODE,
+    HELD_KEPT_CODE,
     HELD_UNLISTED_CODE,
     REWRITE_CITES_ELSEWHERE_CODE,
     REWRITTEN_CODE,
     SECTION_5,
     UNKNOWN_SOURCE_CODE,
     ask_section_agreement,
+    closing_negations,
+    held_closing_sentences,
     passages_of,
     prompt_text,
 )
@@ -155,11 +158,14 @@ def test_a_report_without_them_asks_as_before() -> None:
 def test_a_closing_sentence_a_source_contradicts_is_rewritten() -> None:
     report = _report()
     rewrite = "The mutex the gate routine creates is named 'alphaname' [ev_0002][ev_0004]."
-    done, _ = _ask(report, {"sentences": [_row("limitations", OPEN_MUTEX, ["bound.1"], rewrite)]})
+    # The gate sentence denies what the body may state: held too (T-562), and kept.
+    gate = {"passage": "limitations", "sentence": OPEN_GATE, "sources": ["evasion_antiforensics"]}
+    rows = [_row("limitations", OPEN_MUTEX, ["bound.1"], rewrite), {**gate, "decision": "keep"}]
+    done, _ = _ask(report, {"sentences": rows})
     body = report.technical_analysis.analyst_limitations.body  # type: ignore[union-attr]
     assert body == f"{rewrite} {OPEN_GATE} {KEPT}"
     assert done.summary["rewritten"] == 1 and done.summary["dropped"] == 0
-    assert [r["code"] for r in done.tally.unresolved] == [REWRITTEN_CODE]
+    assert [r["code"] for r in done.tally.unresolved] == [HELD_KEPT_CODE, REWRITTEN_CODE]
 
 
 def test_a_closing_sentence_whose_rewrite_fails_is_left_out_and_recorded() -> None:
@@ -256,9 +262,13 @@ def test_the_stored_runs_hold_exactly_these_closing_sentences(name: str) -> None
     ledger, _unread = stored_ledger(rows)
     passages = {p.id: p for p in passages_of(report, entries=ledger)}
     for pid, openings in STORED_HELD[name].items():
-        held = passages[pid].held
+        passage = passages[pid]
+        held = held_closing_sentences(passage.text, [*passages.values()])
         assert len(held) == len(openings), (pid, held)
         assert all(h.startswith(o) for h, o in zip(held, openings, strict=True)), (pid, held)
+        # Beside them, every negation the body may state otherwise of is held (T-562).
+        expected = dict.fromkeys([*held, *closing_negations(passage.text)])
+        assert passage.held == tuple(expected), (pid, passage.held)
 
 
 def test_a_sentence_naming_no_address_is_held_only_where_it_names_the_run_s_reading() -> None:
@@ -267,11 +277,13 @@ def test_a_sentence_naming_no_address_is_held_only_where_it_names_the_run_s_read
         "The analysts' claims about the gate were not visible in this review, so that "
         "behaviour is not established."
     )
-    held = {p.id: p for p in passages_of(report)}["limitations"].held
-    assert held == (
-        "The analysts' claims about the gate were not visible in this review, so that "
-        "behaviour is not established.",
-    )
+    passage = {p.id: p for p in passages_of(report)}["limitations"]
+    reading = "The analysts' claims about the gate were not visible in this review, so that "
+    reading += "behaviour is not established."
+    sources = list(passages_of(report))
+    assert held_closing_sentences(passage.text, sources) == (reading,)
+    # The other one is held as a negation the body may state otherwise of (T-562).
+    assert passage.held == (reading, "APIs outside that set are not established as absent.")
 
 
 def test_haiku10_s_closing_sentences_are_shown_beside_what_states_otherwise() -> None:
@@ -327,7 +339,7 @@ def test_a_closing_sentence_calling_a_stated_value_open_is_held_and_shown_so() -
     prompt = prompt_text(list(passages.values()))
     assert '[limitations] list each of these sentences: "' in prompt
     # A report holding nothing asks as before: no such line.
-    assert "list each of these sentences" not in prompt_text(passages_of(_report()))
+    assert "list each of these sentences" not in prompt_text(passages_of(_held_report(KEPT)))
 
 
 def test_a_held_sentence_left_unlisted_is_asked_once_more_and_then_kept() -> None:
