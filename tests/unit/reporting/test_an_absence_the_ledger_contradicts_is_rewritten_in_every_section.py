@@ -30,6 +30,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
+from maljan.agents.tool_fence import quoted_value
 from maljan.core.config import Settings, get_settings, install_settings
 from maljan.pipeline.nodes import evidence_summary
 from maljan.pipeline.validation import EntryTexts
@@ -45,13 +46,17 @@ from maljan.reporting.redone_calls import redone_failures
 from maljan.reporting.renderers import MarkdownRenderer
 from maljan.reporting.renderers.layout import ANALYST
 from maljan.reporting.section_agreement import (
+    CLAIM_LED,
+    DEBATE,
     HELD_KEPT_CODE,
-    HELD_UNLISTED_CODE,
     QUALIFIED_CODE,
     REWRITE_UNGROUNDED_CODE,
     REWRITTEN_CODE,
     SECTION_5,
     UNKNOWN_SOURCE_CODE,
+    UNREAD_STANDING_CODE,
+    Passage,
+    _reports_a_claim,
     apply_rows,
     ask_section_agreement,
     passages_of,
@@ -196,7 +201,7 @@ def test_a_sentence_no_listed_routine_is_said_of_is_not_held() -> None:
 # -- what the round does with them ------------------------------------------
 
 
-def test_an_answer_that_leaves_the_body_standing_is_qualified_by_the_platform() -> None:
+def test_an_answer_that_leaves_the_body_standing_is_corrected_by_the_platform() -> None:
     report = _report()
     # The model rewrites the limitations' twin only, as haiku11's did, twice.
     passages = passages_of(report, entries=_ledger())
@@ -211,32 +216,42 @@ def test_an_answer_that_leaves_the_body_standing_is_qualified_by_the_platform() 
     done, reporter = _ask(report, {"sentences": [row]}, {"sentences": [row]})
     assert len(reporter.asked) == 2
     retry = str(reporter.asked[1][-1].content)
+    # The retry names the listing, so the model may state it in its own words.
     assert "persistence_detail" in retry and "calls code not read" in retry
+    assert "offset 0x2800" in retry and "ev_0003" in retry
+    assert "Answer with every row again" in retry
     ta = report.technical_analysis
     assert ta is not None and ta.persistence_detail is not None
     assert ta.analyst_limitations is not None
     assert LIMIT_REWRITE in ta.analyst_limitations.body
     body = ta.persistence_detail.body
-    # The body now states what the ledger shows, beside the sentence as it stood.
-    assert "the routine at offset 0x2800 (decompiled or disassembled) [ev_0003]." in body, body
-    assert "is not read, so the task is not confirmed [ev_0002]; ev_0003 lists the code" in body
+    # The sentence as it stood, then the platform's correction after a dash.
+    assert body.endswith(
+        "is not read, so the task is not confirmed [ev_0002] \u2014 however, ev_0003 lists the "
+        "code of the routine at offset 0x2800 (decompiled or disassembled), so it was read "
+        "[ev_0003]."
+    ), body
     codes = [r["code"] for r in done.tally.unresolved]
     assert codes.count(QUALIFIED_CODE) == 1 and REWRITTEN_CODE in codes
-    assert HELD_UNLISTED_CODE in codes
+    assert UNREAD_STANDING_CODE in codes
     assert done.summary["qualified"] == 1 and done.summary["rewritten"] == 1
 
 
-def test_a_sentence_the_model_answered_is_not_qualified_again() -> None:
+def test_a_sentence_the_model_rewrote_in_its_own_words_is_not_corrected() -> None:
     report = _report()
     passages = passages_of(report, entries=_ledger())
     task = _listed_id(passages, TASK)
+    own_words = (
+        "The body of 0x2800 is listed and was read, but the registration it may perform is "
+        "not confirmed [ev_0002] [ev_0003]."
+    )
     rows = [
         {
             "passage": "persistence_detail",
             "sentence": BODY_UNREAD,
             "sources": [task],
             "decision": "rewrite",
-            "rewrite": "qualified",
+            "rewrite": own_words,
         },
         {
             "passage": "limitations",
@@ -250,8 +265,56 @@ def test_a_sentence_the_model_answered_is_not_qualified_again() -> None:
     assert len(reporter.asked) == 1
     ta = report.technical_analysis
     assert ta is not None and ta.persistence_detail is not None
-    assert ta.persistence_detail.body.count("ev_0003 lists the code") == 1
+    assert ta.persistence_detail.body.endswith(own_words)
+    assert "however" not in ta.persistence_detail.body
     assert done.summary["qualified"] == 0 and done.summary["rewritten"] == 2
+
+
+def test_a_rewrite_still_calling_the_routine_unread_is_asked_again_then_corrected() -> None:
+    report = _report(limitations="Nothing else is open [ev_0002].")
+    passages = passages_of(report, entries=_ledger())
+    task = _listed_id(passages, TASK)
+    row = {
+        "passage": "persistence_detail",
+        "sentence": BODY_UNREAD,
+        "sources": [task],
+        "decision": "rewrite",
+        "rewrite": "The body of 0x2800 was not read [ev_0002] [ev_0003].",
+    }
+    done, reporter = _ask(report, {"sentences": [row]}, {"sentences": [row]})
+    assert len(reporter.asked) == 2
+    ta = report.technical_analysis
+    assert ta is not None and ta.persistence_detail is not None
+    assert "\u2014 however, ev_0003 lists the code" in ta.persistence_detail.body
+    assert done.summary["qualified"] == 1
+
+
+def test_a_retry_listing_only_the_missing_row_keeps_the_first_answer_s_rewrites() -> None:
+    report = _report()
+    passages = passages_of(report, entries=_ledger())
+    task = _listed_id(passages, TASK)
+    first = {
+        "passage": "limitations",
+        "sentence": LIMIT_UNREAD,
+        "sources": [task],
+        "decision": "rewrite",
+        "rewrite": LIMIT_REWRITE,
+    }
+    missing = {
+        "passage": "persistence_detail",
+        "sentence": BODY_UNREAD,
+        "sources": [task],
+        "decision": "rewrite",
+        "rewrite": "The body of 0x2800 is listed [ev_0002] [ev_0003].",
+    }
+    done, reporter = _ask(report, {"sentences": [first]}, {"sentences": [missing]})
+    assert len(reporter.asked) == 2
+    ta = report.technical_analysis
+    assert ta is not None and ta.analyst_limitations is not None
+    assert ta.persistence_detail is not None
+    assert ta.analyst_limitations.body == LIMIT_REWRITE
+    assert ta.persistence_detail.body.endswith("The body of 0x2800 is listed [ev_0002] [ev_0003].")
+    assert done.summary["rewritten"] == 2
 
 
 def test_a_sentence_whose_routine_is_a_modifier_stays_as_the_model_left_it() -> None:
@@ -467,7 +530,7 @@ def test_a_whole_code_rewrite_rests_on_no_claim_and_cites_its_source() -> None:
         assert codes & {UNKNOWN_SOURCE_CODE, REWRITE_UNGROUNDED_CODE}, (sources, codes)
 
 
-def test_a_closing_negation_is_held_and_a_kept_one_is_recorded() -> None:
+def test_a_closing_negation_is_held_and_a_kept_one_is_counted() -> None:
     denial = "The flag read was not attributed to a routine [ev_0002]."
     report = _whole_report(limitations=denial)
     passages = {p.id: p for p in passages_of(report, entries=_ledger())}
@@ -480,7 +543,28 @@ def test_a_closing_negation_is_held_and_a_kept_one_is_recorded() -> None:
     }
     done, reporter = _ask(report, {"sentences": [_whole_row(["string_resolution"]), kept]})
     assert len(reporter.asked) == 1
-    assert HELD_KEPT_CODE in [r["code"] for r in done.tally.unresolved]
+    # Backed by a section 5 passage: counted, not recorded as unresolved.
+    assert done.summary["held_kept"] == 1
+    assert HELD_KEPT_CODE not in [r["code"] for r in done.tally.unresolved]
+
+
+def test_a_closing_negation_kept_on_a_debate_round_alone_is_recorded() -> None:
+    denial = "The flag read was not attributed to a routine [ev_0002]."
+    closing = Passage(
+        id="limitations",
+        label="11. Limitations",
+        text=denial,
+        kind=CLAIM_LED,
+        cites=frozenset({"ev_0002"}),
+        write=lambda _text: None,
+        closing=True,
+        held=(denial,),
+    )
+    debate = Passage(id="debate.1", label="debate round 1", text="x", kind=DEBATE)
+    row = {"passage": "limitations", "sentence": denial, "sources": ["debate.1"]}
+    counts, found = apply_rows({"sentences": [{**row, "decision": "keep"}]}, [debate, closing])
+    assert counts["held_kept"] == 1
+    assert [v.code for v in found] == [HELD_KEPT_CODE]
 
 
 @pytest.mark.parametrize(
@@ -506,7 +590,7 @@ def test_haiku8_s_reported_claims_are_held_not_qualified() -> None:
     report, ledger = _stored("haiku8")
     passages = passages_of(report, entries=ledger)
     (evasion,) = [p for p in passages if p.id == "evasion_antiforensics"]
-    reported = [s for s, _ids, own in evasion.unread_listed if own]
+    reported = [s for s, _ids, _own in evasion.unread_listed if _reports_a_claim(s)]
     assert [s[:40] for s in reported] == [
         "They say the call from 0x3074 to 0x309c ",
         "The statement that the 0x6328 and 0x3074",
@@ -546,3 +630,101 @@ def test_haiku11_s_whole_code_absence_and_closing_denials_are_held() -> None:
     ta = report.technical_analysis
     assert ta is not None and ta.evasion_antiforensics is not None
     assert rewrite in ta.evasion_antiforensics.body
+
+
+# -- first review (T-562): each probe kept as a test -----------------------------
+
+
+@pytest.mark.parametrize(
+    ("failed", "error", "again"),
+    [
+        # A name looked up, then nothing looked up: another question.
+        ({"name": "InstallService"}, "no symbol 'InstallService' in the program", {"name": None}),
+        # A pattern searched, then none.
+        ({"pattern": "Mozilla/5.0"}, "pattern: invalid", {}),
+        # Case is part of the value.
+        ({"pattern": "MZ"}, "timeout", {"pattern": "mz"}),
+        # A bare hex text is not a decimal number the failure never named.
+        ({"names": "a"}, "bad", {"names": "10"}),
+    ],
+)
+def test_a_redo_of_another_question_is_no_redo(
+    failed: dict[str, Any], error: str, again: dict[str, Any]
+) -> None:
+    ledger = [_refused("ev_0001", "lookup", failed, error), _answered("ev_0002", "lookup", again)]
+    assert redone_failures(ledger) == []
+
+
+def test_a_refused_bare_hex_value_the_failure_names_is_redone_as_a_number() -> None:
+    error = "Invalid target: 572d5d8e"
+    ledger = [
+        _refused("ev_0001", "match_names", {"target": "572d5d8e"}, error),
+        _answered("ev_0002", "match_names", {"target": "0x572d5d8e"}),
+    ]
+    assert [row["answered_by"] for row in redone_failures(ledger)] == [["ev_0002"]]
+
+
+def test_a_refused_program_left_out_is_a_redo_only_for_the_declared_program_argument() -> None:
+    facts = {"v": 1, "kind": "", "arguments": {"program": "program"}}
+    error = "Program not found: /work/sample.bin"
+    failed = LedgerEntry(
+        id="ev_0001",
+        tool="program_info",
+        args={"program": "/work/sample.bin"},
+        ok=False,
+        error=error,
+        facts=facts,
+    )
+    again = LedgerEntry(
+        id="ev_0002", tool="program_info", args={"program": None}, output="{}", facts=facts
+    )
+    assert [row["answered_by"] for row in redone_failures([failed, again])] == [["ev_0002"]]
+    undeclared = failed.model_copy(update={"facts": {"v": 1, "kind": ""}})
+    assert redone_failures([undeclared, again.model_copy(update={"facts": None})]) == []
+
+
+def test_a_whole_code_absence_never_rests_on_its_own_passage() -> None:
+    sentence = "No string decryption routine appears in the analysed code [ev_0002]."
+    report = _report(section_5=sentence, limitations="Nothing else is open [ev_0002].")
+    row = {
+        "passage": "persistence_detail",
+        "sentence": sentence,
+        "sources": ["persistence_detail"],
+        "decision": "rewrite",
+        "rewrite": "The sample decrypts strings with a custom routine [ev_0003].",
+    }
+    done, _reporter = _ask(report, {"sentences": [row]}, {"sentences": [row]})
+    ta = report.technical_analysis
+    assert ta is not None and ta.persistence_detail is not None
+    assert ta.persistence_detail.body.endswith(sentence)
+    assert UNKNOWN_SOURCE_CODE in [r["code"] for r in done.tally.unresolved]
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "The registry value 0x2800 sets is not read by any later routine [ev_0002].",
+        "The second stage that 0x2800 downloads was not read [ev_0002].",
+        "The buffer that 0x2800 fills was not read [ev_0002].",
+        "The callee 0x2c00 of routine 0x2800 was not read [ev_0002].",
+        "According to the static analyst, 0x2800 was not read [ev_0002].",
+        "The static analyst noted that 0x2800 was not read [ev_0002].",
+        "0x2800 was not read at runtime because no trace exists [ev_0002].",
+        "That call in 0x2800 is not read as a debug check [ev_0002].",
+    ],
+)
+def test_no_ledger_clause_is_added_to_a_sentence_not_about_the_routine_s_code(
+    sentence: str,
+) -> None:
+    report = _report(section_5=sentence, limitations="Nothing else is open [ev_0002].")
+    done, _reporter = _ask(report)
+    ta = report.technical_analysis
+    assert ta is not None and ta.persistence_detail is not None
+    assert ta.persistence_detail.body.endswith(sentence)
+    assert done.summary["qualified"] == 0
+
+
+def test_a_section_5_whole_code_absence_is_quoted_once_in_the_prompt() -> None:
+    passages = passages_of(_whole_report(), entries=_ledger())
+    # Once, in the note: the held line leaves out what the note lists.
+    assert prompt_text(passages).count(quoted_value(WHOLE)) == 1

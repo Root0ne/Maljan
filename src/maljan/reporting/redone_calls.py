@@ -166,14 +166,37 @@ def _reshaped(before: Any, after: Any) -> bool:
     return bool(was) and was_list != now_list and set(was) <= set(now)
 
 
-def _spelled(value: Any) -> int | float | str:
-    """``value`` as one value whatever its spelling: a number, quoted or not, ``0x`` or
-    bare hex beside it; else its text, stripped and lower-cased."""
-    text = str(value).strip().strip("\"'`").strip()
-    found = _number(text)
-    if found is None and re.fullmatch(r"[0-9a-fA-F]+", text):
-        found = int(text, 16)
-    return found if found is not None else text.lower()
+def _same_value(before: Any, after: Any, named: bool) -> bool:
+    """Whether ``after`` is the refused ``before`` in another spelling.
+
+    Quotes around a text are no part of it; two numbers are one where they are
+    equal (``"0xf000"`` and ``61440``). Case is kept: ``MZ`` is not ``mz``. A
+    bare hex text is read as hex only beside a number and only where the
+    failure's message names the refused value (``572d5d8e`` refused, asked as
+    ``0x572d5d8e``): ``a`` is never ``10``.
+    """
+    was = str(before).strip().strip("\"'`").strip()
+    now = str(after).strip().strip("\"'`").strip()
+    if was == now:
+        return True
+    left, right = _number(was), _number(now)
+    if left is not None and right is not None:
+        return left == right
+    if not named:
+        return False
+    if left is None and right is not None and re.fullmatch(r"[0-9a-fA-F]+", was):
+        return int(was, 16) == right
+    if right is None and left is not None and re.fullmatch(r"[0-9a-fA-F]+", now):
+        return int(now, 16) == left
+    return False
+
+
+def _program_argument(entry: Any) -> str:
+    """The argument an entry's tool declares to name the program, or ``""``."""
+    from maljan.core.declared_reading import kind_free_facts
+
+    roles = getattr(kind_free_facts(entry), "arguments", None)
+    return str(roles.get("program") or "") if isinstance(roles, Mapping) else ""
 
 
 def _changed(
@@ -192,9 +215,11 @@ def _changed(
     A call asked for no address (not ``by_address``) is matched on every
     argument, and its question is its values: a refused value is fixed only
     when the redo gives the same value in another spelling (``"0xf000"`` as
-    ``61440``, :func:`_spelled`) or the same items in another shape, and a
-    value the redo leaves absent or null is a change, fixed only where the
-    failure's message names the argument or the value it refused.
+    ``61440``, :func:`_same_value`) or the same items in another shape. A value
+    the redo leaves absent or null is another question (a name looked up, a
+    pattern searched), but for the program the tool declares an argument for,
+    whose refused value the failure's message names: left out, the server's
+    own program is asked the same question.
     """
     from maljan.core.undeclared_tools import entry_address_arguments
     from maljan.pipeline.validation import _ADDRESS_LIST_ARGUMENTS
@@ -206,6 +231,7 @@ def _changed(
     asked = getattr(failed, "args", None) or {}
     again = getattr(answering, "args", None) or {}
     message = str(getattr(failed, "error", "") or getattr(failed, "output", "") or "")
+    program = "" if by_address else _program_argument(failed)
     for name in sorted({*asked, *again} - skip, key=str):
         before, after = asked.get(name), again.get(name)
         if before == after or str(before) == str(after) or (_empty(before) and _empty(after)):
@@ -215,7 +241,7 @@ def _changed(
         if _empty(after):
             if by_address:
                 continue
-            yield str(name), False, named or _names_argument(message, str(name))
+            yield str(name), False, named and bool(program) and str(name) == program
             continue
         if _empty(before):
             yield str(name), True, _names_argument(message, str(name))
@@ -223,7 +249,7 @@ def _changed(
         if by_address:
             fixed = named and not _narrower(before, after)
         else:
-            fixed = _spelled(before) == _spelled(after)
+            fixed = _same_value(before, after, named)
         yield str(name), False, fixed or _reshaped(before, after)
 
 

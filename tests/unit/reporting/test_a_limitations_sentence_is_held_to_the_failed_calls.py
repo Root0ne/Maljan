@@ -37,7 +37,6 @@ from maljan.reporting.section_agreement import (
     DROPPED_CODE,
     FACT,
     FAILURE_REDONE_CODE,
-    HELD_KEPT_CODE,
     REWRITTEN_CODE,
     _sentences_of,
     ask_section_agreement,
@@ -355,7 +354,9 @@ def test_a_rewrite_citing_the_call_that_redid_it_is_put_in(rewrite: str) -> None
     assert body == f"{rewrite} {OTHER}"
     assert report.technical_analysis.analyst_limitations.evidence_refs == ["ev_0001", "ev_0003"]
     assert done.summary["rewritten"] == 1
-    assert [r["code"] for r in done.tally.unresolved] == [HELD_KEPT_CODE, REWRITTEN_CODE]
+    # Kept on a fact or a section 5 passage: counted, not recorded (T-562).
+    assert [r["code"] for r in done.tally.unresolved] == [REWRITTEN_CODE]
+    assert done.summary["held_kept"] == 1
 
 
 @pytest.mark.parametrize(

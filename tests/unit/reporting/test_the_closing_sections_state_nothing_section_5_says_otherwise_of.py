@@ -34,7 +34,6 @@ from maljan.reporting.models import (
 from maljan.reporting.section_agreement import (
     CLAIM_LED,
     DROPPED_CODE,
-    HELD_KEPT_CODE,
     HELD_UNLISTED_CODE,
     REWRITE_CITES_ELSEWHERE_CODE,
     REWRITTEN_CODE,
@@ -165,7 +164,9 @@ def test_a_closing_sentence_a_source_contradicts_is_rewritten() -> None:
     body = report.technical_analysis.analyst_limitations.body  # type: ignore[union-attr]
     assert body == f"{rewrite} {OPEN_GATE} {KEPT}"
     assert done.summary["rewritten"] == 1 and done.summary["dropped"] == 0
-    assert [r["code"] for r in done.tally.unresolved] == [HELD_KEPT_CODE, REWRITTEN_CODE]
+    # Kept on a fact or a section 5 passage: counted, not recorded (T-562).
+    assert [r["code"] for r in done.tally.unresolved] == [REWRITTEN_CODE]
+    assert done.summary["held_kept"] == 1
 
 
 def test_a_closing_sentence_whose_rewrite_fails_is_left_out_and_recorded() -> None:
