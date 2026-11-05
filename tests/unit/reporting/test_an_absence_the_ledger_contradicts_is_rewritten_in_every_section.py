@@ -227,12 +227,12 @@ def test_an_answer_that_leaves_the_body_standing_is_corrected_by_the_platform() 
     assert ta.analyst_limitations is not None
     assert LIMIT_REWRITE in ta.analyst_limitations.body
     body = ta.persistence_detail.body
-    # The sentence as it stood, then the platform's correction after a dash.
+    # The sentence as it stood, then the ledger's fact alone, no inference.
     assert body.endswith(
-        "is not read, so the task is not confirmed [ev_0002] \u2014 however, ev_0003 lists the "
-        "code of the routine at offset 0x2800 (decompiled or disassembled), so it was read "
-        "[ev_0003]."
+        "is not read, so the task is not confirmed [ev_0002]; the ledger lists the code of the "
+        "routine at offset 0x2800 (decompiled or disassembled) [ev_0003]."
     ), body
+    assert "so it was read" not in body
     codes = [r["code"] for r in done.tally.unresolved]
     assert codes.count(QUALIFIED_CODE) == 1 and REWRITTEN_CODE in codes
     assert UNREAD_STANDING_CODE in codes
@@ -268,7 +268,7 @@ def test_a_sentence_the_model_rewrote_in_its_own_words_is_not_corrected() -> Non
     ta = report.technical_analysis
     assert ta is not None and ta.persistence_detail is not None
     assert ta.persistence_detail.body.endswith(own_words)
-    assert "however" not in ta.persistence_detail.body
+    assert "the ledger lists" not in ta.persistence_detail.body
     assert done.summary["qualified"] == 0 and done.summary["rewritten"] == 2
 
 
@@ -287,7 +287,7 @@ def test_a_rewrite_still_calling_the_routine_unread_is_asked_again_then_correcte
     assert len(reporter.asked) == 2
     ta = report.technical_analysis
     assert ta is not None and ta.persistence_detail is not None
-    assert "\u2014 however, ev_0003 lists the code" in ta.persistence_detail.body
+    assert "; the ledger lists the code of the routine" in ta.persistence_detail.body
     assert done.summary["qualified"] == 1
 
 
@@ -461,7 +461,7 @@ def test_haiku11_s_section_5_absence_is_held_and_states_the_listing() -> None:
     ta = report.technical_analysis
     assert ta is not None and ta.persistence_detail is not None
     body = ta.persistence_detail.body
-    assert "ev_0087, ev_0144 list the code of the routine at offset 0x3728" in body
+    assert "; the ledger lists the code of the routine at offset 0x3728" in body
 
 
 # -- round 2: whole-code absences, closing negations, reported claims ----------
@@ -811,3 +811,47 @@ def test_a_retry_s_row_replaces_the_first_one_for_the_same_place_in_the_passage(
     assert merged["sentences"] == retry["sentences"]
     # Without a place, two spellings are two sentences.
     assert len(_merged_rows(first, retry)["sentences"]) == 2
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "The payload decrypted by the 0x2800 routine was not read [ev_0002].",
+        "The 0x2800 routine's callee body was not read [ev_0002].",
+        "The string table 0x2800 was not read [ev_0002].",
+        "0x2800's callee's body was not read [ev_0002].",
+        "The string 0x2800 that holds the key was not read [ev_0002].",
+    ],
+)
+def test_an_address_another_noun_governs_is_no_subject_and_gets_no_clause(
+    sentence: str,
+) -> None:
+    listed = [p for p in passages_of(_report(), entries=_ledger()) if p.lists_code]
+    ((_sentence, _ids, own),) = unread_listed_sentences(sentence, listed)
+    assert own == (), sentence
+    report = _report(section_5=sentence, limitations="Nothing else is open [ev_0002].")
+    done, _reporter = _ask(report)
+    ta = report.technical_analysis
+    assert ta is not None and ta.persistence_detail is not None
+    assert ta.persistence_detail.body.endswith(sentence)
+    assert done.summary["qualified"] == 0
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "Routine 0x2800 (the registration routine) was not read [ev_0002].",
+        "The body of 0x2800 \u2014 the task routine \u2014 was not read [ev_0002].",
+    ],
+)
+def test_the_ledger_s_fact_reads_after_the_model_s_own_dash_or_bracket(sentence: str) -> None:
+    report = _report(section_5=sentence, limitations="Nothing else is open [ev_0002].")
+    done, _reporter = _ask(report)
+    ta = report.technical_analysis
+    assert ta is not None and ta.persistence_detail is not None
+    stem = sentence.removesuffix(".")
+    assert ta.persistence_detail.body.endswith(
+        f"{stem}; the ledger lists the code of the routine at offset 0x2800 (decompiled or "
+        "disassembled) [ev_0003]."
+    ), ta.persistence_detail.body
+    assert done.summary["qualified"] == 1

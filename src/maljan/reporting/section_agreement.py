@@ -78,9 +78,10 @@ then said opposite things (T-562). Where the statement's own clause names the
 routine (not a noun it modifies, not a clause about it), the ledger itself
 contradicts the sentence: it is answered in the model's words, even in section
 5, and a retry names the listing (``UNREAD_STANDING_CODE``); one the answer
-still leaves standing gets the platform's correction appended after a dash
-("— however, ev_0003 lists the code of the routine at offset 0x2800 ..., so it
-was read"), recorded (``QUALIFIED_CODE``), and is never left out. A sentence
+still leaves standing gets the ledger's fact appended ("; the ledger lists the
+code of the routine at offset 0x2800 (decompiled or disassembled) [ev_0003]"),
+never an inference about the sentence, recorded (``QUALIFIED_CODE``), and is
+never left out. A sentence
 that reports or refutes another's claim ("They say ... was not read",
 "according to", "... is also wrong") is held only: what it calls not read is
 that claim's, and the model answers it. A "not read as" or "not read at
@@ -993,6 +994,11 @@ class _Words:
 # How many words may stand between a routine's address and the noun that ends
 # its subject ("the 0x3728 task routine", "0x3728's body").
 _TRAILING_WORDS = 3
+# Determiners before an address, read past; words that call it an address; the
+# nouns that name another routine than the one the address is.
+_SUBJECT_DETERMINERS = frozenset({"the", "a", "an", "this", "its", "that's"})
+_ADDRESS_WORDS = frozenset({"offset", "address", "va", "rva"})
+_RELATED_NOUNS = frozenset({"callee", "callees", "caller", "callers"})
 # The words that may end a subject after its address: a routine or its code, or
 # the routine itself.
 _SUBJECT_ENDS = frozenset({*_ROUTINE_NOUNS, *_CODE_NOUNS, "itself"})
@@ -1027,8 +1033,25 @@ def _subject_address(words: _Words, begin: int, end: int, stop: int | None = Non
     if trailing and trailing[0] not in _RELATIVE_OPENERS:
         if len(trailing) > _TRAILING_WORDS or trailing[-1] not in _SUBJECT_ENDS:
             return set()
-    before = words.lower[at - 1] if at - 1 >= first else ""
-    head = words.lower[at - 2] if at - 2 >= first else ""
+        # A callee or caller after it is another routine ("the 0x2800 routine's
+        # callee body"), and a possessive owns a routine's code only.
+        if any(_bare(word) in _RELATED_NOUNS for word in trailing):
+            return set()
+    if not _possessives_own_code([words.lower[at], *trailing]):
+        return set()
+    # Determiners say nothing of what the address is: read past them ("decrypted
+    # by the 0x2800 routine" is a modifier, "the 0x2800 routine" a subject).
+    lead = at - 1
+    while lead >= first and words.lower[lead] in _SUBJECT_DETERMINERS:
+        lead -= 1
+    # An address read as such ("at offset 0x2800") is still the address.
+    if lead >= first and words.lower[lead] in _ADDRESS_WORDS:
+        lead -= 1
+        while lead >= first and words.lower[lead] in _SUBJECT_DETERMINERS:
+            lead -= 1
+    before = words.lower[lead] if lead >= first else ""
+    head = words.lower[lead - 1] if lead - 1 >= first else ""
+    at_lead = lead
     if before in _RELATIVE_OPENERS:
         return set()
     if before in _MODIFYING and not (
@@ -1037,10 +1060,33 @@ def _subject_address(words: _Words, begin: int, end: int, stop: int | None = Non
     ):
         return set()
     if before in _KIND_NOUN_WORDS and head in ("of", "for"):
-        owner = words.lower[at - 3] if at - 3 >= first else ""
-        if owner in _KIND_NOUN_WORDS - _ROUTINE_NOUNS or (at - 3 >= first and words.found[at - 3]):
+        owner = words.lower[at_lead - 2] if at_lead - 2 >= first else ""
+        if owner in _RELATED_NOUNS or (at_lead - 2 >= first and words.found[at_lead - 2]):
             return set()
+    # Any other noun before it makes the address its modifier ("the string table
+    # 0x2800"): only a routine or its code is the subject.
+    if before and before not in (_MODIFYING | _ROUTINE_NOUNS | _CODE_NOUNS):
+        return set()
     return set(words.found[at])
+
+
+def _bare(word: str) -> str:
+    """A word without a possessive ending."""
+    for ending in ("'s", "\u2019s"):
+        if word.endswith(ending):
+            return word[: -len(ending)]
+    return word
+
+
+def _possessives_own_code(run: Sequence[str]) -> bool:
+    """Whether every possessive in ``run`` is followed by a routine's code ("0x3728's
+    body"), never by another noun ("0x3728's callee's body")."""
+    for index, word in enumerate(run):
+        if _bare(word) != word:
+            following = run[index + 1] if index + 1 < len(run) else ""
+            if following not in _CODE_NOUNS:
+                return False
+    return True
 
 
 def _appositive_subject(words: _Words, b: int) -> tuple[int, int] | None:
@@ -2531,7 +2577,8 @@ def _unread_standing(passage: Passage, sentence: str, facts: Sequence[Passage]) 
             f"read that the ledger lists ({safe_finding_value(', '.join(f.id for f in facts))}: "
             f"{safe_finding_value(shown)}). Rewrite it in your own words to state that the "
             "code was read and what the sentence can still say, citing an entry that fact "
-            "cites; left standing, the platform adds that the ledger lists it." + _EVERY_ROW
+            "cites; left standing, the platform appends the ledger's listing fact to it."
+            + _EVERY_ROW
         ),
         path=f"held.{passage.id}",
     )
@@ -2973,13 +3020,19 @@ def _reports_a_claim(sentence: str) -> bool:
     return _REPORTED.search(sentence) is not None
 
 
-def _corrected(sentence: str, facts: Sequence[Passage]) -> str:
-    """The sentence as written, with the platform's correction appended after a dash.
+# A listed fact's own clause, by what the ledger lists: "the code of the routine
+# at offset 0x2800 (decompiled or disassembled)".
+_LISTS_WHAT = re.compile(r"\blists?\s+(the code of .*)$")
 
-    "... is not read — however, ev_0003 lists the code of the routine at offset
-    0x2800 (decompiled or disassembled), so it was read [ev_0003]." The reader
-    sees a correction, never two statements set side by side; the model's words
-    stand as written before it.
+
+def _corrected(sentence: str, facts: Sequence[Passage]) -> str:
+    """The sentence as written, with the ledger's fact appended after a semicolon.
+
+    "... is not read; the ledger lists the code of the routine at offset 0x2800
+    (decompiled or disassembled) [ev_0003]." Only the ledger's fact is added,
+    never an inference about the sentence: a subject read wrong adds a true fact
+    at worst. The model's words stand as written before it, after any dash or
+    bracket of theirs.
     """
     base = sentence.rstrip()
     core = base.rstrip("\"')]")
@@ -2988,10 +3041,13 @@ def _corrected(sentence: str, facts: Sequence[Passage]) -> str:
     if core and core[-1] in ".!?":
         end = core[-1]
         base = core[:-1].rstrip() + closers
-    clauses = "; ".join(dict.fromkeys(fact.qualifier for fact in facts))
-    said = "it was" if len(facts) == 1 else "they were"
+    said: list[str] = []
+    for fact in facts:
+        found = _LISTS_WHAT.search(fact.qualifier)
+        said.append(f"the ledger lists {found.group(1)}" if found else fact.qualifier)
+    clauses = "; ".join(dict.fromkeys(said))
     cites = "".join(f"[{c}]" for c in sorted(set().union(*(fact.cites for fact in facts))))
-    return f"{base} \u2014 however, {clauses}, so {said} read {cites}{end}"
+    return f"{base}; {clauses} {cites}{end}"
 
 
 def _qualify_unread_left(
