@@ -79,35 +79,6 @@ class AgentArgument(BaseModel):
             "ends as ``ledger_stated``."
         ),
     )
-    settled_lines: list[str] = Field(
-        default_factory=list,
-        repr=False,
-        description=(
-            "For the mediator: the blocking lines the platform settled by rule, as written "
-            "(``own_entries.settle_own_entry_lines``): each only set an analyst's claim against "
-            "its own dispute entry, and the claim is held at the lower figure both state. They "
-            "ask nobody to revise and withdraw no claim by rule; when every blocking line is one, "
-            "the debate ends as ``settled_by_rule``."
-        ),
-    )
-    settled_by_rule: list[str] = Field(
-        default_factory=list,
-        repr=False,
-        description=(
-            "For the mediator: one sentence per line of ``settled_lines``, with each claim, both "
-            "figures and the analyst's entry: the run's record of the settlement."
-        ),
-    )
-    settled_claims: list[dict[str, Any]] = Field(
-        default_factory=list,
-        repr=False,
-        description=(
-            "For the mediator: one record per claim a line of ``settled_lines`` holds (analyst, "
-            "claim number, both figures, the claim's sentence and the line's record), so that "
-            "analyst's next revision is told it and a revision stating the claim again above "
-            "its held figure is recorded."
-        ),
-    )
     converged: list[dict[str, Any]] = Field(
         default_factory=list,
         repr=False,

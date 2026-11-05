@@ -98,7 +98,7 @@ class NegotiationMetrics:
                              mediation_failed / not_mediated / not_revised /
                              no_contested_point / contested_points_unchanged /
                              carried_without_new_evidence / ledger_stated /
-                             settled_by_rule / reworded),
+                             reworded),
                              read
                              from the router's own rules
                              (``pipeline.routing.debate_route``).
@@ -151,9 +151,6 @@ class NegotiationMetrics:
     # analysts were told those facts, each with them (``debate_facts.ledger_stated``).
     # They stayed blocking lines.
     ledger_stated: list[str] = field(default_factory=list)
-    # The blocking lines the platform settled by rule, each with the claims it
-    # holds at the lower figure (``own_entries.settle_own_entry_lines``).
-    settled_by_rule: list[str] = field(default_factory=list)
 
     @property
     def consensus_applicable(self) -> bool:
@@ -1486,10 +1483,6 @@ class RunSummary:
             lines += ["**Blocking lines the ledger states, told before:**", ""]
             lines += [f"- {sentence}" for sentence in n.ledger_stated]
             lines.append("")
-        if n.settled_by_rule:
-            lines += ["**Blocking lines settled by rule:**", ""]
-            lines += [f"- {sentence}" for sentence in n.settled_by_rule]
-            lines.append("")
         if n.mediation_notes:
             lines += [f"- {sentence}" for sentence in n.mediation_notes]
             lines.append("")
@@ -1820,7 +1813,6 @@ class RunSummary:
                 ),
                 **({"not_blocking_at_end": n.not_blocking_at_end} if n.not_blocking_at_end else {}),
                 **({"ledger_stated": list(n.ledger_stated)} if n.ledger_stated else {}),
-                **({"settled_by_rule": list(n.settled_by_rule)} if n.settled_by_rule else {}),
             },
             "agent_stats": [
                 {
@@ -2602,12 +2594,6 @@ class RunSummaryBuilder:
                 for arg in discussion_history
                 if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                 for sentence in getattr(arg, "ledger_stated", None) or []
-            ],
-            settled_by_rule=[
-                str(sentence)
-                for arg in discussion_history
-                if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
-                for sentence in getattr(arg, "settled_by_rule", None) or []
             ],
         )
         return self

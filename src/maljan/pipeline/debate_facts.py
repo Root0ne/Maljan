@@ -147,18 +147,6 @@ def without_line_mark(line: str) -> str:
     return _LINE_MARK.sub(" ", str(line))
 
 
-def as_not_blocking(line: str, reason: str) -> str:
-    """``line`` with every mark of it replaced by one ``[not blocking: <reason>]`` at its end.
-
-    The platform's own reading of a line it settled (``own_entries``): its
-    claims are no longer withdrawn by rule, and it asks nobody to revise.
-    ``reason`` holds no bracket.
-    """
-    said = " ".join(re.sub(r"[\[\]]", " ", str(reason)).split())
-    kept = " ".join(_ANY_MARK.sub(" ", str(line)).split())
-    return f"{kept} [not blocking: {said}]"
-
-
 # The head of the facts a revision round is told, after the mediator's feedback.
 LEDGER_FACTS_HEAD = "The evidence ledger states these counts for the lines the mediator listed:"
 

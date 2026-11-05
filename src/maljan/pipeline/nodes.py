@@ -99,7 +99,6 @@ from maljan.pipeline.conditions import (
 from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
     analysts_to_revise,
-    as_not_blocking,
     carried_marks,
     claims_named_by_lines,
     contested_input,
@@ -151,14 +150,6 @@ from maljan.pipeline.outcome import (
     unrecognised_verdict_reason,
     verdict_for_run,
     verdict_reading,
-)
-from maljan.pipeline.own_entries import (
-    SETTLED_FOR_YOU_HEAD,
-    SETTLED_REASON,
-    raised_again,
-    rows_in_force,
-    settle_own_entry_lines,
-    with_settled_by_rule,
 )
 from maljan.pipeline.revision_merge import (
     RevisionMerge,
@@ -5192,49 +5183,6 @@ def _ledger_stated_lines(
         return []
 
 
-def _own_entry_settlements(
-    container: ServiceContainer,
-    state: AnalysisState,
-    agent_names: Sequence[str],
-    argument: Any,
-    mediation: int,
-) -> tuple[list[str], list[str], list[dict[str, Any]], dict[str, AgentISR]]:
-    """``(settled lines, their sentences, per-claim records, the answers so held)``. Never raises.
-
-    The blocking lines that only set an analyst's claim against its own
-    dispute entry, settled by rule with no revision round
-    (``own_entries.settle_own_entry_lines``). Each participant's label and
-    spoken name are passed, so a line naming a peer by either is not settled.
-    """
-    try:
-        labels = {
-            name: [
-                label_of(container, name),
-                spoken_name(container, name, _home_stage(container, name)),
-            ]
-            for name in agent_names
-        }
-    except Exception as exc:  # noqa: BLE001 — the keys alone are read
-        logger.debug("negotiation: the participants' labels were not read (%s).", exc)
-        labels = {}
-    try:
-        settled, held = settle_own_entry_lines(
-            list(getattr(argument, "contradictions", None) or []),
-            list(agent_names),
-            dict(state.get("isr_reports") or {}),
-            labels,
-        )
-    except Exception as exc:  # noqa: BLE001 — a line not settled is read as before
-        logger.debug("negotiation: the own-entry lines were not settled (%s).", exc)
-        return [], [], [], {}
-    return (
-        [s.text for s in settled],
-        [s.sentence(mediation) for s in settled],
-        [row for s in settled for row in s.records(mediation)],
-        held,
-    )
-
-
 def _last_mediation_lines(state: AnalysisState) -> tuple[list[str], list[str]]:
     """``(blocking lines, place facts)`` of the last mediation in the history, or empty."""
     for earlier in reversed(state.get("discussion_history") or []):
@@ -5601,50 +5549,14 @@ def make_negotiation_node(
                 argument.carried = carried_marks(
                     list(argument.contradictions or []), len(facts_told)
                 )
-            # A blocking line that only sets an analyst's claim against its own
-            # dispute entry is settled by rule: the lower figure stands, the
-            # claim is held at it, and the line asks nobody to revise. Each
-            # settlement is recorded and told to the room.
-            held_by_rule: dict[str, AgentISR] = {}
-            if (
-                measured
-                and argument.status == "complete"
-                and argument.note != CONTRADICTIONS_BLOCK_MISSING_NOTE
-            ):
-                (
-                    argument.settled_lines,
-                    argument.settled_by_rule,
-                    argument.settled_claims,
-                    held_by_rule,
-                ) = _own_entry_settlements(container, state, agent_names, argument, iteration + 1)
-                if argument.settled_by_rule:
-                    for sentence in argument.settled_by_rule:
-                        logger.info("negotiation: %s", sentence)
-                    emit_agent_message(
-                        container.event_sink,
-                        speaker=ROOM_SPEAKER,
-                        role="system",
-                        text="\n".join(argument.settled_by_rule),
-                        round_index=iteration + 1,
-                        status="complete",
-                        stage=stage_key_of(stage, "debate"),
-                        kind="system",
-                    )
             # Who the mediation asks to revise: the analysts its blocking lines
-            # name in their [analysts: ...] field, read and never guessed. A
-            # line settled by rule names nobody.
+            # name in their [analysts: ...] field, read and never guessed.
             if measured and argument.status == "complete":
                 if argument.note == CONTRADICTIONS_BLOCK_MISSING_NOTE:
                     argument.revise, argument.revise_note = None, BLOCK_NOT_READ_NOTE
                 else:
-                    settled_here = set(argument.settled_lines)
                     argument.revise, argument.revise_note = analysts_to_revise(
-                        [
-                            line
-                            for line in argument.contradictions or []
-                            if line not in settled_here
-                        ],
-                        agent_names,
+                        list(argument.contradictions or []), agent_names
                     )
                 if argument.revise_note:
                     logger.info("negotiation: %s", argument.revise_note)
@@ -5714,9 +5626,6 @@ def make_negotiation_node(
                 ),
                 "sycophancy_detected": syco,
                 "discussion_history": [argument],
-                # The answers in force whose claims a settled line holds at
-                # the lower figure.
-                **({"isr_reports": held_by_rule} if held_by_rule else {}),
                 # Mediation is the only place a judge agent calls a tool, so
                 # this is where those calls have to leave the agent.
                 "evidence_ledger": _judge_evidence(),
@@ -6023,38 +5932,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         if named is None:
             asked_all = str(getattr(mediation, "revise_note", "") or "")
         asked = list(agent_names) if named is None else [n for n in agent_names if n in named]
-        # A line settled by rule is read as not blocking: it withdraws no
-        # claim by rule, and it stays in its place, so every line keeps its
-        # number.
-        settled_lines = set(getattr(mediation, "settled_lines", None) or [])
-        # Every claim a mediation of the run held by rule: its analyst's
-        # revision is told, and a revision stating it again above its held
-        # figure is recorded.
-        held_rows = rows_in_force(
-            [
-                row
-                for arg in history
-                if arg.agent_name == MEDIATOR_AGENT_NAME
-                for row in getattr(arg, "settled_claims", None) or []
-                if isinstance(row, dict)
-            ],
-            [r for r in state.get("revision_rounds") or [] if isinstance(r, dict)],
-        )
-        # The holds a revision of this round stated again above: recorded once.
-        raised_here: list[dict[str, str]] = []
-
-        def _record_raises(name: str, answer: Any) -> None:
-            for raised in raised_again(name, iteration, held_rows, answer):
-                logger.warning("%s", raised.sentence)
-                revision_replacements.append(raised.sentence)
-                raised_here.append(
-                    {"analyst": raised.analyst, "claim_sentence": raised.claim_sentence}
-                )
-
-        contested = [
-            as_not_blocking(line, SETTLED_REASON) if line in settled_lines else line
-            for line in getattr(mediation, "contradictions", None) or []
-        ]
+        contested = list(getattr(mediation, "contradictions", None) or [])
 
         original_reports = state.get("reports") or {}
         # The answer each analyst has in force before this round: its last
@@ -6173,12 +6051,6 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             # each was listed. An analyst with tools is told it can read one
             # the ledger never listed, and its revision is given its tools.
             mine = place_facts_for(name, places, agent_names)
-            # The claims of its own a mediation held by rule, with the record.
-            directive = with_settled_by_rule(
-                directive,
-                [str(r.get("sentence") or "") for r in held_rows if r.get("analyst") == name],
-                SETTLED_FOR_YOU_HEAD,
-            )
             can_read = bool(tools_taking_an_address(getattr(agent, "tools", None) or ()))
             reads = can_read and names_an_unlisted_place(mine)
             # The stored text of the entries those lines cite and of the
@@ -6447,7 +6319,6 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                         iteration,
                     )
                     revised_isrs[name] = combined
-                    _record_raises(name, combined)
                     if name in not_asked:
                         not_revised[name] = not_loaded.get(name, NOT_ASKED_TO_REVISE)
                     else:
@@ -6514,9 +6385,6 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     )
                 revised[name] = report_now
                 revised_isrs[name] = isr
-                # A claim held by rule that the revision states again above
-                # its held figure: the revision's figure stands, and is said.
-                _record_raises(name, isr)
                 if name in not_asked:
                     # Its answer from before the round, handed back unasked:
                     # not a revision, and not counted as one.
@@ -6654,8 +6522,6 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 ),
                 **({"asked_all": asked_all} if asked_all else {}),
                 **({"retry_added": retry_added} if retry_added else {}),
-                # The holds by rule a revision stated again above: not told again.
-                **({"raised_again": raised_here} if raised_here else {}),
                 **({"peers": peers_record} if peers_record else {}),
                 # The entries each revision was shown, for the claims of later
                 # rounds to be read against (``_mark_claims_on_shown_entries``).

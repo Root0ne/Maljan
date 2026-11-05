@@ -32,7 +32,6 @@ from maljan.pipeline.debate_facts import (
     read_claim_references,
     read_marks,
 )
-from maljan.pipeline.own_entries import settle_own_entry_lines
 from maljan.pipeline.validation import (
     EntryTexts,
     absence_holders_note,
@@ -232,22 +231,6 @@ LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 
                 ["[analysts: a, b] " + "claim 3 " * (len(t) // 8) + "[blocking: x]"], ["a", "b"]
             ),
             id="claim numbers read for no analyst",
-        ),
-        pytest.param(
-            lambda t: settle_own_entry_lines(
-                ["[analysts: a] its own " + "b claim 3 " * (len(t) // 10) + "[blocking: x]"],
-                ["a", "b"],
-                {},
-            ),
-            id="an own-entry line naming a peer's claims",
-        ),
-        pytest.param(
-            lambda t: settle_own_entry_lines(
-                ["[analysts: a] its own " + "claim 3 at 0.50 " * (len(t) // 16) + "[blocking: x]"],
-                ["a", "b"],
-                {},
-            ),
-            id="an own-entry line of its own claims",
         ),
     ],
 )
