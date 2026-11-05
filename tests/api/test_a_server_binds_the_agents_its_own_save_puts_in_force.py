@@ -24,6 +24,7 @@ DEFINITIONS = "core.agents.definitions"
 SERVERS = "core.mcp.servers"
 CHECKER = {
     "role": "generic",
+    "category": "other",
     "label": "Dropped-file checker",
     "prompt": "Check the files the sample drops.",
     "tools": [],

@@ -128,6 +128,10 @@ class CatalogEntry:
     # ``data_sources`` (``config.DATA_SOURCES``), served so the console offers
     # exactly what the settings model accepts.
     data_source_choices: list[str] | None = None
+    # For the agent definitions: the categories a definition may declare
+    # (``core.agent_category.AGENT_CATEGORIES``), in the order the console
+    # offers them, so the console's select is the settings model's list.
+    agent_category_choices: list[str] | None = None
     # For the tool-server map: the agent keys a server may be bound to, the
     # effective definition map's keys, so the console offers every agent of
     # the roster rather than a fixed list.

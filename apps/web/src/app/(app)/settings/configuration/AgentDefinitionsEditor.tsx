@@ -42,6 +42,7 @@ import {
 } from "./capabilityRefs";
 import { SANDBOX_REF, choiceRows, toggleChoice } from "./choiceRows";
 import type {
+  AgentCategory,
   AgentDefinitionEntry,
   AgentProbeDetails,
   CatalogEntry,
@@ -61,6 +62,37 @@ const ROLE_TABS: Readonly<Record<string, (typeof AGENT_TABS)[number]>> = {
   network: "network",
   judge: "identity",
 };
+
+/** The categories a definition may declare, in the order they are offered,
+ *  for an API that serves no list (`core.agent_category.AGENT_CATEGORIES`). */
+const AGENT_CATEGORIES: readonly AgentCategory[] = [
+  "code_reader", "static", "dynamic", "network", "intel", "other",
+];
+/** How each category is named to an operator. A value the API serves that is
+ *  missing here is shown as it is. */
+export const CATEGORY_LABELS: Readonly<Record<string, string>> = {
+  code_reader: "Reverser (code reader)",
+  static: "Static",
+  dynamic: "Dynamic / sandbox",
+  network: "Network",
+  intel: "Intel / reputation",
+  other: "Other",
+};
+
+/** What the category select says under it: the owner-approved text, word for
+ *  word, with the two category names it cites in italics. */
+export function CategoryHelp({ id }: { id: string }) {
+  return (
+    <span id={id} className="block text-[11px] text-text-muted mt-0.5">
+      Choose the category that matches what this agent actually does. Malspark sets this
+      agent&apos;s platform steps by its category: for example, an agent in <em>Reverser</em>{" "}
+      is shown the functions on the main path it has not read before it gives its final
+      answer. A wrong category gives the agent steps that do not fit its work and leaves out
+      steps that would help it. If none fits, choose <em>Other</em>; the platform then works
+      out what it can from the agent&apos;s tools and results.
+    </span>
+  );
+}
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
@@ -343,6 +375,7 @@ export function AgentDetail({
   keyErrorMessage,
   capabilityServers = {},
   dataSourceChoices = [],
+  categoryChoices,
   builtinAgentKeys,
   alwaysEnabledAgentKeys,
 }: {
@@ -375,6 +408,10 @@ export function AgentDetail({
   /** The input slices a definition may name, as the API serves them
    *  (`CatalogEntry.data_source_choices`). */
   dataSourceChoices?: readonly string[];
+  /** The categories a definition may declare, as the API serves them
+   *  (`CatalogEntry.agent_category_choices`). Absent from an older API: the
+   *  console's own list. */
+  categoryChoices?: readonly string[] | null;
   /** Every seeded definition key, as the API serves them
    *  (`CatalogEntry.builtin_agent_keys`). Absent from an older API: the five
    *  class built-ins are then the ones known. */
@@ -629,6 +666,38 @@ export function AgentDetail({
                 <FieldError message={fieldError("role")} />
               </label>
             )}
+            {/* What the agent does, which decides the platform steps it is
+                offered and never the tools it may call. Required: a new
+                agent starts with none chosen and the API refuses it so. */}
+            <label className="block sm:col-span-2">
+              <span className="text-text-muted">Category (required)</span>
+              <select
+                className={input}
+                aria-label={`${agentKey} category`}
+                aria-describedby={`${agentKey}-category-help`}
+                aria-required="true"
+                required
+                disabled={locked}
+                value={agent.category ?? ""}
+                onChange={(e) =>
+                  put(agentKey, { category: (e.target.value || null) as AgentCategory | null })
+                }
+              >
+                <option value="" disabled>
+                  Choose a category
+                </option>
+                {(categoryChoices && categoryChoices.length > 0
+                  ? categoryChoices
+                  : AGENT_CATEGORIES
+                ).map((c) => (
+                  <option key={c} value={c}>
+                    {CATEGORY_LABELS[c] ?? c}
+                  </option>
+                ))}
+              </select>
+              <CategoryHelp id={`${agentKey}-category-help`} />
+              <FieldError message={fieldError("category")} />
+            </label>
             {PROVIDER_ROLES.has(agent.role) && (
               <label className="block">
                 <span className="text-text-muted">Static provider</span>
@@ -1342,6 +1411,7 @@ export default function AgentDefinitionsEditor({
           builtinAgentKeys={entry.builtin_agent_keys}
           alwaysEnabledAgentKeys={entry.always_enabled_agent_keys}
           dataSourceChoices={entry.data_source_choices ?? []}
+          categoryChoices={entry.agent_category_choices}
         />
       )}
     </div>

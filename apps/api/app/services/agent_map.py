@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from maljan.core.agent_category import CATEGORY_REQUIRED
 from maljan.core.config import (
     AGENT_KEY_PATTERN,
     ALWAYS_ENABLED_AGENTS,
@@ -121,6 +122,7 @@ def validate_definitions(
     *,
     servers: dict[str, list[str] | None] | None = None,
     plugins_allowed: list[Any] | None = None,
+    stored_keys: Any = (),
 ) -> dict[str, Any]:
     """Return the definition map to store, or raise with one message per offender.
 
@@ -128,6 +130,11 @@ def validate_definitions(
     static provider id is a shipped one or an installed plugin it names, read
     from package metadata (``maljan.core.plugins.id_refusal``), never what
     the API process has loaded.
+
+    ``stored_keys`` are the definitions already stored. Any other definition
+    that is not a built-in is being created, and must name its category
+    (``core.agent_category``); a stored one that names none reads the one its
+    role and tools fit, as the settings model reads it.
     """
     from maljan.core.plugins import id_refusal, shipped_ids
 
@@ -140,6 +147,7 @@ def validate_definitions(
         )
 
     allow_lists = servers if servers is not None else {}
+    stored = {str(key) for key in stored_keys}
     errors: dict[str, str] = {}
     out: dict[str, Any] = {}
     seeds = {name: d.model_dump(mode="json") for name, d in _builtin_definitions().items()}
@@ -153,6 +161,9 @@ def validate_definitions(
             errors[name] = "an agent entry must be an object"
             continue
         seed = seeds.get(name)
+        if seed is None and name not in stored and entry.get("category") is None:
+            errors[f"{name}.category"] = CATEGORY_REQUIRED
+            continue
         # Fill in the seed's own values for whatever a built-in override left
         # out, exactly as ``AgentsConfig._merge_builtin_definition_defaults``
         # does at the Settings layer: an operator writing
@@ -636,12 +647,14 @@ def _validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict
         definitions_raw = stored.get(AGENT_DEFINITIONS_KEY) or {}
     elif definitions_raw is None:
         definitions_raw = {}
+    stored_definitions = stored.get(AGENT_DEFINITIONS_KEY)
     from app.services.settings_service import merged_allow_list
 
     definitions = validate_definitions(
         definitions_raw,
         servers=_server_allow_lists(_staged_over_stored(changes, stored)),
         plugins_allowed=merged_allow_list(changes, stored),
+        stored_keys=stored_definitions if isinstance(stored_definitions, dict) else (),
     )
     if AGENT_DEFINITIONS_KEY in changes and changes[AGENT_DEFINITIONS_KEY] is not None:
         out[AGENT_DEFINITIONS_KEY] = definitions

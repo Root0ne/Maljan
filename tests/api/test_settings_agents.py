@@ -41,7 +41,22 @@ BUILTIN_STATIC = {
 
 
 def _defs(**extra):
-    return {AGENT_DEFINITIONS_KEY: {**extra}}
+    """A save of ``extra``, each new definition given a category.
+
+    A new definition must name its category; these tests are about the other
+    fields, so one that names none is given ``other``. The rule itself is
+    tested on its own below.
+    """
+    return {
+        AGENT_DEFINITIONS_KEY: {
+            key: (
+                {"category": "other", **entry}
+                if key not in BUILTIN_AGENTS and key not in seeded_generic_agents()
+                else entry
+            )
+            for key, entry in extra.items()
+        }
+    }
 
 
 def test_a_valid_definition_round_trips_with_the_built_ins_reseeded():
@@ -289,7 +304,9 @@ def test_the_active_profile_must_exist_in_the_map_being_saved():
 def test_a_profile_and_the_definition_it_uses_may_be_saved_in_one_patch():
     out = validate_agent_map(
         {
-            AGENT_DEFINITIONS_KEY: {"strings": {"role": "generic", "prompt": "p"}},
+            AGENT_DEFINITIONS_KEY: {
+                "strings": {"role": "generic", "category": "other", "prompt": "p"}
+            },
             AGENT_PROFILES_KEY: {"wide": {"analysts": ["static", "strings"]}},
             AGENT_PROFILE_KEY: "wide",
         },
@@ -965,3 +982,74 @@ def test_the_technique_line_turned_off_on_a_built_in_prompt_agent_says_to_clone_
         exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.{key}"]
         == f"{key!r} is built in; clone it to change it"
     )
+
+
+class TestANewDefinitionNamesItsCategory:
+    """A new definition must name its category; a stored one reads the one it fits."""
+
+    MESSAGE_KEY = f"{AGENT_DEFINITIONS_KEY}.strings.category"
+
+    def test_a_new_definition_without_one_is_refused_under_the_field(self):
+        with pytest.raises(AgentMapError) as exc:
+            validate_agent_map(
+                {AGENT_DEFINITIONS_KEY: {"strings": {"role": "generic", "prompt": "p"}}},
+                stored={},
+            )
+        assert "choose the category" in exc.value.errors[self.MESSAGE_KEY]
+
+    def test_a_null_one_is_none(self):
+        with pytest.raises(AgentMapError) as exc:
+            validate_agent_map(
+                {
+                    AGENT_DEFINITIONS_KEY: {
+                        "strings": {"role": "generic", "prompt": "p", "category": None}
+                    }
+                },
+                stored={},
+            )
+        assert self.MESSAGE_KEY in exc.value.errors
+
+    def test_one_that_is_not_a_category_is_refused_under_the_field(self):
+        with pytest.raises(AgentMapError) as exc:
+            validate_agent_map(
+                _defs(strings={"role": "generic", "prompt": "p", "category": "reverser"}),
+                stored={},
+            )
+        assert self.MESSAGE_KEY in exc.value.errors
+
+    def test_the_one_named_is_stored(self):
+        out = validate_agent_map(
+            _defs(strings={"role": "generic", "prompt": "p", "category": "code_reader"}),
+            stored={},
+        )
+        assert out[AGENT_DEFINITIONS_KEY]["strings"]["category"] == "code_reader"
+
+    def test_a_stored_definition_without_one_is_saved_with_the_one_it_fits(self):
+        """A store not yet migrated: the console sends the row back as it read it."""
+        legacy = {"strings": {"role": "generic", "prompt": "p", "tools": [{"kind": "sandbox"}]}}
+        out = validate_agent_map(
+            {AGENT_DEFINITIONS_KEY: legacy}, stored={AGENT_DEFINITIONS_KEY: legacy}
+        )
+        assert out[AGENT_DEFINITIONS_KEY]["strings"]["category"] == "dynamic"
+
+    def test_a_save_that_does_not_touch_the_definitions_is_not_held_to_it(self):
+        stored = {AGENT_DEFINITIONS_KEY: {"strings": {"role": "generic", "prompt": "p"}}}
+        out = validate_agent_map(
+            {AGENT_PROFILES_KEY: {"wide": {"analysts": ["strings"]}}}, stored=stored
+        )
+        assert out[AGENT_PROFILES_KEY]["wide"]["analysts"] == ["strings"]
+
+    def test_a_built_in_needs_none(self):
+        out = validate_agent_map(
+            {AGENT_DEFINITIONS_KEY: {"network": {"role": "network", "enabled": False}}},
+            stored={},
+        )
+        assert out[AGENT_DEFINITIONS_KEY]["network"]["category"] == "network"
+
+    def test_the_catalog_serves_the_choices(self):
+        from app.services.settings_catalog_api import resolved_catalog
+        from maljan.core.agent_category import AGENT_CATEGORIES
+
+        entries = {e.key: e for e in resolved_catalog(["analysis"])}
+        assert entries[AGENT_DEFINITIONS_KEY].agent_category_choices == list(AGENT_CATEGORIES)
+        assert entries["core.mcp.servers"].agent_category_choices is None

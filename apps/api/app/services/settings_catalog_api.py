@@ -18,6 +18,7 @@ from dataclasses import replace
 from functools import lru_cache
 from typing import Any, get_args, get_origin
 
+from maljan.core.agent_category import AGENT_CATEGORIES
 from maljan.core.config import (
     ALWAYS_ENABLED_AGENTS,
     DATA_SOURCES,
@@ -836,6 +837,7 @@ def resolved_catalog(
                 entry,
                 capability_servers=_capability_servers(servers),
                 data_source_choices=list(DATA_SOURCES),
+                agent_category_choices=list(AGENT_CATEGORIES),
                 builtin_agent_keys=sorted(_builtin_definitions()),
                 always_enabled_agent_keys=list(ALWAYS_ENABLED_AGENTS),
             )

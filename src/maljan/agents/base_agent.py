@@ -37,13 +37,13 @@ if TYPE_CHECKING:
 
 from maljan.agents.callees_question import (
     NOT_RUN_FAILED,
-    NOT_RUN_NO_LISTING,
     NOT_RUN_NO_TOOLS,
     UNREAD_CALLEES_CODE,
     CalleesFound,
     callees_asked_record,
     callees_to_read,
     reads_code,
+    states_why,
 )
 from maljan.agents.claim_headings import (
     LINE_PREFIX,
@@ -6350,7 +6350,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         try:
             code, why = reads_code(definition, own)
             if not code:
-                if why != NOT_RUN_NO_LISTING:
+                if states_why(why):
                     BaseAnalyst._state_callees_not_run(self, why, job)
                 return None
             found = callees_to_read(

@@ -306,6 +306,7 @@ class TestSavingAProviderId:
         definitions = {
             "checker": {
                 "role": "generic",
+                "category": "other",
                 "label": "Checker",
                 "prompt": "p",
                 "static_provider": "acme_static",
@@ -450,6 +451,7 @@ class TestTheApiAndTheWorkerJudgeAlike:
             agents = {
                 "checker": {
                     "role": "generic",
+                    "category": "other",
                     "label": "Checker",
                     "prompt": "p",
                     "static_provider": name,

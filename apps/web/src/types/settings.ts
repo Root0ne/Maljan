@@ -116,6 +116,10 @@ export interface CatalogEntry {
    *  its `data_sources`, as the settings model accepts them. Absent from an
    *  API older than the field: only the stored slices are then drawn. */
   data_source_choices?: string[] | null;
+  /** For the agent definitions: the categories a definition may declare
+   *  (`core.agent_category.AGENT_CATEGORIES`), in the order to offer them.
+   *  Absent from an API older than the field: the console's own list. */
+  agent_category_choices?: string[] | null;
   /** For the tool-server map: the agent keys a server may be bound to, the
    *  effective definition map's keys. */
   agent_keys?: string[] | null;
@@ -388,8 +392,16 @@ export interface ToolRefEntry {
  * it. Nothing in this shape is a secret: prompts are operator text and are
  * exported as-is.
  */
+/** What kind of work an agent does (`core.agent_category`), separate from the
+ *  code its role runs. The platform offers an agent its own steps by it. */
+export type AgentCategory = "code_reader" | "static" | "dynamic" | "network" | "intel" | "other";
+
 export interface AgentDefinitionEntry {
   role: "static" | "dynamic" | "network" | "judge" | "generic" | "lead" | "report";
+  /** Required on a new definition: the API refuses one without it. Absent on
+   *  a new agent until one is chosen, and on a definition an API older than
+   *  the field, or a store not yet migrated, sends without one. */
+  category?: AgentCategory | null;
   label: string;
   prompt: string | null;
   tools: ToolRefEntry[];

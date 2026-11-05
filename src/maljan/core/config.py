@@ -1402,6 +1402,9 @@ class PreprocessingConfig(BaseModel):
 # and composer steps run with, and the report stage is a deterministic build
 # around them rather than an agent loop.
 AnalystRole = Literal["static", "dynamic", "network", "judge", "generic", "lead", "report"]
+# What kind of work a definition does, separate from the code its role runs
+# (``core.agent_category``): the platform offers an agent its own steps by it.
+AgentCategory = Literal["code_reader", "static", "dynamic", "network", "intel", "other"]
 # The roles that are a prompt rather than a class, and therefore need one.
 PROMPT_ROLES: tuple[str, ...] = ("generic", "lead")
 
@@ -2692,6 +2695,11 @@ class AgentDefinition(BaseModel):
     """
 
     role: AnalystRole
+    # What the agent does (``core.agent_category``), which decides the platform
+    # steps it is offered and never the tools it may call. Required: a
+    # definition written before the field existed reads the category its role
+    # and tools fit, and the settings API refuses a new definition without one.
+    category: AgentCategory
     label: str = ""
     prompt: str | None = None
     tools: list[ToolRef] = Field(default_factory=list)
@@ -2748,6 +2756,23 @@ class AgentDefinition(BaseModel):
         if isinstance(dumped, dict) and not self.chunk_boundary:
             dumped.pop("chunk_boundary", None)
         return dumped
+
+    @model_validator(mode="before")
+    @classmethod
+    def _a_definition_before_categories_reads_the_one_it_fits(cls, data: Any) -> Any:
+        """A definition that names no category reads the one its role and tools fit.
+
+        Every definition stored, exported or written in code before the field
+        existed names none; ``core.agent_category.fitting_category`` reads it
+        from the role and the tool kinds, never from a name, and ``other``
+        where they tell nothing, which is the behaviour every such definition
+        had. Revision ``20261103000000`` writes the value into the store.
+        """
+        if isinstance(data, dict) and data.get("category") is None:
+            from maljan.core.agent_category import fitting_category
+
+            return {**data, "category": fitting_category(data)[0]}
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -3474,10 +3499,16 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
     The judge and the reporter are here so that their LLM and their tool
     servers have the same editing surface as the analysts. Neither can be an
     analyst: a profile names them from its verdict and report stages.
+
+    Each declares its category (``core.agent_category``): the static analyst
+    and the reverser read decompiled code, the triage and Android agents the
+    sample's static facts, and the judge, the reporter and the lead, which
+    weigh and write rather than read the sample, are ``other``.
     """
     return {
         "static": AgentDefinition(
             role="static",
+            category="code_reader",
             label="Static analyst",
             tools=[
                 ToolRef(kind="mcp", server="analysis"),
@@ -3487,11 +3518,13 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
         ),
         "dynamic": AgentDefinition(
             role="dynamic",
+            category="dynamic",
             label="Dynamic analyst",
             tools=[ToolRef(kind="sandbox"), ToolRef(kind="mcp", server="knowledge")],
         ),
         "network": AgentDefinition(
             role="network",
+            category="network",
             label="Network analyst",
             tools=[
                 ToolRef(kind="mcp", server="network"),
@@ -3505,6 +3538,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
         # judge still decides.
         JUDGE_AGENT_KEY: AgentDefinition(
             role="judge",
+            category="other",
             label="Judge",
             tools=[
                 ToolRef(kind="mcp", server="knowledge"),
@@ -3516,6 +3550,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
         ),
         REPORTER_AGENT_KEY: AgentDefinition(
             role="report",
+            category="other",
             label="Reporter",
             tools=[],
         ),
@@ -3527,6 +3562,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
         # prompts is a team nobody runs.
         "triage": AgentDefinition(
             role="generic",
+            category="static",
             label="Triage",
             prompt=TRIAGE_PROMPT,
             tools=[
@@ -3537,6 +3573,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
         ),
         "android_static": AgentDefinition(
             role="generic",
+            category="static",
             label="Android static analyst",
             prompt=ANDROID_STATIC_PROMPT,
             tools=[
@@ -3547,6 +3584,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
         ),
         "reverser": AgentDefinition(
             role="generic",
+            category="code_reader",
             label="Reverser",
             prompt=REVERSER_PROMPT,
             tools=[
@@ -3562,6 +3600,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
         # cited before it repeats it.
         "lead": AgentDefinition(
             role="lead",
+            category="other",
             label="Lead analyst",
             prompt=LEAD_PROMPT,
             tools=[

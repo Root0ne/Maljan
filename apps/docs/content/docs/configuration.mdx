@@ -2927,6 +2927,61 @@ provider on Ghidra the `static` analyst opens Ghidra as well. Run it by naming i
 (`tests/api/test_the_all_tools_team_document.py`) loads the document through
 the import's validation and resolves every agent against stub servers.
 
+### An agent's category
+
+Every agent definition declares what the agent does in
+`agents.definitions.<key>.category`, separate from its `role`, which picks the
+code that runs it. A reverser an operator writes is a `generic` agent, and its
+role says nothing about the code it reads; its category does. The values, as
+the console names them:
+
+| Value | Console | The agent |
+|---|---|---|
+| `code_reader` | Reverser (code reader) | reads the sample's code: decompiled or disassembled functions |
+| `static` | Static | reads the sample's static facts without its code: header, imports, strings, rule matches |
+| `dynamic` | Dynamic / sandbox | reads what the sample did when it ran: the sandbox report |
+| `network` | Network | reads the sample's traffic and network indicators |
+| `intel` | Intel / reputation | looks indicators up: reputation and threat intelligence |
+| `other` | Other | none of these, or more than one |
+
+The platform offers an agent its own steps by its category. The first is the
+question about the unread functions around the routines an analyst read: an
+agent in `code_reader` is asked it whenever its entries list code, and where
+none does, its conversation says why. An agent in `static`, `dynamic`,
+`network` or `intel` is not asked. For `other`, the platform works out what it
+can from the agent's tools and what they returned, exactly as it did before the
+field existed: an agent whose calls list code is asked, whatever tool listed
+it. A category never restricts the tools an agent may call.
+
+The built-in definitions ship with theirs: `static` (whose class reads its
+provider's decompiled functions) and `reverser` are `code_reader`, `triage` and
+`android_static` are `static`, `dynamic` and `network` are their own, and
+`judge`, `reporter` and `lead` are `other`. The category is required: the
+settings API refuses a new definition that names none, under the field. A
+definition stored before the field existed reads the category its role and
+tools fit, and the `20261103000000` migration writes that value into the store
+once. The rule reads the role, the kinds of the tool references and the input
+slices, never a name: `static` is `code_reader`, `dynamic` and `network` are
+their own, `judge` and `report` are `other`; a `generic` or `lead` definition
+holding a `provider` reference is `code_reader`, one holding a `sandbox`
+reference is `dynamic`, one whose `data_sources` are all `sandbox.network` is
+`network` and one naming any other sandbox slice `dynamic`, and one whose tools
+are only reputation capabilities (asks of other agents aside) is `intel`.
+Anything else is `other`, which keeps the steps it had, and the migration names
+each such definition in its log so an operator can pick one. An entry it cannot
+fit (not an object, an unknown role, a stored value that is not a category) is
+left as it is and named in the log.
+
+The console's agent editor shows the category as a required select, locked on
+the built-ins, with this text under it: "Choose the category that matches what
+this agent actually does. Malspark sets this agent's platform steps by its
+category: for example, an agent in *Reverser* is shown the functions on the main
+path it has not read before it gives its final answer. A wrong category gives
+the agent steps that do not fit its work and leaves out steps that would help
+it. If none fits, choose *Other*; the platform then works out what it can from
+the agent's tools and results." A clone keeps its source's category. The run's
+roster carries each agent's `category` beside its `role`.
+
 ### What a clone is given when it names no tools
 
 A definition that is not a built-in and has no `tools` key takes the tool list

@@ -1091,6 +1091,7 @@ class TestRoster:
             "key": "static",
             "label": "static",
             "role": "",
+            "category": "",
             "stages": ["analysis"],
         }
 
