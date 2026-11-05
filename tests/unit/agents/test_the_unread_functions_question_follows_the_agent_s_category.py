@@ -1,14 +1,12 @@
 """Whether the unread-functions question is put follows the analyst's category (T-559).
 
-The category is the analyst's declared fact; the ledger is the fallback:
+The category only adds; the ledger decides whether the question is put:
 
-- a ``code_reader`` is asked whenever its entries list code, and where none
-  does, its conversation says why instead of saying nothing;
-- an analyst in ``static``, ``dynamic``, ``network`` or ``intel`` is not
-  asked, whatever its tools listed, and nothing is said;
-- ``other``, a definition that names none and no definition at all are read
-  from the ledger exactly as before the category existed, and send the same
-  turn byte for byte.
+- an analyst of any category whose entries list code is asked, and sends the
+  same turn byte for byte whatever its category, ``other``, none or no
+  definition at all included;
+- a ``code_reader`` none of whose entries lists code is told why, where
+  every other analyst is left alone, as before the category existed.
 
 Every address and name here is made up for the test.
 """
@@ -20,11 +18,9 @@ from typing import Any
 import pytest
 
 from maljan.agents.callees_question import (
-    NOT_RUN_CATEGORY,
     NOT_RUN_CODE_READER_NO_LISTING,
     NOT_RUN_NO_LISTING,
     UNREAD_CALLEES_CODE,
-    CalleesFound,
     reads_code,
     states_why,
 )
@@ -74,14 +70,15 @@ class TestTheSeam:
         assert reads_code(reader, []) == (False, NOT_RUN_CODE_READER_NO_LISTING)
         assert states_why(NOT_RUN_CODE_READER_NO_LISTING)
 
-    @pytest.mark.parametrize("category", ["static", "dynamic", "network", "intel"])
-    def test_a_category_that_reads_no_code_is_not_asked_and_not_said(self, category: str) -> None:
-        assert reads_code(_resolved(category), OWN) == (False, NOT_RUN_CATEGORY)
-        assert not states_why(NOT_RUN_CATEGORY)
-        assert not CalleesFound(not_run=NOT_RUN_CATEGORY).says_why()
-
-    @pytest.mark.parametrize("definition", [None, _resolved(None), _resolved("other")])
-    def test_other_and_none_are_read_from_the_ledger_as_before(self, definition: Any) -> None:
+    @pytest.mark.parametrize(
+        "definition",
+        [
+            None,
+            _resolved(None),
+            *(_resolved(c) for c in ("other", "static", "dynamic", "network", "intel")),
+        ],
+    )
+    def test_every_other_category_is_read_from_the_ledger_as_before(self, definition: Any) -> None:
         assert reads_code(definition, OWN) == (True, "")
         assert reads_code(definition, []) == (False, NOT_RUN_NO_LISTING)
         assert not states_why(NOT_RUN_NO_LISTING)
@@ -94,22 +91,20 @@ class TestTheValidationTurn:
         analyst._resolved = _resolved(category)  # type: ignore[attr-defined]
         return analyst, _events(analyst)
 
-    def test_other_sends_the_turn_it_sent_before_byte_for_byte(self) -> None:
+    @pytest.mark.parametrize(
+        "category", ["other", "code_reader", "static", "dynamic", "network", "intel"]
+    )
+    def test_any_category_that_listed_code_is_asked_byte_for_byte_as_before(
+        self, category: str
+    ) -> None:
         before, _ = self._turn(None)
-        other, _ = self._turn("other")
-        reader, _ = self._turn("code_reader")
+        analyst, recorded = self._turn(category)
         assert UNREAD_CALLEES_CODE in str(before.seen_turns[-1][-1].content)
         sent = [[(type(m).__name__, m.content) for m in turn] for turn in before.seen_turns]
-        for analyst in (other, reader):
-            assert [
-                [(type(m).__name__, m.content) for m in turn] for turn in analyst.seen_turns
-            ] == sent
-
-    def test_a_static_analyst_that_listed_code_is_not_asked(self) -> None:
-        analyst, recorded = self._turn("static")
-        assert analyst.seen_turns == []
+        assert [
+            [(type(m).__name__, m.content) for m in turn] for turn in analyst.seen_turns
+        ] == sent
         assert _notes(recorded) == []
-        assert "callees_question" not in analyst._budget_records[-1]
 
     def test_a_code_reader_that_listed_no_code_is_told_why(self) -> None:
         analyst = _Analyst([], [_lookup()])

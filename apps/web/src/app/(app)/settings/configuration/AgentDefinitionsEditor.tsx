@@ -16,6 +16,7 @@ import {
   builtinAgentKeys as builtinKeySet,
   cloneDefinition,
   displayedDefinitions,
+  FALLBACK_AGENT_CATEGORIES,
   stagedDefinitions,
   type StagedDefinitionMap,
 } from "./agentStaging";
@@ -63,11 +64,6 @@ const ROLE_TABS: Readonly<Record<string, (typeof AGENT_TABS)[number]>> = {
   judge: "identity",
 };
 
-/** The categories a definition may declare, in the order they are offered,
- *  for an API that serves no list (`core.agent_category.AGENT_CATEGORIES`). */
-const AGENT_CATEGORIES: readonly AgentCategory[] = [
-  "code_reader", "static", "dynamic", "network", "intel", "other",
-];
 /** How each category is named to an operator. A value the API serves that is
  *  missing here is shown as it is. */
 export const CATEGORY_LABELS: Readonly<Record<string, string>> = {
@@ -688,7 +684,7 @@ export function AgentDetail({
                 </option>
                 {(categoryChoices && categoryChoices.length > 0
                   ? categoryChoices
-                  : AGENT_CATEGORIES
+                  : FALLBACK_AGENT_CATEGORIES
                 ).map((c) => (
                   <option key={c} value={c}>
                     {CATEGORY_LABELS[c] ?? c}

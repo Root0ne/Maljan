@@ -383,6 +383,10 @@ export interface ToolRefEntry {
   provider?: string | null;
 }
 
+/** What kind of work an agent does (`core.agent_category`), separate from the
+ *  code its role runs. The platform offers an agent its own steps by it. */
+export type AgentCategory = "code_reader" | "static" | "dynamic" | "network" | "intel" | "other";
+
 /**
  * One entry of the `agents.definitions` map, keyed by a short agent name.
  *
@@ -392,13 +396,10 @@ export interface ToolRefEntry {
  * it. Nothing in this shape is a secret: prompts are operator text and are
  * exported as-is.
  */
-/** What kind of work an agent does (`core.agent_category`), separate from the
- *  code its role runs. The platform offers an agent its own steps by it. */
-export type AgentCategory = "code_reader" | "static" | "dynamic" | "network" | "intel" | "other";
-
 export interface AgentDefinitionEntry {
   role: "static" | "dynamic" | "network" | "judge" | "generic" | "lead" | "report";
-  /** Required on a new definition: the API refuses one without it. Absent on
+  /** Required on a new definition: the API and the editor refuse one without
+   *  it, and only an import gives one the category it fits. Absent on
    *  a new agent until one is chosen, and on a definition an API older than
    *  the field, or a store not yet migrated, sends without one. */
   category?: AgentCategory | null;

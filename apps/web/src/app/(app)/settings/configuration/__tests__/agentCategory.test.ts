@@ -10,7 +10,13 @@ import {
   CategoryHelp,
   type AgentResolveApi,
 } from "../AgentDefinitionsEditor";
-import { cloneDefinition } from "../agentStaging";
+import {
+  builtinAgentKeys,
+  categoryRequired,
+  cloneDefinition,
+  missingCategoryErrors,
+  stagedDefinitions,
+} from "../agentStaging";
 import { describeChange } from "../describeChange";
 
 /** The owner-approved text under the category select, word for word. */
@@ -146,5 +152,46 @@ describe("the agent category in the editor", () => {
       { mine: { ...base, category: "code_reader" } },
     );
     expect(line.detail).toEqual(["mine: changed: category"]);
+  });
+});
+
+describe("a new agent with no category is refused before a save", () => {
+  const choices = served("agent_definitions").agent_category_choices as string[];
+  const builtins = builtinAgentKeys(served("agent_definitions").builtin_agent_keys as string[]);
+  /** `core.agent_category.CATEGORY_REQUIRED`, as the API words it. */
+  const API_TEXT =
+    "choose the category that matches what this agent does: code_reader, static, dynamic, " +
+    "network, intel, other (other when none fits)";
+
+  it("words it as the API does", () => {
+    expect(categoryRequired(choices)).toBe(API_TEXT);
+    expect(categoryRequired(null)).toBe(API_TEXT);
+  });
+
+  it("names each new agent without one, under its category field", () => {
+    const saved = { kept: base };
+    const next = {
+      ...saved,
+      fresh: cloneDefinition(saved, "fresh").fresh,
+      chosen: { ...base, category: "static" as const },
+    };
+    const staged = stagedDefinitions(next, saved, builtins);
+    expect(missingCategoryErrors(staged, saved, builtins, choices)).toEqual({
+      "core.agents.definitions.fresh.category": API_TEXT,
+    });
+  });
+
+  it("holds neither a built-in nor a stored agent to it", () => {
+    const saved = { kept: base, static: { ...base, role: "static" as const } };
+    const next = { ...saved, static: { ...saved.static, enabled: false } };
+    const staged = stagedDefinitions(next, saved, builtins);
+    expect(missingCategoryErrors(staged, saved, builtins, choices)).toEqual({});
+    expect(missingCategoryErrors(undefined, saved, builtins, choices)).toEqual({});
+  });
+
+  it("draws the message under the field once the save refused it", () => {
+    const fresh = cloneDefinition({}, "fresh").fresh;
+    const errors = missingCategoryErrors({ fresh }, {}, builtins, choices);
+    expect(identity("fresh", fresh, { errors })).toContain(API_TEXT);
   });
 });

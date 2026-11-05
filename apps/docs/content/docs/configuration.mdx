@@ -2944,20 +2944,27 @@ the console names them:
 | `intel` | Intel / reputation | looks indicators up: reputation and threat intelligence |
 | `other` | Other | none of these, or more than one |
 
-The platform offers an agent its own steps by its category. The first is the
-question about the unread functions around the routines an analyst read: an
-agent in `code_reader` is asked it whenever its entries list code, and where
-none does, its conversation says why. An agent in `static`, `dynamic`,
-`network` or `intel` is not asked. For `other`, the platform works out what it
-can from the agent's tools and what they returned, exactly as it did before the
-field existed: an agent whose calls list code is asked, whatever tool listed
-it. A category never restricts the tools an agent may call.
+The platform offers an agent its own steps by its category. A category only
+adds steps: whatever an agent's category, the platform still works out what it
+can from the agent's tools and what they returned, as it did before the field
+existed, and a category never restricts the tools an agent may call. The first
+step keyed on it is the question about the unread functions around the
+routines an analyst read. Every analyst whose calls list code is asked it,
+whatever its category and whatever tool listed the code. An agent in
+`code_reader` none of whose calls lists code is told why in its conversation,
+where an agent in any other category is left alone. The built-in static
+analyst is a `code_reader`, so it now says when it listed no code.
 
 The built-in definitions ship with theirs: `static` (whose class reads its
 provider's decompiled functions) and `reverser` are `code_reader`, `triage` and
 `android_static` are `static`, `dynamic` and `network` are their own, and
-`judge`, `reporter` and `lead` are `other`. The category is required: the
-settings API refuses a new definition that names none, under the field. A
+`judge`, `reporter` and `lead` are `other`. The category is required: an edit
+through the settings API that creates a definition naming none is refused,
+under the field. A settings import is not refused for it: an export written
+before the field existed gives each new definition the category its role and
+tools fit, by the rule below, and the import answers with a warning under that
+definition's category naming what was set, worded more strongly where the rule
+could not tell and the category is `other`. A
 definition stored before the field existed reads the category its role and
 tools fit, and the `20261103000000` migration writes that value into the store
 once. The rule reads the role, the kinds of the tool references and the input

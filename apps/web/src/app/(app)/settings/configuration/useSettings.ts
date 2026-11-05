@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { getErrorMessage, isForbidden } from "@/lib/errors";
 import { SettingsConflictError, SettingsValidationError } from "@/types/settings";
 import { deepEqual } from "./deepEqual";
+import { AGENT_DEFINITIONS_KEY, builtinAgentKeys, missingCategoryErrors } from "./agentStaging";
 import { keysNeedingPassword, passwordRefusal } from "./signInPolicy";
 import type {
   CatalogEntry,
@@ -286,6 +287,20 @@ export function useSettings() {
       const answer = await askPassword(policy);
       if (answer === null) return null;
       password = answer;
+    }
+    // A new agent with no category is refused before anything is sent, under
+    // its field, in the API's own words (`missingCategoryErrors`).
+    const definitionsEntry = entriesByKey[AGENT_DEFINITIONS_KEY];
+    const uncategorised = missingCategoryErrors(
+      pending[AGENT_DEFINITIONS_KEY],
+      values[AGENT_DEFINITIONS_KEY]?.value,
+      builtinAgentKeys(definitionsEntry?.builtin_agent_keys),
+      definitionsEntry?.agent_category_choices,
+    );
+    if (Object.keys(uncategorised).length > 0) {
+      setErrors(uncategorised);
+      setActionError("Choose a category for each new agent before saving.");
+      return null;
     }
     setSaving(true);
     setErrors({});

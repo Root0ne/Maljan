@@ -204,3 +204,53 @@ export function cloneDefinition(
       : { ...EMPTY_DEFINITION },
   };
 }
+
+/** The categories a definition may declare, for an API that serves no list
+ *  (`core.agent_category.AGENT_CATEGORIES`). */
+export const FALLBACK_AGENT_CATEGORIES = [
+  "code_reader", "static", "dynamic", "network", "intel", "other",
+] as const;
+
+/** The text the API puts under a new definition's missing category
+ *  (`core.agent_category.CATEGORY_REQUIRED`), word for word, so the editor and
+ *  the save say the same. */
+export function categoryRequired(choices: readonly string[] | null | undefined): string {
+  const named = choices && choices.length > 0 ? choices : FALLBACK_AGENT_CATEGORIES;
+  return (
+    "choose the category that matches what this agent does: " +
+    `${named.join(", ")} (other when none fits)`
+  );
+}
+
+/**
+ * Each staged definition the API would refuse for naming no category, as the
+ * error map a refused save carries.
+ *
+ * The API's rule: a definition that is neither a built-in nor already stored
+ * is being created, and must name one. A built-in goes out narrowed to its
+ * role and switch and takes its seed's; a stored one sent back without one
+ * reads the one it fits. Refused here as well, before anything is sent, so
+ * the message stands under the field the operator has to fill.
+ */
+export function missingCategoryErrors(
+  staged: unknown,
+  saved: unknown,
+  builtins: ReadonlySet<string>,
+  choices?: readonly string[] | null,
+): Record<string, string> {
+  if (!staged || typeof staged !== "object" || Array.isArray(staged)) return {};
+  const stored =
+    saved && typeof saved === "object" && !Array.isArray(saved)
+      ? new Set(Object.keys(saved))
+      : new Set<string>();
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(staged as Record<string, unknown>)) {
+    if (builtins.has(key) || stored.has(key)) continue;
+    if (!entry || typeof entry !== "object") continue;
+    const category = (entry as { category?: unknown }).category;
+    if (category === undefined || category === null || category === "") {
+      out[`${AGENT_DEFINITIONS_KEY}.${key}.category`] = categoryRequired(choices);
+    }
+  }
+  return out;
+}
