@@ -535,6 +535,9 @@ class TestAgainstTheSequentialBase:
     published technique they write a procedure for, every request the style and
     ownership rules of the system text, and the requests are the four sections'
     more; the retries and the findings are the base's, the technique named.
+    The request bodies were re-pinned when rule 2 of the system text came to
+    ask for what a fact shows in the sample's terms instead of a named and
+    refuted claim (T-560): that sentence is the only change.
     """
 
     def test_the_requests_and_the_report_are_those_of_the_base(self) -> None:
