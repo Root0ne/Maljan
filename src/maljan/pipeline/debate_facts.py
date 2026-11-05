@@ -49,6 +49,7 @@ size are left out.
 from __future__ import annotations
 
 import bisect
+import functools
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -2207,6 +2208,22 @@ def marks_blanked(text: str) -> str:
     return masked
 
 
+def _covered(spans: Iterable[tuple[int, int]], size: int) -> bytearray:
+    """One byte per character of a text of ``size`` and one more: 1 where a span covers it.
+
+    Each character is written once however many spans cover it, so the map
+    costs no more than the text.
+    """
+    covered = bytearray(size + 1)
+    reached = 0
+    for start, end in sorted(spans):
+        start, end = max(start, reached), min(end, size)
+        if start < end:
+            covered[start:end] = b"\x01" * (end - start)
+        reached = max(reached, end)
+    return covered
+
+
 def clause_tokens(
     text: str, masked: str, at: int, end: int, starts: Sequence[int]
 ) -> frozenset[str]:
@@ -2216,11 +2233,24 @@ def clause_tokens(
     next reference named for an analyst (``starts``), a ";" or the end of the
     sentence after its numbers (``end``), whichever comes first; it is read
     in ``masked`` (:func:`marks_blanked`), so a mark's reason never counts.
+    ``starts`` is sorted, as every caller builds it.
     """
-    next_start = min((s for s in starts if s > at), default=len(text))
-    ended = _CLAUSE_END.search(text, end)
-    clause_end = min(next_start, ended.start() if ended is not None else len(text))
+    after = bisect.bisect_right(starts, at)
+    next_start = starts[after] if after < len(starts) else len(text)
+    ends = _clause_ends(text)
+    ended = bisect.bisect_left(ends, end)
+    clause_end = min(next_start, ends[ended] if ended < len(ends) else len(text))
     return line_tokens(masked[at:clause_end])
+
+
+@functools.lru_cache(maxsize=16)
+def _clause_ends(text: str) -> list[int]:
+    """Where each clause of ``text`` ends (``_CLAUSE_END``), in order: found once per line.
+
+    A string keeps its hash once computed, so the line every reference of it
+    asks about is read for its ends once, not once per reference.
+    """
+    return [m.start() for m in _CLAUSE_END.finditer(text)]
 
 
 def _earlier_round(text: str, start: int, names: Sequence[str]) -> bool:
@@ -2234,6 +2264,43 @@ def _earlier_round(text: str, start: int, names: Sequence[str]) -> bool:
     if found is None:
         return False
     return _short_named(text, max(0, start - 40) + found.start(), names) is not None
+
+
+# "its claim 40", "its own claims 3 and 4": the possessive right before "claim(s)".
+_ITS_BEFORE = re.compile(r"\bits(?:\s++own)?\s*+$", re.IGNORECASE)
+
+
+def _own_references(
+    text: str, names: Sequence[str], field_names: Sequence[str] | None, read: set[int]
+) -> list[tuple[str, int, bool]]:
+    """``(analyst, where its numbers start, False)`` per "its claim N" of a one-analyst line.
+
+    Only on a line whose field names one analyst, and only where no other
+    participant is named in the text before the reference, so "its" can stand
+    for nobody else. Read as the newer reading reads a reference, so a
+    blocking line withdraws such a claim by rule only where the reference's
+    clause shares a ledger id or an address with it (``ExpandedNaming``).
+    """
+    if field_names is None or len(field_names) != 1:
+        return []
+    owner = field_names[0]
+    # Where the first other participant's name ends: a reference after it may
+    # mean that one. Found once, so the line is read in linear time.
+    first_other = min(
+        (m.end() for n in names if n != owner if (m := _name_pattern(n).search(text))),
+        default=len(text) + 1,
+    )
+    out: list[tuple[str, int, bool]] = []
+    for reference in _CLAIM_REFERENCE.finditer(text):
+        at = reference.start(1)
+        if (
+            at in read
+            or first_other <= reference.start()
+            or _ITS_BEFORE.search(text[max(0, reference.start() - 16) : reference.start()]) is None
+        ):
+            continue
+        out.append((owner, at, False))
+    return out
 
 
 class ClaimReference(NamedTuple):
@@ -2261,9 +2328,11 @@ def claim_references_of(
     carried-or-new mark (``without_line_mark``). A reference is read for an
     analyst written by name right before "claim(s) N" (``_claims_named``),
     for the field's one analyst where "claim(s) N" follows the field
-    directly or after the mediator's marks written after it, and for an
+    directly or after the mediator's marks written after it, for an
     analyst a short form of whose name stands before "claim(s) N"
-    (``_short_named``). Its numbers are read whole (:func:`read_claim_numbers`).
+    (``_short_named``), and for the field's one analyst where "its" stands
+    before it and no other participant is named before (``_own_references``).
+    Its numbers are read whole (:func:`read_claim_numbers`).
 
     ``read_before`` says whether the earlier reading read the reference,
     ``in_mark`` whether it stands inside a ``[blocking: ...]`` or ``[not
@@ -2274,7 +2343,7 @@ def claim_references_of(
     an earlier round ("TRIAGE ANALYST round-3 claim 24") is never one: its
     numbers index another answer. Linear in the line.
     """
-    in_marks = [m.span() for m in _MARK_ANYWHERE.finditer(text)]
+    in_marks = _covered((m.span() for m in _MARK_ANYWHERE.finditer(text)), len(text))
     # (analyst, where its numbers start, whether the earlier reading read it).
     found: list[tuple[str, int, bool]] = [
         (name, match.start(1), True) for name, match in _claim_numbers_named(text, names)
@@ -2296,9 +2365,10 @@ def claim_references_of(
         short = _short_named(text, reference.start(), names)
         if short is not None:
             found.append((short, reference.start(1), bool(field_names)))
+    found.extend(_own_references(text, names, field_names, {at for _n, at, _o in found}))
     out: list[ClaimReference] = []
     for name, at, old in found:
-        if any(start <= at < end for start, end in in_marks):
+        if in_marks[at]:
             earlier = _EARLIER_NUMBERS.match(text, at) if old else None
             if earlier is not None:
                 digits = tuple(re.findall(r"\d+", earlier.group(0)))
@@ -2325,19 +2395,17 @@ def unattributed_references(
     earlier round's claim names another answer: none is one. Linear in the
     line.
     """
-    in_marks = [m.span() for m in _MARK_ANYWHERE.finditer(text)]
-    read = [(ref.numbers_start, ref.numbers.end) for ref in references]
+    in_marks = _covered((m.span() for m in _MARK_ANYWHERE.finditer(text)), len(text))
+    read = _covered(((r.numbers_start, r.numbers.end) for r in references), len(text))
     out: list[tuple[int, ClaimNumbers]] = []
     for reference in _CLAIM_REFERENCE.finditer(text):
         at = reference.start(1)
-        if any(start <= at < end for start, end in read) or any(
-            s <= reference.start() < e for s, e in in_marks
-        ):
+        if read[at] or in_marks[reference.start()]:
             continue
         numbers = read_claim_numbers(text, at, names)
         if numbers is None:
             continue
-        read.append((at, numbers.end))
+        read[at : numbers.end] = b"\x01" * (numbers.end - at)
         head = reference.group(0)[: at - reference.start()].lower()
         if head.startswith("claims") and len(numbers.numbers) == 1 and not numbers.unplaced:
             continue
@@ -2482,6 +2550,13 @@ def read_claim_references(
         clause_starts = sorted([*starts, *(at for at, _n in unattributed)])
         for start, numbers in unattributed:
             counted = [n for n in map(_as_claim_number, numbers.numbers) if n is not None]
+            if len(candidates) == 1:
+                # A number the line already names for its one analyst is that
+                # claim written again ("... lower claim 27"), no other one.
+                again = out.get(candidates[0], {})
+                counted = [
+                    n for n in counted if not any(row[0] == number for row in again.get(n, []))
+                ]
             if owners and counted:
                 tokens = clause_tokens(text, masked, start, numbers.end, clause_starts)
                 left: list[int] = []
