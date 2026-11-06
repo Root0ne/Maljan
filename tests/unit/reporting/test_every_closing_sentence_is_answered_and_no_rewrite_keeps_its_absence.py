@@ -626,13 +626,86 @@ def _haiku12_limitations() -> tuple[list[Any], dict[str, Any], dict[str, str]]:
         return next(s for s in held if s.startswith(words))
 
     said = {
+        "C1": opening("The gate routine at 0x6328"),
         "C2": opening("The body of the routine at 0x3868"),
         "C3": opening("Whether the beacon"),
         "C4": opening("The C2 request body"),
         "C5": opening("The C2 protocol beyond"),
+        "C6": opening("The decompiler and disassembler"),
         "SCOPE": opening("Traffic beyond the captured window"),
+        "WRITE": opening("The body of the file-write routine at 0x7acc"),
+        "TASK": opening("The registration routine for the scheduled task (0xc42c)"),
     }
     return passages, by_id, said
+
+
+def _fact_about(by_id: dict[str, Any], offset: str) -> str:
+    """The id of the routine fact whose text writes ``offset`` as its own address first."""
+    own = f"(offset {offset})"
+    return next(
+        pid
+        for pid, p in by_id.items()
+        if pid.startswith(("unread.", "listed.")) and own in p.text.split(" is called")[0][:40]
+    )
+
+
+@pytest.mark.parametrize(
+    ("which", "named"),
+    [("WRITE", "unread"), ("TASK", "unread"), ("SCOPE", "command_and_control")],
+)
+def test_haiku12_s_retry_names_the_sources_a_true_limitation_may_be_kept_on(
+    which: str, named: str
+) -> None:
+    passages, by_id, said = _haiku12_limitations()
+    row = _row("limitations", said[which], "keep", [], reason="no source speaks of it")
+    found = agreement_violations({"sentences": [row]}, passages)
+    (violation,) = [v for v in found if v.code == KEEP_UNQUOTED_CODE]
+    assert "The shown sources that speak of it: [" in violation.message
+    assert f"[{named}" in violation.message
+    assert "Keep it on one of these, quoting its words, or rewrite or drop it." in (
+        violation.message
+    )
+    # Bounded: at most three sources, each excerpt one capped quoted value.
+    assert violation.message.count('] "') + violation.message.count("] '") <= 3
+    if which == "TASK":
+        assert f"[{_fact_about(by_id, '0xc42c')}]" in violation.message
+
+
+def test_haiku12_s_true_limitation_kept_on_the_named_source_stands() -> None:
+    from maljan.reporting.section_agreement import apply_rows
+
+    report, ledger = _stored("haiku12")
+    passages = passages_of(report, entries=ledger)
+    by_id = {p.id: p for p in passages}
+    _p, _b, said = _haiku12_limitations()
+    fact = _fact_about(by_id, "0xc42c")
+    text = by_id[fact].text
+    quote = text[text.index("(offset 0xc42c)") :]
+    row = _row("limitations", said["TASK"], "keep", [fact], quote=quote)
+    found = agreement_violations({"sentences": [row]}, passages)
+    assert KEEP_UNQUOTED_CODE not in [v.code for v in found if v.path.startswith("sentences")]
+    counts, records = apply_rows({"sentences": [row]}, passages)
+    assert said["TASK"] in _limitations(report)
+    assert counts["held_kept"] == 1 and counts["dropped"] == 0
+    assert not [v for v in records if v.code in (DROPPED_CODE, HELD_KEPT_CODE)]
+
+
+def test_haiku12_s_c1_to_c6_kept_unsourced_again_are_left_out_and_recorded() -> None:
+    from maljan.reporting.section_agreement import apply_rows
+
+    report, ledger = _stored("haiku12")
+    passages = passages_of(report, entries=ledger)
+    _p, _b, said = _haiku12_limitations()
+    names = ("C1", "C2", "C3", "C4", "C5", "C6")
+    rows = [
+        _row("limitations", said[n], "keep", [], reason="no source speaks of it") for n in names
+    ]
+    counts, records = apply_rows({"sentences": rows}, passages)
+    body = _limitations(report)
+    assert all(said[n] not in body for n in names)
+    dropped = [v.message for v in records if v.code == DROPPED_CODE]
+    assert counts["dropped"] == len(dropped) == 6
+    assert all(any(said[n][:40] in m for m in dropped) for n in names)
 
 
 @pytest.mark.parametrize("which", ["C2", "C3", "C4", "C5"])

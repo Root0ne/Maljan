@@ -46,6 +46,7 @@ from maljan.reporting.absence_answers import (
     quote_stands,
 )
 from maljan.reporting.section_agreement import (
+    _candidates,
     _reports_a_claim,
     _said_unread,
     _unread_addresses,
@@ -283,6 +284,17 @@ LISTED = [SimpleNamespace(addresses=frozenset({0x1400}), id="listed.1")]
             id="an absence kept among distinct clauses on both sides",
         ),
         pytest.param(lambda t: quote_stands(t[: len(t) // 2], [t]), id="a kept sentence's quote"),
+        pytest.param(
+            lambda t: _candidates(
+                "The more words of 0x1400 are not read.",
+                {
+                    "s": SimpleNamespace(
+                        id="s", kind="section 5", text=t, cites=frozenset(), addresses=frozenset()
+                    )
+                },  # type: ignore[dict-item]
+            ),
+            id="a refused keep's candidate sources",
+        ),
         pytest.param(
             lambda t: failure_counts("4 of 158 calls " * (len(t) // 15) + "failed"),
             id="failure counts",

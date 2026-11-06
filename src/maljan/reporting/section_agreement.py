@@ -2442,7 +2442,9 @@ def _answer_violations(
                         f"{safe_finding_value(', '.join(_form(n) for n in row.sources))}, but "
                         f"its quote {safe_finding_value(problem)}: quote the words of a source "
                         "that state the same thing, or rewrite the sentence on the source that "
-                        "states otherwise."
+                        "states otherwise." + _candidates(sentence, by_id or {})
+                        # The candidates the platform found, so a true limitation is kept
+                        # on its source on the retry rather than lost (T-568).
                     ),
                     path=f"{path}.quote",
                 )
@@ -2459,7 +2461,7 @@ def _answer_violations(
                     f"row {number}: {where} keeps {safe_finding_value(sentence)!r} naming no "
                     f"source, but {safe_finding_value(', '.join(speaking))} speaks of what it "
                     "names: name the source and quote its words that state the same thing, or "
-                    "rewrite the sentence on it."
+                    "rewrite the sentence on it." + _candidates(sentence, by_id or {})
                 ),
                 path=f"{path}.sources",
             )
@@ -2524,31 +2526,74 @@ def _quote_problem(sentence: str, quote: str, texts: Sequence[str]) -> str:
     return ""
 
 
-def _speaking_of(sentence: str, by_id: dict[str, Passage]) -> list[str]:
-    """The shown sources a closing sentence kept on no source is about: a fact about an
-    address it names, or a section 5 passage or a fact holding at least half (two or more)
-    of the words before its first negation, what it denies something of. Each source's
-    words are read once per text."""
+# What a candidate source's excerpt quotes at most, in characters.
+_EXCERPT_CHARS = 160
+
+
+def _speaking_sources(sentence: str, by_id: dict[str, Passage]) -> list[tuple[str, str]]:
+    """The shown sources a closing sentence is about, each with an excerpt, best first.
+
+    A source speaks of the sentence where it is a fact about an address the sentence
+    names, or where it (a section 5 passage, or a fact citing an entry) holds at least
+    half (two or more) of the words before the sentence's first negation, what it
+    denies something of. The excerpt is the source's sentence whose own first address
+    the closing sentence names, then the one naming the most of those words; the
+    sources rank the same way, a fact writing that address first ("0x7acc … is called
+    by …") before one naming it as a caller. On one line, cut at
+    :data:`_EXCERPT_CHARS` characters with the cut marked. Each source's sentences are
+    read once per text.
+    """
     named = frozenset(_addresses_named(sentence))
     subject = absence_subject(sentence)
     least = max(_QUOTE_SHARED, -(-len(subject) // 2))
-    out: list[str] = []
-    for source in by_id.values():
-        if source.kind not in (FACT, SECTION_5):
+    ranked: list[tuple[tuple[int, int, int], int, str, str]] = []
+    for order, source in enumerate(by_id.values()):
+        if source.kind not in (FACT, SECTION_5) or not (source.kind == SECTION_5 or source.cites):
             continue
-        if (
-            named
-            and source.kind == FACT
-            and source.cites
-            and not source.addresses.isdisjoint(named)
-        ):
-            out.append(source.id)
-        elif len(subject) >= _QUOTE_SHARED and (source.kind == SECTION_5 or source.cites):
-            if said_of(source.text).count(subject) >= least:
-                out.append(source.id)
+        by_address = bool(named and source.kind == FACT and not source.addresses.isdisjoint(named))
+        by_subject = len(subject) >= _QUOTE_SHARED and said_of(source.text).count(subject) >= least
+        if not (by_address or by_subject):
+            continue
+        best: tuple[tuple[int, int, int], str] | None = None
+        for part in _sentences_of(source.text):
+            words = said_of(part).count(subject) if len(subject) >= _QUOTE_SHARED else 0
+            # A fact writes its address first, the virtual address and its offset.
+            first = _addresses_named(part)[:2] if named else []
+            own = int(any(address in named for address in first))
+            score = (own, int(by_address and bool(named & set(first))), words)
+            if best is None or score > best[0]:
+                best = (score, part)
+        if best is not None:
+            ranked.append((best[0], order, source.id, _capped(best[1], _EXCERPT_CHARS)))
+    ranked.sort(key=lambda item: (tuple(-n for n in item[0]), item[1]))
+    return [(pid, excerpt) for _score, _order, pid, excerpt in ranked]
+
+
+def _speaking_of(sentence: str, by_id: dict[str, Passage]) -> list[str]:
+    """The ids of :func:`_speaking_sources`, the first :data:`_SPEAKING_SHOWN` and the
+    count of the rest."""
+    out = [pid for pid, _excerpt in _speaking_sources(sentence, by_id)]
     if len(out) > _SPEAKING_SHOWN:
         return [*out[:_SPEAKING_SHOWN], f"{len(out) - _SPEAKING_SHOWN} more"]
     return out
+
+
+def _candidates(sentence: str, by_id: dict[str, Passage]) -> str:
+    """The retry's list of the sources a refused closing keep may rest on, each by id with
+    its excerpt as one quoted value, and what to do with them; ``""`` for none (T-568)."""
+    found = _speaking_sources(sentence, by_id)
+    if not found:
+        return ""
+    shown = "; ".join(
+        f"[{safe_finding_value(pid)}] {quoted_value(safe_finding_value(excerpt))}"
+        for pid, excerpt in found[:_SPEAKING_SHOWN]
+    )
+    more = len(found) - _SPEAKING_SHOWN
+    return (
+        f" The shown sources that speak of it: {shown}"
+        + (f"; and {more} more" if more > 0 else "")
+        + ". Keep it on one of these, quoting its words, or rewrite or drop it."
+    )
 
 
 def _count_violation(number: str, where: str, counts: FailureCounts | None, path: str) -> Violation:
