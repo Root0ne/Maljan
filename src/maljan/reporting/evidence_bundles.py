@@ -211,27 +211,27 @@ _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
-class _NotedRef(str):
-    """A claim's evidence as the sections are shown it, and ``routed``: it without ruling notes.
-
-    The mediator's rulings at the round limit (``ClaimEvidence.limit_rulings``)
-    are noted after a claim's evidence, and their reasons name entries and
-    functions the claim itself never cited. What a section is shown (its
-    claims, the outputs and the code they cite) is chosen by the claim's own
-    evidence (:func:`_routed`); the note reaches the section's text whole.
-    """
-
-    routed: str
+# The key of a claim the mediator ruled on at the round limit
+# (``ClaimEvidence.limit_rulings``) that holds its evidence without the
+# rulings' notes. Their reasons name entries and functions the claim itself
+# never cited, so what a section is shown (its claims, the outputs and the
+# code they cite) is chosen by this; ``evidence_ref`` carries the notes whole
+# to the section's text. A claim with no ruling has no such key.
+ROUTED_REF = "routed_ref"
 
 
 def _routed(claim: Mapping[str, Any]) -> str:
     """The text a claim routes a section by: its sentence and its own evidence."""
-    ref = claim.get("evidence_ref", "")
-    return f"{claim.get('claim', '')} {getattr(ref, 'routed', ref)}"
+    ref = claim.get(ROUTED_REF, claim.get("evidence_ref", ""))
+    return f"{claim.get('claim', '')} {ref}"
 
 
 def _claims_text(report: MalwareReport, isr_reports: dict[str, Any] | None) -> list[dict[str, str]]:
     """Every claim in force as ``{claim, evidence_ref, agent, label}``, in the answers' order.
+
+    A claim the mediator ruled on at the round limit also holds
+    :data:`ROUTED_REF`, its evidence without the rulings, which routes it; the
+    composer renders the fields above alone.
 
     ``label`` names the claim by its analyst and its number in the answer in
     force (``claim_coverage.claim_label``): the name the coverage check reads
@@ -245,29 +245,27 @@ def _claims_text(report: MalwareReport, isr_reports: dict[str, Any] | None) -> l
 
     def _noted(claim: Any) -> str:
         # A claim a tool-less retry added, or one a revision carried forward
-        # unwritten, says so beside its evidence; so does one the mediator
-        # ruled on at the round limit, whose reference then routes by what it
-        # was without the rulings (:class:`_NotedRef`).
+        # unwritten, or one the mediator ruled on at the round limit, says so
+        # beside its evidence.
         ref = str(claim.evidence_ref)
         if claim.added_by_retry_in_round is not None:
             ref = f"{ref} ({retry_added_marker(claim.added_by_retry_in_round)})"
         carried = carried_note(claim)
-        if not getattr(claim, "limit_rulings", None):
-            return f"{ref} ({carried})" if carried else ref
-        unruled = carried_note(dataclasses.replace(claim, limit_rulings=()))
-        noted = _NotedRef(f"{ref} ({carried})")
-        noted.routed = f"{ref} ({unruled})" if unruled else ref
-        return noted
+        return f"{ref} ({carried})" if carried else ref
 
-    return [
-        {
+    def _row(claim: Any) -> dict[str, str]:
+        row = {
             "claim": claim.claim,
             "evidence_ref": _noted(claim),
             "agent": claim.agent,
             "label": claim.label,
         }
-        for claim in claims_in_force(isr_reports)
-    ]
+        if claim.limit_rulings:
+            # Routed by the evidence it had before the rulings were noted.
+            row[ROUTED_REF] = _noted(dataclasses.replace(claim, limit_rulings=()))
+        return row
+
+    return [_row(claim) for claim in claims_in_force(isr_reports)]
 
 
 def _word_starts(text: str) -> Iterator[int]:

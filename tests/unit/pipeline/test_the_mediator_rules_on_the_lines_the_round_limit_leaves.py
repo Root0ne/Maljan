@@ -354,16 +354,18 @@ class TestARulingReasonRoutesNothing:
 
     REASON_NOTE = (
         "at the round limit the mediator ruled blocking line L1 of the round-5 mediation, "
-        "which names this claim, UPHELD: ev_0099 shows the loop at 0x401500 (the mediator's ruling)"
+        "which names this claim, UPHELD: ev_0099 shows the encrypt loop at 0x401500 "
+        "(the mediator's ruling)"
     )
 
-    def _claims(self, ruled: bool) -> list[dict[str, str]]:
+    def _claims(self, ruled: bool, carried: int | None = None) -> list[dict[str, str]]:
         from maljan.reporting.evidence_bundles import _claims_text
 
         claim = ClaimEvidence(
             claim="The packer stub at 0x401000 decodes the payload.",
             evidence_ref="[ev_0012] decode listing",
             confidence=0.7,
+            carried_since_round=carried,
             limit_rulings=[self.REASON_NOTE] if ruled else [],
         )
         isrs = {"static": AgentISR(agent_id="static", domain="static", claims=[claim])}
@@ -383,6 +385,26 @@ class TestARulingReasonRoutesNothing:
         assert [r.key for r in _claimed_rows(ruled[0], by_address, rows, ())] == ["a"]
         assert [r.key for r in _claimed_rows(own[0], by_address, rows, ())] == ["a"]
 
+    def test_a_keyword_only_in_the_reason_pulls_the_claim_into_no_section(self) -> None:
+        from maljan.reporting.evidence_bundles import _filter_claims
+
+        own, ruled = self._claims(False), self._claims(True)
+
+        assert _filter_claims(ruled, ("encrypt",)) == _filter_claims(own, ("encrypt",)) == []
+        # A keyword of the claim's own still does.
+        assert _filter_claims(ruled, ("pack",)) == ruled
+
+    def test_a_carried_and_ruled_claim_routes_on_its_evidence_and_carried_note(self) -> None:
+        from maljan.reporting.evidence_bundles import ROUTED_REF, _routed
+        from maljan.schemas.isr_models import carried_marker
+
+        (claim,) = self._claims(True, carried=2)
+
+        carried = carried_marker(2)
+        assert claim[ROUTED_REF] == f"[ev_0012] decode listing ({carried})"
+        assert claim["evidence_ref"] == f"[ev_0012] decode listing ({carried}; {self.REASON_NOTE})"
+        assert carried in _routed(claim) and "ev_0099" not in _routed(claim)
+
     def test_the_section_s_text_still_carries_the_note_whole(self) -> None:
         import json
 
@@ -390,6 +412,11 @@ class TestARulingReasonRoutesNothing:
 
         assert claim["evidence_ref"] == f"[ev_0012] decode listing ({self.REASON_NOTE})"
         assert self.REASON_NOTE in json.dumps(claim)
+
+    def test_a_claim_with_no_ruling_is_the_row_it_always_was(self) -> None:
+        (claim,) = self._claims(False, carried=2)
+
+        assert list(claim) == ["claim", "evidence_ref", "agent", "label"]
 
 
 class TestTheNoteTravelsWithTheClaim:
