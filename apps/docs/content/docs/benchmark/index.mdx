@@ -54,21 +54,21 @@ export const run = {
     'K1: the link to IcedID appears only in the analysts’ claims in the evidence bundle; the report body never names IcedID.',
     'K4: the bot ID’s format string is in the body, but not the values it is built from.',
     'K6: four beacon types are in the body; types 1 and 2 appear only in an appendix statement, without their meaning.',
-    'K6: three reply verbs are named; the fourth, `ERROR`, is only in the bundle’s decoded strings.',
-    'K7: the command that fetches `bp.dat` is described without naming the IcedID payload it loads.',
-    'K9: `update_data.dat` is named with its role, but without its directory.',
+    'K6: three reply verbs are named; the fourth, ERROR, is only in the bundle’s decoded strings.',
+    'K7: the command that fetches bp.dat is described without naming the IcedID payload it loads.',
+    'K9: update_data.dat is named with its role, but without its directory.',
   ],
   beyondExamples: [
     ['The compile time stamp, 2024-03-25 15:54:25 UTC', 'ev_0004'],
-    ['The export directory’s own name, `UpdaterTag.dll`', 'ev_0004'],
+    ['The export directory’s own name, UpdaterTag.dll', 'ev_0004'],
     ['Five sections with their entropies, and no packer', 'ev_0004, ev_0050'],
-    ['The string cipher in full: seed `0x33629d40`, length XOR the low 16 bits of the seed, first key `0x41`, decoder at `0xae78`', 'ev_0021, ev_0077, ev_0079'],
-    ['The order in which `0x6328` calls the resolver tables, and that any failure returns -1', 'ev_0086'],
-    ['The `Content-Type: application/x-www-form-urlencoded` header on the beacon', 'ev_0021'],
-    ['The command thread that runs each discovery line through a pipe, with its `STARTUPINFO` flags', 'ev_0079, ev_0025'],
-    ['The full command dispatcher at `0x3cf4`, code by code', 'ev_0084'],
+    ['The string cipher in full: seed 0x33629d40, length XOR the low 16 bits of the seed, first key 0x41, decoder at 0xae78', 'ev_0021, ev_0077, ev_0079'],
+    ['The order in which 0x6328 calls the resolver tables, and that any failure returns -1', 'ev_0086'],
+    ['The Content-Type: application/x-www-form-urlencoded header on the beacon', 'ev_0021'],
+    ['The command thread that runs each discovery line through a pipe, with its STARTUPINFO flags', 'ev_0079, ev_0025'],
+    ['The full command dispatcher at 0x3cf4, code by code', 'ev_0084'],
     ['The VirusTotal score at analysis time, 56 of 75', 'ev_0018'],
-    ['The sandbox’s two `rundll32.exe <sample>.dll,#1` launches', 'ev_0012'],
+    ['The sandbox’s two rundll32.exe <sample>.dll,#1 launches', 'ev_0012'],
   ],
   knownGaps: [
     'The Limitations section has six sentences that disagree with the report body or the ledger. Three say the request body, the reply protocol and the environment gates were not established, while the C2 section describes them from code.',
@@ -233,7 +233,7 @@ listed separately and left out of the total.
 
 <ul>
   {run.partlyItems.map((item) => (
-    <li key={item}>{item.split('`').map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part))}</li>
+    <li key={item}>{item}</li>
   ))}
 </ul>
 
@@ -253,7 +253,7 @@ reports describe only by behaviour, and named them by address. A sample:
   <tbody>
     {run.beyondExamples.map(([fact, entries]) => (
       <tr key={fact}>
-        <td>{fact.split('`').map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part))}</td>
+        <td>{fact}</td>
         <td><code>{entries}</code></td>
       </tr>
     ))}
