@@ -443,10 +443,10 @@ class ObjectStoreAnchor(ChainAnchor):
     def _bucket_lock(self) -> BucketLock:
         if self._lock is not None:
             return self._lock
-        from app.config import settings
+        from app.services import object_store
 
         try:
-            config = self._client().get_object_lock_config(settings.minio_bucket)
+            config = self._client().get_object_lock_config(object_store.bucket(self._client()))
         except Exception as exc:  # noqa: BLE001 — sorted below: no lock, or the store is down
             code = getattr(exc, "code", "")
             if code in ("ObjectLockConfigurationNotFoundError", "InvalidRequest"):
@@ -462,10 +462,10 @@ class ObjectStoreAnchor(ChainAnchor):
         return self._lock
 
     def _read(self, name: str, version_id: str | None = None) -> AnchoredHead:
-        from app.config import settings
+        from app.services import object_store
 
         kwargs = {"version_id": version_id} if version_id else {}
-        response = self._client().get_object(settings.minio_bucket, name, **kwargs)
+        response = self._client().get_object(object_store.bucket(self._client()), name, **kwargs)
         try:
             body = bytes(response.read())
         finally:
@@ -475,7 +475,7 @@ class ObjectStoreAnchor(ChainAnchor):
 
     def _listing(self, *, prefix: str = OBJECT_PREFIX, start_after: str | None = None) -> dict:
         """Every head object under ``prefix`` after ``start_after``, by name, with its versions."""
-        from app.config import settings
+        from app.services import object_store
 
         kwargs: dict[str, Any] = {"prefix": prefix, "recursive": True}
         if self._bucket_lock().enabled:
@@ -483,7 +483,7 @@ class ObjectStoreAnchor(ChainAnchor):
         if start_after:
             kwargs["start_after"] = start_after
         found: dict[str, list[Any]] = {}
-        for item in self._client().list_objects(settings.minio_bucket, **kwargs):
+        for item in self._client().list_objects(object_store.bucket(self._client()), **kwargs):
             name = str(item.object_name)
             if name.startswith(OBJECT_PREFIX) and name.endswith(".json"):
                 found.setdefault(name, []).append(item)
@@ -535,7 +535,6 @@ class ObjectStoreAnchor(ChainAnchor):
         return self._read(name, self._first(versions))
 
     def _put(self, head: AnchoredHead) -> None:
-        from app.config import settings
         from app.services import object_store
 
         store = self._client()
@@ -550,7 +549,7 @@ class ObjectStoreAnchor(ChainAnchor):
         record = dict(head.record(), anchored_at=datetime.now(UTC).isoformat())
         blob = json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
         store.put_object(
-            settings.minio_bucket,
+            object_store.bucket(store),
             name,
             io.BytesIO(blob),
             length=len(blob),

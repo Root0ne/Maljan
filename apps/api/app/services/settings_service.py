@@ -62,6 +62,7 @@ from app.services.server_map import (
     TOKEN_MASK,
     ServerMapError,
     env_of_row,
+    env_under_current_names,
     merge_server_secrets,
     server_env_key,
     server_token_key,
@@ -740,7 +741,9 @@ def _with_env_names(stored_map: dict[str, Any], rows: dict[str, Any]) -> dict[st
         except box.SecretsUnavailable:
             continue
         if env is not None:
-            out[name] = {**entry, "env": env}
+            # Shown under the current names, as the run reads them
+            # (``server_map.env_under_current_names``).
+            out[name] = {**entry, "env": env_under_current_names(env)}
     return out
 
 

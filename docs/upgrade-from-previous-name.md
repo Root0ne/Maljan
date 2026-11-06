@@ -61,8 +61,11 @@ from `QDRANT_API_KEY` in the env file, never printed), `--apply` creates the
 new default names as aliases of them where the new names are free, so memory
 reads what it held; without it the script prints the two requests. Or point
 `core.memory.qdrant.collection` and `core.memory.qdrant.function_hash_collection`
-at the old names in the console. The marker of the memory repair an earlier
-release finished is still found, so the repair does not run again.
+at the old names in the console. Where neither was done, a store whose
+default collection is absent and whose old twin holds data reads the twin and
+says so in the log; it never creates an empty collection beside it. The
+marker of the memory repair an earlier release finished is still found, so the
+repair does not run again.
 
 ## MinIO
 
@@ -72,6 +75,10 @@ anchor, the anchored audit heads (`audit-chain/head/`) are in the bucket
 Keep it: the compose file now passes `MINIO_BUCKET` to the API and the
 workers, and `--apply` sets `MINIO_BUCKET=maljan-samples` in the env file when
 the copied MinIO data holds that bucket.
+
+If `MINIO_BUCKET` is not set, the default bucket is missing and
+`maljan-samples` is there, the API uses `maljan-samples` and the log names
+`MINIO_BUCKET`; it never creates an empty bucket beside it.
 
 Do not let the API start on a new, empty bucket while an audit head is
 anchored in the old one: the anchor would read empty beside the database's

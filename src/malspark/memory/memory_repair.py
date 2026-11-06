@@ -72,6 +72,32 @@ def _previous(name: str) -> str:
     return f"{PREVIOUS_NAME}_{name[len(current) :]}" if name.startswith(current) else name
 
 
+def collection_in_use(client: Any, name: str, owner: str) -> tuple[str, bool]:
+    """The collection a store named ``name`` reads, and whether it exists.
+
+    ``name`` itself when the server holds it (a collection or an alias). When it
+    does not and its twin under the product's previous name does, the twin: a
+    deployment upgraded without aliasing its collections keeps reading what it
+    held, and no empty collection is created beside it. The switch is named in
+    the log. Raises what the server raises.
+    """
+    names = _collections(client)
+    if name in names:
+        return name, True
+    twin = _previous(name)
+    if twin != name and twin in names:
+        logger.warning(
+            "%s: collection %r is absent and %r, its name before the product's rename, "
+            "holds the data; reading it. Alias the new name to it, or name it in the "
+            "settings, to keep this.",
+            owner,
+            name,
+            twin,
+        )
+        return twin, True
+    return name, False
+
+
 def _pages(client: Any, collection: str) -> Any:
     """Every point of ``collection``, one page at a time, with its payload and no vector."""
     offset: Any = None

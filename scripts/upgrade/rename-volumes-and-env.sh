@@ -202,6 +202,10 @@ else
     if grep -qE '^[[:space:]]*(export[[:space:]]+)?MINIO_BUCKET=' "$env_file"; then
       echo "  keep MINIO_BUCKET: it is already set; it must name the bucket the data is in"
     elif [ "$apply" -eq 1 ]; then
+      # A file whose last line has no newline gets one first.
+      if [ -s "$env_file" ] && [ -n "$(tail -c 1 "$env_file")" ]; then
+        printf '\n' >>"$env_file"
+      fi
       printf 'MINIO_BUCKET=%s\n' "$OLD-samples" >>"$env_file"
       echo "  set MINIO_BUCKET to the bucket the copied data holds"
     else
@@ -229,7 +233,10 @@ if [ -z "$qdrant_url" ] || ! command -v curl >/dev/null 2>&1; then
   done
 else
   # The key goes to curl on its standard input, never on its command line.
-  qdrant_key="$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?QDRANT_API_KEY=//p' "$env_file" 2>/dev/null | tail -1)"
+  qdrant_key=
+  if [ -f "$env_file" ]; then
+    qdrant_key="$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?QDRANT_API_KEY=//p' "$env_file" | tail -1 || true)"
+  fi
   qdrant() {
     printf 'header = "api-key: %s"\n' "$qdrant_key" \
       | curl -sS --fail -K - -H 'Content-Type: application/json' "$@"
@@ -290,13 +297,15 @@ copy refuses any other (run it with the new stack up and MINIO_BUCKET unset):
 
 docker compose -f docker/docker-compose.yml exec -T api python - <<'PY'
 from minio.commonconfig import CopySource
+from minio.error import S3Error
 from app.config import settings
 from app.services.object_store import client
 store, old = client(), "$OLD-samples"
 try:
     store.get_object_lock_config(old)
-except Exception:
-    pass
+except S3Error as exc:
+    if exc.code != "ObjectLockConfigurationNotFoundError":
+        raise
 else:
     raise SystemExit(f"{old} has object lock: keep it with MINIO_BUCKET={old}")
 if any(True for _ in store.list_objects(old, prefix="audit-chain/head/", recursive=True)):

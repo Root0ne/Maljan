@@ -347,3 +347,184 @@ def test_a_previous_prefix_variable_is_named_never_its_value(caplog: Any) -> Non
 )
 def test_every_process_that_imports_the_platform_warns_at_start(path: str) -> None:
     assert "warn_previous_environment(" in (ROOT / path).read_text(encoding="utf-8")
+
+
+# ---- an encrypted env row shown and sent back under the current names -------
+
+
+def test_an_encrypted_env_row_round_trips_through_the_editor(monkeypatch: Any) -> None:
+    from app.services import settings_service
+    from app.services.server_map import TOKEN_MASK, _keep_masked_env
+
+    row = SimpleNamespace(value="sealed")
+    stored_env = {f"{OLD_ENV}SIGMA_RULES_DIR": "/rules", "API_KEY": "k"}
+    monkeypatch.setattr(settings_service.box, "decrypt", lambda _v: json.dumps(stored_env))
+    shown = settings_service._with_env_names(
+        {"analysis": {"command": "x"}}, {"core.mcp.servers.analysis.env": row}
+    )
+    assert shown["analysis"]["env"] == {f"{NEW_ENV}SIGMA_RULES_DIR": "/rules", "API_KEY": "k"}
+
+    sent_back = {"analysis": {"command": "x", "env": {f"{NEW_ENV}SIGMA_RULES_DIR": TOKEN_MASK}}}
+    kept = _keep_masked_env(sent_back, {"analysis": {"command": "x", "env": stored_env}})
+    assert kept["analysis"]["env"] == {f"{NEW_ENV}SIGMA_RULES_DIR": "/rules"}, "never dropped"
+
+
+# ---- the MinIO bucket a deployment held before the rename -------------------
+
+
+class _Store:
+    def __init__(self, buckets: set[str]) -> None:
+        self.buckets = set(buckets)
+        self.made: list[str] = []
+
+    def bucket_exists(self, name: str) -> bool:
+        return name in self.buckets
+
+    def make_bucket(self, name: str) -> None:
+        self.made.append(name)
+        self.buckets.add(name)
+
+    def set_bucket_policy(self, name: str, policy: str) -> None:
+        return None
+
+
+@pytest.fixture
+def unsettled(monkeypatch: Any) -> Any:
+    from app.services import object_store
+
+    monkeypatch.setattr(object_store, "_SETTLED", {})
+    return object_store
+
+
+def test_an_unset_bucket_uses_the_previous_one_and_creates_no_twin(
+    unsettled: Any, monkeypatch: Any, caplog: Any
+) -> None:
+    from app.config import get_settings
+
+    if "minio_bucket" in get_settings().model_fields_set:
+        pytest.skip("MINIO_BUCKET is set in this environment")
+    previous = f"{PREVIOUS_NAME}-samples"
+    assert unsettled.PREVIOUS_BUCKET == previous
+    store = _Store({previous})
+    with caplog.at_level(logging.WARNING):
+        assert unsettled.bucket(store) == previous
+        unsettled.ensure_bucket(store)
+        unsettled.bucket(store)
+    assert store.made == [], "no empty bucket beside the old one"
+    named = [r.getMessage() for r in caplog.records if "MINIO_BUCKET" in r.getMessage()]
+    assert len(named) == 1 and previous in named[0]
+
+
+def test_a_fresh_deployment_creates_the_default_bucket(unsettled: Any) -> None:
+    from app.config import get_settings
+
+    if "minio_bucket" in get_settings().model_fields_set:
+        pytest.skip("MINIO_BUCKET is set in this environment")
+    store = _Store(set())
+    unsettled.ensure_bucket(store)
+    assert store.made == [f"{CURRENT_NAME}-samples"]
+
+
+def test_a_store_that_cannot_answer_settles_nothing(unsettled: Any) -> None:
+    class _Down:
+        def bucket_exists(self, name: str) -> bool:
+            raise OSError("down")
+
+    assert unsettled.bucket(_Down()) == unsettled.settings.minio_bucket
+    assert unsettled._SETTLED == {}
+
+
+def test_a_configured_bucket_is_used_as_configured(unsettled: Any, monkeypatch: Any) -> None:
+    import app.config
+
+    configured = SimpleNamespace(model_fields_set={"minio_bucket"}, minio_bucket="mine")
+    monkeypatch.setattr(app.config, "get_settings", lambda: configured)
+    store = _Store({f"{PREVIOUS_NAME}-samples"})
+    unsettled.ensure_bucket(store)
+    assert store.made == ["mine"]
+
+
+# ---- the upgrade script, against a stub docker ------------------------------
+
+
+SCRIPT = ROOT / "scripts" / "upgrade" / "rename-volumes-and-env.sh"
+STUB_DOCKER = """#!/bin/sh
+echo "docker $*" >> "$STUB_LOG"
+case "$1 $2" in
+  "volume ls") printf '%s_minio_data\\nother\\n' "$OLD" ;;
+  "volume inspect") exit 1 ;;
+  "ps -q") : ;;
+esac
+exit 0
+"""
+
+
+def _script(tmp_path: Path, env_text: str, *args: str) -> tuple[str, str, str]:
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    docker = bin_dir / "docker"
+    docker.write_text(STUB_DOCKER, encoding="utf-8")
+    docker.chmod(0o755)
+    env_file = tmp_path / "env"
+    if not env_file.exists():
+        env_file.write_text(env_text, encoding="utf-8")
+    log = tmp_path / "log"
+    done = subprocess.run(
+        ["bash", str(SCRIPT), "--env-file", str(env_file), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "STUB_LOG": str(log),
+            "OLD": PREVIOUS_NAME,
+        },
+        timeout=60,
+    )
+    return done.stdout, env_file.read_text(encoding="utf-8"), log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("ending", ["\n", ""])
+def test_the_script_pins_the_old_bucket_on_its_own_line(tmp_path: Path, ending: str) -> None:
+    out, env, log = _script(tmp_path, f"{OLD_ENV}UID=1{ending}", "--apply")
+    previous = f"{PREVIOUS_NAME}-samples"
+    assert f"test -d /data/{previous}" in log, "the copied MinIO data is checked for the bucket"
+    assert env.splitlines() == [f"{NEW_ENV}UID=1", f"MINIO_BUCKET={previous}"]
+    assert "set MINIO_BUCKET" in out
+
+
+def test_the_script_s_plan_writes_nothing(tmp_path: Path) -> None:
+    out, env, _log = _script(tmp_path, f"{OLD_ENV}UID=1\n")
+    assert env == f"{OLD_ENV}UID=1\n"
+    assert "set MINIO_BUCKET" in out
+
+
+def test_the_script_keeps_a_set_bucket_and_never_overwrites_a_backup(tmp_path: Path) -> None:
+    (tmp_path / "env.before-malspark").write_text("EARLIER\n", encoding="utf-8")
+    out, env, _log = _script(tmp_path, f"{OLD_ENV}UID=1\nMINIO_BUCKET=mine\n", "--apply")
+    assert "MINIO_BUCKET=mine" in env.splitlines()
+    assert env.count("MINIO_BUCKET=") == 1
+    assert (tmp_path / "env.before-malspark").read_text(encoding="utf-8") == "EARLIER\n"
+    backups = sorted(p.name for p in tmp_path.glob("env.before-malspark.*"))
+    assert len(backups) == 1
+    assert "keep MINIO_BUCKET" in out
+
+
+def test_the_script_without_an_env_file_still_runs_with_a_qdrant_url(tmp_path: Path) -> None:
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "curl").write_text("#!/bin/sh\ncat >/dev/null\necho '{}'\n", encoding="utf-8")
+    (bin_dir / "curl").chmod(0o755)
+    done = subprocess.run(
+        ["bash", str(SCRIPT), "--env-file", str(tmp_path / "absent"), "--qdrant-url", "http://q"],
+        capture_output=True,
+        text=True,
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin"},
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "Qdrant:" in done.stdout and "MinIO:" in done.stdout

@@ -42,6 +42,7 @@ from malspark.core.exceptions import MemoryStoreError
 from malspark.core.logger import logger
 from malspark.core.settings_overrides import redact_url
 from malspark.memory.long_term_memory import family_key, owner_key
+from malspark.memory.memory_repair import collection_in_use
 
 # 1-dim dummy vector: we only ever filter by payload, never search by vector.
 _DUMMY_VECTOR: list[float] = [1.0]
@@ -444,8 +445,11 @@ class FunctionHashStore:
 
     def _collection_exists(self) -> bool:
         try:
-            existing = {c.name for c in self._client.get_collections().collections}
-            return self._collection in existing
+            # A collection or an alias; else its twin under the previous name.
+            self._collection, held = collection_in_use(
+                self._client, self._collection, "FunctionHashStore"
+            )
+            return held
         except Exception as exc:
             logger.warning("FunctionHashStore._collection_exists error: %s", exc)
             return False

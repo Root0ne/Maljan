@@ -54,7 +54,7 @@ from malspark.core.logger import logger
 from malspark.core.settings_overrides import redact_url
 from malspark.memory.embeddings import EMBED_DIM, cosine, encode_with_backend, model_backend_id
 from malspark.memory.long_term_memory import StoredCase, owner_key
-from malspark.memory.memory_repair import aliases
+from malspark.memory.memory_repair import collection_in_use
 
 # The payload keys the scoping reads.
 OWNER_KEY = "owner"
@@ -455,13 +455,14 @@ class QdrantStore:
     def readiness(self) -> str:
         """Ask the server for its collections; raise ``MemoryStoreError`` when it cannot answer."""
         try:
-            existing = {c.name for c in self._client.get_collections().collections}
-            existing |= aliases(self._client)
+            self._collection, held = collection_in_use(
+                self._client, self._collection, "QdrantStore"
+            )
         except Exception as exc:
             raise MemoryStoreError(
                 redact_url(f"Qdrant at {self._url} did not answer: {exc}")
             ) from exc
-        if self._collection in existing:
+        if held:
             return f"ready; collection {self._collection!r} exists"
         return f"ready; collection {self._collection!r} is created on first write"
 
@@ -547,9 +548,11 @@ class QdrantStore:
     def _collection_exists(self) -> bool:
         """Return True if the Qdrant collection currently exists."""
         try:
-            existing = {c.name for c in self._client.get_collections().collections}
-            existing |= aliases(self._client)
-            return self._collection in existing
+            # A collection or an alias; else its twin under the previous name.
+            self._collection, held = collection_in_use(
+                self._client, self._collection, "QdrantStore"
+            )
+            return held
         except Exception as exc:
             logger.warning("QdrantStore._collection_exists error: %s", exc)
             return False
