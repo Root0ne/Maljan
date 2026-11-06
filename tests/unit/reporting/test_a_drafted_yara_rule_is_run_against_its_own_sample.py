@@ -30,10 +30,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.core import ctype_locale
-from maljan.reporting import detection_signatures as drafts
-from maljan.reporting.builder import build_consolidated_iocs
-from maljan.reporting.detection_signatures import (
+from malspark.core import ctype_locale
+from malspark.reporting import detection_signatures as drafts
+from malspark.reporting.builder import build_consolidated_iocs
+from malspark.reporting.detection_signatures import (
     NOT_CHECKED_NO_ANSWER,
     NOT_CHECKED_NO_BUDGET,
     NOT_CHECKED_NO_ENGINE,
@@ -47,7 +47,7 @@ from maljan.reporting.detection_signatures import (
     OwnSample,
     build_detection_rules,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     DetectionRule,
     FileHashes,
     MalwareReport,
@@ -55,7 +55,7 @@ from maljan.reporting.models import (
     NetworkIOCs,
     SampleIdentity,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 needs_engine = pytest.mark.skipif(not drafts._YARA_AVAILABLE, reason="yara-python is not installed")
 
@@ -296,7 +296,7 @@ class TestTheEngineSaysWhichClauseHeld:
         assert path.read_bytes() == BOTH
 
     def test_the_html_report_says_it_too(self, tmp_path: Path) -> None:
-        from maljan.reporting.renderers import HtmlRenderer
+        from malspark.reporting.renderers import HtmlRenderer
 
         path = _sample(tmp_path, ONLY_FIRST)
         report = _drafted(_report(), OwnSample(path=str(path), budget_seconds=BUDGET))
@@ -310,7 +310,7 @@ class TestTheDraftAndItsProbeAreWrittenFromOneDeclaration:
 
     def _rendered(self, imphash: str | None = "d" * 32) -> Any:
         return drafts._render_yara(
-            rule_name="Maljan_AutoGen_loader",
+            rule_name="Malspark_AutoGen_loader",
             sha256=NOT_THE_SAMPLE,
             imphash=imphash,
             strings=[(f"$s{n}", value) for n, value in enumerate(self.VALUES)],
@@ -368,7 +368,7 @@ class TestTheDraftAndItsProbeAreWrittenFromOneDeclaration:
 
         assert len(names) == len(set(names)) == len(self.VALUES) + 4
         assert not set(names) & keywords
-        assert not [name for name in names if name.startswith("Maljan_AutoGen_")]
+        assert not [name for name in names if name.startswith("Malspark_AutoGen_")]
 
 
 @needs_engine
@@ -435,7 +435,7 @@ class TestTheProbeAnswersAsTheDraftDoes:
             sha256 = _sha256(blob) if rng.random() < 0.2 else NOT_THE_SAMPLE
             slots = [f"$s{n}" for n in range(count)]
             rendered = drafts._render_yara(
-                rule_name="Maljan_AutoGen_loader",
+                rule_name="Malspark_AutoGen_loader",
                 sha256=sha256,
                 imphash="d" * 32 if rng.random() < 0.3 else None,
                 strings=list(zip(slots, values, strict=True)),
@@ -722,11 +722,11 @@ class TestAnEngineThatFoldsCaseWronglyIsNotTrusted:
     SHAPE = """
         import sys, tempfile
         from pathlib import Path
-        from maljan.core import ctype_locale
+        from malspark.core import ctype_locale
 
         def check():
-            from maljan.reporting import detection_signatures as drafts
-            from maljan.reporting.detection_signatures import OwnSample
+            from malspark.reporting import detection_signatures as drafts
+            from malspark.reporting.detection_signatures import OwnSample
 
             folder = Path(tempfile.mkdtemp())
             path = folder / "sample.bin"
@@ -736,7 +736,7 @@ class TestAnEngineThatFoldsCaseWronglyIsNotTrusted:
             )
             slots = ["$s0", "$s1"]
             rendered = drafts._render_yara(
-                rule_name="Maljan_AutoGen_loader", sha256="c" * 64, imphash=None,
+                rule_name="Malspark_AutoGen_loader", sha256="c" * 64, imphash=None,
                 strings=list(zip(slots, [
                     "Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run", "mail.example.org"
                 ])),
@@ -852,8 +852,8 @@ class TestOnlyTheYaraDraftCarriesACheck:
 class TestAStoredRuleReadsAsBefore:
     STORED = {
         "kind": "yara",
-        "name": "Maljan_AutoGen_loader",
-        "body": "rule Maljan_AutoGen_loader\n{\n    condition:\n        (filesize > 0)\n}\n",
+        "name": "Malspark_AutoGen_loader",
+        "body": "rule Malspark_AutoGen_loader\n{\n    condition:\n        (filesize > 0)\n}\n",
         "auto_generated": True,
         "source_evidence": ["sha256:" + NOT_THE_SAMPLE],
         "compile_error": None,
@@ -878,8 +878,8 @@ class TestAStoredRuleReadsAsBefore:
 
 class TestTheReportNodeHandsTheDrafterItsSample:
     def test_the_budget_is_the_operator_s_setting(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.pipeline.nodes import _rule_check_budget
+        from malspark.core.config import Settings
+        from malspark.pipeline.nodes import _rule_check_budget
 
         settings = Settings()
 
@@ -890,8 +890,8 @@ class TestTheReportNodeHandsTheDrafterItsSample:
 
     def test_the_budget_is_read_from_no_tool_s_block(self) -> None:
         """The check's budget is the report's own setting, whatever the static blocks hold."""
-        from maljan.core.config import Settings
-        from maljan.pipeline.nodes import _rule_check_budget
+        from malspark.core.config import Settings
+        from malspark.pipeline.nodes import _rule_check_budget
 
         settings = Settings.model_validate({"reporting": {"detection_rule_check_seconds": 12}})
 
@@ -901,8 +901,8 @@ class TestTheReportNodeHandsTheDrafterItsSample:
     @needs_engine
     @pytest.mark.asyncio
     async def test_the_node_checks_the_draft_on_the_file_it_read(self, tmp_path: Path) -> None:
-        from maljan.pipeline.nodes import make_report_node
-        from maljan.reporting.builder import MalwareReportBuilder
+        from malspark.pipeline.nodes import make_report_node
+        from malspark.reporting.builder import MalwareReportBuilder
         from tests.stages import paper_profile
         from tests.unit.pipeline.test_what_is_served_is_the_final_report import _state
 

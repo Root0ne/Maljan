@@ -21,14 +21,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.ledger_projection import network_from_ledger
-from maljan.reporting.models import MalwareReport, NetworkIOCs
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.ledger_projection import network_from_ledger
+from malspark.reporting.models import MalwareReport, NetworkIOCs
+from malspark.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_ENDPOINT_CODE,
     ExtendedSTIXRenderer,
 )
-from maljan.schemas.evidence import build_entry
+from malspark.schemas.evidence import build_entry
 
 INTERNAL = "fileserver.corp.internal"
 REAL = "c2.evil.example.com"
@@ -110,7 +110,7 @@ class TestTheProjectionKeepsWhatSomebodyWatched:
             assert [d.fqdn for d in network.domains] == [name], name
 
     def test_an_analyst_artefact_is_kept_the_same_way(self) -> None:
-        from maljan.schemas.isr_models import AgentISR, Artifact
+        from malspark.schemas.isr_models import AgentISR, Artifact
 
         isr = AgentISR(
             agent_id="network",
@@ -171,7 +171,7 @@ class TestTheExportRefusesItAndSaysSo:
         assert UNPUBLISHABLE_ENDPOINT_CODE in dict(renderer.declined)
 
     def test_a_string_derived_name_is_held_back_without_a_row(self) -> None:
-        from maljan.reporting.models import NetworkDomain
+        from malspark.reporting.models import NetworkDomain
 
         renderer = ExtendedSTIXRenderer()
 

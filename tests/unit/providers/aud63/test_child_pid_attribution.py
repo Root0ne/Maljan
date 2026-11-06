@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from maljan.core.config import MCPServerConfig
-from maljan.providers import servers
-from maljan.providers.servers import ServerHandle
+from malspark.core.config import MCPServerConfig
+from malspark.providers import servers
+from malspark.providers.servers import ServerHandle
 
 
 def test_a_pid_claimed_by_one_handle_is_not_taken_by_another(monkeypatch):
@@ -80,7 +80,7 @@ def test_two_handles_opening_together_each_get_their_own_child(monkeypatch):
         self._launch_argv = ("same",)
         return _Toolkit()
 
-    import maljan.agents.base_agent as base_agent
+    import malspark.agents.base_agent as base_agent
 
     monkeypatch.setattr(servers, "_run_async", run)
     monkeypatch.setattr(servers, "_own_child_pids", lambda: set(children))
@@ -144,7 +144,7 @@ def test_opens_are_not_serialised_across_initialize(monkeypatch):
         self._launch_argv = ("slow",)
         return _Toolkit()
 
-    import maljan.agents.base_agent as base_agent
+    import malspark.agents.base_agent as base_agent
 
     monkeypatch.setattr(servers, "_run_async", run)
     monkeypatch.setattr(servers, "_own_child_pids", lambda: set(children))

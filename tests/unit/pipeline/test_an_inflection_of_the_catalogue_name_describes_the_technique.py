@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     claim_does_not_describe_violation,
     validate_isr,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.tools import knowledge
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.tools import knowledge
 
 PE = {"platform": "windows", "file_type": "pe"}
 
@@ -80,13 +80,13 @@ UNRELATED = (
 
 
 def _every_technique() -> list[str]:
-    from maljan.memory.attck_loader import valid_ids
+    from malspark.memory.attck_loader import valid_ids
 
     return sorted(valid_ids())
 
 
 def test_no_catalogue_name_shares_a_term_with_a_word_of_its_own() -> None:
-    from maljan.pipeline.validation import _name_terms, _stem
+    from malspark.pipeline.validation import _name_terms, _stem
 
     shared = []
     for tid in _every_technique():
@@ -98,7 +98,7 @@ def test_no_catalogue_name_shares_a_term_with_a_word_of_its_own() -> None:
 
 
 def test_the_inflections_come_from_the_leading_verb_only() -> None:
-    from maljan.pipeline.validation import _inflected_forms
+    from malspark.pipeline.validation import _inflected_forms
 
     assert _inflected_forms("Deobfuscate/Decode Files or Information") == {
         "deobfuscates",

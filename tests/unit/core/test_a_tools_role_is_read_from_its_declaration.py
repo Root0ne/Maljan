@@ -17,9 +17,9 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.core import undeclared_tools as roles
-from maljan.core.config import Settings
-from maljan.core.tool_declarations import ToolFacts
+from malspark.core import undeclared_tools as roles
+from malspark.core.config import Settings
+from malspark.core.tool_declarations import ToolFacts
 
 
 class _Args(BaseModel):
@@ -34,7 +34,7 @@ def _tool(name: str, server: str = "") -> Any:
         func=None, coroutine=_run, name=name, description=name, args_schema=_Args
     )
     if server:
-        tool = tool.model_copy(update={"metadata": {"maljan_server": server}})
+        tool = tool.model_copy(update={"metadata": {"malspark_server": server}})
     return tool
 
 
@@ -67,7 +67,7 @@ class TestRoles:
     def test_the_prompt_reads_an_offered_tool_by_its_declared_kind(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import prompt_fragments, tool_pinning
+        from malspark.agents import prompt_fragments, tool_pinning
 
         declared = {"pseudo_c": _facts("decompile"), "who_calls": _facts("xrefs")}
         monkeypatch.setattr(
@@ -83,7 +83,7 @@ class TestRoles:
 
 class TestTheDescriptionTag:
     def test_a_declared_category_wins_over_the_name(self) -> None:
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         toolkit = MCPLangChainToolkit(categories={"get_thing": "analyze"})
         assert toolkit._tag_description("get_thing", "x") == "[ANALYZE] x"
@@ -103,7 +103,7 @@ class TestAddressArguments:
         assert "start" not in roles.ADDRESS_ARGUMENTS
 
     def test_a_decompile_given_its_address_under_a_declared_name_is_placed(self) -> None:
-        from maljan.pipeline.validation import decompiled_functions
+        from malspark.pipeline.validation import decompiled_functions
 
         entry = SimpleNamespace(
             id="ev_0001",
@@ -119,7 +119,7 @@ class TestAddressArguments:
         assert function.address == 0x401000
 
     def test_the_stored_facts_carry_the_declared_arguments(self) -> None:
-        from maljan.core.declared_reading import stored_record
+        from malspark.core.declared_reading import stored_record
 
         record = stored_record(_facts("decompile", arguments={"address": "offset_va"}))
         assert record["arguments"] == {"address": "offset_va"}
@@ -172,7 +172,7 @@ class TestCaptureTools:
     def test_a_capture_tool_is_offered_by_its_declared_kind_under_its_own_name(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import network_analyst, tool_pinning
+        from malspark.agents import network_analyst, tool_pinning
 
         declared = {"pkt_overview": _facts("packet_overview"), "dns_names": _facts("dns")}
         monkeypatch.setattr(
@@ -187,7 +187,7 @@ class TestCaptureTools:
         ]
 
     def test_the_built_in_capture_server_is_offered_as_before(self) -> None:
-        from maljan.agents import network_analyst
+        from malspark.agents import network_analyst
 
         tools = [
             _tool(name, "network") for name in ("extract_http", "read_pcap_summary", "extract_dns")
@@ -201,14 +201,14 @@ class TestCaptureTools:
 
 class TestUnavailableSections:
     def test_new_reports_name_the_platforms_section_ids(self) -> None:
-        from maljan.providers.sandbox.triage import TriageSandboxProvider
-        from maljan.schemas.sandbox_report import SECTION_IDS
+        from malspark.providers.sandbox.triage import TriageSandboxProvider
+        from malspark.schemas.sandbox_report import SECTION_IDS
 
         assert set(TriageSandboxProvider.UNAVAILABLE) == set(SECTION_IDS)
 
     def test_a_stored_report_s_own_words_are_read_through_the_legacy_map(self) -> None:
-        from maljan.analysis.sandbox_sections import Sections
-        from maljan.schemas.sandbox_report import section_id
+        from malspark.analysis.sandbox_sections import Sections
+        from malspark.schemas.sandbox_report import section_id
 
         assert section_id("calls") == "api_calls" and section_id("generic_events") == "events"
         stored = Sections(

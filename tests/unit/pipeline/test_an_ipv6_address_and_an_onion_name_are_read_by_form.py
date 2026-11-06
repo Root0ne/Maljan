@@ -11,13 +11,13 @@ reader.
 
 from __future__ import annotations
 
-from maljan.pipeline.claim_drops import defanged
-from maljan.pipeline.validation import (
+from malspark.pipeline.claim_drops import defanged
+from malspark.pipeline.validation import (
     NO_TABLE_ROW,
     network_values_in,
     unpublished_value_violations,
 )
-from maljan.reporting.renderers.markdown import _defanged_text, _names_a_network_value
+from malspark.reporting.renderers.markdown import _defanged_text, _names_a_network_value
 
 V6 = "2001:db8::17"
 ONION = "relay-panel.onion"
@@ -142,7 +142,7 @@ class TestAnOnionNameEndsAtItsTld:
             assert network_values_in(f"Block {host} at the proxy.") == [("domain", host)], host
 
     def test_a_published_host_raises_nothing(self) -> None:
-        from maljan.pipeline.validation import (
+        from malspark.pipeline.validation import (
             _unstated_values,
             recommendation_indicator_violations,
         )
@@ -179,7 +179,7 @@ class TestAnOnionNameEndsAtItsTld:
         import time
         import tracemalloc
 
-        from maljan.pipeline.validation import _unstated_values
+        from malspark.pipeline.validation import _unstated_values
 
         text = "a." * (200_000 // 2) + "onion"
         tracemalloc.start()

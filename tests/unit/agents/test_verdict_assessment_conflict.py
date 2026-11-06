@@ -20,18 +20,18 @@ under a Benign one.
 
 from __future__ import annotations
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     ASSESSMENT_CONFLICT_CODE,
     assessment_conflict_violations,
 )
-from maljan.schemas.judgement import JudgeAssessment, SeverityVerdict
-from maljan.schemas.stix_models import AttackPattern, Bundle, Malware
+from malspark.schemas.judgement import JudgeAssessment, SeverityVerdict
+from malspark.schemas.stix_models import AttackPattern, Bundle, Malware
 
 
 def _malware_bundle(rating: str, verdict: str = "Malware", category: str | None = None) -> Bundle:
     return Bundle(
         objects=[Malware(id=f"malware--{'a' * 8}-0000-4000-8000-{'b' * 12}", name="loader")],
-        x_maljan_assessment=JudgeAssessment(
+        x_malspark_assessment=JudgeAssessment(
             verdict=verdict,
             malware_category=category,
             severity=SeverityVerdict(rating=rating, rationale="stated by the judge"),
@@ -42,7 +42,7 @@ def _malware_bundle(rating: str, verdict: str = "Malware", category: str | None 
 def _empty_bundle(rating: str, verdict: str = "Benign") -> Bundle:
     return Bundle(
         objects=[],
-        x_maljan_assessment=JudgeAssessment(
+        x_malspark_assessment=JudgeAssessment(
             verdict=verdict,
             severity=SeverityVerdict(rating=rating, rationale="stated by the judge"),
         ),
@@ -54,7 +54,7 @@ class TestTheSeverityDirections:
         violations = assessment_conflict_violations(_malware_bundle("Informational"))
 
         assert [v.code for v in violations] == [ASSESSMENT_CONFLICT_CODE]
-        assert violations[0].path == "x_maljan_assessment.severity.rating"
+        assert violations[0].path == "x_malspark_assessment.severity.rating"
 
     def test_benign_rated_high_or_critical_is_a_conflict(self) -> None:
         for rating in ("High", "Critical"):
@@ -65,7 +65,7 @@ class TestTheSeverityDirections:
         message = assessment_conflict_violations(_malware_bundle("Informational"))[0].message
 
         assert "Malware" in message and "Informational" in message
-        assert "x_maljan_assessment.severity.rating" in message
+        assert "x_malspark_assessment.severity.rating" in message
         assert "Reconcile them" in message
 
 
@@ -76,7 +76,7 @@ class TestTheCategoryDirection:
         violations = assessment_conflict_violations(bundle)
 
         assert [v.code for v in violations] == [ASSESSMENT_CONFLICT_CODE]
-        assert violations[0].path == "x_maljan_assessment.malware_category"
+        assert violations[0].path == "x_malspark_assessment.malware_category"
         assert "legitimate-utility" in violations[0].message
 
     def test_an_ordinary_category_passes(self) -> None:
@@ -90,7 +90,7 @@ class TestTheCategoryDirection:
         classifying the sample."""
         bundle = Bundle(
             objects=[],
-            x_maljan_assessment=JudgeAssessment(verdict="Benign", malware_category="ssh client"),
+            x_malspark_assessment=JudgeAssessment(verdict="Benign", malware_category="ssh client"),
         )
 
         assert assessment_conflict_violations(bundle) == []
@@ -112,7 +112,7 @@ class TestTheMalwareObjectDirection:
                     id=f"attack-pattern--{'a' * 8}-0000-4000-8000-{'c' * 12}", name="T1055"
                 )
             ],
-            x_maljan_assessment=JudgeAssessment(verdict="Malware", malware_category="loader"),
+            x_malspark_assessment=JudgeAssessment(verdict="Malware", malware_category="loader"),
         )
 
         assert assessment_conflict_violations(bundle) == []
@@ -122,7 +122,7 @@ class TestTheMalwareObjectDirection:
 
         violations = assessment_conflict_violations(bundle)
 
-        assert {v.path for v in violations} == {"x_maljan_assessment.severity.rating", "objects"}
+        assert {v.path for v in violations} == {"x_malspark_assessment.severity.rating", "objects"}
 
 
 class TestWhatIsNotAConflict:
@@ -141,7 +141,7 @@ class TestWhatIsNotAConflict:
                         name="T1055",
                     )
                 ],
-                x_maljan_assessment=JudgeAssessment(
+                x_malspark_assessment=JudgeAssessment(
                     verdict="Suspicious",
                     severity=SeverityVerdict(rating=rating, rationale="stated"),
                 ),
@@ -156,7 +156,7 @@ class TestWhatIsNotAConflict:
     def test_a_judge_that_abstained_on_severity_is_not_in_conflict(self) -> None:
         bundle = Bundle(
             objects=[],
-            x_maljan_assessment=JudgeAssessment(
+            x_malspark_assessment=JudgeAssessment(
                 verdict="Benign", malware_category="loader", confidence=0.4
             ),
         )
@@ -168,13 +168,13 @@ class TestTheJudgeIsAskedOnce:
         import asyncio
         from unittest.mock import MagicMock
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         conflicting = (
             '{"type": "bundle", "objects": [{"type": "malware", '
             '"id": "malware--aaaaaaaa-0000-4000-8000-bbbbbbbbbbbb", "name": "loader", '
             '"is_family": false}], '
-            '"x_maljan_assessment": {"verdict": "Malware", '
+            '"x_malspark_assessment": {"verdict": "Malware", '
             '"severity": {"rating": "Informational", '
             '"rationale": "no evidence of malicious functionality"}, '
             '"malware_category": "loader", "confidence": 0.6}}'
@@ -196,5 +196,5 @@ class TestTheJudgeIsAskedOnce:
         assert verdict.retries == 1
         assert verdict.fed_back.get(ASSESSMENT_CONFLICT_CODE) == 1
         assert [v.code for v in verdict.violations] == [ASSESSMENT_CONFLICT_CODE]
-        rating = verdict.bundle.x_maljan_assessment.severity.rating
+        rating = verdict.bundle.x_malspark_assessment.severity.rating
         assert rating == "Informational", "the judge's own rating is recorded, never corrected"

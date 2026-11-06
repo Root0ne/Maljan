@@ -10,7 +10,7 @@ decompiles is read by its name, as before.
 
 from __future__ import annotations
 
-from maljan.core.declaration_proposals import propose_tool
+from malspark.core.declaration_proposals import propose_tool
 
 CODE = "\nvoid entry(void)\n\n{\n  char c;\n  *(char *)p = c;\n}\n"
 

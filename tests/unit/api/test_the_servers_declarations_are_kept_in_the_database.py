@@ -21,10 +21,10 @@ from sqlalchemy.orm import Session
 
 from app.models.served_declaration import ServedDeclaration
 from app.services import served_declarations_store as store
-from maljan.core import served_declarations as sd
-from maljan.core.declared_reading import builtin_tools
-from maljan.core.tool_declarations import ToolFacts
-from maljan.providers.served_listing import unlisted as _unlisted
+from malspark.core import served_declarations as sd
+from malspark.core.declared_reading import builtin_tools
+from malspark.core.tool_declarations import ToolFacts
+from malspark.providers.served_listing import unlisted as _unlisted
 
 
 @compiles(postgresql.JSONB, "sqlite")
@@ -164,7 +164,7 @@ def test_stored_settings_that_cannot_be_read_are_said_once_and_leave_the_reading
     import logging
 
     from app.services import settings_service
-    from maljan.core import declared_reading
+    from malspark.core import declared_reading
 
     held = object()
     monkeypatch.setattr(declared_reading, "_READ_THROUGH", [held])
@@ -220,7 +220,7 @@ def test_kept_declarations_that_cannot_be_read_are_a_failure_of_the_refresh_each
     import logging
 
     from app.services import settings_service
-    from maljan.core import declared_reading
+    from malspark.core import declared_reading
 
     class _Gone(_Awaited):
         """The database, unreachable while ``down`` holds."""
@@ -298,8 +298,8 @@ def test_a_store_not_migrated_yet_is_said_once(caplog: pytest.LogCaptureFixture)
 def test_a_job_s_start_forgets_a_moved_block_and_reaches_no_server(
     db: _Awaited, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.core.config import Settings
-    from maljan.providers import served_listing
+    from malspark.core.config import Settings
+    from malspark.providers import served_listing
 
     listed: list[Any] = []
 
@@ -329,11 +329,11 @@ def test_a_job_lists_its_servers_through_their_attach_and_keeps_what_they_serve(
     import json
     from pathlib import Path
 
-    from maljan.core.config import Settings
-    from maljan.core.tool_declarations import launch_identity
-    from maljan.providers import served_listing, server_probe
-    from maljan.providers.servers import ServerHandle
-    from maljan.tools.declared_facts import FACTS_META_KEY
+    from malspark.core.config import Settings
+    from malspark.core.tool_declarations import launch_identity
+    from malspark.providers import served_listing, server_probe
+    from malspark.providers.servers import ServerHandle
+    from malspark.tools.declared_facts import FACTS_META_KEY
 
     captured = json.loads(
         (
@@ -345,7 +345,7 @@ def test_a_job_lists_its_servers_through_their_attach_and_keeps_what_they_serve(
         """A server that lists its tools, each declared under ``_meta``, and nothing else."""
 
         async def aopen(self, job_id: str, **context: Any) -> None:
-            from maljan.core.served_declarations import served_tool_facts
+            from malspark.core.served_declarations import served_tool_facts
 
             listing = [
                 {"name": tool, "inputSchema": {"type": "object"}, "_meta": {FACTS_META_KEY: f}}
@@ -389,7 +389,7 @@ def test_a_job_lists_its_servers_through_their_attach_and_keeps_what_they_serve(
 
 
 def _staged(server: str, **fields: Any) -> dict[str, Any]:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     entry = Settings(_env_file=None).mcp.servers[server].model_dump(mode="json")
     entry.pop("auth_token", None)
@@ -399,8 +399,8 @@ def _staged(server: str, **fields: Any) -> dict[str, Any]:
 def test_a_connection_test_keeps_only_what_the_saved_block_s_server_declared(
     db: _Awaited,
 ) -> None:
-    from maljan.core.config import Settings
-    from maljan.core.tool_declarations import launch_identity
+    from malspark.core.config import Settings
+    from malspark.core.tool_declarations import launch_identity
 
     shipped = Settings(_env_file=None).mcp.servers["analysis"]
     stored: dict[str, Any] = {}
@@ -427,8 +427,8 @@ def test_a_connection_test_keeps_only_what_the_saved_block_s_server_declared(
 
 
 def test_a_staged_environment_is_another_entry_than_the_saved_one(db: _Awaited) -> None:
-    from maljan.core.config import Settings
-    from maljan.core.tool_declarations import launch_identity
+    from malspark.core.config import Settings
+    from malspark.core.tool_declarations import launch_identity
 
     shipped = Settings(_env_file=None).mcp.servers["analysis"]
     before = sd.snapshot_served("mcp:analysis")
@@ -462,10 +462,10 @@ def test_the_api_reads_a_moved_built_in_through_its_stored_block(
     """The API installs no settings: it reads its built-ins through the stored ones."""
     from app import database, deps
     from app.services import settings_service
-    from maljan.core import declared_reading
-    from maljan.core.declared_reading import shipped_by_name, ships_tool
-    from maljan.core.settings_overrides import build_settings
-    from maljan.core.tool_declarations import launch_identity
+    from malspark.core import declared_reading
+    from malspark.core.declared_reading import shipped_by_name, ships_tool
+    from malspark.core.settings_overrides import build_settings
+    from malspark.core.tool_declarations import launch_identity
 
     stored = build_settings(
         {

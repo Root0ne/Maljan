@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.tools import call_sites
+from malspark.tools import call_sites
 
 from .synthetic_pe import TEXT_RVA, SyntheticPE
 from .test_a_decoded_string_is_joined_to_its_call import (

@@ -9,8 +9,8 @@ must render exactly as before.
 
 from __future__ import annotations
 
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.html import HtmlRenderer
 
 
 def _report() -> MalwareReport:

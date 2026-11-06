@@ -31,8 +31,8 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.llm.openai_provider import OpenAIProvider
+from malspark.core.config import Settings
+from malspark.llm.openai_provider import OpenAIProvider
 
 
 def _provider(**openai_overrides: object) -> tuple[OpenAIProvider, Settings]:
@@ -158,7 +158,7 @@ class TestACapForOneCallReachesAnUncappedLocalModel:
         """The deadline's cap-at-pace sizes the call from the cap the server now reads."""
         import time
 
-        from maljan.llm.generation_rate import _CallDeadline
+        from malspark.llm.generation_rate import _CallDeadline
 
         llm = self._uncapped_local()
         sent = self._extras(llm, max_tokens=60)
@@ -172,7 +172,7 @@ class TestACapForOneCallReachesAnUncappedLocalModel:
         import httpx
         from langchain_core.messages import HumanMessage
 
-        from maljan.llm.openai_provider import forget_standard_only
+        from malspark.llm.openai_provider import forget_standard_only
         from tests.unit.llm.streamed_wire import reply
 
         bodies: list[dict[str, Any]] = []

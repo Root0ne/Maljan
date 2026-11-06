@@ -12,10 +12,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.agents.prompts import REVERSER_PROMPT
-from maljan.pipeline.triage_pack import PIPELINE, pack_block, pack_entries
-from maljan.schemas.evidence import build_entry, format_entry_id
-from maljan.tools.rules import _capa_capabilities
+from malspark.agents.prompts import REVERSER_PROMPT
+from malspark.pipeline.triage_pack import PIPELINE, pack_block, pack_entries
+from malspark.schemas.evidence import build_entry, format_entry_id
+from malspark.tools.rules import _capa_capabilities
 
 BASE = 0x180000000
 
@@ -136,7 +136,7 @@ class TestThePackEveryAgentReads:
         assert "routine 0x7000" in block
 
     def test_a_pack_that_must_say_less_names_how_many_addresses_it_left_out(self) -> None:
-        from maljan.pipeline.triage_pack import _RULE_ADDRESSES, _capa
+        from malspark.pipeline.triage_pack import _RULE_ADDRESSES, _capa
 
         capa = {"capabilities": _capa_capabilities(_capa_document())}
         token = _RULE_ADDRESSES.set(2)
@@ -147,7 +147,7 @@ class TestThePackEveryAgentReads:
         assert "parse PE header @ 0x1a20 0x2b40 (+1 more)" in line
 
     def test_with_no_room_a_rule_says_how_many_places_it_matched(self) -> None:
-        from maljan.pipeline.triage_pack import _RULE_ADDRESSES, _capa
+        from malspark.pipeline.triage_pack import _RULE_ADDRESSES, _capa
 
         capa = {"capabilities": _capa_capabilities(_capa_document())}
         token = _RULE_ADDRESSES.set(0)
@@ -183,7 +183,7 @@ class TestThePackEveryAgentReads:
         assert "parse PE header @" in capa_line
 
     def test_the_agent_brief_carries_the_pack(self) -> None:
-        from maljan.pipeline.nodes import brief_agent
+        from malspark.pipeline.nodes import brief_agent
 
         class _Agent:
             pass

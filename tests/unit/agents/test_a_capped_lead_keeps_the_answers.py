@@ -19,10 +19,10 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.agents import base_agent
-from maljan.agents.delegation import tool_name
-from maljan.pipeline.nodes import promoted_asks
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents import base_agent
+from malspark.agents.delegation import tool_name
+from malspark.pipeline.nodes import promoted_asks
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.unit.agents.test_delegation import _call, _Container, _Scripted, _settings
 
 HELPER_REPORT = (
@@ -290,7 +290,7 @@ class TestTheSalvageCannotChangeHowAFailureIsReported:
     """It runs inside the handler that is reporting the original failure."""
 
     def test_a_truncate_that_raises_is_not_asked_a_second_time(self) -> None:
-        from maljan.core.exceptions import AnalystError
+        from malspark.core.exceptions import AnalystError
 
         container = _team(lead_answers=[], asks=("helper",))
         boss = _lead(container)
@@ -322,7 +322,7 @@ class TestTheSalvageCannotChangeHowAFailureIsReported:
         assert len(calls) == 1, "the handler does not run it again"
 
     def test_a_salvage_that_cannot_be_checked_leaves_the_failure(self) -> None:
-        from maljan.core.exceptions import AnalystError
+        from malspark.core.exceptions import AnalystError
 
         container = _team(lead_answers=[], asks=("helper",))
         boss = _lead(container)

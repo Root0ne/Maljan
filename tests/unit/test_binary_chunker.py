@@ -7,14 +7,14 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from maljan.core.config import ChunkingConfig
-from maljan.loaders.binary_chunker import (
+from malspark.core.config import ChunkingConfig
+from malspark.loaders.binary_chunker import (
     _CHARS_PER_TOKEN,
     BinaryChunker,
     ChunkStrategy,
     TextChunk,
 )
-from maljan.loaders.file_loader import FileDataLoader
+from malspark.loaders.file_loader import FileDataLoader
 
 # ---------------------------------------------------------------------------
 # Helpers

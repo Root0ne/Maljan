@@ -12,7 +12,7 @@ import { test as base, expect } from "@playwright/test";
 import { assertNoUnmockedCalls, installApiMocks, type MockOptions } from "./mocks";
 
 /**
- * Playwright fixtures for the Maljan E2E suite.
+ * Playwright fixtures for the Malspark E2E suite.
  *
  * Both fixtures install the full mock surface from `mocks.ts` and both assert,
  * on teardown, that nothing escaped it. Every spec must import `test` from

@@ -15,10 +15,10 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.llm import context_window
-from maljan.pipeline import analyst_mode as analyst_mode_module
-from maljan.pipeline.analyst_mode import resolve_analyst_mode, resolve_reporter_mode
+from malspark.core.config import Settings
+from malspark.llm import context_window
+from malspark.pipeline import analyst_mode as analyst_mode_module
+from malspark.pipeline.analyst_mode import resolve_analyst_mode, resolve_reporter_mode
 
 LOCAL = "http://127.0.0.1:8080/v1"
 HOSTED = "https://api.deepseek.com"
@@ -112,7 +112,7 @@ class _Composer:
     """Records how the report node asks for the sections."""
 
     def __init__(self) -> None:
-        from maljan.pipeline.validation import ValidationTally
+        from malspark.pipeline.validation import ValidationTally
 
         self.llm = None
         self.validation_tally = ValidationTally()
@@ -131,7 +131,7 @@ class TestTheReportNodeAsks:
     ) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.pipeline.analyst_mode import ReporterMode
+        from malspark.pipeline.analyst_mode import ReporterMode
 
         monkeypatch.setattr(
             analyst_mode_module,
@@ -139,7 +139,7 @@ class TestTheReportNodeAsks:
             lambda settings: ReporterMode(at_once, "auto", "a stated reason"),
         )
 
-        from maljan.pipeline.nodes import make_report_node
+        from malspark.pipeline.nodes import make_report_node
         from tests.stages import paper_profile
         from tests.unit.pipeline.test_what_is_served_is_the_final_report import _state
 

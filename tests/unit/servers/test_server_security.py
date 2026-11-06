@@ -16,10 +16,10 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
-from maljan.agents.subprocess_env import child_env
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.providers.errors import ProviderConfigurationError
-from maljan.providers.servers import ServerHandle
+from malspark.agents.subprocess_env import child_env
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.providers.errors import ProviderConfigurationError
+from malspark.providers.servers import ServerHandle
 
 
 def test_a_server_token_never_appears_in_a_run_summary():
@@ -44,7 +44,7 @@ def test_a_server_token_never_appears_in_a_run_summary():
 
 def test_a_server_token_never_appears_in_a_repr(monkeypatch, caplog):
     """Repr, a registry degrade, and a failed open all name the server, never its token."""
-    from maljan.providers.servers import UNAVAILABLE_REASON, ServerRegistry
+    from malspark.providers.servers import UNAVAILABLE_REASON, ServerRegistry
 
     token = f"s3cr3t-{uuid.uuid4().hex}"
     server = MCPServerConfig(
@@ -66,13 +66,13 @@ def test_a_server_token_never_appears_in_a_repr(monkeypatch, caplog):
         def get_tools(self) -> list[object]:
             return []
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _BoomToolkit)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _BoomToolkit)
     # ``_run_async`` normally hands off to the shared agent loop; run it
     # inline here so the real ``ServerHandle.open`` failure log — and the
     # registry's own degrade log around it — both fire on this thread, where
     # caplog can see them.
     monkeypatch.setattr(
-        "maljan.providers.servers._run_async", lambda coro, label: asyncio.run(coro)
+        "malspark.providers.servers._run_async", lambda coro, label: asyncio.run(coro)
     )
 
     cfg = Settings(_env_file=None)
@@ -82,7 +82,7 @@ def test_a_server_token_never_appears_in_a_repr(monkeypatch, caplog):
     cfg.mcp.servers = {"custom": server}
     registry = ServerRegistry(cfg)
 
-    with caplog.at_level("DEBUG", logger="maljan"):
+    with caplog.at_level("DEBUG", logger="malspark"):
         tools, reasons = registry.tools_for("network", "job-1")
 
     assert tools == []
@@ -112,10 +112,10 @@ async def test_a_server_token_never_appears_in_a_probe_timeout(monkeypatch, capl
         def get_tools(self) -> list[object]:
             return []
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _HangingToolkit)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _HangingToolkit)
     monkeypatch.setattr("app.services.settings_probes.PROBE_BUDGET_SECONDS", 0.05)
 
-    with caplog.at_level("DEBUG", logger="maljan"):
+    with caplog.at_level("DEBUG", logger="malspark"):
         result = await probe_mcp(
             {
                 "name": "x",
@@ -169,7 +169,7 @@ def test_a_server_is_launched_with_an_argv_list_and_never_through_a_shell(monkey
         # anything runs it.
         coro.close()
 
-    monkeypatch.setattr("maljan.providers.servers._run_async", _run_async_stub)
+    monkeypatch.setattr("malspark.providers.servers._run_async", _run_async_stub)
 
     class _Toolkit:
         def __init__(self, *a, **k):
@@ -181,7 +181,7 @@ def test_a_server_is_launched_with_an_argv_list_and_never_through_a_shell(monkey
         def get_tools(self):
             return []
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _Toolkit)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _Toolkit)
     # No "/" in the payload: ``resolve_mcp_args`` roots anything path-shaped at
     # the project directory, which is a separate, deliberate behavior this
     # test is not about — the point here is that the argument reaches the

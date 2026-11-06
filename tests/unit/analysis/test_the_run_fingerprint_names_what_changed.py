@@ -22,15 +22,15 @@ from langchain_core.tools import StructuredTool
 from pydantic import SecretStr
 from tests.credential_shapes import prefixed_key
 
-from maljan.agents.composition import ResolvedAgent, static_provider_id_for
-from maljan.agents.mcp_client import served_info
-from maljan.analysis.efficiency import efficiency_lines, fingerprint_record
-from maljan.analysis.setup_prompts import PROMPT_CONSTANTS, PROMPT_SITES, covered_names
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.core.input_meter import request_parts
+from malspark.agents.composition import ResolvedAgent, static_provider_id_for
+from malspark.agents.mcp_client import served_info
+from malspark.analysis.efficiency import efficiency_lines, fingerprint_record
+from malspark.analysis.setup_prompts import PROMPT_CONSTANTS, PROMPT_SITES, covered_names
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.core.input_meter import request_parts
 
-SRC = Path(__file__).resolve().parents[3] / "src" / "maljan"
+SRC = Path(__file__).resolve().parents[3] / "src" / "malspark"
 SECRET = prefixed_key("sk-")
 
 
@@ -167,7 +167,7 @@ def test_editing_any_built_in_prompt_moves_it(
 def test_editing_an_analyst_s_built_in_prompt_moves_its_part(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.agents import static_analyst
+    from malspark.agents import static_analyst
 
     before = _record(_container())
     monkeypatch.setattr(static_analyst, "_ISR_HEAD", static_analyst._ISR_HEAD + " Edited.")
@@ -277,7 +277,7 @@ def test_the_server_info_is_read_as_the_server_gave_it() -> None:
 
 
 def test_the_registry_lists_each_attached_server_once() -> None:
-    from maljan.providers.servers import ServerRegistry
+    from malspark.providers.servers import ServerRegistry
 
     registry = ServerRegistry(Settings())
     handles = list(registry._handles.values())
@@ -305,13 +305,13 @@ def _on_host(root: str) -> Settings:
     name = sorted(settings.mcp.servers)[0]
     server = settings.mcp.servers[name]
     server.command = f"{root}/.venv/bin/python"
-    server.args = ["-m", "maljan.servers.analysis", "--root", f"{root}/data/samples"]
+    server.args = ["-m", "malspark.servers.analysis", "--root", f"{root}/data/samples"]
     server.cwd = f"{root}/services/analysis"
     return settings
 
 
 def test_the_same_setup_on_two_hosts_hashes_equal() -> None:
-    from maljan.analysis.efficiency import _settings_sections
+    from malspark.analysis.efficiency import _settings_sections
 
     a = _settings_sections(_on_host("/home/one/repo"), [("/home/one/repo", "<checkout>")])
     b = _settings_sections(_on_host("/srv/two/wt-7"), [("/srv/two/wt-7", "<checkout>")])
@@ -324,7 +324,7 @@ def test_the_same_setup_on_two_hosts_hashes_equal() -> None:
 
 
 def test_a_host_path_is_replaced_only_as_a_whole_path() -> None:
-    from maljan.analysis.efficiency import _without_host
+    from malspark.analysis.efficiency import _without_host
 
     host = [("/home/one/repo", "<checkout>")]
     assert _without_host(
@@ -345,8 +345,8 @@ def test_a_sample_whose_name_is_an_ordinary_word_changes_nothing() -> None:
 def test_editing_a_sentence_a_builder_writes_moves_its_part(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.agents import base_agent, judge_agent, prompt_fragments
-    from maljan.reporting import narrative_agent
+    from malspark.agents import base_agent, judge_agent, prompt_fragments
+    from malspark.reporting import narrative_agent
 
     before = _record(_container())
     edits = [
@@ -370,7 +370,7 @@ def test_the_judge_s_tools_are_in_it() -> None:
 
 
 def test_an_agent_reached_only_by_delegation_is_named_and_never_hashed() -> None:
-    from maljan.core.config import AgentDefinition
+    from malspark.core.config import AgentDefinition
 
     settings = Settings()
     settings.agents.definitions["helper"] = AgentDefinition(role="generic", prompt="Help.")
@@ -405,7 +405,7 @@ def test_an_agent_not_set_up_is_named() -> None:
 
 
 def test_the_interpreter_s_own_installation_stays_as_written() -> None:
-    from maljan.analysis.efficiency import _without_host, host_paths
+    from malspark.analysis.efficiency import _without_host, host_paths
 
     assert _without_host("/usr/bin/python3", host_paths()) == "/usr/bin/python3"
     assert all(mark != "<interpreter>" for _path, mark in host_paths())
@@ -436,8 +436,8 @@ def test_a_token_in_a_declared_server_s_arguments_or_address_is_never_stored() -
     import json
     from datetime import UTC, datetime
 
-    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     token = prefixed_key("tok-")
     settings = Settings()
@@ -468,7 +468,7 @@ def test_a_token_in_a_declared_server_s_arguments_or_address_is_never_stored() -
 
 
 def efficiency_record_for(container: Any) -> dict[str, Any]:
-    from maljan.analysis.efficiency import efficiency_record
+    from malspark.analysis.efficiency import efficiency_record
 
     record = efficiency_record(container)
     assert record is not None

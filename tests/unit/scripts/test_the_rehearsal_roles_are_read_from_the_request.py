@@ -31,18 +31,18 @@ from scripts.rehearsal.roles import (
     role_of,
 )
 
-from maljan.agents.base_agent import _REVISION_ISR_FRAMING
-from maljan.agents.judge_agent import (
+from malspark.agents.base_agent import _REVISION_ISR_FRAMING
+from malspark.agents.judge_agent import (
     JUDGE_VERDICT_SYSTEM,
     MEDIATION_EXTRACTION_SYSTEM,
     MEDIATOR_SYSTEM_HEAD,
     TECHNIQUE_QUESTION_SYSTEM,
 )
-from maljan.agents.prompt_fragments import no_tool_call_question
-from maljan.agents.static_analyst import _extract_load_hint
-from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
-from maljan.pipeline.validation import FEEDBACK_PREAMBLE, RetryDrops, retry_drop_question
-from maljan.reporting import composer, narrative_agent
+from malspark.agents.prompt_fragments import no_tool_call_question
+from malspark.agents.static_analyst import _extract_load_hint
+from malspark.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+from malspark.pipeline.validation import FEEDBACK_PREAMBLE, RetryDrops, retry_drop_question
+from malspark.reporting import composer, narrative_agent
 
 SAMPLE = "/w/sample_1.exe"
 PACK = (
@@ -323,7 +323,7 @@ class TestTheJudgeAndTheReport:
         user = PACK + "Expert Reports:\nTECHNIQUE: T1055\nTECHNIQUE: T1071.001\n"
         reply = Brain().answer(_request(JUDGE_VERDICT_SYSTEM, user))[1]
         bundle = json.loads(reply.text)
-        assert bundle["x_maljan_assessment"]["verdict"] == "Malware"
+        assert bundle["x_malspark_assessment"]["verdict"] == "Malware"
         carried = [
             o["external_references"][0]["external_id"]
             for o in bundle["objects"]

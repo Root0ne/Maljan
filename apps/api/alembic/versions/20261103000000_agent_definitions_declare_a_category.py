@@ -32,7 +32,7 @@ stored is kept, and one that is not a category is named in the log as well. Only
 was added; ``is_secret`` rows are never read. Running it again writes nothing.
 
 The rule is restated here rather than imported from
-``maljan.core.agent_category``, as every revision restates what it acts on.
+``malspark.core.agent_category``, as every revision restates what it acts on.
 
 The downgrade writes nothing: the earlier release ignores the field.
 

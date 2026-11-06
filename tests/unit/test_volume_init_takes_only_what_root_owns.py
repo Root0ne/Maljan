@@ -3,7 +3,7 @@
 The backend containers used to run as root, so an existing deployment's sample
 mirror, upload staging and ATT&CK cache hold root-owned entries the
 unprivileged services could not write. The compose file's one-shot
-``volume-init`` service chowns exactly those entries to MALJAN_UID:MALJAN_GID.
+``volume-init`` service chowns exactly those entries to MALSPARK_UID:MALSPARK_GID.
 An entry owned by any other uid or gid belongs to somebody (a developer's own
 checkout, typically): the script stops before changing anything and names the
 id to set, so the stack refuses to start rather than take the files.
@@ -45,7 +45,7 @@ def _run_on_host(tmp_path: Path, uid: str, gid: str) -> subprocess.CompletedProc
     script = _script().replace("/own/", f"{tmp_path}/own/")
     return subprocess.run(
         ["sh", "-euc", script],
-        env={"PATH": "/usr/bin:/bin", "MALJAN_UID": uid, "MALJAN_GID": gid},
+        env={"PATH": "/usr/bin:/bin", "MALSPARK_UID": uid, "MALSPARK_GID": gid},
         capture_output=True,
         text=True,
         timeout=60,
@@ -59,7 +59,7 @@ def _run_on_host(tmp_path: Path, uid: str, gid: str) -> subprocess.CompletedProc
 def test_root_and_empty_or_non_numeric_ids_are_refused(tmp_path: Path, uid: str, gid: str) -> None:
     result = _run_on_host(tmp_path, uid, gid)
     assert result.returncode != 0
-    assert "MALJAN_UID and MALJAN_GID must be non-zero numbers" in result.stderr
+    assert "MALSPARK_UID and MALSPARK_GID must be non-zero numbers" in result.stderr
 
 
 host_find = pytest.mark.skipif(
@@ -76,7 +76,7 @@ def test_files_another_uid_owns_stop_it_with_the_id_to_set(tmp_path: Path) -> No
     assert result.returncode != 0
     assert (
         f"volume-init: data/samples is owned by uid {mine}; "
-        f"set MALJAN_UID/MALJAN_GID={mine} in docker/.env"
+        f"set MALSPARK_UID/MALSPARK_GID={mine} in docker/.env"
     ) in result.stderr
 
 
@@ -85,7 +85,7 @@ def test_files_another_gid_owns_stop_it_too(tmp_path: Path) -> None:
     mine = os.getgid()
     result = _run_on_host(tmp_path, str(os.getuid()), str(mine + 1))
     assert result.returncode != 0
-    assert f"volume-init: data/samples is owned by gid {mine}; set MALJAN_GID={mine}" in (
+    assert f"volume-init: data/samples is owned by gid {mine}; set MALSPARK_GID={mine}" in (
         result.stderr
     )
 
@@ -172,9 +172,9 @@ def test_only_root_owned_entries_are_handed_over_and_a_foreign_owner_stops_it(
                 "--security-opt",
                 "no-new-privileges:true",
                 "-e",
-                "MALJAN_UID=10001",
+                "MALSPARK_UID=10001",
                 "-e",
-                "MALJAN_GID=10001",
+                "MALSPARK_GID=10001",
                 "-e",
                 f"PHASE={phase}",
                 "-v",
@@ -222,7 +222,7 @@ def test_only_root_owned_entries_are_handed_over_and_a_foreign_owner_stops_it(
     assert result.returncode == 0, result.stderr
     out = result.stdout
     assert "foreign=1" in out
-    assert "data/uploads is owned by uid 4242; set MALJAN_UID/MALJAN_GID=4242" in result.stderr
+    assert "data/uploads is owned by uid 4242; set MALSPARK_UID/MALSPARK_GID=4242" in result.stderr
     after = dict(
         (line.split(" ", 2)[2], line.split(" ", 2)[1])
         for line in out.splitlines()
@@ -259,7 +259,7 @@ def _compose_ids(
     fake.write_text(f"#!/bin/sh\necho {uid}\n")
     fake.chmod(0o755)
     result = subprocess.run(
-        ["dash", "-c", prefix + ' printf "%s %s" "$MALJAN_UID" "$MALJAN_GID"'],
+        ["dash", "-c", prefix + ' printf "%s %s" "$MALSPARK_UID" "$MALSPARK_GID"'],
         cwd=tmp_path,
         env={"PATH": f"{shims}:/usr/bin:/bin", **env},
         capture_output=True,
@@ -290,11 +290,11 @@ def test_a_plain_user_s_own_ids_are_used(tmp_path: Path) -> None:
 
 @needs_make_and_dash
 def test_docker_env_is_read_without_quotes_spaces_or_comment(tmp_path: Path) -> None:
-    dotenv = "X=1\nMALJAN_UID=\"2000\"\n  MALJAN_GID = '2001'  # the docs group\r\n"
+    dotenv = "X=1\nMALSPARK_UID=\"2000\"\n  MALSPARK_GID = '2001'  # the docs group\r\n"
     assert _compose_ids(tmp_path, {"SUDO_UID": "1234"}, dotenv=dotenv, uid=0) == ("2000", "2001")
 
 
 @needs_make_and_dash
 def test_the_environment_wins_over_docker_env(tmp_path: Path) -> None:
-    dotenv = "MALJAN_UID=2000\nMALJAN_GID=2001\n"
-    assert _compose_ids(tmp_path, {"MALJAN_UID": "3000"}, dotenv=dotenv) == ("3000", "2001")
+    dotenv = "MALSPARK_UID=2000\nMALSPARK_GID=2001\n"
+    assert _compose_ids(tmp_path, {"MALSPARK_UID": "3000"}, dotenv=dotenv) == ("3000", "2001")

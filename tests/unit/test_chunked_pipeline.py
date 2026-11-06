@@ -14,9 +14,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.analysis.chunk_merger import merge_chunk_isrs
-from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.analysis.chunk_merger import merge_chunk_isrs
+from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -237,7 +237,7 @@ class TestSafeAnalyzeISRChunked:
         """An id the catalogue rejects is offered ranked alternatives, and the
         ranking is the one thing here that builds the ATT&CK index. These tests
         are about chunk merging."""
-        from maljan.tools import knowledge
+        from malspark.tools import knowledge
 
         monkeypatch.setattr(knowledge, "resolve_technique", lambda *a, **k: {"candidates": []})
 
@@ -274,7 +274,7 @@ class TestSafeAnalyzeISRChunked:
             return text
 
         # Attach the real method from BaseAnalyst
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         safe_analyze_isr_chunked = BaseAnalyst.safe_analyze_isr_chunked
         # The wrapper now runs the §4 Item 4 consistency gate (off by default =
@@ -291,7 +291,7 @@ class TestSafeAnalyzeISRChunked:
     def test_empty_chunks_raises_analyst_error(self, analyst: _ConcreteAnalyst) -> None:
         # Hardened behaviour (P4-11): an empty chunk list is a hard input
         # error rather than a silent "no findings" success.
-        from maljan.core.exceptions import AnalystError
+        from malspark.core.exceptions import AnalystError
 
         with pytest.raises(AnalystError):
             analyst.safe_analyze_isr_chunked([])
@@ -326,7 +326,7 @@ class TestSafeAnalyzeISRChunked:
         import threading
         import time
 
-        from maljan.agents.base_agent import lock_for
+        from malspark.agents.base_agent import lock_for
 
         analyst.delegation_lock = threading.RLock()
         order: list[str] = []
@@ -430,7 +430,7 @@ class TestSafeAnalyzeISRChunked:
     def test_a_chunk_not_started_for_the_spend_ceiling_is_stated(
         self, analyst: _ConcreteAnalyst, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         started: list[int] = []
         monkeypatch.setattr(base_agent, "spend_reached", lambda _agent: bool(started))
@@ -450,7 +450,7 @@ class TestSafeAnalyzeISRChunked:
     def test_a_run_of_chunks_not_started_is_one_clause(
         self, analyst: _ConcreteAnalyst, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         started: list[int] = []
         monkeypatch.setattr(base_agent, "spend_reached", lambda _agent: bool(started))
@@ -473,7 +473,7 @@ class TestSafeAnalyzeISRChunked:
         """Held per chunk, the lock let an ask drain the earlier chunks' findings."""
         import threading
 
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         analyst.delegation_lock = threading.RLock()
         free_between: list[bool] = []
@@ -503,7 +503,7 @@ class TestSafeAnalyzeISRChunked:
     def test_the_findings_of_every_chunk_reach_the_merged_answer(
         self, analyst: _ConcreteAnalyst
     ) -> None:
-        from maljan.schemas.isr_models import Finding
+        from malspark.schemas.isr_models import Finding
 
         real_analyze = analyst.analyze_isr
 
@@ -523,8 +523,8 @@ class TestSafeAnalyzeISRChunked:
         self, analyst: _ConcreteAnalyst
     ) -> None:
         """Chunk 2 re-ran ten decompiles chunk 1 had done: it is now told, and they are not run."""
-        from maljan.agents.base_agent import EARLIER_CHUNKS_HEAD
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.agents.base_agent import EARLIER_CHUNKS_HEAD
+        from malspark.schemas.evidence import LedgerEntry
 
         analyst._evidence_entries = []
         prompts: list[str] = []
@@ -566,8 +566,8 @@ class TestSafeAnalyzeISRChunked:
         assert getattr(analyst, "_prior_chunk_calls", None) in (None, [])
 
     def test_the_loop_seeds_its_repeat_guard_with_them(self) -> None:
-        from maljan.agents.evidence_recorder import seeded_repeat_guard
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.agents.evidence_recorder import seeded_repeat_guard
+        from malspark.schemas.evidence import LedgerEntry
 
         guard = seeded_repeat_guard(
             [
@@ -586,7 +586,7 @@ class TestSafeAnalyzeISRChunked:
     def test_the_analyst_loop_builds_its_guard_from_the_earlier_chunks(self) -> None:
         import inspect
 
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         source = inspect.getsource(base_agent.BaseAnalyst._run_tool_loop)
         assert 'settled_chunk_entries(self, getattr(self, "_prior_chunk_calls", None)),' in source
@@ -616,7 +616,7 @@ class TestServiceContainerLoadChunked:
         container._data_cache = {}
         container._lock = threading.Lock()
         # Bind the real method
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container.load_chunked = ServiceContainer.load_chunked.__get__(container)
         return container

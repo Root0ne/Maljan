@@ -15,15 +15,15 @@ from pathlib import Path
 
 import pytest
 
-from maljan.core.pack_steps import PackStep
-from maljan.core.tool_declarations import ToolFacts
-from maljan.extractors.sample_identity import (
+from malspark.core.pack_steps import PackStep
+from malspark.core.tool_declarations import ToolFacts
+from malspark.extractors.sample_identity import (
     detect_file_type,
     file_type_category,
     routed_formats,
     unparsed_container_reason,
 )
-from maljan.tools.identify import identify_file
+from malspark.tools.identify import identify_file
 
 SECTOR = 512
 

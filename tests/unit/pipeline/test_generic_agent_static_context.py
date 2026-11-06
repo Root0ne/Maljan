@@ -31,9 +31,9 @@ from types import MethodType
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.core.container import ServiceContainer
-from maljan.loaders.binary_chunker import TextChunk
-from maljan.pipeline.nodes import _is_placeholder_only, make_revision_node, make_stage_agent_node
+from malspark.core.container import ServiceContainer
+from malspark.loaders.binary_chunker import TextChunk
+from malspark.pipeline.nodes import _is_placeholder_only, make_revision_node, make_stage_agent_node
 from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
@@ -276,10 +276,10 @@ class TestTheGenericContextAlwaysCarriesAnAbsolutePath:
         """Provider `none`: no mirror, so the absolute host path is what the
         agent must see. This is the live failure."""
         shown = self._shown(
-            {"file_hash": "abc123", "sample_path": "/srv/maljan/data/samples/abc123.exe"},
+            {"file_hash": "abc123", "sample_path": "/srv/malspark/data/samples/abc123.exe"},
             provider_id="none",
         )
-        assert "/srv/maljan/data/samples/abc123.exe" in shown
+        assert "/srv/malspark/data/samples/abc123.exe" in shown
         assert '"analysis_file_path": "abc123.exe"' not in shown
 
     def test_the_mirror_path_still_wins_when_the_provider_mirrors(self) -> None:
@@ -288,13 +288,13 @@ class TestTheGenericContextAlwaysCarriesAnAbsolutePath:
         shown = self._shown(
             {
                 "file_hash": "abc123",
-                "sample_path": "/srv/maljan/data/samples/abc123.exe",
-                "static_sample_paths": {"r2": "/srv/maljan/data/samples/r2-work/abc123.exe"},
+                "sample_path": "/srv/malspark/data/samples/abc123.exe",
+                "static_sample_paths": {"r2": "/srv/malspark/data/samples/r2-work/abc123.exe"},
             },
             provider_id="r2",
         )
-        assert "/srv/maljan/data/samples/r2-work/abc123.exe" in shown
-        assert '"analysis_file_path": "/srv/maljan/data/samples/abc123.exe"' not in shown
+        assert "/srv/malspark/data/samples/r2-work/abc123.exe" in shown
+        assert '"analysis_file_path": "/srv/malspark/data/samples/abc123.exe"' not in shown
 
     def test_the_path_it_carries_is_absolute(self) -> None:
         """A relative `sample_path` in state is still resolved before it is
@@ -352,24 +352,24 @@ class TestAGenericAgentIsPinnedToTheSamplePathToo:
         pinned = self._pin(
             {
                 "file_hash": "abc123",
-                "sample_path": "/srv/maljan/data/samples/abc123.exe",
+                "sample_path": "/srv/malspark/data/samples/abc123.exe",
                 "static_sample_path": None,
-                "static_sample_paths": {"r2": "/srv/maljan/data/samples/r2-work/abc123.exe"},
+                "static_sample_paths": {"r2": "/srv/malspark/data/samples/r2-work/abc123.exe"},
             },
             provider_id="none",
         )
-        assert pinned == "/srv/maljan/data/samples/abc123.exe"
+        assert pinned == "/srv/malspark/data/samples/abc123.exe"
 
     def test_a_generic_agent_on_a_mirroring_provider_pins_its_own_mirror(self) -> None:
         pinned = self._pin(
             {
                 "file_hash": "abc123",
-                "sample_path": "/srv/maljan/data/samples/abc123.exe",
-                "static_sample_paths": {"r2": "/srv/maljan/data/samples/r2-work/abc123.exe"},
+                "sample_path": "/srv/malspark/data/samples/abc123.exe",
+                "static_sample_paths": {"r2": "/srv/malspark/data/samples/r2-work/abc123.exe"},
             },
             provider_id="r2",
         )
-        assert pinned == "/srv/maljan/data/samples/r2-work/abc123.exe"
+        assert pinned == "/srv/malspark/data/samples/r2-work/abc123.exe"
 
     def test_a_stale_pin_from_the_previous_sample_is_cleared(self) -> None:
         """Agents are cached across samples; a pin that cannot be recomputed

@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.pipeline.nodes import _is_placeholder_only
+from malspark.pipeline.nodes import _is_placeholder_only
 from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
@@ -92,8 +92,8 @@ class TestTheStaticAnalystIsNotDisabledByTheFix:
         assert _is_placeholder_only(placeholder, "network") is True
 
     def test_the_augmented_static_chunk_is_not_a_placeholder_either(self) -> None:
-        from maljan.loaders.binary_chunker import TextChunk
-        from maljan.pipeline.nodes import _augment_static_chunks_with_path
+        from malspark.loaders.binary_chunker import TextChunk
+        from malspark.pipeline.nodes import _augment_static_chunks_with_path
 
         head = TextChunk(
             index=0,
@@ -117,7 +117,7 @@ class TestTheStaticAnalystIsNotDisabledByTheFix:
 class TestTheNodeSkipsInsteadOfAnalysing:
     def test_a_placeholder_only_analyst_emits_no_data_and_never_calls_the_llm(self) -> None:
         """End to end through the real node factory, with a mock container."""
-        from maljan.pipeline.nodes import make_stage_agent_node
+        from malspark.pipeline.nodes import make_stage_agent_node
 
         agent = MagicMock()
         agent.safe_analyze_isr = MagicMock(
@@ -180,7 +180,7 @@ class TestASyntheticSandboxReportIsAnAbsence:
         return {"file_hash": "abc123", "sample_path": "/s/abc123.exe", "sandbox_report": report}
 
     def test_the_analyst_skips_and_says_there_was_no_fixture(self) -> None:
-        from maljan.pipeline.nodes import SYNTHETIC_SANDBOX_REASON, make_stage_agent_node
+        from malspark.pipeline.nodes import SYNTHETIC_SANDBOX_REASON, make_stage_agent_node
 
         container, agent, events = self._container([_Chunk(content="Behaviour: no API calls.")])
 
@@ -193,8 +193,8 @@ class TestASyntheticSandboxReportIsAnAbsence:
 
     def test_a_real_run_that_observed_nothing_is_still_analysed(self) -> None:
         """Emptiness a sandbox actually observed is a finding, not an absence."""
-        from maljan.pipeline.nodes import make_stage_agent_node
-        from maljan.schemas.isr_models import AgentISR
+        from malspark.pipeline.nodes import make_stage_agent_node
+        from malspark.schemas.isr_models import AgentISR
 
         container, agent, _events = self._container([_Chunk(content="Behaviour: no API calls.")])
         agent.safe_analyze_isr = MagicMock(
@@ -207,7 +207,7 @@ class TestASyntheticSandboxReportIsAnAbsence:
         agent.safe_analyze_isr.assert_called_once()
 
     def test_the_revision_round_skips_it_too(self) -> None:
-        from maljan.pipeline.nodes import _revision_input_is_absent
+        from malspark.pipeline.nodes import _revision_input_is_absent
 
         container, _agent, _events = self._container([_Chunk(content="Behaviour: no API calls.")])
 
@@ -218,7 +218,7 @@ class TestASyntheticSandboxReportIsAnAbsence:
 
     def test_the_static_analyst_is_untouched_by_it(self) -> None:
         """Static reads the sample, not the sandbox."""
-        from maljan.pipeline.nodes import _revision_input_is_absent
+        from malspark.pipeline.nodes import _revision_input_is_absent
 
         container, _agent, _events = self._container([_Chunk(content="PE32, 3 sections.")])
         container.agent_role.return_value = "static"
@@ -228,7 +228,7 @@ class TestASyntheticSandboxReportIsAnAbsence:
 
 class TestTheMockProviderMarksASyntheticReport:
     def test_a_sample_with_no_fixture_is_marked(self, tmp_path: Any) -> None:
-        from maljan.loaders.mock_sandbox_client import MockSandboxClient
+        from malspark.loaders.mock_sandbox_client import MockSandboxClient
 
         sample = tmp_path / "unknown.exe"
         sample.write_bytes(b"MZ" + b"\x00" * 32)
@@ -239,7 +239,7 @@ class TestTheMockProviderMarksASyntheticReport:
         assert result.report["synthetic"] is True
 
     def test_the_normalised_report_carries_the_flag(self) -> None:
-        from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+        from malspark.schemas.sandbox_report import cape_report_to_sandbox_report
 
         synthetic = cape_report_to_sandbox_report(
             {"synthetic": True, "target": {}}, provider="mock", source_format="mock"

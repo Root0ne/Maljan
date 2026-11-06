@@ -11,7 +11,7 @@ import inspect
 
 import pytest
 
-from maljan.agents import judge_agent, network_analyst
+from malspark.agents import judge_agent, network_analyst
 
 
 def test_no_agent_names_a_sidecar_script_any_more():
@@ -47,8 +47,8 @@ def test_the_network_analyst_takes_both_halves_from_the_registry(monkeypatch):
     shared attach path now, so both halves have to arrive and neither may come
     from anywhere but the registry.
     """
-    from maljan.core.config import Settings
-    from maljan.core.container import ServiceContainer
+    from malspark.core.config import Settings
+    from malspark.core.container import ServiceContainer
 
     cfg = Settings(_env_file=None)
     container = ServiceContainer(config=cfg, mock=True)
@@ -82,9 +82,9 @@ def test_the_network_analyst_takes_both_halves_from_the_registry(monkeypatch):
 async def test_the_judge_takes_its_tools_from_the_registry(monkeypatch):
     from unittest.mock import MagicMock
 
-    from maljan.agents.judge_agent import JudgeAgent
-    from maljan.core.config import Settings
-    from maljan.core.container import ServiceContainer
+    from malspark.agents.judge_agent import JudgeAgent
+    from malspark.core.config import Settings
+    from malspark.core.container import ServiceContainer
 
     cfg = Settings(_env_file=None)
     container = ServiceContainer(config=cfg, mock=True)

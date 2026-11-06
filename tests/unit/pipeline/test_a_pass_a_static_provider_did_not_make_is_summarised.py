@@ -7,8 +7,8 @@ run is degraded, why, and which tool it went without.
 
 from __future__ import annotations
 
-from maljan.core.paths import OUTSIDE_PROJECT
-from maljan.pipeline.operator_choice import (
+from malspark.core.paths import OUTSIDE_PROJECT
+from malspark.pipeline.operator_choice import (
     lost_tools,
     provider_pass_reason,
     static_pass_summary,

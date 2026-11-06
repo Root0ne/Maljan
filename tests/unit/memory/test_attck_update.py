@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from maljan.memory import attck_loader, attck_update
+from malspark.memory import attck_loader, attck_update
 
 
 def _bundle(version: str, *, techniques: int = 2, modified: str = "2026-08-05T21:33:58Z") -> dict:
@@ -693,7 +693,7 @@ class TestAnUpdateThatIsStopped:
 
 class TestATooLongInterval:
     def test_the_status_never_fails_on_a_date(self, cache: Path) -> None:
-        from maljan.core.config import ATTCK_REFRESH_DAYS_MAX
+        from malspark.core.config import ATTCK_REFRESH_DAYS_MAX
 
         _seed(cache, {"enterprise": "19.2"})
         status = attck_update.status(ATTCK_REFRESH_DAYS_MAX * 10)
@@ -703,7 +703,7 @@ class TestATooLongInterval:
     def test_the_setting_refuses_one_past_the_bound(self) -> None:
         from pydantic import ValidationError
 
-        from maljan.core.config import ATTCK_REFRESH_DAYS_MAX, ValidationConfig
+        from malspark.core.config import ATTCK_REFRESH_DAYS_MAX, ValidationConfig
 
         assert ValidationConfig(attck_refresh_days=ATTCK_REFRESH_DAYS_MAX)
         with pytest.raises(ValidationError):

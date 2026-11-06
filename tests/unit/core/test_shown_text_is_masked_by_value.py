@@ -1,6 +1,6 @@
 """Shown text is masked by every secret value the platform holds, in each encoded form (T-482).
 
-The structural rules (``maljan.core.settings_masking``) guess a credential by
+The structural rules (``malspark.core.settings_masking``) guess a credential by
 where it stands, and each patch to them opened a new edge (a Windows path, a
 UNC share, a JSON escape before the password). A value the settings hold is
 now masked wherever it stands and however it is encoded, beside those rules:
@@ -22,10 +22,10 @@ from urllib.parse import quote, quote_plus
 import pytest
 from tests.credential_shapes import lowercase_body
 
-from maljan.core import settings_masking as sm
-from maljan.core import settings_overrides as ov
-from maljan.core.config import MCPServerConfig
-from maljan.core.settings_catalog import shown_secret_values
+from malspark.core import settings_masking as sm
+from malspark.core import settings_overrides as ov
+from malspark.core.config import MCPServerConfig
+from malspark.core.settings_catalog import shown_secret_values
 
 MASK = sm.SNAPSHOT_MASK
 
@@ -244,8 +244,8 @@ def test_reading_the_values_never_raises_and_never_names_one(monkeypatch, caplog
     def broken(*_sources):
         raise ValueError(f"cannot read {value}")
 
-    monkeypatch.setattr("maljan.core.settings_catalog.shown_secret_values", broken)
-    with caplog.at_level(logging.DEBUG, logger="maljan.core.settings_masking"):
+    monkeypatch.setattr("malspark.core.settings_catalog.shown_secret_values", broken)
+    with caplog.at_level(logging.DEBUG, logger="malspark.core.settings_masking"):
         sm.remember_settings_values({"api_key": value}, scope="store")
 
     assert value not in caplog.text
@@ -290,8 +290,8 @@ def _bind_and_home_settings():
 
 
 def _records(settings):
-    from maljan.analysis import efficiency as ef
-    from maljan.analysis.disclosure import settings_hosts
+    from malspark.analysis import efficiency as ef
+    from malspark.analysis.disclosure import settings_hosts
 
     return {
         "snapshot": ov.public_snapshot(settings, ()),
@@ -331,7 +331,7 @@ def test_a_short_configured_secret_and_a_longer_value_holding_it_are_one_run():
 
     assert ov.public_snapshot(settings, ())["mcp.servers.s.args"] == [MASK]
 
-    from maljan.enrichment.declared import masked
+    from malspark.enrichment.declared import masked
 
     _remember("/srv/dataKp7")
     assert masked("failed: GET /srv/dataKp7xQ2 refused", "Kp7xQ2") == f"failed: GET {MASK} refused"

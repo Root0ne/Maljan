@@ -9,8 +9,8 @@ import asyncio
 
 import httpx
 
-from maljan.providers.server_guard import ServerGuard
-from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+from malspark.providers.server_guard import ServerGuard
+from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
 PARAMS: list[dict[str, str]] = []
 

@@ -18,8 +18,8 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
-from maljan.tools import call_sites, pe_image
-from maljan.tools.string_blobs import decode_string_blobs
+from malspark.tools import call_sites, pe_image
+from malspark.tools.string_blobs import decode_string_blobs
 
 from .synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 
@@ -287,8 +287,8 @@ def test_decode_string_blobs_states_the_call_beside_the_reference(tmp_path: Path
 
 
 def test_the_pack_line_and_the_indicator_provenance_state_the_call() -> None:
-    from maljan.pipeline.triage_pack import _blob_item
-    from maljan.reporting.renderers.stix_renderer import _decoder_provenance, _recovery_words
+    from malspark.pipeline.triage_pack import _blob_item
+    from malspark.reporting.renderers.stix_renderer import _decoder_provenance, _recovery_words
 
     row = {
         "text": "open the settings file",

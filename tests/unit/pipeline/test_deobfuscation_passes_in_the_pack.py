@@ -19,10 +19,10 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.analysis.anti_analysis import SCAN_TOOL as ANTI_ANALYSIS_TOOL
-from maljan.pipeline import triage_pack
-from maljan.pipeline.triage_pack import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.analysis.anti_analysis import SCAN_TOOL as ANTI_ANALYSIS_TOOL
+from malspark.pipeline import triage_pack
+from malspark.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     PackInputs,
@@ -31,9 +31,9 @@ from maljan.pipeline.triage_pack import (
     render_pack,
     run_pack,
 )
-from maljan.providers.static.ghidra.passes import GhidraPasses
-from maljan.schemas.evidence import EvidenceCounter, build_entry, format_entry_id
-from maljan.tools import crypto_constants, rules
+from malspark.providers.static.ghidra.passes import GhidraPasses
+from malspark.schemas.evidence import EvidenceCounter, build_entry, format_entry_id
+from malspark.tools import crypto_constants, rules
 
 from ..fake_ghidra import X64_BASE, FakeGhidra
 from ..tools.synthetic_pe import TEXT_RVA, SyntheticPE
@@ -575,9 +575,9 @@ class TestTheNodeRecordsWhatThePackLacks:
     ) -> None:
         import asyncio
 
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
-        from maljan.pipeline.nodes import make_triage_node
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
+        from malspark.pipeline.nodes import make_triage_node
         from tests.unit.pipeline.test_stage_events import _state
 
         monkeypatch.setattr(
@@ -601,9 +601,9 @@ class TestTheNodeRecordsWhatThePackLacks:
     def test_a_pack_with_room_has_no_such_record(self, tmp_path: Path) -> None:
         import asyncio
 
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
-        from maljan.pipeline.nodes import make_triage_node
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
+        from malspark.pipeline.nodes import make_triage_node
         from tests.unit.pipeline.test_stage_events import _state
 
         settings = Settings(_env_file=None)
@@ -618,9 +618,9 @@ class TestTheNodeAsksTheRunsStaticProviders:
     def _step(
         self, state: dict[str, Any], provider: str = "ghidra", **ghidra: Any
     ) -> GhidraPasses | None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
-        from maljan.pipeline.nodes import _anti_analysis_step
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
+        from malspark.pipeline.nodes import _anti_analysis_step
 
         settings = Settings(_env_file=None, static={"provider": provider, "ghidra": ghidra})
         container = ServiceContainer(settings, mock=True)

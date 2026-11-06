@@ -3,7 +3,7 @@
 
 Offline for the pipeline: operator-run, never imported by it and never run by a
 test. It downloads IANA's ``tlds-alpha-by-domain.txt``, checks it with the same
-reader the string sweep loads it with (``maljan.tools.strings.read_tld_list``:
+reader the string sweep loads it with (``malspark.tools.strings.read_tld_list``:
 a ``# Version`` line first, then one TLD per line) and writes it, unchanged and
 with its version line, to ``data/tlds-alpha-by-domain.txt``.
 
@@ -22,7 +22,7 @@ import httpx
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from maljan.tools.strings import TLD_LIST_PATH, read_tld_list  # noqa: E402
+from malspark.tools.strings import TLD_LIST_PATH, read_tld_list  # noqa: E402
 
 
 def main() -> int:

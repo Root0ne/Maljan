@@ -12,14 +12,14 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from maljan.reporting.defang import ProseDefanger
-from maljan.reporting.models import (
+from malspark.reporting.defang import ProseDefanger
+from malspark.reporting.models import (
     DynamicBehavior,
     EvidenceSection,
     MalwareReport,
     StaticAnalysis,
 )
-from maljan.reporting.renderers.markdown import (
+from malspark.reporting.renderers.markdown import (
     JUDGE,
     MEASURED,
     PER_ROW,
@@ -342,7 +342,7 @@ class TestMinorLeaks:
         assert defang("see https://other.example/") == "see https://other.example/"
 
     def test_a_model_s_list_is_printed_whole(self) -> None:
-        from maljan.reporting.models import ServiceProcessKill
+        from malspark.reporting.models import ServiceProcessKill
 
         report = rich_report()
         assert report.technical_analysis is not None
@@ -390,7 +390,7 @@ class TestWhatLookedIsNamed:
 
 class TestAFamilySpecificSectionNeedsItsFamily:
     def test_a_loader_s_cipher_is_not_a_ransomware_section(self) -> None:
-        from maljan.reporting.models import EncryptionScheme
+        from malspark.reporting.models import EncryptionScheme
 
         report = rich_report()
         assert report.technical_analysis is not None
@@ -413,7 +413,7 @@ class TestAFamilySpecificSectionNeedsItsFamily:
 
     def test_a_cipher_with_no_per_file_key_is_not_a_ransomware_section(self) -> None:
         """``per_file_key: false`` says the files are not keyed one by one; it names no file."""
-        from maljan.reporting.models import EncryptionScheme
+        from malspark.reporting.models import EncryptionScheme
 
         report = rich_report()
         assert report.technical_analysis is not None
@@ -427,7 +427,7 @@ class TestAFamilySpecificSectionNeedsItsFamily:
 
     @staticmethod
     def _with_t1486(report: Any) -> Any:
-        from maljan.reporting.models import TTPMapping
+        from malspark.reporting.models import TTPMapping
 
         report.ttp_mappings.append(
             TTPMapping(
@@ -440,7 +440,7 @@ class TestAFamilySpecificSectionNeedsItsFamily:
         return report
 
     def test_a_per_file_key_stays_under_the_ransomware_heading(self) -> None:
-        from maljan.reporting.models import EncryptionScheme
+        from malspark.reporting.models import EncryptionScheme
 
         report = self._with_t1486(rich_report())
         assert report.technical_analysis is not None
@@ -451,7 +451,7 @@ class TestAFamilySpecificSectionNeedsItsFamily:
         assert "Ransomware behaviour" in technical.split("### 5.9", 1)[1]
 
     def test_a_published_data_encrypted_for_impact_names_ransomware(self) -> None:
-        from maljan.reporting.models import EncryptionScheme
+        from malspark.reporting.models import EncryptionScheme
 
         report = self._with_t1486(rich_report())
         assert report.malware_category == "loader"
@@ -466,7 +466,7 @@ class TestAFamilySpecificSectionNeedsItsFamily:
 
     def test_a_loader_s_filled_table_is_under_a_neutral_heading(self) -> None:
         """The model filled every file field with prose for "none"; nothing published T1486."""
-        from maljan.reporting.models import EncryptionScheme
+        from malspark.reporting.models import EncryptionScheme
 
         report = rich_report()
         assert all(row.technique_id != "T1486" for row in report.ttp_mappings)
@@ -484,7 +484,7 @@ class TestAFamilySpecificSectionNeedsItsFamily:
         assert "Ransomware" not in technical
 
     def test_a_category_naming_ransomware_without_t1486_is_neutral(self) -> None:
-        from maljan.reporting.models import EncryptionScheme
+        from malspark.reporting.models import EncryptionScheme
 
         for category in ("loader (delivers ransomware)", "loader, not ransomware", "ransomware"):
             report = rich_report()
@@ -498,8 +498,8 @@ class TestAFamilySpecificSectionNeedsItsFamily:
             assert "Ransomware behaviour" not in technical, category
 
     def test_a_block_of_placeholders_is_no_content(self) -> None:
-        from maljan.reporting.composer import _has_content
-        from maljan.reporting.models import EncryptionScheme
+        from malspark.reporting.composer import _has_content
+        from malspark.reporting.models import EncryptionScheme
 
         assert not _has_content(
             EncryptionScheme(cipher="none", mode="unknown", evidence_ref="ev_1")
@@ -509,7 +509,7 @@ class TestAFamilySpecificSectionNeedsItsFamily:
 
 class TestAnMbcIdIsNotAnAttackRow:
     def test_it_is_listed_as_a_behaviour_under_the_table(self) -> None:
-        from maljan.reporting.models import CapabilityCell
+        from malspark.reporting.models import CapabilityCell
 
         report = rich_report()
         report.capability_matrix.append(
@@ -644,7 +644,7 @@ class TestTheSandboxStatusIsAStatementNotAnObservation:
         return report
 
     def test_it_is_no_sandbox_entry_an_observed_step_may_cite(self) -> None:
-        from maljan.reporting.evidence_bundles import sandbox_entry_ids
+        from malspark.reporting.evidence_bundles import sandbox_entry_ids
 
         assert sandbox_entry_ids(self._report()) == []
 

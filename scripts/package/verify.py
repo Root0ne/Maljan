@@ -34,7 +34,7 @@ import json
 import sys
 from pathlib import Path
 
-from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+from malspark.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 
 EXIT = {"verified": 0, "broken": 1, "unsigned": 3, "seal_unverifiable": 4, "other_key": 5}
 

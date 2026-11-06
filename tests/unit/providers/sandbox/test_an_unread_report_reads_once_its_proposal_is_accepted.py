@@ -26,11 +26,11 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.report_proposals import propose_format
-from maljan.providers.errors import ProviderError
-from maljan.providers.sandbox.upload import UploadSandboxProvider
-from maljan.schemas.sandbox_document import sandbox_document
+from malspark.core.config import Settings
+from malspark.core.report_proposals import propose_format
+from malspark.providers.errors import ProviderError
+from malspark.providers.sandbox.upload import UploadSandboxProvider
+from malspark.schemas.sandbox_document import sandbox_document
 
 FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
 
@@ -91,9 +91,9 @@ def _provider(cfg: Settings, name: str, recorded: str) -> UploadSandboxProvider:
 
 
 def _pack(document: dict[str, Any], normalised: Any, tmp_path: Path) -> Any:
-    from maljan.agents.evidence_recorder import EvidenceRecorder
-    from maljan.pipeline.triage_pack import PIPELINE, run_pack
-    from maljan.schemas.evidence import EvidenceCounter
+    from malspark.agents.evidence_recorder import EvidenceRecorder
+    from malspark.pipeline.triage_pack import PIPELINE, run_pack
+    from malspark.schemas.evidence import EvidenceCounter
     from tests.unit.pipeline.test_triage_pack import _inputs, _write
     from tests.unit.tools.test_binary import _pe
 
@@ -110,8 +110,8 @@ class TestUnread:
     def test_it_reaches_the_run_as_raw_blocks_and_no_observed_fact(
         self, name: str, tmp_path: Path
     ) -> None:
-        from maljan.providers.sandbox_tools import sandbox_channels
-        from maljan.reporting.ledger_projection import network_from_sandbox_report
+        from malspark.providers.sandbox_tools import sandbox_channels
+        from malspark.reporting.ledger_projection import network_from_sandbox_report
 
         case = CASES[name]
         run = _provider(_settings(["unread"]), name, "unread").fetch("uploaded")
@@ -152,7 +152,7 @@ class TestAccepted:
         return run, sandbox_document(run.report), declaration["name"]
 
     def test_the_accepted_declaration_reads_it_as_a_built_in_does(self, name: str) -> None:
-        from maljan.reporting.ledger_projection import network_from_sandbox_report
+        from malspark.reporting.ledger_projection import network_from_sandbox_report
 
         case = CASES[name]
         _run, document, _format = self._read(name)
@@ -170,9 +170,9 @@ class TestAccepted:
     def test_it_reaches_the_pack_the_report_and_the_markdown(
         self, name: str, tmp_path: Path
     ) -> None:
-        from maljan.reporting.ledger_projection import dynamic_from_ledger
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.ledger_projection import dynamic_from_ledger
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         case = CASES[name]
         run, document, fmt = self._read(name)
@@ -190,7 +190,7 @@ class TestAccepted:
         assert case["process_name"] in MarkdownRenderer().render(report)
 
     def test_the_rest_provider_reads_the_body_alike(self, name: str) -> None:
-        from maljan.providers.sandbox.rest import RestSandboxProvider
+        from malspark.providers.sandbox.rest import RestSandboxProvider
 
         _run, uploaded, fmt = self._read(name)
         declaration = _accepted(name)

@@ -265,7 +265,7 @@ describe("the tool-server guide", () => {
       ...schema,
       credential_servers: {
         ...schema.credential_servers,
-        intelhub: { label: "Intel hub", family: "maljan", note: "Issued per deployment." },
+        intelhub: { label: "Intel hub", family: "malspark", note: "Issued per deployment." },
       },
     };
     const steps = guideById("tool-server")!.steps({ ...context(), schema: invented });

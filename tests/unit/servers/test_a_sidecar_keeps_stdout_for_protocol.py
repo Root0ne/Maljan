@@ -1,7 +1,7 @@
-"""Every Maljan sidecar's standard output carries JSON-RPC and nothing else.
+"""Every Malspark sidecar's standard output carries JSON-RPC and nothing else.
 
 A stdio MCP client parses each stdout line as JSON-RPC and logs a traceback for
-one that is not; a ``maljan`` log line written to stdout cost 12 to 60 of them
+one that is not; a ``malspark`` log line written to stdout cost 12 to 60 of them
 per validation run. Each entrypoint routes logging to standard error before any
 import that can log. The sidecar runs as a subprocess, the way a client starts
 it, through the initialize handshake and one tool call.
@@ -53,7 +53,11 @@ def _cache(directory: Path) -> dict[str, str]:
     }
     for domain in ("enterprise", "mobile", "ics"):
         (directory / f"{domain}-attack.json").write_text(json.dumps(bundle), encoding="utf-8")
-    return {**os.environ, "MALJAN_ATTCK_CACHE": str(directory), "MALJAN_ATTCK_REFRESH_DAYS": "0"}
+    return {
+        **os.environ,
+        "MALSPARK_ATTCK_CACHE": str(directory),
+        "MALSPARK_ATTCK_REFRESH_DAYS": "0",
+    }
 
 
 def _exchange(
@@ -130,9 +134,9 @@ def test_the_knowledge_sidecar_logs_to_stderr(tmp_path: Path) -> None:
 def test_routing_is_one_handler_and_leaves_the_text_alone() -> None:
     code = (
         "import logging\n"
-        "from maljan.core.stdio_safe import route_logging_to_stderr\n"
+        "from malspark.core.stdio_safe import route_logging_to_stderr\n"
         "route_logging_to_stderr()\n"
-        "from maljan.core.logger import logger\n"
+        "from malspark.core.logger import logger\n"
         "logger.info('hello %s', 'x')\n"
         "print(len(logger.handlers), len(logging.getLogger().handlers))\n"
     )
@@ -141,4 +145,4 @@ def test_routing_is_one_handler_and_leaves_the_text_alone() -> None:
     )
     assert done.stdout.split() == ["0", "1"], done.stderr
     assert done.stderr.count("hello x") == 1
-    assert " - maljan - INFO - hello x" in done.stderr
+    assert " - malspark - INFO - hello x" in done.stderr

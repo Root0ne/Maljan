@@ -4,7 +4,7 @@ The large model's judge answered one sample twice with about 25,000 characters
 that were not a JSON bundle. Both answers had generated exactly the 8,192
 tokens ``judge_max_tokens`` allows (the server log says so, and the run
 summary counts two ``judge_token_cap_hits``), and the text the fallback kept
-begins ``{ "type": "bundle", ... "x_maljan_assessment": {"verdict":
+begins ``{ "type": "bundle", ... "x_malspark_assessment": {"verdict":
 "Malware", "confidence": 0.85, ... "family": {"name": "Filisto", ...}}``. The
 cause was a bundle larger than the output budget, and the correction the
 model was given — "not a JSON STIX bundle" — named a different one, so it
@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     VERDICT_CUT_CODE,
     VERDICT_FALLBACK_CODE,
     JudgeAgent,
@@ -28,9 +28,9 @@ from maljan.agents.judge_agent import (
     stated_assessment_in,
     verdict_cut_violation,
 )
-from maljan.core.config import get_settings
-from maljan.pipeline.outcome import decide_from_bundle, stated_confidence, verdict_reading
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.core.config import get_settings
+from malspark.pipeline.outcome import decide_from_bundle, stated_confidence, verdict_reading
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 ASSESSMENT = {
     "verdict": "Malware",
@@ -47,7 +47,7 @@ def _cut_bundle(chars: int = 25_000) -> str:
         {
             "type": "bundle",
             "id": "bundle--1",
-            "x_maljan_assessment": ASSESSMENT,
+            "x_malspark_assessment": ASSESSMENT,
             "objects": [
                 {
                     "type": "indicator",
@@ -64,7 +64,7 @@ def _cut_bundle(chars: int = 25_000) -> str:
 
 
 def _cap() -> int:
-    from maljan.agents.judge_agent import judge_output_cap
+    from malspark.agents.judge_agent import judge_output_cap
 
     assert get_settings() is not None
     return judge_output_cap().tokens
@@ -128,7 +128,7 @@ class TestTheAssessmentAnAnswerStatedWhole:
 
     def test_prose_and_an_unreadable_verdict_state_nothing(self) -> None:
         assert stated_assessment_in("The verdict is Malware with confidence 0.85.") is None
-        unreadable = json.dumps({"x_maljan_assessment": {**ASSESSMENT, "verdict": "Malicious?"}})
+        unreadable = json.dumps({"x_malspark_assessment": {**ASSESSMENT, "verdict": "Malicious?"}})
         assert stated_assessment_in(unreadable) is None
 
 
@@ -137,7 +137,7 @@ class TestWhichAssessmentIsRead:
         draft = {**ASSESSMENT, "verdict": "Suspicious", "confidence": 0.4}
         text = (
             "Thinking: maybe "
-            + json.dumps({"x_maljan_assessment": draft})
+            + json.dumps({"x_malspark_assessment": draft})
             + " but the evidence says otherwise.\n"
             + _cut_bundle()
         )
@@ -153,7 +153,7 @@ class TestWhichAssessmentIsRead:
             **ASSESSMENT,
             "severity": {"rating": "High", "rationale": rationale},
         }
-        text = json.dumps({"type": "bundle", "x_maljan_assessment": written})[:-1]
+        text = json.dumps({"type": "bundle", "x_malspark_assessment": written})[:-1]
 
         assessment = stated_assessment_in(text)
 
@@ -225,14 +225,19 @@ class TestTheRound:
         assert VERDICT_FALLBACK_CODE in {v.code for v in verdict.violations}
         assert decide_from_bundle(bundle) == "Malware"
         assert stated_confidence(bundle) == 0.85
-        assert bundle.x_maljan_assessment is not None
-        assert bundle.x_maljan_assessment.family is not None
-        assert bundle.x_maljan_assessment.family.name == "Filisto"
+        assert bundle.x_malspark_assessment is not None
+        assert bundle.x_malspark_assessment.family is not None
+        assert bundle.x_malspark_assessment.family.name == "Filisto"
 
     @pytest.mark.asyncio
     async def test_a_retry_that_fits_is_the_verdict(self) -> None:
         fits = json.dumps(
-            {"type": "bundle", "id": "bundle--1", "x_maljan_assessment": ASSESSMENT, "objects": []}
+            {
+                "type": "bundle",
+                "id": "bundle--1",
+                "x_malspark_assessment": ASSESSMENT,
+                "objects": [],
+            }
         )
         llm = _Llm(_answer(_cut_bundle(), tokens=_cap()), _answer(fits, tokens=400))
 
@@ -248,14 +253,14 @@ class TestTheRound:
         verdict = await _verdict(llm)
 
         assert verdict.fed_back == {"verdict.not_json": 1}
-        assert verdict.bundle.x_maljan_assessment is None
+        assert verdict.bundle.x_malspark_assessment is None
         assert stated_confidence(verdict.bundle) is None
 
 
 class TestTheReportPublishesTheStatedNumber:
     def test_a_fallback_whose_answer_stated_its_assessment_carries_its_number(self) -> None:
-        from maljan.pipeline.nodes import _overall_confidence, the_judge_stated_the_verdict
-        from maljan.schemas.judgement import JudgeAssessment
+        from malspark.pipeline.nodes import _overall_confidence, the_judge_stated_the_verdict
+        from malspark.schemas.judgement import JudgeAssessment
 
         assessment = JudgeAssessment.model_validate(ASSESSMENT)
         stated = {"decision": "Malware", "failure": VERDICT_FALLBACK_CODE, "stated": True}

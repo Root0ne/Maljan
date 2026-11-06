@@ -17,14 +17,14 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.pipeline.validation import (
+from malspark.extractors.capability_matrix import build_capability_matrix
+from malspark.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     TECHNIQUE_NAME_CODE,
     technique_name_violations,
 )
-from maljan.reporting.composer import ReportComposer, _ProseOut
-from maljan.reporting.ledger_report import _technique_cell
+from malspark.reporting.composer import ReportComposer, _ProseOut
+from malspark.reporting.ledger_report import _technique_cell
 
 
 def _messages(text: str) -> list[str]:
@@ -98,7 +98,7 @@ class TestTheComposerAsks:
         llm = _RawLLM(wrong, right)
         comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             result = asyncio.run(
                 comp._invoke([HumanMessage(content="write it")], _ProseOut, section="payloads")

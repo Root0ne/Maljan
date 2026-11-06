@@ -1,4 +1,4 @@
-"""``MaljanApp._poll_budget`` reads the active sandbox provider's own numbers.
+"""``MalsparkApp._poll_budget`` reads the active sandbox provider's own numbers.
 
 Before Task 11's REST provider, ``_submit_to_sandbox`` read
 ``sandbox.cape2.timeout_seconds``/``poll_interval_seconds`` unconditionally,
@@ -10,8 +10,8 @@ provider id (mock included) falls back to CAPE's numbers exactly as before.
 
 from __future__ import annotations
 
-from maljan.app import MaljanApp
-from maljan.core.config import Settings
+from malspark.app import MalsparkApp
+from malspark.core.config import Settings
 
 # CAPE's pre-Task-11 constants (``SandboxCape2Config`` defaults), pinned here
 # so a future change to those defaults is a visible test failure rather than
@@ -27,11 +27,11 @@ class _Provider:
         self.id = id
 
 
-def _app(**sandbox_over) -> MaljanApp:
+def _app(**sandbox_over) -> MalsparkApp:
     cfg = Settings(_env_file=None)
     for key, value in sandbox_over.items():
         setattr(cfg.sandbox, key, value)
-    return MaljanApp(config=cfg, mock=True)
+    return MalsparkApp(config=cfg, mock=True)
 
 
 def test_a_provider_with_no_block_is_not_given_capes_numbers():
@@ -52,7 +52,7 @@ def test_cape2_reads_an_override_from_its_own_block_not_a_hardcoded_pair():
     cfg.sandbox.provider = "cape2"
     cfg.sandbox.cape2.timeout_seconds = 111
     cfg.sandbox.cape2.poll_interval_seconds = 7
-    app = MaljanApp(config=cfg, mock=True)
+    app = MalsparkApp(config=cfg, mock=True)
     assert app._poll_budget(_Provider("cape2")) == (111, 7)
 
 
@@ -66,7 +66,7 @@ def test_triage_override_is_honoured_and_not_confused_with_cape_or_rest():
     cfg.sandbox.provider = "triage"
     cfg.sandbox.triage.timeout_seconds = 222
     cfg.sandbox.triage.poll_interval_seconds = 8
-    app = MaljanApp(config=cfg, mock=True)
+    app = MalsparkApp(config=cfg, mock=True)
     assert app._poll_budget(_Provider("triage")) == (222, 8)
 
 
@@ -80,7 +80,7 @@ def test_rest_override_is_honoured_and_not_confused_with_cape_or_triage():
     cfg.sandbox.provider = "rest"
     cfg.sandbox.rest.timeout_seconds = 333
     cfg.sandbox.rest.poll_interval_seconds = 9
-    app = MaljanApp(config=cfg, mock=True)
+    app = MalsparkApp(config=cfg, mock=True)
     assert app._poll_budget(_Provider("rest")) == (333, 9)
 
 

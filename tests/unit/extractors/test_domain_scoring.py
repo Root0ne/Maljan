@@ -9,12 +9,12 @@ mints a technique claim of its own.
 
 from __future__ import annotations
 
-from maljan.extractors.network_extractor import (
+from malspark.extractors.network_extractor import (
     _DGA_SCORE_THRESHOLD,
     _assess_domain,
     _dga_score,
 )
-from maljan.reporting.ledger_projection import network_from_sandbox_report
+from malspark.reporting.ledger_projection import network_from_sandbox_report
 
 # ---------------------------------------------------------------------------
 # DGA scoring (Shannon entropy + bigram rarity composite)

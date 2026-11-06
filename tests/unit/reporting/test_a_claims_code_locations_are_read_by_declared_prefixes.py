@@ -18,11 +18,11 @@ from typing import Any
 
 import pytest
 
-from maljan.core import undeclared_tools
-from maljan.core.config import Settings
-from maljan.core.declared_reading import declarations
-from maljan.reporting.claim_coverage import claims_not_discussed, code_names
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.core import undeclared_tools
+from malspark.core.config import Settings
+from malspark.core.declared_reading import declarations
+from malspark.reporting.claim_coverage import claims_not_discussed, code_names
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
 
 _IDENTITY = SampleIdentity(hashes=FileHashes(sha256="a" * 64))
 
@@ -49,7 +49,7 @@ def installed(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Make the given settings the ones every reader without settings reads."""
 
     def install(settings: Settings) -> Settings:
-        monkeypatch.setattr("maljan.core.config.get_settings", lambda: settings)
+        monkeypatch.setattr("malspark.core.config.get_settings", lambda: settings)
         return settings
 
     return install

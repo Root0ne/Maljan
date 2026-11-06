@@ -15,7 +15,7 @@ describe("readStixAnswer", () => {
   });
 
   it("reads a stored bundle's own flag", () => {
-    const stored = { type: "bundle", x_maljan_published: false, x_maljan_notice: "stored draft" };
+    const stored = { type: "bundle", x_malspark_published: false, x_malspark_notice: "stored draft" };
     const answer = readStixAnswer(stored);
     expect(answer.draft).toBe(true);
     expect(answer.notice).toBe("stored draft");
@@ -29,12 +29,12 @@ describe("readStixAnswer", () => {
   });
 
   it("names a draft's download apart from the export's", () => {
-    expect(STIX_DRAFT_FILE).toBe("maljan-stix-bundle-draft.json");
+    expect(STIX_DRAFT_FILE).toBe("malspark-stix-bundle-draft.json");
     expect(STIX_EXPORT_FILE).not.toBe(STIX_DRAFT_FILE);
   });
 
   it("names the Navigator layer's download apart from both bundles", () => {
-    expect(NAVIGATOR_LAYER_FILE).toBe("maljan-attack-layer.json");
+    expect(NAVIGATOR_LAYER_FILE).toBe("malspark-attack-layer.json");
     expect([STIX_EXPORT_FILE, STIX_DRAFT_FILE]).not.toContain(NAVIGATOR_LAYER_FILE);
   });
 });

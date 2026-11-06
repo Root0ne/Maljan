@@ -12,9 +12,9 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.pipeline.validation import (
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.pipeline.validation import (
     CapabilityGrounding,
     EntryTexts,
     _category_says_benign,
@@ -52,7 +52,7 @@ class _Report:
 
 
 def test_v1_6_an_unread_grounding_keeps_the_rule_only_rows_already_complete() -> None:
-    from maljan.pipeline.validation import rule_match_statement_violations
+    from malspark.pipeline.validation import rule_match_statement_violations
 
     class _RuleReport(_Report):
         run_summary = {"corroboration": {"T1003": {"asserted_by": ["yara"], "claimed_by": []}}}
@@ -157,11 +157,11 @@ class _Tool:
 def test_n7_a_staging_failure_is_the_failure_not_the_tools_file_not_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.agents import composition
-    from maljan.core import config as config_module
-    from maljan.core.config import MCPServerConfig
-    from maljan.core.pack_steps import effective_steps
-    from maljan.pipeline.nodes import _server_step_call
+    from malspark.agents import composition
+    from malspark.core import config as config_module
+    from malspark.core.config import MCPServerConfig
+    from malspark.core.pack_steps import effective_steps
+    from malspark.pipeline.nodes import _server_step_call
     from tests.unit.pipeline.test_the_pack_runs_its_declared_steps import (
         INVENTORY,
         TestAnInventedToolAsAStep,
@@ -191,7 +191,7 @@ def test_n8_a_crashed_pack_publishes_its_type_not_its_message(
 ) -> None:
     import asyncio
 
-    import maljan.pipeline.nodes as nodes
+    import malspark.pipeline.nodes as nodes
     from tests.unit.pipeline.test_triage_pack import (
         _container,
         _pe,
@@ -213,7 +213,7 @@ def test_n8_a_crashed_pack_publishes_its_type_not_its_message(
 
 
 def test_n9_the_failure_header_cuts_nothing_unless_asked() -> None:
-    from maljan.pipeline.nodes import tool_failures
+    from malspark.pipeline.nodes import tool_failures
 
     long_message = "trace " * 400
     ledger = [
@@ -237,8 +237,8 @@ def test_n9_the_failure_header_cuts_nothing_unless_asked() -> None:
 
 
 def test_n9_a_narrative_round_has_no_wait_of_its_own_until_the_pace_is_measured() -> None:
-    from maljan.pipeline.nodes import _narrative_timeout
-    from maljan.reporting.narrative_agent import NarrativeAgent
+    from malspark.pipeline.nodes import _narrative_timeout
+    from malspark.reporting.narrative_agent import NarrativeAgent
 
     agent = NarrativeAgent.__new__(NarrativeAgent)
     agent.generation_rates = None  # type: ignore[attr-defined]
@@ -249,12 +249,12 @@ def test_n9_a_narrative_round_has_no_wait_of_its_own_until_the_pace_is_measured(
 def test_n9_the_reputation_lookup_waits_as_long_as_the_tool_declares(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import maljan.agents.base_agent as base_agent
-    import maljan.core.declared_reading as declared_reading
-    from maljan.agents.evidence_recorder import EvidenceRecorder
-    from maljan.pipeline.nodes import _reputation_lookup
-    from maljan.pipeline.triage_pack import PIPELINE
-    from maljan.schemas.evidence import EvidenceCounter
+    import malspark.agents.base_agent as base_agent
+    import malspark.core.declared_reading as declared_reading
+    from malspark.agents.evidence_recorder import EvidenceRecorder
+    from malspark.pipeline.nodes import _reputation_lookup
+    from malspark.pipeline.triage_pack import PIPELINE
+    from malspark.schemas.evidence import EvidenceCounter
 
     container = ServiceContainer(Settings(_env_file=None), mock=True)
     waits: list[Any] = []
@@ -289,7 +289,7 @@ def test_n9_the_reputation_lookup_waits_as_long_as_the_tool_declares(
 
 
 def test_n_state_a_later_succeeding_round_keeps_the_failure() -> None:
-    from maljan.pipeline.state import _merge_stage_results
+    from malspark.pipeline.state import _merge_stage_results
 
     merged = _merge_stage_results(
         {"debate": {"ran": True, "failure": True, "reason": "round 1 failed"}},
@@ -302,7 +302,7 @@ def test_n_state_a_later_succeeding_round_keeps_the_failure() -> None:
 
 
 def test_p4_only_a_declared_reference_tool_says_an_id_is_not_a_technique() -> None:
-    from maljan.pipeline.evidence_summary import invalid_technique_ids
+    from malspark.pipeline.evidence_summary import invalid_technique_ids
 
     sample_data = SimpleNamespace(
         id="ev_0001", tool="decompile", structured={"technique_id": "T1055", "valid": False}
@@ -316,8 +316,8 @@ def test_p4_only_a_declared_reference_tool_says_an_id_is_not_a_technique() -> No
 def test_p5_p6_a_stopped_run_summary_says_no_verdict_and_what_it_lacks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.pipeline import nodes
-    from maljan.pipeline.stopped_run import NO_VERDICT_REASON, stopped_run_summary
+    from malspark.pipeline import nodes
+    from malspark.pipeline.stopped_run import NO_VERDICT_REASON, stopped_run_summary
     from tests.unit.pipeline.test_a_stopped_run_keeps_a_partial_report import NOTE, _state
 
     container = ServiceContainer(Settings(_env_file=None), mock=True)
@@ -335,7 +335,7 @@ def test_p5_p6_a_stopped_run_summary_says_no_verdict_and_what_it_lacks(
 
 
 def test_p6_an_unreadable_ledger_row_is_said_in_the_stopped_report() -> None:
-    from maljan.pipeline.stopped_run import partial_report
+    from malspark.pipeline.stopped_run import partial_report
     from tests.unit.pipeline.test_a_stopped_run_keeps_a_partial_report import NOTE, _state
 
     container = ServiceContainer(Settings(_env_file=None), mock=True)
@@ -348,7 +348,7 @@ def test_p6_an_unreadable_ledger_row_is_said_in_the_stopped_report() -> None:
 
 
 def test_p7_the_tools_failed_line_merges_repeats() -> None:
-    from maljan.pipeline.run_state import render_run_state
+    from malspark.pipeline.run_state import render_run_state
     from tests.unit.pipeline.test_run_state import _row
 
     rows = [_row("capa", "boom", n, ok=False) for n in range(1, 41)]
@@ -360,11 +360,11 @@ def test_p7_the_tools_failed_line_merges_repeats() -> None:
 def _staging_call(
     monkeypatch: pytest.MonkeyPatch, reasons: list[str], declared: dict | None = None
 ):
-    from maljan.agents import composition
-    from maljan.core import config as config_module
-    from maljan.core.config import MCPServerConfig
-    from maljan.core.pack_steps import effective_steps
-    from maljan.pipeline.nodes import _server_step_call
+    from malspark.agents import composition
+    from malspark.core import config as config_module
+    from malspark.core.config import MCPServerConfig
+    from malspark.core.pack_steps import effective_steps
+    from malspark.pipeline.nodes import _server_step_call
     from tests.unit.pipeline.test_the_pack_runs_its_declared_steps import (
         INVENTORY,
         TestAnInventedToolAsAStep,
@@ -411,12 +411,12 @@ def test_n7_a_step_that_never_uses_the_sample_path_is_not_failed_by_staging(
 def test_n9_the_reputation_lookup_falls_back_to_what_is_left_of_the_pack_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import maljan.agents.base_agent as base_agent
-    import maljan.core.declared_reading as declared_reading
-    from maljan.agents.evidence_recorder import EvidenceRecorder
-    from maljan.pipeline.nodes import _reputation_lookup
-    from maljan.pipeline.triage_pack import PIPELINE
-    from maljan.schemas.evidence import EvidenceCounter
+    import malspark.agents.base_agent as base_agent
+    import malspark.core.declared_reading as declared_reading
+    from malspark.agents.evidence_recorder import EvidenceRecorder
+    from malspark.pipeline.nodes import _reputation_lookup
+    from malspark.pipeline.triage_pack import PIPELINE
+    from malspark.schemas.evidence import EvidenceCounter
 
     container = ServiceContainer(Settings(_env_file=None), mock=True)
     waits: list[Any] = []
@@ -451,8 +451,8 @@ def test_n9_the_reputation_lookup_falls_back_to_what_is_left_of_the_pack_budget(
 
 
 def test_n9_a_62_kb_failure_message_is_held_to_the_result_budget_and_says_so() -> None:
-    from maljan.pipeline.nodes import tool_failures
-    from maljan.schemas.evidence import build_entry
+    from malspark.pipeline.nodes import tool_failures
+    from malspark.schemas.evidence import build_entry
 
     trace = "Traceback (most recent call last):\n" + '  File "/srv/tool/x.py", line 1\n' * 2000
     entry = build_entry(

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from maljan.enrichment.declared import (
+from malspark.enrichment.declared import (
     EnrichmentSource,
     ReadySource,
     Threshold,
@@ -18,7 +18,7 @@ from maljan.enrichment.declared import (
     effective_sources,
     is_malicious,
 )
-from maljan.enrichment.orchestrator import (
+from malspark.enrichment.orchestrator import (
     _carry_seeded_context,
     _has_successful_rep,
     _is_public_ip,
@@ -162,7 +162,7 @@ class TestIPEnrichment:
         mr = _mr(ips=[{"address": "1.2.3.4"}])
         wire = _Wire({VT_HOST: None, ABUSE_HOST: {"data": {"abuseConfidenceScore": 65}}})
         async with wire.client() as http:
-            with patch("maljan.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
+            with patch("malspark.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
                 out = await enrich_malware_report(
                     mr,
                     sources=[
@@ -183,7 +183,7 @@ class TestIPEnrichment:
         wire = _Wire({})
         async with wire.client() as http:
             with patch(
-                "maljan.enrichment.orchestrator.WhoisClient",
+                "malspark.enrichment.orchestrator.WhoisClient",
                 return_value=_whois_mock(asn="AS15169 GOOGLE", geo="US"),
             ):
                 await enrich_malware_report(mr, http_client=http)
@@ -207,7 +207,7 @@ class TestReputationHelpers:
         assert _is_public_ip("not-an-ip") is False
 
     def test_the_whois_lookup_refuses_what_the_orchestrator_refuses(self) -> None:
-        from maljan.enrichment import whois_client
+        from malspark.enrichment import whois_client
 
         assert whois_client._is_public_ip is _is_public_ip
         for address in ("240.0.0.1", "0.0.0.0", "::", "224.0.0.1", "192.168.1.1"):
@@ -265,7 +265,7 @@ class TestTheEarlierRecordsContextIsKept:
         assert rep["hostname"] == "h"
 
     def test_a_stored_rows_legacy_permalink_key_is_still_kept(self) -> None:
-        from maljan.core.legacy_reputation import STORED_REPUTATION_LINK_KEYS
+        from malspark.core.legacy_reputation import STORED_REPUTATION_LINK_KEYS
 
         prev = {key: f"https://stored.example/{key}" for key in STORED_REPUTATION_LINK_KEYS}
         rep: dict[str, Any] = {"source": "anylookup"}
@@ -284,7 +284,7 @@ class TestSignalQualityFeedback:
         mr = _mr(ips=[{"address": "10.0.0.5"}])
         wire = _Wire({VT_HOST: _vt_answer(malicious=5)})
         async with wire.client() as http:
-            with patch("maljan.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
+            with patch("malspark.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
                 await enrich_malware_report(
                     mr, sources=[_shipped("virustotal", _key("k"))], http_client=http
                 )
@@ -354,14 +354,14 @@ class TestAttribution:
         mr = _mr(ips=[{"address": "1.2.3.4"}])
         wire = _Wire({})
         async with wire.client() as http:
-            with patch("maljan.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
+            with patch("malspark.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
                 out = await enrich_malware_report(mr, http_client=http)
         # No attribution block injected when no store was provided.
         assert "attribution" not in out or not out.get("attribution", {}).get("similar_samples")
 
     @pytest.mark.asyncio
     async def test_memory_store_populates_similar_samples(self) -> None:
-        from maljan.memory.long_term_memory import StoredCase
+        from malspark.memory.long_term_memory import StoredCase
 
         store = _AttribStore(
             [
@@ -393,11 +393,11 @@ class TestAttribution:
         sims = out["attribution"]["similar_samples"]
         assert len(sims) == 2
         assert store.calls == 1
-        assert sims[0]["source"] == "maljan-ltm"
+        assert sims[0]["source"] == "malspark-ltm"
 
     @pytest.mark.asyncio
     async def test_attribution_runs_even_without_network_iocs(self) -> None:
-        from maljan.memory.long_term_memory import StoredCase
+        from malspark.memory.long_term_memory import StoredCase
 
         store = _AttribStore(
             [
@@ -438,7 +438,7 @@ class TestWhatTheCapLeavesUnasked:
         )
         wire = _Wire({VT_HOST: _vt_answer()})
         async with wire.client() as http:
-            with patch("maljan.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
+            with patch("malspark.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
                 out = await enrich_malware_report(
                     mr,
                     sources=[_shipped("virustotal", _key("vt", "k"))],
@@ -523,7 +523,7 @@ class TestOrThresholds:
         assert mr["network"]["domains"][0]["reputation"]["malicious_verdict"] is True
         # The same keys come back in a later answer carrying the key itself.
         rep = {"source": "virustotal", "malicious_verdict": True, "harmless": 3}
-        from maljan.enrichment.orchestrator import _keep
+        from malspark.enrichment.orchestrator import _keep
 
         _keep({}, (source, rep))
         assert "malicious_verdict" not in rep

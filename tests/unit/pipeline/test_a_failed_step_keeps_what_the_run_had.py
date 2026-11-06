@@ -21,11 +21,11 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
-from maljan.core.config import Settings
-from maljan.pipeline.nodes import citable_ids, make_judge_node, make_stage_agent_node
-from maljan.pipeline.outcome import VERDICT_READ_FALLBACK
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.core.config import Settings
+from malspark.pipeline.nodes import citable_ids, make_judge_node, make_stage_agent_node
+from malspark.pipeline.outcome import VERDICT_READ_FALLBACK
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.stages import ANALYSIS_STAGE
 from tests.unit.pipeline.test_a_fallback_verdict_assesses_nothing import _Container, _state
 from tests.unit.pipeline.test_evidence_ledger_channel import _analysis_state, _Analyst, _Chunk

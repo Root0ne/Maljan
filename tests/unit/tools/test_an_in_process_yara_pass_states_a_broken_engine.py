@@ -8,9 +8,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core import ctype_locale
-from maljan.providers.static.capa_yara import CapaYaraStaticProvider
-from maljan.tools import rules
+from malspark.core import ctype_locale
+from malspark.providers.static.capa_yara import CapaYaraStaticProvider
+from malspark.tools import rules
 
 PROBLEM = "the YARA engine's case folding is broken in this process's locale (test)"
 
@@ -51,7 +51,7 @@ class _Stub:
 
 
 def _provider(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, native: bool) -> Any:
-    from maljan.analysis.yara_layer import YaraLayer
+    from malspark.analysis.yara_layer import YaraLayer
 
     (tmp_path / "rules.yml").write_text("rules: []\n")
     sample = tmp_path / "sample.bin"

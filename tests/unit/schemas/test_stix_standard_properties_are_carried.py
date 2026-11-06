@@ -12,8 +12,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from maljan.agents.judge_postprocess import _not_carried, _object_problem
-from maljan.schemas.stix_models import AttackPattern, Indicator, Malware, Relationship
+from malspark.agents.judge_postprocess import _not_carried, _object_problem
+from malspark.schemas.stix_models import AttackPattern, Indicator, Malware, Relationship
 
 PHASE = {"kill_chain_name": "lockheed-martin-cyber-kill-chain", "phase_name": "delivery"}
 

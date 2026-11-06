@@ -15,8 +15,8 @@ from typing import Any
 
 from mcp.types import CallToolResult, TextContent
 
-from maljan.agents.mcp_client import MCPLangChainToolkit, tool_error_marker
-from maljan.schemas.evidence import build_entry
+from malspark.agents.mcp_client import MCPLangChainToolkit, tool_error_marker
+from malspark.schemas.evidence import build_entry
 
 
 def _entry(output: str) -> Any:

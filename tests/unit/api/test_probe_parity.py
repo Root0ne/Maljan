@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from app.services.settings_catalog_api import full_catalog
 from app.services.settings_probes import OWN_PROBES, known_probe, probe_names
-from maljan.llm.provider_base import facts_of, provider_names
+from malspark.llm.provider_base import facts_of, provider_names
 
 
 def test_every_probe_the_catalog_names_is_answered():
@@ -21,9 +21,9 @@ def test_every_probe_the_catalog_names_is_answered():
 
 
 def test_every_registered_provider_has_a_probe_and_nothing_else_does():
-    from maljan.enrichment.declared import effective_sources
-    from maljan.memory.store_factory import memory_backends
-    from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+    from malspark.enrichment.declared import effective_sources
+    from malspark.memory.store_factory import memory_backends
+    from malspark.providers.registry import sandbox_provider_ids, static_provider_ids
 
     registered = {
         *static_provider_ids(),

@@ -18,15 +18,15 @@ from typing import Any
 import pytest
 from langchain_core.tools import StructuredTool
 
-from maljan.agents import base_agent
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.agents.tool_pinning import DECLARED_NAME_METADATA_KEY, SERVER_METADATA_KEY
-from maljan.core.config import Settings
-from maljan.core.declared_reading import DECLARED_NAME_KEY, FACTS_VERSION
-from maljan.core.reputation import is_lookup_tool
-from maljan.core.tool_declarations import ToolDeclarations
-from maljan.reporting import tool_kinds
-from maljan.schemas.evidence import build_entry
+from malspark.agents import base_agent
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.agents.tool_pinning import DECLARED_NAME_METADATA_KEY, SERVER_METADATA_KEY
+from malspark.core.config import Settings
+from malspark.core.declared_reading import DECLARED_NAME_KEY, FACTS_VERSION
+from malspark.core.reputation import is_lookup_tool
+from malspark.core.tool_declarations import ToolDeclarations
+from malspark.reporting import tool_kinds
+from malspark.schemas.evidence import build_entry
 
 
 def _declared() -> ToolDeclarations:
@@ -50,7 +50,7 @@ def _declared() -> ToolDeclarations:
 @pytest.fixture
 def held(monkeypatch: pytest.MonkeyPatch) -> ToolDeclarations:
     declared = _declared()
-    monkeypatch.setattr("maljan.core.declared_reading.declarations", lambda *_a, **_k: declared)
+    monkeypatch.setattr("malspark.core.declared_reading.declarations", lambda *_a, **_k: declared)
     return declared
 
 
@@ -116,7 +116,7 @@ def test_a_renamed_call_keeps_its_original_name_when_settings_cannot_be_read(
     def unreadable(*_a: Any, **_k: Any) -> ToolDeclarations:
         raise RuntimeError("settings unreadable")
 
-    monkeypatch.setattr("maljan.core.declared_reading.declarations", unreadable)
+    monkeypatch.setattr("malspark.core.declared_reading.declarations", unreadable)
     renamed = _entry("mine__x", "x")
     assert renamed.facts == {"v": FACTS_VERSION, DECLARED_NAME_KEY: "x"}
     assert tool_kinds.declared_name(renamed) == "x"

@@ -30,8 +30,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from maljan.agents import tool_answer_clearing as tac
-from maljan.core.spend import SpendMeter, prompt_tier_tokens
+from malspark.agents import tool_answer_clearing as tac
+from malspark.core.spend import SpendMeter, prompt_tier_tokens
 
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "clearing" / "haiku5_tool_loops.json"
 MODEL = "claude-haiku-5-5"

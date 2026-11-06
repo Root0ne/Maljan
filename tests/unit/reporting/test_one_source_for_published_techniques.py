@@ -20,14 +20,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
-from maljan.pipeline.validation import MISSING_ID_CODE, validate_verdict_bundle
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport, TTPMapping
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import Bundle
+from malspark.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
+from malspark.pipeline.validation import MISSING_ID_CODE, validate_verdict_bundle
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import MalwareReport, TTPMapping
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import Bundle
 
 # Real, and not real: the catalogue check is asked about both.
 KNOWN = "T1055"

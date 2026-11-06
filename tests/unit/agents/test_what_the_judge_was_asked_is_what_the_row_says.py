@@ -23,22 +23,22 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.agents.judge_agent import VERDICT_CUT_CODE, JudgeAgent
-from maljan.core.config import get_settings
-from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.pipeline.validation import Violation, not_asked, validation_metrics
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.agents.judge_agent import VERDICT_CUT_CODE, JudgeAgent
+from malspark.core.config import get_settings
+from malspark.extractors.capability_matrix import build_capability_matrix
+from malspark.pipeline.validation import Violation, not_asked, validation_metrics
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_CREDIT_CODE,
     ExtendedSTIXRenderer,
 )
-from maljan.schemas.isr_models import (
+from malspark.schemas.isr_models import (
     JUDGE_ONLY_TECHNIQUE_MARKER,
     AgentISR,
     ClaimEvidence,
     judge_and_findings_note,
 )
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.stix_models import Bundle
 
 CREDIT = "stix.credit_without_claim"
 
@@ -52,7 +52,7 @@ def _credited_bundle(technique: str = "T1003") -> dict[str, Any]:
     return {
         "type": "bundle",
         "id": f"bundle--{_uuid(99)}",
-        "x_maljan_assessment": {
+        "x_malspark_assessment": {
             "verdict": "Malware",
             "confidence": 0.9,
             "severity": {"rating": "High", "rationale": "It does harm."},
@@ -71,9 +71,9 @@ def _credited_bundle(technique: str = "T1003") -> dict[str, Any]:
                 "relationship_type": "uses",
                 "source_ref": f"malware--{_uuid(0)}",
                 "target_ref": f"attack-pattern--{_uuid(1)}",
-                "x_maljan_confidence": 0.9,
-                "x_maljan_evidence_basis": "static",
-                "x_maljan_contributing_agents": ["Static Analyst"],
+                "x_malspark_confidence": 0.9,
+                "x_malspark_evidence_basis": "static",
+                "x_malspark_contributing_agents": ["Static Analyst"],
             },
         ],
     }
@@ -174,7 +174,7 @@ class TestWhatTheRecordSays:
 class TestTheJudgesRound:
     @pytest.mark.asyncio
     async def test_a_credit_the_retry_raised_first_is_recorded_as_not_asked(self) -> None:
-        from maljan.agents.judge_agent import judge_output_cap
+        from malspark.agents.judge_agent import judge_output_cap
 
         assert get_settings() is not None
         cap = judge_output_cap().tokens
@@ -199,7 +199,7 @@ class TestTheJudgesRound:
     @pytest.mark.asyncio
     async def test_a_credit_renamed_in_answer_to_the_question_is_recorded_as_asked(self) -> None:
         first = _credited_bundle()
-        first["objects"][2]["x_maljan_contributing_agents"] = ["dynamic"]
+        first["objects"][2]["x_malspark_contributing_agents"] = ["dynamic"]
         renamed = json.dumps(_credited_bundle())
 
         found = await _verdict(_answer(json.dumps(first), tokens=900), _answer(renamed, tokens=900))

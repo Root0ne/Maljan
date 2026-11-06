@@ -19,14 +19,14 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage
 
-from maljan.core.config import Settings
-from maljan.llm.generation_rate import (
+from malspark.core.config import Settings
+from malspark.llm.generation_rate import (
     LLAMA_CPP_PROMPT_SOURCE,
     LLAMA_CPP_SOURCE,
     GenerationRates,
     attach_rate_meter,
 )
-from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only, server_timings_of
+from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only, server_timings_of
 
 _TIMINGS = {
     "prompt_n": 10252,

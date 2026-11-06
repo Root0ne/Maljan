@@ -27,13 +27,13 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.rule_matches import RULE_FACT_HEAD, is_rule_fact
-from maljan.pipeline.debate_facts import fact_atoms, ledger_count_facts, ledger_stated
-from maljan.pipeline.state import AgentArgument
-from maljan.reporting.follow_up import stored_ledger
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.core.rule_matches import RULE_FACT_HEAD, is_rule_fact
+from malspark.pipeline.debate_facts import fact_atoms, ledger_count_facts, ledger_stated
+from malspark.pipeline.state import AgentArgument
+from malspark.reporting.follow_up import stored_ledger
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 
 AGENTS = ["alpha", "beta", "triage"]

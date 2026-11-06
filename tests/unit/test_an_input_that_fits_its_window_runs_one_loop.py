@@ -25,12 +25,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
-from maljan.agents.base_agent import INPUT_NOTICE_ROOM, BaseAnalyst
-from maljan.core.config import ChunkingConfig, ProfileDefinition, Settings, StageDefinition
-from maljan.core.container import ServiceContainer
-from maljan.llm import context_window as cw
-from maljan.llm.context_window import UNKNOWN_WINDOW_CHUNK_TOKENS, _load_table
-from maljan.loaders.binary_chunker import (
+from malspark.agents.base_agent import INPUT_NOTICE_ROOM, BaseAnalyst
+from malspark.core.config import ChunkingConfig, ProfileDefinition, Settings, StageDefinition
+from malspark.core.container import ServiceContainer
+from malspark.llm import context_window as cw
+from malspark.llm.context_window import UNKNOWN_WINDOW_CHUNK_TOKENS, _load_table
+from malspark.loaders.binary_chunker import (
     _CHARS_PER_TOKEN,
     SHIPPED_CHUNK_CHARS,
     BinaryChunker,
@@ -41,7 +41,7 @@ from maljan.loaders.binary_chunker import (
     header_chars,
     joined_when_it_fits,
 )
-from maljan.pipeline.nodes import agent_input_room, make_stage_agent_node
+from malspark.pipeline.nodes import agent_input_room, make_stage_agent_node
 from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
@@ -308,7 +308,7 @@ class TestTheNode:
         container.parser_registry.create.return_value.parse.return_value = parsed
         node = make_stage_agent_node(ANALYSIS_STAGE, "network", container)
 
-        with patch("maljan.pipeline.nodes.upstream_findings", lambda *_a: block):
+        with patch("malspark.pipeline.nodes.upstream_findings", lambda *_a: block):
             node(_state(sandbox_report={"network": {"hosts": ["203.0.113.9"]}}))
 
         agent.safe_analyze_isr.assert_not_called()
@@ -406,7 +406,7 @@ class TestTheHeadSourceRoom:
         block = "Upstream findings: " + "u" * 30_000
         node = make_stage_agent_node(ANALYSIS_STAGE, "triage", container)
 
-        with patch("maljan.pipeline.nodes.upstream_findings", lambda *_a: block):
+        with patch("malspark.pipeline.nodes.upstream_findings", lambda *_a: block):
             node(_state(sandbox_report=report))
 
         (chunks,) = agent.safe_analyze_isr_chunked.call_args[0]
@@ -484,7 +484,7 @@ class TestAnUpstreamBlockNearTheRoomAddsAtMostOneChunk:
     def test_a_block_of_any_size_up_to_past_the_room(self, added: int) -> None:
         block = "U" * (added - 2) if added >= 2 else ""
         agent, node, state, _container_ = _hostile_node(HOSTILE_INPUT, block)
-        with patch("maljan.pipeline.nodes.upstream_findings", lambda *_a: block):
+        with patch("malspark.pipeline.nodes.upstream_findings", lambda *_a: block):
             node(state)
         shown = _chunks_shown(agent)
         assert 1 < len(shown) <= self.AT_THE_ROOM + 1 + -(-added // HOSTILE_ROOM)
@@ -509,7 +509,7 @@ class TestAnUpstreamBlockNearTheRoomAddsAtMostOneChunk:
 
         def timed(parsed: str) -> float:
             agent, node, state, _container_ = _hostile_node(parsed, block)
-            with patch("maljan.pipeline.nodes.upstream_findings", lambda *_a: block):
+            with patch("malspark.pipeline.nodes.upstream_findings", lambda *_a: block):
                 began = time.thread_time()
                 node(state)
                 return time.thread_time() - began
@@ -611,7 +611,7 @@ def test_on_every_known_window_a_chunk_fits_beside_the_reverser_s_prompt(window:
     cfg = Settings(_env_file=None, chunking={"overlap_tokens": 0})
     text = "x" * 300_000
 
-    with patch("maljan.agents.base_agent.get_settings", lambda: cfg):
+    with patch("malspark.agents.base_agent.get_settings", lambda: cfg):
         room = agent._input_room_chars(text)
         chunks = BinaryChunker(cfg.chunking).chunk("triage", text, room=agent._input_room_chars)
 
@@ -637,7 +637,7 @@ def test_on_64k_the_reverser_s_room_is_below_the_old_split_and_its_input_splits_
     agent, _budget = _reverser(65_536)
     cfg = Settings(_env_file=None, chunking={"overlap_tokens": 0})
     text = "x" * 160_000
-    with patch("maljan.agents.base_agent.get_settings", lambda: cfg):
+    with patch("malspark.agents.base_agent.get_settings", lambda: cfg):
         room = agent._input_room_chars(text)
         derived = BinaryChunker(cfg.chunking).chunk("triage", text, room=agent._input_room_chars)
     old = BinaryChunker(ChunkingConfig(max_tokens_per_chunk=20_000, overlap_tokens=0))

@@ -24,7 +24,7 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     COMMAND_VALUES_CODE,
     KEPT_WITH_A_FINDING,
     ComparedValues,
@@ -32,7 +32,7 @@ from maljan.pipeline.validation import (
     command_value_violations,
     compared_values,
 )
-from maljan.reporting.composer import (
+from malspark.reporting.composer import (
     _INSTRUCTIONS,
     COMPARED_VALUES_LEAD,
     ReportComposer,
@@ -42,7 +42,7 @@ from maljan.reporting.composer import (
     _compared_lines,
     code_compared_values,
 )
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
 
 # An invented dispatcher in the form a decompiler writes, with a combined
 # pre-check, an if/else chain split at a bound, and a field compared on the side.
@@ -245,7 +245,7 @@ class TestTheCodeIsRead:
         def _fails(_code: str) -> Any:
             raise ValueError("unreadable")
 
-        monkeypatch.setattr("maljan.pipeline.validation._read_compared_values", _fails)
+        monkeypatch.setattr("malspark.pipeline.validation._read_compared_values", _fails)
         bundle = {"function_code": [{"tool": "t", "symbol": "s", "output": SWITCH}]}
 
         assert compared_values(SWITCH) == []
@@ -420,8 +420,10 @@ def _author(*answers: dict[str, Any]) -> tuple[Any, _RawLLM, ReportComposer]:
         ]
     }
     with (
-        patch("maljan.reporting.composer.bundle_for", return_value=bundle),
-        patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False),
+        patch("malspark.reporting.composer.bundle_for", return_value=bundle),
+        patch(
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ),
     ):
         result = asyncio.run(
             comp._author(

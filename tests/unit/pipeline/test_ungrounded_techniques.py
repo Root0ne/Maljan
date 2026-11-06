@@ -18,12 +18,12 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     UNGROUNDED_TECHNIQUE_CODE,
     ungrounded_technique_note,
     validate_isr,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 LEDGER = ["ev_0001", "ev_0002"]
 
@@ -107,7 +107,7 @@ class TestWhatIsNot:
         reference in prose, and the ledger id in the structured channel
         against the same technique.
         """
-        from maljan.schemas.isr_models import Finding
+        from malspark.schemas.isr_models import Finding
 
         isr = _isr(_claim("API call: VirtualAllocEx @ 0x401234 (import table)"))
         isr.findings = [
@@ -122,7 +122,7 @@ class TestWhatIsNot:
         assert UNGROUNDED_TECHNIQUE_CODE not in _codes(validate_isr(isr, ledger_ids=LEDGER))
 
     def test_a_findings_block_about_another_technique_does_not(self) -> None:
-        from maljan.schemas.isr_models import Finding
+        from malspark.schemas.isr_models import Finding
 
         isr = _isr(_claim("API call: VirtualAllocEx @ 0x401234"))
         isr.findings = [
@@ -132,7 +132,7 @@ class TestWhatIsNot:
         assert UNGROUNDED_TECHNIQUE_CODE in _codes(validate_isr(isr, ledger_ids=LEDGER))
 
     def test_a_findings_block_citing_an_id_from_another_run_does_not(self) -> None:
-        from maljan.schemas.isr_models import Finding
+        from malspark.schemas.isr_models import Finding
 
         isr = _isr(_claim("API call: VirtualAllocEx @ 0x401234"))
         isr.findings = [
@@ -142,7 +142,7 @@ class TestWhatIsNot:
         assert UNGROUNDED_TECHNIQUE_CODE in _codes(validate_isr(isr, ledger_ids=LEDGER))
 
     def test_a_findings_block_that_cites_no_id_does_not_either(self) -> None:
-        from maljan.schemas.isr_models import Finding
+        from malspark.schemas.isr_models import Finding
 
         isr = _isr(_claim("API call: VirtualAllocEx @ 0x401234"))
         isr.findings = [Finding(title="Injection", technique_ids=["T1055"], evidence_ids=[])]
@@ -151,7 +151,7 @@ class TestWhatIsNot:
 
     def test_the_claim_format_asks_for_the_id_the_checker_wants(self) -> None:
         """The requirement and the instruction have to be the same sentence."""
-        from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
+        from malspark.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 
         assert "EVIDENCE:" in CLAIM_FORMAT_FRAGMENT
         assert "ev_0002" in CLAIM_FORMAT_FRAGMENT
@@ -159,8 +159,8 @@ class TestWhatIsNot:
 
     def test_the_view_prompt_and_the_schema_field_ask_for_the_same_id(self) -> None:
         """The two places a reader looks for the format after the analysts."""
-        from maljan.agents.base_agent import _VIEW_SYSTEM
-        from maljan.schemas.isr_models import ClaimEvidence
+        from malspark.agents.base_agent import _VIEW_SYSTEM
+        from malspark.schemas.isr_models import ClaimEvidence
 
         assert "naming the tool result you read it from" in _VIEW_SYSTEM
         assert "[ev_0002]" in _VIEW_SYSTEM
@@ -169,7 +169,7 @@ class TestWhatIsNot:
     def test_every_analyst_prompt_uses_that_one_fragment(self) -> None:
         import inspect
 
-        from maljan.agents import (
+        from malspark.agents import (
             configurable_analyst,
             dynamic_analyst,
             network_analyst,
@@ -213,11 +213,11 @@ class TestTheEvidenceLineKeepsItsId:
 
     @pytest.fixture(autouse=True)
     def _a_narrow_width(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("maljan.agents.base_agent.evidence_ref_width", lambda: 200)
+        monkeypatch.setattr("malspark.agents.base_agent.evidence_ref_width", lambda: 200)
 
     def _parsers(self) -> list[Any]:
-        from maljan.agents.base_agent import parse_structured_claims
-        from maljan.agents.static_analyst import _parse_claim_blocks
+        from malspark.agents.base_agent import parse_structured_claims
+        from malspark.agents.static_analyst import _parse_claim_blocks
 
         return [parse_structured_claims, _parse_claim_blocks]
 
@@ -245,7 +245,7 @@ class TestTheEvidenceLineKeepsItsId:
         cut can land on any character of the id."""
         import re
 
-        from maljan.agents.base_agent import evidence_ref_text
+        from malspark.agents.base_agent import evidence_ref_text
 
         for pad in range(188, 201):
             stored = evidence_ref_text("y" * pad + "[ev_0007] [ev_0008] [ev_0009] [ev_0010]")
@@ -257,7 +257,7 @@ class TestTheEvidenceLineKeepsItsId:
     def test_every_id_the_cut_removed_is_written_back(self) -> None:
         """An id is the citation: a claim that loses one cites less than its
         analyst did, and the judge's question reads its entries from here."""
-        from maljan.agents.base_agent import evidence_ref_text
+        from malspark.agents.base_agent import evidence_ref_text
 
         line = "x" * 200 + " ".join(f"[ev_{n:04d}]" for n in range(1, 60))
 
@@ -280,8 +280,8 @@ class TestTheAnalystIsAskedOnce:
     def _agent(self, answers: list[str], entries: list[str]) -> Any:
         from unittest.mock import MagicMock
 
-        from maljan.agents.base_agent import BaseAnalyst
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.agents.base_agent import BaseAnalyst
+        from malspark.schemas.evidence import LedgerEntry
 
         class _Analyst(BaseAnalyst):
             """The abstract halves this test does not exercise."""
@@ -326,7 +326,7 @@ class TestTheAnalystIsAskedOnce:
             return _isr(_claim(evidence))
 
         agent._text_to_isr = _parse  # type: ignore[method-assign]
-        with patch("maljan.agents.base_agent.get_settings") as settings:
+        with patch("malspark.agents.base_agent.get_settings") as settings:
             settings.return_value.react_agent_timeout = 60
             settings.return_value.react_agent_timeout_overrides = {}
             return agent._validate_isr(isr, "the evidence the analyst read")
@@ -382,7 +382,7 @@ class TestWhatTheJudgeIsTold:
     def test_the_judge_node_reads_it_from_the_validation_findings(self) -> None:
         import inspect
 
-        from maljan.pipeline import nodes
+        from malspark.pipeline import nodes
 
         source = inspect.getsource(nodes)
 
@@ -391,8 +391,8 @@ class TestWhatTheJudgeIsTold:
 
 class TestTheEvidenceWidthComesFromTheWindow:
     def test_a_known_window_sizes_it_like_one_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.agents import base_agent
-        from maljan.llm import context_window
+        from malspark.agents import base_agent
+        from malspark.llm import context_window
 
         monkeypatch.setattr(
             context_window,
@@ -409,8 +409,8 @@ class TestTheEvidenceWidthComesFromTheWindow:
     def test_an_unknown_window_is_the_documented_fallback(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
-        from maljan.llm import context_window
+        from malspark.agents import base_agent
+        from malspark.llm import context_window
 
         monkeypatch.setattr(
             context_window, "window_for_settings", lambda *a, **k: context_window.unknown_window()

@@ -25,7 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     ABSENCE_CONTRADICTS_LEDGER_CODE,
     ABSENCE_HELD_LEAD,
     EntryTexts,
@@ -33,11 +33,11 @@ from maljan.pipeline.validation import (
     feedback_text,
     ledger_absence_contradictions,
 )
-from maljan.reporting.composer import _bundle_text
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.narrative_agent import NarrativeAgent, build_prompt_text
-from maljan.reporting.question_round import question_prompt_text
-from maljan.schemas.evidence import build_entry
+from malspark.reporting.composer import _bundle_text
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.narrative_agent import NarrativeAgent, build_prompt_text
+from malspark.reporting.question_round import question_prompt_text
+from malspark.schemas.evidence import build_entry
 from tests.linear_cost import TIME_RATIO_LIMIT, cpu_seconds
 
 APPEND = "void FUN_0000b984(long *param_1,long param_2)\n{\n  FUN_0000b9cc(param_1,param_2);\n}"
@@ -270,8 +270,8 @@ class TestWhatNamesAnAddress:
     def test_the_holders_are_in_ledger_order_whatever_the_hash_seed(self) -> None:
         script = (
             "import json\n"
-            "from maljan.pipeline.validation import EntryTexts, ledger_absence_contradictions\n"
-            "from maljan.schemas.evidence import build_entry\n"
+            "from malspark.pipeline.validation import EntryTexts, ledger_absence_contradictions\n"
+            "from malspark.schemas.evidence import build_entry\n"
             "ids = [f'ev_{n:04d}' for n in (40, 7, 23, 3, 31, 12, 18, 5)]\n"
             "ledger = [build_entry(entry_id=i, seq=n, agent='a', server='s', tool='function_index',"
             " args={}, output=json.dumps({'0x10c60': 'CreateMutexW'}))\n"

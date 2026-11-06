@@ -229,8 +229,8 @@ def _before(name: str) -> dict[str, Any]:
 
 def observed(capture: Path, network: Any) -> dict[str, Any]:
     """Every surface's answer for one capture, as JSON-shaped data."""
-    from maljan.analysis.pcap_summary import capture_facts, summarize_pcap
-    from maljan.tools.pcap import pcap_summary
+    from malspark.analysis.pcap_summary import capture_facts, summarize_pcap
+    from malspark.tools.pcap import pcap_summary
 
     path = str(capture)
     return json.loads(
@@ -267,9 +267,9 @@ def answers(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, Any
     base = tmp_path_factory.mktemp("staging")
     captures = staged(base)
     with pytest.MonkeyPatch.context() as env:
-        env.setenv("MALJAN_STAGING_DIR", str(base))
-        env.setenv("MALJAN_STAGING_JOB", JOB_LEAF)
-        env.setenv("MALJAN_SAMPLE_ROOTS", "")
+        env.setenv("MALSPARK_STAGING_DIR", str(base))
+        env.setenv("MALSPARK_STAGING_JOB", JOB_LEAF)
+        env.setenv("MALSPARK_SAMPLE_ROOTS", "")
         network = _network()
         return {name: observed(captures / name, network) for name in CAPTURES}
 

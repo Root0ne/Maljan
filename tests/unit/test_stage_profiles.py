@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import (
+from malspark.core.config import (
     DebateOptions,
     ProfileDefinition,
     Settings,

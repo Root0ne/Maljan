@@ -22,7 +22,7 @@ import json
 
 import pytest
 
-from maljan.schemas.stix_models import (
+from malspark.schemas.stix_models import (
     AttackPattern,
     Bundle,
     Indicator,

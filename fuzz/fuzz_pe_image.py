@@ -10,7 +10,7 @@ import sys
 import atheris
 
 with atheris.instrument_imports():
-    from maljan.tools import pe_image
+    from malspark.tools import pe_image
 
 
 def TestOneInput(data: bytes) -> None:  # noqa: N802 - the name libFuzzer looks for

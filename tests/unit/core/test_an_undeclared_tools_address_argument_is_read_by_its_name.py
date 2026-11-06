@@ -17,8 +17,8 @@ import time
 
 import pytest
 
-from maljan.core.tool_declarations import ToolFacts
-from maljan.core.undeclared_tools import (
+from malspark.core.tool_declarations import ToolFacts
+from malspark.core.undeclared_tools import (
     ADDRESS_ARGUMENTS,
     address_arguments,
     entry_address_arguments,
@@ -126,8 +126,8 @@ def test_a_tool_whose_answer_is_not_code_offers_no_name() -> None:
 
 
 def test_a_lookup_s_address_places_no_code_root() -> None:
-    from maljan.analysis.evidence_roots import run_roots
-    from maljan.schemas.evidence import build_entry
+    from malspark.analysis.evidence_roots import run_roots
+    from malspark.schemas.evidence import build_entry
 
     entry = build_entry(
         entry_id="ev_0001",
@@ -156,7 +156,7 @@ def _schema_tool(name: str, **fields: type) -> object:
 
 
 def test_the_debate_lists_only_tools_that_read_code_at_an_address() -> None:
-    from maljan.pipeline.debate_facts import tools_taking_an_address
+    from malspark.pipeline.debate_facts import tools_taking_an_address
 
     tools = [
         _schema_tool("check_ip_reputation", ip_address=str),
@@ -169,8 +169,8 @@ def test_the_debate_lists_only_tools_that_read_code_at_an_address() -> None:
 
 
 def test_an_undeclared_decompile_is_placed_by_it() -> None:
-    from maljan.analysis.evidence_roots import run_roots
-    from maljan.schemas.evidence import build_entry
+    from malspark.analysis.evidence_roots import run_roots
+    from malspark.schemas.evidence import build_entry
 
     entry = build_entry(
         entry_id="ev_0001",

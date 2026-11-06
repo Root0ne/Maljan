@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.pipeline.validation import absence_claim_violation
-from maljan.schemas.isr_models import ClaimEvidence
-from maljan.tools import knowledge
+from malspark.pipeline.validation import absence_claim_violation
+from malspark.schemas.isr_models import ClaimEvidence
+from malspark.tools import knowledge
 
 
 def _asked(text: str, technique: str) -> bool:

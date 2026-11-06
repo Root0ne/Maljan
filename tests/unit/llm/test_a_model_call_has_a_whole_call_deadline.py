@@ -1,4 +1,4 @@
-"""Every model request has a whole-call deadline Maljan enforces itself.
+"""Every model request has a whole-call deadline Malspark enforces itself.
 
 httpx reads a request timeout as the longest silence it waits through. A
 server that trickles bytes — keep-alive lines while a request is queued, or a
@@ -19,7 +19,11 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
-from maljan.llm.generation_rate import ModelCallDeadline, call_deadline, with_sized_request_timeout
+from malspark.llm.generation_rate import (
+    ModelCallDeadline,
+    call_deadline,
+    with_sized_request_timeout,
+)
 
 
 class _Trickling(BaseChatModel):
@@ -94,7 +98,7 @@ class TestTheWholeCallIsBounded:
         assert answer.content == "late"
 
     def test_the_deadline_is_a_timeout_a_model_list_moves_on_from(self) -> None:
-        from maljan.llm.fallback import provider_failure
+        from malspark.llm.fallback import provider_failure
 
         assert provider_failure(ModelCallDeadline("x")) == "the provider timed out"
 

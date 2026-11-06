@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.providers import registry
-from maljan.providers.base import SandboxProvider
-from maljan.providers.sandbox.readers import fetches_task_reports, report_reader
-from maljan.schemas.sandbox_report import TRIAGE_NORMALISER_FILLS, TRIAGE_OVERVIEW_FILLS
+from malspark.providers import registry
+from malspark.providers.base import SandboxProvider
+from malspark.providers.sandbox.readers import fetches_task_reports, report_reader
+from malspark.schemas.sandbox_report import TRIAGE_NORMALISER_FILLS, TRIAGE_OVERVIEW_FILLS
 
 
 def test_the_shipped_provider_that_fetches_them_says_so() -> None:

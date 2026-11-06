@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import (
+from malspark.core.config import (
     AGENT_KEY_PATTERN,
     BUILTIN_AGENTS,
     BUILTIN_PROFILES,
@@ -583,7 +583,7 @@ def test_a_server_bound_to_a_definition_that_does_not_exist_is_refused():
 
 def test_the_deprecated_agent_role_alias_is_still_a_type():
     """Sub-project B imports ``AgentRole``; it must keep importing."""
-    from maljan.core.config import AgentRole
+    from malspark.core.config import AgentRole
 
     assert AgentRole is str
 
@@ -592,7 +592,7 @@ def test_the_deprecated_agent_role_alias_is_still_a_type():
 
 
 def test_every_new_leaf_is_annotated_and_grouped():
-    from maljan.core.settings_annotations import ANNOTATIONS, GROUP_ORDER
+    from malspark.core.settings_annotations import ANNOTATIONS, GROUP_ORDER
 
     for key in ("agents.profile", "agents.profiles", "agents.definitions"):
         assert key in ANNOTATIONS, key
@@ -764,7 +764,7 @@ def test_an_agent_may_not_reference_itself():
 
 
 def test_the_judge_may_ask_and_neither_it_nor_the_reporter_can_be_asked():
-    from maljan.core.config import AgentDefinition, agent_reference_problems
+    from malspark.core.config import AgentDefinition, agent_reference_problems
 
     with pytest.raises(ValidationError, match="'judge' has role 'judge' and cannot be asked"):
         _led(boss={"role": "lead", "prompt": "lead", "tools": [_agent("judge")]})
@@ -836,7 +836,7 @@ def test_the_team_lead_profile_is_seeded_and_the_default_is_unchanged():
 
 
 def test_the_delegation_depth_is_a_setting_with_a_floor_and_an_annotation():
-    from maljan.core.settings_annotations import ANNOTATIONS
+    from malspark.core.settings_annotations import ANNOTATIONS
 
     assert Settings(_env_file=None).agents.delegation_depth == 2
     assert _settings(delegation_depth=3).agents.delegation_depth == 3

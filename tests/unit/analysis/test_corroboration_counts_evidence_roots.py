@@ -10,8 +10,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from maljan.analysis.corroboration import corroboration_row
-from maljan.analysis.evidence_roots import (
+from malspark.analysis.corroboration import corroboration_row
+from malspark.analysis.evidence_roots import (
     BLOB_UNMATCHED,
     EXPORT_TABLE,
     FILE_UNTOLD,
@@ -26,11 +26,11 @@ from maljan.analysis.evidence_roots import (
     roots_phrase,
     run_roots,
 )
-from maljan.extractors.capability_matrix import build_capability_matrix, judge_questions
-from maljan.reporting.models import TTPMapping
-from maljan.reporting.renderers.markdown import _corroborated_words
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
+from malspark.extractors.capability_matrix import build_capability_matrix, judge_questions
+from malspark.reporting.models import TTPMapping
+from malspark.reporting.renderers.markdown import _corroborated_words
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 
 BASE = 0x180000000
 SECTIONS = [
@@ -360,7 +360,7 @@ class TestTheMatrixStatesRootsBesideLayers:
 
 class TestTheCorroborationRecord:
     def test_rows_carry_roots_from_claims_and_asserting_rows(self) -> None:
-        from maljan.pipeline.validation import corroboration
+        from malspark.pipeline.validation import corroboration
 
         record = corroboration(_isrs(), _ledger())
         assert record["T1059.003"]["evidence_roots"] == ["0x5010 in .data"]
@@ -422,7 +422,7 @@ class TestTheWords:
 
 class TestTheJudgeQuestion:
     def test_each_question_states_layers_and_roots_where_its_mentions_are(self) -> None:
-        from maljan.agents.judge_agent import QUESTION_ROOTS_LABEL, technique_question_text
+        from malspark.agents.judge_agent import QUESTION_ROOTS_LABEL, technique_question_text
 
         questions, _ = judge_questions({"objects": []}, _isrs(), ledger=_ledger())
         (question,) = questions
@@ -601,7 +601,7 @@ class TestAStatedRangeIsCheckedAgainstTheImage:
 
     @staticmethod
     def _with(*ranges: tuple[int, int, int]) -> Any:
-        from maljan.analysis.evidence_roots import Layout, _Section
+        from malspark.analysis.evidence_roots import Layout, _Section
 
         sections = tuple(
             _Section(
@@ -960,7 +960,7 @@ class TestManyImageBases:
         assert large < small * 8 * 4 + 0.5
 
     def test_an_address_reads_against_the_nearest_base_below_it(self) -> None:
-        from maljan.analysis.evidence_roots import Layout
+        from malspark.analysis.evidence_roots import Layout
 
         layout = Layout(bases=(0x400000, 0x10000000))
         assert layout.rvas_of(0x10001000) == [0x1000, 0x10001000]
@@ -989,7 +989,7 @@ class TestAnEntryIsAboutTheSampleOnlyWhenItSaysSo:
         assert roots.of_entry("ev_0004").roots == ['0x1100 of file "payload.dll"']
 
     def test_an_address_outside_the_named_program_gives_no_root(self) -> None:
-        from maljan.analysis.evidence_roots import OUTSIDE_PROGRAM
+        from malspark.analysis.evidence_roots import OUTSIDE_PROGRAM
 
         led = [
             self._pe(),

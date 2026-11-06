@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import re
 
-from maljan.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.markdown import _emphasis_escaped, _escaped
+from malspark.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.markdown import _emphasis_escaped, _escaped
 
 BANNER = "| [____DOWNLOADING FREE RTX____] | __init__ called _once_"
 

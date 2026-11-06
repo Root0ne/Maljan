@@ -1,4 +1,4 @@
-"""``maljan.tools.emulated_strings`` reads FLOSS's result document row by row.
+"""``malspark.tools.emulated_strings`` reads FLOSS's result document row by row.
 
 FLOSS itself is not run here: the runner is replaced by one that answers with
 a result document in FLOSS's own shape, so what these tests pin is the reading
@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import emulated_strings as tool
+from malspark.tools import emulated_strings as tool
 
 IMAGEBASE = 0x180000000
 
@@ -216,7 +216,7 @@ class TestFailuresAreAnswers:
         assert runner.calls == []
 
     def test_an_overrun_is_a_timeout_the_error_codes_recognise(self, tmp_path: Path) -> None:
-        from maljan.tools.errors import TIMEOUT, error_parts
+        from malspark.tools.errors import TIMEOUT, error_parts
 
         def runner(argv: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
             raise subprocess.TimeoutExpired(list(argv), timeout)
@@ -255,9 +255,9 @@ class TestFailuresAreAnswers:
     def test_without_the_executable_the_answer_says_how_to_install_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.tools.errors import MISSING_DEPENDENCY, error_parts
+        from malspark.tools.errors import MISSING_DEPENDENCY, error_parts
 
-        monkeypatch.setenv("MALJAN_FLOSS_PATH", str(tmp_path / "absent"))
+        monkeypatch.setenv("MALSPARK_FLOSS_PATH", str(tmp_path / "absent"))
 
         answer = tool.floss(_pe(tmp_path))
 
@@ -284,7 +284,7 @@ class TestFailuresAreAnswers:
     def test_the_memory_limit_is_reported_as_the_budget(
         self, tmp_path: Path, returncode: int, stderr: str
     ) -> None:
-        from maljan.tools.errors import TIMEOUT, error_parts
+        from malspark.tools.errors import TIMEOUT, error_parts
 
         answer = tool.floss(_pe(tmp_path), runner=_Runner("", returncode=returncode, stderr=stderr))
 
@@ -305,7 +305,7 @@ class TestTheExecutable:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         target = self._executable(tmp_path, b"#!/bin/sh\necho not floss\n")
-        monkeypatch.setenv("MALJAN_FLOSS_PATH", str(target))
+        monkeypatch.setenv("MALSPARK_FLOSS_PATH", str(target))
 
         found, reason = tool.find_floss()
 
@@ -320,7 +320,7 @@ class TestTheExecutable:
 
         body = b"#!/bin/sh\n"
         target = self._executable(tmp_path, body)
-        monkeypatch.setenv("MALJAN_FLOSS_PATH", str(target))
+        monkeypatch.setenv("MALSPARK_FLOSS_PATH", str(target))
         monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
 
         assert tool.find_floss() == (target, "")
@@ -331,7 +331,7 @@ class TestTheExecutable:
     ) -> None:
         import hashlib
 
-        monkeypatch.delenv("MALJAN_FLOSS_PATH", raising=False)
+        monkeypatch.delenv("MALSPARK_FLOSS_PATH", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("PATH", str(tmp_path / "empty"))
         body = b"#!/bin/sh\n"
@@ -344,7 +344,7 @@ class TestTheExecutable:
         assert tool.find_floss() == (installed, "")
         assert (
             installed
-            == tmp_path / ".local" / "share" / "maljan" / "tools" / "floss-3.1.1" / "floss"
+            == tmp_path / ".local" / "share" / "malspark" / "tools" / "floss-3.1.1" / "floss"
         )
 
     def test_an_environment_handed_in_is_read_instead_of_this_process_s(
@@ -356,10 +356,10 @@ class TestTheExecutable:
         body = b"#!/bin/sh\n"
         target = self._executable(tmp_path, body)
         monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
-        monkeypatch.setenv("MALJAN_FLOSS_PATH", str(tmp_path / "absent"))
+        monkeypatch.setenv("MALSPARK_FLOSS_PATH", str(tmp_path / "absent"))
 
-        assert tool.find_floss({"MALJAN_FLOSS_PATH": str(target)}) == (target, "")
-        assert tool.floss_unavailable({"MALJAN_FLOSS_PATH": str(target)}) is None
+        assert tool.find_floss({"MALSPARK_FLOSS_PATH": str(target)}) == (target, "")
+        assert tool.floss_unavailable({"MALSPARK_FLOSS_PATH": str(target)}) is None
         assert tool.floss_unavailable() is not None
 
     def test_the_search_path_handed_in_is_the_one_searched(
@@ -383,8 +383,8 @@ class TestTheExecutable:
 class TestTheChild:
     @pytest.fixture(autouse=True)
     def _staging(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
-        monkeypatch.delenv("MALJAN_STAGING_JOB", raising=False)
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.delenv("MALSPARK_STAGING_JOB", raising=False)
 
     def test_the_child_gets_the_limit_and_a_home_inside_staging_and_nothing_else(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -487,8 +487,8 @@ class TestOneEmulationPerSample:
 class TestWhatRunsIsWhatWasVerified:
     @pytest.fixture(autouse=True)
     def _staging(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
-        monkeypatch.delenv("MALJAN_STAGING_JOB", raising=False)
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.delenv("MALSPARK_STAGING_JOB", raising=False)
 
     def _script(self, tmp_path: Path, text: str) -> tuple[Path, str]:
         import hashlib

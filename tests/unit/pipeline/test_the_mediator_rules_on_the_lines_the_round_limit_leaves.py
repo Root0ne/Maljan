@@ -22,15 +22,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     LIMIT_RULING_QUESTION,
     LIMIT_RULING_QUESTION_WITHOUT_TOOLS,
     MEDIATION_ENTRY_CHECK,
     MEDIATOR_HUMAN_CLOSING,
     JudgeAgent,
 )
-from maljan.core.config import Settings
-from maljan.pipeline.limit_rulings import (
+from malspark.core.config import Settings
+from malspark.pipeline.limit_rulings import (
     REASON_LIMIT,
     LimitRulings,
     Ruling,
@@ -42,8 +42,8 @@ from maljan.pipeline.limit_rulings import (
     round_limit,
     rule_at_the_limit,
 )
-from maljan.pipeline.state import AgentArgument
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, carried_note
+from malspark.pipeline.state import AgentArgument
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, carried_note
 
 NAMES = ["network", "triage"]
 LINE_1 = (
@@ -300,7 +300,7 @@ class TestTheRulingsReachTheRecord:
     SENTENCE = "At the round limit the mediator upheld blocking line L1: r."
 
     def test_the_run_summary_records_them_in_its_dict_and_its_markdown(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         mediator = AgentArgument(agent_name="Mediator", finding="x", limit_rulings=[self.SENTENCE])
         state: dict[str, Any] = {
@@ -315,7 +315,7 @@ class TestTheRulingsReachTheRecord:
         assert self.SENTENCE in summary.to_markdown()
 
     def test_a_run_with_none_records_no_key(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         state: dict[str, Any] = {
             "iteration_count": 1,
@@ -328,8 +328,8 @@ class TestTheRulingsReachTheRecord:
         assert "limit_rulings" not in summary.to_dict()["negotiation"]
 
     def test_the_report_s_run_appendix_states_them(self) -> None:
-        from maljan.reporting.builder import MalwareReportBuilder
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
         from tests.unit.reporting.test_renderers_markdown import _build
 
         report = _build(
@@ -359,7 +359,7 @@ class TestARulingReasonRoutesNothing:
     )
 
     def _claims(self, ruled: bool, carried: int | None = None) -> list[dict[str, str]]:
-        from maljan.reporting.evidence_bundles import _claims_text
+        from malspark.reporting.evidence_bundles import _claims_text
 
         claim = ClaimEvidence(
             claim="The packer stub at 0x401000 decodes the payload.",
@@ -372,7 +372,7 @@ class TestARulingReasonRoutesNothing:
         return _claims_text(None, isrs)  # type: ignore[arg-type]
 
     def test_the_cited_entries_and_the_picked_functions_are_the_claim_s_own(self) -> None:
-        from maljan.reporting.evidence_bundles import FunctionCode, _claimed_rows, cited_entry_ids
+        from malspark.reporting.evidence_bundles import FunctionCode, _claimed_rows, cited_entry_ids
 
         own, ruled = self._claims(False), self._claims(True)
         rows = {
@@ -386,7 +386,7 @@ class TestARulingReasonRoutesNothing:
         assert [r.key for r in _claimed_rows(own[0], by_address, rows, ())] == ["a"]
 
     def test_a_keyword_only_in_the_reason_pulls_the_claim_into_no_section(self) -> None:
-        from maljan.reporting.evidence_bundles import _filter_claims
+        from malspark.reporting.evidence_bundles import _filter_claims
 
         own, ruled = self._claims(False), self._claims(True)
 
@@ -395,8 +395,8 @@ class TestARulingReasonRoutesNothing:
         assert _filter_claims(ruled, ("pack",)) == ruled
 
     def test_a_carried_and_ruled_claim_routes_on_its_evidence_and_carried_note(self) -> None:
-        from maljan.reporting.evidence_bundles import ROUTED_REF, _routed
-        from maljan.schemas.isr_models import carried_marker
+        from malspark.reporting.evidence_bundles import ROUTED_REF, _routed
+        from malspark.schemas.isr_models import carried_marker
 
         (claim,) = self._claims(True, carried=2)
 
@@ -421,7 +421,7 @@ class TestARulingReasonRoutesNothing:
 
 class TestTheNoteTravelsWithTheClaim:
     def test_the_note_reaches_the_judge_s_summary_and_the_event_payload(self) -> None:
-        from maljan.pipeline.events import claims_to_payload
+        from malspark.pipeline.events import claims_to_payload
 
         claim = ClaimEvidence(
             claim="c", evidence_ref="[ev_0001]", confidence=0.5, limit_rulings=["ruled: r"]
@@ -447,7 +447,7 @@ class TestTheNoteTravelsWithTheClaim:
         )
 
     def test_a_claim_with_no_ruling_serialises_and_reads_as_before(self) -> None:
-        from maljan.pipeline.events import claims_to_payload
+        from malspark.pipeline.events import claims_to_payload
 
         claim = ClaimEvidence(claim="c", evidence_ref="[ev_0001]", confidence=0.5)
 
@@ -625,7 +625,7 @@ class TestTheJudgeAsksInItsOwnConversation:
         assert judge.limit_ruling_failure == "no mediation answered in this agent"
 
     def test_a_question_the_spend_ceiling_refuses_says_so(self) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         llm = _ReadingLlm()
         judge = JudgeAgent(llm=llm)  # type: ignore[arg-type]
@@ -689,7 +689,7 @@ def _node_run(
 ) -> tuple[dict[str, Any], Any, list[Any]]:
     from unittest.mock import AsyncMock
 
-    from maljan.pipeline.nodes import make_negotiation_node
+    from malspark.pipeline.nodes import make_negotiation_node
 
     events: list[Any] = []
     container = MagicMock()
@@ -748,7 +748,7 @@ class TestTheNegotiationNodeRulesAtTheLimit:
     def test_a_ruling_that_raises_leaves_the_mediation_complete_and_says_so(self) -> None:
         from unittest.mock import patch as _patch
 
-        with _patch("maljan.pipeline.nodes.rule_at_the_limit", side_effect=RuntimeError("boom")):
+        with _patch("malspark.pipeline.nodes.rule_at_the_limit", side_effect=RuntimeError("boom")):
             result, _judge, _events = _node_run(4, 5)
 
         (argument,) = result["discussion_history"]

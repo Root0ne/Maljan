@@ -15,11 +15,11 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from maljan.core import plugins
-from maljan.llm.provider_base import LLMProvider
-from maljan.memory import store_factory
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.providers.base import (
+from malspark.core import plugins
+from malspark.llm.provider_base import LLMProvider
+from malspark.memory import store_factory
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.providers.base import (
     SandboxCapabilities,
     SandboxProvider,
     StaticCapabilities,
@@ -39,7 +39,7 @@ class FakePoint:
         name: str,
         provides: Any,
         *,
-        dist: str = "maljan-acme",
+        dist: str = "malspark-acme",
         version: str = "1.2.3",
         on_import: Callable[[], None] | None = None,
     ) -> None:

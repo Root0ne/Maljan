@@ -19,9 +19,9 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.pipeline import triage_pack
-from maljan.pipeline.triage_pack import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.pipeline import triage_pack
+from malspark.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     FlossSettings,
@@ -33,8 +33,8 @@ from maljan.pipeline.triage_pack import (
     render_pack,
     run_pack,
 )
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.tools import emulated_strings, readers, rules, staging, upx
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.tools import emulated_strings, readers, rules, staging, upx
 
 from ..tools import synthetic_upx as su
 from ..tools.synthetic_pe import SyntheticPE
@@ -148,7 +148,7 @@ def test_the_server_reads_the_program_by_the_carved_path_the_entry_gives(
 ) -> None:
     path = _sample(tmp_path, su.build().data)
     carved = _entry(_pack(path, tmp_path)).structured["child"]["carved_path"]
-    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", str(tmp_path / "samples"))
+    monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", str(tmp_path / "samples"))
     monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
     monkeypatch.setenv(staging.STAGING_JOB_ENV, staging.job_directory_name(JOB))
     spec = importlib.util.spec_from_file_location("analysis_mcp_server_pack_upx", SERVER)

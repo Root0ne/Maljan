@@ -9,13 +9,13 @@ describing nothing.
 
 from __future__ import annotations
 
-from maljan.agents.base_agent import parse_structured_claims
-from maljan.agents.static_analyst import _parse_claim_blocks
-from maljan.pipeline.events import FINDING_VALUE_LIMIT, safe_finding_value
-from maljan.pipeline.validation import claim_does_not_describe_violation
-from maljan.schemas.isr_models import ClaimEvidence
-from maljan.tools import knowledge
-from maljan.utils.marked_cut import CUT_MARK
+from malspark.agents.base_agent import parse_structured_claims
+from malspark.agents.static_analyst import _parse_claim_blocks
+from malspark.pipeline.events import FINDING_VALUE_LIMIT, safe_finding_value
+from malspark.pipeline.validation import claim_does_not_describe_violation
+from malspark.schemas.isr_models import ClaimEvidence
+from malspark.tools import knowledge
+from malspark.utils.marked_cut import CUT_MARK
 
 # A thousand-character claim, and one whose behaviour is named only after character 300.
 _LEAD = "The routine at 0x401000 walks a table of entries and " * 18

@@ -22,13 +22,13 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     ABSENCE_CONTRADICTS_LEDGER_CODE,
     KEPT_WITH_A_FINDING,
     EntryTexts,
     ledger_absence_contradictions,
 )
-from maljan.schemas.evidence import build_entry
+from malspark.schemas.evidence import build_entry
 
 BASE = 0x140000000
 

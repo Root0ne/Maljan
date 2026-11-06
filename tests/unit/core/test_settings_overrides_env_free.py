@@ -10,8 +10,8 @@ environment- and dotenv-capable.
 
 from __future__ import annotations
 
-from maljan.core import settings_overrides as ov
-from maljan.core.config import LLMConfig, Settings
+from malspark.core import settings_overrides as ov
+from malspark.core.config import LLMConfig, Settings
 
 
 def test_build_settings_ignores_the_process_environment(monkeypatch):

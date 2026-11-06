@@ -18,16 +18,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.agents.tool_fence import excerpt_view
-from maljan.reporting.claim_coverage import (
+from malspark.agents.tool_fence import excerpt_view
+from malspark.reporting.claim_coverage import (
     body_text,
     claim_label,
     claims_in_force,
     claims_not_discussed,
 )
-from maljan.reporting.composer import ANALYST_CLAIMS_HEADING, _bundle_text
-from maljan.reporting.evidence_bundles import bundle_for
-from maljan.reporting.models import (
+from malspark.reporting.composer import ANALYST_CLAIMS_HEADING, _bundle_text
+from malspark.reporting.evidence_bundles import bundle_for
+from malspark.reporting.models import (
     ClaimNotDiscussed,
     FileHashes,
     KeyFinding,
@@ -37,8 +37,8 @@ from maljan.reporting.models import (
     TechnicalSubsection,
     TTPMapping,
 )
-from maljan.reporting.narrative_agent import CLAIMS_IN_FORCE_HEADING, build_prompt_text
-from maljan.reporting.renderers.markdown import CLAIMS_NOT_DISCUSSED_TITLE, MarkdownRenderer
+from malspark.reporting.narrative_agent import CLAIMS_IN_FORCE_HEADING, build_prompt_text
+from malspark.reporting.renderers.markdown import CLAIMS_NOT_DISCUSSED_TITLE, MarkdownRenderer
 
 RUN: dict[str, Any] = json.loads(
     (

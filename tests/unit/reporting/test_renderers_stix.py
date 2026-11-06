@@ -13,15 +13,15 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import (
     MalwareReport,
     PersistenceMechanism,
     StaticAnalysis,
     StringIOC,
 )
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.schemas.stix_models import (
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.schemas.stix_models import (
     AttackPattern,
     Bundle,
     Identity,
@@ -269,7 +269,7 @@ class TestNoCountBoundsTheIndicators:
     """The export carries every value the publish rule publishes, whatever their number."""
 
     def _packed_report(self) -> MalwareReport:
-        from maljan.reporting.models import StaticAnalysis, StringIOC
+        from malspark.reporting.models import StaticAnalysis, StringIOC
 
         sandbox = {
             "network": {

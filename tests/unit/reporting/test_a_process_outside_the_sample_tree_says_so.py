@@ -4,10 +4,10 @@ A run's export carried every process of the sandbox's listing in one
 observation, a desktop process the sandbox listed under sihost.exe
 (explorer.exe) among them, with nothing telling it from the sample's own. The
 process stays in the export, where it stands in the tree, and carries the
-platform's ``x_maljan_sample_process_tree: false``, read by the one lineage
+platform's ``x_malspark_sample_process_tree: false``, read by the one lineage
 rule the commands table and the host values read
 (``sandbox_report.sample_process_tree``); one the two lineage facts dispute
-carries ``x_maljan_lineage_disputed`` with the fact that alone names it, as
+carries ``x_malspark_lineage_disputed`` with the fact that alone names it, as
 the report's network rows say it. A process of the tree carries nothing new.
 """
 
@@ -18,11 +18,11 @@ from typing import Any
 import pytest
 from stix2validator import ValidationOptions, validate_instance
 
-from maljan.agents.judge_postprocess import PROPERTY_NOT_CARRIED_CODE, lift_misplaced_extensions
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import DynamicBehavior, MalwareReport, ProcessNode
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.schemas.stix_models import LINEAGE_DISPUTED_PROPERTY, SAMPLE_TREE_PROPERTY
+from malspark.agents.judge_postprocess import PROPERTY_NOT_CARRIED_CODE, lift_misplaced_extensions
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import DynamicBehavior, MalwareReport, ProcessNode
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.schemas.stix_models import LINEAGE_DISPUTED_PROPERTY, SAMPLE_TREE_PROPERTY
 
 SHA256 = "36dabc40fa8983ce900a90b8156d2c754875fe1b5413a997843c4a0ef3908220"
 
@@ -353,13 +353,13 @@ def test_a_quoted_and_an_unquoted_name_of_one_image_match() -> None:
     ],
 )
 def test_the_image_a_listed_name_names(name: str, image: str) -> None:
-    from maljan.schemas.sandbox_report import _image_of
+    from malspark.schemas.sandbox_report import _image_of
 
     assert _image_of(name) == image
 
 
 def test_the_commands_table_places_each_process_as_the_export_does() -> None:
-    from maljan.reporting.renderers.markdown import started_by_the_sample
+    from malspark.reporting.renderers.markdown import started_by_the_sample
 
     report = _report(
         [

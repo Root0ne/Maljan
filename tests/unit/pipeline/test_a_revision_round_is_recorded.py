@@ -18,9 +18,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.pipeline.nodes import RevisionInput, make_negotiation_node, make_revision_node
-from maljan.pipeline.state import AgentArgument, _merge_stage_results
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.nodes import RevisionInput, make_negotiation_node, make_revision_node
+from malspark.pipeline.state import AgentArgument, _merge_stage_results
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.stages import paper_profile
 
 NAMES = ["static", "dynamic"]
@@ -84,7 +84,7 @@ def _state() -> dict[str, Any]:
 def _run(outcomes: dict[str, tuple[str, AgentISR]], ledger: dict[str, int] | None = None) -> Any:
     container, agents = _container(outcomes, ledger or {})
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
+        mp.setattr("malspark.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
         update = asyncio.run(make_revision_node(container)(_state()))
     return update, agents
 
@@ -187,7 +187,7 @@ class TestDroppedValues:
     ) -> None:
         import logging
 
-        with caplog.at_level(logging.DEBUG, logger="maljan"):
+        with caplog.at_level(logging.DEBUG, logger="malspark"):
             _run(
                 {
                     "static": (
@@ -234,9 +234,9 @@ class TestTheDebateDuration:
         )
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(
-                "maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data")
+                "malspark.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data")
             )
-            mp.setattr("maljan.pipeline.nodes._debate_participants", lambda *a: NAMES)
+            mp.setattr("malspark.pipeline.nodes._debate_participants", lambda *a: NAMES)
             update = asyncio.run(make_revision_node(container, stage=debate)(_state()))
 
         record = update["stage_results"][debate.key]
@@ -270,8 +270,8 @@ class TestTheLedgerCountsRideOnCallsAlreadyMade:
             "evidence_ledger": [{"id": "ev_0007", "tool": "t", "structured": {"total": 41}}],
         }
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("maljan.pipeline.nodes.pack_text", lambda *a: "")
-            mp.setattr("maljan.pipeline.nodes.render_run_state", lambda *a: "")
+            mp.setattr("malspark.pipeline.nodes.pack_text", lambda *a: "")
+            mp.setattr("malspark.pipeline.nodes.render_run_state", lambda *a: "")
             update = asyncio.run(make_negotiation_node(container)(state))
         return update, notices, judge
 
@@ -305,8 +305,8 @@ class TestTheLedgerCountsRideOnCallsAlreadyMade:
             "evidence_ledger": [{"id": "ev_0007", "tool": "t", "structured": {"total": 41}}],
         }
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr("maljan.pipeline.nodes.pack_text", lambda *a: "")
-            mp.setattr("maljan.pipeline.nodes.render_run_state", lambda *a: "")
+            mp.setattr("malspark.pipeline.nodes.pack_text", lambda *a: "")
+            mp.setattr("malspark.pipeline.nodes.render_run_state", lambda *a: "")
             update = asyncio.run(make_negotiation_node(container)(state))
 
         assert update["discussion_history"][0].ledger_facts
@@ -331,7 +331,7 @@ class TestTheLedgerCountsRideOnCallsAlreadyMade:
         state = {**_state(), "discussion_history": [argument]}
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(
-                "maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data")
+                "malspark.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data")
             )
             asyncio.run(make_revision_node(container)(state))
 
@@ -344,7 +344,7 @@ class TestTheLedgerCountsRideOnCallsAlreadyMade:
 
 class TestTheSummaryReadsTheDebatesOwnOptions:
     def test_the_limit_and_the_switch_come_from_the_debate_stage(self) -> None:
-        from maljan.pipeline.nodes import debate_options
+        from malspark.pipeline.nodes import debate_options
 
         profile = paper_profile(NAMES)
         debate = next(s for s in profile.stages if s.kind == "debate")
@@ -357,7 +357,7 @@ class TestTheSummaryReadsTheDebatesOwnOptions:
         assert debate_options(container) == (3, False)
 
     def test_a_profile_without_a_debate_reads_the_global_limit(self) -> None:
-        from maljan.pipeline.nodes import debate_options
+        from malspark.pipeline.nodes import debate_options
 
         container = MagicMock()
         container.config.negotiation.max_iterations = 7

@@ -18,16 +18,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     _SYNTHESIS_MIN_CHARS,
     _trim_for_synthesis,
     ledger_ids_in,
     synthesis_budget,
     synthesis_budget_chars,
 )
-from maljan.agents.evidence_recorder import RepeatGuard
-from maljan.core.config import Settings
-from maljan.llm.context_window import CHARS_PER_TOKEN, DECLARED, ContextBudget, WindowFact
+from malspark.agents.evidence_recorder import RepeatGuard
+from malspark.core.config import Settings
+from malspark.llm.context_window import CHARS_PER_TOKEN, DECLARED, ContextBudget, WindowFact
 
 
 def _ai(content: str = "", tool: str = "") -> Any:
@@ -85,8 +85,8 @@ class TestTheGuardEndsTheLoop:
         )
 
     def _wrapped(self, guard: RepeatGuard, calls: list[str], *names: str) -> list[Any]:
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.schemas.evidence import EvidenceCounter
 
         recorder = EvidenceRecorder("static", counter=EvidenceCounter())
         return record_tools(
@@ -140,8 +140,8 @@ class TestTheGuardEndsTheLoop:
         from langchain_core.tools import StructuredTool
         from pydantic import BaseModel
 
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.schemas.evidence import EvidenceCounter
 
         class _Args(BaseModel):
             path: str = ""
@@ -232,8 +232,8 @@ class TestTheGuardEndsTheLoop:
         from langchain_core.tools import StructuredTool
         from pydantic import BaseModel
 
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.schemas.evidence import EvidenceCounter
 
         class _Args(BaseModel):
             path: str = ""
@@ -264,7 +264,7 @@ class TestTheGuardEndsTheLoop:
         spent step budget takes."""
         import inspect
 
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         source = inspect.getsource(base_agent.BaseAnalyst._run_tool_loop)
 
@@ -485,7 +485,7 @@ class TestWhatTheModelIsToldItCanCite:
     def test_the_directive_carries_the_list(self) -> None:
         import inspect
 
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         source = inspect.getsource(base_agent.BaseAnalyst._force_final_synthesis)
 
@@ -504,7 +504,7 @@ class TestTheLoopStopsMidStream:
     """
 
     def _agent(self, llm: Any) -> Any:
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         class _ToolAgent(BaseAnalyst):
             def analyze(self, data: str) -> str:  # pragma: no cover - not exercised
@@ -582,7 +582,7 @@ class TestTheLoopStopsMidStream:
             executor = self._executor(tools)
             return executor
 
-        with patch("maljan.agents.base_agent.get_settings") as settings:
+        with patch("malspark.agents.base_agent.get_settings") as settings:
             cfg = settings.return_value
             cfg.react_agent_timeout = 180
             cfg.react_agent_timeout_overrides = {}
@@ -614,7 +614,7 @@ class TestTheLoopStopsMidStream:
 
         agent = self._agent(MagicMock())
         agent.tools = [MagicMock()]
-        with patch("maljan.agents.base_agent.get_settings") as settings:
+        with patch("malspark.agents.base_agent.get_settings") as settings:
             cfg = settings.return_value
             cfg.react_agent_timeout = 180
             cfg.react_agent_timeout_overrides = {}
@@ -647,7 +647,7 @@ class TestTheLoopStopsMidStream:
         agent = self._agent(MagicMock())
         agent.tools = [MagicMock()]
         agent.logger = MagicMock()
-        with patch("maljan.agents.base_agent.get_settings") as settings:
+        with patch("malspark.agents.base_agent.get_settings") as settings:
             cfg = settings.return_value
             cfg.react_agent_timeout = 180
             cfg.react_agent_timeout_overrides = {}
@@ -677,14 +677,14 @@ class TestAnEarlierChunksCallIsNotRunAgain:
         return TestTheGuardEndsTheLoop()._tool(calls, "decompile_function")
 
     def _wrapped(self, guard: RepeatGuard, calls: list[str]) -> Any:
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.schemas.evidence import EvidenceCounter
 
         recorder = EvidenceRecorder("static", counter=EvidenceCounter())
         return record_tools([self._tool(calls)], recorder, guard)[0]
 
     def test_a_seeded_call_is_answered_with_the_entry_that_holds_it(self) -> None:
-        from maljan.agents.evidence_recorder import repeat_notice
+        from malspark.agents.evidence_recorder import repeat_notice
 
         guard = RepeatGuard()
         guard.seed("decompile_function", {"path": "0x3c7c"}, "ev_0003")

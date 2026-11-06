@@ -15,9 +15,9 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.llm.answer_text import answer_text
-from maljan.pipeline.validation import whole_answer_after_retry_question
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.llm.answer_text import answer_text
+from malspark.pipeline.validation import whole_answer_after_retry_question
 
 
 def _block(n: int, technique: str = "NONE") -> str:
@@ -56,7 +56,7 @@ class _Analyst(BaseAnalyst):
 def _check(analyst: _Analyst) -> None:
     isr = analyst._text_to_isr(FIRST, 0)
     with (
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
     ):
         analyst._validate_isr(isr, "evidence")

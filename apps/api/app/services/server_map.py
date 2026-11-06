@@ -23,7 +23,7 @@ import json
 import re
 from typing import Any
 
-from maljan.core.config import (
+from malspark.core.config import (
     SERVER_KEY_PATTERN,
     MCPServerConfig,
     _builtin_definitions,
@@ -32,13 +32,13 @@ from maljan.core.config import (
     reserved_server_keys,
     shipped_server_keys,
 )
-from maljan.core.settings_overrides import (
+from malspark.core.settings_overrides import (
     SERVER_MAP_PATH,
     server_entry_in_force,
     shipped_tool_facts,
     shipped_tools,
 )
-from maljan.core.tool_declarations import (
+from malspark.core.tool_declarations import (
     changed_declaration_errors,
     check_own_prefix,
     fill_declaration,

@@ -15,16 +15,16 @@ from typing import Any
 import pytest
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.composition import (
+from malspark.agents.composition import (
     ResolvedAgent,
     analyst_keys,
     aresolve_agent,
     builtin_prompt,
     resolve_agent,
 )
-from maljan.agents.registry import AgentRegistry as _AgentRegistry
-from maljan.core.config import Settings, ToolRef
-from maljan.core.model_assignments import assignments_for
+from malspark.agents.registry import AgentRegistry as _AgentRegistry
+from malspark.core.config import Settings, ToolRef
+from malspark.core.model_assignments import assignments_for
 
 # ``resolve_agent("network")``/``resolve_agent("static")`` import their built-in
 # role modules directly, bypassing ``AgentRegistry.discover_agents()``'s fixed
@@ -113,10 +113,10 @@ class _Container:
         self._provider = over.get("provider", _Provider())
         self._registry = over.get("registry", _Registry({}, {}))
         self.llm = object()
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         self._truncation_ledger = TruncationLedger()
-        from maljan.llm.context_window import budget_for_settings
+        from malspark.llm.context_window import budget_for_settings
 
         self._context_budget = budget_for_settings(
             cfg, assignments_for(cfg, ["static"]), probe=False
@@ -145,8 +145,8 @@ class _Container:
 
 
 def test_a_clone_on_r2_gets_the_r2_fragment_in_the_built_in_assembly():
-    from maljan.agents.static_analyst import _ISR_HEAD, _ISR_TAIL
-    from maljan.providers.base import VERIFICATION_DISCIPLINE
+    from malspark.agents.static_analyst import _ISR_HEAD, _ISR_TAIL
+    from malspark.providers.base import VERIFICATION_DISCIPLINE
 
     cfg = Settings(
         _env_file=None,
@@ -156,7 +156,7 @@ def test_a_clone_on_r2_gets_the_r2_fragment_in_the_built_in_assembly():
             "profile": "two",
         },
     )
-    from maljan.agents.prompt_fragments import format_fragment, tools_statement
+    from malspark.agents.prompt_fragments import format_fragment, tools_statement
 
     resolved = resolve_agent("static_r2", _Container(cfg))
     # Resolution runs before the analyst attaches its own provider, so the
@@ -182,7 +182,7 @@ def test_a_clone_on_r2_gets_the_r2_fragment_in_the_built_in_assembly():
 
 
 def test_an_explicit_prompt_wins_over_the_built_in_assembly():
-    from maljan.providers.base import VERIFICATION_DISCIPLINE
+    from malspark.providers.base import VERIFICATION_DISCIPLINE
 
     cfg = Settings(
         _env_file=None,
@@ -192,7 +192,7 @@ def test_an_explicit_prompt_wins_over_the_built_in_assembly():
             "profile": "two",
         },
     )
-    from maljan.agents.prompt_fragments import tools_statement
+    from malspark.agents.prompt_fragments import tools_statement
 
     resolved = resolve_agent("static_r2", _Container(cfg))
     # The operator's text in place of the built-in head, then the platform's
@@ -215,7 +215,7 @@ def test_a_generic_agent_with_no_references_and_no_bound_servers_is_tool_less():
             "profile": "one",
         },
     )
-    from maljan.agents.prompt_fragments import NO_TOOLS_STATEMENT
+    from malspark.agents.prompt_fragments import NO_TOOLS_STATEMENT
 
     resolved = resolve_agent("strings", _Container(cfg))
     assert resolved.tools == []
@@ -474,8 +474,8 @@ def real_registry(monkeypatch):
         instance.cleanup = AsyncMock(return_value=None)
         return instance
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", factory)
-    monkeypatch.setattr("maljan.providers.servers._run_async", lambda coro, label: coro.close())
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", factory)
+    monkeypatch.setattr("malspark.providers.servers._run_async", lambda coro, label: coro.close())
 
 
 def _two_server_settings() -> Settings:
@@ -502,13 +502,13 @@ def _two_server_settings() -> Settings:
 
 
 def _registry_container(cfg: Settings) -> Any:
-    from maljan.providers.servers import ServerRegistry
+    from malspark.providers.servers import ServerRegistry
 
     return _Container(cfg, registry=ServerRegistry(cfg))
 
 
 def _offered(resolved: Any) -> list[tuple[str, str]]:
-    return [(t.name, (t.metadata or {}).get("maljan_server", "")) for t in resolved.tools]
+    return [(t.name, (t.metadata or {}).get("malspark_server", "")) for t in resolved.tools]
 
 
 def test_a_bound_tool_that_collides_with_a_referenced_one_is_prefixed_not_dropped(real_registry):
@@ -547,7 +547,7 @@ def test_the_awaited_resolution_prefixes_the_same_way(real_registry):
 
 
 def test_the_built_in_definitions_name_the_servers_their_role_reads():
-    from maljan.agents.composition import mcp_refs_for
+    from malspark.agents.composition import mcp_refs_for
 
     settings = Settings(_env_file=None)
     definitions = settings.agents.definitions
@@ -737,7 +737,7 @@ class TestALeadWithAProviderReference:
         )
 
     def test_the_lead_resolves_its_providers_tools(self):
-        from maljan.agents.composition import reads_static_provider
+        from malspark.agents.composition import reads_static_provider
 
         cfg = self._settings()
         container = _Container(cfg)
@@ -762,7 +762,7 @@ class TestALeadWithAProviderReference:
         assert [t.name for t in resolved.tools][:2] == ["r2_open", "r2_analyze"]
 
     def test_a_lead_without_a_provider_reference_opens_nothing(self):
-        from maljan.agents.composition import reads_static_provider
+        from malspark.agents.composition import reads_static_provider
 
         cfg = Settings(_env_file=None)
         cfg.agents.profile = "team_lead"

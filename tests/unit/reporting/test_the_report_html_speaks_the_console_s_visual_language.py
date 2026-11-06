@@ -11,7 +11,7 @@ style nonce are those of every other export.
 
 from __future__ import annotations
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     FamilyAttribution,
     FileHashes,
     KeyFinding,
@@ -19,7 +19,7 @@ from maljan.reporting.models import (
     SampleIdentity,
     SeverityAssessment,
 )
-from maljan.reporting.renderers.html import _STYLESHEET, CONTENT_SECURITY_POLICY, HtmlRenderer
+from malspark.reporting.renderers.html import _STYLESHEET, CONTENT_SECURITY_POLICY, HtmlRenderer
 
 
 def _report(**fields: object) -> MalwareReport:

@@ -24,11 +24,11 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst, BudgetCeiling, TurnPace
-from maljan.agents.prompt_fragments import no_tool_call_question
-from maljan.analysis.run_summary import RunSummaryBuilder, tool_asks_of
-from maljan.core.spend import SpendCeilingStop
-from maljan.llm.generation_rate import ModelCallDeadline
+from malspark.agents.base_agent import BaseAnalyst, BudgetCeiling, TurnPace
+from malspark.agents.prompt_fragments import no_tool_call_question
+from malspark.analysis.run_summary import RunSummaryBuilder, tool_asks_of
+from malspark.core.spend import SpendCeilingStop
+from malspark.llm.generation_rate import ModelCallDeadline
 
 TASK = "look at it"
 FIRST = "CLAIM: it reads its own strings\nEVIDENCE: pack\nCONFIDENCE: 0.6\nTECHNIQUE: NONE"
@@ -155,7 +155,7 @@ def _analyst(model: _Model, ran: list[str]) -> _Analyst:
 
 
 def _run(agent: _Analyst, limits: tuple[Any, Any] = (None, None)) -> str:
-    with patch("maljan.agents.base_agent.loop_limits", return_value=limits):
+    with patch("malspark.agents.base_agent.loop_limits", return_value=limits):
         return agent.execute_tool_loop([("system", "s"), ("human", TASK)])
 
 
@@ -260,7 +260,7 @@ class TestWhenItIsNotAsked:
         model = _Model(then="answer")
         agent = _analyst(model, ran)
 
-        with patch("maljan.agents.base_agent.LoopBudget.seconds_left", return_value=0.5):
+        with patch("malspark.agents.base_agent.LoopBudget.seconds_left", return_value=0.5):
             answer = _run(agent, limits=(60, None))
 
         assert not any(_asked(sent) for sent in model.seen)
@@ -469,7 +469,7 @@ def test_the_loop_s_own_clock_ending_the_question_s_pass_leaves_the_first_answer
     ran: list[str] = []
     agent = _analyst(_Model(then="slow"), ran)
 
-    with patch("maljan.agents.base_agent.LoopBudget.seconds_left", return_value=None):
+    with patch("malspark.agents.base_agent.LoopBudget.seconds_left", return_value=None):
         answer = _run(agent, limits=(3, None))
 
     assert answer.strip() == FIRST

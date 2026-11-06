@@ -38,7 +38,7 @@ from typing import Any
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
+SRC = Path(__file__).resolve().parents[2] / "src" / "malspark"
 
 # The names that carry a decision. ``verdict`` is the one the whole run is
 # printed under: the judge states it, the pipeline reads it and nothing else
@@ -58,9 +58,9 @@ GUARDED = frozenset(
         # states about the sample; and the producer an object names is a
         # statement too. The export may decline one with a record, through the
         # copy helpers in ``schemas/stix_models``; nothing writes one.
-        "x_maljan_confidence",
-        "x_maljan_contributing_agents",
-        "x_maljan_evidence_basis",
+        "x_malspark_confidence",
+        "x_malspark_contributing_agents",
+        "x_malspark_evidence_basis",
         "pattern",
         "indicator_types",
         "created_by_ref",
@@ -282,7 +282,7 @@ def test_nothing_outside_schemas_tools_and_validation_overrides_a_decision():
 class TestTheScannerWouldActuallyCatchOne:
     """The test above passes trivially if the scan is broken, so prove it is not.
 
-    Every probe is a source *string*. Planting a module in ``src/maljan`` to
+    Every probe is a source *string*. Planting a module in ``src/malspark`` to
     prove the scanner works would leave a stray file in the installed package
     if the run were interrupted, and could be walked by the scanning test above
     while it existed.
@@ -321,10 +321,10 @@ class TestTheScannerWouldActuallyCatchOne:
         assert offences("row[name] = value\n", "probe.py") == []
 
     def test_a_model_copy_that_changes_a_decision_is_caught(self):
-        source = "moved = edge.model_copy(update={'x_maljan_confidence': 0.5})\n"
+        source = "moved = edge.model_copy(update={'x_malspark_confidence': 0.5})\n"
 
         assert offences(source, "probe.py") == [
-            "probe.py:1: model_copy(update={'x_maljan_confidence': ...})"
+            "probe.py:1: model_copy(update={'x_malspark_confidence': ...})"
         ]
 
     def test_a_model_copy_that_only_fills_an_absence_is_not_caught(self):
@@ -373,7 +373,7 @@ class TestAMergeOnlyGrowsASet:
     """
 
     def _finding(self, title: str, confidence: float, evidence: list[str]) -> Any:
-        from maljan.schemas.isr_models import Finding
+        from malspark.schemas.isr_models import Finding
 
         return Finding(
             title=title,
@@ -383,13 +383,13 @@ class TestAMergeOnlyGrowsASet:
         )
 
     def _isr(self, agent: str, finding: Any) -> Any:
-        from maljan.schemas.isr_models import AgentISR
+        from malspark.schemas.isr_models import AgentISR
 
         return AgentISR(agent_id=agent, domain="static", claims=[], findings=[finding])
 
     def test_a_merged_finding_keeps_the_first_confidence_and_gains_the_second_agent(self) -> None:
-        from maljan.reporting.dedupe import MergeTally
-        from maljan.reporting.ledger_report import build_sections
+        from malspark.reporting.dedupe import MergeTally
+        from malspark.reporting.ledger_report import build_sections
 
         merges = MergeTally()
         sections = {
@@ -419,9 +419,9 @@ class TestAMergeOnlyGrowsASet:
         assert merges.findings_merged == 1
 
     def test_a_merged_indicator_keeps_the_first_notes_and_gains_the_second_id(self) -> None:
-        from maljan.reporting.dedupe import MergeTally
-        from maljan.reporting.ledger_report import build_sections
-        from maljan.schemas.evidence import build_entry
+        from malspark.reporting.dedupe import MergeTally
+        from malspark.reporting.ledger_report import build_sections
+        from malspark.schemas.evidence import build_entry
 
         def _entry(entry_id: str, seq: int, value: str, notes: str) -> Any:
             return build_entry(
@@ -455,7 +455,7 @@ class TestAMergeOnlyGrowsASet:
         assert merges.indicators_merged == 1
 
     def test_two_different_indicators_are_never_folded(self) -> None:
-        from maljan.reporting.dedupe import indicator_fingerprint
+        from malspark.reporting.dedupe import indicator_fingerprint
 
         assert indicator_fingerprint("url", "http://a.tld/one") != indicator_fingerprint(
             "url", "http://a.tld/two"
@@ -484,17 +484,17 @@ class TestABundleShapeDoesNotOverrideAVerdict:
 
     @staticmethod
     def _fallback(decision: str, source: str, objects: list[dict[str, Any]]) -> Any:
-        from maljan.schemas.stix_models import Bundle
+        from malspark.schemas.stix_models import Bundle
 
         return Bundle.model_validate(
             {
                 "objects": objects,
-                "x_maljan_fallback_verdict": {"decision": decision, "source": source},
+                "x_malspark_fallback_verdict": {"decision": decision, "source": source},
             }
         )
 
     def test_an_extracted_verdict_is_read_as_extracted(self) -> None:
-        from maljan.pipeline.outcome import decide_from_bundle
+        from malspark.pipeline.outcome import decide_from_bundle
 
         bundle = self._fallback(
             "Suspicious",
@@ -511,15 +511,15 @@ class TestABundleShapeDoesNotOverrideAVerdict:
         assert decide_from_bundle(bundle) == "Suspicious"
 
     def test_a_pipeline_authored_verdict_is_never_malware(self) -> None:
-        from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT, decide_from_bundle
+        from malspark.pipeline.outcome import INCONCLUSIVE_VERDICT, decide_from_bundle
 
         bundle = self._fallback(INCONCLUSIVE_VERDICT, "pipeline", [])
 
         assert decide_from_bundle(bundle) == INCONCLUSIVE_VERDICT
 
     def test_a_bundle_the_judge_produced_is_still_read_by_its_objects(self) -> None:
-        from maljan.pipeline.outcome import decide_from_bundle
-        from maljan.schemas.stix_models import Bundle
+        from malspark.pipeline.outcome import decide_from_bundle
+        from malspark.schemas.stix_models import Bundle
 
         bundle = Bundle.model_validate(
             {
@@ -551,9 +551,9 @@ class TestAnObjectDeclinedIsRecordedNotRewritten:
 
     @staticmethod
     def _rendered() -> tuple[Any, Any, Any]:
-        from maljan.reporting.builder import MalwareReportBuilder
-        from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-        from maljan.schemas.stix_models import Bundle
+        from malspark.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+        from malspark.schemas.stix_models import Bundle
 
         judged = Bundle.model_validate(
             {
@@ -566,7 +566,7 @@ class TestAnObjectDeclinedIsRecordedNotRewritten:
                         "description": "Legitimate open-source terminal emulator.",
                     }
                 ],
-                "x_maljan_assessment": {
+                "x_malspark_assessment": {
                     "verdict": "Benign",
                     "severity": {"rating": "Informational", "rationale": "signed and clean"},
                     "malware_category": "legitimate-utility",
@@ -586,7 +586,7 @@ class TestAnObjectDeclinedIsRecordedNotRewritten:
             discussion_history=[],
             final_decision="Benign",
             overall_confidence=1.0,
-            judge_assessment=judged.x_maljan_assessment,
+            judge_assessment=judged.x_malspark_assessment,
             malware_category="legitimate-utility",
             evidence_ledger=[],
         ).build_deterministic()
@@ -594,7 +594,7 @@ class TestAnObjectDeclinedIsRecordedNotRewritten:
         return judged, renderer, renderer.render(report, base_bundle=judged)
 
     def test_the_stated_verdict_is_what_is_published(self) -> None:
-        from maljan.pipeline.outcome import decide_from_bundle
+        from malspark.pipeline.outcome import decide_from_bundle
 
         judged, _renderer, _exported = self._rendered()
 
@@ -629,10 +629,10 @@ class TestARelocationMovesAndDoesNotEdit:
 
     @staticmethod
     def _lifted() -> tuple[dict[str, Any], list[Any]]:
-        from maljan.agents.judge_postprocess import lift_misplaced_extensions
+        from malspark.agents.judge_postprocess import lift_misplaced_extensions
 
         block = {
-            "type": "x_maljan_assessment",
+            "type": "x_malspark_assessment",
             "verdict": "Malware",
             "severity": {"rating": "High", "rationale": "it hollows a process"},
             "confidence": 0.8,
@@ -653,9 +653,9 @@ class TestARelocationMovesAndDoesNotEdit:
     def test_the_block_arrives_unchanged(self) -> None:
         data, _found = self._lifted()
 
-        assert data["x_maljan_assessment"]["verdict"] == "Malware"
-        assert data["x_maljan_assessment"]["confidence"] == 0.8
-        assert data["x_maljan_assessment"]["severity"] == {
+        assert data["x_malspark_assessment"]["verdict"] == "Malware"
+        assert data["x_malspark_assessment"]["confidence"] == 0.8
+        assert data["x_malspark_assessment"]["severity"] == {
             "rating": "High",
             "rationale": "it hollows a process",
         }
@@ -664,7 +664,7 @@ class TestARelocationMovesAndDoesNotEdit:
         _data, found = self._lifted()
 
         assert [v.code for v in found] == ["verdict.assessment_relocated"]
-        assert found[0].path == "x_maljan_assessment"
+        assert found[0].path == "x_malspark_assessment"
 
     def test_the_objects_beside_it_are_kept(self) -> None:
         data, _found = self._lifted()
@@ -684,8 +684,8 @@ class TestARejectedIdIsDroppedAndNeverRewritten:
     @staticmethod
     def _matrix() -> Any:
         """One claim whose id the analyst's own loop marked unresolvable."""
-        from maljan.extractors.capability_matrix import build_capability_matrix
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+        from malspark.extractors.capability_matrix import build_capability_matrix
+        from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
         claim = ClaimEvidence(
             claim="it hides its own code",
@@ -866,7 +866,7 @@ class TestARejectedAnswerIsNeverAskedOfAnotherModel:
     def _models() -> tuple[Any, list[Any]]:
         from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-        from maljan.llm.fallback import FallbackChatModel
+        from malspark.llm.fallback import FallbackChatModel
 
         first = FakeListChatModel(responses=["T9999 is what it does", "T1055 is what it does"])
         second = FakeListChatModel(responses=["the other model's answer"])
@@ -878,8 +878,8 @@ class TestARejectedAnswerIsNeverAskedOfAnotherModel:
     def test_the_feedback_turn_goes_back_to_the_model_that_answered(self) -> None:
         from langchain_core.messages import HumanMessage
 
-        from maljan.llm.fallback import turn_model
-        from maljan.pipeline.validation import Violation, retry_with_feedback_sync
+        from malspark.llm.fallback import turn_model
+        from malspark.pipeline.validation import Violation, retry_with_feedback_sync
 
         chain, (first, second) = self._models()
         asked: list[str] = []
@@ -923,7 +923,7 @@ class TestARejectedAnswerIsNeverAskedOfAnotherModel:
         from langchain_core.messages import HumanMessage
         from pydantic import BaseModel, ValidationError
 
-        from maljan.llm.fallback import FallbackChatModel
+        from malspark.llm.fallback import FallbackChatModel
 
         class _Shape(BaseModel):
             technique_id: int
@@ -975,7 +975,7 @@ class TestNoClaimCarriesAConfidenceNobodyStated:
     def _analyst() -> Any:
         import logging
 
-        from maljan.agents.static_analyst import StaticAnalyst
+        from malspark.agents.static_analyst import StaticAnalyst
 
         analyst = StaticAnalyst.__new__(StaticAnalyst)
         analyst.name = "static"
@@ -989,7 +989,7 @@ class TestNoClaimCarriesAConfidenceNobodyStated:
         assert isr.unparsed_answer == self.PROSE
 
     def test_a_block_that_states_no_confidence_is_not_given_one(self) -> None:
-        from maljan.agents.base_agent import parse_structured_claims_counted
+        from malspark.agents.base_agent import parse_structured_claims_counted
 
         claims, without = parse_structured_claims_counted(
             "CLAIM: The sample is packed.\nEVIDENCE: entropy 7.9 [ev_0004]\nTECHNIQUE: T1027\n"

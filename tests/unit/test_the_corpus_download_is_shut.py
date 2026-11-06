@@ -20,8 +20,8 @@ from pathlib import Path
 
 import pytest
 
-from maljan.memory import attck_index, attck_loader, embeddings, semantic_attck_index
-from maljan.memory.attck_loader import load_all_domains as _BOUND_AT_IMPORT
+from malspark.memory import attck_index, attck_loader, embeddings, semantic_attck_index
+from malspark.memory.attck_loader import load_all_domains as _BOUND_AT_IMPORT
 
 
 class TestTheDoorsAreHeld:
@@ -40,7 +40,7 @@ class TestTheDoorsAreHeld:
     def test_a_name_bound_at_import_in_a_test_file_refuses_as_well(self) -> None:
         """The shape that walks past a patch on the module attribute.
 
-        A file whose first line is ``from maljan.memory.attck_loader import
+        A file whose first line is ``from malspark.memory.attck_loader import
         load_all_domains`` holds the original function, and patching the name
         on the module leaves that reference alone. What the original calls is
         patched too, so the door holds whichever way in a caller found: the
@@ -94,7 +94,7 @@ class TestTheCacheIsSomewhereElse:
 
     @staticmethod
     def _real_dir() -> Path:
-        return Path.home() / ".cache" / "maljan" / "attck"
+        return Path.home() / ".cache" / "malspark" / "attck"
 
     def test_both_caches_point_away_from_the_home_directory(self) -> None:
         real = self._real_dir()
@@ -159,4 +159,4 @@ class TestTheOptInOpensTheDoors:
 
 def self_dir_is_temporary(path: Path) -> bool:
     """Whether this path is somewhere a test session may write."""
-    return Path.home() / ".cache" / "maljan" / "attck" != Path(path)
+    return Path.home() / ".cache" / "malspark" / "attck" != Path(path)

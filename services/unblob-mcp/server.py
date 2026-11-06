@@ -92,7 +92,7 @@ TOOLS = (SCAN_TOOL, EXTRACT_TOOL)
 CARVE_ROOT_ENV = "UNBLOB_CARVE_ROOT"
 KEEP_ENV = "CARVED_KEEP_SECONDS"
 KEEP_SECONDS = 3600.0
-# The platform's sample upload bound (``maljan.core.delivery_limits``), which
+# The platform's sample upload bound (``malspark.core.delivery_limits``), which
 # every decompression it does stops at; ``UPLOAD_MAX_BYTES`` holds the
 # console's ``upload_max_bytes`` where an operator changed it.
 UPLOAD_BOUND_ENV = "UPLOAD_MAX_BYTES"
@@ -109,7 +109,7 @@ WATCH_SECONDS = 0.5
 # unblob's own recursion depth (``unblob.processing.DEFAULT_DEPTH``).
 DEFAULT_DEPTH = 10
 # The most one ``get_artefact`` call answers: the platform's own chunk
-# (``maljan.pipeline.artefacts.FETCH_CHUNK_BYTES``).
+# (``malspark.pipeline.artefacts.FETCH_CHUNK_BYTES``).
 FETCH_CHUNK_BYTES = 4 * 1024 * 1024
 HASH_CHUNK_BYTES = 1024 * 1024
 

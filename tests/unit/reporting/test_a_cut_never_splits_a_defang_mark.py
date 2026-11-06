@@ -13,8 +13,8 @@ import re
 
 import pytest
 
-from maljan.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer, _truncate, _truncate_escaped
+from malspark.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer, _truncate, _truncate_escaped
 
 SPLIT_MARK = re.compile(r"\[[.:@]?…")
 

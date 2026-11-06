@@ -19,7 +19,7 @@ value that needs interpreting — is dropped and named, as before.
 
 from __future__ import annotations
 
-from maljan.reporting.composer import (
+from malspark.reporting.composer import (
     _bundle_text,
     _C2Out,
     _CliFlagsOut,
@@ -29,7 +29,7 @@ from maljan.reporting.composer import (
     _section_text_envelope,
     _the_prose_field,
 )
-from maljan.reporting.models import Conclusion, EncryptionScheme, RansomNote
+from malspark.reporting.models import Conclusion, EncryptionScheme, RansomNote
 
 # What the two models answered with, section by section, read off the worker
 # log of the recorded runs.
@@ -135,7 +135,7 @@ class TestANestedObjectIsShownWhole:
     both are shown as the answer has to write them."""
 
     def test_the_flow_step_shows_its_vocabulary_and_its_citation_list(self) -> None:
-        from maljan.reporting.composer import _FlowOut
+        from malspark.reporting.composer import _FlowOut
 
         assert _expected_object(_FlowOut) == (
             '{"steps": [{"order": 0, "action": "...", "voice": "observed or assessed", '
@@ -143,7 +143,7 @@ class TestANestedObjectIsShownWhole:
         )
 
     def test_the_configuration_shows_how_a_value_may_be_obtained(self) -> None:
-        from maljan.reporting.composer import _ConfigOut
+        from malspark.reporting.composer import _ConfigOut
 
         assert '"how_obtained": "decrypted or observed or static-string or inferred"' in (
             _expected_object(_ConfigOut)

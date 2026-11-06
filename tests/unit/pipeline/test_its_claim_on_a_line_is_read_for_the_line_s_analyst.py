@@ -20,13 +20,13 @@ Every value is synthetic.
 
 from __future__ import annotations
 
-from maljan.pipeline.debate_facts import (
+from malspark.pipeline.debate_facts import (
     NO_ANALYST_NAMED,
     claims_named_by_lines,
     read_claim_references,
 )
-from maljan.pipeline.revision_merge import merge_revision
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.revision_merge import merge_revision
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 NAMES = ["a", "b"]
 

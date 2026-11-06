@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import time
 
-from maljan.agents.judge_agent import mediation_reports_text
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.judge_agent import mediation_reports_text
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 ISR_HEADING = "=== STRUCTURED CLAIMS (ISR) ==="
 

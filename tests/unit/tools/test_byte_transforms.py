@@ -19,8 +19,8 @@ import pytest
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from maljan.tools import transforms
-from maljan.tools.transforms import transform_bytes
+from malspark.tools import transforms
+from malspark.tools.transforms import transform_bytes
 from tests.unit.tools.synthetic_pe import DATA_RVA, SyntheticPE
 
 PLAIN = b"beacon to http://update.example.test/gate.php every 60s from HKCU\\Software\\Demo"
@@ -271,7 +271,7 @@ class TestTheAnswerStatesFacts:
         ).items()
 
     def test_the_ascii_reading_is_the_pack_s_escaping_with_high_bytes_written_out(self) -> None:
-        from maljan.utils.written_forms import pack_escaped
+        from malspark.utils.written_forms import pack_escaped
 
         every = bytes(range(256)) + b"\\"
         expected = pack_escaped(every.decode("latin-1")).translate(
@@ -310,7 +310,7 @@ class TestTheRange:
     def test_a_file_offset_in_an_image_states_its_place(self, tmp_path: Path) -> None:
         image = SyntheticPE()
         path = _write(tmp_path, image.build(), "s.exe")
-        from maljan.tools import pe_image
+        from malspark.tools import pe_image
 
         loaded = pe_image.load(path)
         data = next(s for s in loaded.sections if s.name == ".data")
@@ -364,7 +364,7 @@ class TestHostileInputs:
         assert answer["output"]["length"] == 1 << 16 and "cut there" in answer["steps"][0]["cut"]
 
     def test_the_default_cap_is_the_platform_s_upload_cap(self) -> None:
-        from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+        from malspark.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 
         assert transforms.DECOMPRESSED_CAP == SAMPLE_UPLOAD_MAX_BYTES
 
@@ -670,7 +670,7 @@ class TestTheShownPart:
         assert out["shown"]["end"] == len(PLAIN)
 
     def test_the_sizes_come_from_the_rooms_and_the_readings_most_characters(self) -> None:
-        from maljan.llm.context_window import (
+        from malspark.llm.context_window import (
             CHARS_PER_TOKEN,
             MAX_BELIEVABLE_WINDOW_TOKENS,
             UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
@@ -726,7 +726,7 @@ class TestTheShownPart:
     def test_the_utf16le_reading_is_the_pack_s_escaping(self) -> None:
         import os
 
-        from maljan.utils.written_forms import pack_escaped
+        from malspark.utils.written_forms import pack_escaped
 
         for blob in (
             os.urandom(1 << 16),
@@ -839,8 +839,8 @@ class TestTheSpanPath:
         return blobs
 
     def test_the_rows_equal_the_scan_s(self) -> None:
-        from maljan.tools.ioc_spans import string_iocs_with_spans
-        from maljan.tools.strings import iter_string_iocs
+        from malspark.tools.ioc_spans import string_iocs_with_spans
+        from malspark.tools.strings import iter_string_iocs
 
         for blob in self._corpus():
             rows = string_iocs_with_spans(blob)

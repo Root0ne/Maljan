@@ -1,4 +1,4 @@
-"""Maljan API — Centralized logging configuration.
+"""Malspark API — Centralized logging configuration.
 
 Provides structured logging with:
 - JSON output for production (machine-parseable)
@@ -128,7 +128,7 @@ _ARQ_HANDLER_PREFIX = "arq."
 def hand_arq_over_to_root(name: str = "arq") -> bool:
     """Drop arq's own handlers, leaving the root's to format its lines.
 
-    The same hand-over ``maljan.core.logger.hand_over_to_root`` performs for
+    The same hand-over ``malspark.core.logger.hand_over_to_root`` performs for
     the pipeline logger, and the same rule: only the handlers arq's log config
     installed are taken away, so one an operator added stays, and propagation
     is left on because the root handler is the one that has to write the line.
@@ -179,7 +179,7 @@ def setup_logging() -> None:
     # writer for the same record, and every pipeline line went to stdout
     # twice: once plain, once through the formatter chosen here. Now that
     # there is a root handler, that one steps aside.
-    from maljan.core.logger import hand_over_to_root
+    from malspark.core.logger import hand_over_to_root
 
     hand_over_to_root()
 
@@ -207,7 +207,7 @@ def setup_logging() -> None:
     logging.getLogger("mcp.client.stdio").setLevel(logging.CRITICAL)
 
     # Log startup message
-    logger = logging.getLogger("maljan.startup")
+    logger = logging.getLogger("malspark.startup")
     logger.info(
         "Logging initialized",
         extra={"component": "logging", "level": record_level_name(log_level)},
@@ -220,11 +220,11 @@ def record_level_name(level: int) -> str:
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Get a named logger under the 'maljan' namespace.
+    """Get a named logger under the 'malspark' namespace.
 
     Usage:
         from app.logging_config import get_logger
         logger = get_logger(__name__)
         logger.info("Something happened", extra={"user_id": "abc"})
     """
-    return logging.getLogger(f"maljan.{name}")
+    return logging.getLogger(f"malspark.{name}")

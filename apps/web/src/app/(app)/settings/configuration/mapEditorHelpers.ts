@@ -8,7 +8,7 @@
  */
 
 /** The key shape every one of these maps accepts. Mirrors `AGENT_KEY_PATTERN`
- *  and the server-map key rule in `src/maljan/core/config.py`. */
+ *  and the server-map key rule in `src/malspark/core/config.py`. */
 export const MAP_KEY = /^[a-z][a-z0-9_-]{0,31}$/;
 
 export const MAP_KEY_RULE =

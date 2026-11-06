@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.pipeline.outcome import (
+from malspark.pipeline.outcome import (
     INCONCLUSIVE_VERDICT,
     decide_from_bundle,
     normalise_verdict,
@@ -36,18 +36,21 @@ from maljan.pipeline.outcome import (
     stated_confidence,
     unrecognised_verdict_reason,
 )
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     ASSESSMENT_CONFLICT_CODE,
     UNRECOGNISED_VERDICT_CODE,
     UNSTATED_VERDICT_CODE,
     assessment_conflict_violations,
     stated_verdict_violations,
 )
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.stix_renderer import MALWARE_UNDER_BENIGN_CODE, ExtendedSTIXRenderer
-from maljan.schemas.judgement import VERDICT_VALUES
-from maljan.schemas.stix_models import Bundle
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers.stix_renderer import (
+    MALWARE_UNDER_BENIGN_CODE,
+    ExtendedSTIXRenderer,
+)
+from malspark.schemas.judgement import VERDICT_VALUES
+from malspark.schemas.stix_models import Bundle
 
 SHA256 = "d0" + "1f" * 31
 
@@ -89,7 +92,7 @@ SAMPLE_A_ASSESSMENT: dict[str, Any] = {
 def _bundle(objects: list[dict[str, Any]], assessment: dict[str, Any] | None) -> Bundle:
     payload: dict[str, Any] = {"type": "bundle", "objects": objects}
     if assessment is not None:
-        payload["x_maljan_assessment"] = assessment
+        payload["x_malspark_assessment"] = assessment
     return Bundle.model_validate(payload)
 
 
@@ -116,8 +119,8 @@ def _report(bundle: Bundle, decision: str) -> MalwareReport:
         discussion_history=[],
         final_decision=decision,
         overall_confidence=stated_confidence(bundle),
-        judge_assessment=bundle.x_maljan_assessment,
-        malware_category=getattr(bundle.x_maljan_assessment, "malware_category", None),
+        judge_assessment=bundle.x_malspark_assessment,
+        malware_category=getattr(bundle.x_malspark_assessment, "malware_category", None),
         sample_platform="windows",
         sample_file_type="pe",
         evidence_ledger=[],
@@ -204,7 +207,7 @@ class TestWhatTheNormaliserIsGiven:
 
     def test_the_fallback_extractor_only_ever_yields_an_exact_word(self) -> None:
         """The other producer of a decision string, read off the judge's prose."""
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         corpus = (
             "This is malware.",
@@ -235,7 +238,7 @@ class TestWhatTheNormaliserIsGiven:
             bundle = Bundle.model_validate(
                 {
                     "objects": [],
-                    "x_maljan_fallback_verdict": {"decision": decision, "source": "extracted"},
+                    "x_malspark_fallback_verdict": {"decision": decision, "source": "extracted"},
                 }
             )
             assert decide_from_bundle(bundle) == decision
@@ -244,7 +247,7 @@ class TestWhatTheNormaliserIsGiven:
         bundle = Bundle.model_validate(
             {
                 "objects": [],
-                "x_maljan_fallback_verdict": {"decision": "Malware-ish", "source": "extracted"},
+                "x_malspark_fallback_verdict": {"decision": "Malware-ish", "source": "extracted"},
             }
         )
 
@@ -288,7 +291,7 @@ class TestAWordOutsideTheVocabulary:
         violations = stated_verdict_violations(_putty_stating("Malicious"))
 
         assert [v.code for v in violations] == [UNRECOGNISED_VERDICT_CODE]
-        assert violations[0].path == "x_maljan_assessment.verdict"
+        assert violations[0].path == "x_malspark_assessment.verdict"
         assert "'Malicious'" in violations[0].message
         assert "Malware, Suspicious, Benign" in violations[0].message
 
@@ -308,21 +311,21 @@ class TestAWordOutsideTheVocabulary:
         import json
         from unittest.mock import MagicMock
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         answers = [
             json.dumps(
                 {
                     "type": "bundle",
                     "objects": [PUTTY_MALWARE_OBJECT],
-                    "x_maljan_assessment": {**RECORDED_PUTTY_ASSESSMENT, "verdict": "Malicious"},
+                    "x_malspark_assessment": {**RECORDED_PUTTY_ASSESSMENT, "verdict": "Malicious"},
                 }
             ),
             json.dumps(
                 {
                     "type": "bundle",
                     "objects": [],
-                    "x_maljan_assessment": {**RECORDED_PUTTY_ASSESSMENT, "verdict": "Benign"},
+                    "x_malspark_assessment": {**RECORDED_PUTTY_ASSESSMENT, "verdict": "Benign"},
                 }
             ),
         ]
@@ -363,7 +366,7 @@ class TestAVerdictThatIsNotText:
         for value in self.VALUES:
             bundle = _bundle([PUTTY_MALWARE_OBJECT], {"verdict": value, "confidence": 0.9})
             assert len(bundle.objects) == 1, value
-            assert bundle.x_maljan_fallback_verdict is None, value
+            assert bundle.x_malspark_fallback_verdict is None, value
 
     def test_it_reads_as_stated_and_unrecognised(self) -> None:
         for value in self.VALUES:
@@ -384,13 +387,13 @@ class TestAVerdictThatIsNotText:
         import json
         from unittest.mock import MagicMock
 
-        from maljan.agents.judge_agent import VERDICT_FALLBACK_CODE, JudgeAgent
+        from malspark.agents.judge_agent import VERDICT_FALLBACK_CODE, JudgeAgent
 
         answer = json.dumps(
             {
                 "type": "bundle",
                 "objects": [PUTTY_MALWARE_OBJECT],
-                "x_maljan_assessment": {**RECORDED_PUTTY_ASSESSMENT, "verdict": ["Benign"]},
+                "x_malspark_assessment": {**RECORDED_PUTTY_ASSESSMENT, "verdict": ["Benign"]},
             }
         )
 
@@ -450,7 +453,7 @@ class TestWhatTheJudgeWroteIsScrubbedBeforeItIsStored:
         assert len(reason) <= 300
 
     def test_the_report_that_prints_it_carries_neither(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         secret, bundle = self._noisy()
         report = _report(bundle, INCONCLUSIVE_VERDICT)
@@ -479,7 +482,7 @@ class TestWhatTheJudgeWroteIsScrubbedBeforeItIsStored:
         assert len(messages) < 900
 
     def test_an_object_the_bundle_cannot_hold_is_scrubbed_too(self) -> None:
-        from maljan.agents.judge_postprocess import lift_misplaced_extensions
+        from malspark.agents.judge_postprocess import lift_misplaced_extensions
         from tests.credential_shapes import prefixed_key
 
         secret = prefixed_key("ghs_")
@@ -510,16 +513,16 @@ class TestTheRecordedAnswerReplayedUnchanged:
         violations = stated_verdict_violations(_recorded_putty())
 
         assert [v.code for v in violations] == [UNSTATED_VERDICT_CODE]
-        assert violations[0].path == "x_maljan_assessment.verdict"
+        assert violations[0].path == "x_malspark_assessment.verdict"
 
     def test_no_confidence_is_published_for_it(self) -> None:
         """The judge's 1.0 was about its own assessment, not about this verdict."""
-        assert _recorded_putty().x_maljan_assessment.confidence == 1.0
+        assert _recorded_putty().x_malspark_assessment.confidence == 1.0
         assert stated_confidence(_recorded_putty()) is None
         assert _report(_recorded_putty(), "Malware").overall_confidence is None
 
     def test_the_report_header_says_so(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         markdown = MarkdownRenderer().render(_report(_recorded_putty(), "Malware"))
 
@@ -531,13 +534,13 @@ class TestTheRecordedAnswerReplayedUnchanged:
         import json
         from unittest.mock import MagicMock
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         answer = json.dumps(
             {
                 "type": "bundle",
                 "objects": [PUTTY_MALWARE_OBJECT],
-                "x_maljan_assessment": RECORDED_PUTTY_ASSESSMENT,
+                "x_malspark_assessment": RECORDED_PUTTY_ASSESSMENT,
             }
         )
 
@@ -665,7 +668,7 @@ class TestABundleThatStatesNothing:
         bundle = Bundle.model_validate(
             {
                 "objects": [],
-                "x_maljan_fallback_verdict": {"decision": "Suspicious", "source": "extracted"},
+                "x_malspark_fallback_verdict": {"decision": "Suspicious", "source": "extracted"},
             }
         )
 
@@ -686,7 +689,7 @@ class TestTheReportNamesWhatTheExportLeftOut:
     def _run() -> dict[str, Any]:
         import asyncio
 
-        from maljan.pipeline.nodes import make_report_node
+        from malspark.pipeline.nodes import make_report_node
         from tests.unit.pipeline.test_a_fallback_verdict_assesses_nothing import (
             _report_container,
             _report_state,
@@ -722,9 +725,9 @@ class TestAStoredReportWithoutTheField:
         """Every run before this field existed has a bundle without it."""
         bundle = _recorded_putty()
 
-        assert bundle.x_maljan_assessment is not None
-        assert bundle.x_maljan_assessment.verdict is None
-        assert bundle.x_maljan_assessment.severity is not None
+        assert bundle.x_malspark_assessment is not None
+        assert bundle.x_malspark_assessment.verdict is None
+        assert bundle.x_malspark_assessment.severity is not None
 
     def test_a_stated_benign_with_nothing_to_contradict_exports_plainly(self) -> None:
         bundle = _bundle(

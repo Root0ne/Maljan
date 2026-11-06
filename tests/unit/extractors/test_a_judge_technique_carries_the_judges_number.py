@@ -3,7 +3,7 @@
 Every judge-only technique in the forty stored runs — twenty of them — was
 published at confidence 0.0, although the judge's own ``uses`` relationship to
 it said 0.95 in the ELF run. The matrix read a relationship's technique only
-from ``x_maljan_technique_id``, a property the prompt never asks for and the
+from ``x_malspark_technique_id``, a property the prompt never asks for and the
 judge wrote on none of the twenty-one relationships it annotated; the number
 the judge gave was dropped and a zero nobody said was printed on three
 surfaces. The technique a relationship is about is the attack-pattern it
@@ -19,8 +19,8 @@ claims name it; the credit stays on the relationship, as the judge wrote it.
 
 from __future__ import annotations
 
-from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.extractors.capability_matrix import build_capability_matrix
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _pattern(tid: str) -> dict:
@@ -39,11 +39,11 @@ def _uses(tid: str, confidence: float | None, agents: list[str]) -> dict:
         "relationship_type": "uses",
         "source_ref": "malware--1",
         "target_ref": f"attack-pattern--{tid}",
-        "x_maljan_evidence_basis": "static",
-        "x_maljan_contributing_agents": agents,
+        "x_malspark_evidence_basis": "static",
+        "x_malspark_contributing_agents": agents,
     }
     if confidence is not None:
-        edge["x_maljan_confidence"] = confidence
+        edge["x_malspark_confidence"] = confidence
     return edge
 
 

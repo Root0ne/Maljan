@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.core.declaration_proposals import _argument_role, _Shape
+from malspark.core.declaration_proposals import _argument_role, _Shape
 
 
 def _role(regex: str) -> tuple[str, str, str] | None:

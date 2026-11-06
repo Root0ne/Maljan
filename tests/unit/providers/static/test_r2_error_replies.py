@@ -14,8 +14,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from maljan.providers.static import r2
-from maljan.schemas.evidence import build_entry
+from malspark.providers.static import r2
+from malspark.schemas.evidence import build_entry
 
 REGEX_REFUSAL = "Invalid regex used in filter parameter, try a simpler expression"
 
@@ -37,7 +37,7 @@ def _tool(reply: str) -> Any:
         description="List strings",
         args_schema=_Args,
         infer_schema=False,
-        metadata={"maljan_server": "r2"},
+        metadata={"malspark_server": "r2"},
     )
 
 
@@ -97,7 +97,7 @@ def test_the_tool_keeps_its_name_schema_and_metadata() -> None:
 
     assert wrapped.name == "list_strings"
     assert wrapped.args_schema is _Args
-    assert wrapped.metadata == {"maljan_server": "r2"}
+    assert wrapped.metadata == {"malspark_server": "r2"}
     # A copy: stamping the wrapped tool's source must not stamp the original.
     assert wrapped.metadata is not original.metadata
 

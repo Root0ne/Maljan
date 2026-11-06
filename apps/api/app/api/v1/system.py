@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from maljan.core.settings_masking import masked_text
-from maljan.memory.long_term_memory import ISOLATED_JOB_SCOPE, OWNER_PATH_SEPARATOR
+from malspark.core.settings_masking import masked_text
+from malspark.memory.long_term_memory import ISOLATED_JOB_SCOPE, OWNER_PATH_SEPARATOR
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +30,7 @@ from app.services import audit
 from app.services.served_declarations_store import refresh_failure
 
 if TYPE_CHECKING:
-    from maljan.memory.long_term_memory import MemoryStore
+    from malspark.memory.long_term_memory import MemoryStore
 
 logger = get_logger("api.system")
 
@@ -66,7 +66,7 @@ class SystemStatusResponse(BaseModel):
     app_version: str
     mock_mode_allowed: bool = Field(
         description=(
-            "When True, the worker accepts MALJAN_MOCK_MODE=true or "
+            "When True, the worker accepts MALSPARK_MOCK_MODE=true or "
             "job.config.mock_mode=true and short-circuits the real pipeline. "
             "Dashboards should surface a banner so operators notice."
         )
@@ -352,9 +352,9 @@ async def _build_memory_store(db: AsyncSession) -> MemoryStore:
     reads and writes the UI-configured store, and purging another one would be
     destructive and silent.
     """
-    from maljan.core.plugins import ALLOW_LIST_PATH
-    from maljan.core.settings_overrides import build_settings
-    from maljan.memory.store_factory import build_memory_store
+    from malspark.core.plugins import ALLOW_LIST_PATH
+    from malspark.core.settings_overrides import build_settings
+    from malspark.memory.store_factory import build_memory_store
 
     from app.services.plugins import load_in_background
     from app.services.settings_probes import TIMEOUT
@@ -536,7 +536,7 @@ async def ltm_purge_owners(
     that keeps no owners or cannot purge by them, and a purge that matches
     nothing, so a mistyped prefix is said, never answered 0.
     """
-    from maljan.memory.long_term_memory import owner_prefix_key, owner_prefix_segments
+    from malspark.memory.long_term_memory import owner_prefix_key, owner_prefix_segments
 
     prefix = owner_prefix_key(body.owner_prefix)
     if prefix is None:

@@ -17,11 +17,11 @@ import pytest
 
 from app.api.v1.reports import get_attack_navigator_layer
 from app.services.report_service import ReportService
-from maljan.memory import attck_defense, attck_loader
-from maljan.reporting.builder import attck_defense_rows
-from maljan.reporting.models import TTPMapping
-from maljan.reporting.navigator_layer import build_layer, support_score
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.memory import attck_defense, attck_loader
+from malspark.reporting.builder import attck_defense_rows
+from malspark.reporting.models import TTPMapping
+from malspark.reporting.navigator_layer import build_layer, support_score
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 from tests.unit.reporting._report_shapes import rich_report
 
 

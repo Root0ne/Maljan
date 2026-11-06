@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.pipeline.conditions import (
+from malspark.pipeline.conditions import (
     ConditionError,
     StageContext,
     StageResult,

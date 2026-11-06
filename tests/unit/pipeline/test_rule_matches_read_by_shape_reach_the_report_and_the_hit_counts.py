@@ -31,22 +31,22 @@ from typing import Any
 
 import pytest
 
-from maljan.core.rule_matches import BY_SHAPE_KEY
-from maljan.pipeline.conditions import (
+from malspark.core.rule_matches import BY_SHAPE_KEY
+from malspark.pipeline.conditions import (
     SIGNATURE_RULES,
     StageContext,
     TriageFacts,
     evaluate,
     rule_match_hits,
 )
-from maljan.reporting.ledger_report import (
+from malspark.reporting.ledger_report import (
     SHAPE_RULE_COLUMNS,
     SHAPE_RULE_SECTION,
     SHAPE_RULE_TITLE,
     build_sections,
     section_key_of_kind,
 )
-from maljan.schemas.evidence import LedgerEntry, build_entry
+from malspark.schemas.evidence import LedgerEntry, build_entry
 
 _NO_KIND = {"v": 1, "kind": ""}
 # An undeclared tool's answer: its matches nested in a report, one map per
@@ -72,8 +72,8 @@ _TECHNIQUE_LIKE = {"rule_hits": [{"rule_name": "attack.t1059"}]}
 @pytest.fixture(autouse=True)
 def shipped() -> Iterator[None]:
     """The real ``Settings()`` and the shipped server map, installed for every test."""
-    from maljan.core import declared_reading
-    from maljan.core.config import Settings, get_settings, install_settings
+    from malspark.core import declared_reading
+    from malspark.core.config import Settings, get_settings, install_settings
 
     previous = get_settings()
     install_settings(Settings())
@@ -127,8 +127,8 @@ def _undeclared(entry_id: str, answer: Any, server: str) -> LedgerEntry:
 
 
 def _static_server() -> str:
-    from maljan.agents.composition import servers_bound_to
-    from maljan.core.config import Settings
+    from malspark.agents.composition import servers_bound_to
+    from malspark.core.config import Settings
 
     return sorted(servers_bound_to(Settings(), "static"))[0]
 
@@ -222,7 +222,7 @@ class TestNoRuleHitListNamesTheShapedRows:
     """The table is evidence: no list of the rules that matched the sample names its rows."""
 
     def _report(self) -> Any:
-        from maljan.reporting.models import StaticAnalysis
+        from malspark.reporting.models import StaticAnalysis
         from tests.unit.reporting.test_builder import _build
 
         report = _build(ledger=_both())
@@ -231,7 +231,7 @@ class TestNoRuleHitListNamesTheShapedRows:
         return report.model_copy(update={"static": report.static or StaticAnalysis()})
 
     def test_not_in_static_rule_hits_nor_in_10_1(self) -> None:
-        from maljan.reporting.renderers.markdown import _RULE_SECTIONS, MarkdownRenderer
+        from malspark.reporting.renderers.markdown import _RULE_SECTIONS, MarkdownRenderer
 
         assert SHAPE_RULE_SECTION not in _RULE_SECTIONS
         text = MarkdownRenderer().render(self._report())
@@ -245,8 +245,8 @@ class TestNoRuleHitListNamesTheShapedRows:
         assert SHAPE_RULE_TITLE in appendix and "rule_alpha" in appendix
 
     def test_not_in_the_analyst_report_s_8_2(self) -> None:
-        from maljan.reporting.renderers.layout import ANALYST
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.layout import ANALYST
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         text = MarkdownRenderer(layout=ANALYST).render(self._report())
         detection = _block(text, "### 8.2 Detection rules", r"^#{2,3} ")

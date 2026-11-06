@@ -20,11 +20,11 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.schemas.evidence import EvidenceCounter
 
 # What the analysis sidecar answers with when a path argument names nothing:
-# the shape ``maljan.tools.errors`` authors, remediation and all.
+# the shape ``malspark.tools.errors`` authors, remediation and all.
 STRUCTURED_ERROR = {
     "error": {
         "code": "no_such_file",

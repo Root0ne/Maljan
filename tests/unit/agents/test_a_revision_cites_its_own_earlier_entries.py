@@ -18,10 +18,10 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.pipeline.validation import UNGROUNDED_TECHNIQUE_CODE
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.pipeline.validation import UNGROUNDED_TECHNIQUE_CODE
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 class _Analyst(BaseAnalyst):
@@ -80,7 +80,7 @@ def _answer(evidence: str) -> str:
 
 
 def _validate(agent: Any, isr: AgentISR) -> AgentISR:
-    with patch("maljan.agents.base_agent.get_settings") as settings:
+    with patch("malspark.agents.base_agent.get_settings") as settings:
         settings.return_value.react_agent_timeout = 60
         settings.return_value.react_agent_timeout_overrides = {}
         return agent._validate_isr(isr, "the evidence the analyst read")

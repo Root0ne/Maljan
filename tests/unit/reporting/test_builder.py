@@ -11,9 +11,9 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.builder import NO_SUMMARY_REASON, MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
-from maljan.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVerdict
+from malspark.reporting.builder import NO_SUMMARY_REASON, MalwareReportBuilder
+from malspark.reporting.models import MalwareReport
+from malspark.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVerdict
 from tests.unit._ledger_helpers import ledger_from_sandbox
 
 
@@ -77,7 +77,7 @@ class TestMinimalBuild:
         ]
 
     def test_an_operator_who_removed_the_shipped_lookups_gets_none(self) -> None:
-        from maljan.core.config import get_settings
+        from malspark.core.config import get_settings
 
         settings = get_settings()
         kept = list(settings.reporting.reference_urls)

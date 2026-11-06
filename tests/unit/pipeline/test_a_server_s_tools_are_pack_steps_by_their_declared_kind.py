@@ -24,12 +24,12 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.composition import servers_a_job_calls
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.core import config as config_module
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.core.declared_reading import builtin_tools
-from maljan.core.pack_steps import (
+from malspark.agents.composition import servers_a_job_calls
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.core import config as config_module
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.core.declared_reading import builtin_tools
+from malspark.core.pack_steps import (
     IDENTIFICATION_KIND,
     RUNTIME_VALUE,
     SERVER_STEP_KINDS,
@@ -43,17 +43,17 @@ from maljan.core.pack_steps import (
     steps_left_out,
     steps_on_servers,
 )
-from maljan.core.settings_overrides import build_settings
-from maljan.core.tool_declarations import ToolFacts
-from maljan.pipeline.artefacts import written_names
-from maljan.pipeline.triage_pack import (
+from malspark.core.settings_overrides import build_settings
+from malspark.core.tool_declarations import ToolFacts
+from malspark.pipeline.artefacts import written_names
+from malspark.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     PackInputs,
     ServerAnswer,
     run_pack,
 )
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.schemas.evidence import EvidenceCounter
 
 # The platform's own servers whose tools answer a server-step kind.
 SERVERS = ("die", "ilspy", "goresym", "yarax", "oletools", "webcrack", "unblob", "jadx")
@@ -627,7 +627,7 @@ class TestANameOfAServersStep:
             )
 
     def test_a_save_is_held_to_it_and_a_stored_read_is_not(self) -> None:
-        from maljan.core.settings_overrides import build_settings, pack_step_refusals
+        from malspark.core.settings_overrides import build_settings, pack_step_refusals
 
         typo = {"triage.steps": [{"id": "die_scna", "enabled": False}]}
         assert "die_scna" in str(pack_step_refusals(typo, {}))
@@ -672,8 +672,8 @@ STDIO = {"transport": "stdio", "command": "/bin/true", "args": [], "enabled": Tr
 
 
 def _served(key: str, block: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> Settings:
-    from maljan.core import served_declarations
-    from maljan.core.tool_declarations import launch_identity
+    from malspark.core import served_declarations
+    from malspark.core.tool_declarations import launch_identity
 
     held = build_settings({"mcp.servers": {key: block}})
     monkeypatch.setattr(config_module, "_settings_instance", held)
@@ -703,8 +703,8 @@ class TestWhatAServerDeclaresOfItself:
     def test_a_declaration_kept_by_another_release_is_not_kept(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core import served_declarations, tool_declarations
-        from maljan.core.tool_declarations import launch_identity
+        from malspark.core import served_declarations, tool_declarations
+        from malspark.core.tool_declarations import launch_identity
 
         held = _served("kit", {**STDIO, "trusts_served_declaration": True}, monkeypatch)
         block = held.mcp.servers["kit"]

@@ -21,16 +21,16 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.agents import delegation
-from maljan.agents.delegation import (
+from malspark.agents import delegation
+from malspark.agents.delegation import (
     _hand_over_the_record,
     ask,
     ask_tool,
     asks_run_at_once,
     tool_name,
 )
-from maljan.core.config import Settings
-from maljan.pipeline.analyst_mode import resolve_analyst_mode
+from malspark.core.config import Settings
+from malspark.pipeline.analyst_mode import resolve_analyst_mode
 
 
 def _config(provider: str, **llm: Any) -> Settings:
@@ -117,7 +117,7 @@ class _Container:
 
 @pytest.fixture(autouse=True)
 def _every_ask_may_be_made(monkeypatch: pytest.MonkeyPatch) -> Any:
-    from maljan.llm import context_window
+    from malspark.llm import context_window
 
     context_window.forget_learned_windows()
     monkeypatch.setattr(delegation, "refusal", lambda container, caller, callee_key: None)
@@ -178,7 +178,7 @@ class TestTheDecision:
     def test_a_specialist_s_models_are_read_once_per_job(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.pipeline import analyst_mode
+        from malspark.pipeline import analyst_mode
 
         container = _Container("anthropic", analysts=("looker",))
         read = analyst_mode._auto_mode
@@ -349,7 +349,7 @@ class _Callee:
         self.before: Any = None
 
     def answer_task(self, turn: str) -> tuple[str, Any]:
-        from maljan.schemas.isr_models import AgentISR
+        from malspark.schemas.isr_models import AgentISR
 
         self.started.wait()
         if self.before is not None:
@@ -382,7 +382,7 @@ class TestTheEvidenceLockIsTaken:
     """Each place that writes or drains the judge's entries waits for its lock."""
 
     def _judge(self) -> Any:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         judge = JudgeAgent.__new__(JudgeAgent)
         judge.evidence_lock = threading.Lock()

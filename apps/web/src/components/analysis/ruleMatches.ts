@@ -98,7 +98,7 @@ export function findingsByName(
 }
 
 /* ── Claim parsers ─────────────────────────────────────
- * The deterministic layers (src/maljan/analysis/yara_layer.py +
+ * The deterministic layers (src/malspark/analysis/yara_layer.py +
  * sigma_layer.py) emit free-text claims like:
  *
  *   "Deterministic YARA signature match: Virtualization and sandbox

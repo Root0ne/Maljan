@@ -31,7 +31,7 @@ def test_a_built_in_providers_id_is_refused() -> None:
 
 
 def test_an_entry_a_provider_never_reads_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    from maljan.core import tool_declarations
+    from malspark.core import tool_declarations
 
     # A provider whose class registered a block of its own, not ``providers.<id>``.
     monkeypatch.setitem(

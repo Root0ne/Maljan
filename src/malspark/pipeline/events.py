@@ -1,0 +1,2601 @@
+"""Pipeline event sink — the transcript feed behind the live UI.
+
+The pipeline used to be opaque while it ran. The worker announced which agents
+were *about* to run and then nothing until the verdict arrived, 30+ minutes
+later: the UI could show a spinner and no reason to trust what came out of it.
+This module is how a node says what it just found, while it is still running.
+
+Deliberately minimal, and deliberately not async:
+
+* **A plain callable, not a Redis handle.** ``malspark`` is framework-agnostic —
+  it must not learn about Redis, ARQ or FastAPI to describe its own progress.
+  The worker supplies a sink; the CLI supplies none and every ``emit`` becomes
+  a no-op.
+* **Synchronous, and safe to call from any thread.** The analyst node is sync
+  and LangGraph runs it in a worker thread, while the negotiation, revision and
+  judge nodes are coroutines on the loop. One sync signature serves both; the
+  sink implementation is responsible for getting the payload back to its own
+  loop (see ``analysis_worker._make_event_sink``).
+* **Never raises, never blocks.** Telemetry must not be able to fail an
+  analysis. ``emit`` swallows everything the sink throws — a broken progress
+  feed is an annoyance, a broken pipeline is a lost 30-minute run.
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+import re
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Any
+
+from malspark.core.logger import logger
+from malspark.utils.marked_cut import CUT_MARK
+
+# (event_type, payload) -> None. Must be safe to call from any thread.
+EventSink = Callable[[str, dict[str, Any]], None]
+
+# The single event type the transcript UI consumes. One type with a ``role``
+# discriminator rather than one type per speaker: the frontend renders them
+# through a single code path, and a new participant needs no client change.
+AGENT_MESSAGE = "agent_message"
+
+# The rest of the live conversation, one type per thing that happens rather
+# than one more ``role`` on the message: a tool call is not a line somebody
+# said, and a console that draws it as one has to strip the prose back out
+# again. Every one of them carries the stage it happened in, so the console
+# can file it under the step of the team that produced it, and every one of
+# them is assigned its ``seq`` by the publisher rather than here — nothing in
+# this package knows the job, and a second counter would order one run two
+# ways.
+TOOL_CALL_STARTED = "tool_call_started"
+TOOL_CALL_FINISHED = "tool_call_finished"
+VALIDATION_FEEDBACK = "validation_feedback"
+JUDGE_QUESTION = "judge_question"
+AGENT_MESSAGE_DELTA = "agent_message_delta"
+ROSTER = "roster"
+
+# What became of one violation. ``retried`` is the correction turn as it
+# happens; the other two are what the run knows once the producer has answered
+# again — and a violation the retry itself introduced is announced once, as
+# ``survived``, because nobody was ever shown it. ``answered`` is a question
+# the producer answered as the question allows (``Violation.answered``): what
+# it chose is the line's message, and nothing was left unfixed.
+VALIDATION_RETRIED = "retried"
+VALIDATION_RESOLVED = "resolved"
+VALIDATION_SURVIVED = "survived"
+VALIDATION_ANSWERED = "answered"
+VALIDATION_STATES: tuple[str, ...] = (
+    VALIDATION_RETRIED,
+    VALIDATION_RESOLVED,
+    VALIDATION_SURVIVED,
+    VALIDATION_ANSWERED,
+)
+
+# What an ``agent_message`` is. ``says`` is the default and is what every
+# message emitted before this field existed was; the rest name the ones a
+# console draws differently. ``tool_call`` and ``tool_result`` are here for a
+# producer that wants a line in the conversation rather than the two typed
+# events above, and ``verdict`` is the judge's closing message.
+MESSAGE_KINDS: tuple[str, ...] = (
+    "says",
+    "tool_call",
+    "tool_result",
+    "validation_feedback",
+    "judge_question",
+    "verdict",
+    "system",
+    "delegation_ask",
+    "delegation_answer",
+)
+DEFAULT_MESSAGE_KIND = "says"
+
+# Ceiling on the full prose report carried alongside a message. These events are
+# fanned out to every connected browser and mirrored into a bounded Redis Stream
+# (maxlen 1000), so an unbounded field would let one verbose analyst evict the
+# rest of the run from the replay window. Generous enough for a real report;
+# truncation is flagged in the payload rather than done silently.
+REPORT_CHAR_LIMIT = 8_000
+
+
+def emit(sink: EventSink | None, event_type: str, data: dict[str, Any]) -> None:
+    """Send one event to ``sink``, swallowing every failure.
+
+    A no-op when ``sink`` is ``None`` — that is the normal CLI/test path.
+    """
+    if sink is None:
+        return
+    try:
+        sink(event_type, data)
+    except Exception as exc:  # noqa: BLE001 — telemetry must never fail a run
+        logger.debug("event sink raised (%s: %s); continuing.", type(exc).__name__, exc)
+
+
+# The budget meter. ``budget_tick`` is one agent's spend as of one model turn
+# — every ``BUDGET_TICK_EVERY`` steps and once more when its loop ends — and
+# ``stage_ended_at_cap`` says which cap, when a cap is what ended the work:
+# ``steps`` (the loop's own recursion limit), ``time``
+# (the wall-clock hard cap), ``repeats`` (the repeat guard), ``no_room`` (the
+# conversation had no room left for a tool answer), ``spend`` (the operator's
+# spend ceiling for the job) or ``budget_seconds`` (the
+# triage pack's budget). Both are telemetry; neither changes what a model said.
+BUDGET_TICK = "budget_tick"
+STAGE_ENDED_AT_CAP = "stage_ended_at_cap"
+# A tool server this job stopped calling for a while, after a run of calls it
+# did not answer (``malspark.providers.server_guard``).
+TOOL_SERVER_RESTED = "tool_server_rested"
+# An agent's model list moved on to its next model because the one before it
+# failed as a provider (``malspark.llm.fallback``). Once per switch.
+MODEL_FALLBACK = "model_fallback"
+# One model call as the job's token ledger recorded it: the agent, the model
+# that answered and the figures its provider reported (``token_ledger.call_record``).
+# The worker writes each one to the job's event record as it arrives, so what a
+# run spent survives a process that dies before its run summary is built.
+MODEL_USAGE = "model_usage"
+# A tool loop cleared its oldest tool answers to ledger references
+# (``agents.tool_answer_clearing``): the agent, the model turn, how many
+# answers, what the request weighed before and after in characters, and why —
+# ``refused`` (the provider refused the request as over its window and the
+# turn is sent again), ``window`` (the prompt alone is past the agent's own
+# window) or ``tier`` (the prompt is past the length its model is priced higher
+# above, and only answers the model already cited were cleared). Telemetry; the
+# clear itself is what the model reads.
+TOOL_ANSWERS_CLEARED = "tool_answers_cleared"
+BUDGET_TICK_EVERY = 5
+CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "spend", "budget_seconds")
+
+
+def emit_budget_tick(
+    sink: EventSink | None,
+    *,
+    agent: str,
+    stage: str,
+    steps_used: int,
+    max_steps: int | None,
+    elapsed_s: float,
+    timeout_s: float | None,
+    prompt_chars: int,
+    ledger_entries: int,
+    final: bool = False,
+    tool_definition_chars: int = 0,
+) -> None:
+    """One agent's spend as of now: steps against its cap, seconds against its limit.
+
+    ``max_steps`` and ``timeout_s`` are ``None`` for a loop with no limit in
+    that dimension, and are sent as ``null``.
+
+    ``tool_definition_chars`` is what the loop's tool definitions weigh; they
+    go with every request and the context budget counts them beside the
+    prompt, so the two figures together are what a turn sends.
+    """
+    emit(
+        sink,
+        BUDGET_TICK,
+        {
+            "agent": str(agent),
+            "stage": str(stage),
+            "steps_used": max(0, int(steps_used)),
+            "max_steps": None if max_steps is None else max(0, int(max_steps)),
+            "elapsed_s": round(max(0.0, float(elapsed_s)), 1),
+            "timeout_s": None if timeout_s is None else round(max(0.0, float(timeout_s)), 1),
+            "prompt_chars": max(0, int(prompt_chars)),
+            "ledger_entries": max(0, int(ledger_entries)),
+            "tool_definition_chars": max(0, int(tool_definition_chars)),
+            "final": bool(final),
+        },
+    )
+
+
+def emit_tool_answers_cleared(
+    sink: EventSink | None,
+    *,
+    agent: str,
+    stage: str,
+    turn: int,
+    answers: int,
+    chars_before: int,
+    chars_after: int,
+    why: str,
+) -> None:
+    """One clear of a tool loop's oldest answers, as ``TOOL_ANSWERS_CLEARED`` describes it."""
+    emit(
+        sink,
+        TOOL_ANSWERS_CLEARED,
+        {
+            "agent": str(agent),
+            "stage": str(stage),
+            "turn": max(0, int(turn)),
+            "answers": max(0, int(answers)),
+            "chars_before": max(0, int(chars_before)),
+            "chars_after": max(0, int(chars_after)),
+            "why": str(why),
+        },
+    )
+
+
+def emit_stage_ended_at_cap(
+    sink: EventSink | None, *, stage: str, agent: str, cap: str, detail: str = ""
+) -> None:
+    """A cap, not an answer, ended this agent's work in this stage."""
+    payload: dict[str, Any] = {"stage": str(stage), "agent": str(agent), "cap": str(cap)}
+    if detail:
+        payload["detail"] = str(detail)
+    emit(sink, STAGE_ENDED_AT_CAP, payload)
+
+
+def emit_model_fallback(
+    sink: EventSink | None, *, stage: str, agent: str, model: str, reason: str
+) -> None:
+    """An agent's model list moved on: which model now answers, and why, once per switch."""
+    emit(
+        sink,
+        MODEL_FALLBACK,
+        {"stage": str(stage), "agent": str(agent), "model": str(model), "reason": str(reason)},
+    )
+
+
+def announce_model_fallback(
+    sink: EventSink | None, message: Any, *, agent: str, stage: str
+) -> None:
+    """Publish ``model_fallback`` when ``message`` is the answer its model list moved on for.
+
+    Published whatever ``core.events.stream_deltas`` says: the switch is a
+    fact about the run a reader of the conversation has to see, not part of
+    the text being streamed. Once per switch, because a list that moved stays
+    moved for the loop and only the answer that moved it carries the reason.
+    Never raises.
+    """
+    try:
+        from malspark.llm.fallback import turn_model
+
+        model, reason = turn_model(message)
+        if reason:
+            emit_model_fallback(sink, stage=stage, agent=agent, model=model, reason=scrub(reason))
+    except Exception as exc:  # noqa: BLE001 — an announcement never costs a turn
+        logger.debug("model fallback not announced (%s).", exc)
+
+
+def emit_tool_server_rested(sink: EventSink | None, record: dict[str, Any]) -> None:
+    """A tool server is resting: which one, after how many failures, for how long and why.
+
+    ``label`` is the server's display name, given only where it has one other
+    than its key; ``server`` stays the key.
+    """
+    data: dict[str, Any] = {
+        "server": str(record.get("server") or ""),
+        "failures": max(0, int(record.get("failures") or 0)),
+        "cooldown_s": round(max(0.0, float(record.get("cooldown_s") or 0.0)), 1),
+        "reason": str(record.get("reason") or ""),
+    }
+    label = str(record.get("label") or "")
+    if label:
+        data["label"] = label
+    emit(sink, TOOL_SERVER_RESTED, data)
+
+
+def emit_agent_message(
+    sink: EventSink | None,
+    *,
+    speaker: str,
+    role: str,
+    text: str,
+    round_index: int = 0,
+    status: str = "complete",
+    confidence: float | None = None,
+    claims: list[dict[str, Any]] | None = None,
+    dissent: list[str] | None = None,
+    report: str | None = None,
+    stage: str | None = None,
+    addressed_to: str | None = None,
+    kind: str = DEFAULT_MESSAGE_KIND,
+    display_name: str | None = None,
+) -> None:
+    """Emit one transcript line.
+
+    Args:
+        speaker: Who is talking — an agent registry name ("static") or a stage
+            ("negotiation", "judge").
+        role: ``analyst`` | ``reviser`` | ``negotiator`` | ``judge`` | ``system``.
+            Drives grouping and styling in the UI.
+        text: Human-readable summary. This is what a reader skims.
+        round_index: Negotiation round; 0 for the initial pass.
+        status: ``complete`` | ``no_data`` | ``no_claims`` | ``failed`` |
+            ``timeout``. Mirrors
+            ``AgentFinding.status`` so a live message and the persisted row that
+            replaces it after the run read identically.
+        confidence: 0-1 self-reported confidence, when the speaker has one.
+        claims: Evidence-backed claims, already dumped to plain dicts.
+        dissent: Peer claims this speaker still disputes.
+        report: The speaker's full prose report for this round, if it wrote one.
+            Deliberately *not* folded into ``text`` — see ``summarize_claims``
+            below for why that was undone once already. The UI keeps the
+            headline as the message body and puts this behind a disclosure, so
+            the conversation stays skimmable and the evidence stays one click
+            away. Truncated to ``REPORT_CHAR_LIMIT``; when that happens the
+            payload also carries ``report_truncated: True`` rather than leaving
+            the reader to guess whether the report really ended there.
+        stage: The team stage the speaker is working in, when the producer
+            knows it. An ask and its answer carry it so the transcript can
+            place a delegated exchange inside the stage that made it.
+        addressed_to: The agent this line is said *to*, when it is said to one
+            agent rather than to the room: the caller's ask names the callee,
+            the callee's answer names the caller. Absent on every other line.
+        kind: What this line *is*, from ``MESSAGE_KINDS``. ``says`` is the
+            default and is what every message emitted before the field existed
+            was, so a stored run without it reads the same as one with it. An
+            unknown value is recorded as ``says`` rather than passed on: the
+            console switches on this, and a kind it cannot draw is a message
+            that disappears.
+        display_name: The speaker's configured label, so a reader who cannot
+            open the admin settings still sees the name the operator gave the
+            agent rather than its registry key. Absent when the producer has
+            no label to give, and never a substitute for ``speaker`` — the key
+            stays the identity everything else joins on.
+    """
+    # ``confidence`` is spread into the literal rather than written in
+    # afterwards. Nothing about the value changes either way; what changes is
+    # that this stays visibly a construction of a fresh envelope, which is the
+    # only shape ``tests/unit/test_no_silent_overrides.py`` allows for a
+    # decision-bearing key.
+    payload: dict[str, Any] = {
+        "speaker": speaker,
+        "role": role,
+        "round": round_index,
+        "status": status,
+        "text": text,
+        "kind": kind if kind in MESSAGE_KINDS else DEFAULT_MESSAGE_KIND,
+        **({"confidence": round(float(confidence), 4)} if confidence is not None else {}),
+    }
+    if display_name:
+        payload["display_name"] = str(display_name)
+    if stage:
+        payload["stage"] = str(stage)
+    if addressed_to:
+        payload["addressed_to"] = str(addressed_to)
+    if claims:
+        payload["claims"] = claims
+    if dissent:
+        payload["dissent"] = dissent
+    if report:
+        body = str(report)
+        if len(body) > REPORT_CHAR_LIMIT:
+            body = body[:REPORT_CHAR_LIMIT]
+            payload["report_truncated"] = True
+        payload["report"] = body
+    emit(sink, AGENT_MESSAGE, payload)
+
+
+def summarize_claims(claims: Any, *, speaker: str, source: str = "") -> str:
+    """One skimmable line standing in for an analyst's full ISR text.
+
+    The raw ``to_text_summary()`` is several hundred words that already restate
+    every claim inline, so sending it as the transcript body produced a wall of
+    text with the same claims repeated underneath in structured form. Worse, the
+    persisted view summarises ("N evidence-backed claims") — so the same run
+    read differently live and on replay, which is exactly what one shared
+    transcript model is supposed to prevent. The structured ``claims`` payload
+    carries the detail; this is the headline.
+
+    ``source`` is the whole phrase the claims come "from", where the speaker's
+    name does not read inside "the … layer" (``nodes.claims_source``: an
+    agent named by its place in a stage); the name's layer otherwise.
+    """
+    items = list(claims or [])
+    if not items:
+        return f"{speaker}: no claims produced."
+    # Claim text comes straight from the model and often carries newlines and
+    # markdown emphasis. This is a one-line headline, so collapse it — the
+    # expandable claim list below shows the value verbatim.
+    lead = " ".join(str(getattr(items[0], "claim", "") or "").split())
+    lead = _scrubbed_cut(lead, 240, layout=False)
+    plural = "" if len(items) == 1 else "s"
+    headline = (
+        f"{len(items)} evidence-backed claim{plural} from {source or f'the {speaker} layer'}."
+    )
+    return f"{headline} Leading: {lead}" if lead else headline
+
+
+def _cut_kept(text: str, limit: int) -> str:
+    """``text``, its own lines kept, scrubbed and then cut: never cut first.
+
+    A cut in front of the scrub leaves the head of a secret that no longer has
+    the shape the scrub knows.
+    """
+    return _scrubbed_cut(text, limit, layout=True)
+
+
+def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
+    """Reduce ``ClaimEvidence`` objects to the fields the transcript shows.
+
+    Capped because these events are fanned out to every connected browser and
+    mirrored into a bounded Redis Stream; a pathological analyst emitting
+    hundreds of claims should not push the rest of the run out of the replay
+    window. The full set is always available from the persisted report.
+    """
+    out: list[dict[str, Any]] = []
+    for claim in list(claims or [])[:limit]:
+        try:
+            out.append(
+                {
+                    "claim": _cut_kept(str(getattr(claim, "claim", "") or ""), 400),
+                    "evidence_ref": _cut_kept(str(getattr(claim, "evidence_ref", "") or ""), 300),
+                    "confidence": round(float(getattr(claim, "confidence", 0.0) or 0.0), 4),
+                    "technique_id": getattr(claim, "technique_id", None),
+                }
+            )
+            # The heading's note, where the debate is read; only when there is one.
+            note = getattr(claim, "heading_note", None)
+            if note:
+                out[-1]["heading_note"] = _cut_kept(str(note), 300)
+            # The round whose tool-less validation retry added it, beside the
+            # answer in force; only on such a claim.
+            retried = getattr(claim, "added_by_retry_in_round", None)
+            if isinstance(retried, int) and not isinstance(retried, bool):
+                out[-1]["added_by_retry_in_round"] = retried
+            # The round from which a revision carried it forward unwritten,
+            # with its note; only on such a claim.
+            carried = getattr(claim, "carried_since_round", None)
+            if isinstance(carried, int) and not isinstance(carried, bool):
+                from malspark.schemas.isr_models import carried_note
+
+                out[-1]["carried_since_round"] = carried
+                out[-1]["carried_note"] = carried_note(claim)
+            # The mediator's rulings at the round limit on the lines that
+            # named it, in the same note; only on such a claim.
+            ruled = list(getattr(claim, "limit_rulings", None) or [])
+            if ruled and isinstance(ruled[0], str):
+                from malspark.schemas.isr_models import carried_note
+
+                out[-1]["limit_rulings"] = [_cut_kept(str(r), 600) for r in ruled]
+                out[-1]["carried_note"] = carried_note(claim)
+        except Exception:  # noqa: BLE001 — one malformed claim must not drop the rest
+            continue
+    return out
+
+
+# ── The rest of the conversation ─────────────────────────────────────────
+
+# What a tool call's arguments are allowed to look like on the wire. These
+# events are fanned out to every connected browser, mirrored into a Redis
+# stream and written to a table that outlives the run, so the arguments go out
+# as a short summary and never verbatim: the full arguments are in the
+# evidence ledger, behind the same ownership check as the report.
+_SECRET_ARGUMENT_WORDS = (
+    "api_key",
+    "apikey",
+    "auth",
+    "authorization",
+    "bearer",
+    "cookie",
+    "credential",
+    "passphrase",
+    "passwd",
+    "password",
+    "private_key",
+    "pwd",
+    "secret",
+    "session",
+    "token",
+)
+
+# A name is the weaker half of the check. A key travels just as happily under
+# ``query``, ``value`` or ``header``, and a sandbox command line carries host
+# paths in the middle of a sentence, so every string value is scrubbed on its
+# way out whatever it is called:
+#
+# * anything shaped like a credential is replaced outright — a ``Bearer``
+#   prefix, one of the vendor key prefixes, or an unbroken run of hex or
+#   base64 long enough to be a key rather than a hash fragment somebody is
+#   discussing — except an exact md5, sha1 or sha256 digest, which is the
+#   subject of the analysis rather than a secret;
+# * a URL keeps its scheme and host and loses its userinfo, path and query,
+#   because the userinfo *is* a credential and the query is where one is
+#   usually smuggled;
+# * every remaining whitespace-separated token that *looks like a filesystem
+#   path* is cut to its last segment, so a command line with three host paths
+#   loses all three rather than only the last.
+#
+# Each token is peeled of the punctuation around it before any of that and
+# wrapped in it again afterwards. A tool result is JSON, so the thing a rule
+# has to recognise arrives as ``"sk-liveKey",`` rather than as ``sk-liveKey``
+# — every rule here is anchored to the whole token, so without the peel a key
+# echoed by an API response travelled verbatim while the same key passed as a
+# bare argument was replaced.
+_CREDENTIAL_PREFIXES = ("sk-", "sk_", "nvapi-", "ghp_", "gho_", "xoxb-")
+# Vendor key formats whose prefix is also the start of ordinary words
+# (``key-exchange``) or whose body can be letter groups the word rule below
+# reads as words. A run that begins with one of these and carries a body of at
+# least ``PREFIXED_KEY_BODY_FLOOR`` characters after it is a key, asked before
+# the word rule: GitLab, Slack, GitHub, Hugging Face, Mailgun, Stripe, npm and
+# Google OAuth client secrets. Every real body of these formats is longer than
+# the floor. Mailgun's ``key-`` is asked apart (``_MAILGUN_PREFIX``): it begins
+# ordinary phrases (``key-derivation-function-parameters``), so its body must
+# also not be words.
+_PREFIXED_KEY_FORMATS = (
+    "glpat-",
+    "xoxp-",
+    "xoxb-",
+    "xoxa-",
+    "xoxs-",
+    "xoxr-",
+    "xapp-",
+    "ghs_",
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghr_",
+    "github_pat_",
+    "hf_",
+    "rk_live_",
+    "sk_live_",
+    "pk_live_",
+    "rk_test_",
+    "sk_test_",
+    "pk_test_",
+    "npm_",
+    "gocspx-",
+    *_CREDENTIAL_PREFIXES,
+)
+PREFIXED_KEY_BODY_FLOOR = 20
+_MAILGUN_PREFIX = "key-"
+# The secret values this process holds in its own settings — model API keys,
+# sandbox and Ghidra tokens, the VirusTotal key, the database, Redis and object
+# store passwords — masked by exact value wherever the scrub runs, whatever
+# their shape: a passphrase an operator configured reads as words to every
+# shape rule here, and this is what catches it. Held per scope — ``process``
+# for what a worker or an app holds from its start, ``job`` for a job's own
+# settings — and a scope registered again replaces what it held, so a secret no
+# longer configured stops being masked. Filled by ``remember_secret_values``.
+_SECRET_SCOPES: dict[str, frozenset[str]] = {}
+# The union of every scope as one pattern, longest value first so a secret that
+# contains another is masked whole, and each value only where no letter, digit
+# or underscore touches it: ``minioadmin`` configured leaves ``minioadministrator``
+# as written. ``None`` when nothing is registered.
+_CONFIGURED_PATTERN: re.Pattern[str] | None = None
+# Configured values shorter than the floor, per scope: kept out of finding
+# rows only, each as a whole word (``_mask_short_secrets``).
+_SHORT_SECRETS: dict[str, frozenset[str]] = {}
+# The scopes whose configured values could not be read
+# (``secret_registration_failed``); while any is listed, a finding row is held
+# to the whole event scrub.
+_FAILED_SCOPES: set[str] = set()
+# A configured value shorter than this is not masked by value: a four-letter
+# password masked everywhere would take every word it spells out of every
+# sentence. Such a value is still masked by name and by shape.
+CONFIGURED_SECRET_FLOOR = 8
+# Where a run of interest may begin: the start of the text, or right after a
+# character that separates values. Whitespace is not enough — a compact JSON
+# body from a tool server is one whitespace-separated word, and everything
+# worth finding inside it sits behind a quote, a colon, a comma or a brace.
+#
+# The backtick and the angle brackets are here for the same reason the value
+# run excludes them: a path or a URL in markdown prose, or in the angle
+# brackets a placeholder is written in, sits against one of them, and a
+# lookbehind that did not admit them let an absolute host path through whole
+# while the credential pass beside it was splitting the same punctuation off
+# cleanly. Admitting a character here only lets a match *begin*; every marker
+# requirement below still has to be met.
+#
+# A backslash is here because a tool result is JSON inside JSON: the value a
+# rule has to find arrives as ``\"sk-…\"``, and the escape sits against it on
+# both sides. Everything outside ASCII is here because a model writes prose
+# with the punctuation its own language uses — an em dash, a curly quote —
+# and a key or a path written after one of those is a key or a path.
+_AFTER = r"(?:\A|(?<=[\s\"'`<>=:,{\[(\\]|[^\x00-\x7f]))"
+# Where such a run ends: the next separator that cannot be part of a path, a
+# URL or a key.
+#
+# The colon is deliberately *not* one of them, which is the one place this
+# class and the value run's differ. ``_UNTIL`` matches the rest of a URL after
+# its ``://``, and that rest carries a colon whenever there is userinfo
+# (``u:p@h``) or a port (``h:8080``): ending the run at the first colon would
+# hand ``_shorten_url`` the host ``u`` and leave ``:p@h/x`` — the password
+# included — standing in the text. A colon can also be the drive letter's own
+# separator. Everywhere a colon genuinely ends a value, ``_AFTER`` already
+# starts the next run after it.
+_UNTIL_CHARS = r"[^\s\"'`<>;,)\]}]"
+_UNTIL = _UNTIL_CHARS + r"*"
+# A URL's authority, which ends only where the authority ends: at the ``/`` of
+# the path, the ``?`` of the query, the ``#`` of a fragment, or a character no
+# URL can carry at all. A semicolon is legal in userinfo and a password
+# containing one used to end the run in front of the ``@`` — which handed
+# ``_shorten_url`` the *user* as the host and left the real host, the fragment
+# and the password standing in the text.
+_AUTHORITY = r"[^\s\"'`<>,)\]}/?#]*"
+# A path run ends later than any other run. A directory name may carry a
+# semicolon or a comma, and stopping at one cut the *prefix* off and left the
+# rest of the path — the intermediate directories — standing where the whole
+# point was to remove them. Whitespace and the quoting characters still end
+# it: a path with a space in it cannot be told from a path followed by prose.
+_PATH_UNTIL = r"[^\s\"'`<>)\]}]*"
+# An authorization scheme and the secret after it, which no per-value rule can
+# see as one thing: "Bearer" is a word and the secret is the next one, however
+# short it is. Bounded by the same separators as every other run rather than
+# by ``\S+``, which used to swallow the closing quote of a JSON string — and
+# by the same *constant*, so the two cannot drift apart again.
+_SCHEME_AND_SECRET = re.compile(r"(?i)\b(bearer|basic|token)\s+" + _UNTIL_CHARS + r"+")
+# 24 is above a CRC, a short hash prefix and a ledger id, and below every API
+# key shape this has met. The second alternative is the *standard* base64
+# alphabet, not the URL-safe one alone: an AWS secret key, a PKCS blob and
+# anything a server base64-encodes carry ``+`` and ``/``, and a rule that
+# stopped at ``[A-Za-z0-9_-]`` read the run as ending at the first of them and
+# then failed its own whole-run anchor.
+_CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9+/_\-]{24,}={0,2})\Z")
+# The environment variables the platform's own sentences name, which the rule
+# above takes for keys by their length. Named one by one rather than by shape:
+# an upper-case run with underscores in it is also what a key can look like,
+# and a remedy naming a provider's path variable read "check ***" on the
+# console. Each server and provider declares the variable names its sentences
+# use (``variable_names``), read from the shipped declarations
+# (``builtin_declarations.shipped_variable_names``) and from each provider class
+# registered at runtime (``registry.registered_variable_names``), never from a
+# run's settings, so the rule does not depend on which run publishes; a retired
+# variable stays declared while stored runs still name it.
+
+
+def _own_variable_name(token: str) -> bool:
+    """Whether ``token`` is a variable name a shipped declaration says is not a secret."""
+    from malspark.core.builtin_declarations import shipped_variable_names
+    from malspark.providers.registry import registered_variable_names
+
+    return token in shipped_variable_names() or token in registered_variable_names()
+
+
+# A JSON Web Token, which no length rule can see: it is three base64url runs
+# with dots between them, and this project's own access token is one. The
+# segments are held to a floor so that a dotted module name or a hostname is
+# not a candidate, and the head still has to *be* a header — see
+# ``_is_a_token``.
+_JWT_RUN = re.compile(r"\A[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}={0,2}\Z")
+# What the base64 alternative must not take for a key. A MIME type is long
+# enough for it (``application/octet-stream`` is exactly 24 characters) and is
+# the subject of half the tool answers in a run; a path is cut to its file
+# name by the pass below, which is what a reader needs, and reading it as a
+# key would replace the file name too. A path here is one with a marker *and*
+# a second separator: ``/wJalrXUtnFEMIK7MDENG`` is a key that begins with a
+# slash, not a directory. The type is one of the registered top-level types
+# (or an ``x-`` one), and the subtype is exempt only when it is no key itself:
+# ``left/<key>`` has the shape of a MIME type and is a key after a word.
+_MIME_TYPE = re.compile(
+    r"\A(?:application|audio|chemical|font|image|inode|message|model|multipart|text|video"
+    r"|x-[a-z0-9.+\-]+)/[a-z0-9][a-z0-9.+_\-]*\Z"
+)
+# Words with separators between them, which the base64 alternative above reads
+# as a key by its length alone: a claim's ``anti-debugging/environment``, a
+# STIX property name and an analyst's roster key are all 24 characters and
+# more of that alphabet. Two or more pieces split on ``_``, ``-`` or ``/``,
+# each written the way a word is — all lower case, all capitals, or one
+# capital in front — and each shorter than the length floor, so that a piece
+# which would be a key on its own keeps the whole run a key. A key's body of
+# random letters mixes its case or runs past the floor; a vendor prefix is
+# asked before this and wins.
+_WORD_PIECE = re.compile(r"\A(?:[a-z]{1,23}|[A-Z]{1,23}|[A-Z][a-z]{1,22})\Z")
+# A capitalised compound of two or three words, as a family or a product name
+# is written (``NorthWind``): a first word of three letters or more, then one
+# or two more, each a capital and small letters. A key's random case does not
+# keep that pattern, and one alternating letter by letter (``AbCdEf…``) has
+# more words than three. Read only by :func:`_is_a_family_name`, and never
+# for a run that follows a credential label.
+_COMPOUND_PIECE = re.compile(r"\A(?=[A-Za-z]{1,23}\Z)[A-Z][a-z]{2,}(?:[A-Z][a-z]+){1,2}\Z")
+# A credential label right before a run: an argument word a credential is
+# named by (``_SECRET_ARGUMENT_WORDS``, "Access Token" among them by its last
+# word), an authorization scheme, then an optional ``:`` or ``=`` and quote.
+_LABEL_BEFORE_RE = re.compile(
+    r"(?i)(?:api[_-]?key|auth\w*|bearer|basic|cookie|credentials?|passphrase|passwd|password"
+    r"|private[_-]?key|pwd|secrets?|session\w*|tokens?)[\s\"']*[:=]?[\s\"']*\Z"
+)
+# The identifier this system issues for a job, a report, a sample and a
+# message. Exempt for the reason a digest is: it is on the job, on the report
+# and on the event that announced it, and an event reading ``report_id=***``
+# is a console that cannot open the report it is announcing. Exact shape, not
+# "any long run of hex and dashes", and an argument *named* like a credential
+# is still replaced by name — which is what covers a session id written this
+# way.
+_IDENTIFIER = re.compile(
+    r"\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
+)
+_PATH_SHAPED = re.compile(r"\A(?:/|\./|\.\./|~/|[A-Za-z]:/)[^/]*/")
+# The three digests a malware analysis is *about*, which the rule above would
+# otherwise take for keys: md5, sha1 and sha256. A sample hash is not a secret
+# — it is on the job, on the report and in ``pipeline_started`` already — and a
+# tool bubble reading ``hash=***`` cannot say which of three artifacts a
+# reputation lookup was for, which is most of what the bubble is for.
+#
+# Exact lengths, not a range: 32, 40 and 64 hex characters are what a digest
+# is, and widening it to "any hex" would hand back the shape the rule exists
+# to catch.
+_DIGEST = re.compile(r"\A[A-Fa-f0-9]{32}\Z|\A[A-Fa-f0-9]{40}\Z|\A[A-Fa-f0-9]{64}\Z")
+# A URL, wherever it starts. Found before the path pass, so the slashes in
+# ``https://host/x`` are never read as a path.
+_URL_RUN = re.compile(
+    _AFTER + r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*)://(?P<rest>" + _AUTHORITY + _UNTIL + r")"
+)
+# One value, for the credential test. Delimited rather than whitespace-split,
+# because a key a tool server echoes arrives as ``{"api_key":"sk-…"}`` with no
+# spaces in it at all.
+#
+# The class has to hold every character that could sit against a key, because
+# both credential rules are anchored to the whole run: a backtick left inside
+# it makes ``startswith("sk-")`` false, and a trailing ``;`` makes the
+# 24-plus shape fail to match. A key in markdown prose, one in the angle
+# brackets tool documentation writes placeholders in, and one ended by the
+# ``;`` of a ``Set-Cookie`` all have to split cleanly off their punctuation.
+# Splitting on more characters can only expose a credential run and never hide
+# one — a run either rule can fire on is made of ``[A-Za-z0-9_-]`` and nothing
+# else — and the pieces a split leaves behind (``api_key``, ``C``, ``https``)
+# are far too short to match anything.
+# The backslash and the non-ASCII range split for the same reasons ``_AFTER``
+# admits them: an escaped quote is what a key inside nested JSON sits against,
+# and a dash or a quotation mark a model typed is the end of the value in
+# front of it. A colon is already outside the class, so a JWT's dots are the
+# one separator left inside it — which is what lets the whole token be seen as
+# one run. ``!`` splits too: ``kernel32.dll!<key>`` is a module name and a key,
+# and read as one run neither rule saw the key.
+_VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=!\\\x80-\U0010ffff]+")
+# A filesystem path, wherever it starts. A slash alone is not the signal: a
+# MIME type (``application/x-msdownload``), a sub-technique id
+# (``T1055/012``), a date (``2026/09/17``) and a ratio all carry one, and
+# cutting them to their last segment turned readable tool output into
+# nonsense. What marks a path is how it *begins* — but "begins" is not
+# "begins its whitespace-separated word": a host path travels just as happily
+# after ``--out=``, after a colon, or inside a compact JSON body, and anchoring
+# the marker at position 0 let all three through.
+#
+# ``/`` must not be followed by another ``/``: that is the ``//`` of a URL
+# whose scheme the pass above has already reduced to a host. A drive letter is
+# held to the same rule for the same reason — one letter and ``:/`` is also
+# how a one-character URL scheme begins, and ``a://h/x`` reduced to nothing at
+# all until the slash after the colon had to be a lone one. A relative path
+# with no marker (``data/samples/a.exe``) is still left alone — it names no
+# host directory, which is the thing that must not travel.
+#
+# A UNC marker has to be a UNC *shape*, not two backslashes: a host-like
+# segment, a separator, and something after it. A leading ``\\`` alone is what
+# a single backslash looks like inside a JSON string, so taking it as the
+# marker cut ``"\\d+"`` — a regex argument — down to ``d+``. Two or more
+# backslashes are accepted at each separator because the whole path arrives
+# doubled when the tool serialised it as JSON.
+# The host segment admits ``:`` and ``@`` because a UNC path carries
+# credentials in front of its host exactly as a URL does, and one that did
+# not match the marker was left in the text whole — password included.
+# At most eight backslashes in the marker: a JSON escape doubles them, and no
+# UNC path carries more. Unbounded, the marker retried every start inside a long
+# run of backslashes and gave each one back, which is quadratic in the run; a
+# longer run is still read, from its last eight.
+_UNC = r"\\{2,8}[A-Za-z0-9._:@-]+\\+."
+_PATH_RUN = re.compile(
+    _AFTER
+    + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:(?:\\|/(?!/))|"
+    + _UNC
+    + r")"
+    + _PATH_UNTIL
+    + r")"
+)
+# One argument's value, and the whole summary. Short on purpose: this is the
+# line under a chat bubble that says which call is running, not a record of it.
+# 64 rather than a rounder number so a sha256 — the one long value this is
+# meant to let through whole — fits exactly instead of arriving one character
+# short of identifying anything.
+#
+# Each of these caps, and ``FINDING_VALUE_LIMIT`` below, can be exceeded by one
+# whole value: a digest or an identifier the cut would split is kept whole with
+# its extension (``_cut_whole``), so ``<sha256>.exe`` runs past the cap by a
+# few characters rather than arriving as half a digest a second scrub masks.
+ARGUMENT_VALUE_CHARS = 64
+ARGUMENT_SUMMARY_CHARS = 240
+ARGUMENTS_SUMMARISED = 6
+# One tool result's headline, for the same reason.
+RESULT_SUMMARY_CHARS = 240
+
+_REDACTED = "***"
+
+
+def _name_words(name: str) -> set[str]:
+    """The words an argument name is made of, however it was spelled.
+
+    Splitting on separators alone is not enough, and the gap is the shape most
+    tool servers actually use: ``auth_token`` splits into two words and
+    ``authToken`` — the JavaScript spelling, and the norm for an MCP server
+    written in it — splits into none, so a credential named that way was read
+    as one long word matching nothing. The case change is a word boundary, and
+    so is the letter-to-digit change, so ``token2`` is a token.
+
+    Whole words, still: that is what keeps ``author`` and ``obsession`` out of
+    it, which is the thing the substring check got wrong in the other
+    direction.
+    """
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(name))
+    spaced = re.sub(r"(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])", "_", spaced)
+    return set(re.split(r"[^a-z0-9]+", spaced.lower())) - {""}
+
+
+def _is_secret_argument(name: str) -> bool:
+    """Whether this argument's *name* says its value is a credential.
+
+    Matched on the whole words the name is made of. A plain containment check
+    redacted ``author`` for holding ``auth``; whole words keep ``author``,
+    ``authored``, ``obsession`` and ``tokenizer`` out of it while ``authToken``
+    and ``sessionId`` are in.
+
+    A simple plural counts as its singular — ``secrets``, ``tokens``,
+    ``passwords``, ``credentials`` are the same argument named for a list of
+    them. A listed word that is itself compound (``api_key``,
+    ``private_key``) is also tried against the joined name, because ``apiKey``
+    and ``api-key`` are the same argument written three ways.
+    """
+    raw = str(name)
+    words = _name_words(raw)
+    singulars = {word[:-1] for word in words if len(word) > 3 and word.endswith("s")}
+    joined = re.sub(r"[^a-z0-9]+", "", raw.lower())
+    # A name written in capitals throughout carries no case change to split
+    # on, so ``AUTHTOKEN`` and ``SESSIONID`` are one word each and match
+    # nothing. For those, and only those, the joined name is searched for the
+    # listed word instead — the substring check this rule otherwise replaced.
+    # It costs an all-capitals ``AUTHOR``, which is the price of not letting
+    # an all-capitals ``AUTHTOKEN`` through.
+    shouting = not any(char.islower() for char in raw)
+    for secret in _SECRET_ARGUMENT_WORDS:
+        if secret in words or secret in singulars:
+            return True
+        if "_" in secret and secret.replace("_", "") in joined:
+            return True
+        if shouting and secret.replace("_", "") in joined:
+            return True
+    return False
+
+
+def _is_a_token(run: str) -> bool:
+    """Whether this dotted run is a JWT rather than three words with dots in them.
+
+    The shape alone is not enough — a long enough hostname has it — so the
+    first segment has to be a JOSE header: either the ``eyJ`` every
+    base64url-encoded ``{"`` begins with, or something that really decodes to
+    the start of a JSON object.
+    """
+    if not _JWT_RUN.match(run):
+        return False
+    head = run.split(".", 1)[0]
+    if head.startswith("eyJ"):
+        return True
+    try:
+        decoded = base64.urlsafe_b64decode(head + "=" * (-len(head) % 4))
+    except (ValueError, binascii.Error):
+        return False
+    return decoded.lstrip().startswith(b"{")
+
+
+def _looks_like_a_credential(token: str, *, whole: bool = False, alphabet: bool = True) -> bool:
+    """Whether this run of characters is a key rather than a word or a digest.
+
+    In this order, and the order is the argument. A digest and an identifier
+    are what the analysis is *about*. A vendor prefix is a key however short
+    it is and whatever else its shape reads as, so it is asked before the
+    shapes that are exempt. What is left is exempt when it is a MIME type or a
+    path, and a credential when it is long enough to be one or is a token.
+
+    Nothing is exempt for being lowercase. Four real key formats — Mailgun's
+    ``key-…``, Google's ``gocspx-…``, GitHub's ``ghs_…`` and a base64url blob
+    that happens to have no capitals in it — are nothing but lowercase
+    letters, digits and a separator, so a shape test written around the keys
+    *this* system issues let every one of them through. The names an event
+    carries are exempted where their names are known, by key, in the
+    publisher (``analysis_worker.scrubbed``); they are not guessed at here.
+
+    Words joined by separators are exempt by their shape (``_is_words``):
+    every piece letters alone, written the way a word is, and shorter than the
+    floor. That is what keeps a claim's ``anti-debugging/environment`` and an
+    agent key such as ``windows_pe_static_reverse_engineer`` in a sentence.
+    What is left costs, stated rather than discovered: an agent key of 24 to
+    32 characters with a digit in one of its pieces has the shape of a key, so
+    it reads as ``***`` inside a *sentence*. The identity fields the line is
+    filed under are exempt by name and travel whole, so attribution is
+    unaffected and only the name inside the prose goes. The roster is not
+    consulted here on purpose: this is one pure function shared by every job
+    on the worker, and a redaction rule whose answer depended on which run was
+    publishing would not be a redaction rule.
+    """
+    if _DIGEST.match(token) or _IDENTIFIER.match(token) or _own_variable_name(token):
+        return False
+    lowered = token.lower()
+    if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
+        return True
+    if any(
+        lowered.startswith(prefix) and len(token) - len(prefix) >= PREFIXED_KEY_BODY_FLOOR
+        for prefix in _PREFIXED_KEY_FORMATS
+    ):
+        return True
+    if (
+        lowered.startswith(_MAILGUN_PREFIX)
+        and len(token) - len(_MAILGUN_PREFIX) >= PREFIXED_KEY_BODY_FLOOR
+        and not _is_words(token)
+    ):
+        return True
+    if _MIME_TYPE.match(token) and not _looks_like_a_credential(token.split("/", 1)[1]):
+        return False
+    if _PATH_SHAPED.match(token) or _is_words(token):
+        return False
+    if _is_api_name(token, alphabet=alphabet):
+        return False
+    if _CREDENTIAL_RUN.match(token) or _is_a_token(token):
+        return True
+    if whole:
+        return False
+    # A key joined to other text by a slash, a bar, a plus or an ampersand is
+    # still a key: ``<jwt>/name`` failed every rule anchored to the whole run.
+    # ``whole`` asks only the rules that read the run as one.
+    if _glued_token(token) is not None:
+        return True
+    pieces = [piece for piece in _JOINS.split(token) if piece]
+    return len(pieces) > 1 and any(
+        _looks_like_a_credential(piece, alphabet=False) for piece in pieces
+    )
+
+
+# The Windows function names and hash-algorithm ids the scrub leaves as
+# written. The length rule reads ``ZwSetInformationJobObject`` as a key, and a
+# pair of algorithm ids joined by a slash as one; the live console and the
+# stored transcript printed ``***`` where the report printed the names. Three
+# sources, all exact: the vendored export-name catalogue and the vendored
+# hash-algorithm catalogue (``api_hashes``' data files, each read once), and
+# the names this job's hash resolution on the analysis server read
+# (``remember_resolved_names``), which the next job forgets. A vendor prefix is
+# asked before any of them, and a configured value is masked by value before any
+# rule is read, so none exempts a credential.
+_EXPORT_NAMES_FILE = "data/windows_export_names_v1.json"
+_ALGORITHMS_FILE = "data/api_hash_algorithms_v1.json"
+_RESOLVED_NAMES: set[str] = set()
+# The catalogues' names, read on first use.
+_CATALOGUE: frozenset[str] | None = None
+_ALGORITHM_IDS: frozenset[str] | None = None
+# What joins several names into one run: a slash, a bar, a plus, an ampersand.
+_JOINS = re.compile(r"[/|+&]")
+# A resolved name is taken only in the shape a Windows function name has: an
+# identifier with both cases in it. An all-lowercase run is what several key
+# formats are, and no catalogue name past the length floor is written that way
+# except words joined by underscores, which the word rule already keeps.
+_API_NAME_SHAPE = re.compile(r"\A[A-Za-z_?@$][A-Za-z0-9_?@$]*\Z")
+
+
+def _read_data(path: str) -> Any:
+    import json
+
+    from malspark.core.paths import resolve_data
+
+    return json.loads(resolve_data(path).read_text(encoding="utf-8"))
+
+
+def _catalogue_names() -> frozenset[str]:
+    """Every exported name the vendored catalogue holds; empty when it cannot be read."""
+    global _CATALOGUE
+    if _CATALOGUE is None:
+        try:
+            document = _read_data(_EXPORT_NAMES_FILE)
+            _CATALOGUE = frozenset(
+                str(name)
+                for exported in (document.get("dlls") or {}).values()
+                for name in exported or []
+            )
+        except Exception as exc:  # noqa: BLE001 — the shape rules still run
+            logger.warning(
+                "The export-name catalogue was not read for the scrub (%s).", type(exc).__name__
+            )
+            _CATALOGUE = frozenset()
+    return _CATALOGUE
+
+
+def _algorithm_ids() -> frozenset[str]:
+    """Every hash-algorithm id the vendored catalogue holds; empty when it cannot be read."""
+    global _ALGORITHM_IDS
+    if _ALGORITHM_IDS is None:
+        try:
+            document = _read_data(_ALGORITHMS_FILE)
+            _ALGORITHM_IDS = frozenset(
+                str(entry["id"])
+                for entry in document.get("algorithms") or []
+                if isinstance(entry, dict) and entry.get("id")
+            )
+        except Exception as exc:  # noqa: BLE001 — the shape rules still run
+            logger.warning(
+                "The hash-algorithm catalogue was not read for the scrub (%s).", type(exc).__name__
+            )
+            _ALGORITHM_IDS = frozenset()
+    return _ALGORITHM_IDS
+
+
+def _is_a_catalogue_name(name: str) -> bool:
+    return name in _RESOLVED_NAMES or name in _catalogue_names() or name in _algorithm_ids()
+
+
+def _module_names() -> frozenset[str]:
+    """The vendored catalogue's module names, folded to lower case; empty when unread."""
+    global _MODULES
+    if _MODULES is None:
+        try:
+            document = _read_data(_EXPORT_NAMES_FILE)
+            names = (document.get("modules") or {}).get("names") or []
+            _MODULES = frozenset(
+                str(name).lower() for name in [*names, *(document.get("dlls") or {})]
+            )
+        except Exception as exc:  # noqa: BLE001 — the shape rules still run
+            logger.warning(
+                "The module-name catalogue was not read for the scrub (%s).", type(exc).__name__
+            )
+            _MODULES = frozenset()
+    return _MODULES
+
+
+# What a tool writes that the length rule read as a key, each by its exact
+# form: an address or a decimal number (a list of them joined by ``/`` is one
+# run) and a stretch of a base64 alphabet itself (the table a decoder is built
+# from). None is a key's form: a key is not a short number or the alphabet it
+# is written in.
+_MODULES: frozenset[str] | None = None
+_NUMBER_PIECE = re.compile(r"\A(?:0[xX][0-9A-Fa-f]{1,8}|[0-9]{1,8})\Z")
+# Hex is read as the base rules read it: a run holding more hex digits in a row
+# than a number above (eleven or more) is never one of these forms, so a hex
+# dump, a digest in a list or a name ending in long hex is masked as before.
+_LONG_HEX = re.compile(r"[0-9A-Fa-f]{11}")
+# A stretch of an alphabet is that table only at a key's own length floor: a
+# short piece of a key is a stretch of its alphabet too.
+_ALPHABET_SLICE_FLOOR = 24
+_BASE64_ALPHABETS = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+)
+
+
+def _is_a_written_name(token: str, *, alphabet: bool = True) -> bool:
+    """Whether ``token`` is a module name or a stretch of a base64 alphabet: what the
+    scrub keeps by its exact form beside the catalogue."""
+    return bool(token.lower() in _module_names() or (alphabet and _is_an_alphabet_stretch(token)))
+
+
+def _is_an_alphabet_stretch(token: str) -> bool:
+    """Whether ``token`` is, whole, a stretch of 24 or more characters of a base64 alphabet.
+
+    Only a whole run or a whole stretch is read this way, never a piece beside
+    others: a piece of a run is read as the rules always read it, so a key next
+    to the alphabet is masked with the stretch as it was.
+    """
+    return len(token) >= _ALPHABET_SLICE_FLOOR and any(token in a for a in _BASE64_ALPHABETS)
+
+
+def _completes_a_name(piece: str, named: str) -> str:
+    """The catalogue name ``piece`` completes after a head of ``named``, or ``""``.
+
+    How a list abbreviates a name it repeats: ``FindFirstFileA/W`` for the A
+    and W forms, ``NtQueryInformationProcess/Thread`` for the process and the
+    thread form. The completion must itself be a catalogue name.
+    """
+    if not named or not piece[:1].isupper():
+        return ""
+    for end in range(len(named) - 1, 0, -1):
+        whole = named[:end] + piece
+        if _is_a_catalogue_name(whole):
+            return whole
+    return ""
+
+
+def _is_api_name(token: str, *, alphabet: bool = True) -> bool:
+    """Whether ``token`` is a Windows function name or a hash-algorithm id, alone or
+    several joined by ``/``, ``|``, ``+`` or ``&``.
+
+    A module in front of a name (``kernel32.dll!Name``) is split off by the
+    value run itself, so the name is asked alone. In a list, a piece may also
+    be a module name the catalogue lists (in any case), an address or a number,
+    or an abbreviation that completes the name before it to a catalogue name
+    (``FindFirstFileA/W``). A run with eleven hex digits in a row is left to the
+    rules as they were.
+    """
+    # The catalogue first, alone and over every piece, as before the exact
+    # forms existed: those are asked only of a run long enough to be read as a
+    # key (no piece of a shorter run is one), and only after the catalogue.
+    if _is_a_catalogue_name(token):
+        return True
+    pieces = [piece for piece in _JOINS.split(token) if piece]
+    if len(pieces) > 1 and all(_is_a_catalogue_name(piece) for piece in pieces):
+        return True
+    if len(token) < _ALPHABET_SLICE_FLOOR:
+        return False
+    if _LONG_HEX.search(token):
+        return False
+    if len(pieces) < 2:
+        return _is_a_written_name(token, alphabet=alphabet)
+    named = ""
+    for piece in pieces:
+        if _is_a_catalogue_name(piece):
+            named = piece
+            continue
+        if _is_a_written_name(piece, alphabet=False) or _NUMBER_PIECE.match(piece):
+            continue
+        completed = _completes_a_name(piece, named)
+        if not completed:
+            return False
+        named = completed
+    return True
+
+
+def remember_resolved_names(answer: Any) -> None:
+    """Add the function names a ``resolve_api_hashes`` answer read to the names kept as written.
+
+    ``answer`` is the tool's answer as a dict or as its JSON text; every
+    reading under ``hits`` and ``lone_hits`` is taken whose name has the shape
+    a Windows function name has (``_API_NAME_SHAPE`` and both cases). Held for
+    the job, in this process, until ``forget_resolved_names``. Never raises.
+    """
+    try:
+        if isinstance(answer, str):
+            import json
+
+            answer = json.loads(answer)
+        if not isinstance(answer, dict):
+            return
+        for key in ("hits", "lone_hits"):
+            for hit in answer.get(key) or []:
+                for reading in (hit.get("readings") or []) if isinstance(hit, dict) else []:
+                    name = str(reading.get("name") or "") if isinstance(reading, dict) else ""
+                    if (
+                        _API_NAME_SHAPE.match(name)
+                        and any(c.islower() for c in name)
+                        and any(c.isupper() for c in name)
+                    ):
+                        _RESOLVED_NAMES.add(name)
+    except Exception as exc:  # noqa: BLE001 — the shape rules still run
+        logger.debug("A hash resolution's names were not handed to the scrub (%s).", exc)
+
+
+def forget_resolved_names() -> None:
+    """Clear the names a job's hash resolution read: the next job starts with none."""
+    _RESOLVED_NAMES.clear()
+
+
+def resolved_names_held() -> int:
+    """How many resolved names the scrub keeps as written for this job."""
+    return len(_RESOLVED_NAMES)
+
+
+def _is_words(run: str) -> bool:
+    """Whether this run is words joined by ``_``, ``-`` or ``/`` rather than a key.
+
+    What this costs: no shape tells a passphrase or a letters-only grouped
+    code from a hyphenated phrase, so a secret of that shape passes this rule.
+    A vendor prefix is asked before it (``_PREFIXED_KEY_FORMATS``), and the
+    secrets the platform holds are masked by value before any shape is read
+    (``remember_secret_values``); ``apps/docs/content/docs/configuration.mdx`` states the rest.
+    """
+    pieces = re.split(r"[_\-/]", run)
+    return len(pieces) >= 2 and all(_WORD_PIECE.match(piece) for piece in pieces)
+
+
+def _shorten_url(found: re.Match[str]) -> str:
+    """One URL, cut back to its scheme and host.
+
+    The userinfo is a credential outright, and the query is where one travels
+    when it is not in the userinfo, so neither survives. The host stays
+    because which service was called is the fact a reader is after. A URL with
+    no authority at all — ``file:///home/op/samples/x.exe`` — keeps its scheme
+    and loses the rest, which is a host path by another spelling.
+    """
+    rest = found.group("rest")
+    host = rest.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    if "@" in host:
+        host = host.rsplit("@", 1)[1]
+    return f"{found.group('scheme')}://{host}/…"
+
+
+def _shorten_path(found: re.Match[str]) -> str:
+    """One path, cut to its last segment.
+
+    The sample lives under a per-job directory whose name is an internal
+    identifier and whose prefix is wherever this deployment happens to be
+    installed, and neither belongs in a payload that a browser and a
+    long-lived table both keep; the file name is the part a reader is reading.
+
+    Two things the marker alone does not decide. A UNC path can carry
+    credentials in front of its host, exactly like a URL, and they are the
+    whole reason that path must not travel — so they go whatever else happens.
+    And a single rootless word is not a path at all: ``</token>`` in a tool
+    result matched the marker and was rewritten to ``<token>``, silently
+    corrupting the XML the model then read back. A run is cut when it has more
+    than one segment or a segment with a dot in it, which every real path has
+    and a closing tag does not.
+    """
+    run = found.group("run")
+    flat = run.replace("\\", "/").rstrip("/")
+    credentialed = "@" in flat
+    if credentialed:
+        flat = flat.rsplit("@", 1)[1]
+    segments = [segment for segment in flat.split("/") if segment]
+    if not segments:
+        return run
+    if not credentialed and len(segments) < 2 and not any("." in s for s in segments):
+        return run
+    return segments[-1]
+
+
+def _is_a_family_name(run: str) -> bool:
+    """Whether ``run`` is a family name of words joined by ``/``, one a capitalised compound.
+
+    ``Rivulet/NorthWind/Calder``: two or more pieces, each a word
+    (``_WORD_PIECE``) or a capitalised compound (``_COMPOUND_PIECE``), at
+    least one a compound and none with a digit. The caller asks it only where
+    no credential label stands before the run.
+    """
+    pieces = run.split("/")
+    return (
+        len(pieces) >= 2
+        and all(_WORD_PIECE.match(piece) or _COMPOUND_PIECE.match(piece) for piece in pieces)
+        and any(_COMPOUND_PIECE.match(piece) for piece in pieces)
+    )
+
+
+def _hide_credentials(found: re.Match[str]) -> str:
+    """One value run, with every key in it masked together with the base64 around it.
+
+    In this order:
+
+    - A run that reads as a key as one run is masked whole.
+    - A run that is a name the scrub keeps (a digest, an identifier, one of the
+      platform's own variable names, a MIME type, a path, words, a catalogue
+      name) is kept, whatever follows it: ``ZwSetInformationJobObject=1`` is an
+      assignment to a name.
+    - A run followed by base64 padding (``_PADDING``: one or two ``=`` that end
+      a value) ends in a base64 value: its last stretch of base64 characters,
+      when it is 24 characters or more and no name the scrub keeps, is masked,
+      whatever it begins with. A standard base64 key cut by its own ``/`` and
+      ``+`` into fragments shorter than the length rule, or beginning with a
+      slash as a path does, is caught here by its padding. An ``=`` that starts
+      a value is an assignment and not padding.
+    - Otherwise, when a piece of the run between ``/``, ``|``, ``+`` and ``&``
+      reads as a key, or a token sits inside it, the key is masked with the
+      whole stretch of base64 characters (``A-Za-z0-9+/_-``) around it. Any
+      character outside those alphabets (a dot, ``%``, ``|``, ``&``) bounds
+      the stretch: ``host.example/<key>/x.php`` reads ``host.***.php``.
+    """
+    value = found.group(0)
+    if value in _attck_one_token_names() and not _LABEL_BEFORE_RE.search(
+        found.string[max(0, found.start() - 40) : found.start()]
+    ):
+        # A technique or tactic name of the vendored ATT&CK table as the whole
+        # run (``SyncAppvPublishingServer``) is a name, away from a credential
+        # label as a family name is: after ``password=`` the run is the
+        # credential, whatever it spells. A run that joins one to anything
+        # else is read as it always was.
+        return value
+    if _names_only(value):
+        return value
+    if _is_a_family_name(value) and not _LABEL_BEFORE_RE.search(
+        found.string[max(0, found.start() - 40) : found.start()]
+    ):
+        return value
+    if _looks_like_a_credential(value, whole=True):
+        return _REDACTED
+    head = ""
+    # Padding first: it is one anchored match, and the stretch is read only
+    # where padding follows the run.
+    padding = _PADDING.match(found.string, found.end())
+    tail_start = _stretch_start(value, _BASE64_CHARS) if padding is not None else len(value)
+    tail = value[tail_start:]
+    if (
+        tail
+        and padding is not None
+        and len(tail) >= 24
+        and not _names_only(tail)
+        and (padding.group("end") is not None or (len(tail) + len(padding.group("signs"))) % 4 == 0)
+    ):
+        head, value = value[:tail_start], ""
+    if not value:
+        return f"{_hide_in_run(head)}{_REDACTED}" if head else _REDACTED
+    return _hide_in_run(value)
+
+
+def _names_only(stretch: str) -> bool:
+    """Whether a run is a name the scrub keeps, or names joined by ``/``, with no
+    vendor prefix in it: ``path/ZwSetInformationJobObject`` is a word and a
+    catalogue name, and a random key is not written that way.
+
+    Split on ``/`` alone: ``+`` joins no words, and a key cut by its own ``+``
+    into letter-only pieces is a key. Catalogue names joined by ``+`` are kept
+    as one run by the catalogue rule (``_is_api_name``).
+
+    Asked before the padding rule, so a kept name stays readable in front of
+    ``=``. A path's shape is not asked here: a key that begins with a slash has
+    it, and padding after a run is what a path does not end with; the path rule
+    is asked in ``_hide_in_run``, for a run with no padding after it.
+    """
+    pieces = [piece for piece in stretch.split("/") if piece]
+    if _kept_name(stretch):
+        return True
+    return (
+        len(pieces) > 1
+        and all(_WORD_PIECE.match(piece) or _kept_name(piece) for piece in pieces)
+        and not any(_looks_like_a_credential(piece, whole=True) for piece in pieces)
+    )
+
+
+def _kept_name(token: str) -> bool:
+    """``_readable`` without the path rule, and never a run with a vendor prefix."""
+    return _readable(token, path=False) and not _looks_like_a_credential(token, whole=True)
+
+
+def _hide_in_run(value: str) -> str:
+    """The rest of ``_hide_credentials`` for a run with no padding after it.
+
+    The run is read whole and, when a character outside base64 (``.``, ``@``,
+    ``%``) splits it, stretch by stretch: ``hello.<key>`` holds a key no rule
+    over the whole run sees, and a kept name in front of a key never covers it.
+    """
+    if not value or _readable(value):
+        return value
+    if not _looks_like_a_credential(value) and not _a_stretch_holds_a_key(value):
+        return value
+    # A token glued to a word in front of it (``name_<jwt>``): its head is
+    # found where it starts, wherever that is in the run.
+    value = _masked_spans(value, _apart(_glued_tokens(value)))
+    # A token inside the run: its dots end every stretch, so it is found as
+    # itself first and masked with the stretches on either side of it.
+    value = _masked_spans(
+        value,
+        _apart([span for span in _dotted_triples(value) if _is_a_token(value[span[0] : span[1]])]),
+    )
+    return _BASE64_STRETCH.sub(
+        lambda stretch: _REDACTED if _stretch_holds_a_key(stretch.group(0)) else stretch.group(0),
+        value,
+    )
+
+
+def _masked_spans(value: str, spans: list[tuple[int, int]]) -> str:
+    """``value`` with each span (in order, not overlapping) replaced by the mark, in one pass."""
+    if not spans:
+        return value
+    out: list[str] = []
+    at = 0
+    for start, end in spans:
+        out.append(value[at:start])
+        out.append(_REDACTED)
+        at = end
+    out.append(value[at:])
+    return "".join(out)
+
+
+# A run of base64 characters with no other character inside it.
+_PLAIN_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]+")
+
+
+def _a_stretch_holds_a_key(value: str) -> bool:
+    """Whether a run with a character outside base64 in it (``hello.<key>``,
+    ``name@<key>``) holds a key in one of its stretches.
+
+    Two shapes decide here, neither by length alone: a vendor prefix with a
+    key's body after it, and a lowercase key body (24 or more lowercase
+    letters and digits, at least one digit and four letters past ``f``, so no
+    hex run is one, nor a hex run behind an escape's letter such as ``\\n``).
+    A stretch read by its length alone would take a separator line, a dump's
+    file name or a scanner's label behind a dot for a key; those are read by
+    the whole-run rules as before.
+    """
+    # A key of either shape is 24 characters at least, and a run that holds
+    # one beside another character is longer still.
+    if len(value) <= _ALPHABET_SLICE_FLOOR or _PLAIN_STRETCH.fullmatch(value):
+        return False
+    for found in _LOWER_BODY.finditer(value):
+        body = found.group(0)
+        if any(char.isdigit() for char in body) and sum("g" <= char <= "z" for char in body) >= 4:
+            return True
+    lowered = value.lower()
+    if not any(
+        prefix in lowered
+        for prefix in (*_CREDENTIAL_PREFIXES, *_PREFIXED_KEY_FORMATS, _MAILGUN_PREFIX)
+    ):
+        return False
+    return any(
+        _has_a_vendor_prefix(piece)
+        for stretch in _PLAIN_STRETCH.findall(value)
+        for piece in re.split(r"[/+]", stretch)
+        if piece
+    )
+
+
+# A lowercase key body standing as a whole piece of a stretch: bounded by a
+# character outside base64 or by ``/`` or ``+``, never by another letter, digit,
+# ``_`` or ``-`` (so a piece of a longer name is not one).
+_LOWER_BODY = re.compile(r"(?<![A-Za-z0-9_\-])[a-z0-9]{24,}(?![A-Za-z0-9_\-])")
+
+
+def _has_a_vendor_prefix(token: str) -> bool:
+    """Whether ``token`` begins with a vendor key prefix and carries a key's body after it."""
+    lowered = token.lower()
+    if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
+        return True
+    if any(
+        lowered.startswith(prefix) and len(token) - len(prefix) >= PREFIXED_KEY_BODY_FLOOR
+        for prefix in _PREFIXED_KEY_FORMATS
+    ):
+        return True
+    return (
+        lowered.startswith(_MAILGUN_PREFIX)
+        and len(token) - len(_MAILGUN_PREFIX) >= PREFIXED_KEY_BODY_FLOOR
+        and not _is_words(token)
+    )
+
+
+# A stretch of base64 or base64url characters, and one next to the mark a token
+# was masked with.
+_BASE64_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]*\*\*\*[A-Za-z0-9+/_\-]*|[A-Za-z0-9+/_\-]+")
+# The characters of base64 and of base64url. A stretch a run ends with is
+# found by a scan from the end (``_stretch_start``): a search for a pattern
+# anchored at the end retries it from every start, which is quadratic in a
+# long run that does not end with the stretch.
+_BASE64_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/_-")
+_URLSAFE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-")
+
+
+def _stretch_start(text: str, alphabet: frozenset[str]) -> int:
+    """Where the stretch of ``alphabet`` that ``text`` ends with starts; ``len(text)`` for none."""
+    start = len(text)
+    while start > 0 and text[start - 1] in alphabet:
+        start -= 1
+    return start
+
+
+def _stretch_end(text: str, alphabet: frozenset[str]) -> int:
+    """Where the stretch of ``alphabet`` that ``text`` begins with ends."""
+    end = 0
+    while end < len(text) and text[end] in alphabet:
+        end += 1
+    return end
+
+
+def _dotted_triples(run: str) -> list[tuple[int, int]]:
+    """Every place three base64url segments of 8 or more stand joined by dots, in order.
+
+    The first is the stretch a dot-separated part ends with, the second a whole
+    part, the third the stretch the next part begins with: a token's shape, as
+    the pattern it replaces found it. One pass over the parts, linear in ``run``.
+    """
+    if run.count(".") < 2:
+        return []
+    parts = run.split(".")
+    starts = [0]
+    for part in parts[:-1]:
+        starts.append(starts[-1] + len(part) + 1)
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index + 2 < len(parts):
+        head, middle, tail = parts[index], parts[index + 1], parts[index + 2]
+        head_start = _stretch_start(head, _URLSAFE_CHARS)
+        tail_end = _stretch_end(tail, _URLSAFE_CHARS)
+        if (
+            len(head) - head_start < 8
+            or len(middle) < 8
+            or _stretch_end(middle, _URLSAFE_CHARS) != len(middle)
+            or tail_end < 8
+        ):
+            index += 1
+            continue
+        spans.append((starts[index] + head_start, starts[index + 2] + tail_end))
+        # Every three consecutive parts are a candidate, overlapping ones too:
+        # a shape that is no token (a name in front of a token's header) must
+        # not hide the token that starts at the next part.
+        index += 1
+    return spans
+
+
+def _apart(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """``spans`` in order with each one that overlaps an earlier kept one left out."""
+    kept: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if not kept or start >= kept[-1][1]:
+            kept.append((start, end))
+    return kept
+
+
+# Base64 padding after a run: one or two ``=`` that end the value. What may
+# follow them is the end of the text or a character no value starts with:
+# whitespace; a closing quote, bracket or brace, or ``</`` of a closing tag;
+# the separators ``,`` ``;`` ``:`` ``.``; and the scrub's joiners ``/`` ``|``
+# ``+`` ``&`` ``!``, which join a key to a path, a module name or a list. A
+# quote is closing when an end or one of those separators follows it, and a
+# backslash before a quote is the JSON escape of one. Any other follower (a
+# letter, a digit, ``-``, ``_``, an opening quote) starts a value, so that
+# ``=`` is an assignment; ``_hide_credentials`` still takes it for padding
+# when the stretch and its signs together are a multiple of 4 characters,
+# which is what a base64 value's length is.
+_PADDING = re.compile(
+    r"(?P<signs>={1,2})(?!=)"
+    r"(?P<end>\Z|(?=[\s)\]}>,;:.\/|+&!])|(?=</)|(?=\\?[\"'`](?:\Z|[\s)\]}>,;:.\/|&!])))?"
+)
+# A token glued to other text inside a longer run: three dot-separated
+# base64url segments whose first is the run's trailing stretch from some point
+# on. A JOSE header is a JSON object, and base64url of ``{`` begins with ``e``
+# and one of ``w``-``z``, a digit, ``-`` or ``_``; the first four characters
+# decode to three bytes, and the first being ``{`` is what ``_is_a_token``'s
+# decode would find, so each start is decided from those four alone.
+
+
+def _glued_tokens(run: str, *, first: bool = False) -> list[tuple[int, int]]:
+    """Where tokens stand inside ``run`` behind other text, in order. Linear in ``run``.
+
+    ``first`` stops at the first.
+    """
+    spans: list[tuple[int, int]] = []
+    for start, end in _dotted_triples(run):
+        head_end = run.index(".", start)
+        at = next(
+            (
+                offset
+                for offset in range(start, head_end - 7)
+                if run[offset] == "e" and _opens_an_object(run[offset : offset + 8])
+            ),
+            None,
+        )
+        if at is not None:
+            spans.append((at, end))
+            if first:
+                break
+    return spans
+
+
+def _opens_an_object(eight: str) -> bool:
+    """Whether eight base64url characters decode to a JSON object's opening and the
+    quote of its first key: ``{"`` or ``{`` and spaces then ``"``."""
+    try:
+        head = base64.urlsafe_b64decode(eight)
+    except (ValueError, binascii.Error):
+        return False
+    return head.startswith(b"{") and head[1:].lstrip(b" \t\r\n").startswith(b'"')
+
+
+def _glued_token(run: str) -> tuple[int, int] | None:
+    """Where the first token stands inside ``run`` behind other text, or ``None``."""
+    spans = _glued_tokens(run, first=True)
+    return spans[0] if spans else None
+
+
+def _readable(token: str, *, path: bool = True) -> bool:
+    """Whether the whole run is a name the scrub keeps: a digest, an identifier, one of
+    the platform's own variable names, a MIME type, a path (unless ``path`` is false),
+    words, or a catalogue name."""
+    if _DIGEST.match(token) or _IDENTIFIER.match(token) or _own_variable_name(token):
+        return True
+    if _MIME_TYPE.match(token) and not _looks_like_a_credential(token.split("/", 1)[1]):
+        return True
+    return bool((path and _PATH_SHAPED.match(token)) or _is_words(token) or _is_api_name(token))
+
+
+def _stretch_holds_a_key(stretch: str) -> bool:
+    """Whether a stretch of base64 characters holds a key: a masked token, or a piece
+    of it between ``/`` and ``+`` that reads as a key."""
+    if _REDACTED in stretch:
+        return True
+    if _is_an_alphabet_stretch(stretch):
+        return False
+    return any(
+        _looks_like_a_credential(piece, alphabet=False)
+        for piece in re.split(r"[/+]", stretch)
+        if piece
+    )
+
+
+def scrub(text: Any) -> str:
+    """Any text on its way into an event payload.
+
+    Four passes over the whole text, in this order, because each one's output
+    is the next one's input:
+
+    1. an authorization scheme and the secret after it, which no per-value
+       rule can see as one thing;
+    2. URLs, reduced to scheme and host — first, so the ``//`` of a URL is
+       never read as a path;
+    3. values that are shaped like a credential;
+    4. paths, reduced to their last segment.
+
+    Whole-text rather than word by word, and that is the point. A tool server
+    that answers with compact JSON hands this one whitespace-separated word
+    with the key, the URL and the host path all inside it, and a rule anchored
+    to the start of a word found none of them.
+    """
+    return _scrub_line(" ".join(str(text or "").split()))
+
+
+def remember_secret_values(values: Iterable[str], *, scope: str = "job") -> None:
+    """Set the values the scrub masks by exact value under ``scope``, in this process.
+
+    A scope registered again replaces what it held: the worker registers each
+    job's settings under ``job``, so a secret the operator removed is not masked
+    in the next job, and its own startup secrets under ``process``, which stay.
+    A value shorter than ``CONFIGURED_SECRET_FLOOR``, or blank, is not kept.
+    Only the count is logged, never a value.
+    """
+    texts = [text for text in (str(value or "") for value in values) if text.strip()]
+    kept = frozenset(text for text in texts if len(text) >= CONFIGURED_SECRET_FLOOR)
+    _SECRET_SCOPES[scope] = kept
+    # A shorter value is kept out of finding rows only (``safe_finding_value``):
+    # masked everywhere, a short password would take a word out of every event.
+    _SHORT_SECRETS[scope] = frozenset(text for text in texts if len(text) < CONFIGURED_SECRET_FLOOR)
+    _FAILED_SCOPES.discard(scope)
+    _rebuild_configured_pattern()
+    logger.debug("The scrub masks %d configured value(s) under %s.", len(kept), scope)
+
+
+def secret_registration_failed(scope: str) -> None:
+    """Record that a scope's configured values could not be read.
+
+    Until that scope is registered again, a finding row is held to the whole
+    event scrub (``safe_finding_value``): with no value to mask by, the shape
+    rules are what keeps an operator credential out of report text.
+    """
+    _FAILED_SCOPES.add(scope)
+
+
+def forget_secret_values() -> None:
+    """Clear every scope: nothing is masked by value afterwards."""
+    _SECRET_SCOPES.clear()
+    _SHORT_SECRETS.clear()
+    _FAILED_SCOPES.clear()
+    _rebuild_configured_pattern()
+
+
+def _rows_kept_as_written() -> bool:
+    """Whether finding rows may keep their words: values registered, and no scope failed."""
+    return bool(_SECRET_SCOPES) and not _FAILED_SCOPES
+
+
+def _rebuild_configured_pattern() -> None:
+    global _CONFIGURED_PATTERN
+    values = sorted(set().union(*_SECRET_SCOPES.values()), key=len, reverse=True)
+    _CONFIGURED_PATTERN = (
+        re.compile(
+            _SECRET_BOUNDARY_BEFORE
+            + "(?:"
+            + "|".join(re.escape(value) for value in values)
+            + r")(?![A-Za-z0-9_])"
+        )
+        if values
+        else None
+    )
+
+
+# In front of a configured value: no letter, digit or underscore — or the end of
+# an escape sequence. A tool answer carried as JSON text puts ``\n``, ``\t`` or
+# ``\u00a0`` against a value at the start of a line, and the escape's letter or
+# last hex digit is not part of the value. After the value an escape begins with
+# a backslash, which already counts as a boundary.
+_SECRET_BOUNDARY_BEFORE = r"(?:(?<![A-Za-z0-9_])|(?<=\\[A-Za-z])|(?<=\\u[0-9A-Fa-f]{4}))"
+
+
+def _mask_configured_values(line: str) -> str:
+    """``line`` with every configured value replaced by the redaction mark."""
+    if _CONFIGURED_PATTERN is None:
+        return line
+    return _CONFIGURED_PATTERN.sub(_REDACTED, line)
+
+
+def mask_configured_values(text: Any) -> str:
+    """``text`` with every configured value masked, and no shape rule read.
+
+    For a field that names something (``analysis_worker.IDENTITY_FIELDS``):
+    its value is kept from the shape rules, which read a long enough name as
+    a key, but a value the operator configured as a secret is masked wherever
+    it sits, a short one as a whole word.
+    """
+    return _mask_short_secrets(_mask_configured_values(str(text or "")))
+
+
+# The one shape ``model_assignments.endpoint_label`` gives an address: a scheme
+# and a host, with no userinfo, path or query.
+_ENDPOINT_LABEL = re.compile(r"\A[A-Za-z][A-Za-z0-9+.\-]*://[^\s/@?#]+\Z")
+# One part of a model id between ``-``, ``.``, ``_``, ``:`` or ``/`` that holds
+# a digit: a number, or a short run of letters and digits in one case
+# (``qwen3``, ``35b``, ``Q4``). A part of letters alone is a word as the shape
+# rules write one (``_WORD_PIECE``): lower case, capitals or one capital in
+# front, never mixed.
+_MODEL_NUMBER_PART = re.compile(r"\A[0-9]{1,8}\Z")
+_MODEL_MIXED_PART = re.compile(r"\A(?:[a-z0-9]{1,6}|[A-Z0-9]{1,6})\Z")
+# How many letter-and-digit parts a model id may hold; a key cut into short
+# groups (``a1b2c3-d4e5f6-…``) holds more.
+_MODEL_MIXED_PARTS_BELOW = 3
+
+
+def _is_a_model_id(run: str) -> bool:
+    """Whether ``run`` is word and number parts joined, as a model id is written.
+
+    No vendor key prefix in front of the run or of any of its ``/`` segments,
+    every part a word, a number or a short letter-and-digit run in one case,
+    and fewer than three of the last.
+    """
+    if not run or any(_has_a_vendor_prefix(segment) for segment in run.split("/")):
+        return False
+    mixed = 0
+    for part in re.split(r"[-._:/]", run):
+        if _WORD_PIECE.match(part) or _MODEL_NUMBER_PART.match(part):
+            continue
+        if not _MODEL_MIXED_PART.match(part):
+            return False
+        mixed += 1
+    return mixed < _MODEL_MIXED_PARTS_BELOW
+
+
+def _scrub_label_side(side: str) -> str:
+    """One side of `` @ `` in a model label: an endpoint label, or ``provider/model``.
+
+    Kept as written when it is an endpoint label, or when the provider in
+    front of the first ``/`` and the model id after it are each a model id
+    (``_is_a_model_id``); otherwise the whole scrub reads it, as it read every
+    label before.
+    """
+    if _ENDPOINT_LABEL.match(side):
+        return side
+    provider, slash, model = side.partition("/")
+    if not slash:
+        provider, model = "", side
+    if _is_a_model_id(model) and (not slash or _is_a_model_id(provider)):
+        return side
+    return scrub(side)
+
+
+def scrub_model_label(text: Any) -> str:
+    """A model label (``provider/model @ endpoint``) on its way into an event payload.
+
+    The whole scrub reads ``anthropic/claude-haiku-5-5`` as a key: 26
+    characters of the base64 alphabet with digit pieces. Here every
+    configured value is masked and a URL loses its userinfo and its
+    credential-named query values; then each side of `` @ `` is kept only
+    when it is an endpoint label or ``provider/model`` written as a model id
+    is (``claude-sonnet-4-20250514``), and is given the whole scrub
+    otherwise. With no configured values registered, or a scope that could
+    not be read (``secret_registration_failed``), the label is held to the
+    whole scrub.
+    """
+    label = str(text or "")
+    if not _rows_kept_as_written():
+        return scrub(label)
+    label = _URL_RUN.sub(_without_credentials, _mask_short_secrets(_mask_configured_values(label)))
+    return " @ ".join(_scrub_label_side(side) for side in label.split(" @ "))
+
+
+# How many times the passes are repeated at most before the text is taken as
+# settled. Each pass only removes or masks, so the text settles in two or three.
+_SCRUB_PASSES = 4
+
+
+def _scrub_line(line: str) -> str:
+    """The passes over text that is already one line, repeated until they change nothing.
+
+    Once is not always enough: a path cut to its last segment can leave a
+    key-shaped segment the value pass had not seen as a run of its own, and a
+    second scrub then masked it. Repeating until nothing changes makes the
+    scrub idempotent, which is what lets the publisher scrub a payload a
+    producer already scrubbed without changing a character of it.
+    """
+    for _ in range(_SCRUB_PASSES):
+        scrubbed = _scrub_once(line)
+        if scrubbed == line:
+            break
+        line = scrubbed
+    return line
+
+
+# The vendored ATT&CK table's technique and tactic names and ids, read once.
+# The names a label word stands in are kept from the label rule, for each the
+# text in front of the word and the word after it (``Access Token
+# Manipulation`` → ``("access ", "token", "Manipulation")``); an id is never a
+# credential; and a name that is one token is a name the shape rules keep
+# (``SyncAppvPublishingServer``).
+_ATTCK_FILE = "data/attck_techniques.json"
+_ATTCK_NAMES: tuple[str, ...] | None = None
+_ATTCK_IDS: frozenset[str] | None = None
+_LABELLED_NAMES: frozenset[tuple[str, str, str]] | None = None
+_ATTCK_ONE_TOKEN_NAMES: frozenset[str] | None = None
+
+
+def _attck_table() -> tuple[tuple[str, ...], frozenset[str]]:
+    """Every technique and tactic name of the vendored ATT&CK table, and every id; empty unread."""
+    global _ATTCK_NAMES, _ATTCK_IDS
+    if _ATTCK_NAMES is None or _ATTCK_IDS is None:
+        names: set[str] = set()
+        ids: set[str] = set()
+        try:
+            table = _read_data(_ATTCK_FILE)
+            for key, row in table.items():
+                if key.startswith("_") or not isinstance(row, dict):
+                    continue
+                ids.add(str(key))
+                names.add(str(row.get("name") or ""))
+            for tactics in (table.get("_tactics") or {}).values():
+                for tactic in (tactics or {}).values():
+                    if isinstance(tactic, dict):
+                        ids.add(str(tactic.get("id") or ""))
+                        names.add(str(tactic.get("name") or ""))
+        except Exception as exc:  # noqa: BLE001 — every rule then reads the names as any text
+            logger.warning("The ATT&CK names were not read for the scrub (%s).", exc)
+        names.discard("")
+        ids.discard("")
+        _ATTCK_NAMES = tuple(sorted(names))
+        _ATTCK_IDS = frozenset(ids)
+    return _ATTCK_NAMES, _ATTCK_IDS
+
+
+def _labelled_attck_names() -> frozenset[tuple[str, str, str]]:
+    """``(text before, label word, word after)`` for each vendored ATT&CK name with a label word.
+
+    Technique and tactic names, as written. A word after the label that joins
+    alternatives with ``/`` is the name of each alternative too: ``Token
+    Impersonation`` and ``Token Theft`` are how a report shortens ``Token
+    Impersonation/Theft``, and are kept as the whole name is.
+    """
+    global _LABELLED_NAMES
+    if _LABELLED_NAMES is None:
+        found: set[tuple[str, str, str]] = set()
+        names, _ = _attck_table()
+        for name in names:
+            for match in re.finditer(r"(?i)\b(bearer|basic|token)\s+(\S+)", name):
+                in_front = name[: match.start()].lower()
+                label = match.group(1).lower()
+                word = match.group(2)
+                for spelling in (word, *word.split("/")):
+                    if spelling:
+                        found.add((in_front, label, spelling))
+        _LABELLED_NAMES = frozenset(found)
+    return _LABELLED_NAMES
+
+
+def _attck_one_token_names() -> frozenset[str]:
+    """The vendored ATT&CK technique and tactic names that are a single token."""
+    global _ATTCK_ONE_TOKEN_NAMES
+    if _ATTCK_ONE_TOKEN_NAMES is None:
+        names, _ = _attck_table()
+        _ATTCK_ONE_TOKEN_NAMES = frozenset(name for name in names if len(name.split()) == 1)
+    return _ATTCK_ONE_TOKEN_NAMES
+
+
+def _scheme_and_secret(found: re.Match[str]) -> str:
+    """An authorization scheme with what follows it masked, unless the two are ATT&CK's.
+
+    Kept on an exact match with a name in the vendored ATT&CK table, the words
+    in front of the label included (``Access Token Manipulation``), or with an
+    alternative of a slash-joined name (``Token Impersonation``); and kept when
+    what follows is a technique or tactic id of the table, bracketed or not
+    (``Make and Impersonate Token (T1134.003)``), which no credential is.
+    Anything else after ``Bearer``, ``Basic`` or ``token`` is masked.
+    """
+    scheme = found.group(1)
+    after = found.group(0)[len(scheme) :].strip().rstrip(".,;:!?")
+    _, ids = _attck_table()
+    if after.lstrip("([{") in ids:
+        return found.group(0)
+    before = found.string[max(0, found.start() - 80) : found.start()].lower()
+    for in_front, label, word in _labelled_attck_names():
+        if label == scheme.lower() and after == word and before.endswith(in_front):
+            return found.group(0)
+    return f"{scheme} {_REDACTED}"
+
+
+def _scrub_once(line: str) -> str:
+    """The configured secrets by value, then the four passes, once."""
+    line = _mask_configured_values(line)
+    line = _SCHEME_AND_SECRET.sub(_scheme_and_secret, line)
+    line = _URL_RUN.sub(_shorten_url, line)
+    line = _VALUE_RUN.sub(_hide_credentials, line)
+    return _PATH_RUN.sub(_shorten_path, line)
+
+
+# How much of a model-written value reaches a finding row. Such a row is
+# stored with the report and printed verbatim by the console, so it is
+# bounded: a value a model wrote is as long as the model cared to make it, and
+# a 4 KB "verdict" drawn as one line of a run record is a page nobody can read.
+FINDING_VALUE_LIMIT = 200
+
+
+def safe_finding_value(value: Any) -> str:
+    """One model-written value, made fit to store in a finding row and to print.
+
+    A finding row is report text, printed in the report's notes, stored with
+    it and served by the API. With the operator's configured values
+    registered, the row keeps the words of the evidence and the catalogue it
+    quotes; what is kept out is every operator credential: each configured
+    value, by value (a short one as a whole word), a URL's userinfo, and a
+    query value whose key names a credential. The event scrub's shape rules do
+    not run, and the publisher still scrubs the event that carries the row.
+
+    With no values registered, or a scope that could not be read
+    (``secret_registration_failed``), the row is held to the whole event
+    scrub, as before: the shape rules are then what keeps a credential out.
+
+    Bounded either way, and never cut inside a value the scrub would mask.
+    """
+    one_line = " ".join(str(value or "").split())
+    if not _rows_kept_as_written():
+        return _cut_whole(scrub(one_line), FINDING_VALUE_LIMIT)
+    kept = _mask_short_secrets(_mask_configured_values(one_line))
+    kept = _URL_RUN.sub(_without_credentials, kept)
+    return _bound_whole(kept, FINDING_VALUE_LIMIT)
+
+
+def _mask_short_secrets(text: str) -> str:
+    """``text`` with every configured value shorter than the floor masked as a whole word.
+
+    A value of fewer than four characters is not masked as a word anywhere,
+    which would take ordinary words out of the row; it is masked as the whole
+    word after an authorization scheme (``Bearer``, ``Basic``, ``token``),
+    where it stands as the credential, and where it is a URL's password, the
+    userinfo removal takes it.
+    """
+    short = {value for values in _SHORT_SECRETS.values() for value in values}
+    values = sorted((value for value in short if len(value) >= 4), key=len, reverse=True)
+    tiny = sorted((value for value in short if len(value) < 4), key=len, reverse=True)
+    if values:
+        pattern = (
+            _SECRET_BOUNDARY_BEFORE
+            + "(?:"
+            + "|".join(re.escape(value) for value in values)
+            + r")(?![A-Za-z0-9_])"
+        )
+        text = re.sub(pattern, _REDACTED, text)
+    if tiny:
+        after_a_scheme = (
+            r"(?<![A-Za-z0-9_])(?i:bearer|basic|token)(\s+)(?:"
+            + "|".join(re.escape(value) for value in tiny)
+            + r")(?![A-Za-z0-9_])"
+        )
+        text = re.sub(
+            after_a_scheme,
+            lambda found: (
+                found.group(0)[: found.start(1) - found.start(0)] + found.group(1) + _REDACTED
+            ),
+            text,
+        )
+    return text
+
+
+# One query parameter of a URL, its key and its value.
+_QUERY_PARAMETER = re.compile(r"(?P<lead>[?&;#])(?P<key>[^=&;#?]+)=(?P<value>[^&;#]*)")
+
+
+def _without_credentials(found: re.Match[str]) -> str:
+    """One URL with its userinfo masked and each credential-named query value masked."""
+    from malspark.core.settings_catalog import names_a_credential_value
+
+    rest = found.group("rest")
+    cut = min((rest.find(mark) for mark in "/?#" if mark in rest), default=len(rest))
+    authority, tail = rest[:cut], rest[cut:]
+    if "@" in authority:
+        authority = f"{_REDACTED}@" + authority.rsplit("@", 1)[1]
+
+    def _query(parameter: re.Match[str]) -> str:
+        key = parameter.group("key")
+        if not names_a_credential_value(key) and key.lower() not in _CREDENTIAL_QUERY_KEYS:
+            return parameter.group(0)
+        return f"{parameter.group('lead')}{key}={_REDACTED}"
+
+    return f"{found.group('scheme')}://{authority}{_QUERY_PARAMETER.sub(_query, tail)}"
+
+
+# The query keys a service URL carries a credential under, named by their last
+# word or as written here.
+_CREDENTIAL_QUERY_KEYS = frozenset({"api_key", "apikey", "access_token", "token", "key"})
+
+
+def _bound_whole(text: str, limit: int) -> str:
+    """``text`` bounded near ``limit`` and marked, never cut inside a value the scrub masks.
+
+    A digest or an identifier the cut would split is kept whole. Any other
+    run the cut falls in is cut in front of when the scrub would mask it, so
+    the event that carries the row never holds the head of a key.
+    """
+    if len(text) <= limit:
+        return text
+    cut = limit - 1
+    for found in _WHOLE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            cut = found.end()
+            break
+    if cut >= len(text):
+        return text
+    for found in _VALUE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            if scrub(found.group(0)) != found.group(0) or _looks_like_a_credential(
+                text[found.start() : cut]
+            ):
+                cut = found.start()
+            break
+    return text[:cut] + CUT_MARK
+
+
+# Where the run record keeps an analyst answer no claim could be read from.
+UNPARSED_ANSWERS_RECORD = "run_summary.validation.unparsed_answers"
+
+
+def unparsed_answer_kept_sentence(answer: str) -> str:
+    """What an event says of an answer no claim could be read from: never the answer."""
+    return (
+        f"The answer ({len(str(answer or '')):,} characters) could not be read as claims; "
+        f"it is kept whole in the run record ({UNPARSED_ANSWERS_RECORD})."
+    )
+
+
+def safe_answer_text(value: Any) -> str:
+    """A whole model answer, made fit to keep in the run record.
+
+    The masking a finding row gets (:func:`safe_finding_value`) — every
+    configured value, a URL's userinfo and a credential-named query value; the
+    whole event scrub where no values are registered — with the answer's own
+    lines kept and no bound: the answer is as long as it is, and kept to be
+    read for why it could not be parsed.
+    """
+    text = str(value or "")
+    if not _rows_kept_as_written():
+        return scrub_keeping_layout(text)
+    kept = _mask_short_secrets(_mask_configured_values(text))
+    return _URL_RUN.sub(_without_credentials, kept)
+
+
+def scrub_keeping_layout(text: Any) -> str:
+    """The same four passes, with the text's own lines and indentation kept.
+
+    For a field a reader reads as prose rather than skims as a summary — an
+    analyst's report, a correction, a failure's detail. ``scrub`` collapses
+    whitespace because a one-line summary has no use for any of it; doing that
+    to a written report turns it into a wall of text and flattens the lists
+    and code blocks in it. Every rule is applied to each line on its own,
+    which is exactly what ``scrub`` does to the single line it makes.
+    """
+    return "\n".join(_scrub_line(line) for line in str(text or "").splitlines())
+
+
+def describe_exception(exc: BaseException) -> str:
+    """What a failure may be called on the wire: its type, and its remedy.
+
+    Never its message. A published failure reaches every connected browser,
+    the Redis stream and the ``job_events`` table for the whole retention
+    window, and the message is the part that names the things a reader of that
+    feed has no business seeing: an ``OSError`` names the host path of the
+    sample, an ``httpx`` transport error names the request URL, and a base URL
+    configured with userinfo carries the credential into the text. The
+    verbatim text is on the ledger and in the log, behind the report's
+    ownership check, which is where it belongs.
+
+    A failure that carries a ``remediation`` — the shape
+    ``malspark.tools.errors`` uses, and what a refusal is made of — says it,
+    because a remedy is authored text about what the reader should do rather
+    than a report of what went wrong. It is scrubbed like anything else.
+
+    The class alone is not always enough to tell two failures apart:
+    ``concurrent.futures.CancelledError`` and ``asyncio.CancelledError`` print
+    the same word and only one of them is an ``Exception``, so a class outside
+    the builtins is qualified with its module. A group names what is inside
+    it, because an MCP connection error inside a task group is otherwise a
+    bare ``ExceptionGroup``.
+
+    This is not ``malspark.agents.base_agent.describe_exception``, which keeps
+    the message on purpose: that one writes the operator's log, where the
+    detail is the whole value and the reader is the operator.
+    """
+    inner = getattr(exc, "exceptions", None)
+    if isinstance(inner, list | tuple) and inner:
+        parts = [describe_exception(sub) for sub in inner[:3]]
+        return f"{_qualified(exc)}({'; '.join(part for part in parts if part)})"
+    remedy = scrub(getattr(exc, "remediation", "") or "")
+    return f"{_qualified(exc)}: {remedy}" if remedy else _qualified(exc)
+
+
+def _qualified(exc: BaseException) -> str:
+    """The exception's class, with its module when the name alone is ambiguous."""
+    module = type(exc).__module__
+    if module and module not in ("builtins", "__main__"):
+        return f"{module}.{type(exc).__name__}"
+    return type(exc).__name__
+
+
+def _summarize_value(value: Any) -> str:
+    """One argument, short enough to read and stripped of what must not travel."""
+    if isinstance(value, bool) or value is None:
+        return str(value).lower() if isinstance(value, bool) else "null"
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, dict | list | tuple):
+        return f"<{len(value)} items>" if not isinstance(value, dict) else f"<{len(value)} keys>"
+    return _cut_whole(scrub(value), ARGUMENT_VALUE_CHARS)
+
+
+# A digest or an identifier inside a longer text, which a cut must not split:
+# the publisher scrubs every payload again, and the part of a digest left in
+# front of the cut is a hex run of no digest's length, which that second pass
+# reads as a key.
+_WHOLE_RUN = re.compile(
+    r"(?<![A-Za-z0-9])(?:[A-Fa-f0-9]{64}|[A-Fa-f0-9]{40}|[A-Fa-f0-9]{32}"
+    r"|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+    r"(?:\.[A-Za-z0-9]{1,16}(?![A-Za-z0-9.]))?(?![A-Za-z0-9])"
+)
+
+
+def _cut_whole(text: str, limit: int, *, layout: bool = False, more: bool = False) -> str:
+    """``text`` bounded near ``limit`` and marked, never cut inside a value the scrub kept.
+
+    ``text`` is already scrubbed. A digest or an identifier the cut would
+    split is kept whole, with the file extension after it: ``<sha256>.exe`` is
+    the name a reader needs, and it runs past the cap by a few characters. Any
+    other run the cut would leave in a shape the scrub reads as a key is cut in
+    front of instead. And whatever the cut leaves, a URL cut short or a scheme
+    word with the cut mark after it, the result is scrubbed once more: while
+    that changes it, the cut moves back to the start of the word it falls in,
+    so scrubbing the result again changes nothing.
+    """
+    if len(text) <= limit and not more:
+        return text
+    cut = min(limit - 1, len(text))
+    for found in _WHOLE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            cut = found.end()
+            break
+    if cut >= len(text):
+        if not more:
+            return text
+        cut = len(text)
+    for found in _VALUE_RUN.finditer(text):
+        if found.start() < cut < found.end():
+            if _looks_like_a_credential(text[found.start() : cut]):
+                cut = found.start()
+            break
+    made = _marked(text, cut)
+    again = scrub_keeping_layout if layout else scrub
+    while cut > 0 and again(made) != made:
+        cut = text.rfind(" ", 0, cut)
+        cut = max(cut, 0)
+        made = _marked(text, cut)
+    return made
+
+
+def _marked(text: str, cut: int) -> str:
+    """``text[:cut]`` with the cut mark, none added where it already ends in one.
+
+    A scrubbed URL ends in the mark; a second one is folded back into it by the
+    next scrub, which read as a change and backed the cut up past every URL.
+    """
+    head = text[:cut].rstrip()
+    return head if head.endswith(CUT_MARK) else head + CUT_MARK
+
+
+def _scrub_window(text: str, limit: int) -> tuple[str, bool]:
+    """The part of ``text`` worth scrubbing for a cut at ``limit``, and whether it is a part.
+
+    Every secret the scrub knows is whitespace-delimited, and the widest one
+    reads two words (an authorization scheme and the word after it). So the
+    window ends after the two whole words that follow ``limit``: a secret on
+    the cut is whole inside it, and the rest of a long text is never scrubbed.
+
+    The window reaches no further than twice ``limit``. A word that runs past
+    that edge is not read to its end: the text before it is kept and the word
+    is put as the mask, so no head of it is left and the cost stays in the
+    window however long the word is.
+    """
+    edge = 2 * limit
+    stop = limit
+    for _ in range(2):
+        gap = _SPACE.search(text, stop, edge + 1)
+        if gap is None:
+            return (text, False) if len(text) <= edge else _masked_tail(text, edge)
+        word = _WORD.search(text, gap.end(), edge + 1)
+        if word is None:
+            if gap.end() >= len(text):
+                return text, False
+            return text[: gap.start()], True
+        if word.end() > edge:
+            return _masked_tail(text, edge)
+        stop = word.end()
+    return text[:stop], stop < len(text)
+
+
+def _masked_tail(text: str, edge: int) -> tuple[str, bool]:
+    """``text`` up to the word that runs past ``edge``, that word as the mask."""
+    head = text[:edge]
+    blank = max(head.rfind(c) for c in " \n\t\r")
+    return head[: blank + 1] + _REDACTED, True
+
+
+_WORD = re.compile(r"\S+")
+_SPACE = re.compile(r"\s")
+
+
+def _scrubbed_cut(text: str, limit: int, *, layout: bool) -> str:
+    """``text`` scrubbed and then bounded at ``limit``: the scrub is read over a window only."""
+    window, partial = _scrub_window(text, limit)
+    scrubbed = scrub_keeping_layout(window) if layout else scrub(window)
+    return _cut_whole(scrubbed, limit, layout=layout, more=partial)
+
+
+def summarize_args(args: Any) -> str:
+    """A tool call's arguments as one short, redacted line.
+
+    Never the arguments themselves. An argument named like a credential is
+    replaced outright; every value, whatever it is named, is scrubbed of
+    credential shapes, URL userinfo and host paths; every value is capped and
+    only the first few arguments are named at all. A caller that wants the
+    arguments as sent reads the ledger entry this call writes, which is behind
+    the same ownership check as the report.
+
+    A long unbroken run of hex or base64 is replaced, except one that is
+    exactly an md5, sha1 or sha256 digest: those are what the analysis is
+    about and are on the job, the report and ``pipeline_started`` already.
+    """
+    if not isinstance(args, dict) or not args:
+        return ""
+    parts: list[str] = []
+    for name in list(args)[:ARGUMENTS_SUMMARISED]:
+        shown = _REDACTED if _is_secret_argument(name) else _summarize_value(args[name])
+        parts.append(f"{name}={shown}")
+    if len(args) > ARGUMENTS_SUMMARISED:
+        parts.append(f"+{len(args) - ARGUMENTS_SUMMARISED} more")
+    # The joined line is scrubbed as a whole too: two values side by side can
+    # make a run neither was alone.
+    return _cut_whole(scrub(", ".join(parts)), ARGUMENT_SUMMARY_CHARS)
+
+
+def summarize_result(output: Any, *, ok: bool = True, remediation: str = "") -> str:
+    """A tool result's headline, scrubbed and capped.
+
+    A result is not safer than an argument. An API answer echoes the key it
+    was called with, an error names the host path it could not read, and a
+    string lifted out of the sample is whatever the sample's author put there,
+    so the whole of it goes through the same scrub.
+
+    A failure says so and says what would fix it, and nothing else: the raw
+    exception text is the part that names paths and hosts, and it is already
+    kept verbatim on the ledger entry, behind the report's ownership check.
+    """
+    if not ok:
+        fix = scrub(remediation)
+        headline = "the call failed"
+        text = f"{headline}; {fix}" if fix else headline
+    else:
+        text = scrub(output)
+    return _cut_whole(text, RESULT_SUMMARY_CHARS)
+
+
+def emit_tool_call_started(
+    sink: EventSink | None,
+    *,
+    stage: str,
+    agent: str,
+    tool: str,
+    server: str | None = None,
+    args_summary: str = "",
+    nulls_dropped: Sequence[Sequence[str]] = (),
+    nulls_withheld: Sequence[Sequence[str]] = (),
+) -> None:
+    """One tool call, as it starts.
+
+    Paired with ``tool_call_finished`` on every path the recorder takes,
+    including the one where the repeat guard answers instead of the tool: a
+    console that draws a spinner on the start and clears it on the finish must
+    never be left holding one.
+
+    ``nulls_dropped`` and ``nulls_withheld`` name, by path segments, the
+    fields whose ``null`` the tool boundary dropped or the transport did not
+    send (``agents.null_arguments``); the event carries each only when there
+    are any.
+    """
+    data: dict[str, Any] = {
+        "stage": str(stage),
+        "agent": str(agent),
+        "tool": str(tool),
+        "server": str(server) if server else None,
+        "args_summary": str(args_summary),
+    }
+    if nulls_dropped:
+        data["nulls_dropped"] = [[str(part) for part in path] for path in nulls_dropped]
+    if nulls_withheld:
+        data["nulls_withheld"] = [[str(part) for part in path] for path in nulls_withheld]
+    emit(sink, TOOL_CALL_STARTED, data)
+
+
+def emit_tool_call_finished(
+    sink: EventSink | None,
+    *,
+    stage: str,
+    agent: str,
+    tool: str,
+    server: str | None = None,
+    evidence_id: str = "",
+    ok: bool = True,
+    duration_ms: int = 0,
+    summary: str = "",
+    repeated_of: str = "",
+) -> None:
+    """One tool call, as it answers, with the ledger id its result is under.
+
+    ``repeated_of`` is the earlier entry a call the repeat guard answered
+    without running repeats; the key is sent only for such a call.
+    """
+    payload: dict[str, Any] = {
+        "stage": str(stage),
+        "agent": str(agent),
+        "tool": str(tool),
+        "server": str(server) if server else None,
+        "evidence_id": str(evidence_id),
+        "ok": bool(ok),
+        "duration_ms": max(0, int(duration_ms)),
+        "summary": str(summary),
+    }
+    if repeated_of:
+        payload["repeated_of"] = str(repeated_of)
+    emit(sink, TOOL_CALL_FINISHED, payload)
+
+
+def emit_validation_feedback(
+    sink: EventSink | None,
+    *,
+    stage: str,
+    agent: str,
+    code: str,
+    message: str,
+    retry_index: int,
+    state: str = VALIDATION_RETRIED,
+    path: str = "",
+    answer_kept: str = "",
+) -> None:
+    """One violation, and what became of it.
+
+    Emitted where the correction turn is written rather than where the run
+    summary counts it: a violation the retry fixes leaves no other trace, and
+    the conversation is the one place a reader can see that the answer they
+    are reading is the second one.
+
+    ``state`` is ``retried`` when the producer is being shown the violation,
+    then ``resolved`` or ``survived`` once the run knows which. Only the
+    correction turn used to be published, so a reader saw the violations that
+    triggered a retry and never the ones that survived it or the ones the retry
+    introduced — two events in the feed of a run whose summary recorded ten
+    unresolved findings.
+
+    **Folding.** ``(agent, code, path)`` is the key: the same violation, shown
+    and then resolved or survived, arrives under it twice, and a reader that
+    draws one line per violation folds on it. ``path`` is the producer's own
+    locator — ``static.claims[2]`` for an analyst, ``objects[3]`` for the
+    judge's bundle — and it is what separates two violations of one code on
+    different claims; it is ``""`` for a violation about the answer as a whole,
+    where ``(agent, code)`` is already the whole key.
+
+    ``answer_kept`` is one short sentence, for a violation that says none of
+    the producer's answer could be read: that it could not, how long it was,
+    and where the run record keeps it (``unparsed_answer_kept_sentence``). The
+    answer itself never rides on an event: events reach every connected
+    browser, the Redis stream and ``job_events``, and each field on them is
+    bounded. Left out when empty.
+    """
+    emit(
+        sink,
+        VALIDATION_FEEDBACK,
+        {
+            "stage": str(stage),
+            "agent": str(agent),
+            "code": str(code),
+            "message": str(message),
+            "retry_index": max(0, int(retry_index)),
+            "state": str(state),
+            "path": str(path),
+            **({"answer_kept": str(answer_kept)} if answer_kept else {}),
+        },
+    )
+
+
+def emit_judge_question(
+    sink: EventSink | None,
+    *,
+    stage: str,
+    text: str,
+    addressed_to: str | None = None,
+) -> None:
+    """A question the judge asked mid-loop, rather than its closing verdict."""
+    emit(
+        sink,
+        JUDGE_QUESTION,
+        {
+            "stage": str(stage),
+            "text": str(text),
+            "addressed_to": str(addressed_to) if addressed_to else None,
+        },
+    )
+
+
+def emit_agent_message_delta(
+    sink: EventSink | None,
+    *,
+    stage: str,
+    agent: str,
+    text_delta: str,
+    model: str = "",
+    tokens: dict[str, Any] | None = None,
+) -> None:
+    """Part of what an agent is saying, before it has finished saying it.
+
+    A delta is what the loop has newly produced at the moment it is emitted,
+    not a token: the analyst loop reads its graph as a stream of states and
+    the smallest thing it observes is one model turn's text. The console
+    appends deltas under the speaker and replaces them with the
+    ``agent_message`` that closes the turn.
+
+    It is also the one event per model turn, so it says which model gave the
+    turn (``model``) and what the turn spent as the provider reported it
+    (``tokens``; absent where the provider reported nothing). A turn that said
+    nothing — one that only asked for tools — is still published when it
+    carries tokens, so a reader sees what every turn spent. The turn a
+    fallback model gave is announced by ``model_fallback``, which is
+    published whether or not deltas are.
+    """
+    if not text_delta and not tokens:
+        return
+    payload: dict[str, Any] = {
+        "stage": str(stage),
+        "agent": str(agent),
+        "text_delta": str(text_delta),
+    }
+    if model:
+        payload["model"] = str(model)
+    if tokens:
+        payload["tokens"] = dict(tokens)
+    emit(sink, AGENT_MESSAGE_DELTA, payload)
+
+
+def _field(obj: Any, name: str, fallback: Any = "") -> Any:
+    """One attribute of a model or one key of the document it dumps to."""
+    if isinstance(obj, dict):
+        return obj.get(name, fallback)
+    return getattr(obj, name, fallback)
+
+
+def _category_of(definition: Any) -> str:
+    """A definition's category (``core.agent_category``); ``""`` for no definition.
+
+    A stored document written before the field existed reads the one its role
+    and tools fit, as the settings model reads it.
+    """
+    if definition is None:
+        return ""
+    from malspark.core.agent_category import declared_category, fitting_category
+
+    return declared_category(definition) or fitting_category(definition)[0]
+
+
+def _asks_of(definition: Any) -> list[str]:
+    """Every agent this definition can task, from its ``ask_<key>`` tools."""
+    asked: list[str] = []
+    for ref in list(_field(definition, "tools", []) or []):
+        if str(_field(ref, "kind", "")) != "agent":
+            continue
+        callee = str(_field(ref, "agent", "") or "")
+        if callee and callee not in asked:
+            asked.append(callee)
+    return asked
+
+
+def server_labels(servers: Any) -> dict[str, str]:
+    """Each tool server's display name, by key, for a server whose label is not its key.
+
+    Accepts the settings' ``mcp.servers`` map of models, the plain documents
+    they dump to, or a map of labels already read (a string per key). A server
+    with no label, or one equal to its key, is left out: it is named by its key
+    as before.
+    """
+    out: dict[str, str] = {}
+    for key, entry in (servers or {}).items() if isinstance(servers, Mapping) else ():
+        held = entry if isinstance(entry, str) else _field(entry, "label", "")
+        label = str(held or "").strip()
+        if label and label != str(key):
+            out[str(key)] = label
+    return out
+
+
+def roster_payload(
+    profile: Any, definitions: Any, depth: int = 2, servers: Any = None
+) -> dict[str, Any]:
+    """Everyone who can speak in this run, and the stages they speak in.
+
+    Read off the team the job runs rather than off the messages as they
+    arrive, so the console can draw the participants before the first one
+    says anything, and so a reader who cannot open the admin settings still
+    sees the label the operator gave an agent, and its category beside its
+    role (``""`` for one with no definition). An agent a stage names but no
+    definition describes is still listed: it is going to speak, and a roster
+    that omits it sends the console back to the registry key it was trying to
+    replace.
+
+    The stages are not the whole team. A lead-shaped profile names one agent
+    and reaches its specialists through ``ToolRef(kind="agent")`` — a live
+    ``team_lead`` run rostered three participants and then produced messages
+    from five more — so the walk follows those references from each stage
+    agent, ``depth`` hops deep, which is the same bound
+    ``core.agents.delegation_depth`` puts on the asks themselves. A specialist
+    is listed with ``stages: []`` and a ``via`` naming the agents that can
+    task it; a stage agent carries no ``via``, because nothing had to ask it
+    to be there. ``stages`` itself is unchanged: a specialist belongs to no
+    step of the team, which is the fact that made it invisible.
+
+    A definition that is disabled is not reachable — an ask of it is refused
+    by name — so it is not listed. A cycle is walked once: the traversal keeps
+    what it has already reached, and delegation refuses an ask back up its own
+    chain anyway.
+
+    Accepts the pydantic models or the plain documents they dump to, because
+    the worker holds the models and the API holds the stored documents, and
+    one shape of roster is the point.
+
+    ``servers`` is the run's tool-server map: ``servers`` in the roster names
+    each server's display name by its key (:func:`server_labels`), so the
+    console names a server as the operator labelled it; left out when no
+    server has a label of its own.
+    """
+    field = _field
+
+    stages_out: list[dict[str, Any]] = []
+    agents_out: dict[str, dict[str, Any]] = {}
+    definition_map = definitions if isinstance(definitions, dict) else {}
+    for stage in list(field(profile, "stages", []) or []):
+        key = str(field(stage, "key", ""))
+        if not key:
+            continue
+        members = [str(a) for a in (field(stage, "agents", []) or [])]
+        stages_out.append(
+            {
+                "key": key,
+                "label": str(field(stage, "label", "") or key),
+                "kind": str(field(stage, "kind", "analysis") or "analysis"),
+                "agents": members,
+            }
+        )
+        for member in members:
+            definition = definition_map.get(member)
+            entry = agents_out.setdefault(
+                member,
+                {
+                    "key": member,
+                    "label": str(field(definition, "label", "") or member),
+                    "role": str(field(definition, "role", "") or ""),
+                    "category": _category_of(definition),
+                    "stages": [],
+                },
+            )
+            if key not in entry["stages"]:
+                entry["stages"].append(key)
+
+    # The specialists, breadth first from the agents the stages named, so a
+    # callee reached from two callers is listed once with both of them. The
+    # judge asks only while it mediates, so its asks count only in a team
+    # with a debate stage.
+    mediated = any(str(item["kind"]) == "debate" for item in stages_out)
+    named_by_a_stage = set(agents_out)
+    frontier = list(agents_out)
+    for _hop in range(max(0, int(depth))):
+        next_frontier: list[str] = []
+        for caller in frontier:
+            if str(field(definition_map.get(caller), "role", "") or "") == "judge" and not mediated:
+                continue
+            for callee in _asks_of(definition_map.get(caller)):
+                definition = definition_map.get(callee)
+                if definition is None or field(definition, "enabled", True) is False:
+                    continue
+                first_time = callee not in agents_out
+                entry = agents_out.setdefault(
+                    callee,
+                    {
+                        "key": callee,
+                        "label": str(field(definition, "label", "") or callee),
+                        "role": str(field(definition, "role", "") or ""),
+                        "category": _category_of(definition),
+                        "stages": [],
+                    },
+                )
+                if callee not in named_by_a_stage:
+                    via = entry.setdefault("via", [])
+                    if caller not in via:
+                        via.append(caller)
+                if first_time:
+                    next_frontier.append(callee)
+        frontier = next_frontier
+        if not frontier:
+            break
+    roster: dict[str, Any] = {"agents": list(agents_out.values()), "stages": stages_out}
+    labels = server_labels(servers)
+    if labels:
+        roster["servers"] = labels
+    return roster

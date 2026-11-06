@@ -16,7 +16,7 @@ import time
 
 import pytest
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     ConsolidatedIOC,
     FileHashes,
     MalwareReport,
@@ -24,7 +24,7 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer, _defanged_text
+from malspark.reporting.renderers.markdown import MarkdownRenderer, _defanged_text
 
 SIZE = 200_000
 SHA = "a" * 64

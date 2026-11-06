@@ -17,8 +17,8 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import artefact_index
-from maljan.tools.pe_image import Image, Section
+from malspark.tools import artefact_index
+from malspark.tools.pe_image import Image, Section
 
 
 def _image(count: int, size: int, same_address: bool = False) -> Image:

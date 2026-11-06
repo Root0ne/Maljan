@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import children, emulated_strings
+from malspark.tools import children, emulated_strings
 
 ROOT = Path(__file__).resolve().parents[3]
 KILLED: list[int] = []
@@ -75,7 +75,7 @@ def emulations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[list
 def _sample(tmp_path: Path, analysis: Any, monkeypatch: pytest.MonkeyPatch) -> str:
     target = tmp_path / "s.dll"
     target.write_bytes(b"MZ" + bytes(62))
-    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", str(tmp_path))
+    monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", str(tmp_path))
     return str(target)
 
 

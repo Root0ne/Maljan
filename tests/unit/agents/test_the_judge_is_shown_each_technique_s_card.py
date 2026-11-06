@@ -12,17 +12,17 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     TECHNIQUE_CARDS_INTRO,
     TECHNIQUE_QUESTION_SYSTEM,
     JudgeAgent,
     technique_question_text,
 )
-from maljan.extractors.capability_matrix import TechniqueQuestion, judge_questions
-from maljan.memory.technique_cards import technique_card_lines
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import Bundle
-from maljan.tools import knowledge
+from malspark.extractors.capability_matrix import TechniqueQuestion, judge_questions
+from malspark.memory.technique_cards import technique_card_lines
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import Bundle
+from malspark.tools import knowledge
 
 CARRIED = "T1112"  # Modify Registry: carried by the bundle, no card
 CLAIMED = "T1003"  # OS Credential Dumping: claimed, not carried, has a card

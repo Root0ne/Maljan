@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     ValidationTally,
     Violation,
     retry_with_feedback,
@@ -148,7 +148,7 @@ class TestTheRetryLoopReportsWhatItFedBack:
 
 class TestTheReportRoundIsFoldedIn:
     def test_its_codes_are_added_to_the_summary_block(self) -> None:
-        from maljan.pipeline.nodes import _amended_validation
+        from malspark.pipeline.nodes import _amended_validation
 
         tally = ValidationTally(retries=2)
         tally.count([_violation("composer.schema"), _violation("narrative.schema")])
@@ -170,13 +170,13 @@ class TestTheReportRoundIsFoldedIn:
 
     def test_a_clean_report_round_gives_the_block_back_as_it_was(self) -> None:
         """The caller decides whether that is worth storing, by comparing."""
-        from maljan.pipeline.nodes import _amended_validation
+        from malspark.pipeline.nodes import _amended_validation
 
         block = {"retries": 1, "by_code": {}, "unresolved": [], "not_run": []}
         assert _amended_validation(block, ValidationTally()) == block
 
     def test_there_is_nothing_to_amend_without_a_block(self) -> None:
-        from maljan.pipeline.nodes import _amended_validation
+        from malspark.pipeline.nodes import _amended_validation
 
         tally = ValidationTally(retries=1)
         tally.count([_violation("composer.schema")])
@@ -190,7 +190,7 @@ class TestTheReportRoundIsFoldedIn:
         one kind of run that has one: the judge raised, so there is no summary
         of its to rebuild from.
         """
-        from maljan.pipeline.nodes import _amended_validation, with_verdict_fallback
+        from malspark.pipeline.nodes import _amended_validation, with_verdict_fallback
 
         tally = ValidationTally(retries=1)
         tally.count([_violation("composer.schema")])
@@ -204,7 +204,7 @@ class TestTheReportRoundIsFoldedIn:
 
 class TestTheProducersHandItOver:
     def test_the_analyst_drains_what_it_was_shown(self) -> None:
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         class _Analyst(BaseAnalyst):
             def analyze(self, data: str) -> str:  # pragma: no cover - unused
@@ -225,8 +225,8 @@ class TestTheProducersHandItOver:
         assert analyst.drain_validation_findings() == ([], 0, {})
 
     def test_the_judge_verdict_carries_it(self) -> None:
-        from maljan.agents.judge_agent import JudgeVerdict
-        from maljan.schemas.stix_models import Bundle
+        from malspark.agents.judge_agent import JudgeVerdict
+        from malspark.schemas.stix_models import Bundle
 
         verdict = JudgeVerdict(bundle=Bundle(objects=[]), violations=[], retries=1)
         assert verdict.fed_back == {}
@@ -253,7 +253,7 @@ class TestADrainOnTheWrongContract:
             return self._drained
 
     def test_the_right_shape_is_read(self) -> None:
-        from maljan.pipeline.nodes import _validation_update
+        from malspark.pipeline.nodes import _validation_update
 
         update = _validation_update(
             self._Agent(([{"code": "attck.unknown_id", "message": "m", "path": ""}], 1, {"a": 2})),
@@ -267,9 +267,9 @@ class TestADrainOnTheWrongContract:
     def test_the_old_two_value_shape_is_said_out_loud(self, caplog: Any) -> None:
         import logging
 
-        from maljan.pipeline.nodes import _validation_update
+        from malspark.pipeline.nodes import _validation_update
 
-        with caplog.at_level(logging.ERROR, logger="maljan"):
+        with caplog.at_level(logging.ERROR, logger="malspark"):
             assert _validation_update(self._Agent(([], 1)), "static") == {}
 
         assert "drained 2 value(s), not three" in caplog.text
@@ -277,14 +277,14 @@ class TestADrainOnTheWrongContract:
     def test_a_stub_that_drains_nothing_real_is_not_an_error(self, caplog: Any) -> None:
         import logging
 
-        from maljan.pipeline.nodes import _validation_update
+        from malspark.pipeline.nodes import _validation_update
 
-        with caplog.at_level(logging.ERROR, logger="maljan"):
+        with caplog.at_level(logging.ERROR, logger="malspark"):
             assert _validation_update(self._Agent(object()), "static") == {}
 
         assert caplog.text == ""
 
     def test_an_agent_with_no_drain_at_all_is_skipped(self) -> None:
-        from maljan.pipeline.nodes import _validation_update
+        from malspark.pipeline.nodes import _validation_update
 
         assert _validation_update(object(), "static") == {}

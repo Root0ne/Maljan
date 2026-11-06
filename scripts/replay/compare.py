@@ -128,8 +128,8 @@ def materialise(repo: Path, ref: str, into: Path) -> Path:
     into.mkdir(parents=True)
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         tar.extractall(into, filter="data")  # nosec B202 — our own archive, the data filter
-    if not (into / "src" / "maljan").is_dir() or not (into / "pyproject.toml").is_file():
-        raise CompareError(f"{ref} has no src/maljan tree or no pyproject.toml")
+    if not (into / "src" / "malspark").is_dir() or not (into / "pyproject.toml").is_file():
+        raise CompareError(f"{ref} has no src/malspark tree or no pyproject.toml")
     return into
 
 
@@ -218,7 +218,7 @@ def _failure_named(stderr: bytes, status: int) -> str:
 def _is_item() -> Any:
     """The platform's reader of a sandbox item id, or ``None`` where it cannot be imported."""
     try:
-        from maljan.analysis.sandbox_sections import is_item_id
+        from malspark.analysis.sandbox_sections import is_item_id
     except Exception:  # noqa: BLE001 — then an item id is digested like any value
         return None
     return is_item_id

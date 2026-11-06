@@ -27,8 +27,8 @@ from app import observability
 from app.models.audit import AuditChainHead, AuditLog
 from app.services import audit_chain, ledger_chain
 from app.worker.analysis_worker import _store_the_report
-from maljan.core.config import Settings
-from maljan.schemas.evidence import LedgerEntry
+from malspark.core.config import Settings
+from malspark.schemas.evidence import LedgerEntry
 
 KEY = ledger_chain.derive_key("audit-test-material")
 OTHER = ledger_chain.derive_key("audit-test-other-material")

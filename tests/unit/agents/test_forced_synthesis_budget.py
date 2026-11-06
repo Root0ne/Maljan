@@ -28,7 +28,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from maljan.agents.base_agent import BaseAnalyst
+from malspark.agents.base_agent import BaseAnalyst
 
 
 class _Analyst(BaseAnalyst):
@@ -138,7 +138,7 @@ class TestTheBudgetIsMeasuredAsTheServerSeesIt:
     """
 
     def test_a_tool_call_request_is_not_free(self) -> None:
-        from maljan.agents.base_agent import _message_chars
+        from malspark.agents.base_agent import _message_chars
 
         m = AIMessage(
             content="",
@@ -148,7 +148,7 @@ class TestTheBudgetIsMeasuredAsTheServerSeesIt:
         assert _message_chars(m) > 20, "the request payload was counted as nothing"
 
     def test_a_transcript_of_tool_requests_is_trimmed(self) -> None:
-        from maljan.agents.base_agent import _trim_for_synthesis
+        from malspark.agents.base_agent import _trim_for_synthesis
 
         msgs: list = [SystemMessage(content="sys"), HumanMessage(content="task")]
         for i in range(40):
@@ -166,7 +166,7 @@ class TestTheEarlierRunStateCopiesShareTheWindow:
     """A prefix-bound provider sends the kept turns' run-state blocks beside the messages."""
 
     def _sent_chars(self, replayed: int) -> int:
-        from maljan.agents.base_agent import _message_chars
+        from malspark.agents.base_agent import _message_chars
 
         a = _Analyst()
         a._replayed_run_state_chars = lambda: replayed  # type: ignore[method-assign]
@@ -174,8 +174,8 @@ class TestTheEarlierRunStateCopiesShareTheWindow:
         return sum(_message_chars(m) for m in a.seen_messages)
 
     def test_the_trim_leaves_room_for_them(self) -> None:
-        from maljan.agents.base_agent import _SYNTHESIS_DIRECTIVE, synthesis_budget_chars
-        from maljan.core.config import get_settings
+        from malspark.agents.base_agent import _SYNTHESIS_DIRECTIVE, synthesis_budget_chars
+        from malspark.core.config import get_settings
 
         window = synthesis_budget_chars(get_settings(), "static", 0)
         replayed = window // 2

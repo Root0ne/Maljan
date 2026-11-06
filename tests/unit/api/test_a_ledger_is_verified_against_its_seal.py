@@ -30,7 +30,7 @@ from app.services import ledger_chain, ledger_verify
 from app.services.audit_chain import AuditChainCheck
 from app.services.ledger_verify import JobAudit
 from app.worker.analysis_worker import _evidence_row
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 
 KEY = ledger_chain.derive_key("verify-test-material")
 OTHER = ledger_chain.derive_key("verify-test-rotated-material")
@@ -517,7 +517,9 @@ def test_a_null_run_summary_reads_the_same_from_an_export_as_from_the_database(
 
 
 def _benchmark() -> Path | None:
-    main = Path("/home/user/Belgeler/kingston/Projects/Maljan/.superpowers/sdd/mandate-2026-09-17")
+    main = Path(
+        "/home/user/Belgeler/kingston/Projects/Malspark/.superpowers/sdd/mandate-2026-09-17"
+    )
     for parent in (*Path(__file__).resolve().parents, main.parents[2]):
         candidate = parent / ".superpowers/sdd/mandate-2026-09-17/benchmark/deepseek"
         if candidate.is_dir():

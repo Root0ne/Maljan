@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from maljan.agents.base_agent import model_turns_left
+from malspark.agents.base_agent import model_turns_left
 
 
 def _tool_turn(n: int) -> AIMessage:

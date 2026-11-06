@@ -547,7 +547,7 @@ function probeOf(ctx: GuideContext, keys: string[]): string | undefined {
 const MEMORY_GUIDE: GuideDef = {
   id: "memory",
   title: "Set up long-term memory",
-  blurb: "Keep findings in process, or point Maljan at a store that survives a restart.",
+  blurb: "Keep findings in process, or point Malspark at a store that survives a restart.",
   groupHref: "/settings/configuration/tools/memory",
   steps: (ctx) => {
     const steps: GuideStep[] = [

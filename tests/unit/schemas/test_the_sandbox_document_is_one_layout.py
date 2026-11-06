@@ -13,7 +13,7 @@ import json
 import time
 from typing import Any
 
-from maljan.schemas.sandbox_document import (
+from malspark.schemas.sandbox_document import (
     CONTAINERS,
     OPEN_PLACES,
     PLACES,
@@ -23,7 +23,7 @@ from maljan.schemas.sandbox_document import (
     renamed,
     sandbox_document,
 )
-from maljan.schemas.sandbox_report import (
+from malspark.schemas.sandbox_report import (
     CAPE_RENAMES,
     REPORT_LIST_FIELDS,
     SandboxReport,

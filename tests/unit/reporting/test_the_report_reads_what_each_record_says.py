@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     ConsolidatedIOC,
     DynamicBehavior,
     EvidenceSection,
@@ -30,8 +30,8 @@ from maljan.reporting.models import (
     SampleIdentity,
     StaticAnalysis,
 )
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
-from maljan.schemas.isr_models import AgentISR, Artifact
+from malspark.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
+from malspark.schemas.isr_models import AgentISR, Artifact
 from tests.unit._ledger_helpers import entry
 
 
@@ -47,7 +47,7 @@ def _report(**fields: Any) -> MalwareReport:
 
 
 def test_a_false_or_zero_fact_is_shown_and_an_empty_one_is_not() -> None:
-    from maljan.reporting.composer import _bundle_text
+    from malspark.reporting.composer import _bundle_text
 
     text = _bundle_text(
         "packing_obfuscation",
@@ -71,7 +71,7 @@ def test_a_false_or_zero_fact_is_shown_and_an_empty_one_is_not() -> None:
 
 
 def test_a_claim_is_cited_by_its_whole_label() -> None:
-    from maljan.reporting.claim_coverage import ClaimInForce, _Body, coverage_of
+    from malspark.reporting.claim_coverage import ClaimInForce, _Body, coverage_of
 
     claim = ClaimInForce(
         agent="static", number=1, claim="It hashes API names", evidence_ref="", confidence=None
@@ -86,7 +86,7 @@ def test_a_claim_is_cited_by_its_whole_label() -> None:
 
 
 def test_a_family_with_a_line_break_writes_no_rule_of_its_own() -> None:
-    from maljan.reporting import detection_signatures as ds
+    from malspark.reporting import detection_signatures as ds
 
     family = 'Foo\npass ip any any -> any any (msg:"x"; sid:1; rev:1;)\r\u2028drop'
     report = _report(
@@ -105,7 +105,7 @@ def test_a_family_with_a_line_break_writes_no_rule_of_its_own() -> None:
 
 
 def test_a_plain_family_comment_is_as_it_was() -> None:
-    from maljan.reporting import detection_signatures as ds
+    from malspark.reporting import detection_signatures as ds
 
     report = _report(
         attribution=FamilyAttribution(family="Latrodectus", family_grounded=True),
@@ -124,7 +124,7 @@ _RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\upd"
 
 
 def _sigma(payload_published: bool) -> str:
-    from maljan.reporting import detection_signatures as ds
+    from malspark.reporting import detection_signatures as ds
 
     iocs = [
         ConsolidatedIOC(
@@ -234,7 +234,7 @@ def test_a_registry_target_is_never_an_image() -> None:
     ],
 )
 def test_an_autostart_key_is_its_mechanism(key: str, kind: str) -> None:
-    from maljan.reporting.ledger_projection import _autostart_kind
+    from malspark.reporting.ledger_projection import _autostart_kind
 
     assert _autostart_kind(key) == kind
 
@@ -254,7 +254,7 @@ def test_an_autostart_key_is_its_mechanism(key: str, kind: str) -> None:
     ],
 )
 def test_a_configuration_write_is_no_persistence(key: str) -> None:
-    from maljan.reporting.ledger_projection import _autostart_kind, persistence_from_ledger
+    from malspark.reporting.ledger_projection import _autostart_kind, persistence_from_ledger
 
     assert _autostart_kind(key) is None
     ledger = [
@@ -287,8 +287,8 @@ def _signatures(*rows: dict[str, Any]) -> list[LedgerEntry]:
 
 
 def test_a_sandbox_signature_keeps_the_techniques_the_sandbox_tagged() -> None:
-    from maljan.reporting.ledger_projection import dynamic_from_ledger
-    from maljan.reporting.ledger_report import build_sections
+    from malspark.reporting.ledger_projection import dynamic_from_ledger
+    from malspark.reporting.ledger_report import build_sections
 
     ledger = _signatures(
         {"name": "Active Setup", "severity": 8, "technique_ids": ["T1547.014", "t1112"]},
@@ -303,7 +303,7 @@ def test_a_sandbox_signature_keeps_the_techniques_the_sandbox_tagged() -> None:
 
 
 def test_an_untagged_signature_table_is_as_it_was() -> None:
-    from maljan.reporting.ledger_report import build_sections
+    from malspark.reporting.ledger_report import build_sections
 
     ledger = _signatures({"name": "Untagged", "severity": 1, "description": "d"})
     table = next(s for s in build_sections(ledger) if s.key == "sandbox_signatures")
@@ -312,7 +312,7 @@ def test_an_untagged_signature_table_is_as_it_was() -> None:
 
 
 def test_a_later_tagged_answer_gives_the_earlier_rows_a_dash() -> None:
-    from maljan.reporting.ledger_report import build_sections
+    from malspark.reporting.ledger_report import build_sections
 
     counter = EvidenceCounter()
     ledger = [
@@ -331,7 +331,7 @@ def test_a_later_tagged_answer_gives_the_earlier_rows_a_dash() -> None:
 
 
 def test_permissions_are_printed_as_permissions_and_never_as_exports() -> None:
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     report = _report(static=StaticAnalysis(permissions=["android.permission.INTERNET"]))
     markdown = MarkdownRenderer().render(report)
@@ -356,7 +356,7 @@ def _persistence_section(columns: list[str], rows: list[list[str]]) -> EvidenceS
 
 
 def test_a_persistence_listing_is_read_by_its_headings() -> None:
-    from maljan.reporting.ledger_report import analyst_persistence
+    from malspark.reporting.ledger_report import analyst_persistence
 
     reordered = _persistence_section(
         ["Target", "Payload", "Kind"], [["HKCU\\...\\Run\\upd", "C:\\x.exe", "registry_run"]]
@@ -376,7 +376,7 @@ def test_a_persistence_listing_is_read_by_its_headings() -> None:
 
 
 def test_an_ioc_listing_is_read_by_its_headings() -> None:
-    from maljan.reporting.ledger_projection import listed_non_network_values
+    from malspark.reporting.ledger_projection import listed_non_network_values
 
     rows = [["Global\\m1", "mutex"], ["C:\\x.exe", "path"]]
     assert listed_non_network_values("iocs", rows, ["Value", "Type"]) == [
@@ -391,7 +391,7 @@ def test_an_ioc_listing_is_read_by_its_headings() -> None:
 def _merged(
     kind: str, one: tuple[list[str], list[list[str]]], two: tuple[list[str], list[list[str]]]
 ) -> Any:
-    from maljan.reporting.ledger_report import build_sections
+    from malspark.reporting.ledger_report import build_sections
 
     isrs = {
         "static": AgentISR(
@@ -409,7 +409,7 @@ def _merged(
 
 
 def test_a_merged_table_reads_each_artifact_by_its_own_headings() -> None:
-    from maljan.reporting.ledger_report import analyst_persistence
+    from malspark.reporting.ledger_report import analyst_persistence
 
     sections = _merged(
         "persistence",
@@ -430,8 +430,8 @@ def test_a_merged_table_reads_each_artifact_by_its_own_headings() -> None:
 
 
 def test_a_merged_ioc_list_keeps_every_row_the_positional_read_kept() -> None:
-    from maljan.reporting.ledger_projection import listed_non_network_values
-    from maljan.reporting.ledger_report import listed_headings, listed_rows
+    from malspark.reporting.ledger_projection import listed_non_network_values
+    from malspark.reporting.ledger_report import listed_headings, listed_rows
 
     sections = _merged(
         "iocs",
@@ -447,7 +447,7 @@ def test_a_merged_ioc_list_keeps_every_row_the_positional_read_kept() -> None:
 
 
 def test_a_duplicate_value_heading_is_the_payload() -> None:
-    from maljan.reporting.ledger_report import analyst_persistence
+    from malspark.reporting.ledger_report import analyst_persistence
 
     sections = _merged(
         "persistence",
@@ -458,7 +458,7 @@ def test_a_duplicate_value_heading_is_the_payload() -> None:
 
 
 def test_a_merged_table_of_alike_headings_is_as_it_was() -> None:
-    from maljan.reporting.ledger_report import build_sections
+    from malspark.reporting.ledger_report import build_sections
 
     one = Artifact(kind="mutex", columns=["Label", "Value"], rows=[["m", "a"]])
     two = Artifact(kind="mutex", columns=["label", "value"], rows=[["n", "b", "extra"]])
@@ -475,7 +475,7 @@ def test_a_merged_table_of_alike_headings_is_as_it_was() -> None:
 
 
 def test_the_narrative_asserts_no_absence_without_a_sandbox() -> None:
-    from maljan.reporting.narrative_agent import NO_SANDBOX_OBSERVATION, build_prompt_text
+    from malspark.reporting.narrative_agent import NO_SANDBOX_OBSERVATION, build_prompt_text
 
     static_only = build_prompt_text(_report())
     assert static_only.count(f"  ({NO_SANDBOX_OBSERVATION})") == 2
@@ -499,7 +499,7 @@ def test_the_narrative_asserts_no_absence_without_a_sandbox() -> None:
     ],
 )
 def test_a_profile_count_is_stated_only_when_measured(section: str, facts: tuple[str, ...]) -> None:
-    from maljan.reporting.evidence_bundles import bundle_for
+    from malspark.reporting.evidence_bundles import bundle_for
 
     unmeasured = bundle_for(section, _report(static=StaticAnalysis()), {}, None)["facts"]
     assert not set(facts) & set(unmeasured)

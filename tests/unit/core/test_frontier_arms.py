@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.core.config import FrontierArm, FrontierConfig
-from maljan.core.frontier import (
+from malspark.core.config import FrontierArm, FrontierConfig
+from malspark.core.frontier import (
     PacedCaller,
     arm_provenance,
     is_rate_limited,

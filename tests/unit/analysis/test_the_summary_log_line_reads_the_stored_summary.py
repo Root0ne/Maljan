@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import inspect
 
-from maljan.analysis.run_summary import summary_counts_line
+from malspark.analysis.run_summary import summary_counts_line
 
 
 def _summary() -> dict[str, object]:
@@ -47,7 +47,7 @@ def test_an_empty_summary_reads_as_nothing_counted() -> None:
 
 
 def test_both_log_lines_are_read_from_a_summary() -> None:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     source = inspect.getsource(nodes)
     assert source.count("summary_counts_line(") == 2

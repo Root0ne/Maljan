@@ -30,8 +30,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from maljan.core.logger import logger
-from maljan.core.settings_masking import masked_text
+from malspark.core.logger import logger
+from malspark.core.settings_masking import masked_text
 
 from app.logsafe import log_safe
 
@@ -53,7 +53,7 @@ def _provider_for(settings: Any, provider_id: str) -> Any:
     ``static.provider`` names it, as ``ServiceContainer.get_static_provider``
     does.
     """
-    from maljan.providers.registry import get_static_provider
+    from malspark.providers.registry import get_static_provider
 
     cfg = settings
     if provider_id != str(settings.static.provider):
@@ -72,7 +72,7 @@ async def unready_static_providers(
     needs none that fails loudly, and when the profile does not exist (that
     refusal is the caller's, with the list of the ones that do).
     """
-    from maljan.agents.composition import (
+    from malspark.agents.composition import (
         reachable_agents,
         static_provider_id_for,
         static_provider_ids_for,

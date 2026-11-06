@@ -8,11 +8,11 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import BudgetMeter
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.core.config import AgentLLMConfig, Settings
-from maljan.llm.fallback import FALLBACK_KEY, MODEL_KEY
-from maljan.pipeline.events import (
+from malspark.agents.base_agent import BudgetMeter
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.core.config import AgentLLMConfig, Settings
+from malspark.llm.fallback import FALLBACK_KEY, MODEL_KEY
+from malspark.pipeline.events import (
     AGENT_MESSAGE_DELTA,
     MODEL_FALLBACK,
     emit_agent_message_delta,
@@ -153,8 +153,8 @@ class TestTheReporter:
 
         from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-        from maljan.llm.fallback import FallbackChatModel
-        from maljan.pipeline.nodes import _restart_reporter
+        from malspark.llm.fallback import FallbackChatModel
+        from malspark.pipeline.nodes import _restart_reporter
 
         chain = FallbackChatModel(
             models=[FakeListChatModel(responses=["a"]), FakeListChatModel(responses=["b"])],
@@ -174,7 +174,7 @@ class TestTheReporter:
         assert chain.turn_deadline == 60.0, "one section's clock"
 
     def test_its_switch_is_announced(self) -> None:
-        from maljan.pipeline.events import announce_model_fallback
+        from malspark.pipeline.events import announce_model_fallback
 
         events: list[tuple[str, dict[str, Any]]] = []
         announce_model_fallback(
@@ -191,7 +191,7 @@ class TestTheReporter:
         ]
 
     def test_the_narrative_round_announces_through_its_sink(self) -> None:
-        from maljan.reporting.narrative_agent import NarrativeAgent
+        from malspark.reporting.narrative_agent import NarrativeAgent
 
         agent = NarrativeAgent(llm=AIMessage(content="unused"))  # type: ignore[arg-type]
         assert agent.event_sink is None
@@ -199,8 +199,8 @@ class TestTheReporter:
 
 def _run_summary_text(run_summary: dict) -> str:
     """The report's run-summary appendix for a report carrying ``run_summary``."""
-    from maljan.reporting.models import MalwareReport
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.models import MalwareReport
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     report = MalwareReport.model_validate(
         {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}

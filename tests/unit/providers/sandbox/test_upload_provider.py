@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.providers.errors import ProviderError
-from maljan.providers.sandbox.upload import UploadSandboxProvider
-from maljan.schemas.sandbox_document import sandbox_document
+from malspark.core.config import Settings
+from malspark.providers.errors import ProviderError
+from malspark.providers.sandbox.upload import UploadSandboxProvider
+from malspark.schemas.sandbox_document import sandbox_document
 from tests.unit.providers._cape_fixture import first_cape_report_path
 
 ROOT = Path(__file__).resolve().parents[4]

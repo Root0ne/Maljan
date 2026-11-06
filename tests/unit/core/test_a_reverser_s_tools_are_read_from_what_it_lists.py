@@ -30,12 +30,12 @@ from typing import Any
 import pytest
 from tests.conftest import ghidra_listing, r2_listing
 
-from maljan.core import served_declarations
-from maljan.core.config import MCPServerConfig, SampleOpenConfig, Settings, ghidra_block
-from maljan.core.derived_declarations import derived_readings, program_readings_of
-from maljan.core.program_reading import program_facts, program_kind
-from maljan.core.tool_declarations import ToolDeclarations, ToolFacts, launch_identity
-from maljan.core.undeclared_tools import decompiles, reads_xrefs
+from malspark.core import served_declarations
+from malspark.core.config import MCPServerConfig, SampleOpenConfig, Settings, ghidra_block
+from malspark.core.derived_declarations import derived_readings, program_readings_of
+from malspark.core.program_reading import program_facts, program_kind
+from malspark.core.tool_declarations import ToolDeclarations, ToolFacts, launch_identity
+from malspark.core.undeclared_tools import decompiles, reads_xrefs
 
 ROOT = Path(__file__).resolve().parents[3]
 SCHEMA = ROOT / "tests" / "fixtures" / "tools" / "ghidra_mcp_schema.json"
@@ -85,7 +85,7 @@ def test_every_listed_tool_is_read_with_a_kind_and_its_category(
     ghidra_read: dict[str, ToolFacts], r2_read: dict[str, ToolFacts]
 ) -> None:
     ghidra, r2 = ghidra_read, r2_read
-    from maljan.core.undeclared_tools import category_tag
+    from malspark.core.undeclared_tools import category_tag
 
     assert len(ghidra) == 165 and len(r2) == 33
     for name, facts in (*ghidra.items(), *r2.items()):
@@ -194,8 +194,8 @@ def test_an_open_or_load_verb_reaches_the_open_program_readers(
     ghidra_read: dict[str, ToolFacts], r2_read: dict[str, ToolFacts]
 ) -> None:
     ghidra, r2 = ghidra_read, r2_read
-    from maljan.agents.image_range import _OPENS_A_PROGRAM
-    from maljan.core.declared_reading import consumer_kinds
+    from malspark.agents.image_range import _OPENS_A_PROGRAM
+    from malspark.core.declared_reading import consumer_kinds
 
     opening = consumer_kinds("evidence_roots._OPEN_TOOLS")
     for facts in (ghidra["load_program"], ghidra["open_program"], r2["open_file"]):
@@ -253,7 +253,7 @@ def test_a_read_is_read_only_only_for_the_job_s_program(
 
 
 def test_a_read_is_never_read_only_without_the_block_s_statement() -> None:
-    from maljan.core.declared_reading import tools_in_force
+    from malspark.core.declared_reading import tools_in_force
 
     listing = r2_listing()
     read, closed = derived_readings(listing)
@@ -264,7 +264,7 @@ def test_a_read_is_never_read_only_without_the_block_s_statement() -> None:
 
 
 def test_a_batch_names_the_listed_tool_it_aggregates(ghidra_read: dict[str, ToolFacts]) -> None:
-    from maljan.core.undeclared_tools import aggregates_of
+    from malspark.core.undeclared_tools import aggregates_of
 
     assert aggregates_of(ghidra_read) == {
         "batch_decompile": ("decompile_function",),
@@ -285,7 +285,7 @@ def test_a_batch_names_the_listed_tool_it_aggregates(ghidra_read: dict[str, Tool
 
 
 def test_a_tool_that_declares_itself_is_not_read() -> None:
-    from maljan.tools.declared_facts import FACTS_META_KEY
+    from malspark.tools.declared_facts import FACTS_META_KEY
 
     listed = {
         "name": "list_imports",
@@ -310,7 +310,7 @@ def _effects(facts: ToolFacts) -> dict[str, Any]:
 def test_no_ghidra_or_radare2_tool_reads_as_sending_the_sample(
     ghidra: dict[str, ToolFacts], r2: dict[str, ToolFacts]
 ) -> None:
-    from maljan.analysis.tool_effects import sends_sample_bytes
+    from malspark.analysis.tool_effects import sends_sample_bytes
 
     for source, tools in (("ghidra", ghidra), ("r2", r2)):
         for name, facts in tools.items():
@@ -356,7 +356,7 @@ def test_a_tool_that_says_otherwise_keeps_what_it_says(
 
 
 def test_a_tool_that_says_it_uploads_the_file_still_sends_it() -> None:
-    from maljan.core.declared_reading import tools_in_force
+    from malspark.core.declared_reading import tools_in_force
 
     listing = [
         *r2_listing(),
@@ -379,7 +379,7 @@ def test_a_tool_that_says_it_uploads_the_file_still_sends_it() -> None:
 
 
 def test_the_statement_never_lifts_a_disclosure_off_another_server() -> None:
-    from maljan.core.declared_reading import tools_in_force
+    from malspark.core.declared_reading import tools_in_force
 
     listing = r2_listing()
     read, closed = derived_readings(listing)
@@ -523,7 +523,7 @@ def test_the_schema_s_method_says_nothing_of_a_change() -> None:
 
 
 def test_ghidra_s_http_attach_keeps_what_it_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    from maljan.providers.static.ghidra.provider import GhidraStaticProvider
+    from malspark.providers.static.ghidra.provider import GhidraStaticProvider
 
     cfg = ghidra_block()
     source, launch = "provider:ghidra", launch_identity(cfg)
@@ -544,7 +544,7 @@ def test_ghidra_s_http_attach_keeps_what_it_read(monkeypatch: pytest.MonkeyPatch
 
 
 def test_an_analysis_tool_may_be_named_without_an_open_tool() -> None:
-    from maljan.providers.sample_open import declared, long_running_tools
+    from malspark.providers.sample_open import declared, long_running_tools
 
     spec = SampleOpenConfig(analyse_tool="analyze")
     assert not declared(spec)
@@ -608,7 +608,7 @@ _SENDERS = [
 def _under_shipped(
     which: str, listing: list[dict[str, Any]], served: Mapping[str, ToolFacts] | None = None
 ) -> dict[str, ToolFacts]:
-    from maljan.core.declared_reading import tools_in_force
+    from malspark.core.declared_reading import tools_in_force
 
     block = getattr(Settings(_env_file=None).static, which)
     read, closed = derived_readings(listing)
@@ -621,7 +621,7 @@ def _under_shipped(
 
 @pytest.mark.parametrize("which", ["ghidra", "r2"])
 def test_the_statement_never_lifts_content_or_a_send(which: str) -> None:
-    from maljan.analysis.tool_effects import sends_sample_bytes
+    from malspark.analysis.tool_effects import sends_sample_bytes
 
     tools = _under_shipped(which, [*r2_listing(), *_SENDERS])
     for name in ("scan_bytes", "send_to_cloud"):
@@ -633,7 +633,7 @@ def test_the_statement_never_lifts_content_or_a_send(which: str) -> None:
 
 @pytest.mark.parametrize("which", ["ghidra", "r2"])
 def test_a_hostile_listing_cannot_say_a_send_away(which: str) -> None:
-    from maljan.analysis.tool_effects import sends_sample_bytes
+    from malspark.analysis.tool_effects import sends_sample_bytes
 
     # Marked read-only and closed by its own server, and declared local under
     # its _meta: an untrusted server's word never lifts a send.
@@ -686,9 +686,9 @@ def test_a_run_verb_is_the_block_s_own_step_only_where_its_sample_open_names_it(
 def test_a_stored_removal_and_a_kind_free_change_read_as_on_dev() -> None:
     import logging
 
-    from maljan.core import settings_overrides as so
-    from maljan.core.declared_reading import tools_in_force
-    from maljan.core.tool_declarations import with_mark
+    from malspark.core import settings_overrides as so
+    from malspark.core.declared_reading import tools_in_force
+    from malspark.core.tool_declarations import with_mark
 
     stored = with_mark(
         {
@@ -748,8 +748,8 @@ def _hard(name: str) -> str:
 def test_a_never_seen_server_spelt_otherwise_keeps_every_consumer_kind(
     which: str, ghidra_read: dict[str, ToolFacts], r2_read: dict[str, ToolFacts]
 ) -> None:
-    from maljan.core.builtin_declarations import CONSUMER_KINDS
-    from maljan.reporting.evidence_bundles import _SECTION_KINDS
+    from malspark.core.builtin_declarations import CONSUMER_KINDS
+    from malspark.reporting.evidence_bundles import _SECTION_KINDS
 
     consumed = {k for spec in CONSUMER_KINDS.values() for k in spec.get("kinds", ())}
     consumed |= {k for kinds in _SECTION_KINDS.values() for k in kinds}
@@ -767,7 +767,7 @@ def test_a_never_seen_server_spelt_otherwise_keeps_every_consumer_kind(
 
 
 def test_what_is_kept_of_a_listing_is_read_by_the_shipped_names_again() -> None:
-    from maljan.core.declared_reading import shipped_by_name
+    from malspark.core.declared_reading import shipped_by_name
 
     assert shipped_by_name()["list_imports"].kind == "import_listing"
     listing = [{"name": "list_widgets", "inputSchema": {"type": "object", "properties": {}}}]
@@ -808,7 +808,7 @@ def test_what_is_kept_of_a_listing_is_read_by_the_shipped_names_again() -> None:
     ],
 )
 def test_a_tool_that_says_it_sends_is_never_lifted(which: str, definition: dict) -> None:
-    from maljan.analysis.tool_effects import sends_sample_bytes
+    from malspark.analysis.tool_effects import sends_sample_bytes
 
     tools = _under_shipped(which, [definition])
     assert sends_sample_bytes(tools[definition["name"]])
@@ -887,10 +887,10 @@ def test_an_argument_names_code_to_run_by_its_words_and_the_verb(
 def test_a_stored_removal_keeps_that_a_tool_sends_the_sample(which: str) -> None:
     import logging
 
-    from maljan.analysis.tool_effects import sends_sample_bytes
-    from maljan.core import settings_overrides as so
-    from maljan.core.declared_reading import tools_in_force
-    from maljan.core.tool_declarations import with_mark
+    from malspark.analysis.tool_effects import sends_sample_bytes
+    from malspark.core import settings_overrides as so
+    from malspark.core.declared_reading import tools_in_force
+    from malspark.core.tool_declarations import with_mark
 
     listing = [
         {
@@ -941,7 +941,7 @@ def test_a_stored_removal_keeps_that_a_tool_sends_the_sample(which: str) -> None
 def test_content_by_the_one_rule_is_never_lifted_under_the_statement(
     argument: str, schema: dict[str, Any]
 ) -> None:
-    from maljan.analysis.tool_effects import sends_sample_bytes
+    from malspark.analysis.tool_effects import sends_sample_bytes
 
     listing = [
         {

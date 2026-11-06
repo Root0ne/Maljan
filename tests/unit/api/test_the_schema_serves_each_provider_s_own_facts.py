@@ -15,9 +15,9 @@ import pytest
 
 from app.services.provider_facts import OWN_PROBE_LABELS, probe_labels
 from app.services.settings_catalog_api import resolved_catalog
-from maljan.core.config import reserved_server_keys, shipped_server_keys
-from maljan.llm import registry
-from maljan.llm.provider_base import _FACTS, LLMProvider, facts_of, provider_names
+from malspark.core.config import reserved_server_keys, shipped_server_keys
+from malspark.llm import registry
+from malspark.llm.provider_base import _FACTS, LLMProvider, facts_of, provider_names
 
 
 def _entry(key: str) -> Any:

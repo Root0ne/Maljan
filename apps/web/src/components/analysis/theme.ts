@@ -16,7 +16,7 @@ import { THEME_STORAGE_KEY } from "./themeScript";
 export type UiTheme = "light" | "dark";
 
 const KEY = THEME_STORAGE_KEY;
-const EVENT = "maljan:ui-theme";
+const EVENT = "malspark:ui-theme";
 
 export function resolveTheme(stored: string | null, prefersLight: boolean): UiTheme {
   if (stored === "light" || stored === "dark") return stored;

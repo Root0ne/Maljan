@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import (
     MalwareReport,
     NetworkDomain,
     NetworkIOCs,
@@ -31,10 +31,10 @@ from maljan.reporting.models import (
     StaticAnalysis,
     StringIOC,
 )
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.judgement import INDICATOR_TYPES, indicator_type_for
-from maljan.schemas.stix_models import Bundle
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.judgement import INDICATOR_TYPES, indicator_type_for
+from malspark.schemas.stix_models import Bundle
 
 # The properties a STIX object carries a reference in.
 _REF_FIELDS = ("source_ref", "target_ref")
@@ -101,8 +101,8 @@ def _judge_bundle(verdict: str) -> dict[str, Any]:
             "relationship_type": "uses",
             "source_ref": "malware--0f1e2d3c-4b5a-4968-8776-655443332203",
             "target_ref": "attack-pattern--0f1e2d3c-4b5a-4968-8776-655443332201",
-            "x_maljan_confidence": 0.6,
-            "x_maljan_technique_id": "T1027",
+            "x_malspark_confidence": 0.6,
+            "x_malspark_technique_id": "T1027",
         },
         {
             "type": "malware",
@@ -114,7 +114,7 @@ def _judge_bundle(verdict: str) -> dict[str, Any]:
     return {
         "type": "bundle",
         "objects": objects,
-        "x_maljan_assessment": {
+        "x_malspark_assessment": {
             "verdict": verdict,
             "severity": {"rating": "Medium", "rationale": "stated by the judge"},
             "confidence": 0.7,

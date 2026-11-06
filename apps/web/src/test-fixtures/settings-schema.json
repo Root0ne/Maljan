@@ -1,7 +1,7 @@
 {
  "credential_servers": {
   "virustotal": {
-   "family": "vt-mcp-maljan",
+   "family": "vt-mcp-malspark",
    "label": "VirusTotal MCP",
    "note": "The agent token is free and is issued to this deployment without an account. VirusTotal enforces its own published quotas on it; a lookup over quota comes back as a 429 with a retry delay, and the analyst carries on without that answer. Only the read-only lookups are ticked. The submit tools upload the sample itself to VirusTotal, where it is shared with their customers, so they stay off until you tick them in the Tools step."
   }
@@ -11328,18 +11328,18 @@
      "reason": null,
      "required_env": {
       "analysis": [
-       "MALJAN_STAGING_DIR",
-       "MALJAN_STAGING_TTL_HOURS",
-       "MALJAN_SAMPLE_ROOTS"
+       "MALSPARK_STAGING_DIR",
+       "MALSPARK_STAGING_TTL_HOURS",
+       "MALSPARK_SAMPLE_ROOTS"
       ],
       "knowledge": [
-       "MALJAN_INDEX_RETRY_SECONDS",
-       "MALJAN_ATTCK_REFRESH_DAYS",
-       "MALJAN_SAMPLE_SHA256"
+       "MALSPARK_INDEX_RETRY_SECONDS",
+       "MALSPARK_ATTCK_REFRESH_DAYS",
+       "MALSPARK_SAMPLE_SHA256"
       ],
       "network": [
-       "MALJAN_STAGING_DIR",
-       "MALJAN_SAMPLE_ROOTS"
+       "MALSPARK_STAGING_DIR",
+       "MALSPARK_SAMPLE_ROOTS"
       ]
      },
      "reserved_servers": [

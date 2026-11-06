@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.schemas.sandbox_document import renamed
-from maljan.schemas.sandbox_report import CAPE_RENAMES
+from malspark.schemas.sandbox_document import renamed
+from malspark.schemas.sandbox_report import CAPE_RENAMES
 
 
 def as_published(document: Any, source: dict[str, Any]) -> bool:

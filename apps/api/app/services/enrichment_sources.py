@@ -1,11 +1,11 @@
 """The enrichment sources in force, their credentials, and what the console is told about them.
 
 ``api.enrichment_sources`` holds the operator's declarations
-(``maljan.enrichment.declared``), laid over the sources the platform ships.
+(``malspark.enrichment.declared``), laid over the sources the platform ships.
 A source's own credential (``api_key``) is stored in an encrypted row of its
 own, like a frontier arm's key (``nested_secrets``); a source may instead name
 a secret setting in ``credential``, which the catalog generates from the
-shipped declarations (``maljan.enrichment.declared.credential_settings_of``).
+shipped declarations (``malspark.enrichment.declared.credential_settings_of``).
 
 With ``api.enrichment_reputation_servers`` on, every enabled tool server whose
 roles hold ``reputation`` and that no source names is a source too
@@ -22,7 +22,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any
 
-from maljan.enrichment.declared import (
+from malspark.enrichment.declared import (
     EnrichmentSource,
     ReadySource,
     effective_sources,
@@ -118,7 +118,7 @@ def slowest_shipped_pace() -> float:
     service a shipped source asks directly then never asks it faster than
     that source does, whichever service it is. Read from the declarations.
     """
-    from maljan.enrichment.builtin_sources import builtin_source_entries
+    from malspark.enrichment.builtin_sources import builtin_source_entries
 
     paces = [
         float(entry.get("rate_limit_seconds") or 0.0)
@@ -143,8 +143,8 @@ def reputation_server_sources(
     carries no verdict and marks no indicator. A server a declared source names (``named``)
     is asked only as that source declares.
     """
-    from maljan.core.reputation import REPUTATION_ROLE
-    from maljan.enrichment.declared import ASKED_KINDS
+    from malspark.core.reputation import REPUTATION_ROLE
+    from malspark.enrichment.declared import ASKED_KINDS
 
     taken = set(named)
     out: dict[str, EnrichmentSource] = {}
@@ -298,8 +298,8 @@ async def enrichment_reach(
     credential: the secret is read only to tell whether the source is
     configured, as the job reads it.
     """
-    from maljan.analysis.disclosure import enrichment_source_row, registry_rows
-    from maljan.enrichment.declared import ASKED_KINDS
+    from malspark.analysis.disclosure import enrichment_source_row, registry_rows
+    from malspark.enrichment.declared import ASKED_KINDS
 
     rows = registry_rows()
     ready = await ready_sources(

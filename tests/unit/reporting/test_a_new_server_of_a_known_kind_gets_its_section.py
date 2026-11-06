@@ -18,15 +18,15 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.declared_reading import facts_record
-from maljan.core.reputation import reputation_of
-from maljan.core.tool_declarations import ToolDeclarations
-from maljan.reporting.ledger_report import RULE_TABLES, build_sections, section_key_of_kind
-from maljan.reporting.models import EvidenceSection
-from maljan.reporting.renderers.markdown import _capability_rules, _capability_tool
-from maljan.reporting.run_diff import RunRecord, detection_sections, diff_runs
-from maljan.schemas.evidence import build_entry
+from malspark.core.config import Settings
+from malspark.core.declared_reading import facts_record
+from malspark.core.reputation import reputation_of
+from malspark.core.tool_declarations import ToolDeclarations
+from malspark.reporting.ledger_report import RULE_TABLES, build_sections, section_key_of_kind
+from malspark.reporting.models import EvidenceSection
+from malspark.reporting.renderers.markdown import _capability_rules, _capability_tool
+from malspark.reporting.run_diff import RunRecord, detection_sections, diff_runs
+from malspark.schemas.evidence import build_entry
 
 # The built-in tool of each kind the invented server's tool copies, by source.
 BUILT_IN: dict[str, tuple[str, str]] = {
@@ -158,7 +158,7 @@ def test_a_new_rule_tool_is_drawn_in_its_kind_s_table(
 def test_the_renderer_and_the_comparison_read_the_new_tool_s_tables(
     declared: ToolDeclarations,
 ) -> None:
-    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
 
     ledger = [
         _entry(declared, f"mcp:{SERVER}", INVENTED[kind], ANSWERS[kind], n)

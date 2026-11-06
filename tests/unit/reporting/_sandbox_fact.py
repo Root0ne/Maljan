@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.pipeline.validation import UNATTRIBUTED_INDICATOR_CODE
+from malspark.pipeline.validation import UNATTRIBUTED_INDICATOR_CODE
 
 
 def answered_the_sandbox_fact(*subjects: str) -> dict[str, Any]:

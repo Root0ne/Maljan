@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, FunctionSummarizer
+from malspark.analysis.function_summarizer import SUMMARY_CUT_NOTE, FunctionSummarizer
 
 # ---------------------------------------------------------------------------
 # Mock LLM factory
@@ -92,8 +92,8 @@ class TestSummarizeChunk:
         assert "A" * 20_000 in full_prompt
 
     def test_the_chunk_is_fenced_and_an_old_end_marker_stays_inside(self) -> None:
-        from maljan.agents.tool_fence import FENCE_OPEN
-        from maljan.analysis.function_summarizer import (
+        from malspark.agents.tool_fence import FENCE_OPEN
+        from malspark.analysis.function_summarizer import (
             SUMMARY_FENCE_ID,
             SUMMARY_FENCE_STATEMENT,
         )
@@ -132,8 +132,8 @@ class TestSummarizeChunk:
         assert lines[opened + 2].startswith("<<end of tool output [")
 
     def test_the_fence_room_is_the_fence_this_prompt_carries(self) -> None:
-        from maljan.agents.tool_fence import fence_lines_room
-        from maljan.analysis.function_summarizer import SUMMARY_FENCE_ID
+        from malspark.agents.tool_fence import fence_lines_room
+        from malspark.analysis.function_summarizer import SUMMARY_FENCE_ID
 
         room = 12_000
         llm = _make_mock_llm("summary")
@@ -258,7 +258,7 @@ class TestACutSummaryIsMarkedCut:
         assert [c.args for c in ledger.record_summary_cut.call_args_list] == [(100,)]
 
     def test_summaries_cut_at_one_limit_are_counted_in_one_sentence(self) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         ledger = TruncationLedger()
         ledger.record_input_shortened("Another input was shortened.")
@@ -285,7 +285,7 @@ class TestACutSummaryIsMarkedCut:
     def test_summaries_cut_at_different_limits_are_counted_apart(self) -> None:
         from contextlib import contextmanager
 
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         holds = iter([40, None, None])
 
@@ -298,7 +298,7 @@ class TestACutSummaryIsMarkedCut:
             [_answer("cut", 40), _answer("cut", 100), _answer("cut", 100)], max_tokens=100
         )
         summarizer = FunctionSummarizer(llm=llm, truncation_ledger=ledger)  # type: ignore[arg-type]
-        with patch("maljan.core.spend.admitted", _held):
+        with patch("malspark.core.spend.admitted", _held):
             for chunk in ("a", "b", "c"):
                 summarizer.summarize_chunk(chunk)
 
@@ -314,7 +314,7 @@ class TestACutSummaryIsMarkedCut:
         import threading
         import time
 
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         class _SlowLedger(TruncationLedger):
             """A ledger whose recording takes a moment, as any shared work may."""
@@ -349,7 +349,7 @@ class TestACutSummaryIsMarkedCut:
         ]
 
     def test_a_summariser_rebuilt_during_the_job_counts_on(self) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         ledger = TruncationLedger()
         for _ in range(2):
@@ -383,7 +383,7 @@ class TestACutSummaryIsMarkedCut:
 
         llm = _Capped([_answer("It injects", 40), _answer("It reads.", 30)])
         summarizer = FunctionSummarizer(llm=llm)  # type: ignore[arg-type]
-        with patch("maljan.core.spend.admitted", _held):
+        with patch("malspark.core.spend.admitted", _held):
             cut = summarizer.summarize_chunk("code")
             whole = summarizer.summarize_chunk("code")
 

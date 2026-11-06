@@ -22,17 +22,17 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import EARLIER_CHUNKS_HEAD, BaseAnalyst
-from maljan.agents.evidence_recorder import (
+from malspark.agents.base_agent import EARLIER_CHUNKS_HEAD, BaseAnalyst
+from malspark.agents.evidence_recorder import (
     EvidenceRecorder,
     RepeatGuard,
     earlier_chunk_answer,
     record_tools,
     seeded_repeat_guard,
 )
-from maljan.agents.tool_fence import fenced
-from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
+from malspark.agents.tool_fence import fenced
+from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
+from malspark.schemas.evidence import EvidenceCounter, LedgerEntry
 
 RESULT = "int FUN_3c7c(void)\n{ return decode(0x10); }"
 
@@ -204,7 +204,7 @@ def _chunk(index: int) -> TextChunk:
 
 @pytest.fixture(autouse=True)
 def _no_suggestions(monkeypatch: pytest.MonkeyPatch) -> None:
-    from maljan.tools import knowledge
+    from malspark.tools import knowledge
 
     monkeypatch.setattr(knowledge, "resolve_technique", lambda *a, **k: {"candidates": []})
 
@@ -217,7 +217,7 @@ def test_the_second_chunk_s_model_reads_the_earlier_calls_and_their_result() -> 
     analyst.logger = logging.getLogger("test.later_chunk")
     analyst.tools = [_tool(calls)]
 
-    with patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)):
+    with patch("malspark.agents.base_agent.loop_limits", return_value=(None, None)):
         analyst.safe_analyze_isr_chunked([_chunk(0), _chunk(1)])
 
     assert calls == ["0x3c7c"], "the second chunk's identical call is not run"
@@ -239,7 +239,7 @@ class TestWhatTheBlockAndTheAnswerSay:
     def test_an_entry_the_run_did_not_keep_is_marked_as_one_that_may_be_made_again(
         self,
     ) -> None:
-        from maljan.agents.base_agent import earlier_chunks_block
+        from malspark.agents.base_agent import earlier_chunks_block
 
         block = earlier_chunks_block(
             [_entry(), _entry(id="ev_0004", args={"path": "0x4000"}, output="", truncated=True)]
@@ -252,8 +252,8 @@ class TestWhatTheBlockAndTheAnswerSay:
     def test_a_shortened_earlier_result_carries_its_shortening_notice(self) -> None:
         import json
 
-        from maljan.agents.evidence_recorder import shortened_notice
-        from maljan.agents.output_shortening import shorten_json_document
+        from malspark.agents.evidence_recorder import shortened_notice
+        from malspark.agents.output_shortening import shorten_json_document
 
         answer = json.dumps({"rows": [{"n": index} for index in range(400)]})
         shortened = shorten_json_document(answer, 2000).text

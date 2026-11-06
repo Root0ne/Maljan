@@ -16,7 +16,7 @@ import re
 
 import pytest
 
-from maljan.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.html import HtmlRenderer
 
 _html = HtmlRenderer._markdown_to_html
 

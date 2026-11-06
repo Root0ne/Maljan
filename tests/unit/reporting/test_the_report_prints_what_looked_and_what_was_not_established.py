@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from maljan.analysis.coverage import (
+from malspark.analysis.coverage import (
     ABSENCE_POINTER,
     LOOKED_INTRO,
     NEGATIVES_INTRO,
@@ -24,10 +24,10 @@ from maljan.analysis.coverage import (
     coverage_lines,
     coverage_record,
 )
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.unit.reporting.test_the_report_says_what_left_the_machine import STORED_RENDERS
 
 GENERATED_AT = datetime(2026, 9, 1, tzinfo=UTC)
@@ -99,7 +99,7 @@ def test_a_model_s_claim_cannot_open_a_link_or_a_code_span() -> None:
 
 
 def test_the_html_report_carries_the_blocks() -> None:
-    from maljan.reporting.renderers import HtmlRenderer
+    from malspark.reporting.renderers import HtmlRenderer
 
     html = HtmlRenderer().render(
         _report({"final_decision": "Malware", "coverage": _record()}), nonce="fixed"
@@ -116,7 +116,7 @@ def test_a_summary_without_the_record_prints_no_block_and_no_pointer() -> None:
 
 
 def test_a_nothing_recorded_line_points_to_the_coverage_where_it_was_recorded() -> None:
-    from maljan.reporting.renderers.markdown import _Context
+    from malspark.reporting.renderers.markdown import _Context
 
     with_record = _Context(_report({"final_decision": "Malware", "coverage": _record()}))
     without = _Context(_report({"final_decision": "Malware"}))
@@ -146,7 +146,7 @@ def test_the_analysts_come_from_the_report_s_own_analyst_record() -> None:
 
 @pytest.mark.parametrize("run", sorted(STORED_RENDERS))
 def test_a_stored_run_renders_as_it_did_before_the_blocks(run: str) -> None:
-    from maljan.reporting.renderers import HtmlRenderer
+    from malspark.reporting.renderers import HtmlRenderer
     from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import (
         _benchmark,
     )

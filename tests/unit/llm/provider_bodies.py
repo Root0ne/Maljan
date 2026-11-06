@@ -56,8 +56,8 @@ def _history() -> list[Any]:
 
 
 def _openai(base_url: str | None, compat: str, **extra: Any) -> Any:
-    from maljan.core.config import Settings
-    from maljan.llm.openai_provider import OpenAIProvider
+    from malspark.core.config import Settings
+    from malspark.llm.openai_provider import OpenAIProvider
 
     settings = Settings(
         _env_file=None,
@@ -74,8 +74,8 @@ def _openai(base_url: str | None, compat: str, **extra: Any) -> Any:
 
 
 def _ollama() -> Any:
-    from maljan.core.config import Settings
-    from maljan.llm.ollama_provider import OllamaProvider
+    from malspark.core.config import Settings
+    from malspark.llm.ollama_provider import OllamaProvider
 
     settings = Settings(_env_file=None, llm={"ollama": {"disable_thinking": True}})
     return OllamaProvider(settings).build_model("qwen3:8b", 0.1, max_tokens=4096)
@@ -98,8 +98,8 @@ def _structured(model: Any, messages: list[Any]) -> Any:
 
 
 def _usage_reading() -> Any:
-    from maljan.core.spend import SpendMeter
-    from maljan.core.token_ledger import TokenLedger, turn_usage
+    from malspark.core.spend import SpendMeter
+    from malspark.core.token_ledger import TokenLedger, turn_usage
 
     answer = AIMessage(
         content="x",
@@ -139,7 +139,7 @@ def bodies() -> dict[str, Any]:
         "standard": lambda: _openai(None, "auto"),
         "ollama": _ollama,
     }
-    from maljan.agents.base_agent import frame_messages
+    from malspark.agents.base_agent import frame_messages
 
     # A tool loop's turn as the analysts' loop sends it: the run-state block
     # on its newest turn, and a note on that turn's metadata (which the
@@ -149,7 +149,7 @@ def bodies() -> dict[str, Any]:
         update={
             "response_metadata": {
                 **(framed[-1].response_metadata or {}),
-                "maljan_tool_loop_turn": True,
+                "malspark_tool_loop_turn": True,
             }
         }
     )

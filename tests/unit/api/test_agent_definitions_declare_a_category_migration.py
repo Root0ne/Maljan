@@ -17,8 +17,8 @@ from typing import Any
 
 import pytest
 
-from maljan.core.agent_category import fitting_category
-from maljan.core.config import Settings, _builtin_definitions
+from malspark.core.agent_category import fitting_category
+from malspark.core.config import Settings, _builtin_definitions
 
 ROOT = Path(__file__).resolve().parents[3]
 MIGRATION = (

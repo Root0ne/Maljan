@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     NO_STRUCTURED_REPORT_STATUS,
     UNPARSED_ANSWER_REASON,
     BaseAnalyst,
@@ -25,13 +25,13 @@ from maljan.agents.base_agent import (
     parse_structured_claims_counted,
     read_claim_blocks,
 )
-from maljan.agents.static_analyst import StaticAnalyst, _parse_claim_blocks
-from maljan.pipeline.validation import (
+from malspark.agents.static_analyst import StaticAnalyst, _parse_claim_blocks
+from malspark.pipeline.validation import (
     CLAIM_WITHOUT_CONFIDENCE_CODE,
     UNPARSED_ANSWER_CODE,
     parse_violations,
 )
-from maljan.schemas.isr_models import AgentISR
+from malspark.schemas.isr_models import AgentISR
 
 # The shape of the large model's ELF answer: headings, bullets, paragraphs.
 ELF_ANSWER = (
@@ -167,7 +167,7 @@ class TestTheValidationTurn:
         analyst, llm = _validated([GOOD_ANSWER])
         first = analyst._text_to_isr(ELF_ANSWER, revision_round=0)
 
-        with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+        with patch("malspark.agents.base_agent.validity_check_available", return_value=True):
             isr = analyst._validate_isr(first, "evidence text")
 
         assert [claim.confidence for claim in isr.claims] == [0.8]
@@ -179,7 +179,7 @@ class TestTheValidationTurn:
         analyst, _llm = _validated(["Still just a paragraph about the sample."])
         first = analyst._text_to_isr(ELF_ANSWER, revision_round=0)
 
-        with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+        with patch("malspark.agents.base_agent.validity_check_available", return_value=True):
             isr = analyst._validate_isr(first, "evidence text")
 
         assert isr.claims == []
@@ -192,7 +192,7 @@ class TestTheValidationTurn:
         analyst._answer_unstructured = True
         first = analyst._text_to_isr(ELF_ANSWER, revision_round=0)
 
-        with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+        with patch("malspark.agents.base_agent.validity_check_available", return_value=True):
             isr = analyst._validate_isr(first, "evidence text")
 
         assert llm.sent == []
@@ -202,7 +202,7 @@ class TestTheValidationTurn:
 
 
 def test_the_run_names_the_analysts_whose_answer_stayed_prose() -> None:
-    from maljan.agents.base_agent import unparsed_answers_reason
+    from malspark.agents.base_agent import unparsed_answers_reason
 
     reason = unparsed_answers_reason(["static", "reverser"])
 

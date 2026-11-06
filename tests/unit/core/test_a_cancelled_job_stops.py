@@ -19,15 +19,15 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.agents.base_agent import BaseAnalyst, _run_coro_blocking, run_on_agent_loop
-from maljan.core.cancellation import (
+from malspark.agents.base_agent import BaseAnalyst, _run_coro_blocking, run_on_agent_loop
+from malspark.core.cancellation import (
     Cancellation,
     JobCancelled,
     bound,
     current,
     stops_when_cancelled,
 )
-from maljan.core.exceptions import AgentLoopCancelled
+from malspark.core.exceptions import AgentLoopCancelled
 
 # How long any of these may take to stop once told. The slow model would
 # otherwise hold a call for an hour.
@@ -246,7 +246,7 @@ class TestTheGraphStopsBetweenNodes:
     def test_the_builder_wraps_every_node(self) -> None:
         import inspect
 
-        from maljan.pipeline import builder
+        from malspark.pipeline import builder
 
         source = inspect.getsource(builder)
         assert source.count("_node(") >= 8
@@ -338,7 +338,7 @@ class TestTheRevisionRoundToo:
         import ast
         from pathlib import Path
 
-        agents = Path(__file__).resolve().parents[3] / "src" / "maljan" / "agents"
+        agents = Path(__file__).resolve().parents[3] / "src" / "malspark" / "agents"
         found = []
         for path in sorted(agents.glob("*.py")):
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

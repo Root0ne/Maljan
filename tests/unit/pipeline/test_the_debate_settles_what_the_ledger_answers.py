@@ -29,18 +29,18 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import own_earlier_entries, repeatable_earlier_entries
-from maljan.agents.evidence_recorder import (
+from malspark.agents.base_agent import own_earlier_entries, repeatable_earlier_entries
+from malspark.agents.evidence_recorder import (
     EARLIER_CHUNK,
     EARLIER_ROUND,
     earlier_chunk_answer,
     earlier_chunk_sentence,
     seeded_repeat_guard,
 )
-from maljan.agents.judge_agent import _last_ledger_facts
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.pipeline.claim_drops import unchanged_in_substance
-from maljan.pipeline.debate_facts import (
+from malspark.agents.judge_agent import _last_ledger_facts
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.pipeline.claim_drops import unchanged_in_substance
+from malspark.pipeline.debate_facts import (
     LEDGER_STATED_HEAD,
     fact_atoms,
     ledger_count_facts,
@@ -48,11 +48,11 @@ from maljan.pipeline.debate_facts import (
     ledger_stated_sentence,
     with_ledger_stated,
 )
-from maljan.pipeline.nodes import _ledger_stated_lines
-from maljan.pipeline.routing import LEDGER_STATED, NO_CONSENSUS, REWORDED, debate_route
-from maljan.pipeline.state import AgentArgument
-from maljan.schemas.evidence import build_entry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.nodes import _ledger_stated_lines
+from malspark.pipeline.routing import LEDGER_STATED, NO_CONSENSUS, REWORDED, debate_route
+from malspark.pipeline.state import AgentArgument
+from malspark.schemas.evidence import build_entry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 AGENTS = ["alpha", "beta", "gamma"]
 SCAN = {"id": "ev_0007", "tool": "rule_scan", "structured": {"matches": [], "rule_count": 31}}
@@ -447,7 +447,7 @@ class TestARepeatOfAnEarlierRound:
 def _tool(name: str, *, server_read_only: bool = False, server: str = "decompiler") -> Any:
     from langchain_core.tools import StructuredTool
 
-    from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY, SERVER_METADATA_KEY
+    from malspark.agents.tool_pinning import READ_ONLY_METADATA_KEY, SERVER_METADATA_KEY
 
     async def _run(**_kwargs: Any) -> str:
         return ""
@@ -489,10 +489,10 @@ class TestOnlyAToolThatAnswersTheSameIsSeeded:
     def test_a_tool_its_declaration_marks_read_only_is_seeded(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.tool_declarations import ToolFacts
+        from malspark.core.tool_declarations import ToolFacts
 
         monkeypatch.setattr(
-            "maljan.agents.tool_pinning.declared_facts_of",
+            "malspark.agents.tool_pinning.declared_facts_of",
             lambda tool: ToolFacts(read_only=True) if tool.name == "task_status" else None,
         )
         agent = self._agent(
@@ -510,8 +510,8 @@ class TestOnlyAToolThatAnswersTheSameIsSeeded:
         assert repeatable_earlier_entries(agent) == []
 
     def test_the_server_s_read_only_mark_rides_on_its_tool(self) -> None:
-        from maljan.agents.mcp_client import MCPLangChainToolkit
-        from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY, answers_again
+        from malspark.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.tool_pinning import READ_ONLY_METADATA_KEY, answers_again
 
         def listed(name: str, annotations: Any) -> Any:
             return SimpleNamespace(
@@ -566,7 +566,7 @@ class _Address(BaseModel):
 def _server_tool(name: str, server: str, calls: list[str], *, read_only: bool) -> Any:
     from langchain_core.tools import StructuredTool
 
-    from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY, SERVER_METADATA_KEY
+    from malspark.agents.tool_pinning import READ_ONLY_METADATA_KEY, SERVER_METADATA_KEY
 
     def _run(address: str = "") -> str:
         calls.append(f"{name}@{server}")
@@ -601,8 +601,8 @@ class TestAStateChangeMakesAnEarlierRoundsAnswerStale:
     """A seeded answer holds only while no call that is not read-only ran on its server since."""
 
     def _loop(self, *, earlier: list[Any]) -> tuple[dict[str, Any], list[str]]:
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.schemas.evidence import EvidenceCounter
 
         calls: list[str] = []
         tools = [

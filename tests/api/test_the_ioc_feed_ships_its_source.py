@@ -199,7 +199,7 @@ class TestThePublishRuleFailsClosed:
 
     @staticmethod
     def _broken(monkeypatch: Any) -> None:
-        from maljan.reporting import builder
+        from malspark.reporting import builder
 
         def _raises(*_args: Any, **_kwargs: Any) -> Any:
             raise RuntimeError("the renderer is broken")

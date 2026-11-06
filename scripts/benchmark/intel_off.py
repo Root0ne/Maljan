@@ -36,9 +36,9 @@ from typing import Any
 from scripts.benchmark.jobs import job_config
 from scripts.benchmark.provenance import LOOKUP_KINDS
 
-from maljan.core.config import ALL_SERVERS
-from maljan.core.declared_reading import declarations
-from maljan.core.settings_overrides import build_settings
+from malspark.core.config import ALL_SERVERS
+from malspark.core.declared_reading import declarations
+from malspark.core.settings_overrides import build_settings
 
 SUFFIX = "_intel_off"
 PROFILES_KEY = "agents.profiles"

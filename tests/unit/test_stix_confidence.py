@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.schemas.stix_models import (
+from malspark.schemas.stix_models import (
     AttackPattern,
     Bundle,
     ConfidenceAnnotatedRelationship,
@@ -40,10 +40,10 @@ def _make_annotated(
         relationship_type=rel_type,
         source_ref=source_ref,
         target_ref=target_ref,
-        x_maljan_confidence=confidence,
-        x_maljan_evidence_basis=evidence_basis,  # type: ignore[arg-type]
-        x_maljan_contributing_agents=contributing_agents or ["static", "dynamic"],
-        x_maljan_technique_id=technique_id,
+        x_malspark_confidence=confidence,
+        x_malspark_evidence_basis=evidence_basis,  # type: ignore[arg-type]
+        x_malspark_contributing_agents=contributing_agents or ["static", "dynamic"],
+        x_malspark_technique_id=technique_id,
     )
 
 
@@ -75,24 +75,24 @@ class TestConfidenceAnnotatedRelationship:
 
     def test_confidence_stored_correctly(self) -> None:
         r = _make_annotated(confidence=0.75)
-        assert r.x_maljan_confidence == pytest.approx(0.75)
+        assert r.x_malspark_confidence == pytest.approx(0.75)
 
     def test_evidence_basis_stored(self) -> None:
         r = _make_annotated(evidence_basis="all")
-        assert r.x_maljan_evidence_basis == "all"
+        assert r.x_malspark_evidence_basis == "all"
 
     def test_contributing_agents_stored(self) -> None:
         r = _make_annotated(contributing_agents=["static", "network"])
-        assert "static" in r.x_maljan_contributing_agents
-        assert "network" in r.x_maljan_contributing_agents
+        assert "static" in r.x_malspark_contributing_agents
+        assert "network" in r.x_malspark_contributing_agents
 
     def test_technique_id_stored(self) -> None:
         r = _make_annotated(technique_id="T1547.001")
-        assert r.x_maljan_technique_id == "T1547.001"
+        assert r.x_malspark_technique_id == "T1547.001"
 
     def test_technique_id_can_be_none(self) -> None:
         r = _make_annotated(technique_id=None)
-        assert r.x_maljan_technique_id is None
+        assert r.x_malspark_technique_id is None
 
     def test_a_confidence_nobody_stated_is_absent(self) -> None:
         r = ConfidenceAnnotatedRelationship(
@@ -100,8 +100,8 @@ class TestConfidenceAnnotatedRelationship:
             source_ref="a",
             target_ref="b",
         )
-        assert r.x_maljan_confidence is None
-        assert "x_maljan_confidence" not in r.model_dump(mode="json")
+        assert r.x_malspark_confidence is None
+        assert "x_malspark_confidence" not in r.model_dump(mode="json")
         assert r.is_high_confidence is False
         assert r.confidence_label() == "NOT ASSESSED"
 
@@ -111,8 +111,8 @@ class TestConfidenceAnnotatedRelationship:
             source_ref="a",
             target_ref="b",
         )
-        assert r.x_maljan_evidence_basis is None
-        assert "x_maljan_evidence_basis" not in r.model_dump(mode="json")
+        assert r.x_malspark_evidence_basis is None
+        assert "x_malspark_evidence_basis" not in r.model_dump(mode="json")
 
     def test_contributing_agents_default_is_empty(self) -> None:
         r = ConfidenceAnnotatedRelationship(
@@ -120,22 +120,22 @@ class TestConfidenceAnnotatedRelationship:
             source_ref="a",
             target_ref="b",
         )
-        assert r.x_maljan_contributing_agents == []
+        assert r.x_malspark_contributing_agents == []
 
     def test_a_confidence_off_the_scale_is_kept_and_read_as_no_number(self) -> None:
         for value in (-0.1, 1.1):
             r = _make_annotated(confidence=value)
-            assert r.x_maljan_confidence == pytest.approx(value)
+            assert r.x_malspark_confidence == pytest.approx(value)
             assert r.is_high_confidence is False
             assert r.confidence_label() == "NOT ASSESSED"
 
     def test_confidence_zero_accepted(self) -> None:
         r = _make_annotated(confidence=0.0)
-        assert r.x_maljan_confidence == pytest.approx(0.0)
+        assert r.x_malspark_confidence == pytest.approx(0.0)
 
     def test_confidence_one_accepted(self) -> None:
         r = _make_annotated(confidence=1.0)
-        assert r.x_maljan_confidence == pytest.approx(1.0)
+        assert r.x_malspark_confidence == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -208,18 +208,18 @@ class TestEvidenceBasisVocab:
             relationship_type="uses",
             source_ref="a",
             target_ref="b",
-            x_maljan_evidence_basis=basis,  # type: ignore[arg-type]
+            x_malspark_evidence_basis=basis,  # type: ignore[arg-type]
         )
-        assert r.x_maljan_evidence_basis == basis
+        assert r.x_malspark_evidence_basis == basis
 
     def test_a_basis_off_the_list_is_kept_as_written(self) -> None:
         r = ConfidenceAnnotatedRelationship(
             relationship_type="uses",
             source_ref="a",
             target_ref="b",
-            x_maljan_evidence_basis="memory",
+            x_malspark_evidence_basis="memory",
         )
-        assert r.x_maljan_evidence_basis == "memory"
+        assert r.x_malspark_evidence_basis == "memory"
 
 
 # ---------------------------------------------------------------------------
@@ -295,5 +295,5 @@ class TestBundle:
         restored = Bundle.model_validate(data)
         obj = restored.objects[0]
         assert isinstance(obj, ConfidenceAnnotatedRelationship)
-        assert obj.x_maljan_confidence == pytest.approx(0.88)
-        assert obj.x_maljan_evidence_basis == "all"
+        assert obj.x_malspark_confidence == pytest.approx(0.88)
+        assert obj.x_malspark_evidence_basis == "all"

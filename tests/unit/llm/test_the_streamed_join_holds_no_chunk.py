@@ -21,8 +21,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessageChunk
 
-from maljan.core.config import Settings
-from maljan.llm.openai_provider import (
+from malspark.core.config import Settings
+from malspark.llm.openai_provider import (
     REASONING_CONTENT_KEY,
     OpenAIProvider,
     _Join,
@@ -306,7 +306,7 @@ def _ollama_parts(count: int = 3) -> list[dict[str, Any]]:
 
 
 def _ollama(parts: list[dict[str, Any]]) -> Any:
-    from maljan.llm.ollama_provider import OllamaProvider
+    from malspark.llm.ollama_provider import OllamaProvider
 
     model = OllamaProvider(Settings(_env_file=None)).build_model("m", 0.0, reasoning=True)
 
@@ -392,7 +392,7 @@ def test_a_chunk_the_callbacks_were_handed_is_left_as_sent(name: str) -> None:
 def test_an_ollama_chunk_the_callbacks_were_handed_is_left_as_sent() -> None:
     from langchain_core.outputs import ChatGenerationChunk
 
-    from maljan.llm.ollama_provider import _OllamaJoin
+    from malspark.llm.ollama_provider import _OllamaJoin
 
     chunks = [
         ChatGenerationChunk(
@@ -444,7 +444,7 @@ def test_text_pieces_keep_their_place_beside_content_that_is_not_a_string(name: 
 
 @pytest.mark.parametrize("name", sorted(CONTENT_SHAPES))
 def test_an_ollama_join_keeps_text_beside_content_that_is_not_a_string(name: str) -> None:
-    from maljan.llm.ollama_provider import _OllamaJoin
+    from malspark.llm.ollama_provider import _OllamaJoin
 
     join = _OllamaJoin()
     for chunk in _content_chunks(CONTENT_SHAPES[name]):

@@ -1,4 +1,4 @@
-"""``maljan.tools.identify`` answers about real bytes, not about types.
+"""``malspark.tools.identify`` answers about real bytes, not about types.
 
 Every assertion here names a value: the format string, the platform, the
 digest, the signing-scheme label. A test that only checked the keys were
@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import identify
+from malspark.tools import identify
 
 ELF_HEADER = b"\x7fELF\x02\x01\x01" + b"\x00" * 9 + struct.pack("<HH", 2, 0x3E)
 PE_STUB = b"MZ" + b"\x00" * 58 + struct.pack("<I", 0x80) + b"\x00" * 62 + b"PE\x00\x00"
@@ -103,7 +103,7 @@ class TestIdentifyFile:
 
 class TestHashes:
     def test_the_three_cryptographic_digests_are_the_real_ones(self, tmp_path: Path) -> None:
-        blob = b"maljan test sample" * 64
+        blob = b"malspark test sample" * 64
         result = identify.hashes(_write(tmp_path, "s.bin", blob))
         assert result["sha256"] == hashlib.sha256(blob).hexdigest()
         assert result["md5"] == hashlib.md5(blob, usedforsecurity=False).hexdigest()
@@ -296,10 +296,10 @@ def _authenticode_blob(extra: tuple[Any, ...] = (), *, publisher_usages: tuple[s
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.serialization import pkcs7
 
-    authority, authority_key = _a_certificate("Maljan Test Root CA", authority=True)
+    authority, authority_key = _a_certificate("Malspark Test Root CA", authority=True)
     publisher, publisher_key = _a_certificate(
-        "Maljan Test Publisher",
-        issuer_name="Maljan Test Root CA",
+        "Malspark Test Publisher",
+        issuer_name="Malspark Test Root CA",
         issuer_key=authority_key,
         usages=publisher_usages,
     )
@@ -317,10 +317,10 @@ def _authenticode_blob(extra: tuple[Any, ...] = (), *, publisher_usages: tuple[s
 
 def _a_timestamp_chain() -> tuple[Any, ...]:
     """A timestamp authority's root and signer, as a timestamped file carries them."""
-    root, root_key = _a_certificate("Maljan Test TSA Root", authority=True)
+    root, root_key = _a_certificate("Malspark Test TSA Root", authority=True)
     signer, _key = _a_certificate(
-        "Maljan Test Time Stamping Signer",
-        issuer_name="Maljan Test TSA Root",
+        "Malspark Test Time Stamping Signer",
+        issuer_name="Malspark Test TSA Root",
         issuer_key=root_key,
         usages=(TIME_STAMPING_USAGE,),
     )
@@ -385,8 +385,8 @@ class TestWhoSignedIt:
         der, publisher = _authenticode_blob()
         result = identify.signing_info(_write(tmp_path, "s.exe", _signed_pe(der)), file_type="pe")
         assert result["authenticode"]["present"] is True
-        assert "Maljan Test Publisher" in result["authenticode"]["subject"]
-        assert "Maljan Test Root CA" in result["authenticode"]["issuer"]
+        assert "Malspark Test Publisher" in result["authenticode"]["subject"]
+        assert "Malspark Test Root CA" in result["authenticode"]["issuer"]
 
     def test_the_thumbprint_is_the_certificate_the_names_came_from(self, tmp_path: Path) -> None:
         pytest.importorskip("pefile")
@@ -402,7 +402,7 @@ class TestWhoSignedIt:
         pytest.importorskip("pefile")
         der, _publisher = _authenticode_blob()
         result = identify.signing_info(_write(tmp_path, "s.exe", _signed_pe(der)), file_type="pe")
-        assert "Maljan Test Root CA" not in result["authenticode"]["subject"]
+        assert "Malspark Test Root CA" not in result["authenticode"]["subject"]
 
     def test_no_chain_verdict_is_claimed(self, tmp_path: Path) -> None:
         pytest.importorskip("pefile")
@@ -438,13 +438,15 @@ class TestTheTimestampAuthorityIsNeverThePublisher:
         pytest.importorskip("pefile")
         der, _publisher = _authenticode_blob(_a_timestamp_chain())
         subject = self._subject(tmp_path, der)
-        assert "Maljan Test Publisher" in (subject or "")
+        assert "Malspark Test Publisher" in (subject or "")
         assert "Time Stamping" not in (subject or "")
 
     def test_a_counter_signature_leaves_the_publisher_alone(self, tmp_path: Path) -> None:
         """A counter-signature adds its signer to the same certificate set."""
         pytest.importorskip("pefile")
-        counter, _key = _a_certificate("Maljan Test Counter Signer", usages=(TIME_STAMPING_USAGE,))
+        counter, _key = _a_certificate(
+            "Malspark Test Counter Signer", usages=(TIME_STAMPING_USAGE,)
+        )
         der, publisher = _authenticode_blob((counter,))
         subject = self._subject(tmp_path, der)
         assert subject == publisher.subject.rfc4514_string()
@@ -452,7 +454,7 @@ class TestTheTimestampAuthorityIsNeverThePublisher:
     def test_a_cross_signed_chain_still_names_the_publisher(self, tmp_path: Path) -> None:
         """A second root that also issued the publisher's authority is in the bundle."""
         pytest.importorskip("pefile")
-        cross, _key = _a_certificate("Maljan Test Cross Root", authority=True)
+        cross, _key = _a_certificate("Malspark Test Cross Root", authority=True)
         der, publisher = _authenticode_blob((cross,))
         assert self._subject(tmp_path, der) == publisher.subject.rfc4514_string()
 
@@ -469,20 +471,20 @@ class TestWhenNothingDecidesNoPublisherIsNamed:
     """A name that might be the timestamp authority's is worse than no name."""
 
     def test_an_unreadable_signer_identifier_falls_back_to_the_key_usage(self) -> None:
-        from maljan.extractors.authenticode import publisher_certificate
+        from malspark.extractors.authenticode import publisher_certificate
 
-        publisher, _key = _a_certificate("Maljan Test Publisher", usages=(CODE_SIGNING_USAGE,))
+        publisher, _key = _a_certificate("Malspark Test Publisher", usages=(CODE_SIGNING_USAGE,))
         stamper, _stamper_key = _a_certificate(
-            "Maljan Test Time Stamping Signer", usages=(TIME_STAMPING_USAGE,)
+            "Malspark Test Time Stamping Signer", usages=(TIME_STAMPING_USAGE,)
         )
         picked = publisher_certificate(b"not a signed data blob", [stamper, publisher])
         assert picked is publisher
 
     def test_two_candidates_with_no_key_usage_name_nobody(self) -> None:
-        from maljan.extractors.authenticode import publisher_certificate
+        from malspark.extractors.authenticode import publisher_certificate
 
-        first, _a = _a_certificate("Maljan Test One")
-        second, _b = _a_certificate("Maljan Test Two")
+        first, _a = _a_certificate("Malspark Test One")
+        second, _b = _a_certificate("Malspark Test Two")
         assert publisher_certificate(b"", [first, second]) is None
 
     def test_a_blob_that_names_nobody_leaves_the_pack_without_a_publisher(
@@ -490,7 +492,7 @@ class TestWhenNothingDecidesNoPublisherIsNamed:
     ) -> None:
         """Still reported as signed — the signature is there — and unattributed."""
         pytest.importorskip("pefile")
-        from maljan.extractors import authenticode
+        from malspark.extractors import authenticode
 
         monkeypatch.setattr(authenticode, "publisher_certificate", lambda der, certs: None)
         der, _publisher = _authenticode_blob()

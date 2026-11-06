@@ -17,18 +17,18 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.agents.tool_pinning import DELIVERY_TOOLS
-from maljan.pipeline.triage_pack import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.agents.tool_pinning import DELIVERY_TOOLS
+from malspark.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     FlossSettings,
     PackInputs,
     run_pack,
 )
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.tools import emulated_strings, readers, rules, staging, upx
-from maljan.tools.readers import READERS, RUN_READER, Place, SampleReaders
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.tools import emulated_strings, readers, rules, staging, upx
+from malspark.tools.readers import READERS, RUN_READER, Place, SampleReaders
 
 from ..tools import synthetic_upx as su
 
@@ -261,8 +261,8 @@ def test_a_reading_runs_on_its_tools_server_only_when_that_server_is_reached_at_
 ):
     from types import SimpleNamespace
 
-    from maljan.core.config import Settings
-    from maljan.pipeline import nodes
+    from malspark.core.config import Settings
+    from malspark.pipeline import nodes
 
     servers = dict(Settings(_env_file=None).mcp.servers)
 
@@ -340,8 +340,8 @@ def _routing_container(servers: dict[str, Any]) -> Any:
 def test_a_reading_runs_only_on_a_server_that_runs_readings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.core.config import Settings
-    from maljan.pipeline import nodes
+    from malspark.core.config import Settings
+    from malspark.pipeline import nodes
 
     servers = dict(Settings(_env_file=None).mcp.servers)
     # The analysis server off, YARA-X switched on at its address: it declares
@@ -359,9 +359,9 @@ def _in_its_container(block: Any, **launch: Any) -> Any:
     The block trusts what its server declares (``trusts_served_declaration``),
     and the server, listed there, declares its tools as it does anywhere.
     """
-    from maljan.core.declared_reading import builtin_tools
-    from maljan.core.served_declarations import register_served
-    from maljan.core.tool_declarations import launch_identity
+    from malspark.core.declared_reading import builtin_tools
+    from malspark.core.served_declarations import register_served
+    from malspark.core.tool_declarations import launch_identity
 
     moved = block.model_copy(update={**launch, "trusts_served_declaration": True})
     register_served("mcp:analysis", dict(builtin_tools("analysis")), launch_identity(moved))
@@ -371,8 +371,8 @@ def _in_its_container(block: Any, **launch: Any) -> Any:
 def test_where_each_reading_runs_is_resolved_once_per_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.core.config import Settings
-    from maljan.pipeline import nodes
+    from malspark.core.config import Settings
+    from malspark.pipeline import nodes
 
     servers = dict(Settings(_env_file=None).mcp.servers)
     servers["analysis"] = _in_its_container(
@@ -419,7 +419,7 @@ def test_capas_rule_directories_are_held_to_the_data_root(
 def test_capa_reads_a_rule_directory_inside_the_data_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.core.paths import get_project_root
+    from malspark.core.paths import get_project_root
 
     seen: list[dict[str, Any]] = []
     monkeypatch.setattr(rules, "capa", lambda path, **kwargs: seen.append(kwargs) or {"ok": 1})
@@ -569,7 +569,7 @@ def test_an_entry_whose_readings_ran_in_the_worker_dumps_as_it_did(tmp_path: Pat
 def test_an_emulator_started_beside_the_pack_names_the_server_it_ran_on(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.pipeline import triage_pack
+    from malspark.pipeline import triage_pack
 
     rows = [{"kind": "decoded", "string": "text", "function": "0x401000"}]
     monkeypatch.setattr(emulated_strings, "floss_unavailable", lambda environ=None: None)
@@ -614,7 +614,7 @@ def test_where_readings_ran_is_noted_per_thread_and_in_every_open_block(tmp_path
 
 
 def test_a_mixed_entry_names_the_worker_beside_the_server() -> None:
-    from maljan.pipeline.triage_pack import PACK_SOURCE, _ran_on
+    from malspark.pipeline.triage_pack import PACK_SOURCE, _ran_on
 
     assert _ran_on([None, None]) == []
     assert _ran_on([]) == []
@@ -623,8 +623,8 @@ def test_a_mixed_entry_names_the_worker_beside_the_server() -> None:
 
 
 def _isolation_rows(entries: list[Any]) -> dict[str, dict[str, Any]]:
-    from maljan.analysis.isolation import isolation_part, sample_readers
-    from maljan.core.host_locality import LOCAL
+    from malspark.analysis.isolation import isolation_part, sample_readers
+    from malspark.core.host_locality import LOCAL
 
     def route(source: str) -> tuple[str, str, str, str]:
         return ("streamable-http", "analysis-mcp", LOCAL, "")
@@ -643,7 +643,7 @@ def _isolation_rows(entries: list[Any]) -> dict[str, dict[str, Any]]:
 
 
 def test_the_isolation_part_places_a_reading_where_it_ran(tmp_path: Path) -> None:
-    from maljan.analysis.isolation import IN_PROCESS, LOCAL_SERVICE
+    from malspark.analysis.isolation import IN_PROCESS, LOCAL_SERVICE
 
     path = _sample(tmp_path)
     there = _pack(path, tmp_path, _placed(path, _Server()))
@@ -661,8 +661,8 @@ def test_the_isolation_part_places_a_reading_where_it_ran(tmp_path: Path) -> Non
 
 
 def test_a_stored_entry_without_the_field_counts_as_it_did() -> None:
-    from maljan.analysis.isolation import sample_readers
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.analysis.isolation import sample_readers
+    from malspark.schemas.evidence import LedgerEntry
 
     stored = {
         "id": "ev_0001",
@@ -690,9 +690,14 @@ def test_a_stored_entry_without_the_field_counts_as_it_did() -> None:
 def test_the_emulators_row_reads_where_it_ran(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.analysis.isolation import IN_PROCESS, LOCAL_SERVICE, isolation_part, sample_readers
-    from maljan.analysis.tool_effects import effects_part
-    from maljan.core.host_locality import LOCAL
+    from malspark.analysis.isolation import (
+        IN_PROCESS,
+        LOCAL_SERVICE,
+        isolation_part,
+        sample_readers,
+    )
+    from malspark.analysis.tool_effects import effects_part
+    from malspark.core.host_locality import LOCAL
 
     rows = [{"kind": "decoded", "string": "text", "function": "0x401000"}]
     monkeypatch.setattr(emulated_strings, "floss_unavailable", lambda environ=None: None)

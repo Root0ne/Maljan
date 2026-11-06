@@ -10,14 +10,14 @@ from pathlib import Path
 import pytest
 from elftools.elf.elffile import ELFFile
 
-from maljan.extractors.capability_matrix import (
+from malspark.extractors.capability_matrix import (
     CORROBORATION_NOT_READ_NOTE,
     NO_CORROBORATION_ROW_NOTE,
     build_capability_matrix,
 )
-from maljan.extractors.network_extractor import _scored_domain
-from maljan.extractors.pe_extractor import _parse_elf_imports
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.extractors.network_extractor import _scored_domain
+from malspark.extractors.pe_extractor import _parse_elf_imports
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 LS = Path("/bin/ls")
 

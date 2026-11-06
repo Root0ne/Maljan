@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from maljan.core.config import Settings
-from maljan.providers.registry import get_static_provider
+from malspark.core.config import Settings
+from malspark.providers.registry import get_static_provider
 
 
 def _cfg():
@@ -35,7 +35,7 @@ def test_it_degrades_rather_than_raising():
 
 
 def test_the_analyst_runs_toolless_and_says_so(caplog):
-    from maljan.agents.static_analyst import StaticAnalyst
+    from malspark.agents.static_analyst import StaticAnalyst
 
     analyst = StaticAnalyst(llm=MagicMock(), name="static")
     container = MagicMock()

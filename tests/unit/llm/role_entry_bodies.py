@@ -23,7 +23,7 @@ ANTHROPIC_MODEL = "claude-haiku-5-5"
 
 
 def anthropic_settings(**agents: Any) -> Any:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     return Settings(
         _env_file=None,
@@ -44,7 +44,7 @@ def anthropic_settings(**agents: Any) -> Any:
 
 
 def deepseek_settings(**agents: Any) -> Any:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     return Settings(
         _env_file=None,
@@ -69,8 +69,8 @@ def deepseek_settings(**agents: Any) -> Any:
 
 def container(settings: Any) -> Any:
     """A container that builds real models and asks no endpoint for anything."""
-    from maljan.core.container import ServiceContainer
-    from maljan.llm.registry import LLMProviderRegistry
+    from malspark.core.container import ServiceContainer
+    from malspark.llm.registry import LLMProviderRegistry
 
     built = ServiceContainer(settings, mock=True)
     built._llm_registry = LLMProviderRegistry(settings)
@@ -87,7 +87,7 @@ def summarizer_model(settings: Any) -> Any:
 
 def bodies() -> dict[str, Any]:
     """Every body, keyed by what built it."""
-    from maljan.agents.base_agent import frame_messages
+    from malspark.agents.base_agent import frame_messages
 
     history = _history()
     framed = frame_messages(history[:4], run_state="sample: c\nbudget remaining: 3 model turns")
@@ -95,7 +95,7 @@ def bodies() -> dict[str, Any]:
         update={
             "response_metadata": {
                 **(framed[-1].response_metadata or {}),
-                "maljan_tool_loop_turn": True,
+                "malspark_tool_loop_turn": True,
             }
         }
     )

@@ -2,7 +2,7 @@
 
 ``served_tool_declarations`` holds one row per source (``mcp:<key>``,
 ``provider:<id>``): the declaration the server gave of its own tools when it
-was last listed, per tool and field (``maljan.core.served_declarations``), and
+was last listed, per tool and field (``malspark.core.served_declarations``), and
 the launch identity of the block that reached it, and whether that launch was
 the one the source ships with on the host that listed it, so a reader on
 another host (an API on the host, a worker in a container) reads it under its

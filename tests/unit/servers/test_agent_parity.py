@@ -9,8 +9,8 @@ a job that fails minutes after it was accepted.
 
 from __future__ import annotations
 
-from maljan.agents.registry import AgentRegistry
-from maljan.core.config import (
+from malspark.agents.registry import AgentRegistry
+from malspark.core.config import (
     BUILTIN_AGENTS,
     BUILTIN_PROFILES,
     JUDGE_AGENT_KEY,
@@ -78,6 +78,6 @@ def test_the_job_schemas_profile_accepts_exactly_the_effective_profile_keys():
 
 
 def test_a_definition_key_and_a_server_key_obey_the_same_rule():
-    from maljan.core.config import AGENT_KEY_PATTERN, SERVER_KEY_PATTERN
+    from malspark.core.config import AGENT_KEY_PATTERN, SERVER_KEY_PATTERN
 
     assert AGENT_KEY_PATTERN == SERVER_KEY_PATTERN

@@ -24,21 +24,21 @@ import ast
 import pathlib
 from typing import Any
 
-from maljan.pipeline.events import safe_finding_value
-from maljan.pipeline.validation import (
+from malspark.pipeline.events import safe_finding_value
+from malspark.pipeline.validation import (
     Violation,
     schema_violations,
     validate_isr,
     validate_verdict_bundle,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import Bundle
 from tests.credential_shapes import prefixed_key
 from tests.unit.pipeline._source_names import called_name, names_reaching
 from tests.unit.pipeline.test_live_event_schema import _every_key_shape
 from tests.unit.pipeline.test_validation import _Attck
 
-SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
+SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "malspark"
 
 # How long a row may be. ``safe_finding_value`` bounds the value it wraps at
 # 200 characters; a message is that plus the sentence around it, and the rows
@@ -76,7 +76,7 @@ class TestTheRowsThatQuoteAJudge:
             ]
         }
         if assessment:
-            payload["x_maljan_assessment"] = assessment
+            payload["x_malspark_assessment"] = assessment
         return Bundle.model_validate(payload)
 
     def test_an_ungrounded_indicator_does_not_quote_the_credential(self) -> None:
@@ -142,7 +142,7 @@ class TestARowKeepsWordsAndMasksKeys:
         """A row that reaches the event feed is scrubbed again, and half a digest is a key there."""
         import hashlib
 
-        from maljan.pipeline.events import FINDING_VALUE_LIMIT, scrub
+        from malspark.pipeline.events import FINDING_VALUE_LIMIT, scrub
 
         digest = hashlib.sha256(b"a sample").hexdigest()
         text = "word " * ((FINDING_VALUE_LIMIT - 20) // 5) + digest + " and the rest of it"
@@ -156,7 +156,7 @@ class TestARowKeepsWordsAndMasksKeys:
     def test_the_word_runs_of_a_report_are_kept_in_a_row(self) -> None:
         for words in (
             "anti-debugging/environment",
-            "x_maljan_contributing_agents",
+            "x_malspark_contributing_agents",
             "all_tools_reverser_ghidra",
         ):
             assert safe_finding_value(f"for {words} detection") == f"for {words} detection"
@@ -224,7 +224,7 @@ class TestTheRowsAboutUnreadFunctions:
     """
 
     def test_the_question_s_fields_go_through_the_helper(self) -> None:
-        from maljan.agents.callees_question import (
+        from malspark.agents.callees_question import (
             CalleesFound,
             CalleeToRead,
             unread_callees_violation,
@@ -244,9 +244,9 @@ class TestTheRowsAboutUnreadFunctions:
     def test_an_undeclared_tool_s_name_is_scrubbed_where_the_note_names_it(self) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.agents.base_agent import BaseAnalyst
-        from maljan.agents.callees_question import callees_to_read
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.agents.base_agent import BaseAnalyst
+        from malspark.agents.callees_question import callees_to_read
+        from malspark.schemas.evidence import LedgerEntry
 
         secret, url = credentialled_url()
         entry = LedgerEntry(id="ev_0001", tool=f"{url}{'J' * 3000}", args={}, output="{}")
@@ -1011,7 +1011,7 @@ class TestEveryRowIsHeldToTheSameRule:
     def test_it_catches_one_built_under_an_alias(self) -> None:
         """A renaming import used to take the whole module out of the scan."""
         source = (
-            "from maljan.pipeline.validation import Violation as V\n"
+            "from malspark.pipeline.validation import Violation as V\n"
             "def leak(model_text):\n"
             "    return V('x', f'said {model_text}')\n"
         )
@@ -1021,7 +1021,7 @@ class TestEveryRowIsHeldToTheSameRule:
 
     def test_it_catches_one_built_through_a_module_alias(self) -> None:
         source = (
-            "from maljan.pipeline import validation as val\n"
+            "from malspark.pipeline import validation as val\n"
             "def leak(model_text):\n"
             "    return val.Violation('x', f'said {model_text}')\n"
         )
@@ -1053,7 +1053,7 @@ class TestEveryRowIsHeldToTheSameRule:
     def test_it_reads_a_row_built_through_a_subclass(self) -> None:
         """A subclass is a second constructor and the scan saw only the base."""
         source = (
-            "from maljan.pipeline.validation import Violation\n"
+            "from malspark.pipeline.validation import Violation\n"
             "class Finding(Violation):\n"
             "    pass\n"
             "def leak(model_text):\n"

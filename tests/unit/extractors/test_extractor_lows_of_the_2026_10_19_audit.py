@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from maljan.extractors.capability_matrix import (
+from malspark.extractors.capability_matrix import (
     CORROBORATION_NOT_READ_NOTE,
     build_capability_matrix,
 )
-from maljan.extractors.network_extractor import _scored_domain
-from maljan.extractors.pe_extractor import _parse_elf_imports
-from maljan.extractors.sample_identity import _is_certificate_table, unparsed_container_reason
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.extractors.network_extractor import _scored_domain
+from malspark.extractors.pe_extractor import _parse_elf_imports
+from malspark.extractors.sample_identity import _is_certificate_table, unparsed_container_reason
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def test_b_l1_every_elf_import_names_the_library_its_symbol_version_names() -> None:
@@ -64,7 +64,7 @@ def test_b_l9_a_technique_counted_without_its_corroboration_record_says_so(
     def unreadable(*_a: object, **_k: object) -> dict:
         raise RuntimeError("no record")
 
-    monkeypatch.setattr("maljan.pipeline.validation.corroboration", unreadable)
+    monkeypatch.setattr("malspark.pipeline.validation.corroboration", unreadable)
     claim = ClaimEvidence(claim="injects", evidence_ref="r", confidence=0.8, technique_id="T1055")
     isr = {"static": AgentISR(agent_id="static", domain="static", claims=[claim])}
     stix = {

@@ -9,7 +9,7 @@ what the other vetoes. The tests below are about the one reader they now share.
 
 from __future__ import annotations
 
-from maljan.schemas.stix_pattern import read_comparisons
+from malspark.schemas.stix_pattern import read_comparisons
 from tests.linear_cost import assert_scales
 
 

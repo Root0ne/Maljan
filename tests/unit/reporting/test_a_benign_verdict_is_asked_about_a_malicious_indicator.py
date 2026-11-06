@@ -20,14 +20,14 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.pipeline.validation import (
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.pipeline.validation import (
     INDICATOR_TYPE_CONTRADICTS_VERDICT_CODE,
     validate_verdict_bundle,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.judgement import JudgeAssessment
-from maljan.schemas.stix_models import Bundle, Indicator
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.judgement import JudgeAssessment
+from malspark.schemas.stix_models import Bundle, Indicator
 
 # The recorded run's two indicators and the sample they were written for.
 SAMPLE_SHA256 = "d01fdb5aae8f112526040a39b0bfb9e27d813003178645e65f8d1cfdb2a26c87"
@@ -55,7 +55,7 @@ def _vendor_domain_indicator(indicator_type: str = "malicious-activity") -> Indi
 def _bundle(verdict: str, *indicators: Indicator) -> Bundle:
     return Bundle(
         objects=list(indicators),
-        x_maljan_assessment=JudgeAssessment(verdict=verdict, confidence=0.95),
+        x_malspark_assessment=JudgeAssessment(verdict=verdict, confidence=0.95),
     )
 
 
@@ -152,7 +152,7 @@ _BENIGN_JSON = (
     + VENDOR_DOMAIN
     + '\']", "pattern_type": "stix", "indicator_types": ["%s"], '
     '"valid_from": "2026-09-19T22:49:52Z"}], '
-    '"x_maljan_assessment": {"verdict": "Benign", "confidence": 0.95, '
+    '"x_malspark_assessment": {"verdict": "Benign", "confidence": 0.95, '
     '"malware_category": "legitimate_software", '
     '"severity": {"rating": "Informational", "rationale": "a signed vendor utility"}}}'
 )

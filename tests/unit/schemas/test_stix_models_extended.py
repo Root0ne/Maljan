@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from maljan.schemas.stix_models import (
+from malspark.schemas.stix_models import (
     Bundle,
     Identity,
     Malware,
@@ -17,10 +17,10 @@ from maljan.schemas.stix_models import (
 
 class TestExtendedSDOs:
     def test_identity_round_trip(self) -> None:
-        ident = Identity(name="Maljan", identity_class="software")
+        ident = Identity(name="Malspark", identity_class="software")
         dumped = ident.model_dump(mode="json")
         rebuilt = Identity.model_validate(dumped)
-        assert rebuilt.name == "Maljan"
+        assert rebuilt.name == "Malspark"
         assert rebuilt.identity_class == "software"
         assert rebuilt.id.startswith("identity--")
 
@@ -59,7 +59,7 @@ class TestExtendedSDOs:
 
 class TestBundleAcceptsExtendedSDOs:
     def test_bundle_contains_extended_sdos(self) -> None:
-        ident = Identity(name="Maljan")
+        ident = Identity(name="Malspark")
         malware = Malware(name="example")
         note = Note(content="summary text", object_refs=[malware.id])
         rpt = Report(name="r", object_refs=[ident.id, malware.id, note.id])

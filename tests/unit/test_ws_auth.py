@@ -9,7 +9,7 @@ These tests verify that the /ws/analysis/{job_id} endpoint correctly:
   - Accepts the job owner with a valid access token
 
 The token travels only in the ``sec-websocket-protocol`` header, as
-``maljan.v1.<jwt>`` (see ``app.api.ws``): the endpoint no longer reads a
+``malspark.v1.<jwt>`` (see ``app.api.ws``): the endpoint no longer reads a
 ``?token=`` query parameter at all. Every rejection is accepted first (no
 subprotocol echoed) and then closed immediately via the ``_reject`` helper
 so a real close frame reaches the client — closing before accept is
@@ -36,8 +36,8 @@ from app.api.ws import ws_analysis  # noqa: I001
 
 
 def _subprotocol_headers(token: str) -> dict[str, str]:
-    """Build the header the endpoint reads the ``maljan.v1.<jwt>`` token from."""
-    return {"sec-websocket-protocol": f"maljan.v1, maljan.v1.{token}"}
+    """Build the header the endpoint reads the ``malspark.v1.<jwt>`` token from."""
+    return {"sec-websocket-protocol": f"malspark.v1, malspark.v1.{token}"}
 
 
 @pytest.fixture
@@ -201,7 +201,7 @@ async def test_ws_accepts_valid_owner(mock_ws: MagicMock, valid_token_payload: d
 
     # Success routes accept/subprotocol-echo through manager.connect (mocked
     # away here and exercised for real at the tests/api/test_ws_auth.py
-    # layer, which checks ws.accepted_subprotocol == "maljan.v1"); the
+    # layer, which checks ws.accepted_subprotocol == "malspark.v1"); the
     # endpoint itself never calls accept/close directly on this path.
     mock_ws.close.assert_not_awaited()
     mock_ws.accept.assert_not_awaited()

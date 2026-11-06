@@ -160,7 +160,7 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     revealing version of it either: it is the same recording. The verbatim
     text of a tool call stays on the evidence ledger, behind the report's
     ownership check. Columns mirror the payload built by
-    ``maljan.pipeline.events.emit_agent_message`` field for field; the frontend
+    ``malspark.pipeline.events.emit_agent_message`` field for field; the frontend
     maps them straight onto its transcript model with no reshaping.
 
     Rows are immutable and append-only. ``seq`` is the number the publisher
@@ -187,7 +187,7 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     speaker: Mapped[str] = mapped_column(String(100), nullable=False)
     # analyst | reviser | negotiator | judge | system
     role: Mapped[str] = mapped_column(String(20), nullable=False)
-    # What the line *is*, from ``maljan.pipeline.events.MESSAGE_KINDS``: a
+    # What the line *is*, from ``malspark.pipeline.events.MESSAGE_KINDS``: a
     # report, a delegated ask, the answer to one, a verdict, a system notice.
     # NULL on a row written before the column existed, and NULL is the only
     # honest value there: such a row was recorded without its kind, so a

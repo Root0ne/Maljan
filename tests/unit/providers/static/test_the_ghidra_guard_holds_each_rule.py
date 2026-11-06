@@ -12,9 +12,9 @@ from typing import Any
 
 import httpx
 
-from maljan.providers.base import StaticJobContext
-from maljan.providers.server_guard import ServerGuard
-from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+from malspark.providers.base import StaticJobContext
+from malspark.providers.server_guard import ServerGuard
+from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
 
 def _client(handler: Any, guard: Any) -> GhidraHTTPClient:
@@ -151,10 +151,10 @@ def test_the_cap_holds_the_fifth_concurrent_call() -> None:
 
 
 def test_the_provider_builds_a_guard_with_settings_and_none_without(monkeypatch: Any) -> None:
-    from maljan.core.config import Settings
-    from maljan.providers.static.ghidra import GhidraStaticProvider
-    from maljan.providers.static.ghidra import http_client as ghidra_http_client
-    from maljan.providers.static.ghidra import provider as ghidra_provider
+    from malspark.core.config import Settings
+    from malspark.providers.static.ghidra import GhidraStaticProvider
+    from malspark.providers.static.ghidra import http_client as ghidra_http_client
+    from malspark.providers.static.ghidra import provider as ghidra_provider
 
     built: list[Any] = []
     rests: list[dict[str, Any]] = []

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.core import ctype_locale
+from malspark.core import ctype_locale
 
 ROOT = Path(__file__).resolve().parents[3]
 TURKISH = "tr_TR.UTF-8"
@@ -65,7 +65,7 @@ class TestUnderATurkishCtype:
                 import locale, sys
                 if locale.setlocale(locale.LC_CTYPE) != "tr_TR.UTF-8":
                     sys.exit(77)
-                from maljan.core import ctype_locale
+                from malspark.core import ctype_locale
                 assert not ctype_locale.libc_folds_ascii(), "the Turkish fold, before the pin"
                 chosen = ctype_locale.pin_character_classification()
                 assert chosen in ctype_locale.CANDIDATES, chosen
@@ -127,7 +127,7 @@ class TestWhatThePinLeavesAlone:
                     sys.exit(77)
                 names = ("LC_MESSAGES", "LC_TIME", "LC_COLLATE", "LC_NUMERIC", "LC_MONETARY")
                 before = {name: locale.setlocale(getattr(locale, name)) for name in names}
-                from maljan.core.ctype_locale import CANDIDATES, pin_character_classification
+                from malspark.core.ctype_locale import CANDIDATES, pin_character_classification
                 assert pin_character_classification() in CANDIDATES
                 after = {name: locale.setlocale(getattr(locale, name)) for name in names}
                 print(json.dumps({
@@ -148,7 +148,7 @@ class TestWhatThePinLeavesAlone:
             import locale, sys
             if locale.setlocale(locale.LC_CTYPE) != "tr_TR.UTF-8":
                 sys.exit(77)
-            from maljan.core import ctype_locale
+            from malspark.core import ctype_locale
             ctype_locale.CANDIDATES = ("xx_NO.SUCH-LOCALE",)
             said = []
             assert ctype_locale.pin_character_classification(
@@ -200,7 +200,7 @@ class TestTheEngineSelfTest:
                 import locale, sys
                 if locale.setlocale(locale.LC_CTYPE) != "tr_TR.UTF-8":
                     sys.exit(77)
-                from maljan.core import ctype_locale
+                from malspark.core import ctype_locale
                 print(ctype_locale.yara_case_folding_problem())
                 """,
                 LC_CTYPE=TURKISH,
@@ -239,7 +239,7 @@ class TestFromANonUtf8Locale:
                     sys.exit(77)
                 if locale.getpreferredencoding(False).upper().replace("-", "") == "UTF8":
                     sys.exit(77)
-                from maljan.core import ctype_locale
+                from malspark.core import ctype_locale
                 said = []
                 chosen = ctype_locale.pin_character_classification(
                     say=lambda level, text: said.append(text)
@@ -273,7 +273,7 @@ _WATCH_THE_ENGINE = """
     class _Watch:
         def find_spec(self, fullname, path=None, target=None):
             if fullname == "yara" and not first:
-                from maljan.core import ctype_locale
+                from malspark.core import ctype_locale
                 first.update(
                     pinned=bool(ctype_locale._pinned), ctype=locale.setlocale(locale.LC_CTYPE)
                 )
@@ -282,8 +282,8 @@ _WATCH_THE_ENGINE = """
     sys.meta_path.insert(0, _Watch())
 
     def report():
-        from maljan.core import ctype_locale
-        import maljan.reporting.detection_signatures  # the engine loads here, as in a job
+        from malspark.core import ctype_locale
+        import malspark.reporting.detection_signatures  # the engine loads here, as in a job
         print(json.dumps({"first": first, "problem": ctype_locale.yara_case_folding_problem()}))
 """
 
@@ -307,10 +307,10 @@ _STARTS = {
     """,
     # The console script imports the module and calls main().
     "cli": """
-        import maljan.cli
-        sys.argv = ["maljan", "--help"]
+        import malspark.cli
+        sys.argv = ["malspark", "--help"]
         try:
-            maljan.cli.main()
+            malspark.cli.main()
         except SystemExit:
             pass
     """,

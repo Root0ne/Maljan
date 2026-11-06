@@ -1,4 +1,4 @@
-"""Unit tests for :func:`maljan.extractors.pe_extractor._looks_like_domain`.
+"""Unit tests for :func:`malspark.extractors.pe_extractor._looks_like_domain`.
 
 The filter is what keeps APK / asset / source filenames from being labelled
 ``DOMAIN`` in the STATIC tab. Yesterday's E2E run on zararli.apk showed
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.extractors.pe_extractor import _looks_like_domain
+from malspark.extractors.pe_extractor import _looks_like_domain
 
 # Pairs of (text, expected) — True means "treat as domain candidate".
 _NON_DOMAIN_CASES = [

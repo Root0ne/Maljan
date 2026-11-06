@@ -11,8 +11,8 @@ import json
 import struct
 from pathlib import Path
 
-from maljan.schemas.evidence import build_entry, stored_bytes
-from maljan.tools import artefact_index
+from malspark.schemas.evidence import build_entry, stored_bytes
+from malspark.tools import artefact_index
 
 from .synthetic_pe import TEXT_RVA, SyntheticPE
 

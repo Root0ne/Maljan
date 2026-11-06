@@ -12,7 +12,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
-from maljan.tools import artefact_index
+from malspark.tools import artefact_index
 
 from .synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 

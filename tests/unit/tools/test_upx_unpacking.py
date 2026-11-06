@@ -24,7 +24,7 @@ from pathlib import Path
 import pefile
 import pytest
 
-from maljan.tools import binary, staging, upx
+from malspark.tools import binary, staging, upx
 from tests.linear_cost import assert_scales
 from tests.unit.tools import synthetic_upx as su
 from tests.unit.tools.synthetic_pe import SyntheticPE

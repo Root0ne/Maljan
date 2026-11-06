@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents.judge_postprocess import enforce_bundle_integrity
-from maljan.reporting.dedupe import (
+from malspark.agents.judge_postprocess import enforce_bundle_integrity
+from malspark.reporting.dedupe import (
     MergeTally,
     canonical_value,
     finding_fingerprint,

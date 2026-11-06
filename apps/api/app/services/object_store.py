@@ -20,7 +20,7 @@ import io
 import os
 from typing import Any
 
-from maljan.schemas.evidence_spill import EvidenceSpill, SpillRefused
+from malspark.schemas.evidence_spill import EvidenceSpill, SpillRefused
 from pydantic import SecretStr
 
 from app.config import settings
@@ -133,7 +133,7 @@ def remove(store: Any, path: str) -> None:
     store.remove_object(settings.minio_bucket, path)
 
 
-# A job's whole answers (``maljan.schemas.evidence_spill``): every object a
+# A job's whole answers (``malspark.schemas.evidence_spill``): every object a
 # job's ledger references lives under its own prefix, named by the SHA-256 of
 # its bytes, so a job's objects are found and removed by the job id alone and
 # the same bytes are kept once per job.
@@ -454,7 +454,7 @@ async def evidence_bound() -> int:
 
     The setting's own default stands when it cannot be read, and that is logged.
     """
-    from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+    from malspark.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 
     from app.runtime_config import runtime_config
 

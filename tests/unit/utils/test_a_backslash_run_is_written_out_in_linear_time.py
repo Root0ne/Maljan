@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 
-from maljan.utils.written_forms import quoted_backslashes_written_out
+from malspark.utils.written_forms import quoted_backslashes_written_out
 
 
 def test_every_backslash_before_a_quote_is_written_out() -> None:

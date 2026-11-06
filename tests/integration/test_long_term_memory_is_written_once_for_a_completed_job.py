@@ -17,9 +17,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.worker.analysis_worker import run_analysis
-from maljan.app import MaljanApp
-from maljan.core.container import ServiceContainer
-from maljan.memory.long_term_memory import StoredCase
+from malspark.app import MalsparkApp
+from malspark.core.container import ServiceContainer
+from malspark.memory.long_term_memory import StoredCase
 from tests.integration._session_probe import updates_in
 from tests.integration.test_worker_job_lifecycle import (  # noqa: F401 — fixtures
     _answer_reads,
@@ -104,8 +104,8 @@ async def _run(ctx: dict[str, Any], job: Any, arun: Any) -> dict[str, Any]:
 
     api_config._settings = None
     with (
-        patch.dict("os.environ", {"MALJAN_MOCK_MODE": "true"}, clear=False),
-        patch("maljan.app.MaljanApp.arun", new=arun),
+        patch.dict("os.environ", {"MALSPARK_MOCK_MODE": "true"}, clear=False),
+        patch("malspark.app.MalsparkApp.arun", new=arun),
     ):
         result = await run_analysis(ctx, str(job.id))
     api_config._settings = None
@@ -143,7 +143,7 @@ async def test_a_completed_job_writes_its_case_and_its_corpus_once(
     job = _make_job()
     recorded = _answer_reads(mock_db_session, _reads(job, _make_sample()))
     store.redis = mock_ctx["redis"]
-    original = MaljanApp.arun
+    original = MalsparkApp.arun
 
     async def _completes(self: Any, **kwargs: Any) -> dict[str, Any]:
         result = await original(self, **kwargs)
@@ -170,7 +170,7 @@ async def test_a_completed_job_writes_its_case_and_its_corpus_once(
 def test_the_case_is_written_once_and_a_failing_store_costs_nothing(
     store: _Store,
 ) -> None:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     container = ServiceContainer(Settings(_env_file=None), mock=True)
     assert container.remember_the_run() is False

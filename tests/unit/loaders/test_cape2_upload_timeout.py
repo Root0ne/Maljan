@@ -22,8 +22,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.loaders.cape2_client import CAPEv2Client
-from maljan.loaders.sandbox_client import SandboxError
+from malspark.loaders.cape2_client import CAPEv2Client
+from malspark.loaders.sandbox_client import SandboxError
 
 
 def _client(**kwargs: object) -> CAPEv2Client:

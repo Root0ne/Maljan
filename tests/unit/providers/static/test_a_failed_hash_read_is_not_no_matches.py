@@ -17,9 +17,9 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.providers.sample_open import SELECT_REFUSED_AFTER_OPEN, SampleNotes
-from maljan.providers.static.ghidra import function_hashes as hashes
-from maljan.providers.static.ghidra.provider import not_made_current, open_ghidra_sample
+from malspark.providers.sample_open import SELECT_REFUSED_AFTER_OPEN, SampleNotes
+from malspark.providers.static.ghidra import function_hashes as hashes
+from malspark.providers.static.ghidra.provider import not_made_current, open_ghidra_sample
 
 URL = "http://ghidra.invalid"
 HELD = "/data/samples/.work/s.exe"
@@ -274,9 +274,9 @@ class TestTheHashRead:
 
 class TestThePackStep:
     def test_a_failed_read_fails_the_step_with_its_reason(self, monkeypatch: Any) -> None:
-        from maljan.core.config import Settings
-        from maljan.memory import store_factory
-        from maljan.pipeline import nodes
+        from malspark.core.config import Settings
+        from malspark.memory import store_factory
+        from malspark.pipeline import nodes
 
         class _Provider:
             class capabilities:  # noqa: N801 - read as an attribute
@@ -301,10 +301,10 @@ class TestThePackStep:
             step()
 
     def test_a_cut_read_is_said_with_the_step_s_answer(self, monkeypatch: Any) -> None:
-        from maljan.core.config import Settings
-        from maljan.memory import store_factory
-        from maljan.pipeline import nodes
-        from maljan.tools import knowledge
+        from malspark.core.config import Settings
+        from malspark.memory import store_factory
+        from malspark.pipeline import nodes
+        from malspark.tools import knowledge
 
         class _Provider:
             class capabilities:  # noqa: N801 - read as an attribute
@@ -339,9 +339,9 @@ class TestThePackStep:
     def test_the_step_s_walk_carries_the_pack_s_deadline(self, monkeypatch: Any) -> None:
         import time
 
-        from maljan.core.config import Settings
-        from maljan.memory import store_factory
-        from maljan.pipeline import nodes
+        from malspark.core.config import Settings
+        from malspark.memory import store_factory
+        from malspark.pipeline import nodes
 
         jobs: list[Any] = []
 
@@ -437,9 +437,9 @@ class TestTheWalkIsBoundedOnlyByWhatBoundsTheJob:
         assert len(pages) < 10
 
     def test_the_provider_passes_the_stage_deadline_on(self, monkeypatch: Any) -> None:
-        from maljan.core.config import MCPServerConfig, PreprocessingConfig
-        from maljan.providers.base import StaticJobContext
-        from maljan.providers.static.ghidra import GhidraStaticProvider
+        from malspark.core.config import MCPServerConfig, PreprocessingConfig
+        from malspark.providers.base import StaticJobContext
+        from malspark.providers.static.ghidra import GhidraStaticProvider
 
         cfg = MCPServerConfig(enabled=True, transport="http", url=URL, call_timeout_seconds=0.0)
         provider = GhidraStaticProvider(cfg, None, None)  # type: ignore[arg-type]
@@ -455,9 +455,9 @@ class TestTheWalkIsBoundedOnlyByWhatBoundsTheJob:
         assert seen["walk_budget"] == 0.0 and seen["deadline"] == 123.0
 
     def test_the_provider_walks_under_its_call_budget(self, monkeypatch: Any) -> None:
-        from maljan.core.config import MCPServerConfig, PreprocessingConfig
-        from maljan.providers.base import StaticJobContext
-        from maljan.providers.static.ghidra import GhidraStaticProvider
+        from malspark.core.config import MCPServerConfig, PreprocessingConfig
+        from malspark.providers.base import StaticJobContext
+        from malspark.providers.static.ghidra import GhidraStaticProvider
 
         cfg = MCPServerConfig(enabled=True, transport="http", url=URL, call_timeout_seconds=77.0)
         provider = GhidraStaticProvider(cfg, None, None)  # type: ignore[arg-type]

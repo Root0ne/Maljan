@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.pipeline.validation import unknown_technique_ids
-from maljan.tools import knowledge
+from malspark.extractors.capability_matrix import build_capability_matrix
+from malspark.pipeline.validation import unknown_technique_ids
+from malspark.tools import knowledge
 
 
 def _bundle(external_id: str) -> dict[str, Any]:

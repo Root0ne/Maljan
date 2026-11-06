@@ -23,11 +23,11 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.pipeline.nodes import make_revision_node, revision_replacement_sentence
-from maljan.pipeline.validation import CLAIM_WITHOUT_CONFIDENCE_CODE
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.pipeline.nodes import make_revision_node, revision_replacement_sentence
+from malspark.pipeline.validation import CLAIM_WITHOUT_CONFIDENCE_CODE
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 REVISION = (
     Path(__file__).resolve().parents[2]
@@ -83,7 +83,7 @@ def _reviser(revision: str, answers: list[str]) -> tuple[_Reviser, _Answers]:
 
 
 def _revise(analyst: _Reviser) -> tuple[str, AgentISR]:
-    with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+    with patch("malspark.agents.base_agent.validity_check_available", return_value=True):
         return analyst.safe_revise_isr("the evidence", "own report", {}, "feedback", 1)
 
 
@@ -116,7 +116,7 @@ class TestTheValidationTurnAsksARevision:
         # The first answer's loop ended long ago; the revision made no loop.
         analyst._last_loop_deadline = time.monotonic() - 3_600.0
 
-        with patch("maljan.agents.base_agent.loop_limits", return_value=(3_600.0, None)):
+        with patch("malspark.agents.base_agent.loop_limits", return_value=(3_600.0, None)):
             _text, isr = _revise(analyst)
 
         assert len(llm.sent) == 1

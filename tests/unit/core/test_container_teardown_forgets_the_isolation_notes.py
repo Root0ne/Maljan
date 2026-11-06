@@ -1,7 +1,7 @@
 """A job's container, closed, forgets what the job noted of its sample's readers.
 
 Each tool server a job starts notes how its process was started under the
-job's key (``maljan.analysis.isolation``), for the run's disclosure record. The
+job's key (``malspark.analysis.isolation``), for the run's disclosure record. The
 notes are the job's: they are dropped at teardown, so a worker that is not
 recycled starts the next job with none.
 """
@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import asyncio
 
-from maljan.analysis import isolation
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
+from malspark.analysis import isolation
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
 
 
 def test_closing_the_container_forgets_the_notes_of_its_job() -> None:

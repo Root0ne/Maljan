@@ -13,19 +13,19 @@ call. One place is allowed to construct bare regardless:
 The check is bare-call-only (``Settings()``, ``Settings(_env_file=...)``,
 ``APISettings()``) so a kwargs construction does not trip it -- that is
 validating supplied values, not reading the environment. It follows an alias
-too: ``from maljan.core.config import Settings as _CoreSettings`` followed by
+too: ``from malspark.core.config import Settings as _CoreSettings`` followed by
 ``_CoreSettings()`` is the same environment read spelled differently, and
 ``analysis_worker.py`` already carries such an alias (type-only today).
 
 Fix round 1 (Critical 2/3) found the same leak could come back through
-``maljan.core.config.get_settings()``, the module-level lazy singleton:
+``malspark.core.config.get_settings()``, the module-level lazy singleton:
 ``apps/api/app/api/v1/sandbox_reports.py`` and
 ``apps/api/app/worker/sample_files.py`` called it directly from a request
 path that never installs it, so on first access in a fresh process it fell
 back to a bare, environment-reading ``Settings()`` -- invisible to the regex
 above, since the string ``Settings()`` never appears. The second check below
 guards against that: a file may not import ``get_settings`` from
-``maljan.core.config`` and then call it bare. It is careful to look for the
+``malspark.core.config`` and then call it bare. It is careful to look for the
 *core* module's ``get_settings`` specifically -- ``app.config.get_settings``
 (the API's own, process-environment-only ``APISettings`` singleton; a
 different function, same name) is unaffected and stays common throughout
@@ -63,7 +63,7 @@ _ALLOWED_FILES = {
 
 # A file matches this only when it actually names *the core module's*
 # ``get_settings`` -- either by importing the bare name from
-# ``maljan.core.config`` or by reaching it through a qualified
+# ``malspark.core.config`` or by reaching it through a qualified
 # ``core.config.get_settings`` access (e.g. an aliased ``import ... as
 # core_config`` followed by ``core_config.get_settings``). A file that never
 # does either (in particular one that only imports ``get_settings`` from
@@ -71,14 +71,14 @@ _ALLOWED_FILES = {
 # ``get_settings()``-call check -- so that call, wherever it is imported
 # from, is never flagged as the core one by mistake.
 _IMPORTS_CORE_GET_SETTINGS = re.compile(
-    r"from maljan\.core\.config import(?:[^\n]*|\s*\([^)]*)\bget_settings\b"
+    r"from malspark\.core\.config import(?:[^\n]*|\s*\([^)]*)\bget_settings\b"
     r"|core\.config\.get_settings"
 )
 _BARE_GET_SETTINGS_CALL = re.compile(r"\bget_settings\(\)")
 
 # No legitimate job-path use was found: every job-path reader of the process
 # singleton (agents, pipeline nodes, extractors, the CLI) lives under
-# src/maljan, not apps/api/app, and the two request-path call sites this
+# src/malspark, not apps/api/app, and the two request-path call sites this
 # review round found (sandbox_reports.py, sample_files.py) are fixed instead
 # of allow-listed. Empty on purpose -- see the module docstring.
 _GET_SETTINGS_ALLOWED_FILES: set[str] = set()
@@ -136,7 +136,7 @@ def test_no_core_get_settings_outside_the_allow_list() -> None:
         if _IMPORTS_CORE_GET_SETTINGS.search(text) and _BARE_GET_SETTINGS_CALL.search(text):
             offenders.append(str(path.relative_to(ROOT)))
     assert offenders == [], (
-        "maljan.core.config.get_settings() called outside the allow-list: "
+        "malspark.core.config.get_settings() called outside the allow-list: "
         f"{offenders} -- it is a lazy, environment-reading singleton on a "
         "request path that never installs it; read through "
         "settings_service.effective_core_settings(db) (or, inside a job "
@@ -148,7 +148,7 @@ def test_no_core_get_settings_outside_the_allow_list() -> None:
 def test_an_aliased_bare_construction_does_not_slip_past_the_check() -> None:
     """The regex used to be literal-name-only (final review M2)."""
     aliased = (
-        "from maljan.core.config import Settings as _CoreSettings\nsettings = _CoreSettings()\n"
+        "from malspark.core.config import Settings as _CoreSettings\nsettings = _CoreSettings()\n"
     )
     assert _constructs_bare_settings(aliased)
     assert _constructs_bare_settings(
@@ -157,5 +157,5 @@ def test_an_aliased_bare_construction_does_not_slip_past_the_check() -> None:
     # A kwargs construction is validating supplied values, not reading the
     # environment, aliased or not.
     assert not _constructs_bare_settings(
-        "from maljan.core.config import Settings as _CoreSettings\n_CoreSettings(**values)\n"
+        "from malspark.core.config import Settings as _CoreSettings\n_CoreSettings(**values)\n"
     )

@@ -27,15 +27,15 @@ from urllib.parse import parse_qs
 import httpx
 from pydantic import SecretStr
 
-from maljan.core.config import GHIDRA_SAMPLE_OPEN, MCPServerConfig, SampleOpenConfig
-from maljan.providers.sample_open import (
+from malspark.core.config import GHIDRA_SAMPLE_OPEN, MCPServerConfig, SampleOpenConfig
+from malspark.providers.sample_open import (
     FOREIGN_PROGRAM,
     NO_JOB_PROGRAM,
     SampleNotes,
     pin_program_argument,
 )
-from maljan.providers.static.ghidra import GhidraStaticProvider
-from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+from malspark.providers.static.ghidra import GhidraStaticProvider
+from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
 URL = "http://ghidra.invalid"
 KEY = "remote http://ghidra.invalid:80"
@@ -404,8 +404,8 @@ class TestThePlatformsOwnCalls:
         assert ghidra.sent("/get_full_call_graph") == []
 
     def test_the_function_hashes_are_the_job_s_program(self, monkeypatch: Any) -> None:
-        from maljan.core.config import PreprocessingConfig
-        from maljan.providers.base import StaticJobContext
+        from malspark.core.config import PreprocessingConfig
+        from malspark.providers.base import StaticJobContext
 
         ghidra = _SharedGhidra()
         _rest(monkeypatch, ghidra)
@@ -426,7 +426,7 @@ class TestNothingFailsOpen:
     """Where the job's program cannot be named on a shared server, nothing is read."""
 
     def _hashes(self, monkeypatch: Any, ghidra: _SharedGhidra, **over: Any) -> Any:
-        from maljan.providers.static.ghidra import function_hashes as hashes
+        from malspark.providers.static.ghidra import function_hashes as hashes
 
         common: dict[str, Any] = {
             "base_url": URL,
@@ -443,7 +443,7 @@ class TestNothingFailsOpen:
     def test_hashes_of_a_program_the_job_did_not_open_are_absent_on_a_shared_server(
         self, monkeypatch: Any
     ) -> None:
-        from maljan.providers.static.ghidra import function_hashes as hashes
+        from malspark.providers.static.ghidra import function_hashes as hashes
 
         ghidra = _SharedGhidra()
         _rest(monkeypatch, ghidra)
@@ -524,7 +524,7 @@ class TestEveryServerAlike:
         from langchain_core.tools import StructuredTool
         from pydantic import BaseModel
 
-        from maljan.providers.servers import ServerHandle
+        from malspark.providers.servers import ServerHandle
 
         seen: list[tuple[str, dict[str, Any]]] = []
 
@@ -626,8 +626,8 @@ class TestEveryServerAlike:
         assert any("list_everything" in r for r in handle.withheld_reasons())
 
     def test_the_registry_s_merge_records_the_reason(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.providers.servers import ServerRegistry
+        from malspark.core.config import Settings
+        from malspark.providers.servers import ServerRegistry
 
         handle, _seen = self._handle("streamable-http", SampleNotes())
         registry = ServerRegistry(Settings())
@@ -739,8 +739,8 @@ class TestTheRegistryHoldsTheJobsPath:
     """A registry-bound server on a shared transport opens the job's own sample."""
 
     def _registry(self) -> Any:
-        from maljan.core.config import Settings
-        from maljan.providers.servers import ServerRegistry
+        from malspark.core.config import Settings
+        from malspark.providers.servers import ServerRegistry
 
         registry = ServerRegistry(Settings())
         handle, _seen = TestEveryServerAlike()._handle("streamable-http", SampleNotes(), held=None)
@@ -749,7 +749,7 @@ class TestTheRegistryHoldsTheJobsPath:
         return registry
 
     def _stamped(self, handle: Any) -> Any:
-        from maljan.agents.tool_pinning import SERVER_METADATA_KEY
+        from malspark.agents.tool_pinning import SERVER_METADATA_KEY
 
         return handle._all_tools[0].model_copy(
             update={"metadata": {SERVER_METADATA_KEY: "decompiler"}}
@@ -762,7 +762,7 @@ class TestTheRegistryHoldsTheJobsPath:
         assert _error(answer)["code"] == FOREIGN_PROGRAM
 
     def test_the_held_path_reaches_the_handle_and_every_replica(self) -> None:
-        from maljan.agents.composition import hold_sample_paths
+        from malspark.agents.composition import hold_sample_paths
 
         registry = self._registry()
         handle = registry._handles["decompiler"]
@@ -784,7 +784,7 @@ class TestTheRegistryHoldsTheJobsPath:
         assert _error(foreign)["code"] == FOREIGN_PROGRAM
 
     def test_the_agent_s_own_path_is_held_where_no_server_path_is_known(self) -> None:
-        from maljan.agents.composition import hold_sample_paths
+        from malspark.agents.composition import hold_sample_paths
 
         registry = self._registry()
         handle = registry._handles["decompiler"]
@@ -794,7 +794,7 @@ class TestTheRegistryHoldsTheJobsPath:
 
 class TestDecidedOncePerManifest:
     def test_every_reader_reads_one_decision(self, monkeypatch: Any) -> None:
-        from maljan.providers import sample_open
+        from malspark.providers import sample_open
 
         handle, _seen = TestEveryServerAlike()._handle("streamable-http", SampleNotes())
         built: list[int] = []
@@ -898,7 +898,7 @@ class TestADeclarationWithNoProgramArgument:
 
 class TestAFallbackNeverReplacesAServersPath:
     def test_only_a_server_s_own_path_replaces_a_held_one(self) -> None:
-        from maljan.agents.composition import hold_sample_paths
+        from malspark.agents.composition import hold_sample_paths
 
         registry_test = TestTheRegistryHoldsTheJobsPath()
         registry = registry_test._registry()
@@ -916,7 +916,7 @@ class TestTheCacheKey:
     def test_the_same_manifest_by_name_is_one_decision_and_a_reattach_another(
         self, monkeypatch: Any
     ) -> None:
-        from maljan.providers import sample_open
+        from malspark.providers import sample_open
 
         handle, _seen = TestEveryServerAlike()._handle("streamable-http", SampleNotes())
         built: list[int] = []

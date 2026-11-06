@@ -22,11 +22,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.pipeline.nodes import RevisionInput, make_negotiation_node, make_revision_node
-from maljan.pipeline.routing import NOT_REVISED, debate_route
-from maljan.pipeline.state import AgentArgument
-from maljan.pipeline.sycophancy_detector import detect_sycophancy
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.nodes import RevisionInput, make_negotiation_node, make_revision_node
+from malspark.pipeline.routing import NOT_REVISED, debate_route
+from malspark.pipeline.state import AgentArgument
+from malspark.pipeline.sycophancy_detector import detect_sycophancy
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.stages import paper_profile
 
 NAMES = ["dynamic", "network"]
@@ -78,7 +78,7 @@ class TestTheCheck:
     def test_the_answers_left_out_are_named_in_the_log(self, caplog: Any) -> None:
         import logging
 
-        with caplog.at_level(logging.INFO, logger="maljan"):
+        with caplog.at_level(logging.INFO, logger="malspark"):
             detect_sycophancy(list(IN_FORCE.values()), iteration=1, revised=set())
         said = " ".join(r.getMessage() for r in caplog.records)
         assert "not revised in round 1" in said
@@ -123,7 +123,7 @@ def _revise(outcomes: dict[str, Any], absent: tuple[str, ...] = ()) -> dict[str,
     container = _revision_container(outcomes)
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "maljan.pipeline.nodes._revision_input",
+            "malspark.pipeline.nodes._revision_input",
             lambda _state, _container, name: (
                 RevisionInput(absent="no data for this agent")
                 if name in absent

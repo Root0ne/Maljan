@@ -24,7 +24,7 @@ a reference moved; ``is_secret`` rows are never read. Running it again finds
 nothing left to move.
 
 Kept self-contained, as every revision is: the rule is restated here rather
-than imported from ``maljan.core.agent_key_migration``.
+than imported from ``malspark.core.agent_key_migration``.
 
 Revision ID: 20261025000000
 Revises: 20261024000000

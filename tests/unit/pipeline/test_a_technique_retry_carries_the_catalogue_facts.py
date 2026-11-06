@@ -13,7 +13,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     TECHNIQUE_FACTS_LEAD,
     TECHNIQUE_LINE_UNREAD_CODE,
@@ -21,7 +21,7 @@ from maljan.pipeline.validation import (
     Violation,
     technique_facts_note,
 )
-from maljan.tools import knowledge
+from malspark.tools import knowledge
 
 
 def _claim(technique_id: str | None = None, line: str | None = None) -> Any:

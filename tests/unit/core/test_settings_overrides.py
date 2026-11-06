@@ -1,8 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from maljan.core import settings_overrides as ov
-from maljan.core.config import Settings
+from malspark.core import settings_overrides as ov
+from malspark.core.config import Settings
 
 
 def test_nest_builds_nested_dict():
@@ -77,7 +77,7 @@ def test_public_snapshot_keeps_server_env_names_and_hides_their_values():
     The variable names stay, sorted (an operator debugging a server needs to
     see what it was given); every value is masked.
     """
-    from maljan.core.config import MCPServerConfig
+    from malspark.core.config import MCPServerConfig
 
     settings = Settings()
     settings.mcp.servers["probe_srv"] = MCPServerConfig(
@@ -141,7 +141,7 @@ class TestADeprecatedOverrideMapCannotHoldANonBudget:
     def test_the_operator_is_told_which_entry_went(self, caplog):
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="maljan.core.config"):
+        with caplog.at_level(logging.WARNING, logger="malspark.core.config"):
             Settings(react_agent_max_steps_overrides={"scout": "lots"})
 
         assert "scout" in caplog.text

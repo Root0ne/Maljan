@@ -35,7 +35,7 @@ import pytest
 RENDERER = (
     Path(__file__).resolve().parents[3]
     / "src"
-    / "maljan"
+    / "malspark"
     / "reporting"
     / "renderers"
     / "markdown.py"

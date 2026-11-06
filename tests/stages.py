@@ -9,7 +9,7 @@ than the settings model's.
 
 from __future__ import annotations
 
-from maljan.core.config import ProfileDefinition, StageDefinition, stages_from_analysts
+from malspark.core.config import ProfileDefinition, StageDefinition, stages_from_analysts
 
 # The stage a bare analyst node belongs to when the test is about the analyst
 # rather than about the team.

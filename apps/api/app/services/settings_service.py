@@ -14,16 +14,16 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from maljan.core import settings_secrets as box
-from maljan.core.config import Settings, builtin_env_allow
-from maljan.core.plugins import (
+from malspark.core import settings_secrets as box
+from malspark.core.config import Settings, builtin_env_allow
+from malspark.core.plugins import (
     ALLOW_LIST_KEY,
     dropped_selections,
     id_refusal,
     install_allow_list,
 )
-from maljan.core.settings_catalog import PLUGIN_CHOICE_KINDS, _registry_choices
-from maljan.core.settings_masking import (
+from malspark.core.settings_catalog import PLUGIN_CHOICE_KINDS, _registry_choices
+from malspark.core.settings_masking import (
     mask_left_in,
     masked_server,
     masked_server_map,
@@ -33,7 +33,7 @@ from maljan.core.settings_masking import (
     unmasked,
     value_at,
 )
-from maljan.core.settings_overrides import (
+from malspark.core.settings_overrides import (
     SERVER_MAP_PATH,
     build_settings,
     effective_source,
@@ -122,7 +122,7 @@ def unknown_key_reason(
     such a key while the stored allow-list ``stored_allowed`` names it and the
     list the save leaves, ``leaves`` (the stored one when ``None``), still does.
     """
-    from maljan.core import plugins
+    from malspark.core import plugins
 
     match = _PLUGIN_BLOCK_KEY.fullmatch(str(key))
     if match is None:
@@ -156,7 +156,7 @@ def cleared_plugin_block_keys(changes: dict[str, Any], known: Iterable[str]) -> 
     process has not loaded; clearing it deletes its stored row, which needs no
     model, so no plugin is loaded for it and no value of the row is read.
     """
-    from maljan.core import plugins
+    from malspark.core import plugins
 
     held = set(known)
     names: dict[str, set[str]] = {}
@@ -202,7 +202,7 @@ def incoming_declaration_leaves(changes: dict[str, Any], current: dict[str, Any]
     it would drop that key, for :func:`changed_declaration_refusals` to
     refuse. Every other key is unchanged.
     """
-    from maljan.core.tool_declarations import (
+    from malspark.core.tool_declarations import (
         holds_changes,
         stored_changes,
         unreadable_map,
@@ -229,7 +229,7 @@ def _leaf_changes(
     sends with its refused stored change exactly as stored is kept as stored
     (``tool_declarations.kept_stored_changes``) and left out of the rest.
     """
-    from maljan.core.tool_declarations import kept_stored_changes, without_mark
+    from malspark.core.tool_declarations import kept_stored_changes, without_mark
 
     shipped = _shipped_leaf(key)
     incoming = without_mark(value)
@@ -252,7 +252,7 @@ def changed_declaration_refusals(
     than one sent back with its stored change exactly as stored, is refused
     under ``<leaf>`` itself, as the settings model refuses it.
     """
-    from maljan.core.tool_declarations import (
+    from malspark.core.tool_declarations import (
         changed_declaration_errors,
         merge_tool_facts,
         sent_names_refusal,
@@ -311,8 +311,8 @@ def provider_block_refusals(changes: dict[str, Any], current: dict[str, Any]) ->
     (``Settings._provider_blocks_are_their_own``).
     Keys are ``core.providers.<id>[.tool_facts.<tool>[.<field>]]``.
     """
-    from maljan.core.tool_declarations import changed_declaration_errors, elsewhere_declared
-    from maljan.providers.registry import built_in_ids
+    from malspark.core.tool_declarations import changed_declaration_errors, elsewhere_declared
+    from malspark.providers.registry import built_in_ids
 
     value = changes.get(PROVIDER_BLOCKS_KEY)
     if not isinstance(value, dict):
@@ -366,8 +366,8 @@ def stored_declaration_leaves(
     with its refused stored change exactly as stored (:func:`_leaf_changes`).
     Every other key is unchanged.
     """
-    from maljan.core.config import MCPServerConfig
-    from maljan.core.tool_declarations import merge_tool_facts, tool_facts_changes, with_mark
+    from malspark.core.config import MCPServerConfig
+    from malspark.core.tool_declarations import merge_tool_facts, tool_facts_changes, with_mark
 
     out = dict(changes)
     for key, value in changes.items():
@@ -403,7 +403,7 @@ def served_tool_facts(stored: dict[str, Any], shipped: dict[str, Any]) -> dict[s
     force and is served as no change at all, so what the console sends back
     keeps the shipped declarations in force.
     """
-    from maljan.core.tool_declarations import stored_changes, unreadable_map, with_mark
+    from malspark.core.tool_declarations import stored_changes, unreadable_map, with_mark
 
     if unreadable_map(stored):
         return with_mark({})
@@ -426,11 +426,11 @@ def lenient_imported_declarations(
     ships, one tool at a time; each tool the document names is read as it is
     in force, and kept as its changes again, marked, whichever format the
     document is in: only a format that stores changes writes the mark, so a
-    ``maljan-settings/1`` document relabelled from one is read as it was
+    ``malspark-settings/1`` document relabelled from one is read as it was
     written. A map without the mark is its whole map: a shipped tool it does
     not name was removed, and stays removed.
     """
-    from maljan.core.tool_declarations import (
+    from malspark.core.tool_declarations import (
         holds_changes,
         lenient_declarations,
         loggable_names,
@@ -556,7 +556,7 @@ def _fixture_reader_refusals(settings: Any) -> dict[str, str]:
     reader, a live report would be read as a recorded fixture
     (``readers.named_reader_refusal``).
     """
-    from maljan.providers.sandbox.readers import (
+    from malspark.providers.sandbox.readers import (
         named_reader_refusal,
         sandbox_format_named,
         sandbox_formats,
@@ -610,7 +610,7 @@ _NESTED_BY_KEY = {spec.key: spec for spec in NESTED_SECRET_MAPS}
 NESTED_SECRET_KEYS = frozenset(_NESTED_BY_KEY)
 # Rows a start-up repair writes to record that it is done. Their keys sit
 # outside every settings namespace and are never read as a setting.
-MARKER_PREFIX = "maljan.repair."
+MARKER_PREFIX = "malspark.repair."
 # The settings audit rows written before their values were masked are masked
 # (``composite_secrets.mask_audited_settings``).
 AUDIT_MASKED_MARKER = f"{MARKER_PREFIX}settings_audit_masked"
@@ -625,7 +625,7 @@ def shown_setting(entry: Any, value: Any) -> Any:
     """A stored or default value as the console and the export may see it.
 
     Masked as the run settings snapshot masks it, with the console's
-    ``TOKEN_MASK`` (``maljan.core.settings_masking``): the tool-server map by
+    ``TOKEN_MASK`` (``malspark.core.settings_masking``): the tool-server map by
     ``masked_server`` (every ``env`` value, a credential a flag of the
     arguments names, every URL), an open mapping (``dict``) by
     ``masked_value`` (every entry whose key names a credential, every URL),
@@ -809,7 +809,7 @@ async def refused_secrets_a_job_uses(
     if not owned and not arms:
         return dict(refused)
 
-    from maljan.agents.composition import servers_a_job_calls
+    from malspark.agents.composition import servers_a_job_calls
 
     # Read past the refusal: the secret that cannot be read is simply absent,
     # which is all the question "which servers does this job call" needs.
@@ -890,13 +890,13 @@ class SettingsService:
             else:
                 out[row.key] = row.value
         if undecryptable:
-            from maljan.core.settings_overrides import StoredValueRefused
+            from malspark.core.settings_overrides import StoredValueRefused
 
             raise StoredValueRefused(undecryptable)
         merged = _merge_nested(merge_server_secrets(out))
         # The stored plugin allow-list is the one this process judges a
         # provider id by when a check is handed none; it loads and withdraws
-        # nothing (``maljan.core.plugins.load_allowed`` does, when told to).
+        # nothing (``malspark.core.plugins.load_allowed`` does, when told to).
         install_allow_list(merged.get(ALLOW_LIST_KEY))
         # Every secret the store holds masks shown text in this process by
         # value (``settings_masking.masked_values``): each encrypted row's
@@ -1226,7 +1226,7 @@ class SettingsService:
         else:
             # The selected provider's role models are read from its own block,
             # never borrowed from another provider's.
-            from maljan.llm.provider_base import role_block_problem
+            from malspark.llm.provider_base import role_block_problem
 
             problem = role_block_problem(built)
             if problem:

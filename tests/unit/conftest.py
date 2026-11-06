@@ -31,7 +31,7 @@ that share no words.
 
 **The cache directory is somewhere else.** Both caches — the STIX bundles and
 the embedding vectors — point at a per-session temporary directory, so no unit
-run can write into ``~/.cache/maljan/attck``. A bag-of-words corpus written
+run can write into ``~/.cache/malspark/attck``. A bag-of-words corpus written
 there is read back by the next live run as though the model had produced it,
 and the export ranks techniques with it. The bundles are copied in when the
 real cache already has them, so the tests that legitimately want the catalogue
@@ -53,7 +53,7 @@ from typing import Any
 
 import pytest
 
-from maljan.memory import attck_index, attck_loader, embeddings, semantic_attck_index
+from malspark.memory import attck_index, attck_loader, embeddings, semantic_attck_index
 
 _REFUSE_FETCH = "a unit test fetched the ATT&CK corpus from the network."
 

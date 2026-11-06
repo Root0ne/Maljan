@@ -16,7 +16,7 @@ import re
 
 import pytest
 
-from maljan.reporting.models import MalwareReport
+from malspark.reporting.models import MalwareReport
 from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 
 # ``(markdown, html with the nonce "fixed", normalised STIX)`` as dev 2c2522b2 renders them.
@@ -58,7 +58,7 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # table, which has no row left and is not printed; nothing else changed (nor the STIX).
 # The STIX re-pinned when a process the sample's lineage rule leaves out of its
 # tree came to say so (T-511): each desktop process carries
-# ``x_maljan_sample_process_tree: false`` (run4 six: svchost.exe and
+# ``x_malspark_sample_process_tree: false`` (run4 six: svchost.exe and
 # SecurityHealthHost.exe, each in the three readings the stored tree lists;
 # run5 and run7 one; local8 five), and nothing else changed; the Markdown and
 # HTML did not change. The readings of a pid of the sample's tree that record
@@ -80,8 +80,8 @@ def _digest(text: str) -> str:
 
 @pytest.mark.parametrize("run", sorted(STORED_RENDERS))
 def test_a_stored_run_renders_as_dev_rendered_it(run: str) -> None:
-    from maljan.reporting.renderers import HtmlRenderer, MarkdownRenderer
-    from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+    from malspark.reporting.renderers import HtmlRenderer, MarkdownRenderer
+    from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
 
     root = _benchmark()
     if root is None or not (root / run / "report.json").is_file():

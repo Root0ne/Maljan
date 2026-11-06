@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.api.v1.reports import _detail
-from maljan.reporting.renderers import MarkdownRenderer
+from malspark.reporting.renderers import MarkdownRenderer
 
 NOTE = (
     "This report was built and the run failed after it: node judge raised "
@@ -94,7 +94,7 @@ def test_the_migration_adds_the_column_and_takes_it_back() -> None:
 
 
 def test_the_rendered_report_says_it_is_incomplete() -> None:
-    from maljan.reporting.models import MalwareReport
+    from malspark.reporting.models import MalwareReport
 
     report = MalwareReport.model_validate(
         {

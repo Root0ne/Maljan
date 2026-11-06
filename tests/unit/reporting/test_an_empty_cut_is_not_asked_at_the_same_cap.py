@@ -18,9 +18,9 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.core.spend import SpendMeter
-from maljan.core.token_ledger import TokenLedger
-from maljan.reporting.composer import COMPOSED_SECTIONS, ReportComposer, _HostIdentifiersOut
+from malspark.core.spend import SpendMeter
+from malspark.core.token_ledger import TokenLedger
+from malspark.reporting.composer import COMPOSED_SECTIONS, ReportComposer, _HostIdentifiersOut
 
 _WHOLE = (
     '{"identifiers": [{"kind": "File name", "value": "state.example.bin", '
@@ -62,7 +62,7 @@ def _compose(llm: _Answers, ledger: TokenLedger | None, **settings: Any) -> Repo
     )
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+            "malspark.reporting.composer.structured_output_supported_for_llm", lambda _l: False
         )
         composer._last = asyncio.run(  # type: ignore[attr-defined]
             composer._invoke(
@@ -90,7 +90,7 @@ class TestAnEmptyCutAtTheSpendHold:
         meter = _held_meter()
         llm = _Answers(_empty_cut(2_000), _whole())
 
-        with caplog.at_level(logging.INFO, logger="maljan"):
+        with caplog.at_level(logging.INFO, logger="malspark"):
             composer = _compose(llm, TokenLedger(spend=meter))
 
         assert composer._last is None  # type: ignore[attr-defined]
@@ -133,7 +133,7 @@ class TestTheSectionsArePlannedForTheSpend:
         async def _author(self: Any, section: str, *args: Any, **kwargs: Any) -> None:
             asked.append(section)
 
-        from maljan.reporting.models import MalwareReport
+        from malspark.reporting.models import MalwareReport
 
         composer = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
         with pytest.MonkeyPatch.context() as mp:

@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.provider_readiness import refusal_sentence, unready_static_providers
-from maljan.core.config import Settings, ToolRef
+from malspark.core.config import Settings, ToolRef
 
 
 class _Schema(BaseHTTPRequestHandler):

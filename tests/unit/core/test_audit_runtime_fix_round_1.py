@@ -10,9 +10,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.core import spend
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
+from malspark.core import spend
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
 
 
 @pytest.mark.asyncio
@@ -61,7 +61,7 @@ def test_r6_a_persisting_failure_is_read_and_warned_once_until_the_file_changes(
     monkeypatch.setattr(spend, "_table", None)
     monkeypatch.setattr(spend, "_failed_stat", None)
     monkeypatch.setattr(spend, "table_failure", None)
-    monkeypatch.setattr("maljan.core.paths.resolve_data", lambda _p: missing)
+    monkeypatch.setattr("malspark.core.paths.resolve_data", lambda _p: missing)
     meter = spend.SpendMeter(10.0)
     with caplog.at_level("WARNING"):
         assert meter.price_of("m") is None

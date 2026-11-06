@@ -17,16 +17,16 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.callees_question import (
+from malspark.agents.callees_question import (
     NOT_RUN_CODE_READER_NO_LISTING,
     NOT_RUN_NO_LISTING,
     UNREAD_CALLEES_CODE,
     reads_code,
     states_why,
 )
-from maljan.agents.composition import ResolvedAgent
-from maljan.core.config import AgentDefinition
-from maljan.schemas.evidence import LedgerEntry
+from malspark.agents.composition import ResolvedAgent
+from malspark.core.config import AgentDefinition
+from malspark.schemas.evidence import LedgerEntry
 from tests.unit.agents.test_the_unread_functions_around_what_an_analyst_read_are_asked_once import (  # noqa: E501
     OWN,
     RETRY,

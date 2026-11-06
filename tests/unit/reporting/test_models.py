@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     DefensiveRecommendation,
     FileHashes,
     MalwareReport,
@@ -138,7 +138,7 @@ class TestReshapingSchemaPhase2:
         assert r.front_matter is None and r.technical_analysis is None
 
     def test_full_spine_round_trip(self) -> None:
-        from maljan.reporting.models import (
+        from malspark.reporting.models import (
             CliFlag,
             ConsolidatedIOC,
             EncryptionScheme,
@@ -154,7 +154,7 @@ class TestReshapingSchemaPhase2:
             ),
             version_history=[
                 VersionHistoryEntry(
-                    version="1.0", date="2026-07-13", authors="Maljan", description="Completed"
+                    version="1.0", date="2026-07-13", authors="Malspark", description="Completed"
                 )
             ],
             tlp="AMBER",
@@ -180,13 +180,13 @@ class TestReshapingSchemaPhase2:
         assert r2.figures[0].kind == "attack_matrix"
 
     def test_subblocks_forbid_extra(self) -> None:
-        from maljan.reporting.models import EncryptionScheme
+        from malspark.reporting.models import EncryptionScheme
 
         with pytest.raises(ValueError):
             EncryptionScheme(cipher="AES", bogus_field="x")  # type: ignore[call-arg]
 
     def test_figure_kind_literal_enforced(self) -> None:
-        from maljan.reporting.models import Figure
+        from malspark.reporting.models import Figure
 
         with pytest.raises(ValueError):
             Figure(id="f", caption="c", kind="screenshot", content="x")  # type: ignore[arg-type]
@@ -213,7 +213,7 @@ class TestPersistenceLinuxKinds:
         ],
     )
     def test_linux_kind_accepted(self, kind: str) -> None:
-        from maljan.reporting.models import PersistenceMechanism
+        from malspark.reporting.models import PersistenceMechanism
 
         pm = PersistenceMechanism.model_validate(
             {"kind": kind, "target": "/etc/foo", "evidence_ref": "x"}
@@ -221,7 +221,7 @@ class TestPersistenceLinuxKinds:
         assert pm.kind == kind
 
     def test_windows_kinds_still_accepted(self) -> None:
-        from maljan.reporting.models import PersistenceMechanism
+        from malspark.reporting.models import PersistenceMechanism
 
         for kind in ("registry_run", "scheduled_task", "service", "other"):
             pm = PersistenceMechanism.model_validate(
@@ -230,7 +230,7 @@ class TestPersistenceLinuxKinds:
             assert pm.kind == kind
 
     def test_unknown_kind_rejected(self) -> None:
-        from maljan.reporting.models import PersistenceMechanism
+        from malspark.reporting.models import PersistenceMechanism
 
         with pytest.raises(ValueError):
             PersistenceMechanism.model_validate(
@@ -243,7 +243,7 @@ class TestRowsWrittenBeforeTheLabelsWent:
     model no longer has must load, and the key must not come back."""
 
     def test_an_import_row_with_the_old_label_keys_loads(self) -> None:
-        from maljan.reporting.models import ImportRow
+        from malspark.reporting.models import ImportRow
 
         row = ImportRow.model_validate(
             {"dll": "k32", "function": "VirtualAllocEx", "is_suspicious": True, "category": "x"}
@@ -253,7 +253,7 @@ class TestRowsWrittenBeforeTheLabelsWent:
         assert "is_suspicious" not in row.model_dump()
 
     def test_an_attribution_with_case_priors_loads(self) -> None:
-        from maljan.reporting.models import FamilyAttribution
+        from malspark.reporting.models import FamilyAttribution
 
         attribution = FamilyAttribution.model_validate(
             {"attck_case_candidates": [{"technique_id": "T1055", "support": 7}]}

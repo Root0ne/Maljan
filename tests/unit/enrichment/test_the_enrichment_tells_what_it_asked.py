@@ -17,10 +17,10 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from maljan.analysis.disclosure import EnrichmentAsks
-from maljan.enrichment.declared import ReadySource, effective_sources
-from maljan.enrichment.orchestrator import enrich_malware_report
-from maljan.enrichment.whois_client import RDAP_HOST, RDAP_SOURCE
+from malspark.analysis.disclosure import EnrichmentAsks
+from malspark.enrichment.declared import ReadySource, effective_sources
+from malspark.enrichment.orchestrator import enrich_malware_report
+from malspark.enrichment.whois_client import RDAP_HOST, RDAP_SOURCE
 from tests.credential_shapes import password
 
 VT_HOST = "www.virustotal.com"
@@ -60,7 +60,7 @@ def _client() -> httpx.AsyncClient:
 @pytest.mark.asyncio
 async def test_each_question_is_told_with_its_source_host_and_kind() -> None:
     asks = EnrichmentAsks()
-    with patch("maljan.enrichment.whois_client._try_ipwhois", return_value=None):
+    with patch("malspark.enrichment.whois_client._try_ipwhois", return_value=None):
         async with _client() as http:
             await enrich_malware_report(
                 _report(),
@@ -86,7 +86,7 @@ async def test_a_listener_that_fails_never_costs_a_lookup() -> None:
     def _broken(*_args: str) -> None:
         raise RuntimeError("listener down")
 
-    with patch("maljan.enrichment.whois_client._try_ipwhois", return_value=None):
+    with patch("malspark.enrichment.whois_client._try_ipwhois", return_value=None):
         async with _client() as http:
             out = await enrich_malware_report(
                 _report(),
@@ -140,7 +140,7 @@ def test_a_server_the_settings_no_longer_hold_names_no_host() -> None:
 
 @pytest.mark.asyncio
 async def test_the_rdap_fallback_reaches_the_bootstrap_alone_and_follows_no_referral() -> None:
-    from maljan.enrichment.whois_client import WhoisClient
+    from malspark.enrichment.whois_client import WhoisClient
 
     reached: list[str] = []
 
@@ -149,7 +149,7 @@ async def test_the_rdap_fallback_reaches_the_bootstrap_alone_and_follows_no_refe
         return httpx.Response(302, headers={"location": "https://rdap.db.ripe.net/ip/1.2.3.4"})
 
     asks = EnrichmentAsks()
-    with patch("maljan.enrichment.whois_client.ipwhois_available", return_value=False):
+    with patch("malspark.enrichment.whois_client.ipwhois_available", return_value=False):
         async with httpx.AsyncClient(transport=httpx.MockTransport(_answer)) as http:
             await WhoisClient(http, on_ask=asks).asn_lookup("1.2.3.4")
 
@@ -159,13 +159,13 @@ async def test_the_rdap_fallback_reaches_the_bootstrap_alone_and_follows_no_refe
 
 @pytest.mark.asyncio
 async def test_ipwhois_s_own_lookups_are_their_own_rows_with_their_path() -> None:
-    from maljan.analysis.disclosure import (
+    from malspark.analysis.disclosure import (
         disclosure_lines,
         registry_rows,
         with_enrichment,
         with_enrichment_asked,
     )
-    from maljan.enrichment.whois_client import (
+    from malspark.enrichment.whois_client import (
         IPWHOIS_ASN_HOST,
         IPWHOIS_ASN_SOURCE,
         IPWHOIS_RDAP_SOURCE,
@@ -174,8 +174,8 @@ async def test_ipwhois_s_own_lookups_are_their_own_rows_with_their_path() -> Non
 
     asks = EnrichmentAsks()
     with (
-        patch("maljan.enrichment.whois_client.ipwhois_available", return_value=True),
-        patch("maljan.enrichment.whois_client._try_ipwhois", return_value="AS15169 GOOGLE"),
+        patch("malspark.enrichment.whois_client.ipwhois_available", return_value=True),
+        patch("malspark.enrichment.whois_client._try_ipwhois", return_value="AS15169 GOOGLE"),
     ):
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(lambda r: httpx.Response(500))

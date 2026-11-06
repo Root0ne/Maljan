@@ -17,9 +17,9 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.llm.context_window import CHARS_PER_TOKEN, WindowFact, output_cap_for
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.llm.context_window import CHARS_PER_TOKEN, WindowFact, output_cap_for
 
 # Hosted models whose vendors declare a maximum output in the vendored table.
 DEEPSEEK = "deepseek-v4-pro"
@@ -52,7 +52,7 @@ def _fact(window: int) -> WindowFact:
 def _stage(window: int, model: str, **llm: int) -> tuple[Any, Any, Any]:
     """The narrative agent, the composer and the judge's cap, as one container builds them."""
     container = _container(window, model, **llm)
-    with patch("maljan.llm.context_window.learn_window", return_value=_fact(window)):
+    with patch("malspark.llm.context_window.learn_window", return_value=_fact(window)):
         narrative = container.get_narrative_agent()
         composer = container.get_report_composer()
         judge = output_cap_for(container.config, "judge_max_tokens", "judge", role="judge")
@@ -64,8 +64,8 @@ def _compose_one(composer: Any) -> tuple[str, list[str]]:
     import asyncio
     import json
 
-    from maljan.reporting.composer import ReportComposer
-    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from malspark.reporting.composer import ReportComposer
+    from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
 
     sent: dict[str, str] = {}
 
@@ -89,7 +89,9 @@ def _compose_one(composer: Any) -> tuple[str, list[str]]:
         output_cap=composer.output_cap,
         window_tokens=composer.window_tokens,
     )
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+    ):
         asyncio.run(built.compose(report, isr_reports={"static": SimpleNamespace(claims=claims)}))
     return sent.get("introduction", ""), list(built.degradations)
 
@@ -124,7 +126,7 @@ class TestAMaximumOutputPastTheWindow:
         assert composer._room_chars() == (200000 - 50000) * CHARS_PER_TOKEN
 
     def test_a_section_is_written_with_its_claims(self) -> None:
-        from maljan.reporting.composer import NO_ROOM_FOR_THE_ANSWER
+        from malspark.reporting.composer import NO_ROOM_FOR_THE_ANSWER
 
         _narrative, composer, _judge = _stage(200000, DEEPSEEK)
 
@@ -166,7 +168,7 @@ class TestAMixedFallbackList:
 
     @staticmethod
     def _composer() -> Any:
-        from maljan.core.config import REPORTER_AGENT_KEY, AgentLLMConfig, ModelChoice
+        from malspark.core.config import REPORTER_AGENT_KEY, AgentLLMConfig, ModelChoice
 
         settings = Settings(_env_file=None)  # type: ignore[call-arg]
         settings.llm.openai.disable_thinking = True
@@ -189,7 +191,7 @@ class TestAMixedFallbackList:
                 return WindowFact(65536, "probed", "llama.cpp /props reported 65,536 tokens")
             return _fact(1048576)
 
-        with patch("maljan.llm.context_window.learn_window", side_effect=window):
+        with patch("malspark.llm.context_window.learn_window", side_effect=window):
             return container.get_report_composer()
 
     def test_each_model_keeps_its_own_cap(self) -> None:
@@ -225,10 +227,10 @@ class TestAListThatCannotBeBudgeted:
         container = _container(200000, DEEPSEEK)
         with (
             patch(
-                "maljan.core.model_assignments.assignment_chain_for",
+                "malspark.core.model_assignments.assignment_chain_for",
                 side_effect=ValueError("unreadable"),
             ),
-            patch("maljan.llm.context_window.learn_window", return_value=_fact(200000)),
+            patch("malspark.llm.context_window.learn_window", return_value=_fact(200000)),
         ):
             narrative = container.get_narrative_agent()
 
@@ -241,8 +243,8 @@ class TestAFailedProbeOnDeepSeek:
 
     @staticmethod
     def _caps() -> tuple[Any, dict[str, int]]:
-        from maljan.core.model_assignments import assignment_chain_for
-        from maljan.llm import context_window
+        from malspark.core.model_assignments import assignment_chain_for
+        from malspark.llm import context_window
 
         settings = Settings(_env_file=None)  # type: ignore[call-arg]
         settings.llm.provider = "openai"
@@ -258,7 +260,7 @@ class TestAFailedProbeOnDeepSeek:
         failed = context_window.unknown_window("the window probe timed out")
         context_window.forget_learned_windows()
         try:
-            with patch("maljan.llm.context_window.probe_window", return_value=failed):
+            with patch("malspark.llm.context_window.probe_window", return_value=failed):
                 judge = assignment_chain_for(settings, "judge", role="judge")[0]
                 window = context_window.window_for_assignment(settings, judge)
                 caps = {
@@ -273,7 +275,7 @@ class TestAFailedProbeOnDeepSeek:
         return window, caps
 
     def test_the_window_is_the_table_s(self) -> None:
-        from maljan.llm.context_window import TABLE
+        from malspark.llm.context_window import TABLE
 
         window, _caps = self._caps()
 
@@ -288,7 +290,7 @@ class TestAFailedProbeOnDeepSeek:
 
 def _listed(caps: dict[str, int], windows: dict[str, int]) -> Any:
     """A composer over a model list, each model with its own cap and window."""
-    from maljan.reporting.composer import ReportComposer
+    from malspark.reporting.composer import ReportComposer
 
     return ReportComposer(
         llm=SimpleNamespace(),  # type: ignore[arg-type]

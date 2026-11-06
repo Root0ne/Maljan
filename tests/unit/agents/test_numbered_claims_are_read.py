@@ -9,7 +9,7 @@ empty one.
 
 from __future__ import annotations
 
-from maljan.agents.static_analyst import _parse_claim_blocks
+from malspark.agents.static_analyst import _parse_claim_blocks
 
 NUMBERED = """[STATIC ANALYST — negotiation round 1]
 
@@ -64,7 +64,7 @@ def test_a_word_that_begins_with_claim_is_not_a_heading() -> None:
 def test_a_claim_heading_inside_evidence_opens_its_own_block() -> None:
     # The first claim keeps no confidence it did not state; the line that reads
     # as a heading is its own block, with the CONFIDENCE written under it.
-    from maljan.agents.base_agent import read_claim_blocks
+    from malspark.agents.base_agent import read_claim_blocks
 
     text = "CLAIM 1: one\nEVIDENCE: first line\nCLAIM 2 - see also ev_0002\nCONFIDENCE: 0.8"
     read = read_claim_blocks(text)

@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from maljan.core.config import ROLE_ENTRY_KEYS
+from malspark.core.config import ROLE_ENTRY_KEYS
 
 ROLE_ENTRIES_TS = (
     Path(__file__).resolve().parents[3]

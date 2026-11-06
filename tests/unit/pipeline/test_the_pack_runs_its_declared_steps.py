@@ -29,14 +29,14 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.core import config as config_module
-from maljan.core.config import MCPServerConfig, Settings, TriageConfig
-from maljan.core.container import ServiceContainer
-from maljan.core.pack_steps import PACK_RENDERERS, default_steps, effective_steps
-from maljan.pipeline import triage_pack
-from maljan.pipeline.nodes import _server_step_call
-from maljan.pipeline.triage_pack import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.core import config as config_module
+from malspark.core.config import MCPServerConfig, Settings, TriageConfig
+from malspark.core.container import ServiceContainer
+from malspark.core.pack_steps import PACK_RENDERERS, default_steps, effective_steps
+from malspark.pipeline import triage_pack
+from malspark.pipeline.nodes import _server_step_call
+from malspark.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     PackInputs,
@@ -45,9 +45,9 @@ from maljan.pipeline.triage_pack import (
     pack_entries,
     run_pack,
 )
-from maljan.providers.static import capa_yara
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
-from maljan.tools import crypto_constants, emulated_strings, rules
+from malspark.providers.static import capa_yara
+from malspark.schemas.evidence import EvidenceCounter, LedgerEntry
+from malspark.tools import crypto_constants, emulated_strings, rules
 
 from ..tools.synthetic_pe import TEXT_RVA, SyntheticPE
 
@@ -427,7 +427,7 @@ class TestAnInventedToolAsAStep:
     def test_its_tool_s_declared_peak_sizes_it_against_the_floor(
         self, settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core import declared_reading
+        from malspark.core import declared_reading
 
         facts = {**INVENTORY["tool_facts"]["count_sections"], "memory_peak_mb": 2048}
         declared = {**INVENTORY, "tool_facts": {"count_sections": facts}}
@@ -629,7 +629,7 @@ class TestTheServerStepCall:
     def test_the_node_runs_the_operators_steps(
         self, settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.pipeline.nodes import make_triage_node
+        from malspark.pipeline.nodes import make_triage_node
         from tests.unit.pipeline.test_stage_events import _state
 
         settings.triage.steps = TriageConfig(steps=[TestAnInventedToolAsAStep.STEP]).steps
@@ -676,9 +676,9 @@ class TestAStepNamedAsAKeyOfThePackState:
     def test_it_runs_and_its_schedule_never_replaces_a_key(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
     ) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
-        from maljan.pipeline.conditions import HELD_SCHEDULES
-        from maljan.pipeline.triage_pack import PackResult
+        from malspark.analysis.run_summary import RunSummaryBuilder
+        from malspark.pipeline.conditions import HELD_SCHEDULES
+        from malspark.pipeline.triage_pack import PackResult
 
         result = self._run(tmp_path, monkeypatch, self._step(name, starts_after="signing_info"))
         entry = result.entries[-1]
@@ -705,7 +705,7 @@ class TestAStepNamedAsAKeyOfThePackState:
     def test_without_starts_after_it_writes_no_schedule_at_all(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.pipeline.conditions import HELD_SCHEDULES
+        from malspark.pipeline.conditions import HELD_SCHEDULES
 
         result = self._run(tmp_path, monkeypatch, self._step("entries"))
         state = result.to_state()

@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import AgentDefinition, Settings, StageDefinition, ToolRef
-from maljan.pipeline.data_needs import CAPTURE, NETWORK
-from maljan.pipeline.nodes import dataless_stage_reason
+from malspark.core.config import AgentDefinition, Settings, StageDefinition, ToolRef
+from malspark.pipeline.data_needs import CAPTURE, NETWORK
+from malspark.pipeline.nodes import dataless_stage_reason
 
 # A real sandbox report whose network block holds nothing.
 _EMPTY_NETWORK = {
@@ -63,7 +63,7 @@ def test_a_server_bound_by_its_own_agents_list_keeps_the_agent_running(
 
 def test_a_server_withheld_by_the_profile_does_not_count(settings: Settings) -> None:
     """``exclude_servers`` takes the reputation servers away; what is left reads no data."""
-    from maljan.agents.composition import active_profile
+    from malspark.agents.composition import active_profile
 
     settings.mcp.servers["threatintel"].agents.append("netlite")
     active_profile(settings).exclude_servers.append("threatintel")

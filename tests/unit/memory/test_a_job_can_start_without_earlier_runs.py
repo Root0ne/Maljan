@@ -18,10 +18,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from maljan.analysis.run_summary import EARLIER_RUNS_IGNORED_SENTENCE, RunSummaryBuilder
-from maljan.memory import embeddings
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import (
+from malspark.analysis.run_summary import EARLIER_RUNS_IGNORED_SENTENCE, RunSummaryBuilder
+from malspark.memory import embeddings
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import (
     EARLIER_RUN_HEADING,
     StoredCase,
     earlier_case,
@@ -30,7 +30,7 @@ from maljan.memory.long_term_memory import (
     earlier_run_of,
     earlier_run_text,
 )
-from maljan.schemas.stix_models import EARLIER_RUN_PROPERTY, Bundle
+from malspark.schemas.stix_models import EARLIER_RUN_PROPERTY, Bundle
 
 SHA = "ab" * 32
 
@@ -70,8 +70,8 @@ class _Counting:
 
 
 def _container(store: Any, *, ignore: bool | None) -> Any:
-    from maljan.core.config import Settings
-    from maljan.core.container import ServiceContainer
+    from malspark.core.config import Settings
+    from malspark.core.container import ServiceContainer
 
     kwargs = {} if ignore is None else {"ignore_earlier_runs": ignore}
     container = ServiceContainer(Settings(_env_file=None), mock=True, **kwargs)
@@ -85,10 +85,10 @@ class TestTheSwitch:
         assert _container(store, ignore=True).ignore_earlier_runs is True
 
     def test_the_app_hands_it_to_its_container(self) -> None:
-        from maljan.app import MaljanApp
+        from malspark.app import MalsparkApp
 
-        assert MaljanApp(mock=True).container.ignore_earlier_runs is False
-        assert MaljanApp(mock=True, ignore_earlier_runs=True).container.ignore_earlier_runs
+        assert MalsparkApp(mock=True).container.ignore_earlier_runs is False
+        assert MalsparkApp(mock=True, ignore_earlier_runs=True).container.ignore_earlier_runs
 
     def test_on_no_earlier_case_is_read_and_the_store_is_not_asked(
         self, store: InMemoryStore
@@ -117,7 +117,7 @@ class TestNoPromptCarriesTheEarlierRun:
         return {"file_hash": SHA, "evidence_ledger": []}
 
     def test_the_agents_pack_holds_no_block(self, store: InMemoryStore) -> None:
-        from maljan.pipeline.nodes import pack_text
+        from malspark.pipeline.nodes import pack_text
 
         container = _container(store, ignore=True)
 
@@ -125,7 +125,7 @@ class TestNoPromptCarriesTheEarlierRun:
         assert pack_text(self._state(), container, for_reporter=True) == ""
 
     def test_off_the_agents_pack_is_what_it_was(self, store: InMemoryStore) -> None:
-        from maljan.pipeline.nodes import pack_text
+        from malspark.pipeline.nodes import pack_text
 
         container = _container(store, ignore=False)
 
@@ -135,9 +135,9 @@ class TestNoPromptCarriesTheEarlierRun:
 
 def _judge_run(store: Any, *, ignore: bool) -> tuple[dict[str, Any], list[str]]:
     """The judge node over a stored case for the sample, and every text its judge was handed."""
-    from maljan.agents.judge_agent import JudgeVerdict
-    from maljan.pipeline.nodes import make_judge_node
-    from maljan.schemas.evidence import EvidenceCounter
+    from malspark.agents.judge_agent import JudgeVerdict
+    from malspark.pipeline.nodes import make_judge_node
+    from malspark.schemas.evidence import EvidenceCounter
     from tests.unit.pipeline.test_degraded_mode_at_the_judge_node import _Container, _state
 
     class _WithMemory(_Container):
@@ -209,7 +209,7 @@ class TestARunStoppedBeforeItsJudge:
     def test_the_summary_built_at_the_stop_says_what_the_judge_s_would(
         self, store: InMemoryStore, ignore: bool
     ) -> None:
-        from maljan.pipeline.stopped_run import stopped_run_summary
+        from malspark.pipeline.stopped_run import stopped_run_summary
 
         state = {"file_hash": SHA, "evidence_ledger": [], "degradation_reasons": []}
 

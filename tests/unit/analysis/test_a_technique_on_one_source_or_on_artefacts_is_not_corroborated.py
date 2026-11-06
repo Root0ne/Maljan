@@ -24,8 +24,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from maljan.analysis.corroboration import corroborated, corroboration_row, support_sentence
-from maljan.analysis.evidence_roots import (
+from malspark.analysis.corroboration import corroborated, corroboration_row, support_sentence
+from malspark.analysis.evidence_roots import (
     EXTERNAL_ASSESSMENT,
     READING_ARTEFACT,
     READING_CODE,
@@ -37,14 +37,14 @@ from maljan.analysis.evidence_roots import (
     run_roots,
     summary_of_sources,
 )
-from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.pipeline.evidence_summary import summarise
-from maljan.pipeline.validation import corroboration, support_of, technique_sources
-from maljan.reporting.models import TTPMapping
-from maljan.reporting.narrative_agent import support_note
-from maljan.reporting.renderers.markdown import _corroborated_words, support_words
-from maljan.schemas.evidence import LedgerEntry, lists_code
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.extractors.capability_matrix import build_capability_matrix
+from malspark.pipeline.evidence_summary import summarise
+from malspark.pipeline.validation import corroboration, support_of, technique_sources
+from malspark.reporting.models import TTPMapping
+from malspark.reporting.narrative_agent import support_note
+from malspark.reporting.renderers.markdown import _corroborated_words, support_words
+from malspark.schemas.evidence import LedgerEntry, lists_code
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 BASE = 0x180000000
 SECTIONS = [
@@ -357,7 +357,7 @@ class TestTheWholeAnswer:
         assert roots == ("the whole answer of ev_0008",)
 
     def test_the_facts_are_counts_identifiers_and_values_every_row_holds(self) -> None:
-        from maljan.analysis.evidence_roots import answer_facts
+        from malspark.analysis.evidence_roots import answer_facts
 
         facts = answer_facts(
             {
@@ -376,7 +376,7 @@ class TestTheWholeAnswer:
         assert facts.addresses == {0x4000}
 
     def test_many_rows_are_read_in_linear_time(self) -> None:
-        from maljan.analysis.evidence_roots import answer_facts
+        from malspark.analysis.evidence_roots import answer_facts
 
         timings = []
         for n in (2000, 20000):
@@ -389,7 +389,7 @@ class TestTheWholeAnswer:
 
 class TestTheRefinements:
     def test_a_sandbox_s_own_signature_tags_ride_on_the_tool_and_assert(self) -> None:
-        from maljan.providers.sandbox_tools import sandbox_signatures
+        from malspark.providers.sandbox_tools import sandbox_signatures
 
         answer = sandbox_signatures(
             {
@@ -414,7 +414,7 @@ class TestTheRefinements:
         assert _readings(held) == {"ev_0010": READING_RULE}
 
     def test_a_signature_name_is_never_read_as_a_technique(self) -> None:
-        from maljan.providers.sandbox_tools import sandbox_signatures
+        from malspark.providers.sandbox_tools import sandbox_signatures
 
         answer = sandbox_signatures({"signatures": [{"name": "Scheduled Task/Job"}]})
         assert "technique_ids" not in answer["signatures"][0]
@@ -430,7 +430,7 @@ class TestTheRefinements:
         assert _readings(held["T1547.001"]) == {"ev_0011": READING_UNPLACED}
 
     def test_a_count_of_zero_places_nothing(self) -> None:
-        from maljan.analysis.evidence_roots import answer_facts
+        from malspark.analysis.evidence_roots import answer_facts
 
         assert answer_facts({"total": 0, "count": 4}).numbers == {4}
 
@@ -618,8 +618,8 @@ class TestTheMatrixAndTheReport:
         )
 
     def test_the_export_marks_this_run_s_uses_edge_and_not_the_pattern(self) -> None:
-        from maljan.reporting.models import MalwareReport
-        from maljan.reporting.renderers.stix_renderer import (
+        from malspark.reporting.models import MalwareReport
+        from malspark.reporting.renderers.stix_renderer import (
             _attack_patterns_for,
             _support_by_pattern,
             _with_record_evidence,
@@ -646,14 +646,14 @@ class TestTheMatrixAndTheReport:
 
         patterns = [o.model_dump() for o in marked if o.type == "attack-pattern"]
         edges = {o.target_ref: o.model_dump() for o in marked if o.type == "relationship"}
-        assert all("x_maljan_support" not in p for p in patterns)
+        assert all("x_malspark_support" not in p for p in patterns)
         capability = edges[pairs[0][0].id]
         assert capability["relationship_type"] == "uses"
-        assert capability["x_maljan_support"] == "capability"
-        assert capability["x_maljan_support_note"] == support_sentence(
+        assert capability["x_malspark_support"] == "capability"
+        assert capability["x_malspark_support_note"] == support_sentence(
             "capability", {"artefact": 1}, 1
         )
-        assert "x_maljan_support" not in edges[pairs[1][0].id]
+        assert "x_malspark_support" not in edges[pairs[1][0].id]
 
 
 class TestTheModelsAreTold:
@@ -671,8 +671,8 @@ class TestTheModelsAreTold:
         assert "traced to" not in summarise(_restating(2), _ledger())
 
     def test_the_report_models_are_told_what_the_sources_are(self) -> None:
-        from maljan.reporting.composer import _published_techniques
-        from maljan.reporting.models import MalwareReport
+        from malspark.reporting.composer import _published_techniques
+        from malspark.reporting.models import MalwareReport
 
         capability = TTPMapping(
             technique_id="T1547.001",

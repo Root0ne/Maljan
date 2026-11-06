@@ -292,7 +292,7 @@ async def upload_sample(
     upload_tmp_root = Path(settings.upload_temp_dir).resolve()
     upload_tmp_root.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
-        prefix="maljan-upload-",
+        prefix="malspark-upload-",
         delete=False,
         dir=str(upload_tmp_root),
     ) as tmp:
@@ -606,7 +606,7 @@ async def delete_sample(
                 extra={"user_id": str(user.id), "component": "minio"},
             )
 
-        from maljan.providers.registry import mirror_work_dirs
+        from malspark.providers.registry import mirror_work_dirs
 
         from app.worker import sample_files
 

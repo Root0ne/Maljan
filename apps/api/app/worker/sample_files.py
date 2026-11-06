@@ -7,7 +7,7 @@ own corpus in ``samples_dir``: nothing here lists or deletes outside them.
 
 Which subdirectories there are is not written here. Each static provider says
 where it mirrors (``mirror_spec()``, from its server's declared ``work_dir``);
-``maljan.providers.registry.mirror_work_dirs`` is the union for the providers
+``malspark.providers.registry.mirror_work_dirs`` is the union for the providers
 a settings object selects and switches on, and every path that sweeps,
 removes or exports a root takes that union from its caller, beside the
 shipped mirror directories. A name is used only when it is a plain child of
@@ -34,7 +34,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
-from maljan.providers.base import DEFAULT_WORK_DIR
+from malspark.providers.base import DEFAULT_WORK_DIR
 
 from app.config import settings
 from app.logging_config import get_logger
@@ -75,8 +75,8 @@ def temp_dir() -> Path:
 # file (a regular file the worker's own user owns, holding exactly this text),
 # and is not one of the shipped mirror directories, is the operator's and is
 # never written to, chmodded, swept, cleared or exported.
-MIRROR_MARKER = ".maljan-mirror"
-MIRROR_MARKER_TEXT = "A sample mirror directory of the Maljan worker.\n"
+MIRROR_MARKER = ".malspark-mirror"
+MIRROR_MARKER_TEXT = "A sample mirror directory of the Malspark worker.\n"
 
 # The SHA-256 every copy the worker writes is named by.
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -96,8 +96,8 @@ def shipped_mirror_dirs() -> tuple[str, ...]:
     These are the worker's own by allow-list, so a directory a release before
     the marker created is adopted (and marked) rather than left unswept.
     """
-    from maljan.core.settings_overrides import build_settings
-    from maljan.providers.registry import mirror_work_dirs
+    from malspark.core.settings_overrides import build_settings
+    from malspark.providers.registry import mirror_work_dirs
 
     return mirror_work_dirs(build_settings({}), selected_only=False)
 
@@ -268,7 +268,7 @@ def export_sample_roots(subdirs: Iterable[str] | None = None) -> list[Path]:
     """Tell the tool sidecars which directories this worker's samples live in.
 
     A sidecar reads a path argument only inside the roots it was given (see
-    ``maljan.tools.roots``), and the ones this worker uses are its own: the
+    ``malspark.tools.roots``), and the ones this worker uses are its own: the
     download target every sample lands in and the mirror subdirectories a
     static provider reads from. Nothing here comes from a model, and none of
     it is a secret — the variable says where a sample is, not what is in it.
@@ -278,7 +278,7 @@ def export_sample_roots(subdirs: Iterable[str] | None = None) -> list[Path]:
     ``subdirs`` is as for ``work_dirs``.
     Returns the roots it exported, for the caller that wants to log them.
     """
-    from maljan.tools.roots import add_sample_root
+    from malspark.tools.roots import add_sample_root
 
     roots = [temp_dir(), *work_dirs(subdirs)]
     for root in roots:
@@ -557,7 +557,7 @@ def sweep(
 
     In the upload staging directory, the worker's and the API's own private
     scratch, every regular file goes: an upload the API was staging when it
-    died (``maljan-upload-*``) holds live malware as surely as a copy. In a
+    died (``malspark-upload-*``) holds live malware as surely as a copy. In a
     mirror directory only the files named as the worker names a copy go.
 
     The cutoff is the whole of the coordination

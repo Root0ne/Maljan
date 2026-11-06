@@ -25,7 +25,7 @@ from app.services.server_map import (
     split_server_env,
 )
 from app.services.settings_service import SettingsService
-from maljan.core import settings_secrets as box
+from malspark.core import settings_secrets as box
 
 SECRET = password(20)
 
@@ -339,7 +339,7 @@ class _AuditDB:
     async def execute(self, stmt):
         if "runtime_settings" in str(stmt):
             marked = self.marked or any(
-                getattr(r, "key", "").startswith("maljan.repair.") for r in self.added
+                getattr(r, "key", "").startswith("malspark.repair.") for r in self.added
             )
             return SimpleNamespace(scalar_one_or_none=lambda: "marker" if marked else None)
         self.row_reads += 1

@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.call_map import call_map
-from maljan.reporting.follow_up import stored_ledger
-from maljan.schemas.evidence import LedgerEntry
+from malspark.reporting.call_map import call_map
+from malspark.reporting.follow_up import stored_ledger
+from malspark.schemas.evidence import LedgerEntry
 from tests.linear_cost import assert_scales
 from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 

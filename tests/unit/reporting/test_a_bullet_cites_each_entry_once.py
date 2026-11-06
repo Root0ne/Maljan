@@ -10,7 +10,7 @@ text that cites none prints them all as before. The words are never changed.
 
 from __future__ import annotations
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     FileHashes,
     FlowStep,
     KeyFinding,
@@ -18,7 +18,7 @@ from maljan.reporting.models import (
     SampleIdentity,
     TechnicalAnalysis,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 
 def _report(*findings: KeyFinding, steps: list[FlowStep] | None = None) -> MalwareReport:

@@ -22,8 +22,8 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.core.model_assignments import assignments_for
-from maljan.llm import context_window as cw
+from malspark.core.model_assignments import assignments_for
+from malspark.llm import context_window as cw
 
 
 def _client(handler: Any) -> httpx.Client:
@@ -267,7 +267,7 @@ class TestTheProbeCanReachNothingThatGenerates:
 
     def test_learning_a_window_end_to_end_sends_nothing_else(self) -> None:
         """The path a job takes, from settings to a window, under the same watch."""
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         cw.forget_learned_windows()
         settings = Settings(
@@ -341,7 +341,7 @@ class TestANumberAnEndpointReportsIsUntrusted:
     def test_every_window_the_vendored_table_ships_is_believed(self) -> None:
         import json
 
-        from maljan.core.paths import resolve_data
+        from malspark.core.paths import resolve_data
 
         raw = json.loads(resolve_data(cw.TABLE_PATH).read_text(encoding="utf-8"))
         for key, value in raw["windows"].items():
@@ -389,7 +389,7 @@ class TestOneQuestionPerEndpointAndModel:
 
     def test_a_team_on_one_endpoint_asks_once(self) -> None:
         """Four agents used to mean four full plans against a dead endpoint."""
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
         asked = _sent_by(
@@ -401,7 +401,7 @@ class TestOneQuestionPerEndpointAndModel:
         assert len(asked) <= len(cw.PROBE_PATHS)
 
     def test_a_failure_is_remembered_so_the_next_job_does_not_repeat_it(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
         first = _sent_by(
@@ -414,7 +414,7 @@ class TestOneQuestionPerEndpointAndModel:
         assert again == [], "the second job asked again"
 
     def test_a_remembered_answer_is_asked_again_once_it_is_old(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
         _sent_by(lambda: cw.window_for_settings(settings, assignments_for(settings, ["static"])))
@@ -435,7 +435,7 @@ class TestTheOllamaWindowIsBothNumbers:
 
     def test_the_settings_value_does_not_short_circuit_the_probe(self) -> None:
         """The served window is the smaller of what is sent and what is held."""
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         settings = Settings(_env_file=None, llm={"provider": "ollama"})
         asked = _sent_by(
@@ -449,7 +449,7 @@ class TestTheOllamaWindowIsBothNumbers:
         assert fact.tokens == 8192
 
     def test_an_untouched_default_does_not_claim_an_operator_set_it(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         shipped = Settings(_env_file=None, llm={"provider": "ollama"})
         chosen = Settings(_env_file=None, llm={"provider": "ollama", "ollama": {"num_ctx": 4096}})
@@ -515,7 +515,7 @@ class TestTheArithmetic:
 
     def test_the_no_room_point_is_where_the_notice_leaves_no_payload(self) -> None:
         """989 characters: the widest notice plus the smallest payload."""
-        from maljan.agents.output_shortening import (  # noqa: PLC2701
+        from malspark.agents.output_shortening import (  # noqa: PLC2701
             _MIN_SHORTENABLE_STRING,
             MAX_SENTENCE_ROOM,
         )
@@ -530,7 +530,7 @@ class TestTheArithmetic:
         assert "`" not in said, "narrowing the call does not make room"
 
     def test_the_floor_leaves_room_for_the_notice_and_a_document(self) -> None:
-        from maljan.agents.output_shortening import MAX_SENTENCE_ROOM, shorten_target
+        from malspark.agents.output_shortening import MAX_SENTENCE_ROOM, shorten_target
 
         assert cw.MIN_TOOL_OUTPUT_CHARS > MAX_SENTENCE_ROOM
         assert shorten_target(cw.MIN_TOOL_OUTPUT_CHARS, ("limit", "offset")) > 1000
@@ -611,7 +611,7 @@ class TestAWindowThatMovedUnderUs:
         assert cw._cached(("openai", "http://x/v1", "m"))[0] is True  # noqa: SLF001
 
     def test_the_next_question_is_asked_again(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
         _sent_by(lambda: cw.window_for_settings(settings, assignments_for(settings, ["static"])))
@@ -690,7 +690,7 @@ class TestTheBudgetOneRunSpends:
 
 class TestTheVendoredTable:
     def test_the_file_says_it_is_a_fallback_and_how_to_correct_it(self) -> None:
-        from maljan.core.paths import resolve_data
+        from malspark.core.paths import resolve_data
 
         raw = json.loads(resolve_data(cw.TABLE_PATH).read_text(encoding="utf-8"))
         note = " ".join(raw["_comment"]).lower()
@@ -698,7 +698,7 @@ class TestTheVendoredTable:
         assert "core.llm.openai.context_size" in note
 
     def test_every_row_is_a_positive_token_count(self) -> None:
-        from maljan.core.paths import resolve_data
+        from malspark.core.paths import resolve_data
 
         raw = json.loads(resolve_data(cw.TABLE_PATH).read_text(encoding="utf-8"))
         for key, value in raw["windows"].items():

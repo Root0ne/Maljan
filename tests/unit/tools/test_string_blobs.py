@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from maljan.tools import emulated_strings, string_blobs
-from maljan.tools.string_blobs import decode_string_blobs, readable
+from malspark.tools import emulated_strings, string_blobs
+from malspark.tools.string_blobs import decode_string_blobs, readable
 
 from .synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 

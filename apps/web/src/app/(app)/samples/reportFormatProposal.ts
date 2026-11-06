@@ -1,6 +1,6 @@
 /** A proposed report format declaration, as an unread upload's answer carries it.
  *
- *  The API reads the proposal from the report's shape (`maljan.core.report_proposals`):
+ *  The API reads the proposal from the report's shape (`malspark.core.report_proposals`):
  *  each field with its value, where in the report it was read and how sure the
  *  reading is, and the whole as one declaration. Nothing here applies anything:
  *  an admin reads, edits and accepts the declaration, and the API decides

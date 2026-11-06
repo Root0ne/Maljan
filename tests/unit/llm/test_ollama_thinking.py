@@ -17,9 +17,9 @@ import httpx
 import pytest
 
 from app.services.settings_probes import _said_something
-from maljan.core.config import Settings
-from maljan.llm.ollama_provider import OllamaProvider
-from maljan.llm.provider_base import facts_of
+from malspark.core.config import Settings
+from malspark.llm.ollama_provider import OllamaProvider
+from malspark.llm.provider_base import facts_of
 
 
 def _answer(payload: dict[str, Any]) -> httpx.Response:
@@ -92,7 +92,7 @@ class TestTheSettingReachesTheAgents:
         original = sys.modules.get("langchain_ollama")
         sys.modules["langchain_ollama"] = module
         try:
-            from maljan.llm.ollama_provider import OllamaProvider
+            from malspark.llm.ollama_provider import OllamaProvider
 
             settings = Settings()
             settings.llm.ollama.disable_thinking = True
@@ -112,7 +112,7 @@ class TestTheSettingReachesTheAgents:
 
 class TestItIsConfigurable:
     def test_the_catalogue_offers_it(self) -> None:
-        from maljan.core.settings_catalog import core_catalog
+        from malspark.core.settings_catalog import core_catalog
 
         entry = next((e for e in core_catalog() if e.path == "llm.ollama.disable_thinking"), None)
         assert entry is not None, "the setting is not in the catalogue"

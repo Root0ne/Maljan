@@ -28,10 +28,10 @@ from tests.integration._session_probe import SessionFactory, fake_job, fake_samp
 from app.models.evidence import EvidenceEntry
 from app.services import ledger_chain
 from app.worker.analysis_worker import _store_the_report
-from maljan.core.config import Settings
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import LedgerEntry
+from malspark.core.config import Settings
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import LedgerEntry
 
 KEY = ledger_chain.derive_key("seal-test-material")
 _REV = (

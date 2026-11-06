@@ -511,7 +511,7 @@ function GraphCanvas({
   const types = graph.nodes.map((n) => n.type);
   const saveSvg = () => {
     if (!svgRef.current) return;
-    downloadBlob(exportMarkup(svgRef.current, layout, types), "maljan-stix-graph.svg", "image/svg+xml");
+    downloadBlob(exportMarkup(svgRef.current, layout, types), "malspark-stix-graph.svg", "image/svg+xml");
   };
 
   const savePng = () => {
@@ -537,7 +537,7 @@ function GraphCanvas({
       canvas.toBlob((blob) => {
         if (blob) {
           setExportError(null);
-          downloadObject(blob, "maljan-stix-graph.png");
+          downloadObject(blob, "malspark-stix-graph.png");
         } else {
           setExportError("The PNG could not be drawn; the SVG export still works.");
         }

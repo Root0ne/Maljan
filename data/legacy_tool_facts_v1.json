@@ -1,5 +1,5 @@
 {
-  "schema": "maljan-legacy-tool-facts/v1",
+  "schema": "malspark-legacy-tool-facts/v1",
   "version": "1.0",
   "about": "What the legacy reading of a stored ledger entry (one that recorded no source and no facts) resolves a bare tool name to, frozen so that no later change to a shipped declaration changes how a stored run reads. `tools`: each tool name the platform's built-in declarations covered and the facts they declared for it (every field the declaration set), in the order the first source declaring a name was read. `legacy_names`: the names each consumer's table held that no built-in tool has. Read only for an entry with no source and no facts; never extended.",
   "source": "Cut from the platform's own built-in declarations (the built-in servers, the provider-owned blocks and the in-process sources) and its consumer tables, as they stood on 2026-10-27. Written for this project, not copied from a third-party table.",

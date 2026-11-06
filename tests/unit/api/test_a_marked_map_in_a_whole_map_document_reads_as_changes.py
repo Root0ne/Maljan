@@ -1,4 +1,4 @@
-"""A map marked as changes in a ``maljan-settings/1`` document reads as it does in ``/2``.
+"""A map marked as changes in a ``malspark-settings/1`` document reads as it does in ``/2``.
 
 Only ``/2`` writes the mark, so a ``/1`` document carrying it was relabelled
 from one: the map is its changes, never a whole map that would remove every
@@ -19,8 +19,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.services import settings_service as svc
-from maljan.core import settings_overrides as so
-from maljan.core.tool_declarations import CHANGES_FORM, CHANGES_MARK
+from malspark.core import settings_overrides as so
+from malspark.core.tool_declarations import CHANGES_FORM, CHANGES_MARK
 
 # The mechanism is read against a block that ships a table of its tools.
 pytestmark = pytest.mark.usefixtures("a_built_in_server_ships_a_tool_table")
@@ -83,8 +83,8 @@ MARKED = [
 def test_a_marked_provider_leaf_reads_as_its_changes(
     tool_facts: dict[str, Any], added: set[str]
 ) -> None:
-    stored = _import("maljan-settings/1", {LEAF: tool_facts})
-    assert stored == _import("maljan-settings/2", {LEAF: tool_facts})
+    stored = _import("malspark-settings/1", {LEAF: tool_facts})
+    assert stored == _import("malspark-settings/2", {LEAF: tool_facts})
     built = so.build_settings({f"{BLOCK}.tool_facts": stored[LEAF]})
     assert set(built.static.ghidra.tool_facts) == set(so.shipped_tool_facts(BLOCK)) | added
 
@@ -94,8 +94,8 @@ def test_a_marked_server_map_entry_reads_as_its_changes(
     tool_facts: dict[str, Any], added: set[str]
 ) -> None:
     values = {SERVER_MAP: {"virustotal": _server_entry(tool_facts)}}
-    stored = _import("maljan-settings/1", values)
-    assert stored == _import("maljan-settings/2", values)
+    stored = _import("malspark-settings/1", values)
+    assert stored == _import("malspark-settings/2", values)
     built = so.build_settings({"mcp.servers": stored[SERVER_MAP]})
     shipped = set(so.shipped_tool_facts("mcp.servers.virustotal"))
     assert shipped
@@ -103,6 +103,6 @@ def test_a_marked_server_map_entry_reads_as_its_changes(
 
 
 def test_an_unmarked_whole_map_document_still_removes_what_it_does_not_name() -> None:
-    stored = _import("maljan-settings/1", {LEAF: {"zz_mine": DECLARED}})
+    stored = _import("malspark-settings/1", {LEAF: {"zz_mine": DECLARED}})
     built = so.build_settings({f"{BLOCK}.tool_facts": stored[LEAF]})
     assert set(built.static.ghidra.tool_facts) == {"zz_mine"}

@@ -36,7 +36,7 @@ class TestRecycleFiresOnlyWhenBloated:
     async def test_a_small_worker_is_left_alone(self) -> None:
         loop = self._loop_spy()
         with (
-            patch("maljan.core.memprobe.rss_mb", return_value=1200.0),
+            patch("malspark.core.memprobe.rss_mb", return_value=1200.0),
             patch("asyncio.get_running_loop", return_value=loop),
         ):
             await analysis_worker._recycle_if_bloated({})
@@ -46,7 +46,7 @@ class TestRecycleFiresOnlyWhenBloated:
     async def test_a_bloated_worker_schedules_its_own_exit(self) -> None:
         loop = self._loop_spy()
         with (
-            patch("maljan.core.memprobe.rss_mb", return_value=9001.0),
+            patch("malspark.core.memprobe.rss_mb", return_value=9001.0),
             patch("asyncio.get_running_loop", return_value=loop),
         ):
             await analysis_worker._recycle_if_bloated({})

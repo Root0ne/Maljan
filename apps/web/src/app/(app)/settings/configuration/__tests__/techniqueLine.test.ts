@@ -77,7 +77,7 @@ describe("the ATT&CK technique line in the review and the import preview", () =>
   it("previews an import that writes the switch on as no change", () => {
     const preview = buildImportPreview(
       {
-        format: "maljan-settings/1",
+        format: "malspark-settings/1",
         values: { [entry.key]: { checker: { ...base, attck_techniques: true } } },
       },
       { [entry.key]: entry },
@@ -90,7 +90,7 @@ describe("the ATT&CK technique line in the review and the import preview", () =>
   it("previews an import that turns the switch off as that change", () => {
     const preview = buildImportPreview(
       {
-        format: "maljan-settings/1",
+        format: "malspark-settings/1",
         values: { [entry.key]: { checker: { ...base, attck_techniques: false } } },
       },
       { [entry.key]: entry },

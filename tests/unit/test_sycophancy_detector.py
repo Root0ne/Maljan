@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from maljan.pipeline.sycophancy_detector import (
+from malspark.pipeline.sycophancy_detector import (
     detect_sycophancy,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _make_isr(agent_id: str, domain: str, claim_text: str, confidence: float = 0.8) -> AgentISR:

@@ -1,7 +1,7 @@
 """A stored ledger entry references the parts of its answer kept whole.
 
 ``evidence_entries`` gains ``spilled``: the references the entry carries
-(``maljan.schemas.evidence_spill``) to the parts of its answer the run
+(``malspark.schemas.evidence_spill``) to the parts of its answer the run
 shortened, blanked or dropped and kept whole in object storage, each with the
 part, the object key, the byte length and the SHA-256, or the reason the upload
 failed.

@@ -23,9 +23,9 @@ from typing import Any
 from langchain_core.messages import AIMessage
 from stix2validator import ValidationOptions, validate_instance
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import (
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import (
     DynamicBehavior,
     MalwareReport,
     NetworkDomain,
@@ -33,12 +33,12 @@ from maljan.reporting.models import (
     NetworkIP,
     ProcessNode,
 )
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers.stix_renderer import (
     PLATFORM_INDICATES_EDGE,
     UNPUBLISHABLE_OBJECT_CODE,
     ExtendedSTIXRenderer,
 )
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.stix_models import Bundle
 
 SHA256 = "36dabc40fa8983ce900a90b8156d2c754875fe1b5413a997843c4a0ef3908220"
 C2 = "82.157.13.47"
@@ -80,7 +80,7 @@ def _judge(answer: dict[str, Any]) -> Bundle:
     """
     reader = JudgeAgent(llm=object())  # type: ignore[arg-type]
     bundle = reader._bundle_from_response(AIMessage(content=json.dumps(answer)), {}, None)
-    assert bundle.x_maljan_fallback_verdict is None, "the fixture must read as a bundle"
+    assert bundle.x_malspark_fallback_verdict is None, "the fixture must read as a bundle"
     _JUDGE_INDICATES.update(
         str(o.id)
         for o in bundle.objects
@@ -127,9 +127,9 @@ def _rich() -> Bundle:
                     "relationship_type": "uses",
                     "source_ref": "malware--1",
                     "target_ref": "attack-pattern--1",
-                    "x_maljan_confidence": 0.9,
-                    "x_maljan_evidence_basis": "static",
-                    "x_maljan_contributing_agents": ["static"],
+                    "x_malspark_confidence": 0.9,
+                    "x_malspark_evidence_basis": "static",
+                    "x_malspark_contributing_agents": ["static"],
                 },
                 {
                     "type": "relationship",
@@ -356,9 +356,9 @@ def _declined_malware_with_edges() -> tuple[Bundle, MalwareReport]:
                     "relationship_type": "uses",
                     "source_ref": "malware--1",
                     "target_ref": "attack-pattern--1",
-                    "x_maljan_confidence": 0.95,
-                    "x_maljan_evidence_basis": "static",
-                    "x_maljan_contributing_agents": ["static"],
+                    "x_malspark_confidence": 0.95,
+                    "x_malspark_evidence_basis": "static",
+                    "x_malspark_contributing_agents": ["static"],
                 },
                 {
                     "type": "relationship",
@@ -497,7 +497,7 @@ class TestEveryMalwareExportHangsTogether:
             if o.type == "relationship" and o.relationship_type == "uses":
                 target = by_id[o.target_ref]
                 tid = target.external_references[0]["external_id"]
-                exported[tid] = getattr(o, "x_maljan_confidence", None)
+                exported[tid] = getattr(o, "x_malspark_confidence", None)
 
         assert exported == {m.technique_id: m.confidence for m in report.ttp_mappings}
         assert exported == {"T1490": 0.95}
@@ -506,14 +506,14 @@ class TestEveryMalwareExportHangsTogether:
         bundle, _report_ = _declined_malware_with_edges()
 
         (uses,) = [o for o in bundle.objects if getattr(o, "relationship_type", "") == "uses"]
-        assert uses.x_maljan_evidence_basis == "static"
-        assert uses.x_maljan_contributing_agents == ["static"]
+        assert uses.x_malspark_evidence_basis == "static"
+        assert uses.x_malspark_contributing_agents == ["static"]
 
 
 # A Benign answer the output cap cut: its assessment and two indicators were
 # written whole, the rest of the bundle was not. The shape the fallback reads.
 _CUT_BENIGN_ANSWER = (
-    '{"type": "bundle", "id": "bundle--1", "x_maljan_assessment": {"verdict": "Benign", '
+    '{"type": "bundle", "id": "bundle--1", "x_malspark_assessment": {"verdict": "Benign", '
     '"confidence": 0.95, "severity": {"rating": "Informational", "rationale": "A signed '
     'tool."}}, "objects": [{"type": "indicator", "id": "indicator--1", "name": "tool hash", '
     f'"pattern": "[file:hashes.\'SHA-256\' = \'{SHA256}\']", "indicator_types": '
@@ -546,7 +546,7 @@ class TestTheFallbackPathExportsAValidBundle:
     def test_a_cut_benign_answer_exports_a_valid_bundle(self) -> None:
         judge, exported, _declined = _fallback_export(_CUT_BENIGN_ANSWER)
 
-        assert judge.x_maljan_fallback_verdict is not None
+        assert judge.x_malspark_fallback_verdict is not None
         assert _errors(exported) == []
 
     def test_the_fallback_note_names_the_objects_it_is_about(self) -> None:
@@ -568,14 +568,14 @@ class TestTheFallbackPathExportsAValidBundle:
         judge, exported, _declined = _fallback_export("Benign. T1486 looks likely.")
 
         assert [o for o in judge.objects if o.type == "note"] == []
-        assert judge.x_maljan_fallback_verdict is not None
-        assert judge.x_maljan_fallback_verdict.model_only_technique_ids == ["T1486"]
+        assert judge.x_malspark_fallback_verdict is not None
+        assert judge.x_malspark_fallback_verdict.model_only_technique_ids == ["T1486"]
         # The judge's text the note would have carried stays on the mark.
-        assert judge.x_maljan_fallback_verdict.reasoning == "Benign. T1486 looks likely."
+        assert judge.x_malspark_fallback_verdict.reasoning == "Benign. T1486 looks likely."
         assert _errors(exported) == []
 
     def test_a_malware_fallback_with_claims_and_indicators_exports_a_valid_bundle(self) -> None:
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+        from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
         answer = _CUT_BENIGN_ANSWER.replace('"verdict": "Benign"', '"verdict": "Malware"')
         claimed = {
@@ -619,7 +619,7 @@ class TestTheFallbackPathExportsAValidBundle:
                         "object_refs": [_HOST_ID],
                     },
                 ],
-                "x_maljan_fallback_verdict": {"decision": "Benign", "source": "extracted"},
+                "x_malspark_fallback_verdict": {"decision": "Benign", "source": "extracted"},
             }
         )
         renderer = ExtendedSTIXRenderer()

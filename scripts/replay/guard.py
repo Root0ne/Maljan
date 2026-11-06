@@ -41,7 +41,7 @@ from typing import Any
 
 # The environment variable the ATT&CK loader reads its cache directory from at
 # import. Set before the platform is first imported in a process of its own.
-ATTCK_CACHE_VARIABLE = "MALJAN_ATTCK_CACHE"
+ATTCK_CACHE_VARIABLE = "MALSPARK_ATTCK_CACHE"
 
 # The settings sections the replayed rules read. Only these are taken from the
 # run's snapshot; every other setting is the rules' own default.
@@ -101,7 +101,7 @@ def _build_settings(snapshot: Mapping[str, Any], env: ReplayEnvironment) -> Any:
     """Store-only settings over the snapshot's values, each refused value dropped and named."""
     from pydantic import ValidationError
 
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     overrides = _settings_overrides(snapshot)
     # One pass per refused key at most: each failed build names the keys it
@@ -144,9 +144,9 @@ def replay_environment(snapshot: Mapping[str, Any] | None = None) -> Iterator[Re
         saved.append((owner, attribute, getattr(owner, attribute), held))
         setattr(owner, attribute, value)
 
-    with tempfile.TemporaryDirectory(prefix="maljan-replay-attck-") as cache:
+    with tempfile.TemporaryDirectory(prefix="malspark-replay-attck-") as cache:
         env = ReplayEnvironment(cache_dir=Path(cache))
-        quiet = logging.getLogger("maljan")
+        quiet = logging.getLogger("malspark")
         level = quiet.level
         try:
             # A connection, a datagram sent to an address, and every name or
@@ -165,18 +165,18 @@ def replay_environment(snapshot: Mapping[str, Any] | None = None) -> Iterator[Re
             ):
                 _swap(socket, name, _refuse, f"socket.{name}")
 
-            from maljan.memory import attck_loader
+            from malspark.memory import attck_loader
 
             try:
-                from maljan.memory import attck_index
+                from malspark.memory import attck_index
             except ImportError:  # a tree without it
                 attck_index = None  # type: ignore[assignment]
             try:
-                from maljan.memory import embeddings
+                from malspark.memory import embeddings
             except ImportError:
                 embeddings = None  # type: ignore[assignment]
             try:
-                from maljan.memory import semantic_attck_index
+                from malspark.memory import semantic_attck_index
             except ImportError:
                 semantic_attck_index = None  # type: ignore[assignment]
 
@@ -214,7 +214,7 @@ def replay_environment(snapshot: Mapping[str, Any] | None = None) -> Iterator[Re
             if callable(reset):
                 reset()
 
-            from maljan.core import config
+            from malspark.core import config
 
             _swap(
                 config,
@@ -235,7 +235,7 @@ def replay_environment(snapshot: Mapping[str, Any] | None = None) -> Iterator[Re
                 else:
                     delattr(owner, attribute)
             try:
-                from maljan.memory import attck_loader as _loader
+                from malspark.memory import attck_loader as _loader
 
                 reset_after = getattr(_loader, "reset_caches", None)
                 if callable(reset_after):

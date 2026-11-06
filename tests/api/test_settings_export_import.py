@@ -48,9 +48,9 @@ def test_export_omits_secrets_and_lists_their_names(client):
         r = client.get("/api/v1/settings/export")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("application/json")
-    assert r.headers["content-disposition"] == "attachment; filename=maljan-settings.json"
+    assert r.headers["content-disposition"] == "attachment; filename=malspark-settings.json"
     body = r.json()
-    assert body["format"] == "maljan-settings/3"
+    assert body["format"] == "malspark-settings/3"
     assert body["values"] == {"core.llm.provider": "openai"}
     assert body["secrets_omitted"] == ["core.llm.openai.api_key"]
     exported_at = datetime.fromisoformat(body["exported_at"])
@@ -228,7 +228,7 @@ def test_import_rejects_unknown_and_read_only_keys_before_applying(client):
         r = client.post(
             "/api/v1/settings/import",
             json={
-                "format": "maljan-settings/1",
+                "format": "malspark-settings/1",
                 "values": {
                     "core.no.such.key": "x",
                     "api.debug": True,
@@ -250,7 +250,7 @@ def test_import_names_a_retired_key_as_the_one_to_delete(client):
         r = client.post(
             "/api/v1/settings/import",
             json={
-                "format": "maljan-settings/1",
+                "format": "malspark-settings/1",
                 "values": {
                     "core.preprocessing.summarizer_provider": "openai",
                     "core.preprocessing.summarizer_model": "gpt-x",
@@ -283,7 +283,7 @@ def test_import_round_trip_saves_through_settings_service_and_audits(client):
     ):
         r = client.post(
             "/api/v1/settings/import",
-            json={"format": "maljan-settings/1", "values": {"core.llm.provider": "openai"}},
+            json={"format": "malspark-settings/1", "values": {"core.llm.provider": "openai"}},
         )
     assert r.status_code == 200
     assert r.json() == {
@@ -306,7 +306,7 @@ def test_import_validation_error_from_save_is_422_field_map(client):
     ):
         r = client.post(
             "/api/v1/settings/import",
-            json={"format": "maljan-settings/1", "values": {"core.llm.provider": "nope"}},
+            json={"format": "malspark-settings/1", "values": {"core.llm.provider": "nope"}},
         )
     assert r.status_code == 422
     assert r.json()["errors"] == {"core.llm.provider": "bad value"}
@@ -323,7 +323,7 @@ def test_import_never_echoes_a_secret_value(client):
         r = client.post(
             "/api/v1/settings/import",
             json={
-                "format": "maljan-settings/1",
+                "format": "malspark-settings/1",
                 "values": {"core.llm.openai.api_key": "sk-super-secret"},
             },
         )
@@ -344,7 +344,7 @@ def test_import_audits_nothing_when_no_key_was_applied(client):
     ):
         r = client.post(
             "/api/v1/settings/import",
-            json={"format": "maljan-settings/1", "values": {}},
+            json={"format": "malspark-settings/1", "values": {}},
         )
     assert r.status_code == 200
     assert r.json() == {"applied": [], "applies": {}, "warnings": {}}
@@ -386,7 +386,7 @@ def test_export_then_import_round_trips_unchanged(client):
 
 def test_import_is_admin_only():
     r = TestClient(_app(UserRole.ANALYST)).post(
-        "/api/v1/settings/import", json={"format": "maljan-settings/1", "values": {}}
+        "/api/v1/settings/import", json={"format": "malspark-settings/1", "values": {}}
     )
     assert r.status_code == 403
 
@@ -424,7 +424,7 @@ def _import_legacy(client, stored: dict) -> tuple:
         r = client.post(
             "/api/v1/settings/import",
             json={
-                "format": "maljan-settings/1",
+                "format": "malspark-settings/1",
                 "values": {"core.agents.definitions": _LEGACY_DEFINITIONS},
             },
         )

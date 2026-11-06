@@ -297,7 +297,7 @@ test.describe("Analysis page", () => {
     await button.click();
     const download = page.waitForEvent("download");
     await page.getByRole("menuitem", { name: /Indicator list/ }).click();
-    expect((await download).suggestedFilename()).toMatch(/^maljan-[0-9a-f]{12}-iocs\.json$/);
+    expect((await download).suggestedFilename()).toMatch(/^malspark-[0-9a-f]{12}-iocs\.json$/);
   });
 
   test("each tab is its own URL and holds the content it names", async ({ sessionPage: page }) => {
@@ -410,7 +410,7 @@ test.describe("Analysis page", () => {
       await expect(content.locator("h2").first()).toBeVisible();
       const text = await page.getByTestId("analysis-page").innerText();
       expect(text).not.toMatch(/\b(ledger|judge|producer|nudge|report model)\b/i);
-      expect(text).not.toMatch(/RAG Candidates|Sections no tab draws|MALJAN_[A-Z_]+|Platform check|\bMeasured\b/);
+      expect(text).not.toMatch(/RAG Candidates|Sections no tab draws|MALSPARK_[A-Z_]+|Platform check|\bMeasured\b/);
       expect(text).not.toMatch(/\bev_\d+/);
       // No tooltip is a dumped object.
       const dumped = await page.locator('[title^="{"]').count();

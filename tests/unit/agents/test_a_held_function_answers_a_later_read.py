@@ -21,17 +21,17 @@ from unittest.mock import MagicMock
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.delegation import TEAM_SERVER
-from maljan.agents.evidence_recorder import (
+from malspark.agents.delegation import TEAM_SERVER
+from malspark.agents.evidence_recorder import (
     EvidenceRecorder,
     RepeatGuard,
     aggregate_members,
     member_request,
     record_tools,
 )
-from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-from maljan.agents.tool_pinning import SERVER_METADATA_KEY, declared_facts_of
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+from malspark.agents.tool_pinning import SERVER_METADATA_KEY, declared_facts_of
+from malspark.schemas.evidence import EvidenceCounter
 
 PROGRAM = "sample.exe"
 FIRST = "\nundefined8 FUN_1360bc0ae78(void)\n\n{\n  FUN_1360bc09040(0);\n  return 0;\n}\n\n"

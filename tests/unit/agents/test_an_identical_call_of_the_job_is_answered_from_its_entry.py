@@ -24,21 +24,21 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.evidence_recorder import (
+from malspark.agents.evidence_recorder import (
     EvidenceRecorder,
     RepeatGuard,
     holds_a_settled_answer,
     record_tools,
 )
-from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-from maljan.agents.tool_pinning import (
+from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+from malspark.agents.tool_pinning import (
     DECLARED_NAME_METADATA_KEY,
     READ_ONLY_METADATA_KEY,
     SERVER_HINTS_METADATA_KEY,
     SERVER_METADATA_KEY,
 )
-from maljan.llm.context_window import note_answer_cut
-from maljan.schemas.evidence import EvidenceCounter, build_entry
+from malspark.llm.context_window import note_answer_cut
+from malspark.schemas.evidence import EvidenceCounter, build_entry
 
 REPORT = json.dumps({"status": "found", "domain": "example.test", "malicious": 3, "harmless": 60})
 IMPORTS = "KERNEL32.dll!CreateMutexW\nKERNEL32.dll!VirtualAlloc\n"
@@ -462,10 +462,10 @@ class TestTheDeclarationDecidesBeforeTheHints:
     def test_a_declared_tool_that_is_not_read_only_runs_again_whatever_its_hints(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.tool_declarations import ToolFacts
+        from malspark.core.tool_declarations import ToolFacts
 
         stated = ToolFacts.model_validate({"kind": "program_edit", "read_only": False})
-        monkeypatch.setattr("maljan.agents.tool_pinning.declared_facts_of", lambda _t: stated)
+        monkeypatch.setattr("malspark.agents.tool_pinning.declared_facts_of", lambda _t: stated)
         counter, calls = EvidenceCounter(), []
 
         def hinted() -> Any:
@@ -573,7 +573,7 @@ class TestTheLoopsOwnRoundsReadTheTopLevelAsBefore:
     def test_a_nested_running_service_is_still_seeded_across_rounds_and_chunks(
         self, origin: str
     ) -> None:
-        from maljan.agents.evidence_recorder import seeded_repeat_guard
+        from malspark.agents.evidence_recorder import seeded_repeat_guard
 
         services = json.dumps({"services": [{"name": "svc", "status": "running"}]})
         entry = build_entry(
@@ -606,7 +606,7 @@ class TestTheLoopsOwnRoundsReadTheTopLevelAsBefore:
 
 def _through(tool: Any, handle: str, *, quiet: bool) -> Any:
     """``tool`` as merged from the server handle ``handle``, its server quiet or not."""
-    from maljan.agents.tool_pinning import (
+    from malspark.agents.tool_pinning import (
         SERVER_CHANGES_NOTHING_METADATA_KEY,
         SERVER_HANDLE_METADATA_KEY,
     )
@@ -741,8 +741,8 @@ class TestTheHolderReachesTheRunsLedger:
         """
         from unittest.mock import MagicMock, patch
 
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer(Settings(_env_file=None), mock=True)
         with patch.object(container, "get_agent_llm", return_value=MagicMock()):

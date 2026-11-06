@@ -229,7 +229,7 @@ def is_current_generation(payload: dict[str, Any], user: Any) -> bool:
 
 # Domain label for the key the client fingerprint is hashed under, derived
 # from the signing secret so the signing key itself never keys anything else.
-_FINGERPRINT_LABEL = b"maljan-refresh-client-fingerprint-v1"
+_FINGERPRINT_LABEL = b"malspark-refresh-client-fingerprint-v1"
 # An IPv6 client's privacy extensions rotate the low 64 bits; the /64 is the
 # stable part that names the client's network.
 IPV6_FINGERPRINT_PREFIX = 64

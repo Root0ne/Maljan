@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.providers.servers import ServerRegistry
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.providers.servers import ServerRegistry
 
 
 def test_a_ref_to_a_disabled_server_is_reported():

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from maljan.providers.sandbox_tools import sandbox_api_calls
+from malspark.providers.sandbox_tools import sandbox_api_calls
 
 
 def test_a_pidless_call_is_left_out_of_a_process_view():

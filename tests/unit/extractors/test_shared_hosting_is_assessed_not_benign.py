@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.extractors.network_extractor import (
+from malspark.extractors.network_extractor import (
     SHARED_HOSTING_REASON,
     _assess_domain,
     host_rides_a_url,

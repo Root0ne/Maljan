@@ -40,12 +40,12 @@ function exportBundle(extra: StixObject[] = []) {
         relationship_type: "uses",
         source_ref: MALWARE,
         target_ref: T1027,
-        x_maljan_confidence: 0.95,
-        x_maljan_evidence_basis: "static",
-        x_maljan_contributing_agents: ["static_analyst"],
-        x_maljan_evidence_refs: ["ev_0002", "ev_0005"],
+        x_malspark_confidence: 0.95,
+        x_malspark_evidence_basis: "static",
+        x_malspark_contributing_agents: ["static_analyst"],
+        x_malspark_evidence_refs: ["ev_0002", "ev_0005"],
       },
-      { type: "identity", id: IDENTITY, name: "Maljan", identity_class: "system" },
+      { type: "identity", id: IDENTITY, name: "Malspark", identity_class: "system" },
       {
         type: "attack-pattern",
         id: T1027,
@@ -84,7 +84,7 @@ function exportBundle(extra: StixObject[] = []) {
       {
         type: "report",
         id: REPORT,
-        name: "Maljan analysis",
+        name: "Malspark analysis",
         object_refs: [MALWARE, T1027, T1012, HASH, NOTE],
       },
       ...extra,
@@ -197,7 +197,7 @@ describe("reading the bundle", () => {
 describe("confidence on an edge", () => {
   it("carries the judge's number when the bundle holds one", () => {
     const edge = readStixGraph(exportBundle()).edges[0];
-    expect(edge.confidence).toEqual({ value: 0.95, property: "x_maljan_confidence" });
+    expect(edge.confidence).toEqual({ value: 0.95, property: "x_malspark_confidence" });
     expect(formatConfidence(edge.confidence!)).toBe("0.95");
   });
 
@@ -209,11 +209,11 @@ describe("confidence on an edge", () => {
 
   it("reads a word, a value off the scale or an empty string as no number", () => {
     for (const value of ["high", 95, -0.1, "", " ", true, [], {}]) {
-      expect(statedConfidence({ x_maljan_confidence: value })).toBeNull();
+      expect(statedConfidence({ x_malspark_confidence: value })).toBeNull();
     }
-    expect(statedConfidence({ x_maljan_confidence: "0.8" })).toEqual({
+    expect(statedConfidence({ x_malspark_confidence: "0.8" })).toEqual({
       value: 0.8,
-      property: "x_maljan_confidence",
+      property: "x_malspark_confidence",
     });
   });
 
@@ -233,16 +233,16 @@ describe("what a node carries", () => {
   });
 
   it("takes the ledger ids the export wrote and nothing that is not one", () => {
-    expect(evidenceIdsOf({ x_maljan_evidence_refs: ["ev_0007", "ev_0007", "ev_0012"] })).toEqual([
+    expect(evidenceIdsOf({ x_malspark_evidence_refs: ["ev_0007", "ev_0007", "ev_0012"] })).toEqual([
       "ev_0007",
       "ev_0012",
     ]);
-    expect(evidenceIdsOf({ x_maljan_evidence_refs: ["note", 7, "ev_0003"] })).toEqual(["ev_0003"]);
-    expect(evidenceIdsOf({ x_maljan_evidence_refs: "ev_0003" })).toEqual([]);
+    expect(evidenceIdsOf({ x_malspark_evidence_refs: ["note", 7, "ev_0003"] })).toEqual(["ev_0003"]);
+    expect(evidenceIdsOf({ x_malspark_evidence_refs: "ev_0003" })).toEqual([]);
     expect(
       evidenceIdsOf({
-        x_maljan_evidence_basis: "static",
-        x_maljan_evidence: ["ev_0001"],
+        x_malspark_evidence_basis: "static",
+        x_malspark_evidence: ["ev_0001"],
         evidence_ids: ["ev_0002"],
         description: "ev_0001",
       }),

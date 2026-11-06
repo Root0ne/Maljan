@@ -70,7 +70,7 @@ def test_the_revision_follows_the_head_it_was_written_on() -> None:
 
 
 def test_the_restated_defaults_are_the_settings_models() -> None:
-    from maljan.core.config import MCPBreakerConfig, ReportingConfig, StaticCapaConfig
+    from malspark.core.config import MCPBreakerConfig, ReportingConfig, StaticCapaConfig
 
     mod = _module()
     assert mod.FLOOR_SOURCES[CAPA] == StaticCapaConfig().timeout_seconds
@@ -80,8 +80,8 @@ def test_the_restated_defaults_are_the_settings_models() -> None:
 
 
 def test_the_moved_key_is_the_one_the_settings_rename_names_and_the_new_ones_are_held() -> None:
-    from maljan.core.settings_annotations import RENAMED_SETTINGS
-    from maljan.core.settings_catalog import core_catalog
+    from malspark.core.settings_annotations import RENAMED_SETTINGS
+    from malspark.core.settings_catalog import core_catalog
 
     keys = {e.key for e in core_catalog()}
     assert RENAMED_SETTINGS[YARA] == CHECK
@@ -112,8 +112,8 @@ def test_upgrade_writes_the_floor_every_server_had(stored: dict[str, Any], writt
 
 def test_the_settings_read_the_same_budget_the_old_floor_gave() -> None:
     """Every built-in server's budget is the same before and after, by the model's own reading."""
-    from maljan.core.config import Settings
-    from maljan.providers.server_guard import server_call_budget
+    from malspark.core.config import Settings
+    from malspark.providers.server_guard import server_call_budget
 
     conn = _connect()
     _insert(conn, CAPA, 900)

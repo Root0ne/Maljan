@@ -19,18 +19,18 @@ from dataclasses import dataclass
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.core.config import ChunkingConfig
-from maljan.core.container import ServiceContainer
-from maljan.pipeline.nodes import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.core.config import ChunkingConfig
+from malspark.core.container import ServiceContainer
+from malspark.pipeline.nodes import (
     make_judge_node,
     make_negotiation_node,
     make_revision_node,
     make_stage_agent_node,
 )
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
@@ -179,7 +179,7 @@ class TestTheAnalystNode:
         # Twenty Ghidra calls and then a timeout is twenty calls made. Nothing
         # else would ever drain them either: a run that reaches consensus in
         # round one never revises.
-        from maljan.core.exceptions import AnalystError
+        from malspark.core.exceptions import AnalystError
 
         counter = EvidenceCounter()
         agent = _Analyst("static", counter)
@@ -271,7 +271,7 @@ class _JudgeContainer:
     event_sink = None
 
     def __init__(self, counter: EvidenceCounter) -> None:
-        from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
+        from malspark.agents.run_evidence_corpus import RunEvidenceCorpus
 
         self._lock = threading.Lock()
         self._judge_agent_cache: dict[str, Any] = {}
@@ -289,7 +289,7 @@ class _JudgeContainer:
         return ["static"]
 
     def get_judge_agent(self, role: str = "judge") -> Any:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         cached = self._judge_agent_cache.get(role)
         if cached is None:
@@ -480,8 +480,8 @@ class TestAGuardSAnswer:
 
 class TestNoRoundPastTheSpendCeiling:
     def test_the_negotiation_goes_straight_on_to_the_verdict(self) -> None:
-        from maljan.core.spend import SpendMeter
-        from maljan.core.token_ledger import TokenLedger
+        from malspark.core.spend import SpendMeter
+        from malspark.core.token_ledger import TokenLedger
 
         counter = EvidenceCounter()
         container = _JudgeContainer(counter)

@@ -32,12 +32,12 @@ import pytest
 from mcp.server.lowlevel import Server
 from mcp.shared.memory import create_client_server_memory_streams
 
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.analysis.evidence_roots import PROCESS_ROOT, READING_RUN, reading_of, run_roots
-from maljan.core import declared_reading
-from maljan.core.config import Settings, get_settings, install_settings
-from maljan.reporting import tool_kinds
-from maljan.reporting.ledger_report import build_sections
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.analysis.evidence_roots import PROCESS_ROOT, READING_RUN, reading_of, run_roots
+from malspark.core import declared_reading
+from malspark.core.config import Settings, get_settings, install_settings
+from malspark.reporting import tool_kinds
+from malspark.reporting.ledger_report import build_sections
 
 SERVER = "livebox"
 PROCESSES = {
@@ -146,7 +146,7 @@ def _in_memory(server: Server) -> Any:
 @pytest.fixture(autouse=True)
 def _served(monkeypatch: pytest.MonkeyPatch) -> None:
     CALLS.clear()
-    monkeypatch.setattr("maljan.agents.mcp_client.stdio_client", _in_memory(_server()))
+    monkeypatch.setattr("malspark.agents.mcp_client.stdio_client", _in_memory(_server()))
 
 
 @pytest.fixture
@@ -181,7 +181,7 @@ def _settings(tool_facts: dict[str, Any] | None) -> Settings:
 
 def _entry(settings: Settings, tool: str) -> Any:
     async def _run() -> Any:
-        from maljan.providers.servers import ServerRegistry
+        from malspark.providers.servers import ServerRegistry
 
         registry = ServerRegistry(settings)
         tools, _reasons = await registry.atools_for("dynamic", "job-1")

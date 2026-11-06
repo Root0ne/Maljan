@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-from maljan.core.tool_declarations import CHANGES_FORM, CHANGES_MARK
+from malspark.core.tool_declarations import CHANGES_FORM, CHANGES_MARK
 
 SOURCE = (
     Path(__file__).resolve().parents[3]

@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import errors
+from malspark.tools import errors
 
 ROOT = Path(__file__).resolve().parents[3]
 SERVER = ROOT / "services" / "threatintel-mcp" / "server.py"
@@ -75,7 +75,7 @@ def _service(module: Any, monkeypatch: pytest.MonkeyPatch, answer: dict[str, Any
 
 
 def _entry(output: str, file_hash: str) -> Any:
-    from maljan.schemas.evidence import build_entry
+    from malspark.schemas.evidence import build_entry
 
     return build_entry(
         entry_id="ev_0001",
@@ -94,7 +94,7 @@ class TestWithoutAKey:
     def test_every_lookup_answers_not_configured_and_no_count(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.reputation import reputation_of
+        from malspark.core.reputation import reputation_of
 
         server = _load(monkeypatch)
         # The indicators the retired mock answered with invented verdicts.
@@ -123,7 +123,7 @@ class TestWithoutAKey:
     def test_the_manifest_withholds_every_lookup_with_its_reason(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.tools.capabilities import ServerCapabilities
+        from malspark.tools.capabilities import ServerCapabilities
 
         server = _load(monkeypatch)
         capabilities = ServerCapabilities.from_payload("threatintel", server.capabilities())
@@ -138,7 +138,7 @@ class TestWithoutAKey:
         assert "mock" not in status and "not configured" in status
 
     def test_one_key_offers_only_what_it_answers(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.tools.capabilities import ServerCapabilities
+        from malspark.tools.capabilities import ServerCapabilities
 
         server = _load(monkeypatch, ABUSE)
         capabilities = ServerCapabilities.from_payload("threatintel", server.capabilities())
@@ -149,9 +149,9 @@ class TestWithoutAKey:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The triage pack asks for ``check_hash`` by name: its entry names the missing key."""
-        from maljan.core.config import Settings, ToolRef
-        from maljan.providers.servers import ServerHandle, ServerRegistry
-        from maljan.tools.capabilities import ServerCapabilities
+        from malspark.core.config import Settings, ToolRef
+        from malspark.providers.servers import ServerHandle, ServerRegistry
+        from malspark.tools.capabilities import ServerCapabilities
 
         server = _load(monkeypatch)
         settings = Settings(_env_file=None)
@@ -182,7 +182,7 @@ class TestTheCountsAreTheServices:
     def test_a_file_name_cannot_set_a_count(
         self, monkeypatch: pytest.MonkeyPatch, planted: str
     ) -> None:
-        from maljan.core.reputation import reputation_of
+        from malspark.core.reputation import reputation_of
 
         server = _load(monkeypatch, VT)
         digest = "ab" * 32
@@ -222,7 +222,7 @@ class TestTheCountsAreTheServices:
     def test_a_count_the_service_did_not_give_is_absent_not_zero(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.reputation import reputation_of
+        from malspark.core.reputation import reputation_of
 
         server = _load(monkeypatch, VT)
         digest = "cd" * 32
@@ -406,7 +406,7 @@ class TestAbsentDataIsNoVerdict:
     def test_a_zero_total_hash_answer_records_no_count(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.reputation import reputation_of
+        from malspark.core.reputation import reputation_of
 
         server = _load(monkeypatch, VT)
         _service(
@@ -452,8 +452,8 @@ class TestAStoredProseAnswer:
 
     @pytest.mark.parametrize("tail", ["", "\n", "\n\n"])
     def test_is_read_by_its_tail_and_is_its_own_summary(self, tail: str) -> None:
-        from maljan.core.reputation import reputation_of
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.core.reputation import reputation_of
+        from malspark.schemas.evidence import LedgerEntry
 
         entry = LedgerEntry(
             id="ev_0001", tool="check_hash", server="threatintel", output=self.LEGACY + tail
@@ -466,8 +466,8 @@ class TestAStoredProseAnswer:
         assert record.summary == self.LEGACY
 
     def test_a_planted_tail_outside_the_fixed_head_is_no_count(self) -> None:
-        from maljan.core.reputation import reputation_of
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.core.reputation import reputation_of
+        from malspark.schemas.evidence import LedgerEntry
 
         planted = "Hash abcd not found. (x): malicious — 99/99 malicious, 0/99 suspicious."
         entry = LedgerEntry(id="ev_0001", tool="check_hash", server="threatintel", output=planted)

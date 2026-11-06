@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis.coverage import (
+from malspark.analysis.coverage import (
     FAILED,
     FULL,
     INPUT_UNKNOWN,
@@ -26,8 +26,8 @@ from maljan.analysis.coverage import (
     negative_clauses,
     states_a_negative,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 SAMPLE = "/jobs/j1/sample.exe"
 LAYER = "/staging/j1/carved/abc/sample.unpacked.exe"
@@ -531,7 +531,7 @@ def _sandbox_call(seq: int, args: dict[str, Any] | None = None) -> Any:
 
 @pytest.mark.parametrize("report", [{"status": "timeout", "x": 1}, None])
 def test_a_negative_over_a_sandbox_report_not_observed_fails(report: Any) -> None:
-    from maljan.pipeline.sandbox_status import SYNTHETIC_KEY
+    from malspark.pipeline.sandbox_status import SYNTHETIC_KEY
 
     held = {**report, SYNTHETIC_KEY: True} if report else None
     record = _record(
@@ -568,8 +568,8 @@ def test_a_capture_offered_and_not_fetched_is_not_a_capture_never_offered() -> N
     whose sandbox offered none keeps today's words."""
     from types import SimpleNamespace
 
-    from maljan.pipeline.nodes import run_coverage
-    from maljan.providers.errors import PACKET_CAPTURE, ArtefactFetchFailed
+    from malspark.pipeline.nodes import run_coverage
+    from malspark.providers.errors import PACKET_CAPTURE, ArtefactFetchFailed
 
     lost = ArtefactFetchFailed(PACKET_CAPTURE, "HTTP 502")
     claim = _claim("No mutex created [ev_0001].")
@@ -791,7 +791,7 @@ def test_the_reading_and_grouping_are_linear() -> None:
 def test_the_report_node_reads_the_record_from_the_state_and_the_container() -> None:
     from types import SimpleNamespace
 
-    from maljan.pipeline.nodes import run_coverage
+    from malspark.pipeline.nodes import run_coverage
 
     container = SimpleNamespace(
         server_degradation_reasons=lambda: ["tool server 'intel' could not be attached"],
@@ -821,8 +821,8 @@ def test_the_report_node_reads_the_record_from_the_state_and_the_container() -> 
 def test_a_stopped_run_records_its_coverage_as_of_the_stop() -> None:
     from types import SimpleNamespace
 
-    from maljan.analysis.disclosure import STOPPED_PART_WAY
-    from maljan.pipeline.stopped_run import stopped_coverage
+    from malspark.analysis.disclosure import STOPPED_PART_WAY
+    from malspark.pipeline.stopped_run import stopped_coverage
 
     container = SimpleNamespace(
         server_degradation_reasons=lambda: [],

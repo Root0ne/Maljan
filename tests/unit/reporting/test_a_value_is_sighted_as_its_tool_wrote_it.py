@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents._indicator_denylists import whole_value_in
-from maljan.reporting.ledger_projection import tool_sightings, value_key
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.stix_renderer import listed_value_sightings, query_answers
-from maljan.schemas.evidence import LedgerEntry
+from malspark.agents._indicator_denylists import whole_value_in
+from malspark.reporting.ledger_projection import tool_sightings, value_key
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.stix_renderer import listed_value_sightings, query_answers
+from malspark.schemas.evidence import LedgerEntry
 
 TEXT = (
     "found /tmp/evil.sh and http://x.com/Gate.php and C:/Users/x/evil.exe and "

@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import json
 
-from maljan.reporting.ledger_report import build_sections
-from maljan.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import build_entry, format_entry_id
+from malspark.reporting.ledger_report import build_sections
+from malspark.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import build_entry, format_entry_id
 
 LISTING = "KERNEL32.dll PeekNamedPipe\nKERNEL32.dll GetLastError"
 RECORDS = [

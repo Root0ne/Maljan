@@ -19,10 +19,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.isr_models import AgentISR, Artifact
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.isr_models import AgentISR, Artifact
 
 MUTEX = "Global\\relay-mutex-7f3c"
 PROCESS = "relay-helper.exe"
@@ -135,7 +135,7 @@ class TestAPersistenceList:
         assert "relay" in block
 
     def test_the_narrative_is_handed_it_as_its_own_fact(self) -> None:
-        from maljan.reporting.evidence_bundles import bundle_for
+        from malspark.reporting.evidence_bundles import bundle_for
 
         facts = bundle_for("persistence_detail", _build(self.ISRS()))["facts"]
 

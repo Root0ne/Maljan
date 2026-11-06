@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.memory.technique_cards import technique_card_lines
-from maljan.pipeline.validation import (
+from malspark.memory.technique_cards import technique_card_lines
+from malspark.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     PLATFORM_MISMATCH_CODE,
@@ -26,8 +26,8 @@ from maljan.pipeline.validation import (
     mark_invalid_technique_ids,
     validate_isr,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.tools import knowledge
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.tools import knowledge
 
 PE = {"platform": "windows", "file_type": "pe"}
 

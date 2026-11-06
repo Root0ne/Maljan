@@ -1,7 +1,7 @@
 """Sections built from real tool output, one builder at a time.
 
 The fixtures under ``tests/fixtures/ledger`` are the shapes the tools in
-``maljan.tools`` and ``providers.sandbox_tools`` actually return, so a builder
+``malspark.tools`` and ``providers.sandbox_tools`` actually return, so a builder
 that drifts from its tool fails here rather than in a report nobody re-reads.
 """
 
@@ -11,9 +11,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from maljan.reporting.ledger_report import build_sections
-from maljan.schemas.evidence import build_entry, format_entry_id
-from maljan.schemas.isr_models import AgentISR, Artifact, Finding
+from malspark.reporting.ledger_report import build_sections
+from malspark.schemas.evidence import build_entry, format_entry_id
+from malspark.schemas.isr_models import AgentISR, Artifact, Finding
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "ledger"
 
@@ -115,8 +115,8 @@ class TestBinaryBuilders:
         """An APK's permissions become the static block's permissions, never its
         exports; the string ``no: <reason>`` iterated there would be one
         permission per character."""
-        from maljan.reporting.ledger_projection import static_from_ledger
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.reporting.ledger_projection import static_from_ledger
+        from malspark.schemas.evidence import LedgerEntry
 
         def _static(permissions: object) -> list[str]:
             answer = {"manifest_present": True, "permissions": permissions}
@@ -289,7 +289,7 @@ class TestGenericFallbacks:
         assert "Cut here at 4,000 of 9,000 characters; the evidence endpoint carries it" in text
 
     def test_a_table_past_its_rows_says_how_many_it_left_out(self) -> None:
-        from maljan.reporting.ledger_report import _Sections
+        from malspark.reporting.ledger_report import _Sections
 
         acc = _Sections()
         section = acc.get("k", "Table", "table", columns=["a"])

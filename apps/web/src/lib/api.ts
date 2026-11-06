@@ -915,7 +915,7 @@ class ApiClient {
 
   /**
    * Fetches the configuration export and triggers a browser download of it
-   * as `maljan-settings.json` — no server round trip beyond the fetch
+   * as `malspark-settings.json` — no server round trip beyond the fetch
    * already made, and the viewer never sees a bare `data:` link. The
    * document is downloaded byte-for-byte as the API sent it (`format`,
    * `exported_at`, `values`, `secrets_omitted`, `unreadable` in that order) rather than
@@ -930,7 +930,7 @@ class ApiClient {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "maljan-settings.json";
+    a.download = "malspark-settings.json";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

@@ -1,8 +1,8 @@
 """Evidence entries name where the pack's own readings ran.
 
-``evidence_entries`` gains ``ran_on``, the field ``maljan.schemas.evidence.LedgerEntry``
+``evidence_entries`` gains ``ran_on``, the field ``malspark.schemas.evidence.LedgerEntry``
 carries for a triage pack entry whose readings of the sample ran on a server
-of their own (``maljan.tools.readers``): a JSON list of sources, ``mcp:<server
+of their own (``malspark.tools.readers``): a JSON list of sources, ``mcp:<server
 key>`` for each such server and ``pack`` for the worker beside one. The
 isolation part of a run's disclosure counts the entry under those rather than
 as read in the worker.

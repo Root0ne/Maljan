@@ -17,8 +17,8 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.pipeline.validation import record_flagged_statements, unpublished_value_violations
-from maljan.reporting.models import (
+from malspark.pipeline.validation import record_flagged_statements, unpublished_value_violations
+from malspark.reporting.models import (
     C2Channel,
     ConfigItem,
     ConsolidatedIOC,
@@ -29,7 +29,7 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.renderers.markdown import STATE_UNKNOWN, TABLE_NOT_READ, MarkdownRenderer
+from malspark.reporting.renderers.markdown import STATE_UNKNOWN, TABLE_NOT_READ, MarkdownRenderer
 
 ADDRESS = "198.51.100.7"
 HOST = "relay.example.net"
@@ -104,7 +104,7 @@ class TestTheStateBesideACell:
         # by the publish rule, whose answers carry no such words: it is read
         # here as the hostile rows above, to see what a hostile answer becomes.
         with patch(
-            "maljan.reporting.builder.build_consolidated_iocs",
+            "malspark.reporting.builder.build_consolidated_iocs",
             lambda built: list(built.consolidated_iocs),
         ):
             text = MarkdownRenderer().render(report)
@@ -123,7 +123,7 @@ class TestTheStateBesideACell:
             )
         )
         with patch(
-            "maljan.reporting.narrative_agent.published_answers",
+            "malspark.reporting.narrative_agent.published_answers",
             side_effect=RuntimeError("unreadable"),
         ):
             text = MarkdownRenderer().render(report)
@@ -140,9 +140,9 @@ class TestTheStateBesideACell:
             )
         )
         with (
-            caplog.at_level(logging.ERROR, logger="maljan"),
+            caplog.at_level(logging.ERROR, logger="malspark"),
             patch(
-                "maljan.reporting.builder.build_consolidated_iocs",
+                "malspark.reporting.builder.build_consolidated_iocs",
                 side_effect=RuntimeError("unrebuildable"),
             ),
         ):
@@ -162,9 +162,9 @@ class TestTheStateBesideACell:
         )
         report.consolidated_iocs = []
         with (
-            caplog.at_level(logging.ERROR, logger="maljan"),
+            caplog.at_level(logging.ERROR, logger="malspark"),
             patch(
-                "maljan.reporting.builder.build_consolidated_iocs",
+                "malspark.reporting.builder.build_consolidated_iocs",
                 side_effect=RuntimeError("unrebuildable"),
             ),
         ):
@@ -181,7 +181,7 @@ class TestTheStateBesideACell:
             )
         )
         with patch(
-            "maljan.pipeline.validation._unstated_values", side_effect=RuntimeError("broken")
+            "malspark.pipeline.validation._unstated_values", side_effect=RuntimeError("broken")
         ):
             text = MarkdownRenderer().render(report)
 
@@ -197,7 +197,7 @@ class TestTheStateBesideACell:
             )
         )
         with patch(
-            "maljan.pipeline.validation._unstated_values", side_effect=RuntimeError("broken")
+            "malspark.pipeline.validation._unstated_values", side_effect=RuntimeError("broken")
         ):
             text = MarkdownRenderer().render(report)
 

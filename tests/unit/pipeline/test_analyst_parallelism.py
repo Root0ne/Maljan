@@ -16,12 +16,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.core.config import ChunkingConfig
-from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+from malspark.core.config import ChunkingConfig
+from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
 from tests.stages import paper_profile
 
 # The real coroutine function, captured before any test patches the reference
-# on ``maljan.pipeline.nodes.asyncio.gather``. Spies ``wraps`` this so the
+# on ``malspark.pipeline.nodes.asyncio.gather``. Spies ``wraps`` this so the
 # concurrent branch keeps working while call-count stays observable.
 _REAL_GATHER = asyncio.gather
 
@@ -61,7 +61,7 @@ def test_start_fans_out_to_every_analyst(fake_container: Any) -> None:
     """Every analyst node must be a direct successor of the pack, which START feeds."""
     from langgraph.graph import START
 
-    from maljan.pipeline.builder import build_graph
+    from malspark.pipeline.builder import build_graph
 
     graph = build_graph(fake_container)
     edge_set = _edges(graph)
@@ -80,7 +80,7 @@ def test_start_fans_out_to_every_analyst(fake_container: Any) -> None:
 
 def test_no_serialising_router_between_start_and_analysts(fake_container: Any) -> None:
     """No analyst node should be reachable from the pack only via another analyst."""
-    from maljan.pipeline.builder import build_graph
+    from malspark.pipeline.builder import build_graph
 
     graph = build_graph(fake_container)
     edge_set = _edges(graph)
@@ -128,7 +128,7 @@ def test_sequential_mode_chains_analysts(sequential_container: Any) -> None:
     """In sequential mode each analyst follows the previous one in registry order."""
     from langgraph.graph import START
 
-    from maljan.pipeline.builder import build_graph
+    from malspark.pipeline.builder import build_graph
 
     graph = build_graph(sequential_container)
     edge_set = _edges(graph)
@@ -158,7 +158,7 @@ def test_sequential_mode_preserves_negotiation_downstream(
     sequential_container: Any,
 ) -> None:
     """Sequential mode must not break the negotiation → judge → END chain."""
-    from maljan.pipeline.builder import build_graph
+    from malspark.pipeline.builder import build_graph
 
     graph = build_graph(sequential_container)
     edge_set = _edges(graph)
@@ -190,7 +190,7 @@ def _revision_container(parallel: bool, call_order: list[str]) -> Any:
     execution order is observable. ``load_data_for_agent`` hands each the
     one chunk round 0 read.
     """
-    from maljan.pipeline.nodes import _empty_isr
+    from malspark.pipeline.nodes import _empty_isr
 
     container = MagicMock()
     container.agent_registry.list_agents.return_value = ["static", "dynamic", "network"]
@@ -241,13 +241,13 @@ def test_revision_node_sequential_does_not_gather() -> None:
     unconditional gather flips ``assert_not_called`` to a hard failure. The
     registry-order check confirms the sequential ``await`` loop ran each revise
     to completion before the next (exclusive slot use)."""
-    from maljan.pipeline.nodes import make_revision_node
+    from malspark.pipeline.nodes import make_revision_node
 
     call_order: list[str] = []
     container = _revision_container(parallel=False, call_order=call_order)
     node = make_revision_node(container)
 
-    with patch("maljan.pipeline.nodes.asyncio.gather", wraps=_REAL_GATHER) as gather_spy:
+    with patch("malspark.pipeline.nodes.asyncio.gather", wraps=_REAL_GATHER) as gather_spy:
         result = asyncio.run(node(_revision_state()))
 
     gather_spy.assert_not_called()
@@ -260,12 +260,12 @@ def test_revision_node_sequential_does_not_gather() -> None:
 def test_revision_node_parallel_uses_gather() -> None:
     """``parallel_analysts=True`` keeps the concurrent gather and still returns
     a revised report + ISR for every analyst (the branch must not regress)."""
-    from maljan.pipeline.nodes import make_revision_node
+    from malspark.pipeline.nodes import make_revision_node
 
     container = _revision_container(parallel=True, call_order=[])
     node = make_revision_node(container)
 
-    with patch("maljan.pipeline.nodes.asyncio.gather", wraps=_REAL_GATHER) as gather_spy:
+    with patch("malspark.pipeline.nodes.asyncio.gather", wraps=_REAL_GATHER) as gather_spy:
         result = asyncio.run(node(_revision_state()))
 
     gather_spy.assert_called_once()
@@ -277,7 +277,7 @@ def test_revision_node_sequential_tolerates_one_failure() -> None:
     """A single analyst raising must not abort the round (parity with
     ``gather(return_exceptions=True)``): the survivors still revise and the
     failed agent falls back to its original report."""
-    from maljan.pipeline.nodes import make_revision_node
+    from malspark.pipeline.nodes import make_revision_node
 
     call_order: list[str] = []
     container = _revision_container(parallel=False, call_order=call_order)
@@ -290,7 +290,7 @@ def test_revision_node_sequential_tolerates_one_failure() -> None:
         else:
 
             def _revise(*_a: Any, _n: str = name, **_k: Any) -> tuple[str, Any]:
-                from maljan.pipeline.nodes import _empty_isr
+                from malspark.pipeline.nodes import _empty_isr
 
                 call_order.append(_n)
                 return (f"{_n} revised", _empty_isr(_n, revision_round=1))

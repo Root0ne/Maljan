@@ -26,7 +26,7 @@ import uuid
 from typing import Any
 
 import redis.asyncio as aioredis
-from maljan.pipeline.events import MODEL_USAGE
+from malspark.pipeline.events import MODEL_USAGE
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

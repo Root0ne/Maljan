@@ -82,7 +82,7 @@ class TestTheDrop:
 
 class TestAStoredValueOfTheRemovedKey:
     def test_building_the_settings_ignores_it(self) -> None:
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         settings = build_settings(
             {"reporting.narrative_max_tokens": 1500, "reporting.composer_enabled": False}
@@ -92,8 +92,8 @@ class TestAStoredValueOfTheRemovedKey:
         assert not hasattr(settings.reporting, "narrative_max_tokens")
 
     def test_the_catalog_no_longer_offers_it(self) -> None:
-        from maljan.core.config import ReportingConfig
-        from maljan.core.settings_annotations import ANNOTATIONS
+        from malspark.core.config import ReportingConfig
+        from malspark.core.settings_annotations import ANNOTATIONS
 
         assert "narrative_max_tokens" not in ReportingConfig.model_fields
         assert "reporting.narrative_max_tokens" not in ANNOTATIONS

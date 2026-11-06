@@ -247,7 +247,7 @@ async def test_a_password_change_revokes_old_tokens_and_api_keys(
     request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
     updated = await update_me(
         body=body, request=request, response=response, user=user, api_key=None,
-        db=_db_returning(user), maljan_refresh=old_refresh,
+        db=_db_returning(user), malspark_refresh=old_refresh,
     )  # fmt: skip
 
     assert user.token_generation == 1
@@ -709,7 +709,7 @@ async def test_the_password_change_commits_before_the_answer_is_built(
         user=user,
         api_key=None,
         db=db,
-        maljan_refresh=None,
+        malspark_refresh=None,
     )
 
     assert order[0] == "commit"

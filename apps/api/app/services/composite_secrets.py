@@ -21,7 +21,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from maljan.core import settings_secrets as box
+from malspark.core import settings_secrets as box
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

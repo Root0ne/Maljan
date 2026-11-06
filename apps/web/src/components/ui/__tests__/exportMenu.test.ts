@@ -65,13 +65,13 @@ beforeEach(() => {
 });
 
 const item = (key: string, over: Partial<MalwareReport> = {}, stored?: Record<string, unknown> | null) =>
-  reportExportGroups("r1", report(over), "maljan-9f86d081884c", stored)
+  reportExportGroups("r1", report(over), "malspark-9f86d081884c", stored)
     .flatMap((g) => g.items)
     .find((i) => i.key === key)!;
 
 describe("the export groups", () => {
   it("are Quick, Deep and Data, in that order", () => {
-    const groups = reportExportGroups("r1", report(), "maljan-9f86d081");
+    const groups = reportExportGroups("r1", report(), "malspark-9f86d081");
     expect(groups.map((g) => g.label)).toEqual(["Quick", "Deep", "Data"]);
     expect(groups[0].items.map((i) => i.label)).toEqual([
       "Report (PDF)",
@@ -107,7 +107,7 @@ describe("the export groups", () => {
   });
 
   it("call the existing downloads and name every file after the sample", async () => {
-    const groups = reportExportGroups("r1", report(), "maljan-9f86d081884c");
+    const groups = reportExportGroups("r1", report(), "malspark-9f86d081884c");
     for (const item of usableItems(groups)) await item.run();
     expect(calls).toEqual([
       "getReportPdf(r1)",
@@ -126,36 +126,36 @@ describe("the export groups", () => {
     // Every name the console's downloads had before they moved into the
     // menu, unchanged: scripts pick these up.
     expect(saved.map((s) => s.name)).toEqual([
-      "maljan-9f86d081884c.pdf",
-      "maljan-9f86d081884c.html",
-      "maljan-9f86d081884c.md",
-      "maljan-9f86d081884c-iocs.json",
-      "maljan-stix-bundle.json",
+      "malspark-9f86d081884c.pdf",
+      "malspark-9f86d081884c.html",
+      "malspark-9f86d081884c.md",
+      "malspark-9f86d081884c-iocs.json",
+      "malspark-stix-bundle.json",
       "evidence-bundle.html",
       "evidence-bundle.json",
-      "maljan-attack-layer.json",
-      "maljan-yara.yar",
-      "maljan-sigma.yml",
-      "maljan-9f86d081884c-report.json",
-      "maljan-9f86d081884c-mitre.json",
-      "maljan-9f86d081884c-timeline.json",
+      "malspark-attack-layer.json",
+      "malspark-yara.yar",
+      "malspark-sigma.yml",
+      "malspark-9f86d081884c-report.json",
+      "malspark-9f86d081884c-mitre.json",
+      "malspark-9f86d081884c-timeline.json",
     ]);
-    expect(saved.find((s) => s.name === "maljan-yara.yar")?.type).toBe("text/x-yara");
-    expect(saved.find((s) => s.name === "maljan-sigma.yml")?.type).toBe("application/yaml");
+    expect(saved.find((s) => s.name === "malspark-yara.yar")?.type).toBe("text/x-yara");
+    expect(saved.find((s) => s.name === "malspark-sigma.yml")?.type).toBe("application/yaml");
   });
 
   it("pin every file name, the MISP and per-kind ones included", () => {
-    const names = exportFileNames("maljan-9f86d081884c");
-    expect(names.misp).toBe("maljan-9f86d081884c-misp.json");
-    expect(names.stixDraft).toBe("maljan-stix-bundle-draft.json");
-    expect(names.rules("suricata")).toBe("maljan-suricata.rules");
-    expect(names.rules("snort")).toBe("maljan-snort.rules");
+    const names = exportFileNames("malspark-9f86d081884c");
+    expect(names.misp).toBe("malspark-9f86d081884c-misp.json");
+    expect(names.stixDraft).toBe("malspark-stix-bundle-draft.json");
+    expect(names.rules("suricata")).toBe("malspark-suricata.rules");
+    expect(names.rules("snort")).toBe("malspark-snort.rules");
   });
 });
 
 describe("the evidence bundle", () => {
   it("is saved under exactly the names the analyst report links to, never prefixed", async () => {
-    const names = exportFileNames("maljan-9f86d081884c");
+    const names = exportFileNames("malspark-9f86d081884c");
     expect(names.evidenceBundleHtml).toBe("evidence-bundle.html");
     expect(names.evidenceBundleJson).toBe("evidence-bundle.json");
     await item("evidence-bundle-html").run();
@@ -169,7 +169,7 @@ describe("the evidence bundle", () => {
 
   it("keeps the report's HTML name and says the bundle downloads beside it", () => {
     const html = item("html");
-    expect(exportFileNames("maljan-9f86d081884c").html).toBe("maljan-9f86d081884c.html");
+    expect(exportFileNames("malspark-9f86d081884c").html).toBe("malspark-9f86d081884c.html");
     expect(html.hint).toMatch(/evidence bundle \(HTML\) beside it/);
     expect(item("evidence-bundle-html").label).toBe("Evidence bundle (HTML)");
     expect(item("evidence-bundle-json").label).toBe("Evidence bundle (JSON)");
@@ -181,14 +181,14 @@ describe("the STIX download", () => {
     stix.answer = { type: "bundle", id: "bundle--1", objects: [] };
     await item("stix").run();
     expect(saved).toHaveLength(1);
-    expect(saved[0].name).toBe("maljan-stix-bundle.json");
+    expect(saved[0].name).toBe("malspark-stix-bundle.json");
     expect(JSON.parse(saved[0].body as string)).toEqual({ type: "bundle", id: "bundle--1", objects: [] });
   });
 
   it("unwraps a draft the API would not publish and names the file a draft", async () => {
     stix.answer = { published: false, notice: "not published", bundle: { type: "bundle", id: "bundle--2" } };
     await item("stix").run();
-    expect(saved[0].name).toBe("maljan-stix-bundle-draft.json");
+    expect(saved[0].name).toBe("malspark-stix-bundle-draft.json");
     expect(JSON.parse(saved[0].body as string)).toEqual({ type: "bundle", id: "bundle--2" });
   });
 
@@ -214,7 +214,7 @@ describe("the MISP item", () => {
     const misp = item("misp", { misp_attributes: [{ type: "md5", value: "abc" }] as MalwareReport["misp_attributes"] });
     expect(misp.unavailable).toBeUndefined();
     await misp.run();
-    expect(saved[0].name).toBe("maljan-9f86d081884c-misp.json");
+    expect(saved[0].name).toBe("malspark-9f86d081884c-misp.json");
     expect(JSON.parse(saved[0].body as string)).toEqual([{ type: "md5", value: "abc" }]);
   });
 

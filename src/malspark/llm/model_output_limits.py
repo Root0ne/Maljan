@@ -1,0 +1,131 @@
+"""The maximum output a model's provider declares, where it declares one.
+
+A derived output cap is a quarter of the model's learned window
+(``context_window.derived_reply``), and no fixed figure bounds it from above:
+the one bound besides an operator's own cap is the model's own maximum output,
+where its provider states it. Three places state it: an OpenAI-compatible model
+list entry and the Anthropic Models API's model description (its
+``max_tokens``), each read from the same answer the window probe reads, and the
+vendored table's ``max_output`` rows. Nothing here asks a model to produce anything.
+Zero is always "not declared", never a limit.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+from pathlib import Path
+from typing import Any
+
+from malspark.core.logger import logger
+
+_lock = threading.Lock()
+# Learned from the window probe's answers, keyed by the model id as asked,
+# lower-cased: the tokens, and the place they were read from in words.
+_learned: dict[str, tuple[int, str]] = {}
+_MODEL_LIST = "the endpoint's model list"
+_table: dict[str, tuple[int, str]] | None = None
+
+# The fields a model list entry states its own maximum output under: on the
+# entry itself, or under OpenRouter's ``top_provider``.
+OUTPUT_LIMIT_KEYS = ("max_output_tokens", "max_completion_tokens", "max_output_length")
+
+
+def output_limit_from_model_list(payload: Any, model: str = "") -> int:
+    """The maximum output a model list entry declares for ``model``, or zero.
+
+    The entry is chosen as the window's is: the one named ``model``, or the only
+    one. Refused past the window this platform believes, as a window is.
+    """
+    from malspark.llm.context_window import believable
+
+    if not isinstance(payload, dict):
+        return 0
+    entries = [row for row in (payload.get("data") or []) if isinstance(row, dict)]
+    wanted = str(model or "").strip().lower()
+    named = [row for row in entries if str(row.get("id") or "").strip().lower() == wanted]
+    for row in named or (entries if len(entries) == 1 else []):
+        for holder in (row, row.get("top_provider")):
+            if not isinstance(holder, dict):
+                continue
+            for key in OUTPUT_LIMIT_KEYS:
+                value = believable(holder.get(key))
+                if value > 0:
+                    return value
+    return 0
+
+
+def note_from_model_list(payload: Any, model: str = "") -> None:
+    """Remember the maximum output a model list answer declares for ``model``."""
+    tokens = output_limit_from_model_list(payload, model)
+    if tokens > 0 and str(model or "").strip():
+        note_declared(model, tokens, _MODEL_LIST)
+
+
+def note_declared(model: str, tokens: int, where: str) -> None:
+    """Remember the maximum output ``where`` declared for ``model``."""
+    if int(tokens) > 0 and str(model or "").strip():
+        with _lock:
+            _learned[str(model).strip().lower()] = (int(tokens), str(where or _MODEL_LIST))
+
+
+def forget_learned() -> None:
+    """Drop what was learned — for a test, or a changed endpoint."""
+    with _lock:
+        _learned.clear()
+
+
+def declared_output_limit(model: object) -> int:
+    """The maximum output ``model``'s provider declares, in tokens, or zero when none does.
+
+    What a probe learned from the model list first, then the vendored table's
+    ``max_output`` rows. A row answers only for the model it names exactly (its
+    family, as the table's windows are keyed): a snapshot or a sibling the
+    vendor documents apart is not assumed to share its limit.
+    """
+    return declared_output(model)[0]
+
+
+def declared_output(model: object) -> tuple[int, str]:
+    """``(tokens, where it is declared)`` for ``model``'s maximum output, or ``(0, "")``.
+
+    The same answer :func:`declared_output_limit` gives, with the place it was
+    read from in words, so a budget built on it can say where it came from.
+    """
+    from malspark.llm.context_window import model_family
+
+    name = str(model or "").strip().lower()
+    if not name:
+        return 0, ""
+    with _lock:
+        learned, where = _learned.get(name, (0, ""))
+    if learned > 0:
+        return learned, where
+    family = model_family(name)
+    tokens, source = _table_rows().get(family, (0, ""))
+    if tokens <= 0:
+        return 0, ""
+    return tokens, f"the vendored table's {family!r} row, from {source}"
+
+
+def _table_rows() -> dict[str, tuple[int, str]]:
+    """The vendored table's ``max_output`` rows and their sources, read once."""
+    global _table
+    from malspark.core.paths import resolve_data
+    from malspark.llm.context_window import TABLE_PATH
+
+    with _lock:
+        if _table is not None:
+            return _table
+        rows: dict[str, tuple[int, str]] = {}
+        try:
+            raw = json.loads(Path(resolve_data(TABLE_PATH)).read_text(encoding="utf-8"))
+            for key, row in (raw.get("max_output") or {}).items():
+                tokens = row.get("tokens") if isinstance(row, dict) else None
+                source = str(row.get("source") or "") if isinstance(row, dict) else ""
+                if isinstance(tokens, int) and tokens > 0 and source:
+                    rows[str(key).lower()] = (tokens, source)
+        except Exception as exc:  # noqa: BLE001 — a fallback table never fails a run
+            logger.debug("the vendored output-limit table could not be read: %s", exc)
+        _table = rows
+        return _table

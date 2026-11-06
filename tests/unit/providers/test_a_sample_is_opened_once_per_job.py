@@ -22,15 +22,15 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ValidationError
 
-from maljan.core.config import (
+from malspark.core.config import (
     GHIDRA_SAMPLE_OPEN,
     MCPServerConfig,
     SampleOpenConfig,
     Settings,
     StaticConfig,
 )
-from maljan.providers.sample_open import SampleNotes, SampleOpener, wrap_open_tool
-from maljan.providers.servers import ServerHandle
+from malspark.providers.sample_open import SampleNotes, SampleOpener, wrap_open_tool
+from malspark.providers.servers import ServerHandle
 
 PATH = "/samples/a.bin"
 SPEC = SampleOpenConfig(
@@ -201,7 +201,7 @@ class TestOnceAPath:
         ]
 
     def test_a_select_refused_right_after_the_open_hands_on_the_refusal(self) -> None:
-        from maljan.providers.sample_open import is_refusal
+        from malspark.providers.sample_open import is_refusal
 
         server = _Server()
         handle = _handle(server)
@@ -234,7 +234,7 @@ class TestOnceAPath:
 
     def test_an_analysis_refused_after_the_open_hands_on_the_refusal(self) -> None:
         """PS-M6: a declared analysis that failed is the open failing, never its success."""
-        from maljan.providers.sample_open import ANALYSIS_REFUSED_AFTER_OPEN, is_refusal
+        from malspark.providers.sample_open import ANALYSIS_REFUSED_AFTER_OPEN, is_refusal
 
         server = _Server(study_refused=True)
         handle = _handle(server)
@@ -335,14 +335,14 @@ class TestTheHeldPath:
 
 class TestTheNoteIsTheJobs:
     def test_a_registry_gives_its_handles_one_note(self) -> None:
-        from maljan.providers.servers import ServerRegistry
+        from malspark.providers.servers import ServerRegistry
 
         notes = SampleNotes()
         registry = ServerRegistry(Settings(), sample_notes=notes)
         assert {id(h.sample_notes) for h in registry._all_handles()} == {id(notes)}
 
     def test_two_jobs_have_two_notes(self) -> None:
-        from maljan.providers.servers import ServerRegistry
+        from malspark.providers.servers import ServerRegistry
 
         first, second = ServerRegistry(Settings()), ServerRegistry(Settings())
         assert first.sample_notes is not second.sample_notes
@@ -387,7 +387,7 @@ class TestOneServerOneNote:
         assert server.calls[-1] == ("open_thing", {"where": "/samples//sub/../a.bin"})
 
     def test_transports_to_one_address_name_one_server(self) -> None:
-        from maljan.providers.sample_open import server_note_key
+        from malspark.providers.sample_open import server_note_key
 
         keys = {
             server_note_key(MCPServerConfig(transport=transport, url=url))
@@ -401,7 +401,7 @@ class TestOneServerOneNote:
 
     def test_loopback_spellings_are_kept_apart(self) -> None:
         """Three listeners may answer them; keeping them apart costs one more open at most."""
-        from maljan.providers.sample_open import server_note_key
+        from malspark.providers.sample_open import server_note_key
 
         keys = {
             server_note_key(MCPServerConfig(transport="http", url=url))
@@ -412,7 +412,7 @@ class TestOneServerOneNote:
     def test_what_selects_a_backend_is_an_opaque_number_never_the_secret(self) -> None:
         from pydantic import SecretStr
 
-        from maljan.providers.sample_open import server_note_key
+        from malspark.providers.sample_open import server_note_key
 
         token_a = "tenant-a-" + "x" * 20
         token_b = "tenant-b-" + "y" * 20
@@ -437,7 +437,7 @@ class TestOneServerOneNote:
                 assert hashlib.sha256(secret.encode()).hexdigest()[:8] not in said
 
     def test_a_default_port_is_written(self) -> None:
-        from maljan.providers.sample_open import server_note_key
+        from malspark.providers.sample_open import server_note_key
 
         assert server_note_key(MCPServerConfig(transport="http", url="http://g")) == (
             server_note_key(MCPServerConfig(transport="http", url="http://g:80"))
@@ -465,7 +465,7 @@ class TestTheDeclaredToolsHaveNoClientDeadline:
     """
 
     def _guard(self, explicit: float = 0.0) -> Any:
-        from maljan.providers.server_guard import guard_from_settings
+        from malspark.providers.server_guard import guard_from_settings
 
         cfg = Settings.model_validate(
             {
@@ -488,7 +488,7 @@ class TestTheDeclaredToolsHaveNoClientDeadline:
 
     def test_an_analysis_that_outlasts_the_deployment_budget_is_noted(self) -> None:
         """The analysis takes longer than the derived budget and its grace, and still answers."""
-        from maljan.providers import server_guard
+        from malspark.providers import server_guard
 
         guard = self._guard()
         budget = guard.call_timeout("look")

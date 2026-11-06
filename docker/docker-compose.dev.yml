@@ -67,4 +67,4 @@ services:
     environment:
       # A reload mid-analysis kills the run, so keep the probe verbose here —
       # it is the only trace of what the process was doing when it went.
-      MALJAN_MEMPROBE: ${MALJAN_MEMPROBE:-basic}
+      MALSPARK_MEMPROBE: ${MALSPARK_MEMPROBE:-basic}

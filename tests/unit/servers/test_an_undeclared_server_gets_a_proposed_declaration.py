@@ -32,13 +32,13 @@ import pytest
 from mcp.server.lowlevel import Server
 from mcp.shared.memory import create_client_server_memory_streams
 
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.core import declared_reading
-from maljan.core.config import MCPServerConfig, Settings, get_settings, install_settings
-from maljan.core.tool_declarations import ToolFacts
-from maljan.pipeline.evidence_summary import asserted_techniques, asserting_source
-from maljan.providers.servers import ServerRegistry
-from maljan.reporting.ledger_report import build_sections
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.core import declared_reading
+from malspark.core.config import MCPServerConfig, Settings, get_settings, install_settings
+from malspark.core.tool_declarations import ToolFacts
+from malspark.pipeline.evidence_summary import asserted_techniques, asserting_source
+from malspark.providers.servers import ServerRegistry
+from malspark.reporting.ledger_report import build_sections
 
 SERVER = "invented"
 RULE_ANSWER = {
@@ -228,7 +228,7 @@ def _in_memory(server: Server) -> Any:
 @pytest.fixture(autouse=True)
 def _served(monkeypatch: pytest.MonkeyPatch) -> None:
     CALLS.clear()
-    monkeypatch.setattr("maljan.agents.mcp_client.stdio_client", _in_memory(_server()))
+    monkeypatch.setattr("malspark.agents.mcp_client.stdio_client", _in_memory(_server()))
 
 
 @pytest.fixture
@@ -361,7 +361,7 @@ def test_only_the_confirmed_calls_are_made_and_never_name_a_sample() -> None:
     assert set(called) == {"scan_rules", "query_hash", "section_list"}
     for name in ("scan_rules", "section_list"):
         (path,) = called[name].values()
-        assert path.startswith("/nonexistent-maljan-probe/")
+        assert path.startswith("/nonexistent-malspark-probe/")
     assert called["query_hash"] == {"hash": hashlib.sha256(b"").hexdigest()}
 
     patterns = proposals["server"]["error_patterns"]
@@ -469,8 +469,8 @@ def test_a_proposal_that_cannot_be_built_never_fails_the_connection_test(
     def _broken(*_args: Any, **_kw: Any) -> Any:
         raise RuntimeError("no proposals")
 
-    monkeypatch.setattr("maljan.core.declaration_proposals.propose", _broken)
-    monkeypatch.setattr("maljan.core.declaration_proposals.plan_calls", _broken)
+    monkeypatch.setattr("malspark.core.declaration_proposals.propose", _broken)
+    monkeypatch.setattr("malspark.core.declaration_proposals.plan_calls", _broken)
     result = _probe(confirmed=["section_list"])
     assert result.ok is True
     assert "proposals" not in (result.details or {})
@@ -582,11 +582,11 @@ def _what_an_undeclared_tool_gets(entry: Any, tools: list[Any]) -> dict[str, Any
     """The readings an undeclared tool gets, and the composer section its cited output reaches."""
     from types import SimpleNamespace
 
-    from maljan.agents.network_analyst import _undeclared_tools_in
-    from maljan.core.undeclared_tools import entry_code_kind, entry_is_strings_source
-    from maljan.reporting import tool_kinds
-    from maljan.reporting.evidence_bundles import bundle_for
-    from maljan.reporting.models import (
+    from malspark.agents.network_analyst import _undeclared_tools_in
+    from malspark.core.undeclared_tools import entry_code_kind, entry_is_strings_source
+    from malspark.reporting import tool_kinds
+    from malspark.reporting.evidence_bundles import bundle_for
+    from malspark.reporting.models import (
         EvidenceIndexRow,
         FileHashes,
         MalwareReport,
@@ -642,7 +642,7 @@ def _what_an_undeclared_tool_gets(entry: Any, tools: list[Any]) -> dict[str, Any
 def test_accepting_a_field_without_a_kind_keeps_what_an_undeclared_tool_gets(
     installed: Any, accepted: dict[str, Any]
 ) -> None:
-    from maljan.core.undeclared_tools import declares_a_kind
+    from malspark.core.undeclared_tools import declares_a_kind
 
     undeclared_entry, undeclared_tools = _lister_call(installed(_settings(None)))
     before = _what_an_undeclared_tool_gets(undeclared_entry, undeclared_tools)
@@ -673,10 +673,10 @@ def test_no_run_module_reads_a_proposal() -> None:
     import re
     from pathlib import Path
 
-    import maljan
+    import malspark
 
-    imports = re.compile(r"^\s*(?:from|import)\s+maljan\.core\.declaration_proposals\b", re.M)
-    root = Path(maljan.__file__).parent
+    imports = re.compile(r"^\s*(?:from|import)\s+malspark\.core\.declaration_proposals\b", re.M)
+    root = Path(malspark.__file__).parent
     readers = sorted(
         str(path.relative_to(root))
         for path in root.rglob("*.py")
@@ -695,7 +695,7 @@ def test_no_run_module_reads_a_proposal() -> None:
 def test_a_tool_declared_without_a_kind_is_still_introduced_by_the_server_s_own_words() -> None:
     from langchain_core.tools import StructuredTool
 
-    from maljan.providers.servers import _own_words
+    from malspark.providers.servers import _own_words
 
     tools = [
         StructuredTool.from_function(
@@ -718,10 +718,10 @@ def test_a_tool_declared_without_a_kind_is_still_introduced_by_the_server_s_own_
 def test_a_name_and_words_declared_without_a_kind_take_effect_and_keep_the_fallbacks(
     installed: Any,
 ) -> None:
-    from maljan.pipeline.validation import entry_words
-    from maljan.reporting import tool_kinds
-    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-    from maljan.reporting.renderers import MarkdownRenderer
+    from malspark.pipeline.validation import entry_words
+    from malspark.reporting import tool_kinds
+    from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from malspark.reporting.renderers import MarkdownRenderer
 
     undeclared, tools = _lister_call(installed(_settings(None)))
     before = _what_an_undeclared_tool_gets(undeclared, tools)

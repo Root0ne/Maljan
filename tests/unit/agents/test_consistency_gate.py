@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.base_agent import BaseAnalyst, _claim_grounded_in_evidence
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.base_agent import BaseAnalyst, _claim_grounded_in_evidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 _EVIDENCE = (
     "The binary imports VirtualAllocEx and WriteProcessMemory and creates a "
@@ -98,7 +98,7 @@ def _agent() -> _StubAnalyst:
 
 def _set_gate(monkeypatch: pytest.MonkeyPatch, on: bool) -> None:
     settings = SimpleNamespace(preprocessing=SimpleNamespace(use_claim_consistency_gate=on))
-    monkeypatch.setattr("maljan.agents.base_agent.get_settings", lambda: settings)
+    monkeypatch.setattr("malspark.agents.base_agent.get_settings", lambda: settings)
 
 
 def _isr_with_two_claims() -> AgentISR:

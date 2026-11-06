@@ -70,13 +70,13 @@ class EvidenceEntryResponse(BaseModel):
     # The fields of the call whose ``null`` the tool boundary dropped (the
     # field took its declared default), and the top-level ones the schema
     # admitted that the transport did not send, each by its path segments
-    # (``maljan.agents.null_arguments``). Left out where the row holds none,
+    # (``malspark.agents.null_arguments``). Left out where the row holds none,
     # as the entry's own dump leaves them out: a row older than the columns
     # reads as it did, and as empty to a ledger entry read from it.
     args_nulls_dropped: list[list[str]] | None = Field(default=None, exclude_if=_absent)
     args_nulls_withheld: list[list[str]] | None = Field(default=None, exclude_if=_absent)
     # Where the platform's own readings behind a triage pack entry ran, as
-    # sources (``maljan.tools.readers``). Left out where the row holds none:
+    # sources (``malspark.tools.readers``). Left out where the row holds none:
     # every reading ran in the worker, or the row is older than the column.
     ran_on: list[str] | None = Field(default=None, exclude_if=_absent)
     # Where the parts of the answer this entry does not keep whole are kept
@@ -154,7 +154,7 @@ class EvidenceListResponse(BaseModel):
 
 
 class CallMapFunction(BaseModel):
-    """One function the run's code reading touched (``maljan.reporting.call_map``).
+    """One function the run's code reading touched (``malspark.reporting.call_map``).
 
     ``address`` and ``offset`` are hex; ``offset`` is ``None`` without one image
     base, and ``address`` ``None`` for a function listed under a name alone.

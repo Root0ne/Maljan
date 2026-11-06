@@ -297,7 +297,7 @@ def test_the_migration_s_stage_form_is_the_one_the_settings_model_produces():
     producing the document that was correct when it was written — so this is
     the check that the copy was correct in the first place.
     """
-    from maljan.core.config import stages_from_analysts
+    from malspark.core.config import stages_from_analysts
 
     mod = _load_stages_rev()
 
@@ -394,7 +394,7 @@ def test_the_converted_document_loads_as_the_settings_it_describes():
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
 
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     mod = _load_stages_rev()
     conn = _judgement_engine(
@@ -448,7 +448,7 @@ def test_a_migrated_team_keeps_following_the_two_global_keys():
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
 
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     mod = _load_stages_rev()
     triage_rev = _load_revision("20260919000000_seed_triage_stage.py", "seed_triage_stage")

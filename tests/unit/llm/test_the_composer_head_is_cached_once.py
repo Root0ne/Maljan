@@ -23,10 +23,10 @@ from unittest.mock import patch
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from maljan.core.config import Settings
-from maljan.llm import anthropic_history
-from maljan.llm.anthropic_provider import AnthropicProvider
-from maljan.reporting.composer import (
+from malspark.core.config import Settings
+from malspark.llm import anthropic_history
+from malspark.llm.anthropic_provider import AnthropicProvider
+from malspark.reporting.composer import (
     COMPOSED_SECTIONS,
     ReportComposer,
     _published_techniques,
@@ -83,7 +83,9 @@ def _model() -> Any:
 
 def _compose(model: Any) -> None:
     composer = ReportComposer(llm=model, per_section_timeout=60)
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+    ):
         asyncio.run(composer.compose(_report(), _isr(), facts_block=FACTS, concurrent=True))
 
 
@@ -113,7 +115,7 @@ class TestOnTheStructuredPath:
         # What an ``anthropic`` provider's settings answer (``registry``).
         composer = ReportComposer(llm=_model(), per_section_timeout=60)
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=True
         ):
             asyncio.run(composer.compose(_report(), _isr(), facts_block=FACTS, concurrent=True))
         # A section whose structured answer does not parse is asked again by
@@ -161,7 +163,7 @@ class TestTheManualPathAfterAStructuredAttempt:
         install(monkeypatch, found)
         composer = ReportComposer(llm=_model(), per_section_timeout=60)
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=True
         ):
             asyncio.run(composer.compose(_report(), _isr(), facts_block=FACTS, concurrent=True))
         return found.bodies
@@ -200,8 +202,8 @@ class TestWithReadEvidenceBesideTheSchema:
     def test_every_section_shares_one_prefix_and_waits_for_one_lead(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents.ledger_reads import LedgerReads
-        from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+        from malspark.agents.ledger_reads import LedgerReads
+        from malspark.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
 
         from .test_a_structured_answer_in_text_is_kept import _in_text
         from .test_the_report_calls_may_read_the_ledger import LEDGER
@@ -211,7 +213,7 @@ class TestWithReadEvidenceBesideTheSchema:
         composer = ReportComposer(llm=_model(), per_section_timeout=60)
         composer.ledger_reads = LedgerReads(LEDGER)
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=True
         ):
             asyncio.run(composer.compose(_report(), _isr(), facts_block=FACTS, concurrent=True))
         firsts = [b for b in wire.bodies if len(b["messages"]) == 1]

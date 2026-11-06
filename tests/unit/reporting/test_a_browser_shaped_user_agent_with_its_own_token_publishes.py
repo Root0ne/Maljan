@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.reporting.call_bindings import (
+from malspark.reporting.call_bindings import (
     browser_user_agent_tokens,
     distinctive_user_agent_token,
     reads_as_a_browser_user_agent,

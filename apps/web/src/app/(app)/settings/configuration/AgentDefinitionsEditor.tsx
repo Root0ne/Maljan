@@ -130,7 +130,7 @@ const ASKABLE_ROLES = new Set(["static", "dynamic", "network", "generic", "lead"
 const ASKING_ROLES = new Set(["static", "dynamic", "network", "generic", "lead", "judge"]);
 
 /**
- * One entry of `llm.agents`, mirroring `maljan.core.config.AgentLLMConfig`.
+ * One entry of `llm.agents`, mirroring `malspark.core.config.AgentLLMConfig`.
  * Absent from the map means "inherit `llm.provider`/the provider's own
  * `expert_model`/`judge_model`" — there is no per-definition storage for
  * this, `llm.agents` is a single JSON leaf of its own (`core.llm.agents`),

@@ -41,8 +41,8 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from maljan.loaders.mock_sandbox_client import MockSandboxClient
-from maljan.loaders.sandbox_client import (
+from malspark.loaders.mock_sandbox_client import MockSandboxClient
+from malspark.loaders.sandbox_client import (
     SandboxClient,
     SandboxError,
     SandboxNotAvailableError,
@@ -221,14 +221,14 @@ class TestMockSandboxClient:
 
 class TestCAPEv2Client:
     def test_raises_when_httpx_not_installed(self) -> None:
-        from maljan.loaders.cape2_client import CAPEv2Client
+        from malspark.loaders.cape2_client import CAPEv2Client
 
         with patch.dict("sys.modules", {"httpx": None}):
             with pytest.raises((SandboxNotAvailableError, ImportError)):
                 CAPEv2Client(base_url="http://localhost:8000")
 
     def test_raise_for_status_raises_on_4xx(self) -> None:
-        from maljan.loaders.cape2_client import CAPEv2Client
+        from malspark.loaders.cape2_client import CAPEv2Client
 
         mock_response = MagicMock()
         mock_response.status_code = 404
@@ -238,7 +238,7 @@ class TestCAPEv2Client:
             CAPEv2Client._raise_for_status(mock_response, "test_op")
 
     def test_raise_for_status_ok_on_200(self) -> None:
-        from maljan.loaders.cape2_client import CAPEv2Client
+        from malspark.loaders.cape2_client import CAPEv2Client
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -262,7 +262,7 @@ class TestCAPEv2ClientFetchReportSampleIdentity:
 
     @staticmethod
     def _client_with_transport(handler: object) -> object:
-        from maljan.loaders.cape2_client import CAPEv2Client
+        from malspark.loaders.cape2_client import CAPEv2Client
 
         client = CAPEv2Client(base_url="http://cape.invalid:8000", api_token="t")
         # base_url is required here too: CAPEv2Client.fetch_report() issues a
@@ -337,8 +337,8 @@ class TestCAPEv2ClientFetchReportSampleIdentity:
 
 class TestFileDataLoaderLoadFromSandbox:
     def _make_loader(self, tmp_path: Path) -> object:
-        from maljan.loaders.file_loader import FileDataLoader
-        from maljan.parsers.registry import ParserRegistry
+        from malspark.loaders.file_loader import FileDataLoader
+        from malspark.parsers.registry import ParserRegistry
 
         return FileDataLoader(
             samples_dir=str(tmp_path),
@@ -346,7 +346,7 @@ class TestFileDataLoaderLoadFromSandbox:
         )
 
     def test_returns_text_chunks(self, tmp_path: Path) -> None:
-        from maljan.loaders.binary_chunker import TextChunk
+        from malspark.loaders.binary_chunker import TextChunk
 
         report = _make_report()
         sample = tmp_path / "sample.exe"
@@ -370,7 +370,7 @@ class TestFileDataLoaderLoadFromSandbox:
         assert isinstance(chunks[0], TextChunk)
 
     def test_raises_on_submission_failure(self, tmp_path: Path) -> None:
-        from maljan.core.exceptions import DataLoadError
+        from malspark.core.exceptions import DataLoadError
 
         broken_client = MagicMock()
         broken_client.submit.side_effect = SandboxError("connection refused")
@@ -384,7 +384,7 @@ class TestFileDataLoaderLoadFromSandbox:
             )
 
     def test_raises_on_non_reported_status(self, tmp_path: Path) -> None:
-        from maljan.core.exceptions import DataLoadError
+        from malspark.core.exceptions import DataLoadError
 
         broken_client = MagicMock()
         broken_client.submit.return_value = "1"
@@ -399,7 +399,7 @@ class TestFileDataLoaderLoadFromSandbox:
             )
 
     def test_raises_on_fetch_failure(self, tmp_path: Path) -> None:
-        from maljan.core.exceptions import DataLoadError
+        from malspark.core.exceptions import DataLoadError
 
         broken_client = MagicMock()
         broken_client.submit.return_value = "1"

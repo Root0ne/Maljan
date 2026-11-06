@@ -20,8 +20,8 @@ Two-part fix, both exercised here with a MagicMock / tiny callable LLM only
 
 from unittest.mock import MagicMock, patch
 
-from maljan.agents.static_analyst import StaticAnalyst, _reframe_static_raw_data
-from maljan.schemas.isr_models import ClaimEvidence
+from malspark.agents.static_analyst import StaticAnalyst, _reframe_static_raw_data
+from malspark.schemas.isr_models import ClaimEvidence
 
 _PLACEHOLDER = "No static data available for sample 007257bf103de1173f536937eae72ea."
 _DEFEATIST_BLOCK = (

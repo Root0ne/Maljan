@@ -7,8 +7,8 @@ offset) was subtracted twice from the count of what it reaches.
 
 from __future__ import annotations
 
-from maljan.pipeline import function_claims as fc
-from maljan.schemas.evidence import LedgerEntry
+from malspark.pipeline import function_claims as fc
+from malspark.schemas.evidence import LedgerEntry
 from tests.unit.pipeline.test_a_function_claim_is_checked_against_its_function_s_facts import (
     BASE,
     MAIN,

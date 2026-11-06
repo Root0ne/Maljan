@@ -20,9 +20,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.core.config import AgentDefinition, StageDefinition, ToolRef
-from maljan.pipeline.data_needs import SANDBOX_REPORT, STORED
-from maljan.pipeline.nodes import (
+from malspark.core.config import AgentDefinition, StageDefinition, ToolRef
+from malspark.pipeline.data_needs import SANDBOX_REPORT, STORED
+from malspark.pipeline.nodes import (
     DATALESS_STAGE_KEY,
     NO_AGENT_DATA_REASON,
     SYNTHETIC_SANDBOX_REASON,
@@ -32,7 +32,7 @@ from maljan.pipeline.nodes import (
     make_judge_node,
     make_stage_agent_node,
 )
-from maljan.pipeline.state import _merge_stage_results
+from malspark.pipeline.state import _merge_stage_results
 
 _DEFINITIONS = {
     "static": AgentDefinition(role="static", tools=[ToolRef(kind="mcp", server="knowledge")]),
@@ -74,7 +74,7 @@ def _stage(agents: list[str], *, inject: str = "findings", key: str = "dynamic")
 @pytest.fixture(autouse=True)
 def _declared_roles(monkeypatch: pytest.MonkeyPatch) -> None:
     """The servers' declared roles, as the live declarations read them for a double's settings."""
-    import maljan.core.declared_reading as declared_reading
+    import malspark.core.declared_reading as declared_reading
 
     real = declared_reading.declarations
 
@@ -89,7 +89,7 @@ def _declared_roles(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(declared_reading, "declarations", declarations)
 
-    import maljan.agents.composition as composition
+    import malspark.agents.composition as composition
 
     bound = composition.servers_bound_to
 
@@ -314,11 +314,11 @@ class TestTheVerdictSaysTheAnalystWasSkipped:
         import asyncio
         from unittest.mock import AsyncMock
 
-        from maljan.agents.judge_agent import JudgeVerdict
-        from maljan.core.config import ProfileDefinition, stages_from_analysts
-        from maljan.schemas.evidence import EvidenceCounter
-        from maljan.schemas.isr_models import AgentISR
-        from maljan.schemas.stix_models import Bundle
+        from malspark.agents.judge_agent import JudgeVerdict
+        from malspark.core.config import ProfileDefinition, stages_from_analysts
+        from malspark.schemas.evidence import EvidenceCounter
+        from malspark.schemas.isr_models import AgentISR
+        from malspark.schemas.stix_models import Bundle
         from tests.unit.pipeline.test_degraded_mode_at_the_judge_node import (
             _state as judge_state,
         )

@@ -68,8 +68,8 @@ def test_the_revision_follows_the_head_it_was_written_on() -> None:
 
 
 def test_the_moved_key_is_the_one_the_settings_rename_names_and_the_new_one_is_held() -> None:
-    from maljan.core.settings_annotations import RENAMED_SETTING_VALUES, RENAMED_SETTINGS
-    from maljan.core.settings_catalog import core_catalog
+    from malspark.core.settings_annotations import RENAMED_SETTING_VALUES, RENAMED_SETTINGS
+    from malspark.core.settings_catalog import core_catalog
 
     keys = {e.key for e in core_catalog()}
     assert RENAMED_SETTINGS[OLD] == NEW
@@ -89,7 +89,7 @@ def test_upgrade_renames_the_row_to_its_last_segment_keeping_the_rest() -> None:
 
 
 def test_the_migration_and_the_model_read_a_value_the_same_way() -> None:
-    from maljan.core.config import StaticR2Config
+    from malspark.core.config import StaticR2Config
 
     mod = _module()
     for value in ("data/samples/r2-x", "r2-x", "./a/b/r2-x/", "data\\samples\\r2-x"):

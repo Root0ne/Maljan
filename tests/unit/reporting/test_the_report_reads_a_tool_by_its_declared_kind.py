@@ -18,23 +18,23 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.declared_reading import facts_record
-from maljan.core.tool_declarations import ToolDeclarations
-from maljan.reporting import tool_kinds
-from maljan.reporting.evidence_bundles import _SECTION_KINDS, _filter_tool_outputs, bundle_for
-from maljan.reporting.figures import build_code_listings
-from maljan.reporting.ledger_projection import static_from_ledger
-from maljan.reporting.ledger_report import build_sections
-from maljan.reporting.models import EvidenceIndexRow, FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.core.config import Settings
+from malspark.core.declared_reading import facts_record
+from malspark.core.tool_declarations import ToolDeclarations
+from malspark.reporting import tool_kinds
+from malspark.reporting.evidence_bundles import _SECTION_KINDS, _filter_tool_outputs, bundle_for
+from malspark.reporting.figures import build_code_listings
+from malspark.reporting.ledger_projection import static_from_ledger
+from malspark.reporting.ledger_report import build_sections
+from malspark.reporting.models import EvidenceIndexRow, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.stix_renderer import (
     DECODED_FROM_THE_BYTES_TEMPLATE,
     disputed_flow_reason,
     emulation_from_ledger,
     emulation_kwargs,
     recovered_by_words,
 )
-from maljan.schemas.evidence import build_entry
+from malspark.schemas.evidence import build_entry
 
 # The invented reverser: one tool of every kind a technical section reads.
 REVERSER_TOOLS: dict[str, dict[str, Any]] = {
@@ -430,8 +430,8 @@ def _operator_settings() -> Settings:
 
 
 def _rendered(report_json: str) -> tuple[str, str, list[str], list[str]]:
-    from maljan.reporting.renderers.html import HtmlRenderer
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.renderers.html import HtmlRenderer
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     report = MalwareReport.model_validate_json(report_json)
     markdown = MarkdownRenderer().render(report)
@@ -442,9 +442,9 @@ def _rendered(report_json: str) -> tuple[str, str, list[str], list[str]]:
 
 
 def test_a_run_with_an_operator_server_renders_the_same_where_its_settings_are_absent() -> None:
-    from maljan.core import declared_reading
-    from maljan.core.config import get_settings, install_settings
-    from maljan.reporting.models import EvidenceIndexRow
+    from malspark.core import declared_reading
+    from malspark.core.config import get_settings, install_settings
+    from malspark.reporting.models import EvidenceIndexRow
 
     previous = get_settings()
     # Written in the worker, under the operator's settings: each entry stores
@@ -560,10 +560,10 @@ def test_the_built_report_carries_each_entry_s_facts_to_what_the_api_renders() -
     (``LedgerEntry.to_captured``); the API, which has no operator settings,
     reads only those.
     """
-    from maljan.core import declared_reading
-    from maljan.core.config import get_settings, install_settings
-    from maljan.reporting.builder import MalwareReportBuilder
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.core import declared_reading
+    from malspark.core.config import get_settings, install_settings
+    from malspark.reporting.builder import MalwareReportBuilder
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     previous = get_settings()
     install_settings(_operator_settings())

@@ -21,7 +21,7 @@ ANTHROPIC_MODEL = "claude-haiku-5-5"
 
 
 def _anthropic_settings() -> Any:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     return Settings(
         _env_file=None,
@@ -39,7 +39,7 @@ def _anthropic_settings() -> Any:
 
 
 def _deepseek_settings() -> Any:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     return Settings(
         _env_file=None,
@@ -64,7 +64,7 @@ def _deepseek_settings() -> Any:
 
 
 def _models() -> dict[str, Any]:
-    from maljan.llm.registry import LLMProviderRegistry
+    from malspark.llm.registry import LLMProviderRegistry
 
     anthropic = LLMProviderRegistry(_anthropic_settings())
     deepseek = LLMProviderRegistry(_deepseek_settings())
@@ -82,7 +82,7 @@ def _models() -> dict[str, Any]:
 
 def bodies() -> dict[str, Any]:
     """Every body, keyed by what built it."""
-    from maljan.agents.base_agent import frame_messages
+    from malspark.agents.base_agent import frame_messages
 
     history = _history()
     framed = frame_messages(history[:4], run_state="sample: c\nbudget remaining: 3 model turns")
@@ -90,7 +90,7 @@ def bodies() -> dict[str, Any]:
         update={
             "response_metadata": {
                 **(framed[-1].response_metadata or {}),
-                "maljan_tool_loop_turn": True,
+                "malspark_tool_loop_turn": True,
             }
         }
     )

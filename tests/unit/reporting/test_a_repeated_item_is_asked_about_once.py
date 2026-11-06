@@ -18,13 +18,13 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     REPEATED_ITEMS_CODE,
     SECTION_CUT_CODE,
     repeated_item_violations,
     section_cut_violation,
 )
-from maljan.reporting.composer import (
+from malspark.reporting.composer import (
     _ITEM_IDENTITY,
     ReportComposer,
     _C2Out,
@@ -74,7 +74,7 @@ def _compose(llm: _Answers, schema: Any = _HostIdentifiersOut) -> tuple[Any, Rep
     composer = ReportComposer(llm=llm, section_max_tokens=8192)  # type: ignore[arg-type]
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+            "malspark.reporting.composer.structured_output_supported_for_llm", lambda _l: False
         )
         result = asyncio.run(
             composer._invoke([HumanMessage(content="x")], schema, section="host_identifiers")

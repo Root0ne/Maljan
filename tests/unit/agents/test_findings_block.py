@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from maljan.agents.findings_block import parse_findings_block
+from malspark.agents.findings_block import parse_findings_block
 
 _VALID = """Here is what I found.
 
@@ -12,7 +12,7 @@ CONFIDENCE: 0.8
 TECHNIQUE: T1055
 ---
 
-```maljan-findings
+```malspark-findings
 {"artifacts": [{"kind": "imports", "label": "Suspicious imports",
   "columns": ["Library", "Function"],
   "rows": [["KERNEL32.dll", "VirtualAllocEx"]],
@@ -36,7 +36,7 @@ class TestValidBlock:
 
     def test_the_block_is_stripped_from_the_prose(self) -> None:
         block = parse_findings_block(_VALID)
-        assert "maljan-findings" not in block.prose
+        assert "malspark-findings" not in block.prose
         assert "VirtualAllocEx" in block.prose  # the ISR evidence line survives
         assert block.prose.rstrip().endswith("---")
 
@@ -44,7 +44,7 @@ class TestValidBlock:
 class TestInvalidItems:
     def test_an_item_that_does_not_validate_is_dropped_and_counted(self) -> None:
         text = (
-            "prose\n\n```maljan-findings\n"
+            "prose\n\n```malspark-findings\n"
             '{"findings": [{"title": "kept"}, {"detail": "no title"}, "not an object"]}\n'
             "```"
         )
@@ -53,15 +53,15 @@ class TestInvalidItems:
         assert block.dropped == 2
 
     def test_a_block_that_is_not_json_is_dropped_whole(self) -> None:
-        text = "prose\n\n```maljan-findings\nnot json at all\n```"
+        text = "prose\n\n```malspark-findings\nnot json at all\n```"
         block = parse_findings_block(text)
         assert block.findings == []
         assert block.artifacts == []
         assert block.dropped == 1
-        assert "maljan-findings" not in block.prose
+        assert "malspark-findings" not in block.prose
 
     def test_a_block_holding_a_list_is_dropped(self) -> None:
-        block = parse_findings_block('x\n\n```maljan-findings\n[{"title": "a"}]\n```')
+        block = parse_findings_block('x\n\n```malspark-findings\n[{"title": "a"}]\n```')
         assert block.findings == []
         assert block.dropped == 1
 
@@ -81,8 +81,8 @@ class TestNoBlock:
 
 class TestAgentPlumbing:
     def test_the_analyst_drains_the_block_onto_its_isr(self) -> None:
-        from maljan.agents.base_agent import BaseAnalyst
-        from maljan.schemas.isr_models import AgentISR
+        from malspark.agents.base_agent import BaseAnalyst
+        from malspark.schemas.isr_models import AgentISR
 
         class _Stub(BaseAnalyst):
             def analyze(self, data: str) -> str:  # pragma: no cover - unused
@@ -99,7 +99,7 @@ class TestAgentPlumbing:
 
         agent = _Stub(llm=None, name="static")  # type: ignore[arg-type]
         prose = agent._capture_findings(_VALID)
-        assert "maljan-findings" not in prose
+        assert "malspark-findings" not in prose
 
         isr = agent._drain_findings(AgentISR(agent_id="static", domain="static"))
         assert len(isr.findings) == 1
@@ -112,20 +112,20 @@ class TestAgentPlumbing:
 
 class TestPrompts:
     def test_every_built_in_analyst_is_told_about_the_channel(self) -> None:
-        from maljan.agents.dynamic_analyst import _DYN_TAIL
-        from maljan.agents.network_analyst import _NET_TAIL
-        from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT
-        from maljan.agents.static_analyst import _ISR_TAIL
+        from malspark.agents.dynamic_analyst import _DYN_TAIL
+        from malspark.agents.network_analyst import _NET_TAIL
+        from malspark.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT
+        from malspark.agents.static_analyst import _ISR_TAIL
 
         for tail in (_ISR_TAIL, _DYN_TAIL, _NET_TAIL):
             assert tail.startswith(FINDINGS_BLOCK_FRAGMENT)
-            assert "maljan-findings" in tail
+            assert "malspark-findings" in tail
             assert "ev_0007" in tail
 
     def test_the_static_analyst_is_told_what_a_claim_is_for(self) -> None:
         """A live run produced 39 claims, most of them the sample's own
         metadata at confidence 1.00, which the judge then weighed."""
-        from maljan.agents.static_analyst import _ISR_SYSTEM
+        from malspark.agents.static_analyst import _ISR_SYSTEM
 
         assert "Claims state findings that bear on the verdict." in _ISR_SYSTEM
         assert "goes in the artifacts block, not in claims" in _ISR_SYSTEM
@@ -139,7 +139,7 @@ TECHNIQUE: T1055
 
 DISPUTES: NONE
 
-```maljan-findings
+```malspark-findings
 {"findings": [{"title": "Injects into a remote process", "confidence": 0.8,
   "evidence_ids": ["ev_0004"]}]}
 ```
@@ -173,25 +173,25 @@ class TestRevisionPathsStripTheBlock:
         )
 
     def test_the_static_analyst_strips_it(self) -> None:
-        from maljan.agents.static_analyst import StaticAnalyst
+        from malspark.agents.static_analyst import StaticAnalyst
 
         agent = StaticAnalyst(llm=_FixedLLM(), name="static")  # type: ignore[arg-type]
         text, isr = self._revise(agent)
-        assert "maljan-findings" not in text
+        assert "malspark-findings" not in text
         assert [f.title for f in isr.findings] == ["Injects into a remote process"]
 
     def test_the_dynamic_analyst_strips_it(self) -> None:
-        from maljan.agents.dynamic_analyst import DynamicAnalyst
+        from malspark.agents.dynamic_analyst import DynamicAnalyst
 
         agent = DynamicAnalyst(llm=_FixedLLM(), name="dynamic")  # type: ignore[arg-type]
         text, isr = self._revise(agent)
-        assert "maljan-findings" not in text
+        assert "malspark-findings" not in text
         assert [f.title for f in isr.findings] == ["Injects into a remote process"]
 
     def test_the_network_analyst_strips_it(self) -> None:
-        from maljan.agents.network_analyst import NetworkAnalyst
+        from malspark.agents.network_analyst import NetworkAnalyst
 
         agent = NetworkAnalyst(llm=_FixedLLM(), name="network")  # type: ignore[arg-type]
         text, isr = self._revise(agent)
-        assert "maljan-findings" not in text
+        assert "malspark-findings" not in text
         assert [f.title for f in isr.findings] == ["Injects into a remote process"]

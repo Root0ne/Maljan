@@ -18,9 +18,9 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.pipeline.validation import ANALYST_TOOLS_ATTACHED, Violation
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.pipeline.validation import ANALYST_TOOLS_ATTACHED, Violation
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 from .anthropic_wire import Wire, install, message
 from .test_a_replayed_thinking_block_stays_valid import (
@@ -66,7 +66,7 @@ class _Analyst(BaseAnalyst):
 
 @pytest.fixture
 def sent(monkeypatch: pytest.MonkeyPatch) -> tuple[Wire, list[dict[str, Any]]]:
-    from maljan.agents import base_agent
+    from malspark.agents import base_agent
 
     wire = Wire(_answer)
     install(monkeypatch, wire)
@@ -82,7 +82,7 @@ def sent(monkeypatch: pytest.MonkeyPatch) -> tuple[Wire, list[dict[str, Any]]]:
         claims=[ClaimEvidence(claim="c", evidence_ref="x", confidence=0.5, technique_id="T1005")],
     )
     answers = iter([TOLD, TOLD, []])
-    with patch("maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
+    with patch("malspark.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
         agent._validate_isr(isr, "the raw data")
     return wire, loop
 

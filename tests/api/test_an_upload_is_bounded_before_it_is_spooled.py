@@ -27,7 +27,7 @@ from app.middleware.upload_bound_middleware import (
 )
 
 BOUND = 4096
-BOUNDARY = "maljanboundary"
+BOUNDARY = "malsparkboundary"
 
 
 def _app(calls: list[int], bound: int = BOUND) -> FastAPI:
@@ -466,7 +466,7 @@ def test_a_dsn_with_a_percent_reads_back_as_written() -> None:
     from app.database import config_option_value
     from tests.credential_shapes import password
 
-    dsn = f"postgresql+asyncpg://maljan:{password()}%40x%25@db:5432/maljan"
+    dsn = f"postgresql+asyncpg://malspark:{password()}%40x%25@db:5432/malspark"
     config = Config()
     config.set_main_option("sqlalchemy.url", config_option_value(dsn))
 

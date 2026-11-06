@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from app.models import RuntimeSetting
 from app.services import settings_service as svc
-from maljan.core import settings_overrides
+from malspark.core import settings_overrides
 
 SERVER = {
     "command": "invented-rules",

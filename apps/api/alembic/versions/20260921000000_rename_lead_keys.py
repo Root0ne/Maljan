@@ -14,7 +14,7 @@ runs this still loads; what this adds is that the rename is written down.
 The rewriting itself is the earlier revision's, loaded from its file rather
 than copied a second time. A revision file is immutable once it has run
 anywhere, so this one cannot be broken by a change in the application the way
-an import of ``maljan`` could break it.
+an import of ``malspark`` could break it.
 
 Revision ID: 20260921000000
 Revises: 20260920000000

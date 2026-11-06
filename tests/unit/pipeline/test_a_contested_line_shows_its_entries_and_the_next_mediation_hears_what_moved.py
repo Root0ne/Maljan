@@ -26,10 +26,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.agents.base_agent import PACK_SUMMARY_NOTE, cited_entry_texts
-from maljan.agents.tool_fence import fenced
-from maljan.pipeline.claim_drops import changed_anywhere
-from maljan.pipeline.debate_facts import (
+from malspark.agents.base_agent import PACK_SUMMARY_NOTE, cited_entry_texts
+from malspark.agents.tool_fence import fenced
+from malspark.pipeline.claim_drops import changed_anywhere
+from malspark.pipeline.debate_facts import (
     DEBATE_ENTRIES_HEAD,
     DEBATE_ENTRIES_UNFIT,
     LINE_MARK_RULE,
@@ -49,13 +49,13 @@ from maljan.pipeline.debate_facts import (
     round_facts_text,
     same_points,
 )
-from maljan.pipeline.nodes import RevisionInput, make_negotiation_node, make_revision_node
-from maljan.pipeline.routing import NO_CONSENSUS, POINTS_UNCHANGED, debate_route
-from maljan.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END
-from maljan.pipeline.state import AgentArgument
-from maljan.pipeline.sycophancy_detector import convergence_flags
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.nodes import RevisionInput, make_negotiation_node, make_revision_node
+from malspark.pipeline.routing import NO_CONSENSUS, POINTS_UNCHANGED, debate_route
+from malspark.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END
+from malspark.pipeline.state import AgentArgument
+from malspark.pipeline.sycophancy_detector import convergence_flags
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 NAMES = ["static", "reverser", "dynamic"]
 
@@ -580,8 +580,8 @@ def _revise(argument: AgentArgument) -> tuple[dict[str, Any], dict[str, Any]]:
         "evidence_ledger": [e.model_dump(mode="json") for e in _ledger()],
     }
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
-        mp.setattr("maljan.pipeline.nodes.pack_text", lambda *a: "[ev_0001] identity: pe")
+        mp.setattr("malspark.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
+        mp.setattr("malspark.pipeline.nodes.pack_text", lambda *a: "[ev_0001] identity: pe")
         update = asyncio.run(make_revision_node(container)(state))
     return agents, update
 
@@ -660,9 +660,9 @@ def _negotiate(state: dict[str, Any], argument: AgentArgument) -> tuple[dict[str
     judge.mediate = AsyncMock(return_value=(argument, False))
     container.get_judge_agent.return_value = judge
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("maljan.pipeline.nodes.pack_text", lambda *a: "[ev_0001] identity: pe")
-        mp.setattr("maljan.pipeline.nodes.render_run_state", lambda *a: "")
-        mp.setattr("maljan.pipeline.nodes.detect_sycophancy", lambda *a, **k: False)
+        mp.setattr("malspark.pipeline.nodes.pack_text", lambda *a: "[ev_0001] identity: pe")
+        mp.setattr("malspark.pipeline.nodes.render_run_state", lambda *a: "")
+        mp.setattr("malspark.pipeline.nodes.detect_sycophancy", lambda *a, **k: False)
         update = asyncio.run(make_negotiation_node(container)(state))
     return {**state, **update}, judge
 
@@ -711,8 +711,8 @@ class TestTheNextMediationHearsTheRound:
 
 class TestTheGuards:
     def test_a_peer_s_entry_cited_by_two_analysts_is_one_source(self) -> None:
-        from maljan.analysis.corroboration import corroborated
-        from maljan.pipeline.validation import corroboration
+        from malspark.analysis.corroboration import corroborated
+        from malspark.pipeline.validation import corroboration
 
         ledger = [
             LedgerEntry(id="ev_0011", agent="reverser", tool="decompile", output="RC4 key at f5750")
@@ -750,8 +750,8 @@ class TestTheGuards:
         assert not corroborated(row)
 
     def test_restating_two_shown_peer_entries_is_no_second_sayer(self) -> None:
-        from maljan.analysis.corroboration import corroborated
-        from maljan.pipeline.validation import corroboration, shown_claim_unbacked
+        from malspark.analysis.corroboration import corroborated
+        from malspark.pipeline.validation import corroboration, shown_claim_unbacked
 
         ledger = [
             LedgerEntry(id="ev_0011", agent="reverser", tool="decompile", output="RC4 schedule"),
@@ -786,7 +786,7 @@ class TestTheGuards:
         assert not corroborated(both)
 
     def test_a_shown_claim_citing_an_entry_of_its_own_is_backed(self) -> None:
-        from maljan.pipeline.validation import shown_claim_unbacked
+        from malspark.pipeline.validation import shown_claim_unbacked
 
         ledger = [LedgerEntry(id="ev_0020", agent="dynamic", tool="sandbox", output="x")]
         claim = ClaimEvidence(

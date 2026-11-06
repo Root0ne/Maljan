@@ -245,7 +245,7 @@ def test_a_backend_without_owners_is_refused() -> None:
 
 def test_nothing_adopts_automatically() -> None:
     """The default stays: the repair that runs at start never labels an owner."""
-    from maljan.memory import memory_repair
+    from malspark.memory import memory_repair
 
     source = open(memory_repair.__file__).read()
     start_up = source.split("def repair_once")[1].split("def repair_memory")[0]
@@ -310,7 +310,7 @@ async def test_the_grace_window_at_runtime_never_outlives_the_clamped_token() ->
 
 
 def test_a_failed_adoption_is_audited_with_the_partial_counts_and_re_raised() -> None:
-    from maljan.memory.memory_repair import AdoptionFailed
+    from malspark.memory.memory_repair import AdoptionFailed
 
     class _Failing(_Store):
         def adopt_unowned(self, owner: str) -> dict[str, int]:

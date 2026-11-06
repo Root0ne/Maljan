@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     DetectionRule,
     FileHashes,
     MalwareReport,
@@ -27,7 +27,7 @@ from maljan.reporting.models import (
     SampleIdentity,
     TechnicalAnalysis,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 sys.path.insert(0, str(Path(__file__).parent))
 from test_every_autolink_start_is_defanged import _live  # noqa: E402
@@ -71,7 +71,7 @@ def test_a_ransom_note_faking_the_rule_heading_prints_defanged() -> None:
 
 
 def test_the_html_report_prints_the_faking_note_defanged() -> None:
-    from maljan.reporting.renderers.html import HtmlRenderer
+    from malspark.reporting.renderers.html import HtmlRenderer
 
     html = HtmlRenderer().render(_faking_note())
 
@@ -160,7 +160,7 @@ def test_a_value_beginning_with_a_configured_endpoint_prints_defanged(
 def test_the_html_report_prints_a_value_beginning_with_a_label_defanged(
     label: str, value: str
 ) -> None:
-    from maljan.reporting.renderers.html import HtmlRenderer
+    from malspark.reporting.renderers.html import HtmlRenderer
 
     html = HtmlRenderer().render(_with_label(label, value))
 

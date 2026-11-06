@@ -20,10 +20,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.fallback import FallbackChatModel
-from maljan.llm.generation_rate import note_pieces
-from maljan.llm.transient import (
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.fallback import FallbackChatModel
+from malspark.llm.generation_rate import note_pieces
+from malspark.llm.transient import (
     ABANDONED_ANSWER_ESTIMATE,
     FAILED_ATTEMPT_CALL,
     attach_retry_recorder,
@@ -182,7 +182,7 @@ def test_an_answer_within_the_deadline_is_not_charged_as_abandoned() -> None:
 
 
 def test_a_charge_landing_after_the_summary_is_sealed_is_marked_and_kept() -> None:
-    from maljan.core.token_ledger import LANDED_AFTER_END
+    from malspark.core.token_ledger import LANDED_AFTER_END
 
     ledger = TokenLedger(spend=_Spend())
     rows: list[dict[str, Any]] = []
@@ -201,7 +201,7 @@ def test_a_charge_landing_after_the_summary_is_sealed_is_marked_and_kept() -> No
 
 
 def test_a_call_added_after_the_seal_is_late_and_in_no_total() -> None:
-    from maljan.core.token_ledger import LANDED_AFTER_END
+    from malspark.core.token_ledger import LANDED_AFTER_END
 
     spend = _Spend()
     ledger = TokenLedger(spend=spend)
@@ -219,9 +219,9 @@ def test_a_call_added_after_the_seal_is_late_and_in_no_total() -> None:
 
 
 def test_closing_the_container_ends_the_ledger() -> None:
-    from maljan.core.config import Settings
-    from maljan.core.container import ServiceContainer
-    from maljan.core.token_ledger import LANDED_AFTER_END
+    from malspark.core.config import Settings
+    from malspark.core.container import ServiceContainer
+    from malspark.core.token_ledger import LANDED_AFTER_END
 
     container = ServiceContainer(Settings(_env_file=None), mock=True)
     ledger = container.get_token_ledger()

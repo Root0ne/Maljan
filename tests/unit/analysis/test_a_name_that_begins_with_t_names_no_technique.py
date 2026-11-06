@@ -15,17 +15,17 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis.technique_ids import (
+from malspark.analysis.technique_ids import (
     attack_reference_id,
     declared_reference_id,
     declared_technique_id,
     name_technique_id,
     written_technique_id,
 )
-from maljan.extractors.capability_matrix import bundle_technique_ids, unmapped_behaviours
-from maljan.pipeline.validation import MISSING_ID_CODE, validate_verdict_bundle
-from maljan.reporting.renderers.stix_renderer import _declared_technique
-from maljan.schemas.stix_models import Bundle
+from malspark.extractors.capability_matrix import bundle_technique_ids, unmapped_behaviours
+from malspark.pipeline.validation import MISSING_ID_CODE, validate_verdict_bundle
+from malspark.reporting.renderers.stix_renderer import _declared_technique
+from malspark.schemas.stix_models import Bundle
 
 _STAMP = "2026-01-01T00:00:00.000Z"
 _PATTERN_ID = "attack-pattern--11111111-1111-4111-8111-111111111111"
@@ -66,7 +66,7 @@ def _bundle(pattern: dict[str, Any]) -> dict[str, Any]:
         "relationship_type": "uses",
         "source_ref": _MALWARE_ID,
         "target_ref": _PATTERN_ID,
-        "x_maljan_contributing_agents": ["static"],
+        "x_malspark_contributing_agents": ["static"],
     }
     return {
         "type": "bundle",

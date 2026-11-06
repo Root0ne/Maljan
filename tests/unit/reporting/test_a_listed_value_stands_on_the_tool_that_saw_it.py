@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import (
     EvidenceSection,
     FileHashes,
     MalwareReport,
@@ -27,9 +27,9 @@ from maljan.reporting.models import (
     NetworkIOCs,
     SampleIdentity,
 )
-from maljan.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, Artifact
+from malspark.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, Artifact
 
 CAPTURED = "185.199.110.61"
 DECOMPILED = "185.199.110.62"

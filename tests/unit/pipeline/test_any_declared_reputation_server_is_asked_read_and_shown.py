@@ -18,24 +18,24 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.core import declared_reading
-from maljan.core.config import Settings, ToolRef, get_settings, install_settings
-from maljan.core.container import ServiceContainer
-from maljan.core.reputation import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.core import declared_reading
+from malspark.core.config import Settings, ToolRef, get_settings, install_settings
+from malspark.core.container import ServiceContainer
+from malspark.core.reputation import (
     ReputationRecord,
     is_lookup_entry,
     pack_lookups,
     read_answer,
     reputation_of,
 )
-from maljan.pipeline.nodes import _reputation_asked, _reputation_lookup
-from maljan.pipeline.run_state import render_run_state
-from maljan.pipeline.triage_pack import PIPELINE, reason_sentence, render_pack, run_pack
-from maljan.reporting.builder import _reputation_answers
-from maljan.reporting.models import EvidenceIndexRow, FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import EvidenceCounter, build_entry
+from malspark.pipeline.nodes import _reputation_asked, _reputation_lookup
+from malspark.pipeline.run_state import render_run_state
+from malspark.pipeline.triage_pack import PIPELINE, reason_sentence, render_pack, run_pack
+from malspark.reporting.builder import _reputation_answers
+from malspark.reporting.models import EvidenceIndexRow, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import EvidenceCounter, build_entry
 from tests.unit.pipeline.test_triage_pack import _inputs, _write
 from tests.unit.tools.test_binary import _pe
 
@@ -150,7 +150,7 @@ def _lookup_entry(**over: Any) -> Any:
 
 
 def _report(ledger: list[Any]) -> MalwareReport:
-    from maljan.reporting.ledger_report import build_sections
+    from malspark.reporting.ledger_report import build_sections
 
     return MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256=SHA)),
@@ -268,7 +268,7 @@ class TestEveryReaderReadsIt:
     def test_the_judge_holds_it_and_counts_it_as_asked(self, installed: Any) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         installed(_settings(hashrep=INVENTED))
         judge = JudgeAgent.__new__(JudgeAgent)
@@ -279,7 +279,7 @@ class TestEveryReaderReadsIt:
 
         judge._definition_tool_refs = lambda: []  # type: ignore[method-assign]
         judge.tools = [
-            type("_T", (), {"name": "lookup_digest", "metadata": {"maljan_server": "hashrep"}})()
+            type("_T", (), {"name": "lookup_digest", "metadata": {"malspark_server": "hashrep"}})()
         ]
         assert judge._holds_attached_lookup_tool() is True
 
@@ -289,24 +289,24 @@ class TestEveryReaderReadsIt:
     def test_a_native_prefix_is_no_rename_for_the_judge(self, installed: Any) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         installed(_settings(hashrep=INVENTED))
         judge = JudgeAgent.__new__(JudgeAgent)
         judge.logger = MagicMock()
-        meta = {"maljan_server": "hashrep"}
+        meta = {"malspark_server": "hashrep"}
         tool = type("_T", (), {"name": "hashrep__lookup_digest", "metadata": meta})
         judge.tools = [tool()]
         assert judge._holds_attached_lookup_tool() is False
 
-        renamed = {**meta, "maljan_declared_name": "lookup_digest"}
+        renamed = {**meta, "malspark_declared_name": "lookup_digest"}
         judge.tools = [type("_T", (), {"name": "hashrep__lookup_digest", "metadata": renamed})()]
         assert judge._holds_attached_lookup_tool() is True
 
     def test_it_reaches_only_the_agents_its_own_settings_allow(self, installed: Any) -> None:
         """A capability reference never broadens access: an operator's server is bound by
         its own ``agents`` list alone, and reaches no agent that list leaves out."""
-        from maljan.agents.composition import mcp_refs_for, servers_bound_to
+        from malspark.agents.composition import mcp_refs_for, servers_bound_to
 
         everyone = ("static", "dynamic", "network", "judge", "triage", "android_static")
         unscoped = installed(_settings(hashrep=INVENTED))
@@ -408,7 +408,7 @@ class TestANamesakeGetsNothing:
 
 
 def test_reading_a_hostile_answer_grows_linearly() -> None:
-    from maljan.core.tool_declarations import ToolFacts
+    from malspark.core.tool_declarations import ToolFacts
 
     facts = ToolFacts.model_validate(
         {
@@ -480,7 +480,7 @@ class TestOnlyTheServicesAnswerIsARecord:
         self,
     ) -> None:
         """Entries written before records (no source, no facts) are read by their flags alone."""
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.schemas.evidence import LedgerEntry
 
         note = "the platform's own words about this call"
         repeat = LedgerEntry(
@@ -512,7 +512,7 @@ class TestOnlyTheServicesAnswerIsARecord:
     def test_a_budget_blank_keeps_the_record_written_from_the_whole_answer(
         self, installed: Any
     ) -> None:
-        from maljan.schemas.evidence import apply_budget
+        from malspark.schemas.evidence import apply_budget
 
         installed(_settings(hashrep=INVENTED))
         entry = _lookup_entry()
@@ -545,7 +545,7 @@ def test_one_unreadable_record_never_costs_the_stored_report() -> None:
 
 
 def test_a_build_date_is_never_a_first_seen_date() -> None:
-    from maljan.core.tool_declarations import ToolDeclarations
+    from malspark.core.tool_declarations import ToolDeclarations
 
     held = ToolDeclarations.from_settings(Settings()).declaration_for(
         ("mcp:virustotal", "get_file_report")
@@ -573,7 +573,7 @@ def test_the_service_s_name_and_date_cannot_write_markdown_into_the_report(
 ) -> None:
     # A declared service's name and its answer's date are words the report did not
     # write: a link or markup in them is escaped, and an address is defanged.
-    from maljan.reporting.models import ReputationAnswer
+    from malspark.reporting.models import ReputationAnswer
 
     installed(_settings(hashrep=INVENTED))
     entry = _lookup_entry()

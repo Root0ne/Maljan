@@ -19,7 +19,7 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
-from maljan.analysis.pcap_summary import capture_facts, conversation_line, summary_text
+from malspark.analysis.pcap_summary import capture_facts, conversation_line, summary_text
 
 HOST = b"\x0a\x00\x00\x02"  # the sandbox
 C2 = b"\x08\x08\x08\x08"
@@ -176,8 +176,8 @@ def test_a_flow_the_external_host_opened_is_a_conversation(tmp_path: Path) -> No
 
 
 def test_an_inbound_only_host_is_no_sandbox_contact_in_the_ledger() -> None:
-    from maljan.reporting.ledger_projection import network_from_ledger
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.reporting.ledger_projection import network_from_ledger
+    from malspark.schemas.evidence import LedgerEntry
 
     rows = [
         {"dst": "8.8.4.4", "dport": 6000, "proto": "udp", "packets": 3, "bytes": 96,

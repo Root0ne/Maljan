@@ -16,8 +16,8 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import create_model
 
-from maljan.providers.base import StaticJobContext
-from maljan.providers.static.ghidra import GhidraStaticProvider
+from malspark.providers.base import StaticJobContext
+from malspark.providers.static.ghidra import GhidraStaticProvider
 
 
 def _agent(pinned: str | None) -> GhidraStaticProvider:

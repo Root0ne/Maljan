@@ -113,7 +113,7 @@ export default function Toolbar() {
             setExportLeftOut("");
             try {
               const unreadable = await api.exportSettings();
-              setToast("Configuration downloaded as maljan-settings.json");
+              setToast("Configuration downloaded as malspark-settings.json");
               setExportLeftOut(exportLeftOutNotice(unreadable));
             } catch (e) {
               setExportError(getErrorMessage(e));

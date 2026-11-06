@@ -19,7 +19,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from maljan.schemas.sandbox_report import (
+from malspark.schemas.sandbox_report import (
     SandboxNetwork,
     SandboxReport,
     SandboxRun,

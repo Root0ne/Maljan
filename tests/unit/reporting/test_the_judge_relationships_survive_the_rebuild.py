@@ -16,12 +16,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.agents.judge_postprocess import enforce_bundle_integrity
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer, _pattern_id_for
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import Bundle, ConfidenceAnnotatedRelationship
+from malspark.agents.judge_postprocess import enforce_bundle_integrity
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer, _pattern_id_for
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import Bundle, ConfidenceAnnotatedRelationship
 
 KNOWN = "T1055"
 INVENTED = "T1063"
@@ -54,10 +54,10 @@ def _judge_bundle(*technique_ids: str) -> dict[str, Any]:
                 "relationship_type": "uses",
                 "source_ref": MALWARE_ID,
                 "target_ref": pattern_id,
-                "x_maljan_confidence": 0.82,
-                "x_maljan_evidence_basis": "static",
-                "x_maljan_contributing_agents": ["static", "dynamic"],
-                "x_maljan_technique_id": tid,
+                "x_malspark_confidence": 0.82,
+                "x_malspark_evidence_basis": "static",
+                "x_malspark_contributing_agents": ["static", "dynamic"],
+                "x_malspark_technique_id": tid,
             }
         )
     return {"type": "bundle", "objects": objects}
@@ -144,10 +144,10 @@ class TestARelationshipToASurvivingTechnique:
         bundle = ExtendedSTIXRenderer().render(report, Bundle.model_validate(stix))
 
         (annotated,) = _annotated(bundle)
-        assert annotated.x_maljan_confidence == 0.82
-        assert annotated.x_maljan_evidence_basis == "static"
-        assert annotated.x_maljan_contributing_agents == ["static", "dynamic"]
-        assert annotated.x_maljan_technique_id == KNOWN
+        assert annotated.x_malspark_confidence == 0.82
+        assert annotated.x_malspark_evidence_basis == "static"
+        assert annotated.x_malspark_contributing_agents == ["static", "dynamic"]
+        assert annotated.x_malspark_technique_id == KNOWN
 
     def test_the_count_survives_the_integrity_pass(self) -> None:
         """The pass is where they were being lost, so it is asked directly."""
@@ -196,7 +196,7 @@ class TestARelationshipToATechniqueThatWasDropped:
         assert renderer.unlinked == [(INVENTED, 1)]
 
     def test_the_row_names_the_technique_and_the_count(self) -> None:
-        from maljan.pipeline.nodes import _note_unlinked_techniques
+        from malspark.pipeline.nodes import _note_unlinked_techniques
 
         stix = _judge_bundle(KNOWN, INVENTED)
         report = _report(stix, _isr(KNOWN, INVENTED))
@@ -230,8 +230,8 @@ class TestTheRefsThatAreMoved:
                 "relationship_type": "related-to",
                 "source_ref": pattern_id,
                 "target_ref": MALWARE_ID,
-                "x_maljan_confidence": 0.44,
-                "x_maljan_technique_id": KNOWN,
+                "x_malspark_confidence": 0.44,
+                "x_malspark_technique_id": KNOWN,
             }
         )
         report = _report(stix, _isr(KNOWN))
@@ -242,7 +242,7 @@ class TestTheRefsThatAreMoved:
         sourced = [
             obj for obj in after.objects if getattr(obj, "relationship_type", "") == "related-to"
         ]
-        assert [rel.x_maljan_confidence for rel in sourced] == [0.44]
+        assert [rel.x_malspark_confidence for rel in sourced] == [0.44]
         assert sourced[0].source_ref == _pattern_id_for(KNOWN)
 
     def test_another_relationship_type_does_not_take_the_used_edge_with_it(self) -> None:
@@ -263,8 +263,8 @@ class TestTheRefsThatAreMoved:
                 "relationship_type": "related-to",
                 "source_ref": MALWARE_ID,
                 "target_ref": "attack-pattern--d4e5f6a7-b8c9-4123-9efa-234567890199",
-                "x_maljan_confidence": 0.31,
-                "x_maljan_technique_id": KNOWN,
+                "x_malspark_confidence": 0.31,
+                "x_malspark_technique_id": KNOWN,
             }
         )
         report = _report(stix, _isr(KNOWN))
@@ -288,7 +288,7 @@ class TestWhatAnUnlinkedRelationshipCosts:
         an object this renderer took out deliberately is not a defect of the
         judge's bundle and must not read as one.
         """
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         stix = _judge_bundle(KNOWN, INVENTED)
         report = _report(stix, _isr(KNOWN, INVENTED))
@@ -307,7 +307,7 @@ class TestTheFallbackBundleKeepsThemToo:
     def _fallback() -> Bundle:
         from unittest.mock import MagicMock
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         judge = JudgeAgent(llm=MagicMock())
         return judge._fallback_bundle_from_text("Verdict: Malware.", {}, _isr(KNOWN))

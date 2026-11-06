@@ -12,7 +12,7 @@ import threading
 import time
 from typing import Any
 
-from maljan.agents.delegation import _held_unless_waiting_on_each_other
+from malspark.agents.delegation import _held_unless_waiting_on_each_other
 
 
 class _Agent:
@@ -83,7 +83,7 @@ def test_a_callee_that_frees_up_is_taken() -> None:
 
 def test_an_agent_waiting_on_two_threads_keeps_each_wait() -> None:
     """The first wait to end does not take the other thread's entry with it."""
-    from maljan.agents.delegation import _WAITING_FOR, _waits_on
+    from malspark.agents.delegation import _WAITING_FOR, _waits_on
 
     caller, first, second = _Agent("a"), _Agent("b"), _Agent("c")
     first.delegation_lock.acquire()

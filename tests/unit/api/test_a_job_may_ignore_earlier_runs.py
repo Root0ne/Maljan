@@ -49,7 +49,7 @@ class TestTheWorker:
 
         from app import config as api_config
         from app import runtime_config as rc
-        from maljan.core.config import reset_settings_cache
+        from malspark.core.config import reset_settings_cache
 
         async def _mock_mode_allowed() -> dict[str, Any]:
             return {"api.mock_mode_allowed": True}
@@ -59,7 +59,7 @@ class TestTheWorker:
         with patch.dict(
             "os.environ",
             {
-                "MALJAN_MOCK_MODE": "true",
+                "MALSPARK_MOCK_MODE": "true",
                 "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
                 "SAMPLES_DIR": str(tmp_path / "samples"),
             },
@@ -100,7 +100,7 @@ class TestTheWorker:
         with (
             patch.object(object_store, "client", return_value=MagicMock()),
             patch.object(object_store, "download", side_effect=_download),
-            patch("maljan.app.MaljanApp.arun", new=_arun),
+            patch("malspark.app.MalsparkApp.arun", new=_arun),
         ):
             result = await analysis_worker.run_analysis(
                 {"redis": redis, "db_session": factory}, str(job.id)
@@ -125,7 +125,7 @@ class TestTheCommandLine:
     ) -> None:
         from typer.testing import CliRunner
 
-        from maljan import cli
+        from malspark import cli
 
         built: dict[str, Any] = {}
 
@@ -139,7 +139,7 @@ class TestTheCommandLine:
             def remember_the_run(self) -> bool:
                 return False
 
-        monkeypatch.setattr(cli, "MaljanApp", _App)
+        monkeypatch.setattr(cli, "MalsparkApp", _App)
         monkeypatch.setattr(cli, "_release", lambda _app: None)
 
         result = CliRunner().invoke(cli.app, ["analyze", "sample_1", "--mock", *argv])

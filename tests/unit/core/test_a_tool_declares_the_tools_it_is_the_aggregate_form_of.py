@@ -21,9 +21,9 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import ValidationError
 
-from maljan.core.builtin_declarations import GHIDRA_WORKFLOW, R2_WORKFLOW
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.core.tool_declarations import (
+from malspark.core.builtin_declarations import GHIDRA_WORKFLOW, R2_WORKFLOW
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.core.tool_declarations import (
     KIND_FREE_FIELDS,
     ToolDeclarations,
     ToolFacts,
@@ -32,7 +32,7 @@ from maljan.core.tool_declarations import (
     declaration_digest,
     strict_declarations,
 )
-from maljan.core.undeclared_tools import aggregate_note, aggregates_of, with_aggregate_notes
+from malspark.core.undeclared_tools import aggregate_note, aggregates_of, with_aggregate_notes
 
 
 def _tool(name: str, description: str = "") -> StructuredTool:
@@ -202,7 +202,7 @@ class TestTheModelIsShownIt:
         assert noted[0].description == aggregate_note(("one",))
 
     def test_the_registry_names_a_renamed_aggregated_tool_as_offered(self) -> None:
-        from maljan.providers.servers import ServerRegistry
+        from malspark.providers.servers import ServerRegistry
 
         registry = ServerRegistry(Settings(_env_file=None))
         tools: list[Any] = []
@@ -216,7 +216,7 @@ class TestTheModelIsShownIt:
         assert tools[0].description == "[TOOL] one."
 
     def test_the_registry_leaves_a_tool_the_reference_did_not_pick_out(self) -> None:
-        from maljan.providers.servers import ServerRegistry
+        from malspark.providers.servers import ServerRegistry
 
         registry = ServerRegistry(Settings(_env_file=None))
         tools: list[Any] = []
@@ -226,7 +226,7 @@ class TestTheModelIsShownIt:
     def test_ghidra_s_attach_notes_its_offered_aggregates(
         self, ghidra: dict[str, ToolFacts]
     ) -> None:
-        from maljan.providers.static.ghidra.provider import GhidraStaticProvider
+        from malspark.providers.static.ghidra.provider import GhidraStaticProvider
 
         provider = object.__new__(GhidraStaticProvider)
         provider._cfg = SimpleNamespace(tool_facts=ghidra)
@@ -236,7 +236,7 @@ class TestTheModelIsShownIt:
         assert noted[1] is tools[1] and noted[2] is tools[2]
 
     def test_a_generic_server_s_quoted_words_never_carry_the_note(self) -> None:
-        from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+        from malspark.providers.static.generic_mcp import GenericMCPStaticProvider
 
         tools = [_tool("many", "[BATCH] Its own words."), _tool("one")]
         handle = SimpleNamespace(
@@ -264,7 +264,7 @@ class TestTheWorkflowsSetNoNumber:
         assert "Large binaries may have 1000+ functions." in GHIDRA_WORKFLOW
 
     def test_a_generic_server_s_generated_workflow_sets_none(self) -> None:
-        from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+        from malspark.providers.static.generic_mcp import GenericMCPStaticProvider
 
         handle = SimpleNamespace(
             name="custom", tools=lambda: [_tool("t")], server_instructions="", config=None

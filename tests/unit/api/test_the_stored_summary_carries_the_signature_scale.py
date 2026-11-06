@@ -10,8 +10,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.worker.analysis_worker import _report_inputs
-from maljan.core.config import Settings
-from maljan.core.report_formats import SIGNATURE_SCALE_KEY
+from malspark.core.config import Settings
+from malspark.core.report_formats import SIGNATURE_SCALE_KEY
 
 SCALE = {"name": "CAPE 1–3", "max": 3, "rungs": ["Low", "Medium", "High"]}
 

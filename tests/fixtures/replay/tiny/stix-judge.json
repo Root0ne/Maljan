@@ -5,7 +5,7 @@
  "bundle": {
   "id": "bundle--1",
   "type": "bundle",
-  "x_maljan_assessment": {
+  "x_malspark_assessment": {
    "verdict": "Malware",
    "confidence": 0.8,
    "severity": {"rating": "Medium", "rationale": "Its configuration is XOR-encoded and decoded at run time (ev_0002)."},
@@ -33,8 +33,8 @@
     "source_ref": "malware--1",
     "target_ref": "attack-pattern--1",
     "relationship_type": "uses",
-    "x_maljan_confidence": 0.7,
-    "x_maljan_contributing_agents": ["static"]
+    "x_malspark_confidence": 0.7,
+    "x_malspark_contributing_agents": ["static"]
    },
    {
     "id": "relationship--2",
@@ -42,8 +42,8 @@
     "source_ref": "malware--1",
     "target_ref": "attack-pattern--fake",
     "relationship_type": "uses",
-    "x_maljan_confidence": 0.5,
-    "x_maljan_contributing_agents": ["network"]
+    "x_malspark_confidence": 0.5,
+    "x_malspark_contributing_agents": ["network"]
    },
    {"id": "relationship--3", "type": "relationship", "source_ref": "indicator--1", "target_ref": "malware--1", "relationship_type": "indicates"},
    {"id": "indicator--2", "type": "indicator", "pattern": "[url:value = 'https://cdn.stage-two-host.net/live/']", "indicator_types": ["malicious-activity"], "description": "The decoded stub fetches it (ev_0004)."},

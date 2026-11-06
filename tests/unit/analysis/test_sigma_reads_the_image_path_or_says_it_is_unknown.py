@@ -20,8 +20,8 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis.sigma_layer import build_events_from_sandbox, read_sandbox_events
-from maljan.tools import rules as tool
+from malspark.analysis.sigma_layer import build_events_from_sandbox, read_sandbox_events
+from malspark.tools import rules as tool
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "sandbox"
 
@@ -338,7 +338,7 @@ class TestTheToolSaysWhichRulesItCouldNotEvaluate:
         assert sum(r[1] - r[0] + 1 for row in rows for r in row["events"]) == 7
 
     def test_the_pack_summary_says_it_too(self, sigma_dir: str) -> None:
-        from maljan.pipeline.triage_pack import _sigma
+        from malspark.pipeline.triage_pack import _sigma
 
         result = tool.sigma_match_sandbox(_cape_document(with_paths=False), ruleset=sigma_dir)
         text = _sigma(result)

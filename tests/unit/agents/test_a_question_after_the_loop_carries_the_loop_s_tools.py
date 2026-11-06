@@ -28,26 +28,26 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst, LoopBudget, _submit_to_agent_loop
-from maljan.agents.delegation import tool_name
-from maljan.agents.evidence_recorder import EARLIER_TURN, earlier_chunk_sentence
-from maljan.agents.prompt_fragments import KEEP_REPLY
-from maljan.core.exceptions import AnalystError
-from maljan.core.spend import in_validation_retry, validation_retry
-from maljan.core.token_ledger import (
+from malspark.agents.base_agent import BaseAnalyst, LoopBudget, _submit_to_agent_loop
+from malspark.agents.delegation import tool_name
+from malspark.agents.evidence_recorder import EARLIER_TURN, earlier_chunk_sentence
+from malspark.agents.prompt_fragments import KEEP_REPLY
+from malspark.core.exceptions import AnalystError
+from malspark.core.spend import in_validation_retry, validation_retry
+from malspark.core.token_ledger import (
     RETRY_DROPS_QUESTION_CALL,
     VALIDATION_RETRY_CALL,
     WHOLE_ANSWER_RETRY_CALL,
     TokenLedger,
 )
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     ANALYST_TOOLS_ATTACHED,
     RETRY_DROP_TOOLS_ATTACHED,
     VALIDATION_ENTRIES_HEAD,
     Violation,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 from .test_a_validation_retry_is_shown_the_entries_its_answer_cites import FIRST as CITING
 from .test_a_validation_retry_is_shown_the_entries_its_answer_cites import FIXED as NUMBERED
@@ -76,7 +76,7 @@ def _tool(name: str, *, read_only: bool = False) -> StructuredTool:
         name=name,
         description=f"{name} a function.",
         args_schema=_Address,
-        metadata={"maljan_read_only": True} if read_only else {},
+        metadata={"malspark_read_only": True} if read_only else {},
     )
 
 
@@ -181,7 +181,7 @@ def _isr() -> AgentISR:
 
 def _validate(analyst: _Analyst, isr: AgentISR, told: list[list[Violation]]) -> AgentISR:
     answers = iter(told)
-    with patch("maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
+    with patch("malspark.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
         return analyst._validate_isr(isr, "the raw data")
 
 
@@ -252,7 +252,7 @@ class TestTheValidationRetryCarriesTheLoopsTools:
         calls = [_call("decompile", f"0x{n}", f"c{n}") for n in range(9)]
         analyst, llm = _analyst(calls, _CallsWhileItMay)
 
-        with patch("maljan.agents.base_agent.loop_limits", return_value=(None, 3)):
+        with patch("malspark.agents.base_agent.loop_limits", return_value=(None, 3)):
             result = _validate(analyst, _isr(), [TOLD, TOLD, []])
 
         assert [c.evidence_ref for c in result.claims] == ["[ev_0003]"]
@@ -277,7 +277,7 @@ class TestTheValidationRetryCarriesTheLoopsTools:
         needs = iter([0.0, 1_000.0])
 
         with (
-            patch("maljan.agents.base_agent.loop_limits", return_value=(None, 3)),
+            patch("malspark.agents.base_agent.loop_limits", return_value=(None, 3)),
             patch.object(BaseAnalyst, "seconds_an_answer_needs", lambda _s: next(needs)),
             pytest.raises(AnalystError, match="not asked"),
         ):
@@ -306,7 +306,7 @@ class TestAnIdenticalCallIsAnsweredFromTheLoopsEntry:
 def _validated_text(analyst: _Analyst, first: str) -> AgentISR:
     isr = analyst._text_to_isr(first, 0)
     with (
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
     ):
         return analyst._validate_isr(isr, "evidence")
@@ -419,7 +419,7 @@ class TestTheWindowCountsTheDefinitionsTheQuestionCarries:
 
 class TestTheInputMeterFilesTheQuestionUnderItsCall:
     def test_the_retry_s_loop_row_is_a_validation_retry(self) -> None:
-        from maljan.core.input_meter import TOOL_LOOP, InputMeter
+        from malspark.core.input_meter import TOOL_LOOP, InputMeter
 
         analyst, _llm = _analyst([_call("decompile", "0x1000", "s1"), REPORT, FIXED])
         meter = InputMeter()
@@ -485,7 +485,7 @@ class TestTheQuestionsShareWhatTheLoopLeft:
             [_call("decompile", "0x1000", "s1"), REPORT, _call("decompile", "0x309c", "c1"), FIXED]
         )
         turns = [SystemMessage(content="s"), HumanMessage(content="Q?")]
-        with patch("maljan.agents.base_agent.loop_limits", return_value=(None, 9)):
+        with patch("malspark.agents.base_agent.loop_limits", return_value=(None, 9)):
             analyst.execute_tool_loop([("system", "s"), ("human", "Analyse.")])
             # The loop spent three steps of nine: its tool round and its answer.
             assert analyst._last_loop_steps_left == 6
@@ -629,7 +629,7 @@ class TestTheQuestionsRecordsAreFolded:
         analyst._container = MagicMock(
             event_sink=lambda kind, payload: events.append((kind, payload))
         )
-        with patch("maljan.agents.base_agent.loop_limits", return_value=(None, 9)):
+        with patch("malspark.agents.base_agent.loop_limits", return_value=(None, 9)):
             analyst.execute_tool_loop([("system", "s"), ("human", "Analyse.")])
             result = _validate(analyst, _isr(), [TOLD, TOLD, []])
 
@@ -676,7 +676,7 @@ class TestARevisionAsksTheNoToolCallQuestionOncePerAnalyst:
 
 class TestEveryFallbackIsWordedForNoTools:
     def test_too_few_steps_sends_the_no_tools_prompt_and_no_attached_sentence(self) -> None:
-        from maljan.pipeline.validation import analyst_feedback_closing
+        from malspark.pipeline.validation import analyst_feedback_closing
 
         analyst, llm = _analyst([FIXED])
         analyst._last_loop_steps_known = True
@@ -705,7 +705,7 @@ class TestEveryFallbackIsWordedForNoTools:
 
 class TestTheAskedBlocksAreThoseTheQuestionsNamed:
     def test_the_first_answer_is_read_at_the_ledger_the_feedback_saw(self) -> None:
-        from maljan.pipeline.function_claims import FUNCTION_CLAIM_UNHELD_CODE
+        from malspark.pipeline.function_claims import FUNCTION_CLAIM_UNHELD_CODE
 
         first = "CLAIM: it reads a file\nEVIDENCE: [ev_0500]\nCONFIDENCE: 0.6\nTECHNIQUE: T1005\n"
         retry = "CLAIM 1: it reads a file\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.6\nTECHNIQUE: T1005\n"
@@ -720,10 +720,10 @@ class TestTheAskedBlocksAreThoseTheQuestionsNamed:
 
         answers = iter([[unheld], [unheld], []])
         with (
-            patch("maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])),
-            patch("maljan.agents.base_agent.listed_functions", return_value={"0x1": object()}),
-            patch("maljan.agents.base_agent.function_facts", return_value=object()),
-            patch("maljan.agents.base_agent.check_function_claims", side_effect=_check),
+            patch("malspark.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])),
+            patch("malspark.agents.base_agent.listed_functions", return_value={"0x1": object()}),
+            patch("malspark.agents.base_agent.function_facts", return_value=object()),
+            patch("malspark.agents.base_agent.check_function_claims", side_effect=_check),
         ):
             analyst._validate_isr(isr, "evidence")
 
@@ -763,7 +763,7 @@ class TestTheRecordsGoOnTheAgentsOwnRow:
 
 class TestTheRunSummaryShowsTheQuestions:
     def test_the_agent_s_budget_carries_its_questions_and_fallbacks(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         rows = [
             {
@@ -795,7 +795,7 @@ class TestTheStepsLeftAreThoseOfTheLatestLoop:
         analyst._last_loop_steps_known = True
         analyst._last_loop_steps_left = 1
 
-        with patch("maljan.agents.base_agent.loop_limits", return_value=(None, 9)):
+        with patch("malspark.agents.base_agent.loop_limits", return_value=(None, 9)):
             analyst.execute_tool_loop([("system", "s"), ("human", "Analyse.")])
         assert analyst._last_loop_steps_left == 8
 
@@ -814,7 +814,7 @@ class TestTheStepsLeftAreThoseOfTheLatestLoop:
             held.append(kw["steps"])
             return FIXED
 
-        with patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)):
+        with patch("malspark.agents.base_agent.loop_limits", return_value=(None, None)):
             analyst.execute_tool_loop([("system", "s"), ("human", "Analyse.")])
         assert analyst._last_loop_steps_known and analyst._last_loop_steps_left is None
         analyst.execute_tool_loop = _loop  # type: ignore[method-assign]

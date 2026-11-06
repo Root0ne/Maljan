@@ -125,8 +125,8 @@ def test_a_backend_no_entry_point_carries_by_name_is_stated_with_what_to_do(
 
 
 def test_the_revision_names_what_the_application_names() -> None:
-    from maljan.core.plugins import ALLOW_LIST_KEY, PLUGIN_GROUPS
-    from maljan.memory.store_factory import BUILT_IN_BACKENDS
+    from malspark.core.plugins import ALLOW_LIST_KEY, PLUGIN_GROUPS
+    from malspark.memory.store_factory import BUILT_IN_BACKENDS
 
     mod = _module()
     assert mod.MEMORY_GROUP == PLUGIN_GROUPS["memory"]
@@ -137,7 +137,7 @@ def test_the_revision_names_what_the_application_names() -> None:
 
 
 def test_the_written_list_is_one_the_settings_accept() -> None:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     conn = _connect({BACKEND: "vectorhub"})
     _module().allow_the_memory_plugin_in_use(conn, ["vectorhub"])

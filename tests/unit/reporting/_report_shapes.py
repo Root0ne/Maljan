@@ -19,8 +19,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import (
     C2Channel,
     CapabilityCell,
     CliFlag,
@@ -32,8 +32,8 @@ from maljan.reporting.models import (
     TechnicalSubsection,
     TTPMapping,
 )
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVerdict
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVerdict
 from tests.unit._ledger_helpers import entry
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "ledger"

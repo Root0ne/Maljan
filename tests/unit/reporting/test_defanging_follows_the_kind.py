@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.reporting.defang import defang, defang_text
+from malspark.reporting.defang import defang, defang_text
 
 
 class TestEachNetworkKindHasItsForm:

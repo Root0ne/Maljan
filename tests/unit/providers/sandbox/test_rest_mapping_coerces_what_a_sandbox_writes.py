@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.core.config import RestMappingConfig
-from maljan.core.report_formats import SignatureScale
-from maljan.providers.sandbox.readers import required_reader
-from maljan.providers.sandbox.rest_mapping import (
+from malspark.core.config import RestMappingConfig
+from malspark.core.report_formats import SignatureScale
+from malspark.providers.sandbox.readers import required_reader
+from malspark.providers.sandbox.rest_mapping import (
     apply_mapping,
     compile_mapping,
     rung_score,
@@ -103,7 +103,7 @@ class TestSignatures:
         assert report.signatures[0].extra == {"severity": "high"}
 
     def test_the_reader_with_no_declared_scale_says_unknown_not_zero(self) -> None:
-        from maljan.schemas.sandbox_document import sandbox_document
+        from malspark.schemas.sandbox_document import sandbox_document
 
         report = required_reader("generic").read(
             {"sigs": [{"name": "a", "severity": "high"}]},

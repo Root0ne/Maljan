@@ -14,7 +14,7 @@ _APPS_API_DIR = Path(__file__).resolve().parents[3] / "apps" / "api"
 
 def _valid_kwargs(**overrides: object) -> dict[object, object]:
     base: dict[object, object] = {
-        "database_url": "postgresql+asyncpg://u:p@127.0.0.1:5433/maljan",
+        "database_url": "postgresql+asyncpg://u:p@127.0.0.1:5433/malspark",
         "redis_url": "redis://127.0.0.1:6379/0",
         "minio_endpoint": "127.0.0.1:9000",
         "minio_access_key": "real-access-key",
@@ -103,8 +103,8 @@ def test_the_jwt_secret_is_read_from_the_environment_not_the_field(monkeypatch) 
 
 
 def test_no_environment_variable_switches_the_guard_off(monkeypatch) -> None:
-    """The removed ``MALJAN_API_SKIP_SECRET_CHECK`` flag changes nothing."""
-    monkeypatch.setenv("MALJAN_API_SKIP_SECRET_CHECK", "1")
+    """The removed ``MALSPARK_API_SKIP_SECRET_CHECK`` flag changes nothing."""
+    monkeypatch.setenv("MALSPARK_API_SKIP_SECRET_CHECK", "1")
     monkeypatch.setenv("JWT_SECRET_KEY", "short")
     s = APISettings(**_valid_kwargs(debug=False), _env_file=None)
     assert any("JWT_SECRET_KEY" in p for p in validate_bootstrap(s).problems)
@@ -131,7 +131,7 @@ def test_an_unset_minio_secret_is_reported_once() -> None:
 
 def test_the_auth_bypass_outside_debug_is_a_bootstrap_problem() -> None:
     class _Bypass:
-        database_url = "postgresql+asyncpg://u:p@127.0.0.1:5433/maljan"
+        database_url = "postgresql+asyncpg://u:p@127.0.0.1:5433/malspark"
         redis_url = "redis://127.0.0.1:6379/0"
         minio_endpoint = "127.0.0.1:9000"
         minio_access_key = "real-access-key"
@@ -197,7 +197,7 @@ def test_cookie_secure_off_in_production_is_a_warning() -> None:
     # by auth_disabled" branch is exercised against a minimal stand-in that
     # carries only the attributes validate_bootstrap reads.
     class _Stub:
-        database_url = "postgresql+asyncpg://u:p@127.0.0.1:5433/maljan"
+        database_url = "postgresql+asyncpg://u:p@127.0.0.1:5433/malspark"
         redis_url = "redis://127.0.0.1:6379/0"
         minio_endpoint = "127.0.0.1:9000"
         minio_access_key = "real-access-key"
@@ -217,7 +217,7 @@ def test_no_environment_variable_makes_a_process_look_like_a_test_run() -> None:
     The substituted ``TEST_JWT_SECRET`` is 43 characters and not a placeholder,
     so a process that looked like a test run booted and signed session tokens
     with a secret published in this repository -- what dropping
-    ``MALJAN_API_SKIP_SECRET_CHECK`` was for, one variable name later. Checked
+    ``MALSPARK_API_SKIP_SECRET_CHECK`` was for, one variable name later. Checked
     in a subprocess because this process genuinely is a pytest run: the
     interpreter state is the only thing ``_is_test_env`` may read.
     """
@@ -231,7 +231,7 @@ def test_no_environment_variable_makes_a_process_look_like_a_test_run() -> None:
         "assert 'pytest' not in sys.modules\n"
         "assert _is_test_env() is False\n"
         "s = APISettings(\n"
-        "    database_url='postgresql+asyncpg://u:p@127.0.0.1:5433/maljan',\n"
+        "    database_url='postgresql+asyncpg://u:p@127.0.0.1:5433/malspark',\n"
         "    redis_url='redis://127.0.0.1:6379/0',\n"
         "    minio_endpoint='127.0.0.1:9000',\n"
         "    minio_access_key='real-access-key',\n"

@@ -20,8 +20,8 @@ from tests.unit._plugin_doubles import (
     withdraw_every_plugin,
 )
 
-from maljan.core import plugins
-from maljan.core.settings_overrides import build_settings, stored_settings
+from malspark.core import plugins
+from malspark.core.settings_overrides import build_settings, stored_settings
 
 PROFILES = "core.agents.profiles"
 
@@ -125,7 +125,7 @@ class TestWhatATeamSelectsIsSelectedForRuns:
         ]
 
     def test_the_mirrored_work_dirs_count_a_team_s_static_provider(self) -> None:
-        from maljan.core.tool_declarations import selected_static_providers
+        from malspark.core.tool_declarations import selected_static_providers
 
         built = build_settings({"static.provider": "none", "agents.profiles": _team("r2")})
         assert {"none", "r2"} <= selected_static_providers(built)

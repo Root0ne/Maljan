@@ -14,9 +14,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.core.undeclared_tools import code_listing, code_text, holds_code
-from maljan.reporting.figures import LISTING_CUT_FOR_STORAGE, build_code_listings
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.core.undeclared_tools import code_listing, code_text, holds_code
+from malspark.reporting.figures import LISTING_CUT_FOR_STORAGE, build_code_listings
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
 from tests.linear_cost import assert_scales
 
 CODE = (

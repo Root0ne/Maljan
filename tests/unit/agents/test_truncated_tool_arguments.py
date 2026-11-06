@@ -19,7 +19,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.evidence_recorder import (
+from malspark.agents.evidence_recorder import (
     ArgumentRepairs,
     EvidenceRecorder,
     record_tools,
@@ -199,8 +199,8 @@ class _Scripted(BaseChatModel):
 class TestTheRepairedCallActuallyRuns:
     def test_the_loop_calls_the_tool_and_reads_its_answer(self) -> None:
         """End to end: without the repair the loop ends here having done nothing."""
-        from maljan.agents.composition import ResolvedAgent
-        from maljan.agents.configurable_analyst import ConfigurableAnalyst
+        from malspark.agents.composition import ResolvedAgent
+        from malspark.agents.configurable_analyst import ConfigurableAnalyst
 
         def peek(path: str) -> dict[str, Any]:
             """Look at the sample."""

@@ -1,5 +1,5 @@
 {
-  "schema": "maljan-language-signatures/v1",
+  "schema": "malspark-language-signatures/v1",
   "version": "1.0",
   "_note": "Source-language and runtime fingerprints for compiled binaries. Scored 3x strong + 1x weak; highest total wins, ties broken by list order. Strong markers are runtime symbols or section names that only that toolchain emits; weak markers are suggestive but shared. Deliberately does NOT cover MSVC/MFC/MinGW — the Rich-header and linker-version path in _pe_compiler_fingerprint identifies those far more precisely than any string table could.",
   "languages": [

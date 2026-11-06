@@ -128,7 +128,7 @@ def _rename_map(stored: Any, seeded: tuple, extra_taken: set) -> dict:
 def set_if_list(mapping: Any, field: str, renames: dict) -> Any:
     """``mapping`` with ``field`` rewritten, and only if it held a list.
 
-    A copy of ``maljan.core.agent_key_migration.set_if_list`` rather than a
+    A copy of ``malspark.core.agent_key_migration.set_if_list`` rather than a
     call to it, for the reason every alembic revision keeps its own copies:
     alembic imports every revision file on every run, so a rename or removal in
     the application would stop the whole migration history from loading.

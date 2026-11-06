@@ -8,7 +8,7 @@ read, and the answer lands in the ledger, the report and the event feed.
 Every path-taking tool on both sidecars therefore resolves its argument
 (symlinks followed) and refuses anything outside the roots this deployment
 named: the staging directory the sidecar writes uploads into, plus whatever
-``MALJAN_SAMPLE_ROOTS`` lists. The refusal carries a code and a remedy and
+``MALSPARK_SAMPLE_ROOTS`` lists. The refusal carries a code and a remedy and
 names no host path, because the refusal itself travels to the model.
 """
 
@@ -57,8 +57,8 @@ def staging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """
     base = tmp_path / "staging"
     base.mkdir()
-    monkeypatch.setenv("MALJAN_STAGING_DIR", str(base))
-    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", "")
+    monkeypatch.setenv("MALSPARK_STAGING_DIR", str(base))
+    monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", "")
     return base
 
 
@@ -174,7 +174,7 @@ class TestAConfiguredRootIsRead:
     ) -> None:
         corpus = tmp_path / "corpus"
         corpus.mkdir()
-        monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", str(corpus))
+        monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", str(corpus))
 
         answer = analysis.identify_file(_pe(corpus / "sample.bin"))
 
@@ -187,7 +187,7 @@ class TestAConfiguredRootIsRead:
         second = tmp_path / "two"
         first.mkdir()
         second.mkdir()
-        monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", f"{first}:{second}")
+        monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", f"{first}:{second}")
 
         assert analysis.identify_file(_pe(second / "s.bin")).get("error") is None
 
@@ -199,7 +199,7 @@ class TestAConfiguredRootIsRead:
         real.mkdir()
         link = tmp_path / "link"
         link.symlink_to(real)
-        monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", str(link))
+        monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", str(link))
 
         assert analysis.identify_file(_pe(real / "s.bin")).get("error") is None
 
@@ -216,7 +216,7 @@ class TestARulesetNamesACorpus:
     """``ruleset`` is a path the model chooses too, and it names a rule corpus.
 
     Held to the rule directories rather than to the sample ones, and held at
-    the server rather than in ``maljan.tools.rules``: an in-process caller
+    the server rather than in ``malspark.tools.rules``: an in-process caller
     passes the corpus it built, and the trust boundary is the server.
     """
 
@@ -238,7 +238,7 @@ class TestARulesetNamesACorpus:
         """The environment override is set on the server, not passed to it."""
         corpus = tmp_path / "our-rules.yaml"
         corpus.write_text("rules:\n  - id: ours\n    technique_id: T1059\n    patterns: [x]\n")
-        monkeypatch.setenv("MALJAN_YARA_RULES_DIR", str(corpus))
+        monkeypatch.setenv("MALSPARK_YARA_RULES_DIR", str(corpus))
 
         answer = analysis.yara_scan(text="anything", ruleset=str(corpus))
 
@@ -267,9 +267,9 @@ class TestTheWorkerNamesTheDirectoriesItWritesTo:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from app.worker import sample_files
-        from maljan.tools.roots import configured_roots
+        from malspark.tools.roots import configured_roots
 
-        monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", "")
+        monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", "")
         monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path / "samples"))
         monkeypatch.setattr(sample_files.settings, "upload_temp_dir", str(tmp_path / "uploads"))
 
@@ -285,7 +285,7 @@ class TestTheWorkerNamesTheDirectoriesItWritesTo:
     ) -> None:
         from app.worker import sample_files
 
-        monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", "")
+        monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", "")
         monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path / "samples"))
         monkeypatch.setattr(sample_files.settings, "upload_temp_dir", str(tmp_path / "uploads"))
         downloads = sample_files.export_sample_roots()[0]
@@ -296,9 +296,9 @@ class TestTheWorkerNamesTheDirectoriesItWritesTo:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from app.worker import sample_files
-        from maljan.tools.roots import configured_roots
+        from malspark.tools.roots import configured_roots
 
-        monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", "")
+        monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", "")
         monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path / "samples"))
         monkeypatch.setattr(sample_files.settings, "upload_temp_dir", str(tmp_path / "uploads"))
 
@@ -424,8 +424,8 @@ class TestAnArgumentIsBoundedBeforeItIsRead:
         and a helper extracted or a parameter renamed would break a source
         count while leaving the behaviour exactly as it is.
         """
-        from maljan.providers.static import capa_yara
-        from maljan.tools import rules
+        from malspark.providers.static import capa_yara
+        from malspark.tools import rules
 
         yara_timeouts: list[int] = []
         capa_timeouts: list[int] = []

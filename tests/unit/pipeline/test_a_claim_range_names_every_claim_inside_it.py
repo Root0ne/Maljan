@@ -21,8 +21,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.base_agent import read_claim_blocks
-from maljan.pipeline.debate_facts import (
+from malspark.agents.base_agent import read_claim_blocks
+from malspark.pipeline.debate_facts import (
     CLAIM_RANGE_CAP,
     NO_ANALYST_NAMED,
     RANGE_NOT_READ,
@@ -31,9 +31,9 @@ from maljan.pipeline.debate_facts import (
     read_claim_numbers,
     read_claim_references,
 )
-from maljan.pipeline.nodes import make_revision_node
-from maljan.pipeline.revision_merge import _numbers_written, merge_revision
-from maljan.schemas.isr_models import AgentISR
+from malspark.pipeline.nodes import make_revision_node
+from malspark.pipeline.revision_merge import _numbers_written, merge_revision
+from malspark.schemas.isr_models import AgentISR
 
 PARTICIPANTS = ["static", "all_tools_reverser_ghidra", "dynamic", "triage"]
 REVERSER = "[analysts: ALL_TOOLS_REVERSER_GHIDRA ANALYST]"
@@ -115,7 +115,7 @@ class TestEveryFormOfARangeOrAListNamesEachClaim:
 
 class TestTheReaderOfEveryParticipant:
     def test_each_reference_says_whether_it_stands_inside_a_mark(self) -> None:
-        from maljan.pipeline.debate_facts import claim_references_of
+        from malspark.pipeline.debate_facts import claim_references_of
 
         text = (
             "[analysts: STATIC ANALYST] STATIC ANALYST claims 2-3 are loose, versus TRIAGE "
@@ -132,7 +132,7 @@ class TestTheReaderOfEveryParticipant:
         }
 
     def test_the_references_no_analyst_is_read_for_are_one_computation(self) -> None:
-        from maljan.pipeline.debate_facts import claim_references_of, unattributed_references
+        from malspark.pipeline.debate_facts import claim_references_of, unattributed_references
 
         text = (
             "[analysts: STATIC ANALYST, TRIAGE ANALYST] Claim 1 and claim 44 say X; the dropper "
@@ -223,8 +223,8 @@ class TestWhatTheLineSaysAroundItsReferences:
         assert [(u.line, u.marked, u.claims) for u in refs.unplaced] == [(1, True, "claim 4")]
 
     def test_a_reference_is_stated_by_each_analyst_it_may_mean_and_kept_once(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
-        from maljan.pipeline.revision_merge import unplaced_sentence
+        from malspark.analysis.run_summary import RunSummaryBuilder
+        from malspark.pipeline.revision_merge import unplaced_sentence
 
         line = f"[analysts: DYNAMIC ANALYST, STATIC ANALYST] The own claim 4 says X. {BLOCKS}"
 
@@ -511,8 +511,8 @@ class TestTheMergeReadsARangeAsItReadsASingleClaim:
         assert merge.unplaced == ()
 
     def test_the_node_withdraws_inside_a_range_and_states_what_it_cannot_place(self) -> None:
-        from maljan.core.config import MEDIATOR_AGENT_NAME
-        from maljan.pipeline.state import AgentArgument
+        from malspark.core.config import MEDIATOR_AGENT_NAME
+        from malspark.pipeline.state import AgentArgument
 
         answer = _block(MUTEX) + _block(PERSIST)
         container = MagicMock()

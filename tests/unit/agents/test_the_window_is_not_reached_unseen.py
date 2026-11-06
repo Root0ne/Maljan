@@ -44,9 +44,9 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from maljan.agents.base_agent import BaseAnalyst, LoopBudget
-from maljan.agents.mcp_client import MCPLangChainToolkit
-from maljan.llm import context_window as cw
+from malspark.agents.base_agent import BaseAnalyst, LoopBudget
+from malspark.agents.mcp_client import MCPLangChainToolkit
+from malspark.llm import context_window as cw
 
 # The recorded run: the window llama served and the reply reserve it was given.
 WINDOW = 32_768
@@ -184,7 +184,7 @@ class TestWhatTheServerReportedBoundsTheCount:
         refresh = agent._run_state_refresher(40, 1500.0, 0.0, LoopBudget(40, 1500.0))
         refresh({"messages": messages})
 
-        from maljan.agents.base_agent import _message_chars
+        from malspark.agents.base_agent import _message_chars
 
         after = _message_chars(turn) + _message_chars(answer)
         assert budget.held_chars("static") == reported * cw.CHARS_PER_TOKEN + after
@@ -286,7 +286,7 @@ class TestAServerThatSaysTheWindowIsFull:
         ids=["other-server-error", "first-request", "reply-cap", "not-a-provider-error"],
     )
     def test_everything_else_still_fails_the_analyst(self, refuse_at: int, error: Any) -> None:
-        from maljan.core.exceptions import AnalystError
+        from malspark.core.exceptions import AnalystError
 
         model = _RefusesAtTheFourthTurn(calls=[], refuse_at=refuse_at, error=error)
         with pytest.raises(AnalystError):
@@ -349,7 +349,7 @@ class _Offset(BaseModel):
 
 @contextlib.contextmanager
 def _settings() -> Iterator[None]:
-    with patch("maljan.agents.base_agent.get_settings") as settings:
+    with patch("malspark.agents.base_agent.get_settings") as settings:
         cfg = settings.return_value
         cfg.react_agent_timeout = 600
         cfg.react_agent_timeout_overrides = {}
@@ -402,7 +402,7 @@ class TestTheSalvageIsSizedFromTheCountedWindow:
     def test_a_declared_window_larger_than_the_probed_one_does_not_size_it(self) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.agents.base_agent import counted_window_tokens, synthesis_budget_chars
+        from malspark.agents.base_agent import counted_window_tokens, synthesis_budget_chars
 
         cfg = MagicMock()
         cfg.llm.provider = "openai"
@@ -424,7 +424,7 @@ class TestTheSalvageIsSizedFromTheCountedWindow:
         assert refused == budget.tool_budget_chars() - cw.chars_for_tokens(WINDOW // 4)
 
     def test_a_budget_that_derives_nothing_leaves_the_declaration_in_charge(self) -> None:
-        from maljan.agents.base_agent import counted_window_tokens
+        from malspark.agents.base_agent import counted_window_tokens
 
         unknown = cw.ContextBudget(cw.WindowFact(8192, cw.FALLBACK, "none"))
         assert counted_window_tokens(unknown) == 0

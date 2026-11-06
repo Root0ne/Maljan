@@ -15,9 +15,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.agents.prompt_fragments import format_fragment
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
+from malspark.agents.prompt_fragments import format_fragment
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
 
 ROLES = ("static", "dynamic", "network")
 
@@ -99,7 +99,7 @@ class TestTheSystemTurnTheAnalystSends:
 
     def test_the_network_analyst_sends_its_resolved_prompt(self) -> None:
         """Its entry points build the chain themselves rather than through the loop."""
-        from maljan.agents.network_analyst import _ISR_SYSTEM
+        from malspark.agents.network_analyst import _ISR_SYSTEM
 
         agent = _container("apk", "android").get_agent("network")
         sent = agent._system_prompt(_ISR_SYSTEM)
@@ -116,7 +116,7 @@ def test_a_windows_dynamic_prompt_still_names_what_it_used_to() -> None:
 
 def test_an_analyst_built_outside_a_container_falls_back_to_the_neutral_prompt() -> None:
     """A test, a script or the CLI has no job context; the neutral text is honest."""
-    from maljan.agents.dynamic_analyst import _ISR_SYSTEM, DynamicAnalyst
+    from malspark.agents.dynamic_analyst import _ISR_SYSTEM, DynamicAnalyst
 
     agent = DynamicAnalyst(llm=MagicMock(), name="dynamic")
     assert agent._system_prompt(_ISR_SYSTEM) == _ISR_SYSTEM

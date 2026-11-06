@@ -1,6 +1,6 @@
 """Every built-in tool is declared, and its declaration says what the code's tables say.
 
-The declarations of ``maljan.core.builtin_declarations`` are the facts the name
+The declarations of ``malspark.core.builtin_declarations`` are the facts the name
 tables hold today, so each consumer can move from its table to the declaration
 with the same output. Each consumer table is held, tool by tool over every
 built-in source, equal to the set of kinds ``CONSUMER_KINDS`` names for it; a
@@ -18,10 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from maljan.core import virustotal
-from maljan.core.builtin_declarations import BUILDER_OF_KIND, CONSUMER_KINDS, READERS
-from maljan.core.config import REQUIRED_ENV_ALLOW, Settings
-from maljan.core.tool_declarations import PACK, SourceRef, ToolDeclarations, select
+from malspark.core import virustotal
+from malspark.core.builtin_declarations import BUILDER_OF_KIND, CONSUMER_KINDS, READERS
+from malspark.core.config import REQUIRED_ENV_ALLOW, Settings
+from malspark.core.tool_declarations import PACK, SourceRef, ToolDeclarations, select
 
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "mcp_tools"
@@ -107,7 +107,7 @@ def test_every_virustotal_tool_the_code_names_is_declared(declared: ToolDeclarat
 
 
 def test_every_sandbox_report_tool_is_declared(declared: ToolDeclarations) -> None:
-    from maljan.providers import sandbox_tools
+    from malspark.providers import sandbox_tools
 
     names = {
         name
@@ -120,11 +120,11 @@ def test_every_sandbox_report_tool_is_declared(declared: ToolDeclarations) -> No
 
 
 def test_every_step_the_triage_pack_records_is_declared(declared: ToolDeclarations) -> None:
-    from maljan.analysis import sandbox_sections
-    from maljan.analysis.anti_analysis import SCAN_TOOL as ANTI_ANALYSIS_TOOL
-    from maljan.core.pack_steps import default_steps
-    from maljan.pipeline import sandbox_status
-    from maljan.tools import artefact_index, crypto_constants, upx
+    from malspark.analysis import sandbox_sections
+    from malspark.analysis.anti_analysis import SCAN_TOOL as ANTI_ANALYSIS_TOOL
+    from malspark.core.pack_steps import default_steps
+    from malspark.pipeline import sandbox_status
+    from malspark.tools import artefact_index, crypto_constants, upx
 
     # A step of a server's tool is declared by its server (the identification
     # servers' steps, held in ``tests/unit/servers/test_identification_servers.py``).
@@ -173,8 +173,8 @@ def _strip_tool(names: object) -> set[str]:
 
 def _tables() -> dict[str, Callable[[str], bool]]:
     """Each consumer table as a membership test on a bare tool name, as the code reads it."""
-    from maljan.core import legacy_tool_tables as legacy
-    from maljan.reporting import legacy_tool_names
+    from malspark.core import legacy_tool_tables as legacy
+    from malspark.reporting import legacy_tool_names
 
     def names(values: object) -> Callable[[str], bool]:
         held = _strip_tool(values)
@@ -212,7 +212,7 @@ def _read_inline_tables() -> dict[str, tuple[str, ...]]:
     the consumer test then holds the declaration to the new table. The
     reporting ones are read from the legacy module that keeps them.
     """
-    from maljan.reporting import legacy_tool_names
+    from malspark.reporting import legacy_tool_names
 
     return {
         "figures.code_listing": (legacy_tool_names.CODE_LISTING_TOOL,),
@@ -293,7 +293,7 @@ SHIPPED_AFTER_THE_NAME_TABLES = {"behaviour_code_links": "_behaviour_code"}
 
 
 def test_the_section_builders_are_drawn_by_kind(declared: ToolDeclarations) -> None:
-    from maljan.reporting import legacy_tool_names
+    from malspark.reporting import legacy_tool_names
 
     assert not set(SHIPPED_AFTER_THE_NAME_TABLES) & set(legacy_tool_names.BUILDERS)
     differ = []
@@ -325,7 +325,7 @@ EVIDENCE_ROOT_READERS = {
 
 
 def test_the_readers_are_the_evidence_roots_shapes(declared: ToolDeclarations) -> None:
-    from maljan.core.reputation import SHAPE_READER
+    from malspark.core.reputation import SHAPE_READER
 
     for source, name, facts in _built_in_tools(declared):
         if facts.reader == SHAPE_READER:  # type: ignore[attr-defined]
@@ -350,7 +350,7 @@ def test_no_reader_is_named_after_a_tool_or_a_server(declared: ToolDeclarations)
 
 
 def test_the_asserting_sources_are_the_declared_asserting_tools(declared: ToolDeclarations) -> None:
-    from maljan.core.legacy_tool_tables import ASSERTING_SOURCES
+    from malspark.core.legacy_tool_tables import ASSERTING_SOURCES
 
     for source, name, facts in _built_in_tools(declared):
         if name in ASSERTING_SOURCES:
@@ -363,7 +363,7 @@ def test_the_asserting_sources_are_the_declared_asserting_tools(declared: ToolDe
 def test_the_reputation_servers_are_the_servers_with_the_reputation_role(
     declared: ToolDeclarations,
 ) -> None:
-    from maljan.core.reputation import lookup_servers
+    from malspark.core.reputation import lookup_servers
 
     keys = {ref.key for ref in declared.servers_with_role("reputation") if ref.kind == "mcp"}
     assert keys == lookup_servers(declared) == {"threatintel", "virustotal"}
@@ -403,8 +403,8 @@ def test_the_required_environment_is_the_declared_one(declared: ToolDeclarations
 
 
 def test_the_non_secret_variable_names_are_the_events_ones(declared: ToolDeclarations) -> None:
-    from maljan.core.builtin_declarations import shipped_variable_names
-    from maljan.pipeline.events import scrub
+    from malspark.core.builtin_declarations import shipped_variable_names
+    from malspark.pipeline.events import scrub
 
     declared_names = {n for d in declared.sources() for n in d.variable_names}
     assert declared_names == set(shipped_variable_names())
@@ -413,9 +413,9 @@ def test_the_non_secret_variable_names_are_the_events_ones(declared: ToolDeclara
 
 
 def test_the_work_directories_are_the_providers(declared: ToolDeclarations) -> None:
-    from maljan.core.config import Settings
-    from maljan.providers.base import DEFAULT_WORK_DIR
-    from maljan.providers.static.r2 import R2StaticProvider
+    from malspark.core.config import Settings
+    from malspark.providers.base import DEFAULT_WORK_DIR
+    from malspark.providers.static.r2 import R2StaticProvider
 
     assert declared.source("provider:ghidra").work_dir == DEFAULT_WORK_DIR  # type: ignore[union-attr]
     r2_dir = R2StaticProvider.from_settings(Settings(_env_file=None)).mirror_spec().work_subdir
@@ -423,8 +423,8 @@ def test_the_work_directories_are_the_providers(declared: ToolDeclarations) -> N
 
 
 def test_the_auto_name_prefixes_are_the_validation_patterns(declared: ToolDeclarations) -> None:
-    from maljan.core.undeclared_tools import auto_name_pattern
-    from maljan.pipeline import validation
+    from malspark.core.undeclared_tools import auto_name_pattern
+    from malspark.pipeline import validation
 
     alternation = re.search(r"\(\?:([a-z|]+)\)", auto_name_pattern().pattern)
     assert alternation is not None
@@ -442,7 +442,7 @@ def test_virustotals_reference_url_is_linked_on_a_run_that_asked_it(
 ) -> None:
     from types import SimpleNamespace
 
-    from maljan.reporting.references import declared_references
+    from malspark.reporting.references import declared_references
 
     held = declared.source("mcp:virustotal")
     assert held is not None
@@ -455,7 +455,7 @@ def test_virustotals_reference_url_is_linked_on_a_run_that_asked_it(
 
 
 def test_ghidras_open_tools_are_its_long_running_tools(declared: ToolDeclarations) -> None:
-    from maljan.providers.sample_open import long_running_tools
+    from malspark.providers.sample_open import long_running_tools
 
     # Its block's ``sample_open`` holds them long-running; no tool says so itself.
     held = declared.source("provider:ghidra")
@@ -465,11 +465,13 @@ def test_ghidras_open_tools_are_its_long_running_tools(declared: ToolDeclaration
 
 
 def test_the_analysis_servers_long_running_tools_and_budgets_are_its_manifests() -> None:
-    from maljan.core.declared_reading import builtin_tools
+    from malspark.core.declared_reading import builtin_tools
 
     # The sidecar's manifest is declared where a check before a job reads it too;
     # the server declares the same of its tools itself.
-    manifest = (ROOT / "src" / "maljan" / "tools" / "sidecar_needs.py").read_text(encoding="utf-8")
+    manifest = (ROOT / "src" / "malspark" / "tools" / "sidecar_needs.py").read_text(
+        encoding="utf-8"
+    )
     facts = builtin_tools("analysis")
     assert {n for n, f in facts.items() if f.long_running} == {"capa", "floss"}
     assert manifest.count("long_running=True") == 2
@@ -479,8 +481,8 @@ def test_the_analysis_servers_long_running_tools_and_budgets_are_its_manifests()
 
 
 def test_the_report_sections_are_the_section_hints_by_name(declared: ToolDeclarations) -> None:
-    from maljan.reporting.evidence_bundles import _SECTION_KINDS
-    from maljan.reporting.legacy_tool_names import SECTION_TOOL_HINTS as _SECTION_TOOL_HINTS
+    from malspark.reporting.evidence_bundles import _SECTION_KINDS
+    from malspark.reporting.legacy_tool_names import SECTION_TOOL_HINTS as _SECTION_TOOL_HINTS
 
     for source, name, facts in _built_in_tools(declared):
         hinted = [s for s, hs in _SECTION_TOOL_HINTS.items() if any(h in name for h in hs)]
@@ -494,7 +496,7 @@ def test_the_report_sections_are_the_section_hints_by_name(declared: ToolDeclara
 
 
 def test_the_tool_words_are_the_validation_words(declared: ToolDeclarations) -> None:
-    from maljan.pipeline.validation import _tool_words
+    from malspark.pipeline.validation import _tool_words
 
     for source, name, facts in _built_in_tools(declared):
         parts = {part for part in name.split("_") if len(part) >= 3}
@@ -502,8 +504,8 @@ def test_the_tool_words_are_the_validation_words(declared: ToolDeclarations) -> 
 
 
 def test_the_categories_are_the_mcp_clients_tags(declared: ToolDeclarations) -> None:
-    from maljan.agents.mcp_client import MCPLangChainToolkit
-    from maljan.core.undeclared_tools import categories_of, category_tag
+    from malspark.agents.mcp_client import MCPLangChainToolkit
+    from malspark.core.undeclared_tools import categories_of, category_tag
 
     for source in ("provider:ghidra", "provider:r2"):
         tools = _tools(declared, source)
@@ -517,7 +519,7 @@ def test_the_categories_are_the_mcp_clients_tags(declared: ToolDeclarations) -> 
 
 
 def test_the_rule_match_display_names_are_the_assertion_words(declared: ToolDeclarations) -> None:
-    from maljan.pipeline.validation import _rule_match_assertion_re, shipped_matcher_names
+    from malspark.pipeline.validation import _rule_match_assertion_re, shipped_matcher_names
 
     # YARA-X, a rule matcher shipped switched off, is among them.
     one_program = [
@@ -540,9 +542,9 @@ def test_the_rule_match_display_names_are_the_assertion_words(declared: ToolDecl
 def test_ghidra_and_radare2_carry_their_workflows_and_radare2_its_errors(
     declared: ToolDeclarations,
 ) -> None:
-    from maljan.core.builtin_declarations import CAPE_WORKFLOW, R2_WORKFLOW
-    from maljan.providers.base import CLAIM_GUIDANCE
-    from maljan.providers.static import ghidra, r2
+    from malspark.core.builtin_declarations import CAPE_WORKFLOW, R2_WORKFLOW
+    from malspark.providers.base import CLAIM_GUIDANCE
+    from malspark.providers.static import ghidra, r2
 
     held = declared.source("provider:ghidra")
     assert held is not None and held.prompt_fragment == ghidra.GHIDRA_WORKFLOW
@@ -577,8 +579,8 @@ def test_ghidra_and_radare2_carry_their_workflows_and_radare2_its_errors(
 def test_the_declared_technique_paths_read_what_the_summary_reads(
     declared: ToolDeclarations, source: str, tool: str
 ) -> None:
-    from maljan.analysis.technique_ids import sigma_technique_ids, technique_ids_in
-    from maljan.pipeline.evidence_summary import _technique_ids
+    from malspark.analysis.technique_ids import sigma_technique_ids, technique_ids_in
+    from malspark.pipeline.evidence_summary import _technique_ids
 
     answer = json.loads((LEDGER / f"{tool}.json").read_text(encoding="utf-8"))
     facts = declared.declaration_for((source, tool))
@@ -594,7 +596,7 @@ def test_the_declared_technique_paths_read_what_the_summary_reads(
 
 
 def test_the_technique_depth_bound_is_the_summarys(declared: ToolDeclarations) -> None:
-    from maljan.pipeline.evidence_summary import _technique_ids
+    from malspark.pipeline.evidence_summary import _technique_ids
 
     facts = declared.declaration_for(("mcp:analysis", "capa"))
     assert facts is not None
@@ -610,11 +612,11 @@ def test_the_reputation_service_s_lookup_reads_its_answer_by_its_shape(
     declared: ToolDeclarations,
 ) -> None:
     """The built-in service's lookup is read from its listing, and declares no paths."""
-    from maljan.core.reputation import read_answer
+    from malspark.core.reputation import read_answer
 
     answer = json.loads((LEDGER / "get_file_report.json").read_text(encoding="utf-8"))
     facts = declared.declaration_for(("mcp:virustotal", "get_file_report"))
-    from maljan.core.reputation import SHAPE_READER
+    from malspark.core.reputation import SHAPE_READER
 
     assert facts is not None and facts.kind == "reputation" and facts.reader == SHAPE_READER
     # What its catalog entry says of the service as a whole, and no path.
@@ -665,7 +667,7 @@ def test_the_declared_rows_read_the_stored_answers(
 
 
 def test_qu1cksc0pes_declaration_reads_as_a_server_block() -> None:
-    from maljan.core.config import MCPServerConfig
+    from malspark.core.config import MCPServerConfig
 
     data = json.loads((ROOT / "docs/examples/profiles/qu1cksc0pe.declaration.json").read_text())
     block = MCPServerConfig.model_validate({"command": "x", **data})

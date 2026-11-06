@@ -22,7 +22,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-from maljan.agents.output_shortening import (
+from malspark.agents.output_shortening import (
     BOOKKEEPING_KEY,
     SHORTENING_BUDGET_SECONDS,
     shorten_json_document,
@@ -302,8 +302,8 @@ class TestTheBookkeepingIsInOnePlaceAndIsOurs:
         and the key-value table did not filter the second, so the answer
         carried a block of arithmetic nobody had introduced.
         """
-        from maljan.agents.evidence_recorder import shortened_notice
-        from maljan.reporting.ledger_report import shortened_sentence
+        from malspark.agents.evidence_recorder import shortened_notice
+        from malspark.reporting.ledger_report import shortened_sentence
 
         answer = json.dumps(
             {
@@ -326,7 +326,7 @@ class TestTheBookkeepingIsInOnePlaceAndIsOurs:
 
     def test_a_tool_that_owns_the_name_keeps_it_out_of_the_fact_table(self) -> None:
         """Both names are filtered: the tool's, and the one ours moved to."""
-        from maljan.reporting.ledger_report import our_own_words
+        from malspark.reporting.ledger_report import our_own_words
 
         answer = json.dumps(
             {
@@ -610,7 +610,7 @@ class TestTheOddInputsNobodyMeantToSend:
 
     def test_an_answer_past_the_size_ceiling_is_refused_before_it_is_read(self) -> None:
         """The wall cannot pre-empt the parse, so the parse is what is bounded."""
-        from maljan.agents.output_shortening import MAX_SHORTENABLE_CHARS
+        from malspark.agents.output_shortening import MAX_SHORTENABLE_CHARS
 
         def ones(count: int) -> str:
             return '{"rows": [' + ",".join(["1"] * count) + "]}"
@@ -709,7 +709,7 @@ class TestTheGuardrailUsesIt:
 
     @staticmethod
     def _client(ledger: Any, limit: int = 4000) -> Any:
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         toolkit = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
         toolkit._max_output_chars = limit
@@ -738,9 +738,9 @@ class TestTheGuardrailUsesIt:
         and so is the completeness line the recorder appends to a cut answer
         (``schemas.answer_completeness.cut_line_room``).
         """
-        from maljan.agents.mcp_client import TRUNCATION_MARKER, truncation_target
-        from maljan.agents.tool_fence import fence_lines_room
-        from maljan.schemas.answer_completeness import cut_line_room
+        from malspark.agents.mcp_client import TRUNCATION_MARKER, truncation_target
+        from malspark.agents.tool_fence import fence_lines_room
+        from malspark.schemas.answer_completeness import cut_line_room
 
         ledger = self._Ledger()
         text = "a decompiled function, in C. " * 500
@@ -763,7 +763,7 @@ class TestTheGuardrailUsesIt:
         assert ledger.rows[-1]["over_limit"] is False
 
     def test_a_shortening_that_ran_out_of_time_is_on_the_record(self) -> None:
-        import maljan.agents.output_shortening as shortening
+        import malspark.agents.output_shortening as shortening
 
         ledger = self._Ledger()
         client = self._client(ledger)
@@ -779,7 +779,7 @@ class TestTheGuardrailUsesIt:
         assert ledger.rows[-1]["hard_truncated"] is True
 
     def test_the_ghidra_client_does_the_same_thing(self) -> None:
-        from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+        from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
         ledger = self._Ledger()
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
@@ -796,8 +796,8 @@ class TestTheGuardrailUsesIt:
     def test_the_guardrail_is_awaited_off_the_loop(self) -> None:
         import inspect
 
-        from maljan.agents import mcp_client
-        from maljan.providers.static.ghidra import http_client as ghidra_http_client
+        from malspark.agents import mcp_client
+        from malspark.providers.static.ghidra import http_client as ghidra_http_client
 
         for module in (mcp_client, ghidra_http_client):
             source = inspect.getsource(module)
@@ -821,8 +821,8 @@ class TestWhatTheRecordThenHolds:
     LIMIT = 6000
 
     def _entry(self) -> Any:
-        from maljan.agents.evidence_recorder import EvidenceRecorder
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.evidence_recorder import EvidenceRecorder
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         toolkit = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
         toolkit._max_output_chars = self.LIMIT
@@ -850,7 +850,7 @@ class TestWhatTheRecordThenHolds:
         )
 
     def test_the_ledger_report_draws_a_section_from_it(self) -> None:
-        from maljan.reporting.ledger_report import build_sections
+        from malspark.reporting.ledger_report import build_sections
 
         sections = build_sections([self._entry()])
 
@@ -860,7 +860,7 @@ class TestWhatTheRecordThenHolds:
 
     def test_the_bookkeeping_is_not_printed_as_a_fact_about_the_sample(self) -> None:
         """A row reading "shortened | {...}" is this system talking, not the tool."""
-        from maljan.reporting.ledger_report import build_sections
+        from malspark.reporting.ledger_report import build_sections
 
         sections = build_sections([self._entry()])
 
@@ -871,10 +871,10 @@ class TestWhatTheRecordThenHolds:
 
     def test_the_report_a_reader_opens_says_the_answer_was_shortened(self) -> None:
         """Rendered, not the attribute: the body used to stop at the rows."""
-        from maljan.reporting.ledger_report import build_sections
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-        from maljan.reporting.renderers.html import HtmlRenderer
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.ledger_report import build_sections
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.renderers.html import HtmlRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         report = MalwareReport(
             identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
@@ -887,7 +887,7 @@ class TestWhatTheRecordThenHolds:
         assert "was shortened to fit" in HtmlRenderer().render(report)
 
     def test_the_model_is_told_the_answer_was_shortened_and_what_to_do(self) -> None:
-        from maljan.agents.evidence_recorder import shortened_notice
+        from malspark.agents.evidence_recorder import shortened_notice
 
         notice = shortened_notice(_strings_answer(2), narrowing=["pattern"])
         assert notice == ""
@@ -901,7 +901,7 @@ class TestWhatTheRecordThenHolds:
 
     def test_the_arguments_named_are_the_ones_the_schema_offered(self) -> None:
         """Read off the tool's own schema, never guessed from its name."""
-        from maljan.agents.output_shortening import narrowing_arguments
+        from malspark.agents.output_shortening import narrowing_arguments
 
         strings = ("path", "carved_path", "min_len", "limit", "offset", "pattern", "start", "end")
         assert narrowing_arguments(strings) == ("limit", "offset", "pattern", "start", "end")
@@ -911,7 +911,7 @@ class TestWhatTheRecordThenHolds:
         assert narrowing_arguments(()) == ()
 
     def test_a_tool_with_nothing_to_vary_is_told_that_and_nothing_more(self) -> None:
-        from maljan.agents.evidence_recorder import shortened_notice
+        from malspark.agents.evidence_recorder import shortened_notice
 
         parsed = shorten_json_document(_strings_answer(300), 4000).text
         said = shortened_notice(parsed, narrowing=())
@@ -922,8 +922,8 @@ class TestWhatTheRecordThenHolds:
 
     def test_the_sentence_is_inside_the_limit_the_answer_was_cut_to(self) -> None:
         """The notice is appended after the cut, so the cut keeps room for it."""
-        from maljan.agents.evidence_recorder import shortened_notice
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.evidence_recorder import shortened_notice
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         narrowing = ("limit", "offset", "pattern")
         limit = 4000
@@ -951,7 +951,7 @@ class TestAServersParameterNameIsUntrustedText:
     @staticmethod
     def _tool(properties: dict[str, Any], limit: int = 4000) -> Any:
         """One real toolkit tool over a session that answers a large document."""
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         class _McpTool:
             name = "strings"
@@ -977,8 +977,8 @@ class TestAServersParameterNameIsUntrustedText:
     def test_a_name_that_is_not_an_identifier_is_not_named_at_all(self) -> None:
         import asyncio
 
-        from maljan.agents.evidence_recorder import shortened_notice
-        from maljan.agents.output_shortening import narrowing_arguments
+        from malspark.agents.evidence_recorder import shortened_notice
+        from malspark.agents.output_shortening import narrowing_arguments
 
         properties = {
             "path": {"type": "string"},
@@ -996,7 +996,7 @@ class TestAServersParameterNameIsUntrustedText:
         assert "`limit`" in notice
 
     def test_a_name_longer_than_an_identifier_is_left_out(self) -> None:
-        from maljan.agents.output_shortening import MAX_NARROWING_NAME_CHARS, narrowing_arguments
+        from malspark.agents.output_shortening import MAX_NARROWING_NAME_CHARS, narrowing_arguments
 
         fits = "max_" + "n" * (MAX_NARROWING_NAME_CHARS - 4)
         too_long = fits + "n"
@@ -1004,7 +1004,7 @@ class TestAServersParameterNameIsUntrustedText:
         assert narrowing_arguments([fits, too_long]) == (fits,)
 
     def test_only_a_handful_are_named(self) -> None:
-        from maljan.agents.output_shortening import MAX_NARROWING_NAMES, narrowing_arguments
+        from malspark.agents.output_shortening import MAX_NARROWING_NAMES, narrowing_arguments
 
         many = [f"max_{index}" for index in range(50)]
 
@@ -1014,7 +1014,7 @@ class TestAServersParameterNameIsUntrustedText:
         """Two hundred long parameter names, and the answer is still a document."""
         import asyncio
 
-        from maljan.agents.output_shortening import MAX_SENTENCE_ROOM
+        from malspark.agents.output_shortening import MAX_SENTENCE_ROOM
 
         properties: dict[str, Any] = {"path": {"type": "string"}}
         for index in range(200):
@@ -1032,8 +1032,8 @@ class TestAServersParameterNameIsUntrustedText:
         """The claim is one claim, so the arithmetic is one function."""
         import inspect
 
-        from maljan.agents import mcp_client
-        from maljan.providers.static.ghidra import http_client as ghidra_http_client
+        from malspark.agents import mcp_client
+        from malspark.providers.static.ghidra import http_client as ghidra_http_client
 
         narrowing = ("limit", "offset", "pattern")
         for module in (mcp_client, ghidra_http_client):
@@ -1044,8 +1044,8 @@ class TestAServersParameterNameIsUntrustedText:
             assert "output_limit(self._max_output_chars, self._context_budget)" in source
             assert "shorten_target(limit, narrowing)" in source, module.__name__
 
-        from maljan.agents.evidence_recorder import shortened_notice
-        from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+        from malspark.agents.evidence_recorder import shortened_notice
+        from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
         client._max_output_chars = 4000

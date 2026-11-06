@@ -1,4 +1,4 @@
-"""ARQ worker — executes MaljanApp pipeline in a background process.
+"""ARQ worker — executes MalsparkApp pipeline in a background process.
 
 This worker is started separately from the API server:
 
@@ -27,22 +27,22 @@ from typing import Any
 
 import redis.asyncio as aioredis
 from arq import cron
-from maljan.agents.base_agent import CANCEL_DELIVERY_GRACE
-from maljan.core.cancellation import Cancellation, JobCancelled
-from maljan.core.config import MEDIATOR_AGENT_NAME
-from maljan.core.config import Settings as _CoreSettings
-from maljan.core.report_formats import declarations_in_effect, recorded_signature_scale
-from maljan.core.settings_catalog import core_catalog
-from maljan.core.settings_overrides import (
+from malspark.agents.base_agent import CANCEL_DELIVERY_GRACE
+from malspark.core.cancellation import Cancellation, JobCancelled
+from malspark.core.config import MEDIATOR_AGENT_NAME
+from malspark.core.config import Settings as _CoreSettings
+from malspark.core.report_formats import declarations_in_effect, recorded_signature_scale
+from malspark.core.settings_catalog import core_catalog
+from malspark.core.settings_overrides import (
     StoredValueRefused,
     build_settings,
     public_snapshot,
     settings_from_store,
     trim_declarations,
 )
-from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
-from maljan.pipeline.outcome import absent_analysis_message
-from maljan.providers.errors import AttachedReportRefused, ProviderError
+from malspark.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
+from malspark.pipeline.outcome import absent_analysis_message
+from malspark.providers.errors import AttachedReportRefused, ProviderError
 from pydantic import ValidationError
 from sqlalchemy import Select, delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -78,9 +78,9 @@ def is_publishable(message: str) -> bool:
     """
     if not message:
         return True
-    # Deferred like every other ``maljan`` import here: the API process must
+    # Deferred like every other ``malspark`` import here: the API process must
     # not pay for the core package at import time.
-    from maljan.pipeline.events import scrub
+    from malspark.pipeline.events import scrub
 
     return scrub(message) == message
 
@@ -170,7 +170,7 @@ def build_job_settings(
     """
     merged = dict(overrides)
     if job_config:
-        from maljan.core.plugins import ALLOW_LIST_PATH
+        from malspark.core.plugins import ALLOW_LIST_PATH
 
         from app.schemas.job import PLUGINS_ALLOWED_CONTEXT, _KnownJobConfig
 
@@ -202,7 +202,7 @@ def build_job_settings(
     settings = settings_from_store(merged, stored_keys=overrides)
     # The selected provider's role models come from its own block; a job never
     # runs with an empty model name borrowed from nowhere.
-    from maljan.llm.provider_base import role_block_problem
+    from malspark.llm.provider_base import role_block_problem
 
     problem = role_block_problem(settings)
     if problem:
@@ -215,7 +215,7 @@ def job_questions(job_config: Mapping[str, Any] | None) -> list[str]:
 
     Read by the report's question round; a job with none asks nothing.
     """
-    from maljan.reporting.question_round import asked_questions
+    from malspark.reporting.question_round import asked_questions
 
     return asked_questions((job_config or {}).get("questions"))
 
@@ -244,7 +244,7 @@ def take_the_job_plugin_set(overrides: Mapping[str, Any]) -> None:
     runtime setting, an enrichment) loads and withdraws nothing, so a list
     saved meanwhile applies to the next job, as every other setting does.
     """
-    from maljan.core.plugins import ALLOW_LIST_PATH, load_allowed
+    from malspark.core.plugins import ALLOW_LIST_PATH, load_allowed
 
     load_allowed(overrides.get(ALLOW_LIST_PATH))
 
@@ -255,7 +255,7 @@ def retired_environment_lines(environ: Mapping[str, str]) -> list[str]:
     ``settings_annotations.RETIRED_ENVIRONMENT`` names each one; the value
     itself is not repeated, only where it lives now.
     """
-    from maljan.core.settings_annotations import RETIRED_ENVIRONMENT
+    from malspark.core.settings_annotations import RETIRED_ENVIRONMENT
 
     return [
         f"{variable} is set and no longer read; the setting {key} holds the value now "
@@ -277,9 +277,9 @@ def mirror_lines(core: Any) -> list[str]:
     answer "file not found", so each pair is said once, where an operator
     reads the start.
     """
-    from maljan.core.tool_declarations import selected_static_providers
-    from maljan.providers.base import path_in_server
-    from maljan.providers.registry import static_provider_class, static_provider_ids
+    from malspark.core.tool_declarations import selected_static_providers
+    from malspark.providers.base import path_in_server
+    from malspark.providers.registry import static_provider_class, static_provider_ids
 
     lines: list[str] = []
     selected = selected_static_providers(core)
@@ -311,7 +311,7 @@ async def load_the_allowed_plugins(session_factory: Any) -> None:
     settings carry (``take_the_job_plugin_set``). A store that cannot be read
     leaves that to the first job, and the start goes on.
     """
-    from maljan.core.plugins import ALLOW_LIST_PATH, load_allowed
+    from malspark.core.plugins import ALLOW_LIST_PATH, load_allowed
 
     from app.services.settings_service import load_core_overrides
 
@@ -336,7 +336,7 @@ async def state_the_mirrors(session_factory: Any) -> None:
     that directory is a sample root from the start. A store that cannot be
     read leaves the shipped settings', and the start goes on.
     """
-    from maljan.providers.registry import mirror_work_dirs
+    from malspark.providers.registry import mirror_work_dirs
 
     from app.services.settings_service import effective_core_settings
     from app.worker import sample_files
@@ -376,7 +376,7 @@ def mirror_target_for(
     place, and every future provider that does the same. The host directory and
     its 0o700/0o600 handling stay in ``sample_files``; only the decision moved.
     """
-    from maljan.providers.base import path_in_server
+    from malspark.providers.base import path_in_server
 
     from app.worker import sample_files
 
@@ -411,7 +411,7 @@ def servers_this_job_binds(container: Any) -> set[str] | None:
     keys = getattr(container, "analyst_keys", None)
     if not callable(keys):
         return None
-    from maljan.agents.composition import servers_a_job_calls
+    from malspark.agents.composition import servers_a_job_calls
 
     return servers_a_job_calls(container.config)
 
@@ -441,8 +441,8 @@ def mirror_server_samples(
     reads the worker's own filesystem, or is staged to (``agents.sample_staging``),
     and gets nothing here. A failure is logged per server, and the rest go on.
     """
-    from maljan.providers.base import MirrorSpec, path_in_server
-    from maljan.tools.roots import add_sample_root
+    from malspark.providers.base import MirrorSpec, path_in_server
+    from malspark.tools.roots import add_sample_root
 
     from app.worker import sample_files
 
@@ -506,7 +506,7 @@ def place_server_file(
     (read-only where it is). ``None`` for a server that declares no mount, or
     a copy that failed, which is logged.
     """
-    from maljan.providers.base import MirrorSpec, path_in_server
+    from malspark.providers.base import MirrorSpec, path_in_server
 
     from app.worker import sample_files
 
@@ -562,8 +562,8 @@ def profile_static_providers(container: Any) -> list[str]:
     definition lets the mediator ask. An agent that names several providers
     on its ``provider`` references needs a mirror for each.
     """
-    from maljan.agents.composition import reachable_agents, static_provider_ids_for
-    from maljan.core.config import JUDGE_AGENT_KEY
+    from malspark.agents.composition import reachable_agents, static_provider_ids_for
+    from malspark.core.config import JUDGE_AGENT_KEY
 
     settings = container.config
     ids = [str(settings.static.provider)]
@@ -628,8 +628,8 @@ def mirror_static_samples(
             # child at spawn, so a root added afterwards never reaches a server
             # that is already running. That holds here because the mirror runs
             # in ``run_analysis`` and every sidecar is opened later, inside
-            # ``MaljanApp.arun``.
-            from maljan.tools.roots import add_sample_root
+            # ``MalsparkApp.arun``.
+            from malspark.tools.roots import add_sample_root
 
             add_sample_root(host_mirror.parent)
             if host_mirror not in copied_host_paths:
@@ -1007,7 +1007,7 @@ IDENTITY_FIELDS = frozenset(
 def _registration_failed(scope: str) -> None:
     """Hold finding rows to the whole scrub while ``scope``'s values are unread. Never raises."""
     try:
-        from maljan.pipeline.events import secret_registration_failed
+        from malspark.pipeline.events import secret_registration_failed
 
         secret_registration_failed(scope)
     except Exception as exc:  # noqa: BLE001 — the publisher's scrub still runs
@@ -1024,9 +1024,9 @@ def remember_process_secrets(core_settings: Any = None) -> None:
     the shape rules.
     """
     try:
-        from maljan.core.settings_catalog import configured_secret_values
-        from maljan.core.settings_masking import remember_settings_values
-        from maljan.pipeline.events import remember_secret_values
+        from malspark.core.settings_catalog import configured_secret_values
+        from malspark.core.settings_masking import remember_settings_values
+        from malspark.pipeline.events import remember_secret_values
 
         sources = [get_settings()] + ([core_settings] if core_settings is not None else [])
         remember_settings_values(*sources, scope="process")
@@ -1054,14 +1054,14 @@ def remember_configured_secrets(core_settings: Any) -> None:
     (``core.settings_masking``) is masked by the job's values under the same
     scope. Never raises.
     """
-    from maljan.core.settings_masking import remember_settings_values
-    from maljan.pipeline.events import forget_resolved_names
+    from malspark.core.settings_masking import remember_settings_values
+    from malspark.pipeline.events import forget_resolved_names
 
     forget_resolved_names()
     remember_settings_values(core_settings, scope="job")
     try:
-        from maljan.core.settings_catalog import configured_secret_values
-        from maljan.pipeline.events import remember_secret_values
+        from malspark.core.settings_catalog import configured_secret_values
+        from malspark.pipeline.events import remember_secret_values
 
         remember_secret_values(configured_secret_values(core_settings), scope="job")
     except Exception as exc:  # noqa: BLE001 — the shape rules still run
@@ -1087,7 +1087,7 @@ def scrubbed(value: Any, *, field: str = "") -> Any:
     Keys are left as they are: a key is a field name the console switches on,
     not text somebody wrote. Numbers, booleans and ``None`` keep their type,
     so a payload that goes through this is still the payload the reader
-    expects — only its prose has been through ``maljan.pipeline.events.scrub``.
+    expects — only its prose has been through ``malspark.pipeline.events.scrub``.
 
     A value sitting directly under one of ``IDENTITY_FIELDS`` is left alone,
     and so is each string of a list under one — ``agents: ["static", …]`` is
@@ -1099,7 +1099,7 @@ def scrubbed(value: Any, *, field: str = "") -> Any:
     A value under one of ``MODEL_FIELDS`` is scrubbed as a model label, and so
     is each key of a mapping under one.
     """
-    from maljan.pipeline.events import (
+    from malspark.pipeline.events import (
         mask_configured_values,
         scrub_keeping_layout,
         scrub_model_label,
@@ -1138,8 +1138,8 @@ async def _publish_event(
     ``{"type": ..., "data": ..., "ts": ...}``.
 
     Every event is stamped with a per-job ``seq`` *here* and nowhere else.
-    Nothing in ``maljan`` knows which job it is running under, so nothing in
-    ``maljan`` can number a run; and a second counter anywhere would order one
+    Nothing in ``malspark`` knows which job it is running under, so nothing in
+    ``malspark`` can number a run; and a second counter anywhere would order one
     conversation two ways. The number is what a client resumes from, on the
     socket and on the events endpoint alike.
 
@@ -1324,7 +1324,7 @@ def _evidence_row(
 ) -> Any:
     """One ledger entry as the row that keeps it.
 
-    Every one of the 34 fields ``maljan.schemas.evidence.LedgerEntry`` carries
+    Every one of the 34 fields ``malspark.schemas.evidence.LedgerEntry`` carries
     has a column here, which is what lets a reader of the stored ledger say why an output
     is empty instead of guessing. An absent value stays absent rather than
     becoming a default, for the same reason. ``written_at`` is the moment the
@@ -1443,7 +1443,7 @@ def rows_to_store(ledger: list[Any], *, job_id: str) -> list[dict[str, Any]]:
 def _transcript_row(message: dict[str, Any], *, report_id: uuid.UUID, seq: int) -> Any:
     """One broadcast line as the row that keeps it.
 
-    Field for field from the payload ``maljan.pipeline.events.emit_agent_message``
+    Field for field from the payload ``malspark.pipeline.events.emit_agent_message``
     built, which is the property ``AgentMessage`` is documented on: a replay
     that has to re-derive a field the publisher already sent is a replay that
     can get it wrong. A field the payload did not carry is stored as NULL, so
@@ -1483,7 +1483,7 @@ def _make_event_sink(
 ) -> Callable[[str, dict[str, Any]], None]:
     """Bridge the pipeline's synchronous event sink onto this event loop.
 
-    ``maljan.pipeline.events.EventSink`` is a plain sync callable because the
+    ``malspark.pipeline.events.EventSink`` is a plain sync callable because the
     analyst node is synchronous and LangGraph runs it in a worker thread, while
     the negotiation / revision / judge nodes are coroutines on the loop. One
     signature has to serve both, so the bridge is here rather than in the core.
@@ -1512,9 +1512,9 @@ def _make_event_sink(
     one conversation told two ways.
     """
 
-    # Deferred like every other ``maljan`` import in this module — the core
+    # Deferred like every other ``malspark`` import in this module — the core
     # package is heavy and the API process must not pay for it at import time.
-    from maljan.pipeline.events import AGENT_MESSAGE
+    from malspark.pipeline.events import AGENT_MESSAGE
 
     def sink(event_type: str, data: dict[str, Any]) -> None:
         recorded: dict[str, Any] | None = None
@@ -1693,7 +1693,7 @@ def arm_the_exit_guard(grace: float | None = None) -> None:
 # while a worker is alive *and* still on that job, and it names which worker,
 # so a second worker's job is never mistaken for an abandoned one. The value is
 # for the log; the sweep reads only whether the key is there.
-JOB_OWNER_KEY_PREFIX = "maljan:job-owner:"
+JOB_OWNER_KEY_PREFIX = "malspark:job-owner:"
 JOB_OWNER_TTL_SECONDS = 90
 JOB_OWNER_REFRESH_SECONDS = 30
 # How long the release in the job's ``finally`` may wait on Redis. The worker
@@ -1782,7 +1782,7 @@ def remove_job_staging(job_id: str) -> list[Path]:
     """Take away what this job's sidecars staged and carved. Never raises.
 
     Staging is one directory per job, named by the same rule on both sides
-    (``maljan.tools.staging``), so this removes exactly what this process
+    (``malspark.tools.staging``), so this removes exactly what this process
     pointed its sidecars at and nothing a concurrent job owns. Removal never
     follows a symlink: the tree holds live malware, and a link planted in it is
     the one way a cleanup becomes a delete somewhere else.
@@ -1793,8 +1793,8 @@ def remove_job_staging(job_id: str) -> list[Path]:
     directory that is gone is not a cache, it is an error every tool call after
     it would answer with.
     """
-    from maljan.agents import sample_staging
-    from maljan.tools import staging
+    from malspark.agents import sample_staging
+    from malspark.tools import staging
 
     wanted = staging.job_directories(job_id)
     sample_staging.forget_job(job_id)
@@ -1860,7 +1860,7 @@ async def hold_queue_claim(redis_conn: Any, arq_job_id: str | None) -> bool:
 
 # Where a job's queue-lease renewal is kept in its arq context, from the job's
 # start hook to its end hook.
-_QUEUE_LEASE = "maljan_queue_lease"
+_QUEUE_LEASE = "malspark_queue_lease"
 
 
 async def _renew_queue_claim(redis_conn: Any, arq_job_id: str) -> None:
@@ -1912,7 +1912,7 @@ async def hold_job_owner(redis_conn: Any, job_id: str) -> None:
     on disk (``staging.touch_job_staging``) rather than losing its directory to
     another worker's TTL.
     """
-    from maljan.tools import staging
+    from malspark.tools import staging
 
     while True:
         await asyncio.sleep(JOB_OWNER_REFRESH_SECONDS)
@@ -2246,7 +2246,7 @@ async def keep_the_built_report(
     """Store a report a failed run built, marked incomplete. Never raises.
 
     ``built`` is the state the report node built its report from, with what
-    it wrote merged in (``MaljanApp.built_report``). The report is stored the
+    it wrote merged in (``MalsparkApp.built_report``). The report is stored the
     way a completed run stores one — findings, evidence ledger, transcript —
     with ``incomplete_reason`` set to ``note``, and the note is added to the
     degradation reasons the report and the run summary already carry, so every
@@ -2255,7 +2255,7 @@ async def keep_the_built_report(
     entry ``container``'s agents still held added (``with_undrained_evidence``).
     """
     try:
-        from maljan.pipeline.state import with_undrained_evidence
+        from malspark.pipeline.state import with_undrained_evidence
 
         state = with_undrained_evidence(dict(built), container)
         malware_report = state.get("malware_report")
@@ -2393,7 +2393,7 @@ async def keep_the_stopped_run(
     if app is None:
         return False
     try:
-        from maljan.pipeline.stopped_run import (
+        from malspark.pipeline.stopped_run import (
             NO_VERDICT_DECISION,
             judge_ran,
             partial_report,
@@ -2607,12 +2607,12 @@ async def fail_unread_job(
 
 
 async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
-    """Execute the full Maljan analysis pipeline for the given job.
+    """Execute the full Malspark analysis pipeline for the given job.
 
     This function:
     1. Loads the job from the database.
     2. Transitions status to 'running'.
-    3. Instantiates MaljanApp and runs the pipeline.
+    3. Instantiates MalsparkApp and runs the pipeline.
     4. Saves the result as an AnalysisReport.
     5. Publishes progress events via Redis PubSub.
 
@@ -2907,14 +2907,14 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # ── 3. Run the pipeline ──────────────────────────────
         start_time = time.time()
 
-        from maljan.app import MaljanApp
+        from malspark.app import MalsparkApp
 
         logger.info(
             "Starting pipeline execution...",
             extra={"job_id": job_id, "component": "pipeline"},
         )
 
-        from maljan.core.config import install_settings
+        from malspark.core.config import install_settings
 
         # The plugin set this job runs with: the stored list read with its
         # settings, loaded off the event loop before the settings are built.
@@ -2970,7 +2970,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 "Fix them in the console; the job did not run on defaults in their place."
             ) from None
         # Agents, pipeline nodes and extractors read the process singleton
-        # (``get_settings()``), not the config handed to MaljanApp. With
+        # (``get_settings()``), not the config handed to MalsparkApp. With
         # ``max_jobs = 1`` installing this job's Settings there is what
         # makes a UI override reach every consumer, not only the container.
         # The object stays installed after the job: ``enrich_threat_intel``
@@ -3007,11 +3007,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         #   1. ``api.mock_mode_allowed`` — operator-level gate
         #      (defaults False; must be flipped via the settings store).
         #   2. Either the per-job ``config.mock_mode`` flag OR the
-        #      ``MALJAN_MOCK_MODE`` env var.
+        #      ``MALSPARK_MOCK_MODE`` env var.
         # A leaked env var alone is no longer sufficient — production
         # workers stay on the real LLM/sandbox path even if a stale
-        # shell exports ``MALJAN_MOCK_MODE=true``.
-        _env_mock = os.environ.get("MALJAN_MOCK_MODE", "false").lower() == "true"
+        # shell exports ``MALSPARK_MOCK_MODE=true``.
+        _env_mock = os.environ.get("MALSPARK_MOCK_MODE", "false").lower() == "true"
         _job_mock = bool(job_config.get("mock_mode"))
         _mock_requested = _env_mock or _job_mock
         _mock_mode_allowed = await runtime_config.get("mock_mode_allowed")
@@ -3052,17 +3052,17 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # finishes — the live feed and the permanent record are one list,
         # not two derivations that can drift.
         transcript: list[dict[str, Any]] = []
-        from maljan.core import memprobe
+        from malspark.core import memprobe
 
         memprobe.reset()
         memprobe.probe("job:start", job_id=job_id)
         # Whether the analysts run in parallel is decided from their
         # endpoints: a name resolved and a server's /props asked, which are
         # network round trips and do not belong on this loop.
-        from maljan.pipeline.analyst_mode import resolve_for
+        from malspark.pipeline.analyst_mode import resolve_for
 
         _analyst_mode = await asyncio.to_thread(resolve_for, core_settings, mock=_mock_active)
-        app = MaljanApp(
+        app = MalsparkApp(
             config=core_settings,
             mock=_mock_active,
             job_id=job_id,
@@ -3088,7 +3088,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         app.servers_listed = True
         # What the run shortens, blanks or drops from a ledger entry's answer
         # is kept whole in object storage under this job's prefix, and the
-        # entry references it (``maljan.schemas.evidence_spill``).
+        # entry references it (``malspark.schemas.evidence_spill``).
         from app.services import object_store
 
         app.container.set_evidence_spill(await object_store.job_evidence_spill(job_id))
@@ -3101,7 +3101,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # and checked in the session above; what is left here needs the
         # container rather than the database.
         if attached_report is not None:
-            from maljan.core.report_formats import UNREAD_FORMAT, UNREAD_RUN_REASON
+            from malspark.core.report_formats import UNREAD_FORMAT, UNREAD_RUN_REASON
 
             from app.api.v1.sandbox_reports import get_object
 
@@ -3191,7 +3191,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # Roster only — "waiting", not "analyzing". Analysts are serialised
         # on the single-slot local model, so marking them all busy up front
         # was simply false; each analyst node now announces its own start
-        # (see maljan.pipeline.nodes), which is the real signal.
+        # (see malspark.pipeline.nodes), which is the real signal.
         for agent_name in registered_agents:
             await _publish_event(
                 redis_conn,
@@ -3608,7 +3608,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # Every entry the job's counter issued is on the ledger that is
         # stored, including what no node drained (``with_undrained_evidence``);
         # gathered before the run summary below counts the ledger.
-        from maljan.pipeline.state import with_undrained_evidence
+        from malspark.pipeline.state import with_undrained_evidence
 
         pipeline_result = with_undrained_evidence(pipeline_result, getattr(app, "container", None))
         post_graph_result = pipeline_result
@@ -4016,13 +4016,13 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # user-cancelled path — this covers success, failure and
             # cancellation without re-indenting any of it.
             #
-            # ``aclose`` is total by construction (see MaljanApp.aclose), so a
+            # ``aclose`` is total by construction (see MalsparkApp.aclose), so a
             # failed teardown cannot turn a completed analysis into a failed
             # one. Whether it actually reclaims the memory is a separate
             # question, which is why the readings are logged either side of it
             # and why the worker also carries a hard recycle backstop.
             if app is not None:
-                from maljan.core import memprobe
+                from malspark.core import memprobe
 
                 memprobe.probe("job:before_teardown", job_id=job_id)
                 try:
@@ -4079,7 +4079,7 @@ def _roster_for(container: Any) -> dict[str, Any]:
     a label.
     """
     try:
-        from maljan.pipeline.events import roster_payload
+        from malspark.pipeline.events import roster_payload
 
         agents = container.config.agents
         return roster_payload(
@@ -4191,7 +4191,7 @@ def judge_bundle_json(bundle: dict) -> dict:
     hold the judge's bundle — its own record, and the report's bundle when no
     export was made — are written through here.
     """
-    from maljan.schemas.stix_models import Bundle
+    from malspark.schemas.stix_models import Bundle
 
     try:
         as_json = Bundle.model_validate(bundle).model_dump(mode="json")
@@ -4525,8 +4525,8 @@ async def repair_long_term_memory() -> str:
     start.
     """
     try:
-        from maljan.memory.memory_repair import repair_memory
-        from maljan.memory.store_factory import build_memory_store
+        from malspark.memory.memory_repair import repair_memory
+        from malspark.memory.store_factory import build_memory_store
 
         store = await asyncio.to_thread(build_memory_store, await runtime_config.core())
     except Exception as exc:  # noqa: BLE001 — a repair never costs a start
@@ -4550,7 +4550,7 @@ async def startup(ctx: dict) -> None:
     # Before any job, and so before any thread or the YARA engine loads: C code
     # in this process folds case by LC_CTYPE, and a Turkish one leaves a capital
     # I unfolded (``core.ctype_locale``).
-    from maljan.core.ctype_locale import pin_character_classification
+    from malspark.core.ctype_locale import pin_character_classification
 
     pin_character_classification()
 
@@ -4584,7 +4584,7 @@ async def startup(ctx: dict) -> None:
         # minus the environment read.
         core = build_settings({})
         remember_process_secrets(core)
-        from maljan.providers.registry import mirror_work_dirs
+        from malspark.providers.registry import mirror_work_dirs
 
         subdirs = mirror_work_dirs(core)
         sample_files.sweep(subdirs=subdirs)
@@ -4637,7 +4637,7 @@ async def startup(ctx: dict) -> None:
     # neither did a deployment whose worker restarted across the night's window.
     ctx["events_sweep_task"] = asyncio.create_task(purge_old_job_events(ctx))
     # Long-term memory kept before AUD-65, repaired once and beside the slot
-    # (``maljan.memory.memory_repair``).
+    # (``malspark.memory.memory_repair``).
     ctx["memory_repair_task"] = asyncio.create_task(repair_long_term_memory())
     # The console's ATT&CK cache jobs, read beside this worker's one analysis
     # slot rather than in it: this is the process that holds the cache.
@@ -4747,7 +4747,7 @@ async def _recycle_if_bloated(ctx: dict, *args: Any, **kwargs: Any) -> None:
     compose brings the worker back, and the existing startup orphan sweep
     repairs any job row left mid-flight.
     """
-    from maljan.core import memprobe
+    from malspark.core import memprobe
 
     rss = memprobe.rss_mb()
     if rss < _RSS_RESTART_MB:
@@ -4942,7 +4942,7 @@ def _report_inputs(
             # rule, and whoever reads the stored bundle is told.
             # Without the run facts that name other runs' samples (the earlier
             # run, the similar cases): the judge's own stored bundle keeps them.
-            from maljan.schemas.stix_models import (
+            from malspark.schemas.stix_models import (
                 JUDGE_ONLY_PROPERTIES,
                 UNPUBLISHED_NOTICE,
                 UNPUBLISHED_PROPERTY,
@@ -4955,7 +4955,7 @@ def _report_inputs(
                     if key not in JUDGE_ONLY_PROPERTIES
                 },
                 UNPUBLISHED_PROPERTY: False,
-                "x_maljan_notice": UNPUBLISHED_NOTICE,
+                "x_malspark_notice": UNPUBLISHED_NOTICE,
             }
     # Ensure STIX 2.1 ``spec_version`` is present on every bundle —
     # the OASIS spec requires it on top-level bundle objects, and
@@ -5000,14 +5000,14 @@ def _report_inputs(
     with_record(_run_summary, pipeline_result.get("malware_report"), sample_integrity)
     # A detonating sandbox's report that named another target than the sample
     # (``sandbox_target_of``), said in the same part; none adds nothing.
-    from maljan.analysis.sample_integrity import SANDBOX_KEY
+    from malspark.analysis.sample_integrity import SANDBOX_KEY
 
     with_record(
         _run_summary, pipeline_result.get("malware_report"), sandbox_target, key=SANDBOX_KEY
     )
     # A job whose memory was its own says so on the stored summary and on the
     # report's (``run_summary.ISOLATED_MEMORY_KEY``); every other is unchanged.
-    from maljan.analysis.run_summary import with_isolated_memory
+    from malspark.analysis.run_summary import with_isolated_memory
 
     with_isolated_memory(_run_summary, isolated_memory)
     _malware_report = pipeline_result.get("malware_report")
@@ -5034,7 +5034,7 @@ def _disclosed(
     without a record says why none was built (``analysis.disclosure.not_built``),
     so it is told apart from a run stored before the block existed.
     """
-    from maljan.analysis.disclosure import not_built, not_built_reason, with_enrichment
+    from malspark.analysis.disclosure import not_built, not_built_reason, with_enrichment
 
     record = run_summary.get("disclosure")
     if not isinstance(record, dict) or "models" not in record:
@@ -5072,8 +5072,8 @@ async def enrichment_plan(core_settings: Any) -> list[dict[str, Any]] | None:
     """
     if not await runtime_config.get("enrichment_enabled"):
         return None
-    from maljan.analysis.disclosure import registry_rows, unread_sources_row
-    from maljan.enrichment.declared import ASKED_KINDS
+    from malspark.analysis.disclosure import registry_rows, unread_sources_row
+    from malspark.enrichment.declared import ASKED_KINDS
 
     from app.services.enrichment_sources import (
         ENRICHMENT_SOURCES_PATH,
@@ -5374,7 +5374,7 @@ async def _store_the_report(
     # one transaction: a report whose citations resolve to nothing is
     # worse than one that was never saved.
     _ledger = pipeline_result.get("evidence_ledger") or []
-    from maljan.schemas.evidence import fit_structures_to_budget
+    from malspark.schemas.evidence import fit_structures_to_budget
 
     # The last pass before it is saved: each agent's kept bytes within its
     # budget, structures dropped first, texts untouched (a no-op for a ledger
@@ -5382,7 +5382,7 @@ async def _store_the_report(
     # A structure this pass drops is kept whole under the job's prefix first,
     # by the job's own store (``spill``, the container's) or, for a caller
     # without one, a store made now (``object_store.job_evidence_spill``).
-    from maljan.schemas.evidence_spill import settle_refs
+    from malspark.schemas.evidence_spill import settle_refs
 
     from app.services import object_store
 

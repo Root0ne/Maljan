@@ -30,10 +30,10 @@ from typing import Any
 import pytest
 from stix2validator import ValidationOptions, validate_instance
 
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.claim_coverage import claims_in_force, claims_not_discussed
-from maljan.reporting.models import (
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.claim_coverage import claims_in_force, claims_not_discussed
+from malspark.reporting.models import (
     CommandRow,
     EvidenceSection,
     FileHashes,
@@ -44,20 +44,20 @@ from maljan.reporting.models import (
     StaticAnalysis,
     TechnicalAnalysis,
 )
-from maljan.reporting.renderers import HtmlRenderer, MarkdownRenderer
-from maljan.reporting.renderers.pdf import PdfRenderer, PdfUnavailableError
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers import HtmlRenderer, MarkdownRenderer
+from malspark.reporting.renderers.pdf import PdfRenderer, PdfUnavailableError
+from malspark.reporting.renderers.stix_renderer import (
     PLATFORM_INDICATES_EDGE,
     ExtendedSTIXRenderer,
     sample_similarity_pattern,
 )
-from maljan.schemas.isr_models import (
+from malspark.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     UNVERIFIED_TECHNIQUE_MARKER,
     AgentISR,
     ClaimEvidence,
 )
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.stix_models import Bundle
 
 SHA256 = "36dabc40fa8983ce900a90b8156d2c754875fe1b5413a997843c4a0ef3908220"
 # Longer than every width a body cell was ever cut to, and ending in a word

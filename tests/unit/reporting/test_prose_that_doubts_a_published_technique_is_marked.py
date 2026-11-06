@@ -30,7 +30,7 @@ from typing import Any
 import pytest
 
 from app.services.report_service import with_current_iocs
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     CapabilityCell,
     FileHashes,
     FlaggedStatement,
@@ -41,11 +41,11 @@ from maljan.reporting.models import (
     TechnicalSubsection,
     TTPMapping,
 )
-from maljan.reporting.prose_decisions import (
+from malspark.reporting.prose_decisions import (
     PUBLISHED_TECHNIQUE_DOUBTED_CODE,
     statements_against_publication,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 
 KEPT = "kept by the judge when asked (The disassembly shows a gate with the 75 and 50 thresholds.)"

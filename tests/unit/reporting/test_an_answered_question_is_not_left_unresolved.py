@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import re
 
-from maljan.pipeline.nodes import _violations_from_rows
-from maljan.pipeline.validation import (
+from malspark.pipeline.nodes import _violations_from_rows
+from malspark.pipeline.validation import (
     ValidationTally,
     claims_kept_under_disputes_finding,
     validation_metrics,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 from tests.unit.reporting._report_shapes import rich_report
 
 
@@ -35,7 +35,7 @@ def test_the_kept_under_disputes_row_carries_answered_on_every_path() -> None:
 
 
 def test_an_ordinary_row_carries_no_answered_key() -> None:
-    from maljan.pipeline.validation import claims_under_disputes_violation
+    from malspark.pipeline.validation import claims_under_disputes_violation
 
     assert "answered" not in claims_under_disputes_violation(1).to_dict()
 

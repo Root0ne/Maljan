@@ -13,16 +13,16 @@ import json
 import pathlib
 from types import SimpleNamespace
 
-from maljan.agents.judge_agent import verdict_report_parts
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.pipeline.debate_facts import ledger_count_facts
-from maljan.pipeline.nodes import (
+from malspark.agents.judge_agent import verdict_report_parts
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.pipeline.debate_facts import ledger_count_facts
+from malspark.pipeline.nodes import (
     answer_with_retry_additions,
     retry_additions_report,
     retry_additions_sentence,
 )
-from maljan.pipeline.validation import count_claim_blocks, mark_claims_citing_only_failed_calls
-from maljan.schemas.isr_models import (
+from malspark.pipeline.validation import count_claim_blocks, mark_claims_citing_only_failed_calls
+from malspark.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     UNVERIFIED_TECHNIQUE_MARKER,
     AgentISR,

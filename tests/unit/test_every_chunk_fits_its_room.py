@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     ARGUMENTS_HELD,
     EARLIER_CALLS_BY_TOOL,
     EARLIER_CHUNKS_COMPACT_HEAD,
@@ -36,8 +36,8 @@ from maljan.agents.base_agent import (
     earlier_chunks_compact,
     fitted_chunk,
 )
-from maljan.core.config import ChunkingConfig
-from maljan.loaders.binary_chunker import (
+from malspark.core.config import ChunkingConfig
+from malspark.loaders.binary_chunker import (
     CHUNK_CHARS,
     SIZED_BY,
     SIZED_BY_ROOM,
@@ -48,7 +48,7 @@ from maljan.loaders.binary_chunker import (
     joined_when_it_fits,
     within_the_room,
 )
-from maljan.schemas.isr_models import AgentISR
+from malspark.schemas.isr_models import AgentISR
 from tests.unit._chunking_doubles import _chunk, _room
 
 DOMAINS = ("triage", "network", "static", "dynamic")
@@ -106,7 +106,7 @@ class TestABinNeverPassesItsSize:
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         chunker = BinaryChunker(ChunkingConfig(overlap_tokens=1_000))
-        with caplog.at_level(logging.WARNING, logger="maljan"):
+        with caplog.at_level(logging.WARNING, logger="malspark"):
             chunks = chunker.chunk(
                 "network",
                 "".join(f"Flow {i}:\n" + "y" * 900 + "\n" for i in range(20)),
@@ -216,7 +216,7 @@ class _Reverser:
 
     def __init__(self, room: int, calls_per_chunk: int) -> None:
         self.name = "all_tools_reverser_ghidra"
-        self.logger = logging.getLogger("maljan")
+        self.logger = logging.getLogger("malspark")
         self._room = room
         self._calls = calls_per_chunk
         self._evidence_entries: list = []
@@ -495,7 +495,7 @@ class TestTheCompactListKeepsEveryCallsArguments:
 def test_the_loops_are_the_count_forms_and_lists_take_only_the_slack(
     calls: int, overlap: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import maljan.agents.base_agent as base
+    import malspark.agents.base_agent as base
 
     room = 25_832
     flows = (f"- 203.0.{i % 250}.{i % 199}:443 flow {i:07d}\n" for i in range(11_000))
@@ -522,7 +522,7 @@ def _run_and_project(
     chunks: list, room: int, calls: int, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[list[str], int]:
     """The prompts a pass sends, and the loops of the same pass with only the count form."""
-    import maljan.agents.base_agent as base
+    import malspark.agents.base_agent as base
 
     sent = _Reverser(room, calls_per_chunk=calls)
     sent.safe_analyze_isr_chunked(chunks)
@@ -646,8 +646,8 @@ def test_near_room_joins_run_one_loop_each() -> None:
 
 
 def test_a_carried_rest_shorter_than_the_overlap_holds_nothing_twice() -> None:
-    from maljan.agents.base_agent import _past_overlap
-    from maljan.loaders.binary_chunker import OVERLAP_IN
+    from malspark.agents.base_agent import _past_overlap
+    from malspark.loaders.binary_chunker import OVERLAP_IN
 
     piece = "abcdefghij" * 10
     after = _chunk(piece[-40:] + "NEXT", 1, 2)

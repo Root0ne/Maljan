@@ -10,9 +10,9 @@ import sys
 
 import pytest
 
-from maljan.core.spend import carrying, current_admission
-from maljan.llm.stream_watch import _RULE as _RULE_VAR
-from maljan.llm.stream_watch import current_rule, ends_recorded, watching
+from malspark.core.spend import carrying, current_admission
+from malspark.llm.stream_watch import _RULE as _RULE_VAR
+from malspark.llm.stream_watch import current_rule, ends_recorded, watching
 
 
 def _rule() -> object:
@@ -64,7 +64,7 @@ def test_a_watch_inside_a_task_torn_down_by_the_loop_closing_resets_quietly(
         task = loop.create_task(hold())
         loop.run_until_complete(asyncio.sleep(0))
         assert not task.done()
-        with caplog.at_level(logging.WARNING, logger="maljan.core.context_reset"):
+        with caplog.at_level(logging.WARNING, logger="malspark.core.context_reset"):
             # The coroutine is closed from the GC's context, not the task's.
             contextvars.copy_context().run(task.get_coro().close)  # type: ignore[union-attr]
     finally:
@@ -76,4 +76,4 @@ def test_a_watch_inside_a_task_torn_down_by_the_loop_closing_resets_quietly(
     # The value lived in the task's own context only, and this one is untouched.
     assert entered_in and entered_in[0].get(_RULE_VAR) is _rule
     assert current_rule() is None
-    assert any("maljan_stream_stop_rule" in r.getMessage() for r in caplog.records)
+    assert any("malspark_stream_stop_rule" in r.getMessage() for r in caplog.records)

@@ -24,18 +24,18 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.extractors.network_extractor import address_is_publishable, ip_corroboration_reason
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.ledger_projection import network_from_ledger
-from maljan.reporting.models import (
+from malspark.extractors.network_extractor import address_is_publishable, ip_corroboration_reason
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.ledger_projection import network_from_ledger
+from malspark.reporting.models import (
     MalwareReport,
     NetworkDomain,
     NetworkIOCs,
     NetworkIP,
     NetworkURL,
 )
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.schemas.evidence import build_entry
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.schemas.evidence import build_entry
 
 # The shapes a string sweep produces: version numbers, build numbers, and the
 # ranges a specification writes its examples with.
@@ -286,8 +286,8 @@ class TestWhatIsSentToAProvider:
         import asyncio
         from unittest.mock import AsyncMock, MagicMock
 
-        from maljan.enrichment.declared import ReadySource, effective_sources
-        from maljan.enrichment.orchestrator import _enrich_ips
+        from malspark.enrichment.declared import ReadySource, effective_sources
+        from malspark.enrichment.orchestrator import _enrich_ips
 
         asker = MagicMock()
         asker.ask = AsyncMock(return_value=None)

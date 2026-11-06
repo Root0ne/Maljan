@@ -31,7 +31,7 @@ def test_snapshot_records_overridden_keys():
 
 
 def test_install_settings_replaces_the_process_singleton():
-    from maljan.core import config as core_config
+    from malspark.core import config as core_config
 
     s = build_job_settings({"negotiation.max_iterations": 7}, None)
     try:

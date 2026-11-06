@@ -27,14 +27,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.services.report_service import ReportService  # noqa: E402
-from maljan.reporting.models import MalwareReport  # noqa: E402
+from malspark.reporting.models import MalwareReport  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _stored_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """The store as a fresh deployment holds it: the settings' defaults, read with no database."""
     from app.services import settings_service
-    from maljan.core.config import get_settings
+    from malspark.core.config import get_settings
 
     async def _effective(db: Any) -> Any:
         return get_settings()

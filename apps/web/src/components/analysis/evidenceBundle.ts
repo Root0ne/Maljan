@@ -2,7 +2,7 @@
  * The evidence bundle, read for the console's Evidence tab.
  *
  * The bundle is the record behind the analyst report
- * (`maljan-evidence-bundle/1`, served at `/evidence-bundle.json`): the notes
+ * (`malspark-evidence-bundle/1`, served at `/evidence-bundle.json`): the notes
  * the report cites, the evidence index (one row per tool call) and every
  * section of the single-file report as Markdown under its anchor. The
  * console draws it as the bundle's HTML does, with the same anchors, so a
@@ -12,7 +12,7 @@
 
 import { inlineText, subsectionTitles } from "./safeMarkdown";
 
-export const BUNDLE_FORMAT = "maljan-evidence-bundle/1";
+export const BUNDLE_FORMAT = "malspark-evidence-bundle/1";
 
 /** The anchors of the two sections the console draws from the bundle's data
  *  rather than from their Markdown. */

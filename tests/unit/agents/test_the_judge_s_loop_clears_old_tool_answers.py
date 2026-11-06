@@ -16,9 +16,9 @@ from collections.abc import Iterator
 from typing import Any
 from unittest.mock import patch
 
-from maljan.agents import tool_answer_clearing as tac
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.pipeline.events import TOOL_ANSWERS_CLEARED
+from malspark.agents import tool_answer_clearing as tac
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.pipeline.events import TOOL_ANSWERS_CLEARED
 
 from .test_old_tool_answers_are_cleared import (
     TASK,
@@ -33,8 +33,8 @@ from .test_old_tool_answers_are_cleared import (
 @contextlib.contextmanager
 def _settings(steps: int | None = None) -> Iterator[None]:
     with (
-        patch("maljan.agents.base_agent.get_settings") as base,
-        patch("maljan.agents.judge_agent.get_settings") as judge,
+        patch("malspark.agents.base_agent.get_settings") as base,
+        patch("malspark.agents.judge_agent.get_settings") as judge,
     ):
         for patched in (base, judge):
             cfg = patched.return_value

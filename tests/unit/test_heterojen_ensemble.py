@@ -24,8 +24,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.core.config import AgentLLMConfig, LLMConfig, Settings
-from maljan.core.exceptions import ConfigurationError
+from malspark.core.config import AgentLLMConfig, LLMConfig, Settings
+from malspark.core.exceptions import ConfigurationError
 
 # ---------------------------------------------------------------------------
 # AgentLLMConfig
@@ -117,7 +117,7 @@ class TestLLMConfigAgents:
 
 def _make_registry(agents: dict | None = None) -> object:
     """Create a registry with mocked provider registry."""
-    from maljan.llm.registry import LLMProviderRegistry
+    from malspark.llm.registry import LLMProviderRegistry
 
     cfg = Settings(
         llm=LLMConfig(
@@ -143,7 +143,7 @@ def _make_registry(agents: dict | None = None) -> object:
 class TestBuildModelForAgent:
     def _make_registry_patched(self, agents: dict | None = None):
         """Create registry with _PROVIDER_REGISTRY patched."""
-        from maljan.llm.registry import LLMProviderRegistry
+        from malspark.llm.registry import LLMProviderRegistry
 
         cfg = Settings(llm=LLMConfig(provider="openai", agents=agents or {}))
         registry = LLMProviderRegistry.__new__(LLMProviderRegistry)
@@ -172,7 +172,7 @@ class TestBuildModelForAgent:
         mock_provider = MagicMock(build_model=MagicMock(return_value=mock_model))
         mock_cls = MagicMock(return_value=mock_provider)
 
-        with patch("maljan.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
+        with patch("malspark.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
             result = registry.build_model_for_agent("STATIC")  # uppercase
         assert result is mock_model
 
@@ -184,7 +184,7 @@ class TestBuildModelForAgent:
         mock_provider = MagicMock(build_model=MagicMock(return_value=mock_model))
         mock_cls = MagicMock(return_value=mock_provider)
 
-        with patch("maljan.llm.registry._PROVIDER_REGISTRY", {"anthropic": mock_cls}):
+        with patch("malspark.llm.registry._PROVIDER_REGISTRY", {"anthropic": mock_cls}):
             result = registry.build_model_for_agent("dynamic")
 
         mock_provider.build_model.assert_called_once()
@@ -216,7 +216,7 @@ class TestBuildModelForAgent:
         mock_provider = MagicMock(build_model=MagicMock(return_value=mock_model))
         mock_cls = MagicMock(return_value=mock_provider)
 
-        with patch("maljan.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
+        with patch("malspark.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
             registry.build_model_for_agent("network")
 
         call_kwargs = mock_provider.build_model.call_args
@@ -230,7 +230,7 @@ class TestBuildModelForAgent:
         mock_provider = MagicMock(build_model=MagicMock(return_value=mock_model))
         mock_cls = MagicMock(return_value=mock_provider)
 
-        with patch("maljan.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
+        with patch("malspark.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
             registry.build_model_for_agent("static")
 
         call_kwargs = mock_provider.build_model.call_args
@@ -238,7 +238,7 @@ class TestBuildModelForAgent:
 
     def test_unknown_provider_in_override_is_refused_by_the_builder(self) -> None:
         """An entry past the save check is refused at build, never built on the global model."""
-        from maljan.core.exceptions import LLMError
+        from malspark.core.exceptions import LLMError
 
         registry = self._make_registry_patched(agents={})
         registry._config.llm.agents["static"] = AgentLLMConfig.model_construct(
@@ -250,7 +250,7 @@ class TestBuildModelForAgent:
             fallbacks=[],
         )
         with patch.object(registry, "build_model") as mock_build:
-            with patch("maljan.llm.registry._PROVIDER_REGISTRY", {"openai": MagicMock()}):
+            with patch("malspark.llm.registry._PROVIDER_REGISTRY", {"openai": MagicMock()}):
                 with pytest.raises(LLMError, match="not registered"):
                     registry.build_model_for_agent("static")
             mock_build.assert_not_called()
@@ -260,7 +260,7 @@ class TestPerAgentBaseUrl:
     """Two agents, two local servers: the endpoint travels with the agent."""
 
     def _registry(self, agents: dict):
-        from maljan.llm.registry import LLMProviderRegistry
+        from malspark.llm.registry import LLMProviderRegistry
 
         cfg = Settings(llm=LLMConfig(provider="openai", agents=agents))
         registry = LLMProviderRegistry.__new__(LLMProviderRegistry)
@@ -277,7 +277,7 @@ class TestPerAgentBaseUrl:
         mock_provider = MagicMock(build_model=MagicMock(return_value=MagicMock()))
         mock_cls = MagicMock(return_value=mock_provider)
 
-        with patch("maljan.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
+        with patch("malspark.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
             registry.build_model_for_agent("static")
 
         kwargs = mock_provider.build_model.call_args.kwargs
@@ -289,7 +289,7 @@ class TestPerAgentBaseUrl:
         mock_provider = MagicMock(build_model=MagicMock(return_value=MagicMock()))
         mock_cls = MagicMock(return_value=mock_provider)
 
-        with patch("maljan.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
+        with patch("malspark.llm.registry._PROVIDER_REGISTRY", {"openai": mock_cls}):
             registry.build_model_for_agent("static")
 
         assert "base_url" not in mock_provider.build_model.call_args.kwargs
@@ -299,8 +299,8 @@ class TestProvidersHonourTheKwarg:
     """A per-agent local server gets the same treatment as a global one."""
 
     def test_openai_prefers_the_kwarg_and_keeps_the_llama_cpp_extras(self) -> None:
-        from maljan.core.config import OpenAIConfig
-        from maljan.llm.openai_provider import OpenAIProvider
+        from malspark.core.config import OpenAIConfig
+        from malspark.llm.openai_provider import OpenAIProvider
 
         cfg = Settings(
             llm=LLMConfig(
@@ -324,8 +324,8 @@ class TestProvidersHonourTheKwarg:
 
     def test_openai_treats_a_kwarg_only_endpoint_as_local(self) -> None:
         """No global base_url at all: the per-agent one still turns the extras on."""
-        from maljan.core.config import OpenAIConfig
-        from maljan.llm.openai_provider import OpenAIProvider
+        from malspark.core.config import OpenAIConfig
+        from malspark.llm.openai_provider import OpenAIProvider
 
         cfg = Settings(
             llm=LLMConfig(
@@ -343,8 +343,8 @@ class TestProvidersHonourTheKwarg:
         assert kwargs["extra_body"]["repeat_penalty"] == pytest.approx(1.1)
 
     def test_ollama_prefers_the_kwarg(self) -> None:
-        from maljan.core.config import OllamaConfig
-        from maljan.llm.ollama_provider import OllamaProvider
+        from malspark.core.config import OllamaConfig
+        from malspark.llm.ollama_provider import OllamaProvider
 
         cfg = Settings(
             llm=LLMConfig(
@@ -360,8 +360,8 @@ class TestProvidersHonourTheKwarg:
         assert mock_chat.call_args.kwargs["base_url"] == "http://gpu-box:11434"
 
     def test_ollama_falls_back_to_the_global_endpoint(self) -> None:
-        from maljan.core.config import OllamaConfig
-        from maljan.llm.ollama_provider import OllamaProvider
+        from malspark.core.config import OllamaConfig
+        from malspark.llm.ollama_provider import OllamaProvider
 
         cfg = Settings(
             llm=LLMConfig(
@@ -384,7 +384,7 @@ class TestContainerGetAgentLLM:
     def _make_container(self, agents: dict | None = None) -> object:
         import threading
 
-        from maljan.core.container import PerLoopModels, ServiceContainer
+        from malspark.core.container import PerLoopModels, ServiceContainer
 
         container = ServiceContainer.__new__(ServiceContainer)
         container.config = Settings(llm=LLMConfig(agents=agents or {}))
@@ -406,7 +406,7 @@ class TestContainerGetAgentLLM:
         # Analyst models carry the expert output cap:
         # the analyst path was the only unbounded LLM call in the system and a
         # single forced-synthesis call was measured running 19+ minutes.
-        from maljan.llm.context_window import output_cap_for
+        from malspark.llm.context_window import output_cap_for
 
         derived = output_cap_for(container.config, "expert_max_tokens", "static")
         container._llm_registry.build_model_for_agent.assert_called_once_with(
@@ -451,7 +451,7 @@ class TestContainerGetAgentLLM:
     def test_mock_mode_raises(self) -> None:
         import threading
 
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer.__new__(ServiceContainer)
         container._llm_registry = None
@@ -469,8 +469,8 @@ class TestContainerGetAgentLLM:
 
 class TestContainerGetAgentUsesAgentLLM:
     def test_get_agent_calls_get_agent_llm_not_expert(self) -> None:
-        from maljan.agents.static_analyst import StaticAnalyst
-        from maljan.core.container import ServiceContainer
+        from malspark.agents.static_analyst import StaticAnalyst
+        from malspark.core.container import ServiceContainer
 
         # ``mock=True`` at construction avoids building a real LLM registry;
         # flipping it back off afterwards exercises ``resolve_agent``'s
@@ -492,7 +492,7 @@ class TestContainerGetAgentUsesAgentLLM:
     def test_get_agent_cache_hit_does_not_rebuild_llm(self) -> None:
         import threading
 
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer.__new__(ServiceContainer)
 

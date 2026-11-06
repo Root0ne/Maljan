@@ -166,7 +166,7 @@ UNSET = (
 
 
 def _withheld() -> str:
-    from maljan.providers.sample_open import UNCOVERED, withheld_unpinned
+    from malspark.providers.sample_open import UNCOVERED, withheld_unpinned
 
     return withheld_unpinned("remote http://localhost:8089 (backend 1)", "open_project", UNCOVERED)
 

@@ -12,7 +12,7 @@ import sys
 import atheris
 
 with atheris.instrument_imports():
-    from maljan.agents import findings_block
+    from malspark.agents import findings_block
 
 # The fence's language tag, read from the parser's own pattern so the harness
 # opens the block exactly as the parser looks for it.

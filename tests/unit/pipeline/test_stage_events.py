@@ -15,9 +15,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.pipeline.builder import build_graph
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.pipeline.builder import build_graph
 
 
 def _state(**over: Any) -> dict[str, Any]:
@@ -238,8 +238,8 @@ class TestALedgerEntrySaysWhichStageMadeTheCall:
     """
 
     def test_the_judge_records_the_stage_the_node_put_it_in(self) -> None:
-        from maljan.agents.evidence_recorder import EvidenceRecorder
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.evidence_recorder import EvidenceRecorder
+        from malspark.agents.judge_agent import JudgeAgent
 
         judge = JudgeAgent.__new__(JudgeAgent)
         # The default, for a judge nobody staged — a script, a test, the CLI.
@@ -254,7 +254,7 @@ class TestALedgerEntrySaysWhichStageMadeTheCall:
         half way still has its tool calls filed under the verdict stage."""
         from unittest.mock import MagicMock
 
-        from maljan.pipeline.nodes import make_judge_node
+        from malspark.pipeline.nodes import make_judge_node
 
         settings = Settings(_env_file=None)
         stage = settings.agents.profiles["default"].stage("verdict")
@@ -277,7 +277,7 @@ class TestALedgerEntrySaysWhichStageMadeTheCall:
     def test_the_debate_node_stages_its_mediator_as_the_debate(self) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.pipeline.nodes import make_negotiation_node
+        from malspark.pipeline.nodes import make_negotiation_node
 
         settings = Settings(_env_file=None)
         stage = settings.agents.profiles["default"].stage("debate")
@@ -299,9 +299,9 @@ class TestALedgerEntrySaysWhichStageMadeTheCall:
         assert judge.pipeline_stage == "debate"
 
     def test_the_report_s_own_rows_carry_the_report_stage(self) -> None:
-        from maljan.providers.base import StaticEvidenceBundle
-        from maljan.providers.static.capa_yara import ledger_entries
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.providers.base import StaticEvidenceBundle
+        from malspark.providers.static.capa_yara import ledger_entries
+        from malspark.schemas.evidence import EvidenceCounter
 
         bundle = StaticEvidenceBundle(
             yara_matches=[{"rule": "ransom_note", "strings": [], "technique": "T1486"}]
@@ -310,9 +310,9 @@ class TestALedgerEntrySaysWhichStageMadeTheCall:
         assert entry.stage == "report"
 
     def test_those_rows_default_to_analysis_outside_a_staged_run(self) -> None:
-        from maljan.providers.base import StaticEvidenceBundle
-        from maljan.providers.static.capa_yara import ledger_entries
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.providers.base import StaticEvidenceBundle
+        from malspark.providers.static.capa_yara import ledger_entries
+        from malspark.schemas.evidence import EvidenceCounter
 
         bundle = StaticEvidenceBundle(
             yara_matches=[{"rule": "ransom_note", "strings": [], "technique": "T1486"}]
@@ -321,7 +321,7 @@ class TestALedgerEntrySaysWhichStageMadeTheCall:
         assert entry.stage == "analysis"
 
     def test_an_analyst_s_own_entries_still_carry_their_stage(self) -> None:
-        from maljan.agents.evidence_recorder import EvidenceRecorder
+        from malspark.agents.evidence_recorder import EvidenceRecorder
 
         assert EvidenceRecorder("static", stage="triage").stage == "triage"
 

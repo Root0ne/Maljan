@@ -39,7 +39,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from maljan.reporting.composer import _section_declined, _unwrap_section_envelope
+from malspark.reporting.composer import _section_declined, _unwrap_section_envelope
 
 
 class _Demo(BaseModel):

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents._indicator_denylists import whole_value_in
+from malspark.agents._indicator_denylists import whole_value_in
 
 # Every haystack below is lowercased, because the corpus reaches this function
 # lowercased and the function lowercases only the value it is asked about.

@@ -296,8 +296,8 @@ def reach_reads_the_six_rows_of_one_source() -> None:
 def the_registered_backend_is_built_by_the_products_factory() -> None:
     from scripts.validation import memory_backend
 
-    from maljan.core.settings_overrides import build_settings
-    from maljan.memory.store_factory import build_memory_store, registered_backends
+    from malspark.core.settings_overrides import build_settings
+    from malspark.memory.store_factory import build_memory_store, registered_backends
 
     store = memory_backend.register()
     try:

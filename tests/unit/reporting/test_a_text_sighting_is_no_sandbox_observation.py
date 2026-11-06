@@ -20,8 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import (
     EvidenceSection,
     FileHashes,
     JudgeIndicator,
@@ -31,14 +31,14 @@ from maljan.reporting.models import (
     NetworkIP,
     SampleIdentity,
 )
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers.stix_renderer import (
     CAPTURE_TLS_NAME,
     emulation_kwargs,
     publish_answer,
     publishes,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, Artifact
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, Artifact
 from tests.unit.reporting._sandbox_fact import answered_the_sandbox_fact
 
 NAME = "relay-alpha-7f3c.top"

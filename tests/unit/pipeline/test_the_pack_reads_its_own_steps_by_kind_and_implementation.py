@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline import triage_pack
+from malspark.pipeline import triage_pack
 
 
 def test_the_shipped_tools_read_as_the_kinds_the_table_names() -> None:
@@ -52,7 +52,7 @@ def test_a_renamed_tool_of_the_kind_is_read_as_the_shipped_one(
     def record(source: str, tool: str, **_: Any) -> dict[str, Any] | None:
         return {"v": 1, "kind": kind} if tool == "acme_lookup" else None
 
-    monkeypatch.setattr("maljan.core.declared_reading.facts_record", record)
+    monkeypatch.setattr("malspark.core.declared_reading.facts_record", record)
     established = triage_pack._ESTABLISHED.get(triage_pack._pack_kind("acme_lookup"))
     assert established is not None
     assert established(nothing) is False

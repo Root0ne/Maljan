@@ -21,18 +21,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import Settings
-from maljan.pipeline.mediation_models import (
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.core.config import Settings
+from malspark.pipeline.mediation_models import (
     MEDIATOR_NO_ANSWER,
     MediatorVerdict,
     mediator_no_answer_note,
 )
-from maljan.pipeline.nodes import make_negotiation_node
-from maljan.pipeline.routing import NOT_MEDIATED, ConsensusRouter, debate_route
-from maljan.pipeline.state import AgentArgument
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.nodes import make_negotiation_node
+from malspark.pipeline.routing import NOT_MEDIATED, ConsensusRouter, debate_route
+from malspark.pipeline.state import AgentArgument
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 _THINKING = {"type": "thinking", "thinking": "", "signature": "c2lnbmF0dXJl"}
 
@@ -137,7 +137,7 @@ class TestTheMediatorRecordsNoAnswer:
         with (
             patch.object(judge, "_spend_admits", return_value=512),
             patch(
-                "maljan.llm.context_window.output_bound_kwargs",
+                "malspark.llm.context_window.output_bound_kwargs",
                 return_value={"max_tokens": 512},
             ),
             patch.object(judge, "_built_cap_tokens", return_value=128000),
@@ -155,7 +155,7 @@ class TestTheMediatorRecordsNoAnswer:
         assert model.calls == 1
 
     def test_a_second_ask_the_spend_ceiling_refuses_is_stated_as_refused(self) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         model = _Says(_empty())
         judge = JudgeAgent(llm=model)  # type: ignore[arg-type]
@@ -197,7 +197,7 @@ class TestTheMediatorRecordsNoAnswer:
         )
 
     def test_a_first_call_the_spend_ceiling_refuses_is_stated_as_not_admitted(self) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         model = _Says(_empty())
         judge = JudgeAgent(llm=model)  # type: ignore[arg-type]
@@ -271,7 +271,7 @@ class TestTheMediatorRecordsNoAnswer:
     def test_a_failed_salvage_call_is_recorded_as_failed(self) -> None:
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        import maljan.agents.judge_agent as judge_agent
+        import malspark.agents.judge_agent as judge_agent
 
         class _Fails:
             async def ainvoke(self, _messages: Any, **_kw: Any) -> AIMessage:
@@ -344,7 +344,7 @@ def _no_answer() -> AgentArgument:
 class TestTheRoundIsNotMediated:
     def _round(self) -> dict[str, Any]:
         container = _container((_no_answer(), None))
-        with patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False):
+        with patch("malspark.pipeline.nodes.detect_sycophancy", return_value=False):
             return asyncio.run(make_negotiation_node(container)(CLAIMING_STATE))
 
     def test_the_node_records_no_agreement_and_keeps_consensus_applicable(self) -> None:
@@ -388,8 +388,8 @@ class TestTheRoundIsNotMediated:
         assert summary.to_dict()["negotiation"]["termination_reason"] == NOT_MEDIATED
 
     def test_the_run_summary_and_the_report_say_the_mediator_wrote_no_answer(self) -> None:
-        from maljan.reporting.models import MalwareReport
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.models import MalwareReport
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         summary = (
             RunSummaryBuilder(start_time=0.0)
@@ -408,7 +408,7 @@ class TestTheRoundIsNotMediated:
         assert note in MarkdownRenderer().render(report)
 
     def test_the_outer_cap_covers_every_call_a_mediation_can_make(self) -> None:
-        from maljan.agents.judge_agent import MEDIATION_CALL_SPANS
+        from malspark.agents.judge_agent import MEDIATION_CALL_SPANS
 
         caps: list[float | None] = []
 
@@ -418,9 +418,9 @@ class TestTheRoundIsNotMediated:
 
         container = _container((_no_answer(), None))
         with (
-            patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False),
-            patch("maljan.agents.base_agent.loop_limits", return_value=(100, 8)),
-            patch("maljan.agents.base_agent.run_on_agent_loop", _on_agent_loop),
+            patch("malspark.pipeline.nodes.detect_sycophancy", return_value=False),
+            patch("malspark.agents.base_agent.loop_limits", return_value=(100, 8)),
+            patch("malspark.agents.base_agent.run_on_agent_loop", _on_agent_loop),
         ):
             asyncio.run(make_negotiation_node(container)(CLAIMING_STATE))
 
@@ -432,7 +432,7 @@ class TestTheRoundIsNotMediated:
         events: list[tuple[str, dict]] = []
         container = _container((_no_answer(), None))
         container.event_sink = lambda kind, data: events.append((kind, data))
-        with patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False):
+        with patch("malspark.pipeline.nodes.detect_sycophancy", return_value=False):
             asyncio.run(make_negotiation_node(container)(CLAIMING_STATE))
 
         said = [str(data.get("text", "")) for _kind, data in events]

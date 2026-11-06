@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from maljan.extractors.capability_matrix import _TACTIC_BY_SLUG, _resolve_tactic
-from maljan.memory import attck_loader
-from maljan.memory.attck_index import ATTCKIndex
-from maljan.memory.attck_loader import _load_raw_bundle, _parse_tactics
+from malspark.extractors.capability_matrix import _TACTIC_BY_SLUG, _resolve_tactic
+from malspark.memory import attck_loader
+from malspark.memory.attck_index import ATTCKIndex
+from malspark.memory.attck_loader import _load_raw_bundle, _parse_tactics
 
 # ---------------------------------------------------------------------------
 # Fixture bundle: a v19-shaped slice (Stealth TA0005 + Defense Impairment TA0112)
@@ -149,7 +149,7 @@ class TestCacheTTL:
         def boom(url: str) -> dict:
             raise AssertionError("fresh cache must not trigger a fetch")
 
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", boom)
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", boom)
         raw = _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=30)
         assert raw["objects"][0]["x_mitre_version"] == "fresh"
 
@@ -158,7 +158,7 @@ class TestCacheTTL:
         _write_bundle(cache, "old")
         _age(cache, 60)
         monkeypatch.setattr(
-            "maljan.memory.attck_loader._fetch_bundle",
+            "malspark.memory.attck_loader._fetch_bundle",
             lambda url: _refreshed_bundle("new"),
         )
         raw = _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=30)
@@ -174,7 +174,7 @@ class TestCacheTTL:
         def fail(url: str) -> dict:
             raise RuntimeError("network down")
 
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", fail)
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", fail)
         raw = _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=30)
         # A failed refresh must not break the run — the stale cache is reused.
         assert raw["objects"][0]["x_mitre_version"] == "stale"
@@ -189,7 +189,7 @@ class TestCacheTTL:
         def boom(url: str) -> dict:
             raise AssertionError("max_age<=0 must not refresh")
 
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", boom)
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", boom)
         raw = _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=0)
         assert raw["objects"][0]["x_mitre_version"] == "ancient"
 
@@ -199,7 +199,7 @@ class TestCacheTTL:
         monkeypatch.delenv(attck_loader.ATTCK_REFRESH_DAYS_ENV, raising=False)
         assert attck_loader._default_max_age_days() == 7
         monkeypatch.setattr(
-            "maljan.memory.attck_loader._fetch_bundle",
+            "malspark.memory.attck_loader._fetch_bundle",
             lambda url: _refreshed_bundle("new"),
         )
         six_days = tmp_path / "six.json"
@@ -219,7 +219,7 @@ class TestCacheTTL:
         monkeypatch.setenv(attck_loader.ATTCK_REFRESH_DAYS_ENV, "30")
         assert attck_loader._default_max_age_days() == 30
         monkeypatch.setattr(
-            "maljan.memory.attck_loader._fetch_bundle",
+            "malspark.memory.attck_loader._fetch_bundle",
             lambda url: _refreshed_bundle("new"),
         )
         twenty_days = tmp_path / "twenty.json"
@@ -236,7 +236,7 @@ class TestCacheTTL:
         def boom(url: str) -> dict:
             raise AssertionError("an interval of 0 must not refresh")
 
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", boom)
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", boom)
         cache = tmp_path / "old.json"
         _write_bundle(cache, "ancient")
         _age(cache, 9999)
@@ -253,14 +253,14 @@ class TestCacheTTL:
 
     def test_the_retired_variable_is_read_no_more(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(attck_loader.ATTCK_REFRESH_DAYS_ENV, raising=False)
-        monkeypatch.setenv("MALJAN_ATTCK_MAX_AGE_DAYS", "0")
+        monkeypatch.setenv("MALSPARK_ATTCK_MAX_AGE_DAYS", "0")
         assert attck_loader._default_max_age_days() == 7
 
     def test_the_container_announces_the_stored_interval(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         # Set first so the value the container writes is taken back afterwards.
         monkeypatch.setenv(attck_loader.ATTCK_REFRESH_DAYS_ENV, "7")
@@ -288,7 +288,7 @@ class TestCacheTTL:
         _age(cache, 60)
         aged = cache.stat().st_mtime
         before = cache.read_text(encoding="utf-8")
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", lambda url: download)
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", lambda url: download)
         raw = _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=30)
         assert raw["objects"][0]["x_mitre_version"] == "stale"
         # Neither replaced nor made to look fresh.
@@ -299,13 +299,13 @@ class TestCacheTTL:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cache = tmp_path / "missing.json"
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", lambda url: {})
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", lambda url: {})
         with pytest.raises(RuntimeError, match="refused"):
             _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=30)
         assert not cache.exists()
 
     def test_the_save_itself_refuses_a_bundle_with_no_techniques(self, tmp_path: Path) -> None:
-        from maljan.memory import attck_update
+        from malspark.memory import attck_update
 
         target = tmp_path / "enterprise-attack.json"
         assert attck_update.save_refreshed_bundle({"objects": []}, target) is False
@@ -346,7 +346,7 @@ class TestCacheTTL:
             if download == "mobile"
             else self._bundle("enterprise-attack", 4)  # 4 < 5: two revoked ones left out
         )
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", lambda url: fresh)
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", lambda url: fresh)
         raw = _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=30)
         assert len(raw["objects"]) == 6, "the stale cache"
         record = json.loads(attck_loader.refusal_path(cache).read_text())
@@ -364,7 +364,7 @@ class TestCacheTTL:
             fetched.append(url)
             return {}
 
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", _empty)
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", _empty)
         _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=30)
         _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=30)
         assert fetched == ["http://x"], "one download until the interval has passed"
@@ -380,12 +380,12 @@ class TestCacheTTL:
         cache = tmp_path / "enterprise-attack.json"
         cache.write_text(json.dumps(self._bundle("enterprise-attack", 3, revoked=2)))
         smaller = self._bundle("enterprise-attack", 2)
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", lambda url: smaller)
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", lambda url: smaller)
         raw = _load_raw_bundle("http://x", cache, force_refresh=True, max_age_days=30)
         assert len(raw["objects"]) == 3, "the operator's refresh replaces the cache"
         assert not attck_loader.refusal_path(cache).exists()
         # Still refused when it is no bundle, and still without a stamp.
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", lambda url: {})
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", lambda url: {})
         raw = _load_raw_bundle("http://x", cache, force_refresh=True, max_age_days=30)
         assert len(raw["objects"]) == 3
         assert not attck_loader.refusal_path(cache).exists()
@@ -397,7 +397,7 @@ class TestCacheTTL:
         cache.write_text(json.dumps(self._bundle("enterprise-attack", 3)))
         _age(cache, 60)
         fresh = self._bundle("enterprise-attack", 3, revoked=1)
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", lambda url: fresh)
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", lambda url: fresh)
         raw = _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=30)
         assert len(raw["objects"]) == 5
 
@@ -409,7 +409,7 @@ class TestCacheTTL:
         def fail(url: str) -> dict:
             raise RuntimeError("network down")
 
-        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", fail)
+        monkeypatch.setattr("malspark.memory.attck_loader._fetch_bundle", fail)
         with pytest.raises(RuntimeError):
             _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=30)
 

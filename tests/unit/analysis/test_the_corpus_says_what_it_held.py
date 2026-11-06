@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.agents.run_evidence_corpus import RunEvidenceCorpus, held_by
-from maljan.analysis.run_summary import RunSummaryBuilder, corpus_held_sentence
-from maljan.core.truncation_ledger import TruncationLedger
+from malspark.agents.run_evidence_corpus import RunEvidenceCorpus, held_by
+from malspark.analysis.run_summary import RunSummaryBuilder, corpus_held_sentence
+from malspark.core.truncation_ledger import TruncationLedger
 
 
 def _summary(snapshot: dict[str, Any]) -> dict[str, Any]:

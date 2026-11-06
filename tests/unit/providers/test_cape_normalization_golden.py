@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.schemas.sandbox_document import sandbox_document
-from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+from malspark.schemas.sandbox_document import sandbox_document
+from malspark.schemas.sandbox_report import cape_report_to_sandbox_report
 from tests.unit._ledger_helpers import sandbox_view
 from tests.unit.providers._document import as_published
 from tests.unit.providers.test_sandbox_tools_golden import cape_reports
@@ -169,7 +169,7 @@ def test_file_writes_survives_the_render_as_the_flat_list_it_is():
     assert rendered is not raw
     assert rendered["file_writes"] == ["/etc/rc.local", "/etc/ld.so.preload"]
 
-    from maljan.providers.sandbox_tools import sandbox_report_section
+    from malspark.providers.sandbox_tools import sandbox_report_section
 
     raw_section = sandbox_report_section(raw, "file_writes")
     rendered_section = sandbox_report_section(rendered, "file_writes")

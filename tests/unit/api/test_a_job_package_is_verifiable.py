@@ -30,9 +30,9 @@ from scripts.replay.stored import FILES
 
 from app.services import job_package, ledger_chain, run_export
 from app.worker.analysis_worker import _evidence_row
-from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
-from maljan.reporting.models import DynamicBehavior, FileHashes, MalwareReport, SampleIdentity
-from maljan.schemas.evidence import LedgerEntry
+from malspark.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+from malspark.reporting.models import DynamicBehavior, FileHashes, MalwareReport, SampleIdentity
+from malspark.schemas.evidence import LedgerEntry
 
 CHAIN = ledger_chain.derive_key("package-test-material")
 SIGNER = ledger_chain.derive_key("package-test-material", job_package.SIGNATURE_LABEL)
@@ -452,7 +452,7 @@ async def test_the_route_is_owner_only_and_streams_the_package(tmp_path: Path, m
     body = b"".join([chunk async for chunk in served.body_iterator])  # type: ignore[misc]
     assert body == b"package bytes"
     assert served.headers["content-disposition"] == (
-        f'attachment; filename="maljan-job-{job_id}.tar.gz"'
+        f'attachment; filename="malspark-job-{job_id}.tar.gz"'
     )
     assert served.headers["x-package-seal-status"] == "verified"
     assert served.headers["x-package-signed"] == "true"

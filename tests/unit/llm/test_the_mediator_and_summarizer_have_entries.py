@@ -36,7 +36,7 @@ def _body(model: Any) -> dict[str, Any]:
 
 @pytest.fixture
 def lines(caplog: pytest.LogCaptureFixture) -> Any:
-    from maljan.core.logger import logger
+    from malspark.core.logger import logger
 
     logger.addHandler(caplog.handler)
     caplog.set_level(logging.DEBUG)
@@ -76,7 +76,7 @@ class TestTheMediatorsEntry:
         assert _body(llm.models[1])["reasoning_effort"] == "low"
 
     def test_its_output_cap_is_derived_from_its_own_model(self, lines: Any) -> None:
-        from maljan.llm.context_window import output_cap_for
+        from malspark.llm.context_window import output_cap_for
 
         settings = deepseek_settings(
             mediator={"provider": "openai", "model": "local-model", "base_url": LOCAL}
@@ -89,7 +89,7 @@ class TestTheMediatorsEntry:
         assert f"Output cap for mediator: {cap.sentence}." in lines()
 
     def test_its_calls_are_recorded_under_its_own_model(self) -> None:
-        from maljan.core.model_assignments import model_label_for
+        from malspark.core.model_assignments import model_label_for
 
         settings = deepseek_settings(
             mediator={"provider": "openai", "model": "local-model", "base_url": LOCAL}
@@ -127,7 +127,7 @@ class TestTheRunsWindow:
     """A role with an entry of its own is one of the models the run's window is learned for."""
 
     def _asked(self, settings: Any, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
-        from maljan.llm import context_window
+        from malspark.llm import context_window
 
         asked: list[list[Any]] = []
         real = context_window.budget_for_settings
@@ -219,15 +219,15 @@ class TestTheSummarizersEntry:
 
 class TestTheRetiredSummarizerSettings:
     def test_the_settings_no_longer_carry_them(self) -> None:
-        from maljan.core.config import PreprocessingConfig
-        from maljan.core.settings_annotations import ANNOTATIONS
+        from malspark.core.config import PreprocessingConfig
+        from malspark.core.settings_annotations import ANNOTATIONS
 
         for name in ("summarizer_provider", "summarizer_model"):
             assert name not in PreprocessingConfig.model_fields
             assert f"preprocessing.{name}" not in ANNOTATIONS
 
     def test_a_stored_value_is_ignored_when_the_settings_are_built(self) -> None:
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         settings = build_settings(
             {

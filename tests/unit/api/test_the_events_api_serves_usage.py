@@ -21,11 +21,11 @@ from typing import Any
 import pytest
 
 from app.services.job_events import read_events
-from maljan.analysis.run_summary import spend_blocks, usage_totals
-from maljan.core.spend import OUTPUT_ESTIMATED, SpendMeter
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.transient import FAILED_ATTEMPT_CALL
-from maljan.pipeline.events import MODEL_USAGE
+from malspark.analysis.run_summary import spend_blocks, usage_totals
+from malspark.core.spend import OUTPUT_ESTIMATED, SpendMeter
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.transient import FAILED_ATTEMPT_CALL
+from malspark.pipeline.events import MODEL_USAGE
 
 PRICES = {
     "m1": {
@@ -606,7 +606,7 @@ class TestWhoReadsTheUsage:
 
         from app.api.v1.jobs import get_job_usage
         from app.services.analysis_service import AnalysisService
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         async def settings_now(db: Any) -> Settings:
             return Settings(_env_file=None)
@@ -648,7 +648,7 @@ class TestTheUsageEndpoint:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from app.api.v1.jobs import get_job_usage
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         async def settings_now(db: Any) -> Settings:
             # No price at all now: the recorded charges still give the run's spend.

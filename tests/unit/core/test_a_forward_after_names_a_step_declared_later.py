@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from maljan.core.pack_steps import effective_steps
+from malspark.core.pack_steps import effective_steps
 
 
 def _step(step_id: str, after: str = "") -> dict[str, Any]:

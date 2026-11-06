@@ -18,15 +18,15 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from maljan.agents.judge_agent import VERDICT_AGENT_CEILING_CODE, JudgeAgent
-from maljan.core.spend import AgentCeilingStop, SpendMeter
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.agent_ceiling import attach_agent_ceiling
-from maljan.llm.generation_rate import model_name_of
-from maljan.pipeline.mediation_models import MEDIATOR_NO_ANSWER, mediator_no_answer_note
-from maljan.pipeline.nodes import make_judge_node, stopped_before_answer_reason
-from maljan.pipeline.outcome import decide_from_bundle
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.agents.judge_agent import VERDICT_AGENT_CEILING_CODE, JudgeAgent
+from malspark.core.spend import AgentCeilingStop, SpendMeter
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.agent_ceiling import attach_agent_ceiling
+from malspark.llm.generation_rate import model_name_of
+from malspark.pipeline.mediation_models import MEDIATOR_NO_ANSWER, mediator_no_answer_note
+from malspark.pipeline.nodes import make_judge_node, stopped_before_answer_reason
+from malspark.pipeline.outcome import decide_from_bundle
+from malspark.schemas.evidence import EvidenceCounter
 from tests.unit.agents.test_a_loop_has_no_default_limit import (
     REPORT,
     USAGE,
@@ -112,7 +112,7 @@ class TestAJudgeStoppedBeforeItsVerdict:
             reports={"static": "static findings"}, history=[]
         )
 
-        assert verdict.bundle.x_maljan_fallback_verdict is not None
+        assert verdict.bundle.x_malspark_fallback_verdict is not None
         assert decide_from_bundle(verdict.bundle) == "Suspicious"
         (row,) = [v for v in verdict.violations if v.code == "verdict.agent_ceiling"]
         assert _SAID in row.message

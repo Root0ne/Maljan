@@ -37,7 +37,7 @@ SOURCE_TREES = ("/app/src", "/app/apps", "/app/tests", "/app/services")
 # ``test_compose_config.REQUIRED_ENV``).
 REQUIRED_ENV = {
     "REDIS_PASSWORD": "p" * 32,
-    "MINIO_ROOT_USER": "maljan",
+    "MINIO_ROOT_USER": "malspark",
     "MINIO_ROOT_PASSWORD": "m" * 32,
     "JWT_SECRET_KEY": "j" * 32,
     "SETTINGS_ENCRYPTION_KEY": "s" * 32,
@@ -153,7 +153,7 @@ def test_every_backend_service_runs_unprivileged_with_no_capability() -> None:
     services = _services(PRODUCTION)
     for name in BACKEND:
         service = services[name]
-        assert service.get("user") == "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}", name
+        assert service.get("user") == "${MALSPARK_UID:-10001}:${MALSPARK_GID:-10001}", name
         assert service.get("cap_drop") == ["ALL"], name
         assert not service.get("cap_add"), name
 
@@ -202,10 +202,10 @@ def test_the_worker_s_attck_cache_mounts_at_the_image_s_home_cache() -> None:
         for entry in worker["volumes"]
         if isinstance(entry, str) and entry.startswith("attck_cache:")
     ]
-    assert caches == [f"{homes[0]}/.cache/maljan"]
+    assert caches == [f"{homes[0]}/.cache/malspark"]
     # Created in the image root-owned and 1777, so a fresh volume starts
     # root-owned and volume-init hands it over like an old one.
-    assert f"{homes[0]}/.cache/maljan" in dockerfile.split("chmod 1777", 1)[1].split("\n", 1)[0]
+    assert f"{homes[0]}/.cache/malspark" in dockerfile.split("chmod 1777", 1)[1].split("\n", 1)[0]
 
 
 def test_the_frontend_runs_unprivileged_with_no_capability() -> None:

@@ -16,8 +16,8 @@ from collections.abc import Callable
 
 import pytest
 
-from maljan.agents import base_agent
-from maljan.agents.base_agent import read_claim_blocks
+from malspark.agents import base_agent
+from malspark.agents.base_agent import read_claim_blocks
 from tests.linear_cost import assert_scales
 
 SENTENCE = "Routine 0x4100 decodes its strings at run time."

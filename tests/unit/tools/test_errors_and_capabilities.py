@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import capabilities as caps
-from maljan.tools import errors
-from maljan.tools.errors import (
+from malspark.tools import capabilities as caps
+from malspark.tools import errors
+from malspark.tools.errors import (
     BAD_ARGUMENT,
     MISSING_DEPENDENCY,
     NO_SUCH_FILE,
@@ -175,16 +175,16 @@ class TestTheManifest:
         assert cell["tools"][0]["available"] is True
 
     def test_a_setting_is_probed_from_the_environment(self, monkeypatch) -> None:
-        monkeypatch.delenv("MALJAN_TEST_KEY", raising=False)
+        monkeypatch.delenv("MALSPARK_TEST_KEY", raising=False)
         cell = caps.manifest(
-            "t", [caps.ToolNeeds("k", (caps.env("MALJAN_TEST_KEY"),))], version="1"
+            "t", [caps.ToolNeeds("k", (caps.env("MALSPARK_TEST_KEY"),))], version="1"
         )
         assert cell["tools"][0]["available"] is False
-        assert cell["tools"][0]["reason"] == "MALJAN_TEST_KEY is not configured"
+        assert cell["tools"][0]["reason"] == "MALSPARK_TEST_KEY is not configured"
         assert "Settings" in cell["tools"][0]["remediation"]
-        monkeypatch.setenv("MALJAN_TEST_KEY", "x")
+        monkeypatch.setenv("MALSPARK_TEST_KEY", "x")
         cell = caps.manifest(
-            "t", [caps.ToolNeeds("k", (caps.env("MALJAN_TEST_KEY"),))], version="1"
+            "t", [caps.ToolNeeds("k", (caps.env("MALSPARK_TEST_KEY"),))], version="1"
         )
         assert cell["tools"][0]["available"] is True
 

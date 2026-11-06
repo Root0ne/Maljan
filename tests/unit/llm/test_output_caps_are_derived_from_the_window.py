@@ -18,16 +18,16 @@ its derivation.
 
 from __future__ import annotations
 
-from maljan.core.config import LLMConfig, Settings
-from maljan.llm import model_output_limits
-from maljan.llm.context_window import (
+from malspark.core.config import LLMConfig, Settings
+from malspark.llm import model_output_limits
+from malspark.llm.context_window import (
     DEFAULT_REPLY_TOKENS,
     WindowFact,
     derived_reply,
     output_cap_for,
     reply_reserve_tokens,
 )
-from maljan.llm.generation_rate import GenerationRates
+from malspark.llm.generation_rate import GenerationRates
 
 
 def _settings(
@@ -68,8 +68,8 @@ class TestAFreshInstallOnTheDefaultModels:
     def test_every_max_output_row_names_the_vendor_page_it_came_from(self) -> None:
         import json
 
-        from maljan.core.paths import resolve_data
-        from maljan.llm.context_window import TABLE_PATH
+        from malspark.core.paths import resolve_data
+        from malspark.llm.context_window import TABLE_PATH
 
         with open(resolve_data(TABLE_PATH), encoding="utf-8") as handle:
             rows = json.load(handle)["max_output"]
@@ -100,7 +100,7 @@ class TestTheThreeCases:
 
         for window, expected in ((32768, 8192), (131072, 32768)):
             fact = WindowFact(window, "probed", f"llama.cpp /props reported {window:,} tokens")
-            with patch("maljan.llm.context_window.learn_window", return_value=fact):
+            with patch("malspark.llm.context_window.learn_window", return_value=fact):
                 cap = output_cap_for(
                     _settings(window, base_url=LOCAL), "expert_max_tokens", "static"
                 )
@@ -186,7 +186,7 @@ class TestItIsPrinted:
 
 class TestTheBuiltCapIsReadNotDerivedAgain:
     def test_a_recorded_cap_is_read_back(self) -> None:
-        from maljan.llm.context_window import OutputCap, built_output_cap, record_built_cap
+        from malspark.llm.context_window import OutputCap, built_output_cap, record_built_cap
 
         class _Model:
             pass
@@ -198,14 +198,14 @@ class TestTheBuiltCapIsReadNotDerivedAgain:
     def test_a_model_built_without_one_has_none(self) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.llm.context_window import built_output_cap
+        from malspark.llm.context_window import built_output_cap
 
         assert built_output_cap(MagicMock()) is None
         assert built_output_cap(None) is None
 
     def test_the_record_outlives_the_window_cache(self) -> None:
         """Derived again after the cache expired the cap is 8,192; the record is not."""
-        from maljan.llm.context_window import (
+        from malspark.llm.context_window import (
             OutputCap,
             built_output_cap,
             forget_learned_windows,

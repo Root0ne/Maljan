@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from maljan.agents import sample_staging
+from malspark.agents import sample_staging
 from tests.credential_shapes import password
 
 
@@ -315,7 +315,7 @@ def _tool_from(server: str):
         func=lambda: "x",
         name="identify_file",
         description="x",
-        metadata={"maljan_server": server},
+        metadata={"malspark_server": server},
     )
 
 
@@ -488,7 +488,7 @@ class TestEveryUploadIsWrittenDown:
     ) -> None:
         from types import SimpleNamespace
 
-        from maljan.agents.composition import _astage
+        from malspark.agents.composition import _astage
 
         path, digest = _sample(tmp_path, 256)
         container = SimpleNamespace(sample_path=path, sample_sha256=digest, sample_stagings=[])

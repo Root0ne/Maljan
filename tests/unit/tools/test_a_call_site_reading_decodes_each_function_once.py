@@ -18,9 +18,9 @@ import struct
 
 import pytest
 
-from maljan.tools import call_sites
-from maljan.tools.call_sites import Instruction, decode
-from maljan.tools.pe_image import Image, Section
+from malspark.tools import call_sites
+from malspark.tools.call_sites import Instruction, decode
+from malspark.tools.pe_image import Image, Section
 
 TEXT_RVA = 0x1000
 TEXT_RAW = 0x400

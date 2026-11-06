@@ -8,7 +8,7 @@ address places no function rather than the wrong one.
 
 from __future__ import annotations
 
-from maljan.pipeline.function_claims import FunctionFacts
+from malspark.pipeline.function_claims import FunctionFacts
 
 
 def _facts(*known: int, bases: tuple[int, ...] = (0x10000,)) -> FunctionFacts:

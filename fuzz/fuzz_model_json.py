@@ -10,7 +10,7 @@ import sys
 import atheris
 
 with atheris.instrument_imports():
-    from maljan.utils import json_cleaner
+    from malspark.utils import json_cleaner
 
 
 def TestOneInput(data: bytes) -> None:  # noqa: N802 - the name libFuzzer looks for

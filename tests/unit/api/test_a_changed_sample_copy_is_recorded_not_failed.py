@@ -27,19 +27,19 @@ from tests.integration._session_probe import SessionFactory, fake_job, fake_samp
 from app.worker import analysis_worker
 from app.worker.analysis_worker import _report_inputs, keep_the_stopped_run
 from app.worker.sample_integrity import SampleIntegrity, copies_of
-from maljan.analysis.disclosure import disclosure_record
-from maljan.analysis.isolation import isolation_lines
-from maljan.analysis.sample_integrity import (
+from malspark.analysis.disclosure import disclosure_record
+from malspark.analysis.isolation import isolation_lines
+from malspark.analysis.sample_integrity import (
     AT_END,
     AT_START,
     RECORD_KEY,
     file_sha256,
     integrity_lines,
 )
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers import MarkdownRenderer
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers import MarkdownRenderer
 
 BYTES = b"MZ synthetic sample bytes, never run\x00" * 64
 INTAKE = hashlib.sha256(BYTES).hexdigest()
@@ -486,7 +486,7 @@ class TestAFailedReading:
 
 
 def _disclosure_with_rows() -> dict[str, Any]:
-    from maljan.analysis.isolation import isolation_part
+    from malspark.analysis.isolation import isolation_part
 
     record = _disclosure()
     record["isolation"] = isolation_part(
@@ -506,7 +506,7 @@ def _disclosure_with_rows() -> dict[str, Any]:
 async def test_a_report_kept_after_a_failure_carries_the_end_reading(tmp_path: Path) -> None:
     from app.models.report import AnalysisReport
     from app.worker.analysis_worker import keep_the_built_report
-    from maljan.pipeline.stopped_run import partial_report
+    from malspark.pipeline.stopped_run import partial_report
 
     download, mirror = _copies(tmp_path)
     integrity = SampleIntegrity(INTAKE, copies_of(str(download), [mirror]), size=len(BYTES))
@@ -580,7 +580,7 @@ class TestTheCompletedRun:
 
         from app import config as api_config
         from app import runtime_config as rc
-        from maljan.core.config import reset_settings_cache
+        from malspark.core.config import reset_settings_cache
 
         async def _mock_mode_allowed() -> dict[str, Any]:
             return {"api.mock_mode_allowed": True}
@@ -590,7 +590,7 @@ class TestTheCompletedRun:
         with patch.dict(
             "os.environ",
             {
-                "MALJAN_MOCK_MODE": "true",
+                "MALSPARK_MOCK_MODE": "true",
                 "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
                 "SAMPLES_DIR": str(tmp_path / "samples"),
             },
@@ -637,7 +637,7 @@ class TestTheCompletedRun:
         with (
             patch.object(object_store, "client", return_value=MagicMock()),
             patch.object(object_store, "download", side_effect=_download),
-            patch("maljan.app.MaljanApp.arun", new=_arun),
+            patch("malspark.app.MalsparkApp.arun", new=_arun),
         ):
             result = await analysis_worker.run_analysis(
                 {"redis": redis, "db_session": factory}, str(job.id)

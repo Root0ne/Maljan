@@ -4,7 +4,7 @@ Started by the worker it serves over stdio; with ``--http``, over streamable
 HTTP behind its own token, from a container of its own (``MCP_BIND_ADDRESS``,
 ``MCP_PORT``, ``MCP_AUTH_TOKEN``, the shared sidecar plumbing's), where
 ``run_reader`` runs the triage pack's own reading of the capture
-(``maljan.tools.readers``), which the worker then does not run itself.
+(``malspark.tools.readers``), which the worker then does not run itself.
 """
 
 import copy
@@ -18,19 +18,19 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from maljan.core.stdio_safe import route_logging_to_stderr
+from malspark.core.stdio_safe import route_logging_to_stderr
 
 # Only when run as the stdio server: a test or tool that imports this module
 # in-process keeps its own logging.
 if __name__ == "__main__":
     route_logging_to_stderr()
 
-from maljan.analysis.capture_reader import Packet
-from maljan.analysis.pcap_summary import each_packet
-from maljan.tools import readers, sidecar_needs, staging
-from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
-from maljan.tools.declared_facts import NO_EFFECT, tool_declaration
-from maljan.tools.errors import (
+from malspark.analysis.capture_reader import Packet
+from malspark.analysis.pcap_summary import each_packet
+from malspark.tools import readers, sidecar_needs, staging
+from malspark.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
+from malspark.tools.declared_facts import NO_EFFECT, tool_declaration
+from malspark.tools.errors import (
     CAPTURES_REMEDIATION,
     NO_CAPTURE_REMEDIATION,
     NO_SUCH_FILE,
@@ -39,8 +39,8 @@ from maljan.tools.errors import (
     normalise_error,
     tool_error,
 )
-from maljan.tools.roots import PathOutsideRoots, resolve_under_roots
-from maljan.utils.written_forms import pack_escaped
+from malspark.tools.roots import PathOutsideRoots, resolve_under_roots
+from malspark.utils.written_forms import pack_escaped
 
 # Every name, request line and header read out of a capture is the sender's
 # text. It is written the way the triage pack writes a sample's own strings
@@ -52,7 +52,7 @@ from maljan.utils.written_forms import pack_escaped
 
 mcp = FastMCP("NetworkMCP", stateless_http=True)
 
-# What each tool declares of itself (``maljan.tools.declared_facts``). Every
+# What each tool declares of itself (``malspark.tools.declared_facts``). Every
 # capture reader takes the capture's path as its ``pcap_path``; only the
 # manifest is read-only, the capture readers being left to answer again.
 _PCAP_WORDS = ["capture", "packet", "packets", "pcap"]
@@ -158,7 +158,7 @@ def _staging_root() -> Path:
     """The delivery directory a capture may have been staged into.
 
     The same directory the analysis sidecar writes this job's uploads to: the
-    base ``MALJAN_STAGING_DIR`` names plus the job leaf the spawn composed, so
+    base ``MALSPARK_STAGING_DIR`` names plus the job leaf the spawn composed, so
     on a host where both sidecars run a capture delivered for this job is a
     capture this server may read — and one delivered for another job is not.
     Nothing here writes to it.
@@ -188,7 +188,7 @@ def _capture(pcap_path: str) -> Path:
     read whatever its author wrote there. A relative name is read inside this
     job's own directory — the form a refusal lists the captures in — and a bare
     file name inside its captures. Raises ``PathOutsideRoots`` for anything
-    that resolves elsewhere; see ``maljan.tools.roots``.
+    that resolves elsewhere; see ``malspark.tools.roots``.
     """
     asked = str(pcap_path or "").strip().strip("'\"")
     candidate = Path(asked)
@@ -241,7 +241,7 @@ def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: i
     if isinstance(capture, str):
         return capture
     try:
-        from maljan.analysis.pcap_summary import asked_limit, capture_facts, summary_text
+        from malspark.analysis.pcap_summary import asked_limit, capture_facts, summary_text
 
         page = asked_limit(packet_limit)
         if page is None:
@@ -398,7 +398,7 @@ def pcap_summary(pcap_path: str, packet_limit: int | None = None) -> dict[str, A
     agent that reads this first knows which conversation to go and read
     individual packets from, instead of walking the capture to find out.
     """
-    from maljan.tools.pcap import pcap_summary as summarize
+    from malspark.tools.pcap import pcap_summary as summarize
 
     capture = _opened("pcap_summary", pcap_path)
     if isinstance(capture, str):
@@ -433,7 +433,7 @@ def run_reader(
     A delivery primitive, never offered to a model: the worker's triage pack
     calls it when this server runs in a container of its own, so the capture
     is parsed here and the worker reads only the answer
-    (``maljan.tools.readers``). Only a reading standing in for a tool this
+    (``malspark.tools.readers``). Only a reading standing in for a tool this
     server offers is run, its file arguments held to the sample roots and
     ``job``'s staging directory.
     """
@@ -447,7 +447,7 @@ def release_job(job: str) -> dict[str, Any]:
     A delivery primitive, never offered to a model: the worker calls it when
     a job whose readings ran here ends, so ``job``'s staging directory goes
     then rather than at the staging TTL. Only that job's directory, never a
-    path the id could name (``maljan.tools.readers.serve_release``).
+    path the id could name (``malspark.tools.readers.serve_release``).
     """
     return readers.serve_release(job)
 
@@ -466,7 +466,7 @@ if __name__ == "__main__":
     # Before the server starts its threads: C code in this process folds case
     # as ASCII does (``core.ctype_locale``). The one line goes to standard
     # error: standard output is this server's protocol.
-    from maljan.core.ctype_locale import pin_character_classification, say_on_stderr
+    from malspark.core.ctype_locale import pin_character_classification, say_on_stderr
 
     pin_character_classification(say=say_on_stderr)
     if "--http" in sys.argv[1:]:

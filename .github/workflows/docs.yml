@@ -50,7 +50,7 @@ jobs:
         working-directory: apps/docs
         run: npm run check
 
-      # The old address, https://root0ne.github.io/Maljan/, now only sends
+      # The old address, https://root0ne.github.io/Malspark/, now only sends
       # readers on to the same page on malspark.com.
       - name: Write the redirect site
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

@@ -24,8 +24,8 @@ from typing import Any
 
 import pytest
 
-from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
-from maljan.tools import binary
+from malspark.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+from malspark.tools import binary
 
 
 def _old_tar_members(target: Path, limit: int) -> dict[str, Any]:

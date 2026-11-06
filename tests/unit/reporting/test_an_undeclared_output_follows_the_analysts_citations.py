@@ -23,15 +23,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.reporting.evidence_bundles import _SECTION_KINDS, bundle_for
-from maljan.reporting.models import (
+from malspark.reporting.evidence_bundles import _SECTION_KINDS, bundle_for
+from malspark.reporting.models import (
     EvidenceIndexRow,
     EvidenceSection,
     FileHashes,
     MalwareReport,
     SampleIdentity,
 )
-from maljan.reporting.section_tabs import CONSOLE_SUFFIXES, section_tabs
+from malspark.reporting.section_tabs import CONSOLE_SUFFIXES, section_tabs
 
 OPERATOR = "mcp:invented"
 UNDECLARED = {"v": 1}
@@ -316,7 +316,7 @@ def test_no_agent_name_places_a_section() -> None:
     import ast
     import inspect
 
-    from maljan.reporting import section_tabs as module
+    from malspark.reporting import section_tabs as module
 
     source = inspect.getsource(module)
     tree = ast.parse(source)
@@ -334,7 +334,7 @@ def test_no_agent_name_places_a_section() -> None:
 
 
 def test_an_entry_records_its_agent_s_declared_role(monkeypatch: pytest.MonkeyPatch) -> None:
-    from maljan.agents.evidence_recorder import EvidenceRecorder
+    from malspark.agents.evidence_recorder import EvidenceRecorder
 
     recorder = EvidenceRecorder("reverser", agent_role="generic", agent_tab="static")
     entry = recorder.record(tool="x", args={}, output="answer", server="invented")
@@ -347,8 +347,8 @@ def test_an_entry_records_its_agent_s_declared_role(monkeypatch: pytest.MonkeyPa
 
 
 def test_an_agent_reads_its_role_and_tab_from_its_definition_whatever_its_name() -> None:
-    from maljan.agents.composition import role_of, tab_of
-    from maljan.core.config import AgentDefinition, Settings
+    from malspark.agents.composition import role_of, tab_of
+    from malspark.core.config import AgentDefinition, Settings
 
     settings = Settings()
     # The built-ins declare today's mapping; generic and lead agents declare none.
@@ -425,7 +425,7 @@ def test_the_served_report_carries_the_placements() -> None:
     expected["sections"][0]["source_server"] = "invented"
     # And its IOC table is the one /iocs serves, with the MISP attributes of a
     # report stored before they were built (``with_current_iocs``).
-    from maljan.reporting.builder import build_consolidated_iocs
+    from malspark.reporting.builder import build_consolidated_iocs
 
     expected["consolidated_iocs"] = [
         row.model_dump(mode="json") for row in build_consolidated_iocs(report)
@@ -444,8 +444,8 @@ def test_the_console_offers_the_tabs_an_agent_may_declare() -> None:
     import re
     from pathlib import Path
 
-    from maljan.core.config import AGENT_TABS
-    from maljan.reporting.section_tabs import TABS
+    from malspark.core.config import AGENT_TABS
+    from malspark.reporting.section_tabs import TABS
 
     editor = (
         Path(__file__).resolve().parents[3]
@@ -462,7 +462,7 @@ def test_the_console_reads_each_role_s_tab_as_the_settings_do() -> None:
     import re
     from pathlib import Path
 
-    from maljan.core.config import ROLE_TABS
+    from malspark.core.config import ROLE_TABS
 
     editor = (
         Path(__file__).resolve().parents[3]

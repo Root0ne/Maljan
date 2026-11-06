@@ -6,8 +6,8 @@ ubiquitous and benign, so mere presence must never be flagged.
 
 from __future__ import annotations
 
-from maljan.analysis.lolbin_layer import classify_lolbin
-from maljan.tools.knowledge import lolbin_lookup
+from malspark.analysis.lolbin_layer import classify_lolbin
+from malspark.tools.knowledge import lolbin_lookup
 
 
 class TestClassifyLolbin:

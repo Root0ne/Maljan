@@ -16,10 +16,10 @@ from typing import Any
 import pytest
 
 from app.worker import analysis_worker, sample_files
-from maljan.agents.composition import _mounted
-from maljan.core.config import MCPServerConfig
-from maljan.core.settings_overrides import build_settings
-from maljan.providers.registry import mirror_work_dirs
+from malspark.agents.composition import _mounted
+from malspark.core.config import MCPServerConfig
+from malspark.core.settings_overrides import build_settings
+from malspark.providers.registry import mirror_work_dirs
 
 SHA = "b" * 64
 
@@ -48,7 +48,7 @@ class _Container:
 def samples(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path / "samples"))
     monkeypatch.setattr(sample_files.settings, "upload_temp_dir", str(tmp_path / "uploads"))
-    monkeypatch.setattr("maljan.tools.roots.add_sample_root", lambda _p: None)
+    monkeypatch.setattr("malspark.tools.roots.add_sample_root", lambda _p: None)
     return tmp_path / "samples"
 
 
@@ -111,7 +111,7 @@ def test_its_directory_is_one_the_worker_sweeps() -> None:
 class _Tool:
     def __init__(self, server: str) -> None:
         self.name = f"t_{server}"
-        self.metadata = {"maljan_server": server}
+        self.metadata = {"malspark_server": server}
 
 
 def test_the_bound_agent_is_held_to_the_mounted_path_and_staging_wins() -> None:

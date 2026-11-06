@@ -15,29 +15,29 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis import sandbox_sections as ss
-from maljan.analysis.evidence_roots import NO_CITATION, run_roots
-from maljan.pipeline import triage_pack
-from maljan.pipeline.validation import (
+from malspark.analysis import sandbox_sections as ss
+from malspark.analysis.evidence_roots import NO_CITATION, run_roots
+from malspark.pipeline import triage_pack
+from malspark.pipeline.validation import (
     CITATION_NOT_EVIDENCE_CODE,
     UNGROUNDED_TECHNIQUE_CODE,
     citation_violations,
     flow_voice_violations,
     validate_isr,
 )
-from maljan.providers import sandbox_tools
-from maljan.reporting.evidence_bundles import sandbox_item_observation
-from maljan.reporting.models import (
+from malspark.providers import sandbox_tools
+from malspark.reporting.evidence_bundles import sandbox_item_observation
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkIOCs,
     NetworkIP,
     SampleIdentity,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.sandbox_document import sandbox_document
-from maljan.schemas.sandbox_report import reader_of, triage_overview_to_sandbox_report
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.sandbox_document import sandbox_document
+from malspark.schemas.sandbox_report import reader_of, triage_overview_to_sandbox_report
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "sandbox"
 IDENTITY = SampleIdentity(hashes=FileHashes(sha256="a" * 64))
@@ -603,7 +603,7 @@ class TestWhatTheReaderCanFill:
 
 
 def _rich_cape() -> dict[str, Any]:
-    from maljan.schemas.sandbox_report import _SUMMARY_KEYS
+    from malspark.schemas.sandbox_report import _SUMMARY_KEYS
 
     one = [{"x": 1}]
     return {
@@ -633,7 +633,7 @@ class TestTheReadersDeclareWhatTheyFill:
     """Each reader's declaration is what its code fills: all on a full input, no more on any."""
 
     def test_the_cape_reader(self) -> None:
-        from maljan.schemas.sandbox_report import (
+        from malspark.schemas.sandbox_report import (
             CAPE_NORMALISER_FILLS,
             cape_report_to_sandbox_report,
             report_fills,
@@ -645,7 +645,7 @@ class TestTheReadersDeclareWhatTheyFill:
         assert report_fills(report) == CAPE_NORMALISER_FILLS
 
     def test_the_triage_reader(self) -> None:
-        from maljan.schemas.sandbox_report import (
+        from malspark.schemas.sandbox_report import (
             TRIAGE_NORMALISER_FILLS,
             report_fills,
             triage_overview_to_sandbox_report,
@@ -667,13 +667,13 @@ class TestTheReadersDeclareWhatTheyFill:
         assert report_fills(more) <= TRIAGE_NORMALISER_FILLS
 
     def test_the_rest_mapping(self) -> None:
-        from maljan.core.config import RestMappingConfig
-        from maljan.providers.sandbox.rest_mapping import (
+        from malspark.core.config import RestMappingConfig
+        from malspark.providers.sandbox.rest_mapping import (
             REST_MAPPING_FILLS,
             apply_mapping,
             compile_mapping,
         )
-        from maljan.schemas.sandbox_report import report_fills
+        from malspark.schemas.sandbox_report import report_fills
 
         mapping = RestMappingConfig(
             processes="$.p[*]",
@@ -716,7 +716,7 @@ class TestTheReadersDeclareWhatTheyFill:
         assert report_fills(report.report) == REST_MAPPING_FILLS
 
     def test_every_section_reads_fields_of_the_one_vocabulary(self) -> None:
-        from maljan.schemas.sandbox_report import REPORT_LIST_FIELDS
+        from malspark.schemas.sandbox_report import REPORT_LIST_FIELDS
 
         named = {field for fields in ss.SECTION_FIELDS.values() for field in fields}
         assert set(ss.SECTION_FIELDS) == set(ss.SECTION_PREFIXES)
@@ -729,7 +729,7 @@ class TestReviewRoundOne:
     """Each finding of the first review, held by a test of its own."""
 
     def test_an_item_citation_faces_the_value_checks_an_entry_citation_faces(self) -> None:
-        from maljan.pipeline.validation import (
+        from malspark.pipeline.validation import (
             EntryTexts,
             identifier_citation_violations,
             stated_value_violations,
@@ -784,7 +784,7 @@ class TestReviewRoundOne:
         assert UNGROUNDED_TECHNIQUE_CODE in codes
 
     def test_a_rendered_report_s_pid_zero_is_no_pid_and_no_process_is_its_own_parent(self) -> None:
-        from maljan.schemas.sandbox_report import SandboxProcess, SandboxReport
+        from malspark.schemas.sandbox_report import SandboxProcess, SandboxReport
 
         report = sandbox_document(
             SandboxReport(
@@ -807,9 +807,9 @@ class TestReviewRoundOne:
         ]
 
     def test_the_uploaded_triage_overview_fills_only_the_signatures(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.providers.sandbox.upload import UploadSandboxProvider
-        from maljan.schemas.sandbox_report import TRIAGE_OVERVIEW_FILLS, report_fills
+        from malspark.core.config import Settings
+        from malspark.providers.sandbox.upload import UploadSandboxProvider
+        from malspark.schemas.sandbox_report import TRIAGE_OVERVIEW_FILLS, report_fills
 
         cfg = Settings(_env_file=None)
         cfg.sandbox.provider = "upload"
@@ -823,7 +823,7 @@ class TestReviewRoundOne:
         }
 
     def test_rest_calls_are_read_under_their_process_and_filtered_by_pid(self) -> None:
-        from maljan.schemas.sandbox_report import SandboxProcess, SandboxReport
+        from malspark.schemas.sandbox_report import SandboxProcess, SandboxReport
 
         report = sandbox_document(
             SandboxReport(
@@ -852,9 +852,9 @@ class TestReviewRoundOne:
     def test_the_index_is_recorded_after_the_pack_s_budget_is_spent(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents.evidence_recorder import EvidenceRecorder
-        from maljan.pipeline.triage_pack import PIPELINE, CapaSettings, PackInputs, _Pack
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.evidence_recorder import EvidenceRecorder
+        from malspark.pipeline.triage_pack import PIPELINE, CapaSettings, PackInputs, _Pack
+        from malspark.schemas.evidence import EvidenceCounter
 
         inputs = PackInputs(
             sample_path=str(tmp_path / "s"),
@@ -869,7 +869,7 @@ class TestReviewRoundOne:
         pack = _Pack(recorder, inputs, reputation=None, function_matches=None)
         pack.steps_run = 1
         pack.started -= 100
-        from maljan.core.pack_steps import shipped_step
+        from malspark.core.pack_steps import shipped_step
 
         pack._sandbox_sections(shipped_step(ss.SECTIONS_TOOL))
         (entry,) = [e for e in pack.recorder.entries if e.tool == ss.SECTIONS_TOOL]
@@ -919,7 +919,7 @@ class TestReviewRoundOne:
         assert ss.NETWORK_KINDS == sandbox_tools.NETWORK_VIEW_KINDS
 
     def test_the_extra_places_are_sections_and_the_tree_gives_parents(self) -> None:
-        from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+        from malspark.schemas.sandbox_report import cape_report_to_sandbox_report
 
         source = {
             "behavior": {
@@ -950,7 +950,7 @@ class TestReviewRoundOne:
         }
 
     def test_the_extra_places_are_declared_by_every_reader_of_the_cape_shape(self) -> None:
-        from maljan.schemas.sandbox_report import (
+        from malspark.schemas.sandbox_report import (
             cape_report_to_sandbox_report,
             normaliser_reading,
         )
@@ -976,8 +976,8 @@ class TestReviewRoundTwo:
         import httpx
         from pydantic import SecretStr
 
-        from maljan.core.config import Settings
-        from maljan.providers.sandbox.triage import TriageSandboxProvider
+        from malspark.core.config import Settings
+        from malspark.providers.sandbox.triage import TriageSandboxProvider
 
         overview = json.loads((FIXTURES / "triage_overview.json").read_text())
 
@@ -1026,8 +1026,8 @@ class TestReviewRoundTwo:
         assert not known.known("proc:999") and not known.known(f"proc:{101_000}")
 
     def test_the_index_is_not_blanked_by_the_byte_budget(self) -> None:
-        from maljan.pipeline.triage_pack import budgeted_entries
-        from maljan.schemas.evidence import apply_budget
+        from malspark.pipeline.triage_pack import budgeted_entries
+        from malspark.schemas.evidence import apply_budget
 
         entries = [
             LedgerEntry(id="ev_0001", tool="strings", agent="pipeline", output="x" * 100),
@@ -1039,8 +1039,8 @@ class TestReviewRoundTwo:
         assert entries[1].structured is not None
 
     def test_the_report_node_reads_cited_items_through_their_rows(self) -> None:
-        from maljan.pipeline.nodes import sandbox_item_citations, with_item_texts
-        from maljan.pipeline.validation import EntryTexts, stated_value_violations
+        from malspark.pipeline.nodes import sandbox_item_citations, with_item_texts
+        from malspark.pipeline.validation import EntryTexts, stated_value_violations
 
         class _Container:
             sandbox_normalised = None
@@ -1087,7 +1087,7 @@ class TestReviewRoundTwo:
         ]
 
     def test_a_cape_report_with_no_raw_dict_is_read_as_rendered(self) -> None:
-        from maljan.schemas.sandbox_report import SandboxProcess, SandboxReport
+        from malspark.schemas.sandbox_report import SandboxProcess, SandboxReport
 
         model = SandboxReport(
             provider="cape2",

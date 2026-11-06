@@ -13,14 +13,14 @@ filed. Every value is synthetic.
 
 from __future__ import annotations
 
-from maljan.pipeline.events import claims_to_payload
-from maljan.pipeline.validation import corroboration, retry_claim_unbacked, tool_backed_answers
-from maljan.reporting.claim_coverage import claims_not_discussed
-from maljan.reporting.evidence_bundles import _claims_text
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, retry_added_marker
+from malspark.pipeline.events import claims_to_payload
+from malspark.pipeline.validation import corroboration, retry_claim_unbacked, tool_backed_answers
+from malspark.reporting.claim_coverage import claims_not_discussed
+from malspark.reporting.evidence_bundles import _claims_text
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, retry_added_marker
 
 MARKER = "added by a tool-less retry, round 2"
 

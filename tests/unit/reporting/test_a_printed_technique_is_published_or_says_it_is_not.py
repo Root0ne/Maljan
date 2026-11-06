@@ -14,14 +14,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.analysis.corroboration import (
+from malspark.analysis.corroboration import (
     UNPUBLISHED_WITHOUT_A_REASON,
     mark_unpublished,
     published_count,
     technique_label,
 )
-from maljan.reporting.ledger_report import NOT_PUBLISHED_MARKER, build_sections
-from maljan.schemas.isr_models import AgentISR
+from malspark.reporting.ledger_report import NOT_PUBLISHED_MARKER, build_sections
+from malspark.schemas.isr_models import AgentISR
 
 # What the recorded Android run's static analyst wrote: one claim carrying no
 # technique id, and three findings carrying enterprise-only ones.
@@ -142,14 +142,14 @@ class TestTheCorroborationRowsSaySo:
 
 class TestTheRunSummaryPrintsBothNumbers:
     def test_the_report_s_own_line(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         marked = mark_unpublished(
             {tid: {"asserted_by": [], "claimed_by": ["static"]} for tid in ENTERPRISE_ONLY},
             set(),
             {},
         )
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
 
         rendered = MarkdownRenderer()._appendix_run(
             MalwareReport(
@@ -167,7 +167,7 @@ class TestTheReportNodeWritesItDown:
 
     @staticmethod
     def _report(published: list[str], reasons: dict[str, str]) -> Any:
-        from maljan.reporting.models import (
+        from malspark.reporting.models import (
             CapabilityCell,
             FileHashes,
             MalwareReport,
@@ -201,7 +201,7 @@ class TestTheReportNodeWritesItDown:
         )
 
     def test_the_reason_the_matrix_wrote_reaches_the_summary(self) -> None:
-        from maljan.pipeline.nodes import _corroboration_with_publication
+        from malspark.pipeline.nodes import _corroboration_with_publication
 
         marked = _corroboration_with_publication(
             self._report([], {"T1027": "outside the sample's ATT&CK domain"}), {}
@@ -212,7 +212,7 @@ class TestTheReportNodeWritesItDown:
         assert marked["T1055"]["not_published"] == UNPUBLISHED_WITHOUT_A_REASON
 
     def test_a_published_technique_is_left_plain(self) -> None:
-        from maljan.pipeline.nodes import _corroboration_with_publication
+        from malspark.pipeline.nodes import _corroboration_with_publication
 
         marked = _corroboration_with_publication(self._report(["T1027"], {}), {})
 
@@ -220,7 +220,7 @@ class TestTheReportNodeWritesItDown:
         assert "not_published" not in marked["T1027"]
 
     def test_a_run_that_named_nothing_amends_nothing(self) -> None:
-        from maljan.pipeline.nodes import _corroboration_with_publication
+        from malspark.pipeline.nodes import _corroboration_with_publication
 
         report = self._report([], {})
         report.run_summary = {}

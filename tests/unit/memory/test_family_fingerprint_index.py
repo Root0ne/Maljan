@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from maljan.memory.family_fingerprint_index import (
+from malspark.memory.family_fingerprint_index import (
     FamilyFingerprintIndex,
     load_family_index,
     reset_cache,
@@ -111,7 +111,7 @@ class TestTheCatalogueWithNoBuildRecord:
         return path
 
     def test_it_is_warned_about_while_no_record_sits_beside_it(self, tmp_path, monkeypatch) -> None:  # noqa: ANN001
-        from maljan.memory import family_fingerprint_index as fpi
+        from malspark.memory import family_fingerprint_index as fpi
 
         warned: list[str] = []
         monkeypatch.setattr(fpi.logger, "warning", lambda msg, *a: warned.append(msg % a))
@@ -120,7 +120,7 @@ class TestTheCatalogueWithNoBuildRecord:
         assert any("no build record" in w and "fam.build.json" in w for w in warned)
 
     def test_it_is_not_warned_about_with_its_record(self, tmp_path, monkeypatch) -> None:  # noqa: ANN001
-        from maljan.memory import family_fingerprint_index as fpi
+        from malspark.memory import family_fingerprint_index as fpi
 
         warned: list[str] = []
         monkeypatch.setattr(fpi.logger, "warning", lambda msg, *a: warned.append(msg % a))

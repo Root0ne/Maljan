@@ -14,10 +14,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from maljan.reporting.evidence_bundles import bundle_for, is_empty
-from maljan.reporting.ledger_projection import dynamic_from_ledger
-from maljan.reporting.models import DynamicBehavior, FileHashes, MalwareReport, SampleIdentity
-from maljan.schemas.evidence import LedgerEntry
+from malspark.reporting.evidence_bundles import bundle_for, is_empty
+from malspark.reporting.ledger_projection import dynamic_from_ledger
+from malspark.reporting.models import DynamicBehavior, FileHashes, MalwareReport, SampleIdentity
+from malspark.schemas.evidence import LedgerEntry
 
 
 def _entry(n: int, tool: str, kind: str, structured: dict[str, Any]) -> LedgerEntry:
@@ -67,7 +67,7 @@ def test_a_called_name_no_answer_covers_is_not_counted() -> None:
 
 
 def _report(called: dict[str, int], static: bool = False) -> MalwareReport:
-    from maljan.reporting.models import StaticAnalysis
+    from malspark.reporting.models import StaticAnalysis
 
     return MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
@@ -114,7 +114,7 @@ def _kind(entry: Any) -> str:
 
 
 def test_the_pack_asks_the_catalogue_about_the_sandbox_s_calls(tmp_path: Any) -> None:
-    from maljan.reporting.ledger_projection import static_from_ledger
+    from malspark.reporting.ledger_projection import static_from_ledger
     from tests.unit.pipeline.test_triage_pack import SANDBOX_REPORT, _pack, _pe, _write
 
     behaviour = {
@@ -134,7 +134,7 @@ def test_the_pack_asks_the_catalogue_about_the_sandbox_s_calls(tmp_path: Any) ->
     assert [e.tool for e in result.entries[-2:]] == ["find_directed_text", "behaviour_code_links"]
     # Its line says these are the sandbox's recorded calls; an import
     # catalogue line keeps its own name.
-    from maljan.pipeline.triage_pack import render_pack
+    from malspark.pipeline.triage_pack import render_pack
 
     lines = render_pack(result.entries, 1_000_000).splitlines()
     (line,) = [x for x in lines if x.startswith(f"[{asked.id}] ")]

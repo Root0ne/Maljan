@@ -19,15 +19,15 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     NO_STRUCTURED_REPORT_STATUS,
     WRITTEN_BESIDES_CLAIMS,
     BaseAnalyst,
     report_rendered_again,
 )
-from maljan.agents.claim_headings import besides_claims
-from maljan.agents.judge_agent import mediation_reports_text
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
+from malspark.agents.claim_headings import besides_claims
+from malspark.agents.judge_agent import mediation_reports_text
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 
 WRITTEN = "CLAIM 1: The loader decodes its strings.\nCONFIDENCE: 0.7\nEVIDENCE: [ev_0138]"
 

@@ -3,7 +3,7 @@
 Mines our OWN long-term memory (the Qdrant ``StoredCase`` history: a behavioural
 ``summary_text`` plus the ``technique_ids`` the pipeline ultimately attributed) into
 the vendored ``data/attck_case_corpus_v1.json`` that
-``maljan.memory.attck_case_index`` loads at runtime. This is an OPERATOR / OFFLINE
+``malspark.memory.attck_case_index`` loads at runtime. This is an OPERATOR / OFFLINE
 script — never imported by the pipeline. It needs NO heavy ML deps: the corpus stores
 case TEXT only and the runtime index embeds it at load (one embedding space).
 
@@ -35,7 +35,7 @@ import re
 import sys
 from pathlib import Path
 
-_CORPUS_SCHEMA = "maljan-attck-case-corpus/v1"
+_CORPUS_SCHEMA = "malspark-attck-case-corpus/v1"
 _EMBED_MODEL = "BAAI/bge-small-en-v1.5"  # what the runtime index embeds the text with
 
 # MABEL feature-CSV mining (a features-only, no-binary dataset whose condensed
@@ -202,7 +202,7 @@ def _cases_from_mabel(paths: list[str], max_per_family: int) -> list[dict]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build the ATT&CK case-prior RAG corpus.")
     ap.add_argument("--qdrant-url", type=str, help="Live Qdrant URL to scroll the LTM from.")
-    ap.add_argument("--collection", type=str, default="maljan_cases_v2", help="LTM collection.")
+    ap.add_argument("--collection", type=str, default="malspark_cases_v2", help="LTM collection.")
     ap.add_argument("--cases-jsonl", type=str, help="JSONL export (one StoredCase per line).")
     ap.add_argument(
         "--mabel-csv", nargs="+", help="MABEL feature CSV segment(s) to mine (capa->ATT&CK)."

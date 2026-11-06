@@ -17,12 +17,12 @@ import httpx
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import SandboxTriageConfig, Settings
-from maljan.providers.errors import ProviderError
-from maljan.providers.sandbox.triage import TriageSandboxProvider
-from maljan.schemas.sandbox_document import sandbox_document
-from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.core.config import SandboxTriageConfig, Settings
+from malspark.providers.errors import ProviderError
+from malspark.providers.sandbox.triage import TriageSandboxProvider
+from malspark.schemas.sandbox_document import sandbox_document
+from malspark.schemas.sandbox_report import triage_overview_to_sandbox_report
 
 FIX = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
 

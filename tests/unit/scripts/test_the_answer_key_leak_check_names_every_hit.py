@@ -103,16 +103,16 @@ class TestTheScan:
             tmp_path,
             {
                 ".gitignore": "*.log\n",
-                "src/maljan/tracked.py": "x\n",
-                "src/maljan/local_prompt.md": "y\n",
-                "src/maljan/run.log": "z\n",
+                "src/malspark/tracked.py": "x\n",
+                "src/malspark/local_prompt.md": "y\n",
+                "src/malspark/run.log": "z\n",
                 "elsewhere.md": "w\n",
             },
         )
-        git("add", "src/maljan/tracked.py")
+        git("add", "src/malspark/tracked.py")
         assert leak_check.shipped_files(tmp_path) == [
-            "src/maljan/local_prompt.md",
-            "src/maljan/tracked.py",
+            "src/malspark/local_prompt.md",
+            "src/malspark/tracked.py",
         ]
 
 

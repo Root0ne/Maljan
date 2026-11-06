@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1 import sandbox_reports as module
-from maljan.core.config import SandboxConfig
+from malspark.core.config import SandboxConfig
 
 SHA = "a" * 64
 FIXTURES = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "sandbox"
@@ -264,8 +264,8 @@ _BEHAVIOR_NETWORK = {
 
 
 def _sniffed(formats: list[Any]) -> str:
-    from maljan.core.report_formats import ReportFormat, sniff
-    from maljan.providers.sandbox.readers import sandbox_formats
+    from malspark.core.report_formats import ReportFormat, sniff
+    from malspark.providers.sandbox.readers import sandbox_formats
 
     cape = json.loads(_blob("cape2_synthetic.json"))
     found = sniff(cape, sandbox_formats([ReportFormat.model_validate(f) for f in formats]))

@@ -1,6 +1,6 @@
 """A stored ledger entry keeps every field the entry carries.
 
-``evidence_entries`` gains the seven fields ``maljan.schemas.evidence.LedgerEntry``
+``evidence_entries`` gains the seven fields ``malspark.schemas.evidence.LedgerEntry``
 carried with no column: ``source``, ``facts``, ``reputation``, ``pack_step``,
 ``structured_from_server``, ``agent_role`` and ``agent_tab``. Without them a
 ledger read back from the database lost where each tool was declared, what

@@ -1,4 +1,4 @@
-"""A sandbox does not get to decide how much memory Maljan spends.
+"""A sandbox does not get to decide how much memory Malspark spends.
 
 ``rest.py`` and ``triage.py`` read a report
 body with ``response.json()`` and streamed a pcap to disk with no ceiling on
@@ -14,11 +14,11 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from maljan.core.config import Settings
-from maljan.providers.errors import ArtefactFetchFailed, ProviderError
-from maljan.providers.sandbox import limits
-from maljan.providers.sandbox.rest import RestSandboxProvider
-from maljan.providers.sandbox.triage import TriageSandboxProvider
+from malspark.core.config import Settings
+from malspark.providers.errors import ArtefactFetchFailed, ProviderError
+from malspark.providers.sandbox import limits
+from malspark.providers.sandbox.rest import RestSandboxProvider
+from malspark.providers.sandbox.triage import TriageSandboxProvider
 
 
 def _rest(handler):

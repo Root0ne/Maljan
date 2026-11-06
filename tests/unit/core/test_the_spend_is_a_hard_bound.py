@@ -16,8 +16,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from maljan.core.spend import SpendCeilingStop, SpendMeter
-from maljan.llm.context_window import CHARS_PER_TOKEN
+from malspark.core.spend import SpendCeilingStop, SpendMeter
+from malspark.llm.context_window import CHARS_PER_TOKEN
 
 MODEL = "deepseek-v4-pro"
 PRICES = {

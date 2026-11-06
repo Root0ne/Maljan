@@ -17,12 +17,12 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from maljan.core.config import Settings
-from maljan.loaders.cape2_client import CAPEv2Client
-from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider, cape_platform
-from maljan.providers.sandbox.formats import detect_sample_format, option_for_format
-from maljan.providers.sandbox.rest import RestSandboxProvider
-from maljan.providers.sandbox.triage import TriageSandboxProvider
+from malspark.core.config import Settings
+from malspark.loaders.cape2_client import CAPEv2Client
+from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider, cape_platform
+from malspark.providers.sandbox.formats import detect_sample_format, option_for_format
+from malspark.providers.sandbox.rest import RestSandboxProvider
+from malspark.providers.sandbox.triage import TriageSandboxProvider
 
 
 def _pe(tmp_path: Path) -> Path:

@@ -108,7 +108,7 @@ def test_the_live_sidecar_offers_exactly_the_pinned_manifest(name: str) -> None:
     the manifest moved."""
     from scripts.goldens.capture_builtin_tool_sets import SIDECARS, enumerate_stdio_manifest
 
-    from maljan.agents.subprocess_env import child_env
+    from malspark.agents.subprocess_env import child_env
 
     subdir, allow = SIDECARS[name]
     live = asyncio.run(
@@ -141,7 +141,7 @@ def test_the_caveats_on_a_measured_number_reach_the_model_that_reads_them() -> N
     """
     import importlib.util
 
-    from maljan.tools import knowledge as knowledge_tools
+    from malspark.tools import knowledge as knowledge_tools
 
     spec = importlib.util.spec_from_file_location(
         "knowledge_sidecar", ROOT / "services" / "knowledge-mcp" / "server.py"
@@ -191,7 +191,7 @@ def test_the_caveats_on_a_measured_number_reach_the_model_that_reads_them() -> N
 def test_the_sidecar_is_registered_as_a_built_in_with_the_launch_parameters_it_needs(
     name: str,
 ) -> None:
-    from maljan.core.config import Settings, reserved_server_keys, shipped_server_keys
+    from malspark.core.config import Settings, reserved_server_keys, shipped_server_keys
 
     assert name in shipped_server_keys()
     assert name in reserved_server_keys()
@@ -213,25 +213,25 @@ def test_only_the_analysis_sidecar_is_allowed_to_see_the_staging_directory() -> 
     """The staging variables say where uploads land and how long they are
     kept, and no other built-in has any business reading either.
 
-    ``MALJAN_SAMPLE_ROOTS`` is the exception both file-reading sidecars need:
+    ``MALSPARK_SAMPLE_ROOTS`` is the exception both file-reading sidecars need:
     it is the list of directories they may read a path argument in, and a
     server that cannot see it reads only what it staged itself. The knowledge
     sidecar takes no path at all, so it sees neither, and the one variable it
     does see says nothing about the filesystem.
     """
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     servers = Settings(_env_file=None).mcp.servers
     assert servers["analysis"].env_allow == [
-        "MALJAN_STAGING_DIR",
-        "MALJAN_STAGING_TTL_HOURS",
-        "MALJAN_SAMPLE_ROOTS",
+        "MALSPARK_STAGING_DIR",
+        "MALSPARK_STAGING_TTL_HOURS",
+        "MALSPARK_SAMPLE_ROOTS",
     ]
-    assert servers["network"].env_allow == ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"]
+    assert servers["network"].env_allow == ["MALSPARK_STAGING_DIR", "MALSPARK_SAMPLE_ROOTS"]
     assert servers["knowledge"].env_allow == [
-        "MALJAN_INDEX_RETRY_SECONDS",
-        "MALJAN_ATTCK_REFRESH_DAYS",
-        "MALJAN_SAMPLE_SHA256",
+        "MALSPARK_INDEX_RETRY_SECONDS",
+        "MALSPARK_ATTCK_REFRESH_DAYS",
+        "MALSPARK_SAMPLE_SHA256",
     ]
 
 
@@ -246,9 +246,9 @@ def test_the_index_retry_interval_reaches_the_knowledge_sidecar() -> None:
     import json
     import subprocess
 
-    from maljan.agents.subprocess_env import child_env
-    from maljan.core.config import REQUIRED_ENV_ALLOW, Settings
-    from maljan.tools.knowledge import INDEX_RETRY_ENV
+    from malspark.agents.subprocess_env import child_env
+    from malspark.core.config import REQUIRED_ENV_ALLOW, Settings
+    from malspark.tools.knowledge import INDEX_RETRY_ENV
 
     assert INDEX_RETRY_ENV in REQUIRED_ENV_ALLOW["knowledge"]
     assert INDEX_RETRY_ENV in Settings(_env_file=None).mcp.servers["knowledge"].env_allow
@@ -280,7 +280,7 @@ def test_a_sidecar_that_is_told_nothing_keeps_the_module_default() -> None:
     import json
     import subprocess
 
-    from maljan.agents.subprocess_env import child_env
+    from malspark.agents.subprocess_env import child_env
 
     env = child_env(source={k: v for k, v in os.environ.items()})
     probe = (
@@ -304,7 +304,7 @@ def test_a_sidecar_that_is_told_nothing_keeps_the_module_default() -> None:
 def test_the_container_is_the_one_place_that_announces_the_retry_interval() -> None:
     """A sidecar started from any entry point reads the deployment's number.
 
-    It used to be announced from ``MaljanApp.arun``, which is one entry point
+    It used to be announced from ``MalsparkApp.arun``, which is one entry point
     of several: a container built by a script, a test harness or the API
     started its knowledge sidecar with the module default instead of the
     configured interval. The container builds the sidecar registry, so it is
@@ -314,9 +314,9 @@ def test_the_container_is_the_one_place_that_announces_the_retry_interval() -> N
     import os
     import pathlib
 
-    from maljan.core.config import Settings
-    from maljan.core.container import ServiceContainer
-    from maljan.tools.knowledge import INDEX_RETRY_ENV
+    from malspark.core.config import Settings
+    from malspark.core.container import ServiceContainer
+    from malspark.tools.knowledge import INDEX_RETRY_ENV
 
     config = Settings(_env_file=None)
     config.validation.index_retry_seconds = 1234
@@ -332,7 +332,7 @@ def test_the_container_is_the_one_place_that_announces_the_retry_interval() -> N
 
     # And in one place only: nothing else in the tree writes the name.
     writers: list[str] = []
-    root = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
+    root = pathlib.Path(__file__).resolve().parents[3] / "src" / "malspark"
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):

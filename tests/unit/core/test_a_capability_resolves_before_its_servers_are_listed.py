@@ -15,15 +15,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from maljan.agents.composition import (
+from malspark.agents.composition import (
     capability_servers,
     mcp_refs_for,
     note_unresolved_capabilities,
     servers_bound_to,
     unresolved_capability_reasons,
 )
-from maljan.core import served_declarations
-from maljan.core.settings_overrides import (
+from malspark.core import served_declarations
+from malspark.core.settings_overrides import (
     build_settings,
     unknown_reference_refusals,
     unresolved_capability_warnings,

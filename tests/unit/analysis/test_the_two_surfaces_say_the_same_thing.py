@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis.run_summary import TruncationMetrics, bundle_loss_sentence
+from malspark.analysis.run_summary import TruncationMetrics, bundle_loss_sentence
 
 FIXTURE = (
     pathlib.Path(__file__).resolve().parents[2]
@@ -70,7 +70,7 @@ def test_the_real_metrics_object_reads_the_same() -> None:
 
 def test_the_report_prints_it_and_not_the_lumped_total() -> None:
     """Through the builder, so the line is the one a run really renders."""
-    from maljan.analysis.run_summary import RunSummaryBuilder
+    from malspark.analysis.run_summary import RunSummaryBuilder
 
     everything = next(c for c in CASES if c["shape"] == "everything at once")
     snapshot: dict[str, Any] = {

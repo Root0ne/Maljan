@@ -27,7 +27,7 @@ from app.services.frontier_arms import (
 )
 from app.services.server_map import TOKEN_MASK
 from app.services.settings_service import SettingsService, SettingsValidationError
-from maljan.core import settings_secrets as box
+from malspark.core import settings_secrets as box
 
 
 @pytest.fixture()

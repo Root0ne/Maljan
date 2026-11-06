@@ -10,7 +10,7 @@ the same heading notes and numbers.
 
 from __future__ import annotations
 
-from maljan.agents.base_agent import _blocks_with_notes, read_claim_blocks
+from malspark.agents.base_agent import _blocks_with_notes, read_claim_blocks
 from tests.linear_cost import assert_scales
 
 _CLAIM = "CLAIM: a [ev_0001]\nCONFIDENCE: 0.5"

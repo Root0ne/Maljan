@@ -1,0 +1,453 @@
+"""The analyst an operator declares rather than writes.
+
+One class, parametrised by a ``ResolvedAgent``. Deliberately thin: the three
+built-in analysts carry provider-specific ISR extraction that goldens pin —
+Ghidra program info, CAPE signature shapes, PCAP heuristics — and reproducing
+any of that generically would be a guess. What is left is the part that is the
+same for every analyst: send the prompt, run the ReAct loop when there are
+tools and a plain call when there are none, and wrap whatever comes back into
+an ISR under the agent's own key.
+
+The degradation policy is the one applied to custom servers: a
+custom analyst never fails a job. A tool server that would not attach, a tool
+that is not there, an LLM call that raises — each becomes a reason on
+``degradation_reasons`` and a ``[WARN]`` report, so the run summary says the
+ensemble was thinner rather than the job dying on an agent the operator added
+this morning.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from langchain_core.language_models.chat_models import BaseChatModel
+
+from malspark.agents.base_agent import (
+    BaseAnalyst,
+    describe_exception_for_log,
+    revision_messages,
+)
+from malspark.agents.composition import ResolvedAgent
+from malspark.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
+    CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT,
+    PROVIDER_FAMILY,
+    tool_families,
+)
+from malspark.core.exceptions import SampleNotOpened
+from malspark.loaders.binary_chunker import head_object
+from malspark.pipeline.events import describe_exception
+from malspark.schemas.isr_models import AgentISR
+
+# Appended to the agent's own prompt on the ISR paths. The operator writes what
+# their agent is *for*; this is the shape the ISR parsers read, and asking them
+# to reproduce it by hand would make a working definition a matter of luck.
+_ISR_FORMAT_INSTRUCTION = (
+    "Return a structured list of findings. For each finding state: the claim, "
+    "the exact artifact reference, your confidence (0.0-1.0), and the MITRE "
+    "ATT&CK technique ID.\n\n"
+    f"{CLAIM_FORMAT_FRAGMENT}\n"
+)
+# The same instruction for an agent whose definition turns the technique line
+# off (``AgentDefinition.attck_techniques``): an agent whose work is not
+# malware behaviour is not pushed toward technique ids.
+_ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES = (
+    "Return a structured list of findings. For each finding state: the claim, "
+    "the exact artifact reference and your confidence (0.0-1.0).\n\n"
+    f"{CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT}\n"
+)
+
+# Prefix on the *report text* shown when a run degraded — cosmetic only. Never
+# inspected: whether a run degraded is carried by ``_Run.degraded``, not by
+# sniffing this prefix, so a custom agent's own model output starting with the
+# same words is never mistaken for a degradation notice.
+_WARN_PREFIX = "[WARN]"
+
+# BUG 11, second round (live 2026-09-07, S5c). A generic agent's system prompt
+# is the operator's own text and says nothing about where the sample is; the
+# only place the path appeared was a field inside the JSON data block, and
+# `static_qu1cksc0pe` called every tool with the sample's bare *filename*
+# instead — which Qu1cksc0pe then resolved against its own working directory.
+# The static role has never had this problem because its human turn opens with
+# an explicit line naming the path. The framework states it here for every
+# custom agent, so an operator does not have to know to write it.
+_PATH_HEADER = (
+    "Sample path (use exactly this string, verbatim, wherever a tool asks for "
+    "a file or a path): {path}\n"
+    "It is an absolute path. Never pass the file name on its own — a tool "
+    "resolves a bare name against its own working directory, not ours.\n\n"
+)
+
+
+def _analysis_path_in(data: str) -> str | None:
+    """The ``analysis_file_path`` spliced into a head chunk, when there is one.
+
+    Read from the object the chunk opens with (``loaders.binary_chunker.
+    head_object``): a reverser's head chunk is the sample context followed by
+    the sandbox slice joined after it, and the path is the head's whatever is
+    joined behind it. Mirrors the static analyst's own extraction rather than
+    importing it: the static module pulls in its RAG and sink-reachability
+    machinery a custom agent has no business loading.
+    """
+    parsed = head_object(data)
+    if parsed is None:
+        return None
+    path = parsed.get("analysis_file_path")
+    return path if isinstance(path, str) and path else None
+
+
+@dataclass(frozen=True)
+class _Run:
+    """What one loop invocation produced, plus whether it actually ran."""
+
+    text: str
+    degraded: bool
+
+
+class ConfigurableAnalyst(BaseAnalyst):
+    """A ``BaseAnalyst`` whose prompt, tools and LLM come from configuration."""
+
+    def __init__(self, definition_key: str, resolved: ResolvedAgent, llm: BaseChatModel) -> None:
+        super().__init__(llm=llm, name=definition_key, tools=list(resolved.tools))
+        self._resolved = resolved
+        # Reasons resolution already produced (a referenced tool that is not
+        # there) start the list; the analyst appends its own as it runs.
+        self.degradation_reasons = list(resolved.degradation_reasons)
+
+    # ------------------------------------------------------------------
+    # Tools
+    # ------------------------------------------------------------------
+
+    def _initialize_mcp_client(self) -> None:
+        """Nothing to attach: resolution already did it.
+
+        Present because ``BaseAnalyst._try_initialize_mcp`` calls it. A custom
+        analyst has no provider lifecycle of its own — its tools arrived in the
+        ``ResolvedAgent`` — so this is deliberately a no-op rather than a
+        second attachment path that could disagree with the first.
+        """
+        return None
+
+    def _infer_domain(self) -> str:
+        """The definition key. A custom agent's domain is its own name."""
+        return self.name
+
+    def _with_path_header(self, data: str) -> str:
+        """The data, preceded by an explicit statement of the sample path.
+
+        The path is the pinned one when the analyst node set it, otherwise the
+        one spliced into the head chunk's JSON — a chunked run hands later
+        chunks no JSON at all, so the pin is what keeps every chunk pointed at
+        the same file. When neither exists the data is returned untouched: an
+        agent that never reads a file is not given a line about one, and the
+        pre-fix prompt is preserved byte for byte.
+        """
+        path = self._analysis_file_path or _analysis_path_in(data)
+        if not path:
+            return data
+        return _PATH_HEADER.format(path=path) + data
+
+    def _priority_hint(self, data: str) -> str:
+        """The static provider's priority-functions hint, for an agent that reads a provider.
+
+        The same open and sink-reachability pre-pass the static analyst runs
+        (``providers.base.prepare_sample``), for a generic agent whose request
+        carries its own static provider's tools — the reverser a team puts on
+        a disassembler reads the call graph's ranking as the static analyst
+        does, wherever the provider gives a call graph. Computed on the chunk
+        that carries the sample path (the head chunk), once per sample, and
+        ``""`` for every other agent and chunk and for a provider with no call
+        graph. A sample the provider knows it cannot open raises
+        :class:`SampleNotOpened` here, before the loop.
+        """
+        if _analysis_path_in(data) is None:
+            return ""
+        if PROVIDER_FAMILY not in tool_families(self.tools):
+            return ""
+        from malspark.providers.base import prepare_sample
+
+        path = self._analysis_file_path or _analysis_path_in(data) or ""
+        held = self._held_providers()
+        if held:
+            hint = self._prepare_on_each(held, path)
+        else:
+            hint = prepare_sample(self._own_static_provider(), path, self.logger)
+        if hint and not self.asks_for_techniques():
+            # The follow-up's clause pointing the reading at a technique is
+            # left out for an agent not asked for one.
+            from malspark.analysis.sink_reachability import ATTCK_PURPOSE
+
+            hint = hint.replace(ATTCK_PURPOSE, "")
+        return f"{hint}\n" if hint else ""
+
+    def _held_providers(self) -> list[tuple[str, Any]]:
+        """Each static provider this agent holds, by id, when its references name several.
+
+        Empty for an agent with one provider or none, which keeps the one
+        provider's path (``BaseAnalyst._own_static_provider``) exactly.
+        """
+        resolved = getattr(self, "_resolved", None)
+        provider_ids = getattr(resolved, "provider_ids", None)
+        container = getattr(self, "_container", None)
+        if not isinstance(provider_ids, tuple) or len(provider_ids) < 2 or container is None:
+            return []
+        out: list[tuple[str, Any]] = []
+        for provider_id in provider_ids:
+            try:
+                out.append((str(provider_id), container.get_static_provider(str(provider_id))))
+            except Exception as exc:  # noqa: BLE001 — a lookup is never worth a lost loop
+                self.logger.debug("%s: no static provider %s (%s).", self.name, provider_id, exc)
+        return out
+
+    def _note_unopened(self, provider_id: str, failure: SampleNotOpened) -> None:
+        """Say that one of the agent's several providers could not open the sample; the loop goes on."""
+        reason = f"agent '{self.name}': static provider '{provider_id}' could not open the sample"
+        self.logger.warning("%s: %s; its other providers go on.", reason, failure)
+        if reason not in self.degradation_reasons:
+            self.degradation_reasons.append(reason)
+
+    def _prepare_on_each(self, held: list[tuple[str, Any]], path: str) -> str:
+        """``prepare_sample`` on each of the agent's providers, their hints in reference order.
+
+        A provider that cannot open the sample is said (``_note_unopened``)
+        while another one could; only when none could is the first failure
+        raised, which ends the loop as it does for an agent with one provider.
+        """
+        from malspark.agents.composition import _renamed_tools, _with_offered_names
+        from malspark.providers.base import prepare_sample
+
+        hints: list[str] = []
+        failures: list[tuple[str, SampleNotOpened]] = []
+        for provider_id, provider in held:
+            try:
+                hint = prepare_sample(provider, path, self.logger)
+            except SampleNotOpened as exc:
+                failures.append((provider_id, exc))
+                continue
+            # A provider's hint names its tools as it declares them; a tool
+            # offered under a namespaced name is named as it is offered.
+            hints.append(
+                _with_offered_names(
+                    hint, _renamed_tools(getattr(self, "tools", None) or [], provider_id)
+                )
+            )
+        if failures and len(failures) == len(held):
+            raise failures[0][1]
+        for provider_id, failure in failures:
+            self._note_unopened(provider_id, failure)
+        return "\n".join(hint for hint in hints if hint)
+
+    def _stop_if_the_sample_did_not_open(self) -> None:
+        """The base check, over every provider of an agent that holds several.
+
+        The loop is not started only when every provider met a failure opening
+        the job's sample; while one of them opened it, each that did not is
+        said and the loop goes on with the others (their calls fail on their
+        own, ``composition._failing_as_a_call``).
+        """
+        held = self._held_providers()
+        if not held:
+            super()._stop_if_the_sample_did_not_open()
+            return
+        failures: list[tuple[str, SampleNotOpened]] = []
+        for provider_id, provider in held:
+            known = getattr(provider, "sample_failure", None)
+            failure = known() if callable(known) else None
+            if isinstance(failure, SampleNotOpened):
+                failures.append((provider_id, failure))
+        if len(failures) < len(held):
+            for provider_id, failure in failures:
+                self._note_unopened(provider_id, failure)
+            return
+        first = failures[0][1]
+        first.stopped_agent = self.name
+        self.logger.error("%s: %s; its loop is not started.", self.name, first)
+        raise first
+
+    def _load_hint(self, data: str) -> str:
+        """The static role's load line, for an agent given a server's declared open tool.
+
+        A server that declares ``sample_open`` (declared, accepted from a
+        proposal, or bound to the agent by the operator) marks its open tool
+        (``providers.sample_open.mark_open_tool``); an agent offered it is told
+        to open the sample with it first, as the static role is. Only on the
+        chunk that carries the sample path, and not for an agent whose
+        provider tools open the sample before the loop (``_priority_hint``):
+        every other request is unchanged.
+        """
+        path = _analysis_path_in(data)
+        if path is None:
+            return ""
+        return self.load_line_for(self._analysis_file_path or path)
+
+    def load_line_for(self, path: str) -> str:
+        """The load line naming the declared open tool this agent is offered, for ``path``.
+
+        ``""`` with no path, for an agent whose provider tools open the sample
+        before the loop (``_priority_hint``), and for one offered no declared
+        open tool. Read by :meth:`_load_hint` and by a delegated task's turn
+        (``delegation._task_turn``), which has the pinned path and no chunk.
+        """
+        if not path or PROVIDER_FAMILY in tool_families(self.tools):
+            return ""
+        from malspark.providers.sample_open import declared_open, load_line
+
+        spec = declared_open(self.tools)
+        if spec is None:
+            return ""
+        return load_line(spec.open_tool, spec.path_argument, path)
+
+    # ------------------------------------------------------------------
+    # Text interface
+    # ------------------------------------------------------------------
+
+    def _run(self, prompt_messages: list[tuple[str, str]], what: str) -> _Run:
+        """Run the loop and turn any failure into a report the pipeline can read.
+
+        ``degraded`` is the signal callers act on; the returned text is only
+        ever shown, never inspected — a custom agent's genuine model output is
+        free to start with the same words as the warning prefix without being
+        mistaken for one.
+        """
+        try:
+            return _Run(text=str(self.execute_tool_loop(prompt_messages)), degraded=False)
+        except SampleNotOpened:
+            # Not a thinner ensemble: the agent's provider cannot read the
+            # sample, and the stage records the failure as the agent's own.
+            raise
+        except Exception as exc:  # noqa: BLE001 — a custom analyst never fails a job
+            # The reason travels: it is appended to the run's degradation
+            # reasons and returned as this agent's report, which is published.
+            # So it says the kind of failure rather than what the failure said,
+            # and the log line beside it keeps the message.
+            reason = f"agent '{self.name}': {describe_exception(exc)}"
+            self.logger.warning(
+                "%s failed during %s: %s", self.name, what, describe_exception_for_log(exc)
+            )
+            if reason not in self.degradation_reasons:
+                self.degradation_reasons.append(reason)
+            return _Run(text=f"{_WARN_PREFIX} {reason}", degraded=True)
+
+    def analyze(self, data: str) -> str:
+        self.logger.info("Executing '%s' analysis (%d tools).", self.name, len(self.tools))
+        return self._run(
+            [
+                ("system", self._resolved.prompt),
+                (
+                    "human",
+                    self._priority_hint(data)
+                    + self._load_hint(data)
+                    + self._with_path_header(data),
+                ),
+            ],
+            "analysis",
+        ).text
+
+    def revise(
+        self,
+        original_data: str,
+        own_report: str,
+        peer_reports: dict[str, str],
+        mediator_feedback: str,
+    ) -> str:
+        self.logger.info("Revising '%s' analysis based on peer feedback...", self.name)
+        return self._run(
+            revision_messages(
+                self._resolved.prompt,
+                self._with_path_header(original_data),
+                own_report,
+                peer_reports,
+                mediator_feedback,
+                isr=False,
+            ),
+            "revision",
+        ).text
+
+    # ------------------------------------------------------------------
+    # ISR interface
+    # ------------------------------------------------------------------
+
+    def _isr_for(self, run: _Run, revision_round: int) -> AgentISR:
+        """Wrap a run's text into an ISR — zero-claim when the run degraded.
+
+        A degraded run's text is a warning, not analysis; passing it through
+        ``_text_to_isr`` would keep the warning as the analyst's prose and ask
+        the analyst about its format. Short-circuiting on ``run.degraded`` —
+        never on the text — keeps the same rule ``_text_to_isr`` already
+        applies to its own placeholder text: a failure is zero claims, never a
+        claim, and a genuine finding is never mistaken for one because of how
+        it happens to start.
+        """
+        if run.degraded:
+            return AgentISR(
+                agent_id=self.name,
+                domain=self._infer_domain(),
+                claims=[],
+                dissent_items=[],
+                revision_round=revision_round,
+            )
+        return self._text_to_isr(run.text, revision_round=revision_round)
+
+    def asks_for_techniques(self) -> bool:
+        """Whether the definition asks this agent for a technique line (``attck_techniques``)."""
+        return bool(self._resolved.attck_techniques)
+
+    def _isr_format_instruction(self) -> str:
+        """The claim format this agent is asked for, with or without the technique line."""
+        if self.asks_for_techniques():
+            return _ISR_FORMAT_INSTRUCTION
+        return _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES
+
+    def analyze_isr(self, data: str) -> AgentISR:
+        self.logger.info("Executing '%s' ISR analysis...", self.name)
+        run = self._run(
+            [
+                ("system", self._resolved.prompt),
+                (
+                    "human",
+                    self._isr_format_instruction()
+                    + self._priority_hint(data)
+                    + self._load_hint(data)
+                    + self._with_path_header(data),
+                ),
+            ],
+            "ISR analysis",
+        )
+        return self._isr_for(run, revision_round=0)
+
+    def revise_isr(
+        self,
+        original_data: str,
+        own_report: str,
+        peer_reports: dict[str, str],
+        mediator_feedback: str,
+        revision_round: int = 1,
+    ) -> tuple[str, AgentISR]:
+        self.logger.info("Executing '%s' ISR revision (round %d)...", self.name, revision_round)
+        run = self._run(
+            revision_messages(
+                self._resolved.prompt,
+                self._with_path_header(original_data),
+                own_report,
+                peer_reports,
+                mediator_feedback,
+                isr=True,
+                revision_round=revision_round,
+                techniques=self.asks_for_techniques(),
+            ),
+            "ISR revision",
+        )
+        isr = self._isr_for(run, revision_round=revision_round)
+        if not run.degraded:
+            # The negotiation round asks for a DISPUTES section; what it says
+            # is this agent's dissent, as the built-in analysts read it.
+            # Read off the prose, as the built-ins read it: a findings block
+            # (its JSON fence) is no part of the disputes. Read only; what it
+            # carries is taken where the answer is.
+            from malspark.agents.findings_block import parse_findings_block
+            from malspark.agents.static_analyst import _parse_disputes
+
+            block = parse_findings_block(run.text)
+            isr.dissent_items = _parse_disputes(block.prose)
+        return run.text, isr

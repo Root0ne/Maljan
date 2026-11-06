@@ -19,16 +19,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.base_agent import BaseAnalyst, read_claim_blocks
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import BaseAnalyst, read_claim_blocks
+from malspark.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     claim_block_indexes,
     mark_invalid_technique_ids,
     validate_isr,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.tools import knowledge
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.tools import knowledge
 
 PE = {"platform": "windows", "file_type": "pe"}
 
@@ -174,7 +174,7 @@ def test_an_unknown_id_in_a_list_marks_only_its_own_claim() -> None:
 
 def test_two_blocks_written_alike_are_two_blocks() -> None:
     """The block is recorded where the claim is read, not inferred from its words."""
-    from maljan.pipeline.validation import count_claim_blocks
+    from malspark.pipeline.validation import count_claim_blocks
 
     sentence = "The loader injects code into a remote process."
     read = read_claim_blocks(_block(sentence, "T1055") + "\n---\n" + _block(sentence, "T1620"))

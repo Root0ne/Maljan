@@ -15,11 +15,11 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from maljan.agents.base_agent import BudgetMeter, _with_run_state_on
-from maljan.analysis.efficiency import efficiency_lines, efficiency_record
-from maljan.core.input_meter import PARTS, TOOL_LOOP, InputMeter, request_parts
-from maljan.core.token_ledger import TokenLedger
-from maljan.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END
+from malspark.agents.base_agent import BudgetMeter, _with_run_state_on
+from malspark.analysis.efficiency import efficiency_lines, efficiency_record
+from malspark.core.input_meter import PARTS, TOOL_LOOP, InputMeter, request_parts
+from malspark.core.token_ledger import TokenLedger
+from malspark.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END
 
 PACK = "TRIAGE PACK\nrow one\nrow two"
 TASK = "Analyse the sample."
@@ -76,7 +76,7 @@ def test_run_state_markers_a_tool_answer_carries_are_not_taken_for_the_block() -
 
 def test_the_split_is_linear_in_the_request() -> None:
     """The messages measured and the texts searched grow with the request, and nothing else."""
-    import maljan.core.input_meter as input_meter
+    import malspark.core.input_meter as input_meter
 
     def work(scale: int) -> int:
         counted = [0]
@@ -183,7 +183,7 @@ def test_the_record_and_the_report_name_an_agent_whose_calls_were_not_measured()
     ledger.add({"input_tokens": 60, "output_tokens": 2}, agent="static")
     ledger.add({"input_tokens": 9, "output_tokens": 2}, agent="reporter")
 
-    from maljan.analysis.run_summary import spend_blocks
+    from malspark.analysis.run_summary import spend_blocks
 
     tokens = spend_blocks(ledger.snapshot())["tokens"]
     record = efficiency_record(_container(meter, ledger), tokens=tokens)

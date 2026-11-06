@@ -16,9 +16,9 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.pdf import PdfRenderer
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.pdf import PdfRenderer
 from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 from tests.unit.reporting.test_renderers_html import _rich_report
 

@@ -25,9 +25,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.core.config import Settings
-from maljan.llm.openai_provider import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.core.config import Settings
+from malspark.llm.openai_provider import (
     NO_REPLY_RECORDED,
     NOT_RUN_REPLY,
     OpenAIProvider,

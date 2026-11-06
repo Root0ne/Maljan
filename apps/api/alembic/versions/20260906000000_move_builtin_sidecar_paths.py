@@ -2,7 +2,7 @@
 
 The sidecar MCP servers moved from ``network-mcp/`` and ``threatintel-mcp/``
 to ``services/network-mcp/`` and ``services/threatintel-mcp/`` on this branch.
-``_builtin_servers()`` in ``src/maljan/core/config.py`` already seeds the new
+``_builtin_servers()`` in ``src/malspark/core/config.py`` already seeds the new
 paths, but ``MCPConfig._reseed_builtins`` only fills in a builtin key that is
 *absent* (``servers.setdefault(key, default)``) -- a key already present,
 whatever its content, is kept wholesale. An operator who ever saved the

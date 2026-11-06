@@ -24,19 +24,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.agents.base_agent import BaseAnalyst, TurnPace
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.analysis.chunk_merger import merge_chunk_isrs
-from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.memory.long_term_memory import build_stored_case
-from maljan.pipeline.evidence_summary import collect
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import BaseAnalyst, TurnPace
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.analysis.chunk_merger import merge_chunk_isrs
+from malspark.extractors.capability_matrix import build_capability_matrix
+from malspark.memory.long_term_memory import build_stored_case
+from malspark.pipeline.evidence_summary import collect
+from malspark.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     absence_claim_violation,
     validate_isr,
 )
-from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, AgentISR, ClaimEvidence
-from maljan.tools import knowledge
+from malspark.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, AgentISR, ClaimEvidence
+from malspark.tools import knowledge
 
 # The benign control run's claims that stated absence, with the ids they carried.
 PUTTY_ABSENCE_CLAIMS: tuple[tuple[str, str], ...] = (
@@ -294,7 +294,7 @@ class TestTheAnalystsLoop:
         analyst._note_budget({"stage": "analysis", "cap": "time"})
         analyst._last_loop_deadline = time.monotonic() + 100.0
 
-        with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+        with patch("malspark.agents.base_agent.validity_check_available", return_value=True):
             result = analyst._validate_isr(analyst._first, "evidence")
 
         assert analyst.seen_turns == []

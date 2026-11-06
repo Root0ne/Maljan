@@ -3,10 +3,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.agents.dynamic_analyst import DynamicAnalyst
-from maljan.agents.network_analyst import NetworkAnalyst
-from maljan.agents.static_analyst import StaticAnalyst
-from maljan.core.exceptions import AnalystError
+from malspark.agents.dynamic_analyst import DynamicAnalyst
+from malspark.agents.network_analyst import NetworkAnalyst
+from malspark.agents.static_analyst import StaticAnalyst
+from malspark.core.exceptions import AnalystError
 
 # ---------------------------------------------------------------------------
 # Agent Analyze Tests
@@ -138,7 +138,7 @@ class TestNoToolsFallbackTimeout:
 
     def _make_bare_agent(self, llm: object):  # type: ignore[no-untyped-def]
         """Concrete BaseAnalyst with empty tools list."""
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         class _BareAgent(BaseAnalyst):
             def analyze(self, data: str) -> str:
@@ -157,7 +157,7 @@ class TestNoToolsFallbackTimeout:
                 return MagicMock(content="fast answer")
 
         agent = self._make_bare_agent(_FastLLM())
-        with patch("maljan.agents.base_agent.get_settings") as mock_settings:
+        with patch("malspark.agents.base_agent.get_settings") as mock_settings:
             mock_settings.return_value.react_agent_timeout = 5
             mock_settings.return_value.react_agent_timeout_overrides = {}
             result = agent.execute_tool_loop([("system", "s"), ("human", "h")])
@@ -173,7 +173,7 @@ class TestNoToolsFallbackTimeout:
                 return MagicMock(content="never")
 
         agent = self._make_bare_agent(_HangingLLM())
-        with patch("maljan.agents.base_agent.get_settings") as mock_settings:
+        with patch("malspark.agents.base_agent.get_settings") as mock_settings:
             # 1s budget; outer daemon thread guard is timeout + 30 = 31s.
             mock_settings.return_value.react_agent_timeout = 1
             mock_settings.return_value.react_agent_timeout_overrides = {}
@@ -211,7 +211,7 @@ class TestNoToolsFallbackTimeout:
             return original_info(fmt, *args, **kwargs)
 
         with patch.object(agent.logger, "info", side_effect=_capturing_info):
-            with patch("maljan.agents.base_agent.get_settings") as mock_settings:
+            with patch("malspark.agents.base_agent.get_settings") as mock_settings:
                 mock_settings.return_value.react_agent_timeout = 999
                 mock_settings.return_value.react_agent_timeout_overrides = {"bare": 1}
 
@@ -234,7 +234,7 @@ class TestDegradationReasonsAreNotSharedAcrossInstances:
     analyst instance in a long-lived worker. Pin the instance-attribute fix."""
 
     def _make_agent(self):  # type: ignore[no-untyped-def]
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         class _BareAgent(BaseAnalyst):
             def analyze(self, data: str) -> str:
@@ -264,7 +264,7 @@ class TestPerAgentMaxStepsOverride:
     """
 
     def _make_tool_agent(self, name: str):  # type: ignore[no-untyped-def]
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         class _ToolAgent(BaseAnalyst):
             def analyze(self, data: str) -> str:
@@ -285,7 +285,7 @@ class TestPerAgentMaxStepsOverride:
                 yield {"messages": [MagicMock(content="done", tool_calls=[])]}
 
         agent = self._make_tool_agent(name)
-        with patch("maljan.agents.base_agent.get_settings") as mock_settings:
+        with patch("malspark.agents.base_agent.get_settings") as mock_settings:
             cfg = mock_settings.return_value
             cfg.react_agent_timeout = 180
             cfg.react_agent_timeout_overrides = {"static": 1200}
@@ -303,7 +303,7 @@ class TestPerAgentMaxStepsOverride:
         assert self._capture_recursion_limit("network") == 10
 
     def test_the_config_has_no_default_limit(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         s = Settings()
         assert s.react_agent_max_steps is None and s.react_agent_timeout is None
@@ -316,7 +316,7 @@ class TestPerAgentMaxStepsOverride:
     def test_no_limit_is_an_unbounded_recursion_limit(self) -> None:
         import sys
 
-        with patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)):
+        with patch("malspark.agents.base_agent.loop_limits", return_value=(None, None)):
             captured: dict[str, int] = {}
 
             class _FakeExecutor:
@@ -341,12 +341,12 @@ class TestABudgetBelongsToTheAgentThatSpendsIt:
 
     @staticmethod
     def _settings(**agents: Any):  # type: ignore[no-untyped-def]
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         return Settings(_env_file=None, agents=agents) if agents else Settings(_env_file=None)
 
     def _limits(self, cfg: Any, agent: str) -> tuple[int, int]:
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         with patch.object(base_agent, "get_settings", lambda: cfg):
             return base_agent.loop_limits(agent)
@@ -450,7 +450,7 @@ class TestForcedFinalSynthesis:
     """
 
     def _make_tool_agent(self, llm: object):  # type: ignore[no-untyped-def]
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         class _ToolAgent(BaseAnalyst):
             def analyze(self, data: str) -> str:
@@ -491,7 +491,7 @@ class TestForcedFinalSynthesis:
             )
         )
         agent = self._make_tool_agent(synth_llm)
-        with patch("maljan.agents.base_agent.get_settings") as ms:
+        with patch("malspark.agents.base_agent.get_settings") as ms:
             self._settings(ms)
             with patch("langgraph.prebuilt.create_react_agent", return_value=_FakeExecutor()):
                 result = agent.execute_tool_loop([("system", "s"), ("human", "h")])
@@ -516,7 +516,7 @@ class TestForcedFinalSynthesis:
 
         llm = MagicMock()
         agent = self._make_tool_agent(llm)
-        with patch("maljan.agents.base_agent.get_settings") as ms:
+        with patch("malspark.agents.base_agent.get_settings") as ms:
             self._settings(ms)
             with patch("langgraph.prebuilt.create_react_agent", return_value=_FakeExecutor()):
                 result = agent.execute_tool_loop([("system", "s"), ("human", "h")])

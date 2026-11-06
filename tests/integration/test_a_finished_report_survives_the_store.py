@@ -49,8 +49,8 @@ from app.worker.analysis_worker import (
     mark_job_failed,
     run_analysis,
 )
-from maljan.core.config import Settings
-from maljan.schemas.evidence import LedgerEntry
+from malspark.core.config import Settings
+from malspark.schemas.evidence import LedgerEntry
 from tests.integration._session_probe import (
     JobRow,
     Recorded,
@@ -72,7 +72,7 @@ SURROGATES = (0xD800, 0xDFFF)
 @pytest.fixture(autouse=True)
 def _isolated_runtime_settings(monkeypatch: pytest.MonkeyPatch):
     from app import runtime_config as rc
-    from maljan.core.config import reset_settings_cache
+    from malspark.core.config import reset_settings_cache
 
     async def _mock_mode_allowed_override() -> dict[str, Any]:
         return {"api.mock_mode_allowed": True}
@@ -92,7 +92,7 @@ def _no_object_store(tmp_path: Path):
         patch.dict(
             "os.environ",
             {
-                "MALJAN_MOCK_MODE": "true",
+                "MALSPARK_MOCK_MODE": "true",
                 "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
                 "SAMPLES_DIR": str(tmp_path / "samples"),
             },
@@ -253,7 +253,7 @@ async def test_a_publish_raising_at_each_point_still_stores_and_completes(
             raise ConnectionError("Connection closed by server.")
 
     redis_stub.publish = AsyncMock(side_effect=_publish)
-    with patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())):
+    with patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())):
         result = await _run(factory, redis_stub, job)
 
     assert result["status"] == "completed"
@@ -270,7 +270,7 @@ async def test_redis_down_for_the_whole_run_still_stores_and_completes(
     job = fake_job()
     factory, row = _factory(job)
     redis_stub.publish = AsyncMock(side_effect=ConnectionError("Connection refused."))
-    with patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())):
+    with patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())):
         result = await _run(factory, redis_stub, job)
     assert result["status"] == "completed"
     assert row.row.status == "completed"
@@ -284,8 +284,8 @@ async def test_a_failure_after_the_completion_never_marks_the_job_failed(
     job = fake_job()
     factory, row = _factory(job)
     with (
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
-        patch("maljan.app.MaljanApp.remember_the_run", side_effect=OSError("store gone")),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+        patch("malspark.app.MalsparkApp.remember_the_run", side_effect=OSError("store gone")),
         caplog.at_level(logging.ERROR),
     ):
         result = await _run(factory, redis_stub, job)
@@ -316,7 +316,7 @@ async def test_a_failure_between_the_graph_and_the_store_keeps_the_report(
     job = fake_job()
     factory, row = _factory(job)
     with (
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())),
         patch.object(worker_module, "enrichment_plan", side_effect=RuntimeError("plan")),
     ):
         result = await _run(factory, redis_stub, job)
@@ -334,7 +334,7 @@ async def test_an_absent_analysis_is_still_not_kept(redis_stub: MagicMock) -> No
     job = fake_job()
     factory, row = _factory(job)
     absent = {"final_decision": "Suspicious", "isr_reports": {}, "evidence_ledger": []}
-    with patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=absent)):
+    with patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=absent)):
         result = await _run(factory, redis_stub, job)
     assert result["status"] == "failed"
     assert _stored(factory, AnalysisReport) == []
@@ -362,9 +362,9 @@ async def test_a_cancel_during_persistence_is_not_overwritten(
     job = fake_job()
     factory, row = _factory(job)
     with (
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())),
         _row_moves_while_building(row, "cancelled", "Cancelled by the operator."),
-        patch("maljan.app.MaljanApp.remember_the_run") as remembered,
+        patch("malspark.app.MalsparkApp.remember_the_run") as remembered,
         caplog.at_level(logging.WARNING),
     ):
         result = await _run(factory, redis_stub, job)
@@ -397,7 +397,7 @@ async def test_a_job_the_sweep_took_during_a_redis_outage_still_completes(
     job = fake_job()
     factory, row = _factory(job)
     with (
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())),
         _row_moves_while_building(row, "failed", worker_module._SWEPT_NO_OWNER),
         caplog.at_level(logging.WARNING),
     ):
@@ -416,7 +416,7 @@ async def test_a_job_failed_for_another_reason_is_not_completed(redis_stub: Magi
     job = fake_job()
     factory, row = _factory(job)
     with (
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())),
         _row_moves_while_building(row, "failed", "something else"),
     ):
         result = await _run(factory, redis_stub, job)
@@ -443,7 +443,7 @@ async def test_a_lost_completion_acknowledgement_keeps_the_complete_report(
             raise ConnectionError("connection lost after COMMIT")
 
     monkeypatch.setattr(_session_probe.TrackedSession, "commit", _commit_then_lose_the_answer)
-    with patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())):
+    with patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())):
         result = await _run(factory, redis_stub, job)
 
     assert lost == [True]
@@ -510,7 +510,7 @@ async def _lost_commit_under_a_cancelled_row(
     monkeypatch.setattr(_session_probe.TrackedSession, "flush", _flush)
     monkeypatch.setattr(_session_probe.TrackedSession, "commit", _commit)
     with (
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())),
         _row_moves_while_building(row, "cancelled", "Cancelled by the operator."),
     ):
         result = await _run(factory, redis_stub, job)
@@ -706,7 +706,7 @@ async def test_nul_in_evidence_transcript_and_report_is_written_out(
 
 
 def test_the_written_form_is_the_packs_own() -> None:
-    from maljan.utils.written_forms import pack_escaped
+    from malspark.utils.written_forms import pack_escaped
 
     assert store_text.NUL_WRITTEN == pack_escaped(NUL) == "\\x00"
 
@@ -949,7 +949,7 @@ async def test_the_worker_ends_the_token_ledger_when_the_stored_inputs_are_built
     redis_stub: MagicMock,
 ) -> None:
     """A charge landing between the stored summary and the container's close is marked late."""
-    from maljan.core.token_ledger import TokenLedger
+    from malspark.core.token_ledger import TokenLedger
 
     job = fake_job()
     factory, _row = _factory(job)
@@ -961,7 +961,7 @@ async def test_the_worker_ends_the_token_ledger_when_the_stored_inputs_are_built
         real(container)
 
     with (
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())),
         patch.object(worker_module, "_end_the_token_ledger", new=_spy),
     ):
         await _run(factory, redis_stub, job)

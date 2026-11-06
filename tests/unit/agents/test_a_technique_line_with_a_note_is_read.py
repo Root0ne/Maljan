@@ -27,9 +27,9 @@ import time
 
 import pytest
 
-from maljan.agents.base_agent import read_claim_blocks, read_technique_line
-from maljan.pipeline.validation import TECHNIQUE_LINE_UNREAD_CODE, parse_violations
-from maljan.schemas.isr_models import AgentISR
+from malspark.agents.base_agent import read_claim_blocks, read_technique_line
+from malspark.pipeline.validation import TECHNIQUE_LINE_UNREAD_CODE, parse_violations
+from malspark.schemas.isr_models import AgentISR
 
 
 @pytest.mark.parametrize(

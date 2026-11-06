@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from maljan.memory.attck_loader import TECHNIQUES_FILE, technique_entry
-from maljan.memory.technique_cards import (
+from malspark.memory.attck_loader import TECHNIQUES_FILE, technique_entry
+from malspark.memory.technique_cards import (
     BEHAVIOUR_KIND,
     CARDS_FILE,
     INTENT_KIND,
@@ -26,7 +26,7 @@ from maljan.memory.technique_cards import (
     technique_card,
     technique_card_lines,
 )
-from maljan.pipeline.validation import CAPABILITY_TERMS
+from malspark.pipeline.validation import CAPABILITY_TERMS
 
 CARDS = load_cards()
 TABLE = json.loads(Path(TECHNIQUES_FILE).read_text(encoding="utf-8"))

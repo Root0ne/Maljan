@@ -16,9 +16,9 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import _platforms_own_resolution
-from maljan.core.config import Settings
-from maljan.core.declared_reading import kind_of
+from malspark.agents.evidence_recorder import _platforms_own_resolution
+from malspark.core.config import Settings
+from malspark.core.declared_reading import kind_of
 
 
 def _legacy(server: str) -> Any:
@@ -26,7 +26,7 @@ def _legacy(server: str) -> Any:
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
-    monkeypatch.setattr("maljan.core.config.get_settings", lambda: settings)
+    monkeypatch.setattr("malspark.core.config.get_settings", lambda: settings)
 
 
 def test_the_legacy_entry_is_a_resolution() -> None:

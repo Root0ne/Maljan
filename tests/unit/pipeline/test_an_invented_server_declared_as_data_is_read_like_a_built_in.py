@@ -16,9 +16,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core import config as config_module
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.schemas.evidence import build_entry
+from malspark.core import config as config_module
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.schemas.evidence import build_entry
 
 SCAN_ANSWER = (
     '{"matches": [{"rule": "Loader_Generic", "meta": {"technique_id": "T1055"}, '
@@ -83,7 +83,7 @@ def _ledger() -> list[Any]:
 
 
 def test_the_scan_asserts_its_technique_and_the_lookalike_does_not(settings: Settings) -> None:
-    from maljan.pipeline.evidence_summary import asserting_labels, collect, technique_evidence
+    from malspark.pipeline.evidence_summary import asserting_labels, collect, technique_evidence
 
     ledger = _ledger()
     assert ("scan", None) in collect(None, ledger)["T1055"]
@@ -93,14 +93,14 @@ def test_the_scan_asserts_its_technique_and_the_lookalike_does_not(settings: Set
 
 
 def test_the_corroboration_names_the_scan_by_its_declared_source(settings: Settings) -> None:
-    from maljan.pipeline.validation import corroboration
+    from malspark.pipeline.validation import corroboration
 
     row = corroboration(None, _ledger())["T1055"]
     assert row["asserted_by"] == ["scanner", "yara"]
 
 
 def test_the_scan_is_placed_as_a_built_in_scan_is(settings: Settings) -> None:
-    from maljan.analysis.evidence_roots import NOTHING_TO_PLACE, RunRoots
+    from malspark.analysis.evidence_roots import NOTHING_TO_PLACE, RunRoots
 
     roots = RunRoots(_ledger())
     scan, builtin = roots.entries["ev_0001"], roots.entries["ev_0002"]
@@ -114,7 +114,7 @@ def test_the_scan_is_placed_as_a_built_in_scan_is(settings: Settings) -> None:
 
 
 def test_a_section_opened_by_the_scan_is_a_rule_match(settings: Settings) -> None:
-    from maljan.pipeline.validation import (
+    from malspark.pipeline.validation import (
         _RULE_MATCH_SECTIONS,
         CapabilityGrounding,
         _section_reads_as,
@@ -142,7 +142,7 @@ def test_a_section_opened_by_the_scan_is_a_rule_match(settings: Settings) -> Non
 
 
 def test_a_sentence_reporting_the_scans_match_claims_nothing(settings: Settings) -> None:
-    from maljan.pipeline.validation import _says_only_that_a_rule_matched, matcher_names
+    from malspark.pipeline.validation import _says_only_that_a_rule_matched, matcher_names
 
     names = matcher_names(_ledger())
     assert {"capa", "yara", "scanengine"} <= set(names)
@@ -151,7 +151,7 @@ def test_a_sentence_reporting_the_scans_match_claims_nothing(settings: Settings)
 
 
 def test_the_words_a_statement_names_the_scan_by_are_declared(settings: Settings) -> None:
-    from maljan.pipeline.validation import entry_words
+    from malspark.pipeline.validation import entry_words
 
     ledger = _ledger()
     assert "scanner" in entry_words(ledger[0])
@@ -159,8 +159,8 @@ def test_the_words_a_statement_names_the_scan_by_are_declared(settings: Settings
 
 
 def test_the_function_map_and_index_read_inputs_by_kind(settings: Settings) -> None:
-    from maljan.agents.function_map import _map_kind
-    from maljan.pipeline.triage_pack import _index_slot
+    from malspark.agents.function_map import _map_kind
+    from malspark.pipeline.triage_pack import _index_slot
 
     recover = _entry("ev_0005", "recover", "mcp:scanner", '{"strings": []}')
     floss_lookalike = _entry("ev_0006", "floss", "mcp:lookalike", '{"strings": []}')
@@ -171,8 +171,8 @@ def test_the_function_map_and_index_read_inputs_by_kind(settings: Settings) -> N
 
 
 def test_the_scan_is_a_layer_counted_from_the_runs_own_rows(settings: Settings) -> None:
-    from maljan.analysis.run_summary import RunSummaryBuilder, _rule_layers
-    from maljan.pipeline.validation import corroboration
+    from malspark.analysis.run_summary import RunSummaryBuilder, _rule_layers
+    from malspark.pipeline.validation import corroboration
 
     builder = RunSummaryBuilder(start_time=0.0).set_corroboration(corroboration(None, _ledger()))
     assert builder._techniques_by_layer["scanner"] == 1
@@ -183,8 +183,8 @@ def test_the_scan_is_a_layer_counted_from_the_runs_own_rows(settings: Settings) 
 def _readings(ledger: list[Any]) -> str:
     import json
 
-    from maljan.analysis.evidence_roots import RunRoots
-    from maljan.pipeline import evidence_summary, validation
+    from malspark.analysis.evidence_roots import RunRoots
+    from malspark.pipeline import evidence_summary, validation
 
     roots = RunRoots(ledger)
     texts = validation.EntryTexts.from_ledger(ledger)
@@ -206,7 +206,7 @@ def _readings(ledger: list[Any]) -> str:
 def test_a_stored_run_reads_the_same_in_a_process_with_no_operator_settings(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.schemas.evidence import LedgerEntry
 
     ledger = _ledger()
     in_the_worker = _readings(ledger)
@@ -221,7 +221,7 @@ def test_a_stored_run_reads_the_same_in_a_process_with_no_operator_settings(
 
 
 def test_an_entry_written_before_facts_were_stored_dumps_as_it_did() -> None:
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.schemas.evidence import LedgerEntry
 
     entry = build_entry(
         entry_id="ev_0001", seq=1, agent="a", tool="capa", args={}, server=None, output="{}"

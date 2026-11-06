@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import GHIDRA_SAMPLE_OPEN
+from malspark.core.config import GHIDRA_SAMPLE_OPEN
 from tests.unit.providers.test_a_job_reads_its_own_program import (
     A,
     B,
@@ -40,7 +40,7 @@ def test_a_shared_server_gets_a_close_of_the_name_the_load_answered(
 
 
 def _key(job: Any) -> str:
-    from maljan.providers.sample_open import server_note_key
+    from malspark.providers.sample_open import server_note_key
 
     return server_note_key(job.provider._cfg, str(getattr(job.provider, "note_instance", "") or ""))
 

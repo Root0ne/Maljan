@@ -36,7 +36,7 @@ from app.logging_config import get_logger
 logger = get_logger("middleware.upload_bound")
 
 # The attribute a route's endpoint carries its bound reader under.
-UPLOAD_BOUND_ATTR = "__maljan_upload_bound__"
+UPLOAD_BOUND_ATTR = "__malspark_upload_bound__"
 
 # What a multipart body carries around its one file: the boundary lines and the
 # part's headers (a 255-character filename among them). Slack over the route's

@@ -16,12 +16,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.agents.function_map import build_function_map
-from maljan.llm import context_window as cw
-from maljan.pipeline.validation import decompiled_functions
-from maljan.reporting.ledger_report import build_sections
-from maljan.schemas.evidence import (
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.agents.function_map import build_function_map
+from malspark.llm import context_window as cw
+from malspark.pipeline.validation import decompiled_functions
+from malspark.reporting.ledger_report import build_sections
+from malspark.schemas.evidence import (
     answer_not_shown,
     apply_budget,
     build_entry,
@@ -38,7 +38,7 @@ def _full_budget() -> Any:
 
 
 def _ghidra(budget: Any) -> Any:
-    from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+    from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
     client = GhidraHTTPClient.__new__(GhidraHTTPClient)
     client._max_output_chars = 0

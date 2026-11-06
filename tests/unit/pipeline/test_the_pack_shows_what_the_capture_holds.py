@@ -12,14 +12,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.pipeline import triage_pack
-from maljan.pipeline.validation import (
+from malspark.pipeline import triage_pack
+from malspark.pipeline.validation import (
     ENTRY_CONTENTS_MISSTATED_CODE,
     KEPT_WITH_A_FINDING,
     EntryTexts,
     misstated_entry_contents,
 )
-from maljan.schemas.evidence import build_entry
+from malspark.schemas.evidence import build_entry
 
 
 def _facts(conversations: int = 3) -> dict[str, Any]:

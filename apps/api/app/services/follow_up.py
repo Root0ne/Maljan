@@ -2,7 +2,7 @@
 
 An analyst asks a new question of a job that has finished
 (``POST /jobs/{id}/follow-ups``). It is answered by the report's question round
-from what the job stored (``maljan.reporting.follow_up``): no tool is called
+from what the job stored (``malspark.reporting.follow_up``): no tool is called
 and nothing is analysed again. Three steps, so no database transaction is held
 across the model call:
 
@@ -97,8 +97,8 @@ async def prepare(db: Any, job: Any) -> Prepared:
 
     ``job`` is the caller's own job, as the job routes read it. Only reads.
     """
-    from maljan.core.settings_overrides import StoredValueRefused, settings_from_store
-    from maljan.reporting.follow_up import (
+    from malspark.core.settings_overrides import StoredValueRefused, settings_from_store
+    from malspark.reporting.follow_up import (
         CURRENT_MODEL,
         UNBUILT_MODEL,
         reporter_overrides,
@@ -193,9 +193,9 @@ def _learn_reporter_windows(settings: Any) -> None:
     the process (``context_window.learn_window``), so building the reporter
     on the loop afterwards asks nothing. Never raises.
     """
-    from maljan.core.config import REPORTER_AGENT_KEY
-    from maljan.core.container import report_stage_budget
-    from maljan.core.model_assignments import assignment_chain_for
+    from malspark.core.config import REPORTER_AGENT_KEY
+    from malspark.core.container import report_stage_budget
+    from malspark.core.model_assignments import assignment_chain_for
 
     try:
         for assignment in assignment_chain_for(settings, REPORTER_AGENT_KEY, role="judge"):
@@ -213,11 +213,11 @@ async def answer(prepared: Prepared, question: str) -> Answered:
     model no provider builds) leaves the question "not determinable from this
     run" with the reason. Never raises.
     """
-    from maljan.core.config import REPORTER_AGENT_KEY
-    from maljan.core.container import ServiceContainer
-    from maljan.core.model_assignments import model_label_for
-    from maljan.pipeline.events import MODEL_USAGE
-    from maljan.reporting.follow_up import answer_follow_up
+    from malspark.core.config import REPORTER_AGENT_KEY
+    from malspark.core.container import ServiceContainer
+    from malspark.core.model_assignments import model_label_for
+    from malspark.pipeline.events import MODEL_USAGE
+    from malspark.reporting.follow_up import answer_follow_up
 
     usage: list[dict[str, Any]] = []
 
@@ -246,7 +246,7 @@ async def answer(prepared: Prepared, question: str) -> Answered:
         if reporter is not None:
             model = str(getattr(reporter, "model_label", "") or model)
             try:
-                from maljan.pipeline.nodes import pack_text
+                from malspark.pipeline.nodes import pack_text
 
                 # Off the loop: its bound is derived from the job's windows,
                 # which may be asked of the model servers.
@@ -350,7 +350,7 @@ async def _usage_events(
     """
     if not usage:
         return None
-    from maljan.pipeline.events import MODEL_USAGE
+    from malspark.pipeline.events import MODEL_USAGE
     from sqlalchemy import func, select
 
     from app.models.job_event import JobEvent

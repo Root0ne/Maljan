@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from maljan.providers.static import r2
+from malspark.providers.static import r2
 
 _ENVELOPE = re.compile(r"<log>(?P<body>.*)</log>", re.DOTALL)
 _LOG_LINE = re.compile(r"\[(?P<level>[A-Z]+)\]\s*\S.*")

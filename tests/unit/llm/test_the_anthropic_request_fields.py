@@ -16,15 +16,15 @@ from typing import Any
 import pytest
 from langchain_core.messages import HumanMessage
 
-from maljan.core.config import Settings
-from maljan.core.paths import resolve_data
-from maljan.llm.anthropic_provider import (
+from malspark.core.config import Settings
+from malspark.core.paths import resolve_data
+from malspark.llm.anthropic_provider import (
     AnthropicProvider,
     cache_control,
     fixed_sampling_source,
     needs_streaming,
 )
-from maljan.llm.context_window import TABLE_PATH
+from malspark.llm.context_window import TABLE_PATH
 
 from .anthropic_wire import Wire, install, message
 

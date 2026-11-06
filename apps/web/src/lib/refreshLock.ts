@@ -11,7 +11,7 @@
  * there) a lease in localStorage does the same across the tabs of one origin.
  */
 
-export const REFRESH_LOCK_NAME = "maljan-token-refresh";
+export const REFRESH_LOCK_NAME = "malspark-token-refresh";
 const LEASE_KEY = `${REFRESH_LOCK_NAME}-lease`;
 
 /**

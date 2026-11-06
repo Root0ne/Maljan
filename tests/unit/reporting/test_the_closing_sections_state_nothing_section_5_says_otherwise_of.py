@@ -22,8 +22,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
-from maljan.core.config import Settings, get_settings, install_settings
-from maljan.reporting.models import (
+from malspark.core.config import Settings, get_settings, install_settings
+from malspark.reporting.models import (
     BoundValue,
     FileHashes,
     MalwareReport,
@@ -31,7 +31,7 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.section_agreement import (
+from malspark.reporting.section_agreement import (
     CLAIM_LED,
     DROPPED_CODE,
     HELD_KEPT_CODE,
@@ -290,7 +290,7 @@ def test_the_stored_runs_hold_exactly_these_closing_sentences(name: str) -> None
     root = stored_runs()
     if root is None or not (root / name / "report.json").is_file():
         pytest.skip(f"the stored benchmark run {name} is not on this machine")
-    from maljan.reporting.follow_up import stored_ledger
+    from malspark.reporting.follow_up import stored_ledger
 
     run = root / name
     report = MalwareReport.model_validate(json.loads((run / "report.json").read_text()))
@@ -328,7 +328,7 @@ def test_haiku10_s_closing_sentences_are_shown_beside_what_states_otherwise() ->
     root = stored_runs()
     if root is None or not (root / "haiku10" / "report.json").is_file():
         pytest.skip("the stored benchmark run haiku10 is not on this machine")
-    from maljan.reporting.follow_up import stored_ledger
+    from malspark.reporting.follow_up import stored_ledger
 
     run = root / "haiku10"
     report = MalwareReport.model_validate(json.loads((run / "report.json").read_text()))
@@ -430,7 +430,7 @@ def test_a_closing_section_whose_every_sentence_is_left_out_is_empty() -> None:
 
 
 def test_an_address_only_a_closing_section_names_is_read_off_the_ledger() -> None:
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.schemas.evidence import LedgerEntry
 
     ledger = [
         LedgerEntry(

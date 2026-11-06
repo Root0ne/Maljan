@@ -6,9 +6,9 @@ nothing another run had carved. That holds two runs of the *same* sample in one
 tree, leaves every ``put_sample`` upload flat in a directory every job on the
 host shares, and keeps a stale tree from an old run reachable until the TTL.
 
-The directory is the bound now. ``MALJAN_STAGING_DIR`` stays the operator's
+The directory is the bound now. ``MALSPARK_STAGING_DIR`` stays the operator's
 base; the process that spawns a sidecar composes one leaf inside it per job and
-hands it over as ``MALJAN_STAGING_JOB``; the sidecar joins the two. Two jobs on
+hands it over as ``MALSPARK_STAGING_JOB``; the sidecar joins the two. Two jobs on
 two samples and two jobs on the same sample all get directories of their own,
 and the job's owner takes its directory away on every way out of the run.
 """
@@ -27,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import staging
+from malspark.tools import staging
 
 # A live sidecar handshake plus a handful of calls. Generous, because the
 # machine may be running another suite beside this one.
@@ -77,8 +77,8 @@ class TestTheOperatorsValueStaysTheBase:
 
     @staticmethod
     def _spawn_env(name: str, job_id: str, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
-        from maljan.core.config import Settings
-        from maljan.providers.servers import ServerRegistry
+        from malspark.core.config import Settings
+        from malspark.providers.servers import ServerRegistry
 
         captured: dict[str, Any] = {}
 
@@ -92,7 +92,7 @@ class TestTheOperatorsValueStaysTheBase:
             def get_tools(self) -> list[Any]:
                 return []
 
-        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+        monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
         registry = ServerRegistry(Settings(_env_file=None))
         handle = registry.get(name)
         handle.open(job_id)
@@ -142,8 +142,8 @@ class TestTheOperatorsValueStaysTheBase:
     def test_a_server_of_the_operators_own_is_told_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.servers import ServerHandle
 
         handle = ServerHandle(
             "theirs", MCPServerConfig(transport="stdio", command=sys.executable, args=["-c", ""])
@@ -151,8 +151,8 @@ class TestTheOperatorsValueStaysTheBase:
         assert handle._stages_per_job() is False
 
     def test_one_configured_with_the_staging_name_is(self) -> None:
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.servers import ServerHandle
 
         handle = ServerHandle(
             "theirs",
@@ -187,8 +187,8 @@ class _Job:
         self.handle: Any = None
 
     async def open(self) -> None:
-        from maljan.core.settings_overrides import build_settings
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.settings_overrides import build_settings
+        from malspark.providers.servers import ServerHandle
 
         self.handle = ServerHandle(self.server, build_settings({}).mcp.servers[self.server])
         await self.handle.aopen(self.job_id)
@@ -238,7 +238,7 @@ def samples(tmp_path: Path) -> Path:
 @pytest.fixture
 def staged(tmp_path: Path, samples: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A private staging base and a sample root, for the live sidecars below."""
-    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+    from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
     base = tmp_path / "staging"
     monkeypatch.setenv(staging.STAGING_DIR_ENV, str(base))
@@ -618,7 +618,7 @@ class TestTheStagedPathCacheBelongsToItsJob:
     inside a directory the last job's teardown removed."""
 
     def test_two_jobs_on_one_sample_stage_twice(self, tmp_path: Path) -> None:
-        from maljan.agents import sample_staging
+        from malspark.agents import sample_staging
 
         sample_staging.clear_cache()
         calls: list[str] = []
@@ -667,7 +667,7 @@ class TestTheStagedPathCacheBelongsToItsJob:
         sample_staging.clear_cache()
 
     def test_a_finished_jobs_entries_go(self, tmp_path: Path) -> None:
-        from maljan.agents import sample_staging
+        from malspark.agents import sample_staging
 
         sample_staging.clear_cache()
         now = time.monotonic()
@@ -680,7 +680,7 @@ class TestTheStagedPathCacheBelongsToItsJob:
 
     def test_the_worker_forgets_them_where_it_removes_the_directory(self, tmp_path: Path) -> None:
         from app.worker.analysis_worker import remove_job_staging
-        from maljan.agents import sample_staging
+        from malspark.agents import sample_staging
 
         sample_staging.clear_cache()
         sample_staging._CACHE[("one", "analysis", "b" * 64)] = ("/gone/x", time.monotonic())
@@ -710,7 +710,7 @@ class TestTheBoundaryWhenTheBaseIsInsideASampleRoot:
 
     @pytest.fixture
     def nested(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         corpus = tmp_path / "corpus"
         base = corpus / "staging"
@@ -721,7 +721,7 @@ class TestTheBoundaryWhenTheBaseIsInsideASampleRoot:
         return base
 
     def test_a_sibling_jobs_file_is_refused(self, nested: Path) -> None:
-        from maljan.tools.roots import PathOutsideRoots, resolve_under_roots
+        from malspark.tools.roots import PathOutsideRoots, resolve_under_roots
 
         theirs = staging.job_staging_dir(nested, "theirs")
         theirs.mkdir()
@@ -732,7 +732,7 @@ class TestTheBoundaryWhenTheBaseIsInsideASampleRoot:
             staging.confined_to_this_job(inside)
 
     def test_this_jobs_own_file_is_not(self, nested: Path) -> None:
-        from maljan.tools.roots import resolve_under_roots
+        from malspark.tools.roots import resolve_under_roots
 
         mine = staging.job_staging_dir(nested, "mine")
         (mine / "carved").mkdir(parents=True)
@@ -742,7 +742,7 @@ class TestTheBoundaryWhenTheBaseIsInsideASampleRoot:
         assert staging.confined_to_this_job(inside) == inside
 
     def test_a_sample_outside_the_base_is_not_touched(self, nested: Path, tmp_path: Path) -> None:
-        from maljan.tools.roots import resolve_under_roots
+        from malspark.tools.roots import resolve_under_roots
 
         sample = tmp_path / "corpus" / "sample.bin"
         sample.write_bytes(b"SAMPLE\x00")
@@ -754,7 +754,7 @@ class TestTheBoundaryWhenTheBaseIsInsideASampleRoot:
         self, nested: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A probe or a hand-started server writes in the base itself."""
-        from maljan.tools.roots import resolve_under_roots
+        from malspark.tools.roots import resolve_under_roots
 
         monkeypatch.delenv(staging.STAGING_JOB_ENV, raising=False)
         theirs = staging.job_staging_dir(nested, "theirs")
@@ -769,8 +769,8 @@ class TestTheLeafIsTheSpawnsAlone:
     def test_a_stored_mapping_cannot_supply_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """``child_env`` applies a server's own map last, so the composed name
         is cleared before the question of composing one is even asked."""
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.servers import ServerHandle
 
         captured: dict[str, Any] = {}
 
@@ -784,7 +784,7 @@ class TestTheLeafIsTheSpawnsAlone:
             def get_tools(self) -> list[Any]:
                 return []
 
-        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+        monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
         config = MCPServerConfig.model_construct(
             enabled=True,
             transport="stdio",
@@ -807,8 +807,8 @@ class TestTheLeafIsTheSpawnsAlone:
     def test_a_staging_server_gets_the_spawns_name_and_not_the_stored_one(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.servers import ServerHandle
 
         captured: dict[str, Any] = {}
 
@@ -822,7 +822,7 @@ class TestTheLeafIsTheSpawnsAlone:
             def get_tools(self) -> list[Any]:
                 return []
 
-        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+        monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
         config = MCPServerConfig.model_construct(
             enabled=True,
             transport="stdio",
@@ -845,7 +845,7 @@ class TestTheLeafIsTheSpawnsAlone:
     def test_settings_refuse_the_name_where_it_is_entered(self) -> None:
         import pydantic
 
-        from maljan.core.config import MCPServerConfig
+        from malspark.core.config import MCPServerConfig
 
         for field in ("env", "env_allow"):
             payload: dict[str, Any] = {"transport": "stdio", "command": "/bin/true"}
@@ -860,9 +860,9 @@ class TestAHandleOpensUnderTheJobsIdentity:
     def test_a_static_provider_names_the_job_and_not_the_sample(self) -> None:
         """Two jobs on one sample are the case a per-job directory exists for,
         and the sample's digest is the same string for both of them."""
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.base import StaticJobContext
-        from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.base import StaticJobContext
+        from malspark.providers.static.generic_mcp import GenericMCPStaticProvider
 
         opened: list[str] = []
 
@@ -880,9 +880,9 @@ class TestAHandleOpensUnderTheJobsIdentity:
         assert opened == ["job-one"]
 
     def test_with_no_job_it_still_has_an_identity_of_its_own(self) -> None:
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.base import StaticJobContext
-        from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.base import StaticJobContext
+        from malspark.providers.static.generic_mcp import GenericMCPStaticProvider
 
         opened: list[str] = []
         provider = GenericMCPStaticProvider(
@@ -898,7 +898,7 @@ class TestAHandleOpensUnderTheJobsIdentity:
     def test_the_resolver_hands_the_provider_the_containers_job(self) -> None:
         import inspect
 
-        from maljan.agents import composition
+        from malspark.agents import composition
 
         source = inspect.getsource(composition._provider_tools)
         assert "job_key=container.job_key()" in source
@@ -983,8 +983,8 @@ class TestTheBaseIsRecordedAbsolute:
         assert staging.job_staging_dir(staging.staging_base(), "one").is_absolute()
 
     def test_what_the_spawn_records_is_absolute(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.servers import ServerHandle
 
         class _FakeToolkit:
             def __init__(self, server_params: Any = None, **kwargs: Any) -> None:
@@ -996,7 +996,7 @@ class TestTheBaseIsRecordedAbsolute:
             def get_tools(self) -> list[Any]:
                 return []
 
-        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+        monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
         monkeypatch.setenv(staging.STAGING_DIR_ENV, "rel/staging")
         handle = ServerHandle(
             "analysis",
@@ -1043,7 +1043,7 @@ class TestASandboxCaptureBelongsToItsJob:
     def test_it_lands_in_this_jobs_own_directory(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.tools.roots import ROOT_SEPARATOR, SAMPLE_ROOTS_ENV
+        from malspark.tools.roots import ROOT_SEPARATOR, SAMPLE_ROOTS_ENV
 
         base = tmp_path / "staging"
         monkeypatch.setenv(staging.STAGING_DIR_ENV, str(base))
@@ -1075,7 +1075,7 @@ class TestASandboxCaptureBelongsToItsJob:
     def test_the_root_and_the_directory_go_when_the_job_does(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
         monkeypatch.setenv(SAMPLE_ROOTS_ENV, "")
@@ -1093,7 +1093,7 @@ class TestASandboxCaptureBelongsToItsJob:
     ) -> None:
         """The permanent root of the release before this is what let a later
         job's sidecars read an earlier job's capture."""
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV, configured_roots
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV, configured_roots
 
         monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
         monkeypatch.setenv(SAMPLE_ROOTS_ENV, "")
@@ -1155,7 +1155,7 @@ class TestASandboxCaptureBelongsToItsJob:
         root = Path(__file__).resolve().parents[3]
         written = [
             path
-            for path in (root / "src" / "maljan").rglob("*.py")
+            for path in (root / "src" / "malspark").rglob("*.py")
             if staging.LEGACY_CAPTURE_DIR_NAME in path.read_text(encoding="utf-8")
         ]
 
@@ -1175,7 +1175,7 @@ class TestNoJobCanNameAnotherJobsCapture:
         """One capture per job, each in its job's own directory, both named as
         roots — the second half being the configuration this has to hold under
         even when a root points straight at the other job's directory."""
-        from maljan.tools.roots import add_sample_root
+        from malspark.tools.roots import add_sample_root
 
         mine = staging.open_capture_dir("one") / "rest_41.pcap"
         theirs = staging.open_capture_dir("two") / "rest_42.pcap"
@@ -1245,8 +1245,8 @@ class TestTheSidecarThatStagesNothingIsUnaffected:
     of its own, which must not be read as a reason to give it one."""
 
     def test_its_required_name_is_not_a_staging_one(self) -> None:
-        from maljan.core.config import REQUIRED_ENV_ALLOW, Settings
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import REQUIRED_ENV_ALLOW, Settings
+        from malspark.providers.servers import ServerHandle
 
         settings = Settings(_env_file=None)
         handle = ServerHandle("knowledge", settings.mcp.servers["knowledge"])
@@ -1256,20 +1256,20 @@ class TestTheSidecarThatStagesNothingIsUnaffected:
         assert handle._stages_per_job() is False
 
     def test_what_it_does_need_still_reaches_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.config import Settings
-        from maljan.providers.servers import ServerHandle
+        from malspark.agents.subprocess_env import child_env
+        from malspark.core.config import Settings
+        from malspark.providers.servers import ServerHandle
 
-        monkeypatch.setenv("MALJAN_INDEX_RETRY_SECONDS", "900")
-        monkeypatch.setenv("MALJAN_ATTCK_REFRESH_DAYS", "0")
+        monkeypatch.setenv("MALSPARK_INDEX_RETRY_SECONDS", "900")
+        monkeypatch.setenv("MALSPARK_ATTCK_REFRESH_DAYS", "0")
         handle = ServerHandle("knowledge", Settings(_env_file=None).mcp.servers["knowledge"])
         handle._job_id = "job-x"
         env = child_env(handle.config.env, allow=tuple(handle.config.env_allow))
 
         handle._name_the_job_staging(env)
 
-        assert env["MALJAN_INDEX_RETRY_SECONDS"] == "900"
-        assert env["MALJAN_ATTCK_REFRESH_DAYS"] == "0"
+        assert env["MALSPARK_INDEX_RETRY_SECONDS"] == "900"
+        assert env["MALSPARK_ATTCK_REFRESH_DAYS"] == "0"
         assert staging.STAGING_JOB_ENV not in env
 
 
@@ -1278,8 +1278,8 @@ class TestARunWithNoJobIdEndsLikeOne:
     only thing between a finished run and a directory of live malware."""
 
     def test_the_key_is_per_run_and_a_recycled_pid_inherits_nothing(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         first = ServiceContainer(Settings(_env_file=None), mock=True)
         second = ServiceContainer(Settings(_env_file=None), mock=True)
@@ -1292,8 +1292,8 @@ class TestARunWithNoJobIdEndsLikeOne:
     def test_the_container_takes_its_staging_with_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
         container = ServiceContainer(Settings(_env_file=None), mock=True)
@@ -1312,7 +1312,7 @@ class TestARunWithNoJobIdEndsLikeOne:
         replaced: what is under test is the ``finally``, not the analysis."""
         import typer
 
-        from maljan import cli
+        from malspark import cli
 
         monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
         released: list[str] = []
@@ -1321,8 +1321,8 @@ class TestARunWithNoJobIdEndsLikeOne:
 
         class _App:
             def __init__(self, **_kwargs: Any) -> None:
-                from maljan.core.config import Settings
-                from maljan.core.container import ServiceContainer
+                from malspark.core.config import Settings
+                from malspark.core.container import ServiceContainer
 
                 self.container = ServiceContainer(Settings(_env_file=None), mock=True)
                 self.captures = staging.open_capture_dir(self.container.job_key())
@@ -1336,7 +1336,7 @@ class TestARunWithNoJobIdEndsLikeOne:
                 released.append(self.container.job_key())
                 staging.remove_job_staging(self.container.job_key())
 
-        monkeypatch.setattr(cli, "MaljanApp", _App)
+        monkeypatch.setattr(cli, "MalsparkApp", _App)
         for how_it_ends in (RuntimeError("the pipeline failed"), KeyboardInterrupt()):
             ending.append(how_it_ends)
             with pytest.raises((typer.Exit, KeyboardInterrupt)):
@@ -1347,7 +1347,7 @@ class TestARunWithNoJobIdEndsLikeOne:
             assert not app.captures.parent.exists()
 
     def test_a_run_that_never_started_releases_nothing(self) -> None:
-        from maljan import cli
+        from malspark import cli
 
         assert cli._release(None) is None
 
@@ -1359,7 +1359,7 @@ class TestAProbeLeafIsPerCall:
         """One operator's cleanup must not take away another's directory."""
         import inspect
 
-        from maljan.providers import server_probe
+        from malspark.providers import server_probe
 
         source = inspect.getsource(server_probe.handshake)
         assert 'probe_key = f"probe-{name}-{uuid.uuid4().hex[:8]}"' in source
@@ -1370,7 +1370,7 @@ class TestAProbeLeafIsPerCall:
         import ast
         import inspect
 
-        from maljan.providers import server_probe
+        from malspark.providers import server_probe
 
         tree = ast.parse(inspect.getsource(server_probe.handshake).lstrip())
         guarded = [
@@ -1441,7 +1441,7 @@ class TestACaptureIsPrivateFromItsFirstByte:
                 raise OSError("the connection went away")
 
     def test_it_is_created_0600_rather_than_chmodded_afterwards(self, tmp_path: Path) -> None:
-        from maljan.providers.sandbox.limits import stream_to_file_capped
+        from malspark.providers.sandbox.limits import stream_to_file_capped
 
         out = tmp_path / "rest_1.pcap"
         modes: list[int] = []
@@ -1458,7 +1458,7 @@ class TestACaptureIsPrivateFromItsFirstByte:
         assert stat.S_IMODE(out.lstat().st_mode) == 0o600
 
     def test_a_stream_that_fails_leaves_no_partial(self, tmp_path: Path) -> None:
-        from maljan.providers.sandbox.limits import stream_to_file_capped
+        from malspark.providers.sandbox.limits import stream_to_file_capped
 
         out = tmp_path / "rest_2.pcap"
 
@@ -1468,7 +1468,7 @@ class TestACaptureIsPrivateFromItsFirstByte:
         assert not out.exists()
 
     def test_a_symlink_at_the_destination_is_not_followed(self, tmp_path: Path) -> None:
-        from maljan.providers.sandbox.limits import stream_to_file_capped
+        from malspark.providers.sandbox.limits import stream_to_file_capped
 
         target = tmp_path / "somebody-elses"
         target.write_bytes(b"NOT-THIS\x00")
@@ -1486,8 +1486,8 @@ class TestACaptureIsPrivateFromItsFirstByte:
         with the answer, as they do for a failed fetch."""
         import inspect
 
-        from maljan.loaders import cape2_client
-        from maljan.providers.sandbox import rest, triage
+        from malspark.loaders import cape2_client
+        from malspark.providers.sandbox import rest, triage
 
         for source in (
             inspect.getsource(rest.RestSandboxProvider.fetch_pcap),

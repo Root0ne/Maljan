@@ -36,9 +36,9 @@ from typing import Any
 
 import pytest
 
-from maljan.memory.embeddings import EMBED_DIM, encode
-from maljan.memory.long_term_memory import StoredCase
-from maljan.memory.qdrant_store import (
+from malspark.memory.embeddings import EMBED_DIM, encode
+from malspark.memory.long_term_memory import StoredCase
+from malspark.memory.qdrant_store import (
     QdrantNotAvailableError,
     QdrantStore,
     _stable_id,
@@ -210,7 +210,7 @@ class _StandInModel:
     """
 
     def embed(self, texts: list[str], batch_size: int | None = None) -> Any:
-        from maljan.memory import embeddings
+        from malspark.memory import embeddings
 
         for text in texts:
             bow = embeddings._bow_projection(text)
@@ -228,15 +228,15 @@ class TestQdrantStoreLive:
 
     @pytest.fixture(autouse=True)
     def _model(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.memory import embeddings
+        from malspark.memory import embeddings
 
         monkeypatch.setattr(embeddings, "_try_load_fastembed", lambda: _StandInModel())
 
     def test_a_fallback_vector_is_refused_by_a_real_qdrant(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.exceptions import MemoryStoreError
-        from maljan.memory import embeddings
+        from malspark.core.exceptions import MemoryStoreError
+        from malspark.memory import embeddings
 
         monkeypatch.setattr(embeddings, "_try_load_fastembed", lambda: False)
         store = self._unique_store()
@@ -248,7 +248,7 @@ class TestQdrantStoreLive:
 
     def _unique_store(self) -> QdrantStore:
         """Return a QdrantStore with a unique test collection."""
-        collection = f"maljan_test_{uuid.uuid4().hex[:8]}"
+        collection = f"malspark_test_{uuid.uuid4().hex[:8]}"
         return QdrantStore(url=LIVE_URL, collection=collection)  # type: ignore[arg-type]
 
     def test_store_and_retrieve_single_case(self) -> None:

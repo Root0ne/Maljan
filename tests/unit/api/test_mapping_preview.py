@@ -44,7 +44,7 @@ def test_the_cap_is_four_mebibytes():
 def test_the_rest_probe_is_registered_and_reads_the_rest_settings():
     """The probe is the provider's own, built from the candidate ``sandbox.rest`` block."""
     from app.services.settings_probes import candidate_settings, known_probe
-    from maljan.providers.sandbox.rest import RestSandboxProvider
+    from malspark.providers.sandbox.rest import RestSandboxProvider
 
     assert known_probe("rest")
     settings = candidate_settings(
@@ -64,8 +64,8 @@ def test_a_good_mapping_over_the_xyz_fixture_matches_task_10s_golden():
     import json as _json
     from pathlib import Path
 
-    from maljan.core.config import RestMappingConfig
-    from maljan.providers.sandbox.rest_mapping import apply_mapping, compile_mapping
+    from malspark.core.config import RestMappingConfig
+    from malspark.providers.sandbox.rest_mapping import apply_mapping, compile_mapping
 
     golden = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "golden" / "rest_mapping"
     payload = _json.loads((golden / "xyz_report.json").read_text(encoding="utf-8"))

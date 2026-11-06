@@ -22,19 +22,19 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.agents.image_range import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.agents.image_range import (
     ImageRange,
     ImageRangeReader,
     image_range_of,
     out_of_image_note,
 )
-from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-from maljan.agents.tool_pinning import declared_facts_of
-from maljan.core.token_ledger import TokenLedger
-from maljan.schemas.evidence import EvidenceCounter, build_entry
-from maljan.tools.errors import tool_error
+from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+from malspark.agents.tool_pinning import declared_facts_of
+from malspark.core.token_ledger import TokenLedger
+from malspark.schemas.evidence import EvidenceCounter, build_entry
+from malspark.tools.errors import tool_error
 
 REPORT = "CLAIM: it reads memory\nEVIDENCE: ev_0001\nCONFIDENCE: 0.6\nTECHNIQUE: NONE"
 
@@ -499,7 +499,7 @@ def _loop(script: list[dict[str, Any]], pack: list[Any]) -> tuple[_Analyst, _Mod
     ]
     agent.token_ledger = TokenLedger()
     agent.pack_entries = pack
-    with patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)):
+    with patch("malspark.agents.base_agent.loop_limits", return_value=(None, None)):
         agent.execute_tool_loop([("system", "s"), ("human", "look at it")])
     return agent, model
 

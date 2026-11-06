@@ -16,10 +16,10 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from maljan.analysis.run_summary import RunSummaryBuilder, cap_in_force_sentence
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.llm import context_window as cw
+from malspark.analysis.run_summary import RunSummaryBuilder, cap_in_force_sentence
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.llm import context_window as cw
 
 
 def _langchain_tool(func: Any, name: str) -> Any:
@@ -62,13 +62,13 @@ class TestBothToolPathsCutAtTheDerivedNumber:
 
     @staticmethod
     def _toolkit(budget: Any, configured: int = 0) -> Any:
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         return MCPLangChainToolkit(max_output_chars=configured, context_budget=budget)
 
     @staticmethod
     def _ghidra(budget: Any, configured: int = 0) -> Any:
-        from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+        from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
         client._max_output_chars = configured
@@ -135,7 +135,7 @@ class TestAConversationWithNoRoomLeft:
         return budget
 
     def test_the_model_is_told_rather_than_handed_a_fragment(self) -> None:
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         budget = self._full_budget()
         toolkit = MCPLangChainToolkit(max_output_chars=0, context_budget=budget)
@@ -148,7 +148,7 @@ class TestAConversationWithNoRoomLeft:
         assert not said.startswith("{"), "no fragment of the answer was handed over"
 
     def test_the_ghidra_path_says_the_same_thing(self) -> None:
-        from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+        from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
         client._max_output_chars = 0
@@ -160,8 +160,8 @@ class TestAConversationWithNoRoomLeft:
         assert client._apply_output_guardrail(answer) == cw.no_room_sentence(len(answer))
 
     def test_the_run_counts_it_and_the_report_shows_it(self) -> None:
-        from maljan.agents.mcp_client import MCPLangChainToolkit
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.agents.mcp_client import MCPLangChainToolkit
+        from malspark.core.truncation_ledger import TruncationLedger
 
         ledger = TruncationLedger()
         toolkit = MCPLangChainToolkit(max_output_chars=0, context_budget=self._full_budget())
@@ -178,7 +178,7 @@ class TestAConversationWithNoRoomLeft:
 
     def test_the_sentence_is_charged_like_any_answer(self) -> None:
         """And so is the standing run-state line the block carries from now on."""
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         budget = self._full_budget()
         before = budget.held_chars("static")
@@ -195,7 +195,7 @@ class TestAConversationWithNoRoomLeft:
 
     def test_the_tool_phase_ends_rather_than_repeating_the_sentence(self) -> None:
         """A call made after the room ran out does not run, and costs one line."""
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
 
         budget = self._full_budget()
         budget.note_no_room("static")
@@ -221,7 +221,7 @@ class TestAConversationWithNoRoomLeft:
 
     def test_the_sentence_is_withheld_when_it_would_reach_the_reserve(self) -> None:
         """The long sentence is gated the way the short line is, on the same budget."""
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
         budget.note_conversation("static", budget.tool_budget_chars())
@@ -235,7 +235,7 @@ class TestAConversationWithNoRoomLeft:
         assert budget.out_of_room("static") is True, "the phase ends whether or not it was said"
 
     def test_a_refusal_that_would_not_fit_is_not_handed_over(self) -> None:
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
 
         budget = cw.ContextBudget(cw.WindowFact(4096, cw.PROBED, "props"), reply_tokens=8192)
         budget.note_conversation("static", 4096 * cw.CHARS_PER_TOKEN)
@@ -263,7 +263,7 @@ class TestAConversationWithNoRoomLeft:
 
     def test_an_operator_cap_never_produces_it(self) -> None:
         """A number the operator set is theirs, and it is never zero."""
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         toolkit = MCPLangChainToolkit(max_output_chars=6000, context_budget=self._full_budget())
         assert toolkit._apply_output_guardrail(_answer(400)) != cw.no_room_sentence(0)
@@ -283,7 +283,7 @@ class TestTheGuardrailIsAlwaysReachedThroughTheWrapper:
 
     @staticmethod
     def _tool(budget: Any) -> Any:
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
 
         def strings(path: str) -> str:
             """List printable runs."""
@@ -298,7 +298,7 @@ class TestTheGuardrailIsAlwaysReachedThroughTheWrapper:
         """The two callers, and neither hands a raw tool to a model."""
         import inspect
 
-        from maljan.agents import base_agent, judge_agent
+        from malspark.agents import base_agent, judge_agent
 
         for module in (base_agent, judge_agent):
             source = inspect.getsource(module)
@@ -306,7 +306,7 @@ class TestTheGuardrailIsAlwaysReachedThroughTheWrapper:
 
     def test_the_wrapper_names_the_agent_for_the_length_of_the_call(self) -> None:
         """What the guardrail two layers down reads to charge the right agent."""
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
 
         seen: list[str] = []
 
@@ -340,7 +340,7 @@ class TestTheGuardrailIsAlwaysReachedThroughTheWrapper:
         """The failure mode, made loud: the mark still reaches an agent."""
         import logging
 
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
         budget.note_conversation("static", (32768 - 8192) * cw.CHARS_PER_TOKEN)
@@ -358,7 +358,7 @@ class TestALoopReportsWhatItHolds:
 
     @staticmethod
     def _analyst(budget: Any) -> Any:
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         class _Container:
             def get_context_budget(self) -> Any:
@@ -382,7 +382,7 @@ class TestALoopReportsWhatItHolds:
         return _Analyst()
 
     def test_the_refresher_tells_the_budget_what_the_turn_weighs(self) -> None:
-        from maljan.agents.base_agent import LoopBudget
+        from malspark.agents.base_agent import LoopBudget
 
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
         analyst = self._analyst(budget)
@@ -394,7 +394,7 @@ class TestALoopReportsWhatItHolds:
 
     def test_a_tool_request_is_not_free(self) -> None:
         """The payload of a tool call is outside ``content`` and still counts."""
-        from maljan.agents.base_agent import LoopBudget
+        from malspark.agents.base_agent import LoopBudget
 
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
         analyst = self._analyst(budget)
@@ -464,7 +464,7 @@ class TestTheRunSaysWhatWasInForce:
     def test_the_window_and_the_caps_reach_the_run_summary(self) -> None:
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "llama.cpp /props"))
         budget.chars_for_one_answer()
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         ledger = TruncationLedger()
         ledger.record_tool_output(chars_in=10, chars_kept=10, over_limit=False, limit=9216)
@@ -478,7 +478,7 @@ class TestTheRunSaysWhatWasInForce:
         assert summary["context_window"]["chars_per_token"] == cw.CHARS_PER_TOKEN
 
     def test_the_sentence_names_the_window_and_where_it_came_from(self) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "llama.cpp /props reported it"))
         ledger = TruncationLedger()
@@ -495,7 +495,7 @@ class TestTheRunSaysWhatWasInForce:
         assert "3 characters per token" in said
 
     def test_an_unknown_window_says_so_and_derives_nothing(self) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         budget = cw.ContextBudget(cw.unknown_window())
         ledger = TruncationLedger()
@@ -516,7 +516,7 @@ class TestTheRunSaysWhatWasInForce:
 
     def test_a_refused_figure_is_named_rather_than_read_as_a_silence(self) -> None:
         """The operator whose proxy reports bytes has a concrete thing to fix."""
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         refused = cw.unknown_window(
             "the server description reported 1,000,000,000,000,000 tokens, which is past the "
@@ -538,7 +538,7 @@ class TestTheRunSaysWhatWasInForce:
         assert "unknown" in said
 
     def test_a_window_nothing_reported_says_only_that(self) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         ledger = TruncationLedger()
         ledger.record_tool_output(
@@ -555,7 +555,7 @@ class TestTheRunSaysWhatWasInForce:
         assert "refused" not in said
 
     def test_a_run_with_an_operator_cap_says_that_instead(self) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         ledger = TruncationLedger()
         ledger.record_tool_output(chars_in=10, chars_kept=10, over_limit=False, limit=6000)
@@ -565,7 +565,7 @@ class TestTheRunSaysWhatWasInForce:
         assert "6,000 characters, the number this run was set" in said
 
     def test_a_run_that_called_no_tool_says_nothing_about_a_cap(self) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         ledger = TruncationLedger()
         ledger.record_react_loop(hit_step_cap=False)

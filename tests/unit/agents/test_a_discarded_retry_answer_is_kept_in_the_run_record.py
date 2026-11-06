@@ -17,10 +17,10 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.pipeline.validation import validation_metrics
-from maljan.schemas.isr_models import AgentISR
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.pipeline.validation import validation_metrics
+from malspark.schemas.isr_models import AgentISR
 
 
 def _block(n: int, technique: str = "NONE") -> str:
@@ -60,7 +60,7 @@ class _Analyst(BaseAnalyst):
 def _check(analyst: _Analyst) -> AgentISR:
     isr = analyst._text_to_isr(FIRST, 0)
     with (
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
     ):
         return analyst._validate_isr(isr, "evidence")

@@ -19,10 +19,10 @@ from pydantic import ValidationError
 
 from app.schemas.job import JobCreateRequest
 from app.services.settings_service import SettingsService, SettingsValidationError
-from maljan.llm import registry
-from maljan.llm.provider_base import _FACTS, LLMProvider, provider_names
-from maljan.memory.store_factory import memory_backends
-from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+from malspark.llm import registry
+from malspark.llm.provider_base import _FACTS, LLMProvider, provider_names
+from malspark.memory.store_factory import memory_backends
+from malspark.providers.registry import sandbox_provider_ids, static_provider_ids
 
 ROOT = Path(__file__).resolve().parents[3]
 

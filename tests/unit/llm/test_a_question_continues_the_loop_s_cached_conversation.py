@@ -30,10 +30,10 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.agents.base_agent import BaseAnalyst, KeptConversation
-from maljan.llm import anthropic_history
-from maljan.pipeline.validation import ANALYST_TOOLS_ATTACHED, TECHNIQUE_FACTS_LEAD, Violation
-from maljan.schemas.isr_models import ClaimEvidence
+from malspark.agents.base_agent import BaseAnalyst, KeptConversation
+from malspark.llm import anthropic_history
+from malspark.pipeline.validation import ANALYST_TOOLS_ATTACHED, TECHNIQUE_FACTS_LEAD, Violation
+from malspark.schemas.isr_models import ClaimEvidence
 
 from .anthropic_wire import Wire, _as_blocks, _unmarked, install, message
 from .test_a_replayed_thinking_block_stays_valid import (
@@ -142,8 +142,8 @@ def _run(
     aged: bool = False,
     earlier: bool = False,
 ) -> Any:
-    from maljan.agents import base_agent
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.agents import base_agent
+    from malspark.schemas.evidence import LedgerEntry
 
     wire = Wire(_answers(retry_calls))
     install(monkeypatch, wire)
@@ -172,7 +172,7 @@ def _run(
         assert kept is not None
         agent._kept_conversation = KeptConversation(kept.messages, kept.sent_at - 3600.0)
     answers = iter([TOLD, TOLD, []])
-    with patch("maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
+    with patch("malspark.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
         agent._validate_isr(isr, "the raw data")
     questions = [body for body in wire.bodies if _is_question(body)]
     return wire, loop, questions
@@ -256,7 +256,7 @@ class TestTheRebuiltConversationStands:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            "maljan.llm.anthropic_history.prompt_cache_seconds", lambda *_a, **_k: 300
+            "malspark.llm.anthropic_history.prompt_cache_seconds", lambda *_a, **_k: 300
         )
         agent = _Analyst(llm=cast(Any, None), name="static")
         task = _human("Analyse.")
@@ -270,14 +270,14 @@ class TestTheRebuiltConversationStands:
         assert agent._continued_question(asked, rebuilt, 0, tools=False) is None
 
     def test_a_base_past_its_lifetime_is_not_asked_over(self) -> None:
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         agent = _Analyst(llm=cast(Any, None), name="static")
         rebuilt = [_human("the raw data")]
         asked = [*rebuilt, _ai(REPORT), _human("q")]
         sent_at = time.monotonic() - 250.0
         agent._question_base = KeptConversation((_human("Analyse."),), sent_at)
-        with patch("maljan.llm.anthropic_history.prompt_cache_seconds", lambda *_a, **_k: 300):
+        with patch("malspark.llm.anthropic_history.prompt_cache_seconds", lambda *_a, **_k: 300):
             assert agent._continued_question(asked, rebuilt, 0, tools=True) is not None
             assert agent._question_base.sent_at == sent_at, "built, not yet sent"
             agent._question_base = KeptConversation(
@@ -289,7 +289,7 @@ class TestTheRebuiltConversationStands:
     def test_a_base_lives_again_only_once_a_continued_question_is_sent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents.base_agent import ContinuationRefused
+        from malspark.agents.base_agent import ContinuationRefused
 
         agent = _Analyst(llm=cast(Any, None), name="static")
         sent_at = time.monotonic() - 250.0
@@ -310,8 +310,12 @@ class TestTheRebuiltConversationStands:
     def test_a_loop_that_sent_nothing_keeps_the_base_s_time(
         self, monkeypatch: pytest.MonkeyPatch, failure: str
     ) -> None:
-        from maljan.agents.base_agent import ContinuationRefused, QuestionUnanswered, ToolsNotBound
-        from maljan.core.exceptions import AnalystError
+        from malspark.agents.base_agent import (
+            ContinuationRefused,
+            QuestionUnanswered,
+            ToolsNotBound,
+        )
+        from malspark.core.exceptions import AnalystError
 
         raised = {
             "tools not bound": ToolsNotBound("no binding"),
@@ -368,7 +372,7 @@ class TestWhatIsNotContinued:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            "maljan.llm.anthropic_history.prompt_cache_seconds", lambda *_a, **_k: None
+            "malspark.llm.anthropic_history.prompt_cache_seconds", lambda *_a, **_k: None
         )
         wire, _loop, questions = _run(monkeypatch, 0)
         assert wire.refused == []
@@ -392,7 +396,7 @@ class TestWhatIsNotContinued:
     def test_a_loop_that_offered_read_evidence_keeps_no_conversation(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         wire = Wire(_answers(0))
         install(monkeypatch, wire)
@@ -448,7 +452,7 @@ def _last_user_text(body: dict[str, Any]) -> str:
 
 def _chain_answer(body: dict[str, Any]) -> dict[str, Any]:
     """The loop calls twice and answers two claims; each question is answered in one turn."""
-    from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+    from malspark.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
 
     done = _results(body)
     asked = _is_question(body)
@@ -475,9 +479,9 @@ def _chain_answer(body: dict[str, Any]) -> dict[str, Any]:
 
 @pytest.fixture
 def chain(monkeypatch: pytest.MonkeyPatch) -> Any:
-    from maljan.agents import base_agent
-    from maljan.pipeline.retry_merge import RetryMerge
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.agents import base_agent
+    from malspark.pipeline.retry_merge import RetryMerge
+    from malspark.schemas.evidence import LedgerEntry
 
     wire = Wire(_chain_answer)
     install(monkeypatch, wire)
@@ -495,7 +499,7 @@ def chain(monkeypatch: pytest.MonkeyPatch) -> Any:
     )
     isr = agent._text_to_isr(text, revision_round=0)
     answers = iter([TOLD, TOLD])
-    with patch("maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
+    with patch("malspark.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
         agent._validate_isr(isr, "the raw data")
     return wire
 
@@ -506,7 +510,7 @@ def _asked(wire: Wire, marker: str) -> list[dict[str, Any]]:
 
 class TestEveryQuestionContinuesTheLoop:
     def test_the_whole_answer_question_sends_the_retry_s_question_as_sent(self, chain: Any) -> None:
-        from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+        from malspark.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
 
         assert chain.refused == []
         whole = _asked(chain, WHOLE_ANSWER_AFTER_RETRY_LEAD)
@@ -523,7 +527,7 @@ class TestEveryQuestionContinuesTheLoop:
         )
 
     def test_the_whole_answer_question_shows_what_the_loop_never_held(self, chain: Any) -> None:
-        from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+        from malspark.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
 
         whole = _asked(chain, WHOLE_ANSWER_AFTER_RETRY_LEAD)[0]
         feedback = json.dumps(whole["messages"][-3]["content"], ensure_ascii=False)
@@ -562,9 +566,9 @@ def _chain_bodies(
     entry under another agent, in the run's ledger the agent was briefed with;
     ``looked_up`` is what the loop's first call asks for, its answer's text.
     """
-    from maljan.agents import base_agent
-    from maljan.pipeline.retry_merge import RetryMerge
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.agents import base_agent
+    from malspark.pipeline.retry_merge import RetryMerge
+    from malspark.schemas.evidence import LedgerEntry
 
     def answer(body: dict[str, Any]) -> dict[str, Any]:
         out = _chain_answer(body)
@@ -608,7 +612,7 @@ def _chain_bodies(
         agent._kept_conversation = KeptConversation(kept.messages, kept.sent_at - 3600.0)
     isr = agent._text_to_isr(text, revision_round=0)
     answers = iter([TOLD, TOLD])
-    with patch("maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
+    with patch("malspark.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
         agent._validate_isr(isr, "the raw data")
     assert wire.refused == []
     return list(wire.bodies)
@@ -647,7 +651,7 @@ class TestARefusedContinuedPartIsAskedAsBuilt:
     def test_its_items_are_asked_again_over_the_rebuilt_turns(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents.base_agent import ContinuationRefused
+        from malspark.agents.base_agent import ContinuationRefused
 
         real = BaseAnalyst._answer_after_loop
 
@@ -672,7 +676,7 @@ PAD = " pad" * 1000
 
 
 def _kind(body: dict[str, Any]) -> str:
-    from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+    from malspark.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
 
     last = _last_user_text(body)
     if "no longer states these items" in last:
@@ -706,7 +710,7 @@ class TestAContinuedQuestionShowsWhatTheRebuiltOneShows:
 
 def _entry_block(entry: str) -> str:
     """The cited entry's block as a question shows it whole, as written in a request's JSON."""
-    from maljan.agents.tool_fence import fenced
+    from malspark.agents.tool_fence import fenced
 
     block = f"[ev_0099] peer_tool:\n{fenced('ev_0099', entry)}"
     return json.dumps(block, ensure_ascii=False)[1:-1]
@@ -776,7 +780,7 @@ class TestAMixedDropsAskIsTheRebuiltPartsItLeft:
     ) -> None:
         import sys
 
-        from maljan.agents.base_agent import ContinuationRefused, RetryDrops
+        from malspark.agents.base_agent import ContinuationRefused, RetryDrops
 
         module = sys.modules[__name__]
         # The whole answer drops both claims of the first, and each drops
@@ -845,7 +849,7 @@ class TestABaseFitLogsNothing:
     def test_only_the_rebuilt_fit_names_the_entries_it_cannot_show(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.schemas.evidence import LedgerEntry
 
         agent = _Analyst(llm=cast(Any, None), name="static")
         agent._evidence_entries = [
@@ -873,8 +877,8 @@ class TestAnEntryTheRebuiltConversationHolds:
 
         from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
-        from maljan.agents.tool_fence import fenced
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.agents.tool_fence import fenced
+        from malspark.schemas.evidence import LedgerEntry
 
         body = "PEER BODY: 0x309c reads PEB BeingDebugged " * 5
         view = fenced("ev_0901", body)
@@ -914,7 +918,7 @@ def _without_budget(bodies: list[dict[str, Any]]) -> str:
 
 
 def AgentISR_with(cited: list[str]) -> Any:  # noqa: N802 — a builder named for what it builds
-    from maljan.schemas.isr_models import AgentISR
+    from malspark.schemas.isr_models import AgentISR
 
     return AgentISR(
         agent_id="static",

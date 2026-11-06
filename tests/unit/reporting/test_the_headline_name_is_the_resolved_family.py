@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import FamilyAttribution, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import FamilyAttribution, FileHashes, MalwareReport, SampleIdentity
 
 
 def _builder() -> MalwareReportBuilder:

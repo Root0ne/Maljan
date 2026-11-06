@@ -17,15 +17,15 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.agents.mcp_client import MCPLangChainToolkit, with_structured_content
-from maljan.llm.context_window import (
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.agents.mcp_client import MCPLangChainToolkit, with_structured_content
+from malspark.llm.context_window import (
     note_answer_not_shown,
     note_answer_structure,
     note_answer_whole,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.evidence_spill import EvidenceSpill
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence_spill import EvidenceSpill
 
 LISTING = "void FUN_00401000(void) {\n  int counter = 0;\n  return;\n}\n" * 400
 DOCUMENT = json.dumps({"rows": [{"index": i, "value": "v" * 30} for i in range(400)]})
@@ -44,7 +44,7 @@ class _Store:
 
 
 def _ghidra(limit: int) -> Any:
-    from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+    from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
     client = GhidraHTTPClient.__new__(GhidraHTTPClient)
     client._max_output_chars = limit

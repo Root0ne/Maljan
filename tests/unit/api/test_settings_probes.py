@@ -15,9 +15,9 @@ import httpx
 import pytest
 
 from app.services import settings_probes as probes
-from maljan.llm.ollama_provider import THINKING_SETTING
-from maljan.llm.openai_provider import OpenAIProvider
-from maljan.llm.provider_base import facts_of
+from malspark.llm.ollama_provider import THINKING_SETTING
+from malspark.llm.openai_provider import OpenAIProvider
+from malspark.llm.provider_base import facts_of
 
 
 def _dsn(scheme: str, userinfo: str, rest: str) -> str:
@@ -73,7 +73,7 @@ async def test_llm_probe_lists_models_and_completes(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_llm_probe_anthropic_ok(monkeypatch):
-    from maljan.llm.context_window import ANTHROPIC_VERSION
+    from malspark.llm.context_window import ANTHROPIC_VERSION
 
     def handler(req: httpx.Request):
         assert req.headers["x-api-key"] == "sk-ant-secret"
@@ -241,7 +241,7 @@ async def test_unknown_probe_is_answered_not_raised():
 
 
 def test_the_per_agent_map_is_annotated_with_the_llm_probe():
-    from maljan.core.settings_annotations import ANNOTATIONS
+    from malspark.core.settings_annotations import ANNOTATIONS
 
     assert ANNOTATIONS["llm.agents"].get("probe") == "llm"
 
@@ -662,7 +662,7 @@ def _ollama_generate_bodies(monkeypatch) -> list[dict]:
 
 @pytest.mark.asyncio
 async def test_the_ollama_probe_loads_the_model_at_the_window_the_job_uses(monkeypatch):
-    from maljan.core.config import OllamaConfig
+    from malspark.core.config import OllamaConfig
 
     bodies = _ollama_generate_bodies(monkeypatch)
     result = await probes.run_probe(
@@ -769,7 +769,7 @@ async def test_a_stored_value_reaches_a_provider_probe(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_cape_probe_resolves_from_the_default_settings_with_nothing_staged(monkeypatch):
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     seen: dict[str, str] = {}
 
@@ -852,7 +852,7 @@ async def test_a_reputation_probe_timeout_is_reported_not_raised(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_memory_backend_probe_asks_the_store_it_builds_and_closes_it(monkeypatch):
-    import maljan.memory.store_factory as factory
+    import malspark.memory.store_factory as factory
 
     built: list[Any] = []
 
@@ -878,8 +878,8 @@ async def test_a_memory_backend_probe_asks_the_store_it_builds_and_closes_it(mon
 
 @pytest.mark.asyncio
 async def test_a_memory_backend_that_cannot_answer_is_reported_redacted(monkeypatch):
-    import maljan.memory.store_factory as factory
-    from maljan.core.exceptions import MemoryStoreError
+    import malspark.memory.store_factory as factory
+    from malspark.core.exceptions import MemoryStoreError
 
     class _Store:
         def readiness(self) -> str:
@@ -954,7 +954,7 @@ def test_redact_url_leaves_credential_free_urls_alone():
 
 
 def _r2mcp_is_found_where_configured(monkeypatch) -> None:
-    from maljan.providers.static import r2
+    from malspark.providers.static import r2
 
     monkeypatch.setattr(
         r2, "resolve_r2_binary", lambda configured, env=None: r2.R2Binary(configured, ())
@@ -975,7 +975,7 @@ async def test_r2_probe_reports_a_missing_binary_by_name():
 async def test_r2_probe_reports_a_timeout_and_kills_the_handshake(monkeypatch):
     import asyncio
 
-    from maljan.providers import server_probe, servers
+    from malspark.providers import server_probe, servers
 
     closed: list[bool] = []
 
@@ -990,8 +990,8 @@ async def test_r2_probe_reports_a_timeout_and_kills_the_handshake(monkeypatch):
         async def aclose(self):
             closed.append(True)
 
-    from maljan.core.settings_overrides import build_settings
-    from maljan.providers.static.r2 import R2StaticProvider
+    from malspark.core.settings_overrides import build_settings
+    from malspark.providers.static.r2 import R2StaticProvider
 
     provider = R2StaticProvider.from_settings(build_settings({}))
     monkeypatch.setattr(servers, "ServerHandle", _HangingHandle)
@@ -1005,7 +1005,7 @@ async def test_r2_probe_reports_a_timeout_and_kills_the_handshake(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_r2_probe_reports_the_tool_count_on_success(monkeypatch):
-    from maljan.providers import servers
+    from malspark.providers import servers
 
     class _Handle:
         def __init__(self, name, config):
@@ -1021,7 +1021,7 @@ async def test_r2_probe_reports_the_tool_count_on_success(monkeypatch):
         def all_tool_names(self):
             return ["open_file", "analyze"]
 
-    from maljan.providers.static.r2 import R2StaticProvider
+    from malspark.providers.static.r2 import R2StaticProvider
 
     provider = R2StaticProvider.from_settings(_settings(**{"static.r2.binary_path": "r2mcp"}))
     monkeypatch.setattr(servers, "ServerHandle", _Handle)
@@ -1053,7 +1053,7 @@ async def test_probe_mcp_closes_a_real_handle_that_hangs_mid_handshake(monkeypat
         cleaned.append(instance)
         return instance
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", hanging_factory)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", hanging_factory)
     monkeypatch.setattr(probes, "PROBE_BUDGET_SECONDS", 0.05)
     result = await probes.probe_mcp({"name": "x", "entry": {"enabled": True, "command": "mcp"}})
     assert result.ok is False
@@ -1169,7 +1169,7 @@ async def test_a_provider_that_fails_while_it_is_built_is_reported_without_its_c
     monkeypatch,
 ):
     """A failure no probe expected still reaches the operator with any URL's credentials cut."""
-    from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+    from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider
 
     secret_url = _dsn("http", "user:hunter2", "cape.example:8000")
 

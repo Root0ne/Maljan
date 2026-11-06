@@ -17,10 +17,10 @@ import httpx
 import pytest
 from pydantic import BaseModel, SecretStr
 
-from maljan.core.model_assignments import ModelAssignment, endpoint_for
-from maljan.core.settings_overrides import build_settings
-from maljan.llm import registry
-from maljan.llm.provider_base import (
+from malspark.core.model_assignments import ModelAssignment, endpoint_for
+from malspark.core.settings_overrides import build_settings
+from malspark.llm import registry
+from malspark.llm.provider_base import (
     _FACTS,
     LLMProvider,
     ModelListing,
@@ -85,7 +85,7 @@ class AcmeProvider(LLMProvider):
 
     @classmethod
     def window_probes(cls, endpoint: object, model: str) -> tuple[Any, ...]:
-        from maljan.llm import context_window as cw
+        from malspark.llm import context_window as cw
 
         return (cw.Ask("GET", f"{endpoint}/window", None, cw.window_from_tgi_info, "acme"),)
 
@@ -159,14 +159,14 @@ class TestItsOwnSettings:
         assert endpoint_for(settings, ACME) == ACME_OWN
 
     def test_its_global_effort_is_its_own_setting(self) -> None:
-        from maljan.llm.effort import effort_in_force, effort_options
+        from malspark.llm.effort import effort_in_force, effort_options
 
         settings = _settings(**{"llm.acme.effort": "gentle"})
         assert effort_in_force(settings, ACME) == ("gentle", "gentle from llm.acme.effort")
         assert effort_options(settings, ACME, "m")["global_value"] == "gentle"
 
     def test_the_catalogue_lists_its_settings(self) -> None:
-        from maljan.core.settings_catalog import core_catalog
+        from malspark.core.settings_catalog import core_catalog
 
         entries = {e.key: e for e in core_catalog()}
         assert entries["core.llm.acme.api_key"].secret is True
@@ -175,7 +175,7 @@ class TestItsOwnSettings:
         assert "core.llm.acme.expert_model" in entries
 
     def test_a_provider_with_no_block_borrows_no_role_model(self) -> None:
-        from maljan.llm.provider_base import role_block_problem
+        from malspark.llm.provider_base import role_block_problem
 
         class _Bare(LLMProvider):
             name = "bare"
@@ -211,7 +211,7 @@ class TestSettingsReadTheAdapter:
         )
 
     def test_an_entry_may_name_its_own_endpoint_and_one_of_its_efforts(self) -> None:
-        from maljan.core.config import ModelChoice
+        from malspark.core.config import ModelChoice
 
         choice = ModelChoice(
             provider=ACME, model="m", base_url="http://elsewhere:1", effort="fierce"
@@ -221,7 +221,7 @@ class TestSettingsReadTheAdapter:
             ModelChoice(provider=ACME, model="m", effort="loud")
 
     def test_its_endpoint_and_effort_options_are_its_own(self) -> None:
-        from maljan.llm.effort import effort_options
+        from malspark.llm.effort import effort_options
 
         settings = _settings()
         assert endpoint_for(settings, ACME) == ACME_ROOT
@@ -232,14 +232,14 @@ class TestSettingsReadTheAdapter:
 
 class TestTheModelLayerReadsTheAdapter:
     def test_window(self) -> None:
-        from maljan.llm import context_window as cw
+        from malspark.llm import context_window as cw
 
         (ask,) = cw.probe_plan(ACME, ACME_ROOT, "m")
         assert ask.url == f"{ACME_ROOT}/window"
         assert cw.declared_window(_settings(), ACME) == (12_345, False)
 
     def test_errors_are_classified_by_its_sdk(self) -> None:
-        from maljan.llm.transient import transient_failure
+        from malspark.llm.transient import transient_failure
 
         assert "acme_sdk" in provider_error_packages()
         assert "acme_sdk" in transient_error_packages()
@@ -248,9 +248,9 @@ class TestTheModelLayerReadsTheAdapter:
         assert transient_failure(error) == "HTTP 503"
 
     def test_a_model_it_built_is_recognised(self) -> None:
-        from maljan.llm.context_window import output_bound_kwargs
-        from maljan.llm.registry import structured_output_supported
-        from maljan.reporting.composer import _caches_once_answered
+        from malspark.llm.context_window import output_bound_kwargs
+        from malspark.llm.registry import structured_output_supported
+        from malspark.reporting.composer import _caches_once_answered
 
         class _Model:
             _llm_type = "acme-chat"
@@ -263,9 +263,9 @@ class TestTheModelLayerReadsTheAdapter:
         assert structured_output_supported(_settings(), None) is True
 
     def test_reasoning_cap_cache_and_passback(self) -> None:
-        from maljan.agents.base_agent import _passback_keys
-        from maljan.core.container import _reporter_reasons
-        from maljan.core.spend import hour_cache_models
+        from malspark.agents.base_agent import _passback_keys
+        from malspark.core.container import _reporter_reasons
+        from malspark.core.spend import hour_cache_models
 
         settings = _settings(**{"llm.agents": {"judge": {"provider": ACME, "model": "big"}}})
         assert _reporter_reasons(settings, ACME) is True
@@ -273,7 +273,7 @@ class TestTheModelLayerReadsTheAdapter:
         assert "thoughts" in _passback_keys()
 
     def test_it_is_taken_to_serve_one_request_at_a_time(self) -> None:
-        from maljan.pipeline.analyst_mode import _serves_concurrently
+        from malspark.pipeline.analyst_mode import _serves_concurrently
 
         assignment = ModelAssignment("static", ACME, ACME_ROOT, "m")
         concurrent, why = _serves_concurrently(_settings(), assignment, probe=False)

@@ -11,7 +11,7 @@ import hashlib
 from typing import Any
 
 from app.services import object_store
-from maljan.schemas.evidence_spill import ANSWER, spill_part
+from malspark.schemas.evidence_spill import ANSWER, spill_part
 
 BLOB = ("0123456789" * 30).encode()
 

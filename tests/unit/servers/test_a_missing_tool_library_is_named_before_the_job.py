@@ -16,9 +16,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.services.tool_availability import as_rows, unavailable_tools
-from maljan.core.config import Settings
-from maljan.tools import capabilities, emulated_strings, sidecar_needs
-from maljan.tools.capabilities import Requirement, ToolNeeds, binary, env, manifest, module
+from malspark.core.config import Settings
+from malspark.tools import capabilities, emulated_strings, sidecar_needs
+from malspark.tools.capabilities import Requirement, ToolNeeds, binary, env, manifest, module
 
 
 def _without(monkeypatch: pytest.MonkeyPatch, *missing: str) -> list[str]:
@@ -42,10 +42,10 @@ def _without(monkeypatch: pytest.MonkeyPatch, *missing: str) -> list[str]:
 
 class TestTheCheckBeforeAJob:
     def test_a_missing_module_is_named_in_the_imports_own_words(self) -> None:
-        said = module("maljan_t329_no_such_library").installed()
+        said = module("malspark_t329_no_such_library").installed()
         assert said == (
-            "maljan_t329_no_such_library is not installed "
-            "(No module named 'maljan_t329_no_such_library')"
+            "malspark_t329_no_such_library is not installed "
+            "(No module named 'malspark_t329_no_such_library')"
         )
 
     def test_an_installed_module_is_not_named_and_is_not_imported(self) -> None:
@@ -54,7 +54,7 @@ class TestTheCheckBeforeAJob:
         assert "colorsys" not in sys.modules
 
     def test_the_words_are_the_servers_own(self) -> None:
-        req = module("maljan_t329_no_such_library")
+        req = module("malspark_t329_no_such_library")
         assert req.installed() == req.probe()
 
     def test_an_executable_is_looked_for_in_the_servers_environment(self) -> None:
@@ -68,12 +68,12 @@ class TestTheCheckBeforeAJob:
             binary("floss", locate).installed({"PATH": "/x"}) == "floss is not installed: nowhere"
         )
         assert seen == [{"PATH": "/x"}]
-        assert binary("maljan-t329-no-such-program").installed({"PATH": ""}) == (
-            "maljan-t329-no-such-program is not on PATH"
+        assert binary("malspark-t329-no-such-program").installed({"PATH": ""}) == (
+            "malspark-t329-no-such-program is not on PATH"
         )
 
     def test_a_setting_is_no_install(self) -> None:
-        assert env("MALJAN_T329_NO_SUCH_KEY").installed({}) is None
+        assert env("MALSPARK_T329_NO_SUCH_KEY").installed({}) is None
 
 
 class TestTheSidecarsDeclareTheirNeedsOnce:
@@ -212,9 +212,9 @@ class TestReadinessNamesWhatTheJobWouldCall:
     def test_a_reading_runs_on_its_server_when_that_is_reached_at_an_address(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.declared_reading import builtin_tools
-        from maljan.core.served_declarations import register_served
-        from maljan.core.tool_declarations import launch_identity
+        from malspark.core.declared_reading import builtin_tools
+        from malspark.core.served_declarations import register_served
+        from malspark.core.tool_declarations import launch_identity
 
         _without(monkeypatch, "capa")
         settings = Settings()
@@ -270,7 +270,7 @@ class TestReadinessNamesWhatTheJobWouldCall:
         _without(monkeypatch)
         floss = next(n for n in sidecar_needs.ANALYSIS if n.name == "floss")
         bare: dict[str, str] = {}
-        configured = {"MALJAN_FLOSS_PATH": "/opt/floss"}
+        configured = {"MALSPARK_FLOSS_PATH": "/opt/floss"}
         monkeypatch.setattr(
             tool_availability,
             "_in_process_readings",
@@ -290,7 +290,7 @@ class TestReadinessNamesWhatTheJobWouldCall:
     ) -> None:
         import logging
 
-        from maljan.core import pack_servers
+        from malspark.core import pack_servers
 
         _without(monkeypatch)
         said = MagicMock()
@@ -318,8 +318,8 @@ class TestReadinessNamesWhatTheJobWouldCall:
         """The decoder, capa and carve choices the job's servers are read with (T-354)."""
         import logging
 
-        from maljan.agents.composition import servers_a_job_calls
-        from maljan.core import pack_servers
+        from malspark.agents.composition import servers_a_job_calls
+        from malspark.core import pack_servers
 
         _without(monkeypatch)
         said = MagicMock()

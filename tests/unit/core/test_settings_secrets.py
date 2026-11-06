@@ -1,7 +1,7 @@
 import pytest
 from cryptography.fernet import Fernet
 
-from maljan.core import settings_secrets as box
+from malspark.core import settings_secrets as box
 
 
 @pytest.fixture

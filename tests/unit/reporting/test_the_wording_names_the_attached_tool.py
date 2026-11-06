@@ -21,12 +21,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from maljan.agents.function_map import build_function_map, function_artefacts, function_map_block
-from maljan.core.declared_reading import shipped_by_name, stored_record
-from maljan.pipeline.run_state import index_sentence
-from maljan.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import _capability_owner, _capability_table
-from maljan.schemas.evidence import LedgerEntry
+from malspark.agents.function_map import build_function_map, function_artefacts, function_map_block
+from malspark.core.declared_reading import shipped_by_name, stored_record
+from malspark.pipeline.run_state import index_sentence
+from malspark.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import _capability_owner, _capability_table
+from malspark.schemas.evidence import LedgerEntry
 
 _DECODED = json.dumps({"strings": [{"kind": "decoded", "string": "a", "function_rva": "0x2000"}]})
 
@@ -54,7 +54,7 @@ def test_another_decoder_is_named_by_its_declared_display_name_or_neutrally() ->
 
 
 def test_the_index_line_names_the_shipped_matcher_only_for_its_cells() -> None:
-    from maljan.tools.artefact_index import RULES_FIELD_NEUTRAL, rules_field
+    from malspark.tools.artefact_index import RULES_FIELD_NEUTRAL, rules_field
 
     shipped = rules_field(shipped=True)
     assert f"{shipped} rules" in index_sentence("ev_0001", {"rows": [{shipped: []}]})
@@ -96,7 +96,7 @@ def _rule_report(**titles: str) -> SimpleNamespace:
 
 
 def test_the_narrative_rule_pointer_is_read_from_the_reports_rule_tables() -> None:
-    from maljan.reporting import narrative_agent
+    from malspark.reporting import narrative_agent
 
     assert narrative_agent.rule_pointer() == "a sigma/yara pointer"
     assert narrative_agent.system_prompt() == narrative_agent._SYSTEM_PROMPT
@@ -109,8 +109,8 @@ def test_the_narrative_rule_pointer_is_read_from_the_reports_rule_tables() -> No
 
 
 def test_the_function_check_names_the_attached_emulator(monkeypatch: pytest.MonkeyPatch) -> None:
-    from maljan.core import declared_reading
-    from maljan.pipeline import function_claims as fc
+    from malspark.core import declared_reading
+    from malspark.pipeline import function_claims as fc
 
     assert fc.attached_emulators() == "FLOSS"
     built_in = fc.NOT_A_SAMPLE_STRING.format(value="v", emulators=fc.attached_emulators())

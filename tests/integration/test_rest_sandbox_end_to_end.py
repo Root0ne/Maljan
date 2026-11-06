@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# Constructing ``MaljanApp`` lazily imports the LLM SDKs (google-genai among
+# Constructing ``MalsparkApp`` lazily imports the LLM SDKs (google-genai among
 # them), and one of them subclasses ``httpx.Client`` at import time. Importing
 # it here, before the ``stub`` fixture below replaces ``httpx.Client`` with a
 # plain function for the duration of a test, keeps that subclassing looking
@@ -12,7 +12,7 @@ from __future__ import annotations
 import google.genai  # noqa: F401
 import pytest
 
-from maljan.core.config import Settings
+from malspark.core.config import Settings
 from tests.unit.servers.rest_stub import StubState, build_stub_app
 
 
@@ -78,14 +78,14 @@ def stub(monkeypatch):
             headers=kwargs.get("headers"),
         )
 
-    monkeypatch.setattr("maljan.providers.sandbox.rest.httpx.Client", client)
+    monkeypatch.setattr("malspark.providers.sandbox.rest.httpx.Client", client)
     return state
 
 
 @pytest.mark.asyncio
 async def test_a_job_detonates_and_the_dynamic_sections_are_filled(stub, tmp_path):
-    from maljan.app import MaljanApp
-    from maljan.reporting.ledger_projection import (
+    from malspark.app import MalsparkApp
+    from malspark.reporting.ledger_projection import (
         dynamic_from_ledger,
         network_from_sandbox_report,
     )
@@ -93,7 +93,7 @@ async def test_a_job_detonates_and_the_dynamic_sections_are_filled(stub, tmp_pat
 
     sample = tmp_path / "s.bin"
     sample.write_bytes(b"MZ" + b"\0" * 128)
-    app = MaljanApp(config=_settings(), mock=False)
+    app = MalsparkApp(config=_settings(), mock=False)
     container = app.container
 
     report = await app._submit_to_sandbox(str(sample))
@@ -127,7 +127,7 @@ async def test_a_job_detonates_and_the_dynamic_sections_are_filled(stub, tmp_pat
 
 @pytest.mark.asyncio
 async def test_the_unmapped_channels_are_named_rather_than_left_empty(stub, tmp_path):
-    from maljan.core.container import ServiceContainer
+    from malspark.core.container import ServiceContainer
 
     sample = tmp_path / "s.bin"
     sample.write_bytes(b"MZ" + b"\0" * 128)
@@ -146,13 +146,13 @@ async def test_the_unmapped_channels_are_named_rather_than_left_empty(stub, tmp_
 @pytest.mark.asyncio
 async def test_the_rest_provider_polls_on_its_own_budget(stub, tmp_path):
     """The app used to thread CAPE's timeout into every provider's poll loop."""
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
     cfg = _settings()
     cfg.sandbox.rest.timeout_seconds = 42
     cfg.sandbox.rest.poll_interval_seconds = 1
     cfg.sandbox.cape2.timeout_seconds = 300
-    app = MaljanApp(config=cfg, mock=False)
+    app = MalsparkApp(config=cfg, mock=False)
     assert app._poll_budget(app.container.get_sandbox_provider()) == (42, 1)
     await app.aclose()
 
@@ -175,14 +175,14 @@ async def test_a_failed_job_reports_the_provider_error_without_a_traceback(stub,
     """
     import logging
 
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
     stub.states = ["queued", "failed"]
     sample = tmp_path / "s.bin"
     sample.write_bytes(b"MZ" + b"\0" * 128)
-    app = MaljanApp(config=_settings(), mock=False)
+    app = MalsparkApp(config=_settings(), mock=False)
 
-    with caplog.at_level(logging.WARNING, logger="maljan"):
+    with caplog.at_level(logging.WARNING, logger="malspark"):
         report = await app._submit_to_sandbox(str(sample))
     assert report is None, "a failed sandbox task degrades the run rather than raising"
 
@@ -204,13 +204,13 @@ async def test_a_failed_job_reports_the_provider_error_without_a_traceback(stub,
 
 @pytest.mark.asyncio
 async def test_the_pcap_is_fetched_only_when_configured(stub, tmp_path):
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
     sample = tmp_path / "s.bin"
     sample.write_bytes(b"MZ" + b"\0" * 128)
 
     with_pcap = _settings()
-    app_with_pcap = MaljanApp(config=with_pcap, mock=False)
+    app_with_pcap = MalsparkApp(config=with_pcap, mock=False)
     report = await app_with_pcap._submit_to_sandbox(str(sample))
     assert report is not None
     assert report["network"].get("pcap_local_path")
@@ -219,7 +219,7 @@ async def test_the_pcap_is_fetched_only_when_configured(stub, tmp_path):
     stub.states = ["queued", "running", "finished"]
     without_pcap = _settings()
     without_pcap.sandbox.rest.report.pcap_path = ""
-    app_without_pcap = MaljanApp(config=without_pcap, mock=False)
+    app_without_pcap = MalsparkApp(config=without_pcap, mock=False)
     report = await app_without_pcap._submit_to_sandbox(str(sample))
     assert report is not None
     assert not report["network"].get("pcap_local_path")

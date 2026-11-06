@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.evidence_bundles import bundle_for, is_empty
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity, StaticAnalysis
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.reporting.evidence_bundles import bundle_for, is_empty
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity, StaticAnalysis
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 NOTE = (
     "YOUR FILES ARE ENCRYPTED. To decrypt them send 0.1 BTC to the address below.\n"

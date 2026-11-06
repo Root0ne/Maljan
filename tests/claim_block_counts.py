@@ -6,7 +6,7 @@ by attribute so a test that patches ``claim_headings`` reads its patched rules.
 
 from __future__ import annotations
 
-from maljan.agents import claim_headings
+from malspark.agents import claim_headings
 
 
 def begun_and_distinct(text: str) -> tuple[int, int]:

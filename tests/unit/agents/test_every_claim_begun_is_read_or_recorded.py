@@ -15,16 +15,16 @@ from pathlib import Path
 
 import pytest
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     ClaimRead,
     claims_unread_sentence,
     parse_structured_claims_counted,
     read_claim_blocks,
 )
-from maljan.agents.claim_headings import count_claims_begun
-from maljan.agents.static_analyst import StaticAnalyst, _parse_claim_blocks
-from maljan.core.truncation_ledger import TruncationLedger
-from maljan.pipeline.validation import analyst_cut_violation
+from malspark.agents.claim_headings import count_claims_begun
+from malspark.agents.static_analyst import StaticAnalyst, _parse_claim_blocks
+from malspark.core.truncation_ledger import TruncationLedger
+from malspark.pipeline.validation import analyst_cut_violation
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "claims"
 REVISION = (FIXTURES / "blank_line_separated_revision.txt").read_text(encoding="utf-8")
@@ -188,7 +188,7 @@ def test_list_marker_headings_are_read_and_counted(marker: str) -> None:
 
 
 def test_a_numbered_only_answer_is_a_report() -> None:
-    from maljan.agents.base_agent import answer_is_isr
+    from malspark.agents.base_agent import answer_is_isr
 
     text = "CLAIM 1: one\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\n\n**CLAIM 2 (REVISED):** two"
     assert "CLAIM:" not in text
@@ -231,7 +231,7 @@ def test_a_technique_line_is_one_id_none_or_kept_whole(
 
 
 def test_a_kept_technique_line_is_asked_about_once() -> None:
-    from maljan.pipeline.validation import TECHNIQUE_LINE_UNREAD_CODE, parse_violations
+    from malspark.pipeline.validation import TECHNIQUE_LINE_UNREAD_CODE, parse_violations
 
     isr = _analyst()._text_to_isr(
         "CLAIM: x\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\nTECHNIQUE: T1055 or T1106\n", 0
@@ -242,7 +242,7 @@ def test_a_kept_technique_line_is_asked_about_once() -> None:
 
 
 def test_only_the_answers_in_force_carry_their_unread_claims_reason() -> None:
-    from maljan.pipeline.nodes import claims_unread_in_force
+    from malspark.pipeline.nodes import claims_unread_in_force
 
     analyst = _analyst()
     short = analyst._text_to_isr(MALFORMED, revision_round=0)
@@ -266,7 +266,7 @@ def test_an_unread_claim_beside_claims_read_is_informational() -> None:
     The run states it in its limitations; it does not make the verdict
     tentative. An answer none of whose claims were read still degrades.
     """
-    from maljan.pipeline.nodes import claims_unread_in_force, informational_reasons_in_force
+    from malspark.pipeline.nodes import claims_unread_in_force, informational_reasons_in_force
 
     analyst = _analyst()
     short = analyst._text_to_isr(MALFORMED, revision_round=0)
@@ -281,7 +281,10 @@ def test_an_unread_claim_beside_claims_read_is_informational() -> None:
 
 
 def test_disputes_left_unasked_are_informational() -> None:
-    from maljan.pipeline.nodes import claims_under_disputes_unasked, informational_reasons_in_force
+    from malspark.pipeline.nodes import (
+        claims_under_disputes_unasked,
+        informational_reasons_in_force,
+    )
 
     text = (
         "CLAIM 1: The file is a DLL.\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.7\n\n"
@@ -298,7 +301,7 @@ def test_disputes_left_unasked_are_informational() -> None:
 
 
 def test_a_merged_chunked_answer_carries_each_chunk_s_reason() -> None:
-    from maljan.analysis.chunk_merger import merge_chunk_isrs
+    from malspark.analysis.chunk_merger import merge_chunk_isrs
 
     analyst = _analyst()
     short = analyst._text_to_isr(MALFORMED, revision_round=0)
@@ -339,12 +342,12 @@ QUOTED_PEER = (
 def test_a_peer_s_claim_quoted_under_disputes_is_asked_about_and_then_described(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE, parse_violations
+    from malspark.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE, parse_violations
 
     read = read_claim_blocks(QUOTED_PEER)
     assert [c.claim for c in read.claims] == ["own"]
     assert (read.begun, read.after_disputes, read.unread) == (1, 1, 0)
-    from maljan.pipeline.nodes import claims_under_disputes_unasked
+    from malspark.pipeline.nodes import claims_under_disputes_unasked
 
     analyst = _analyst()
     with caplog.at_level(logging.INFO, logger="test.claims"):
@@ -374,8 +377,8 @@ def test_a_peer_s_claim_quoted_under_disputes_is_asked_about_and_then_described(
     ],
 )
 def test_an_own_claim_below_a_label_that_opens_the_section_is_asked_about(label: str) -> None:
-    from maljan.pipeline.nodes import claims_under_disputes_unasked, claims_unread_in_force
-    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE, parse_violations
+    from malspark.pipeline.nodes import claims_under_disputes_unasked, claims_unread_in_force
+    from malspark.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE, parse_violations
 
     text = (
         "CLAIM 1: The file is a DLL.\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.7\n\n"
@@ -476,7 +479,7 @@ class _Answers:
 
 
 def _validated(answers: list[str]) -> tuple[object, _Answers]:
-    from maljan.agents.base_agent import BaseAnalyst
+    from malspark.agents.base_agent import BaseAnalyst
 
     class _Validated(BaseAnalyst):
         def analyze(self, data: str) -> str:  # pragma: no cover - unused
@@ -492,15 +495,15 @@ def _validated(answers: list[str]) -> tuple[object, _Answers]:
 def _validate(analyst: object, isr: object) -> object:
     from unittest.mock import patch
 
-    with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+    with patch("malspark.agents.base_agent.validity_check_available", return_value=True):
         return analyst._validate_isr(isr, "evidence text")  # type: ignore[attr-defined]
 
 
 def test_headings_kept_under_disputes_when_asked_are_the_analyst_s_answer(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from maljan.pipeline.nodes import claims_under_disputes_unasked
-    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE
+    from malspark.pipeline.nodes import claims_under_disputes_unasked
+    from malspark.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE
 
     analyst, llm = _validated([QUOTED_PEER])
     first = analyst._text_to_isr(QUOTED_PEER, revision_round=1)  # type: ignore[attr-defined]
@@ -526,8 +529,8 @@ def test_headings_kept_under_disputes_when_asked_are_the_analyst_s_answer(
 
 
 def test_headings_moved_above_disputes_when_asked_are_read_and_state_nothing() -> None:
-    from maljan.pipeline.nodes import claims_under_disputes_unasked
-    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE
+    from malspark.pipeline.nodes import claims_under_disputes_unasked
+    from malspark.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE
 
     moved = (
         "CLAIM 1: own\nEVIDENCE: [ev_1]\nCONFIDENCE: 0.9\n\n"
@@ -544,7 +547,7 @@ def test_headings_moved_above_disputes_when_asked_are_read_and_state_nothing() -
 
 
 def test_headings_under_disputes_in_a_nudged_answer_are_a_degradation_reason() -> None:
-    from maljan.pipeline.nodes import claims_under_disputes_unasked
+    from malspark.pipeline.nodes import claims_under_disputes_unasked
 
     analyst, llm = _validated([])
     analyst._answer_unstructured = True  # type: ignore[attr-defined]
@@ -560,9 +563,9 @@ def test_headings_under_disputes_in_a_nudged_answer_are_a_degradation_reason() -
 def test_headings_under_disputes_not_asked_for_want_of_time_are_a_degradation_reason() -> None:
     import time
 
-    from maljan.agents.base_agent import TurnPace
-    from maljan.pipeline.nodes import claims_under_disputes_unasked
-    from maljan.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE
+    from malspark.agents.base_agent import TurnPace
+    from malspark.pipeline.nodes import claims_under_disputes_unasked
+    from malspark.pipeline.validation import CLAIMS_UNDER_DISPUTES_CODE
 
     analyst, llm = _validated([])
     pace = TurnPace()

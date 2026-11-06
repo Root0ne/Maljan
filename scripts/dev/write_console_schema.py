@@ -34,10 +34,10 @@ _LISTING = Path(__file__).resolve().parents[2] / "tests/fixtures/virustotal_list
 
 def _listed_once() -> None:
     """Keep what is read of the built-in reputation service's listing, unless something is."""
-    from maljan.core.config import _builtin_servers
-    from maljan.core.derived_declarations import derived_tool_facts
-    from maljan.core.served_declarations import derived, register_served
-    from maljan.core.tool_declarations import launch_identity
+    from malspark.core.config import _builtin_servers
+    from malspark.core.derived_declarations import derived_tool_facts
+    from malspark.core.served_declarations import derived, register_served
+    from malspark.core.tool_declarations import launch_identity
 
     launch = launch_identity(_builtin_servers()["virustotal"])
     if not derived("mcp:virustotal", launch):
@@ -55,11 +55,11 @@ def _reversers_listed_once() -> None:
     As every test starts (``tests/conftest.py``): Ghidra's ``/mcp/schema`` as
     its HTTP client lists it, and r2mcp's listing (``core.program_reading``).
     """
-    from maljan.core.config import ghidra_block, r2_block
-    from maljan.core.derived_declarations import derived_readings, program_readings_of
-    from maljan.core.served_declarations import program_read, register_served
-    from maljan.core.tool_declarations import launch_identity
-    from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+    from malspark.core.config import ghidra_block, r2_block
+    from malspark.core.derived_declarations import derived_readings, program_readings_of
+    from malspark.core.served_declarations import program_read, register_served
+    from malspark.core.tool_declarations import launch_identity
+    from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
     client = GhidraHTTPClient(base_url="http://ghidra.invalid")
     client._schema = list(

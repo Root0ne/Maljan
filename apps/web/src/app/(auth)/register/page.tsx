@@ -44,7 +44,7 @@ export default function RegisterPage() {
     <div className="w-full max-w-sm">
       <div className="flex items-center justify-center mb-8">
         <ShieldCheck size={18} aria-hidden="true" className="text-status-blue" />
-        <span className="ml-3 text-lg font-semibold text-text-primary tracking-wide">MALJAN</span>
+        <span className="ml-3 text-lg font-semibold text-text-primary tracking-wide">MALSPARK</span>
       </div>
 
       <div className="bg-bg-surface border border-border rounded p-6">

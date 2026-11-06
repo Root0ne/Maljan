@@ -16,13 +16,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     UNPUBLISHED_RECOMMENDATION_TECHNIQUE_CODE,
     recommendation_technique_violations,
 )
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity, TTPMapping
-from maljan.reporting.narrative_agent import NarrativeAgent, published_technique_ids
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity, TTPMapping
+from malspark.reporting.narrative_agent import NarrativeAgent, published_technique_ids
 
 PUBLISHED = ["T1071.001", "T1105"]
 

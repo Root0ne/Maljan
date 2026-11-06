@@ -17,11 +17,11 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import RestMappingConfig
-from maljan.providers.sandbox.readers import required_reader
-from maljan.providers.sandbox.rest_mapping import node_count, unnamed_blocks
-from maljan.schemas.sandbox_document import DNS_REQUEST_KEY, SAME_REQUEST_KEY, sandbox_document
-from maljan.schemas.sandbox_report import (
+from malspark.core.config import RestMappingConfig
+from malspark.providers.sandbox.readers import required_reader
+from malspark.providers.sandbox.rest_mapping import node_count, unnamed_blocks
+from malspark.schemas.sandbox_document import DNS_REQUEST_KEY, SAME_REQUEST_KEY, sandbox_document
+from malspark.schemas.sandbox_report import (
     cape_report_to_sandbox_report,
     stored_place,
     triage_overview_to_sandbox_report,
@@ -205,7 +205,7 @@ def _reach_by_walking_each_chain(parent: dict[Any, Any], roots: set[Any]) -> set
 def test_the_settled_lineage_answers_as_the_plain_walk_does() -> None:
     import random
 
-    from maljan.schemas.sandbox_report import _reach
+    from malspark.schemas.sandbox_report import _reach
 
     rng = random.Random(7)
     for _ in range(500):
@@ -355,8 +355,8 @@ class TestManyQuestionsTimesManyAnswers:
     def _check(self, named: bool) -> None:
         import json
 
-        from maljan.parsers.network_parser import NetworkParser
-        from maljan.reporting.ledger_projection import network_from_sandbox_report
+        from malspark.parsers.network_parser import NetworkParser
+        from malspark.reporting.ledger_projection import network_from_sandbox_report
 
         task = self._task(named)
         body = json.dumps(task)
@@ -403,7 +403,7 @@ class TestEveryKindLosesItsLinkKeysLinearly:
         )
 
     def test_a_report_laid_out_from_fields(self) -> None:
-        from maljan.schemas.sandbox_report import SandboxNetwork, SandboxReport
+        from malspark.schemas.sandbox_report import SandboxNetwork, SandboxReport
 
         def report(n: int) -> SandboxReport:
             network = self._rows(n)["network"]

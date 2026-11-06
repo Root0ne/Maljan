@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1 import sandbox_reports as module
-from maljan.core.config import SandboxConfig
+from malspark.core.config import SandboxConfig
 
 SHA = "c" * 64
 

@@ -17,8 +17,8 @@ from unittest.mock import MagicMock, patch
 from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.core.config import Settings
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.core.config import Settings
 
 
 def _recursion_limit_of_the_judge(cfg: Settings) -> tuple[int, Any]:
@@ -36,8 +36,8 @@ def _recursion_limit_of_the_judge(cfg: Settings) -> tuple[int, Any]:
     judge = JudgeAgent(llm=MagicMock())
     judge.tools = [StructuredTool.from_function(func=lookup, name="lookup")]
     with (
-        patch("maljan.agents.base_agent.get_settings", lambda: cfg),
-        patch("maljan.agents.judge_agent.get_settings", lambda: cfg),
+        patch("malspark.agents.base_agent.get_settings", lambda: cfg),
+        patch("malspark.agents.judge_agent.get_settings", lambda: cfg),
         patch("langgraph.prebuilt.create_react_agent", return_value=_Executor()),
     ):
         asyncio.run(judge.execute_tool_loop([("system", "s"), ("human", "h")]))

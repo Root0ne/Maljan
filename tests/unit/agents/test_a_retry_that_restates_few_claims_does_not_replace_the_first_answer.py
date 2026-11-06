@@ -24,8 +24,8 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.pipeline.validation import (
     RETRY_DROP_KEPT,
     RETRY_DROP_NOT_ANSWERED,
     RETRY_DROP_WITHDRAWN,
@@ -34,7 +34,7 @@ from maljan.pipeline.validation import (
     retry_drops,
     retry_restated_few_question,
 )
-from maljan.schemas.isr_models import AgentISR
+from malspark.schemas.isr_models import AgentISR
 
 RESTATED_HEAD = "so it does not replace your first answer"
 REPLACED_HEAD = "Your retry stands as your answer"
@@ -163,7 +163,7 @@ class TestARetryThatRestatesNone:
         assert states == [RETRY_DROP_KEPT, RETRY_DROP_WITHDRAWN, RETRY_DROP_KEPT]
 
     def test_the_run_log_says_why_with_the_drops_code_s_lifecycle(self) -> None:
-        from maljan.pipeline.events import VALIDATION_RESOLVED, VALIDATION_RETRIED
+        from malspark.pipeline.events import VALIDATION_RESOLVED, VALIDATION_RETRIED
 
         analyst = _Analyst(["KEEP C1: yes\nKEEP C2: yes\nKEEP C3: yes"])
 
@@ -181,7 +181,7 @@ class TestARetryThatRestatesNone:
         assert analyst.validation_fed_back[RETRY_DROPPED_CODE] == 1
 
     def test_unanswered_the_code_survives(self) -> None:
-        from maljan.pipeline.events import VALIDATION_SURVIVED
+        from malspark.pipeline.events import VALIDATION_SURVIVED
 
         analyst = _Analyst([TimeoutError("no answer")])
 
@@ -204,8 +204,8 @@ class TestARetryThatRestatesNone:
         }
 
     def test_a_question_asked_in_parts_states_the_answer_s_totals_in_each(self) -> None:
-        from maljan.llm.context_window import ContextBudget, WindowFact
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.llm.context_window import ContextBudget, WindowFact
+        from malspark.schemas.evidence import LedgerEntry
 
         # Two claims with values, each citing an entry too large to share a part,
         # and one claim with no value: every part states 0 restated, 2 left out, 1 plain.
@@ -400,7 +400,7 @@ class TestTheWholeTurn:
         isr = analyst._text_to_isr(self.FIRST, 0)
 
         with (
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         ):
             result = analyst._validate_isr(isr, "evidence")
@@ -427,7 +427,7 @@ class TestThePathsThatAreNotAskedAbout:
     def _validate(analyst: _Analyst, first: str) -> AgentISR:
         isr = analyst._text_to_isr(first, 0)
         with (
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         ):
             return analyst._validate_isr(isr, "evidence")
@@ -438,8 +438,8 @@ class TestThePathsThatAreNotAskedAbout:
         analyst = _Analyst([OTHER])
         isr = analyst._text_to_isr(first, 0)
         with (
-            patch("maljan.agents.base_agent.analyst_output_cap", return_value=cap),
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.analyst_output_cap", return_value=cap),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         ):
             analyst._record_usage(

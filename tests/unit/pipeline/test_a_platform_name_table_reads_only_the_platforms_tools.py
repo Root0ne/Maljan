@@ -16,11 +16,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from maljan.extractors.sample_identity import unparsed_container_reason
-from maljan.pipeline.nodes import reason_applies_to_format
-from maljan.pipeline.run_state import render_run_state
-from maljan.pipeline.triage_pack import PIPELINE
-from maljan.schemas.evidence import build_entry, format_entry_id
+from malspark.extractors.sample_identity import unparsed_container_reason
+from malspark.pipeline.nodes import reason_applies_to_format
+from malspark.pipeline.run_state import render_run_state
+from malspark.pipeline.triage_pack import PIPELINE
+from malspark.schemas.evidence import build_entry, format_entry_id
 from tests.linear_cost import assert_scales
 
 PARSED = {"pages": 2, "objects": 14}

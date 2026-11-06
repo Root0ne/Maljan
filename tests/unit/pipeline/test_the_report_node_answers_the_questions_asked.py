@@ -16,10 +16,10 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.pipeline.stopped_run import QUESTIONS_STOPPED, partial_report
-from maljan.pipeline.validation import ValidationTally
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers import MarkdownRenderer
+from malspark.pipeline.stopped_run import QUESTIONS_STOPPED, partial_report
+from malspark.pipeline.validation import ValidationTally
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers import MarkdownRenderer
 from tests.stages import paper_profile
 from tests.unit.pipeline.test_what_is_served_is_the_final_report import _state
 
@@ -68,7 +68,7 @@ def _container(reporter: Any) -> Any:
 
 
 async def _run(container: Any, state: dict[str, Any]) -> dict[str, Any]:
-    from maljan.pipeline.nodes import make_report_node
+    from malspark.pipeline.nodes import make_report_node
 
     stage = next(step for step in container.active_profile().stages if step.kind == "report")
     node = make_report_node(container, stage=stage, announces=False)
@@ -146,7 +146,7 @@ def test_a_stopped_run_asked_nothing_carries_no_answers() -> None:
 def test_a_run_stopped_before_its_first_step_still_prints_each_question() -> None:
     from types import SimpleNamespace
 
-    from maljan.pipeline.stopped_run import stopped_state
+    from malspark.pipeline.stopped_run import stopped_state
 
     # Stopped while the sandbox submission ran: no graph step completed, so
     # the state is empty and the questions are known only to the app.

@@ -22,9 +22,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.core.exceptions import AnalystError
-from maljan.pipeline import events as ev
-from maljan.pipeline.nodes import (
+from malspark.core.exceptions import AnalystError
+from malspark.pipeline import events as ev
+from malspark.pipeline.nodes import (
     make_negotiation_node,
     make_revision_node,
     make_stage_agent_node,
@@ -34,7 +34,7 @@ from tests.unit.pipeline._source_names import names_reaching
 
 # One string carrying both of the things a message must not put on the wire.
 SECRET = "sk-" + "L" * 32
-HOST_PATH = "/home/operator/maljan/data/samples/ab12/evil.exe"
+HOST_PATH = "/home/operator/malspark/data/samples/ab12/evil.exe"
 LOUD = f"POST https://user:{SECRET}@llm.internal/v1 failed reading {HOST_PATH}"
 
 
@@ -251,22 +251,22 @@ class TestOnlyTheSafeHelperReachesAPublishSite:
     def test_the_walk_follows_an_aliased_import(self) -> None:
         """The shape the code was in before the two helpers were told apart.
 
-        ``from maljan.agents.base_agent import describe_exception as detail``
+        ``from malspark.agents.base_agent import describe_exception as detail``
         is how the unsafe helper last reached a publish site, and a walk that
         only knows one spelling would have let that one through.
         """
         aliased = ast.parse(
-            "from maljan.agents.base_agent import describe_exception_for_log as detail\n"
+            "from malspark.agents.base_agent import describe_exception_for_log as detail\n"
             "def n():\n"
             "    emit_agent_message(sink, text=f'x {detail(e)}')\n"
         )
         unaliased = ast.parse(
-            "from maljan.agents.base_agent import describe_exception_for_log\n"
+            "from malspark.agents.base_agent import describe_exception_for_log\n"
             "def n():\n"
             "    emit_agent_message(sink, text=f'x {describe_exception_for_log(e)}')\n"
         )
         other = ast.parse(
-            "from maljan.pipeline.events import describe_exception as detail\n"
+            "from malspark.pipeline.events import describe_exception as detail\n"
             "def n():\n"
             "    emit_agent_message(sink, text=f'x {detail(e)}')\n"
         )
@@ -309,13 +309,13 @@ class TestOnlyTheSafeHelperReachesAPublishSite:
         assert self._offenders(appended) == [4]
 
     def test_the_two_helpers_do_not_share_a_name(self) -> None:
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         assert not hasattr(base_agent, "describe_exception")
         assert hasattr(base_agent, self.UNSAFE)
 
     def test_they_disagree_about_the_message_on_purpose(self) -> None:
-        from maljan.agents.base_agent import describe_exception_for_log
+        from malspark.agents.base_agent import describe_exception_for_log
 
         said = describe_exception_for_log(ValueError(LOUD))
 
@@ -342,7 +342,7 @@ class TestTheHelper:
         assert "asyncio" in ev.describe_exception(_asyncio.CancelledError())
 
     def test_a_remediation_the_failure_carries_is_said(self) -> None:
-        from maljan.tools.roots import PathOutsideRoots
+        from malspark.tools.roots import PathOutsideRoots
 
         said = ev.describe_exception(PathOutsideRoots())
 
@@ -436,8 +436,8 @@ class TestTheRevision:
 
 class TestTheJudge:
     def test_a_failed_verdict_says_the_type_alone(self) -> None:
-        from maljan.pipeline.nodes import make_judge_node
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.pipeline.nodes import make_judge_node
+        from malspark.schemas.evidence import EvidenceCounter
         from tests.unit.pipeline.test_degraded_mode_at_the_judge_node import _Container, _state
 
         recorder = _Recorder()

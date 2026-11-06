@@ -12,11 +12,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.pipeline.conditions import StageResult
-from maljan.pipeline.nodes import make_stage_agent_node, stage_context
-from maljan.reporting.follow_up import stored_run
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.conditions import StageResult
+from malspark.pipeline.nodes import make_stage_agent_node, stage_context
+from malspark.reporting.follow_up import stored_run
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.stages import ANALYSIS_STAGE
 from tests.unit.analysis.test_one_claim_is_counted_once_everywhere import _split_isr
 from tests.unit.pipeline.test_evidence_ledger_channel import (

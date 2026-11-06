@@ -8,8 +8,8 @@ Covers:
 
 from unittest.mock import MagicMock, patch
 
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
 
 
 class TestServiceContainerCache:

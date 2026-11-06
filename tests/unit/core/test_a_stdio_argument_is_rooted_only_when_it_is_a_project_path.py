@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.core.paths import (
+from malspark.core.paths import (
     get_project_root,
     mcp_paths_leaving_project,
     resolve_mcp_args,
@@ -79,7 +79,7 @@ def test_a_backslash_separates_only_where_the_platform_s_separator_is_one(
 ) -> None:
     root = get_project_root()
     assert resolve_mcp_args(["src\\x"]) == ["src\\x"]
-    monkeypatch.setattr("maljan.core.paths.os.sep", "\\")
+    monkeypatch.setattr("malspark.core.paths.os.sep", "\\")
     assert resolve_mcp_args(["src\\x"]) == [str(Path(root / "src" / "x"))]
     assert resolve_mcp_args(["..\\x"]) == ["..\\x"]
     assert mcp_paths_leaving_project(["..\\x"]) == ["..\\x"]

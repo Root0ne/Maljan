@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import json
 
-from maljan.pipeline.triage_pack import PIPELINE
-from maljan.reporting.ledger_projection import identity_from_ledger
-from maljan.reporting.ledger_report import build_sections
-from maljan.schemas.evidence import build_entry, format_entry_id
+from malspark.pipeline.triage_pack import PIPELINE
+from malspark.reporting.ledger_projection import identity_from_ledger
+from malspark.reporting.ledger_report import build_sections
+from malspark.schemas.evidence import build_entry, format_entry_id
 
 
 def _pack_entry(tool: str, payload: dict, seq: int):

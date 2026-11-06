@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import struct
 
-from maljan.extractors.pe_extractor import (
+from malspark.extractors.pe_extractor import (
     _MAX_CARVED_CHILDREN,
     _carve_from,
     carve_payloads,

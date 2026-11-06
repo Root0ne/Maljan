@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
-from maljan.schemas.sandbox_document import sandbox_document
+from malspark.core.config import Settings
+from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider
+from malspark.schemas.sandbox_document import sandbox_document
 from tests.unit.providers._cape_fixture import first_cape_report
 from tests.unit.providers._document import as_published
 
@@ -26,7 +26,7 @@ class _FakeClient:
         return "reported"
 
     def fetch_report(self, task_id):
-        from maljan.loaders.sandbox_client import SubmissionResult
+        from malspark.loaders.sandbox_client import SubmissionResult
 
         target = self.report.get("target", {})
         # Mirrors the fixed CAPEv2Client.fetch_report: real CAPE reports nest
@@ -98,7 +98,7 @@ def test_notable_apis_survives_as_a_block_with_no_place():
     lays it out where the report put it. Proved through the call an agent
     makes to read it rather than asserted in prose.
     """
-    from maljan.providers.sandbox_tools import sandbox_report_section
+    from malspark.providers.sandbox_tools import sandbox_report_section
 
     raw = {
         "target": {"sha256": "e" * 64, "name": "mirai"},
@@ -127,7 +127,7 @@ def _fake_toolkit(monkeypatch, names, built=None):
 
     ``built`` gets each construction's keyword arguments.
     """
-    import maljan.agents.mcp_client as mc
+    import malspark.agents.mcp_client as mc
 
     class _FakeToolkit:
         def __init__(self, *args, **kwargs):
@@ -173,7 +173,7 @@ class TestTheCapeServerSharesTheServerLifecycle:
     """PS-M8: the CAPE MCP server is attached as every server is, never as a bare toolkit."""
 
     def test_its_calls_go_through_the_job_s_guard_with_the_block_s_budget(self, monkeypatch):
-        from maljan.providers.server_guard import ServerGuard
+        from malspark.providers.server_guard import ServerGuard
 
         built: list[dict] = []
         _fake_toolkit(monkeypatch, ["get_task_report"], built)
@@ -195,7 +195,7 @@ class TestTheCapeServerSharesTheServerLifecycle:
 
         from langchain_core.tools import StructuredTool
 
-        import maljan.agents.mcp_client as mc
+        import malspark.agents.mcp_client as mc
 
         async def report(task_id: int) -> str:
             return "Task is TLP RED, report not available"
@@ -220,13 +220,13 @@ class TestTheCapeServerSharesTheServerLifecycle:
         monkeypatch.setattr(mc, "MCPLangChainToolkit", _FakeToolkit)
         cfg = Settings(_env_file=None)
         cfg.sandbox.cape2.mcp.enabled = True
-        from maljan.core.tool_declarations import ErrorPattern
+        from malspark.core.tool_declarations import ErrorPattern
 
         cfg.sandbox.cape2.mcp.error_patterns = [ErrorPattern(match=".*TLP RED.*")]
         provider = CAPE2SandboxProvider.from_settings(cfg)
         (wrapped,) = provider.dynamic_tools()
         answer = asyncio.run(wrapped.ainvoke({"task_id": 1}))
-        from maljan.tools.errors import error_parts
+        from malspark.tools.errors import error_parts
 
         assert error_parts(answer) is not None
         provider.close()
@@ -275,7 +275,7 @@ def test_a_disabled_cape_mcp_yields_no_tools_and_no_workflow():
 
 
 def test_the_mock_provider_offers_no_tool_workflow():
-    from maljan.providers.sandbox.mock import MockSandboxProvider
+    from malspark.providers.sandbox.mock import MockSandboxProvider
 
     provider = MockSandboxProvider.from_settings(Settings(_env_file=None))
     assert provider.dynamic_tools() == []
@@ -290,7 +290,7 @@ def test_dynamic_tools_is_idempotent_for_a_repeat_call(monkeypatch):
     repeat call leaks the first transport/subprocess instead of replacing it.
     ``dynamic_tools()`` guards the same way, via ``_toolkit``.
     """
-    import maljan.agents.mcp_client as mc
+    import malspark.agents.mcp_client as mc
 
     class _T:
         def __init__(self, name):
@@ -343,7 +343,7 @@ def test_the_http_bearer_header_carries_the_real_token_not_its_mask(monkeypatch)
     """
     import secrets
 
-    import maljan.agents.mcp_client as mc
+    import malspark.agents.mcp_client as mc
 
     token = secrets.token_hex(16)
     factory = _http_toolkit_factory()
@@ -370,7 +370,7 @@ def test_the_http_branch_sends_no_auth_header_for_an_empty_token(monkeypatch):
     """The counterpart: an empty token must not become ``Bearer `` (or ``Bearer
     **********``); the header is omitted entirely, same as before the SecretStr
     change."""
-    import maljan.agents.mcp_client as mc
+    import malspark.agents.mcp_client as mc
 
     factory = _http_toolkit_factory()
     monkeypatch.setattr(mc, "MCPLangChainToolkit", factory)
@@ -393,9 +393,9 @@ def test_the_cape_server_s_process_is_noted_under_the_job_and_cleared_with_it(mo
     and goes when the job's container closes."""
     import asyncio
 
-    from maljan.analysis import isolation
-    from maljan.core.container import ServiceContainer
-    from maljan.providers.servers import ServerHandle
+    from malspark.analysis import isolation
+    from malspark.core.container import ServiceContainer
+    from malspark.providers.servers import ServerHandle
 
     _fake_toolkit(monkeypatch, ["get_task_report"])
 

@@ -22,11 +22,11 @@ from pathlib import Path
 import pytest
 from tests.unit.core.test_every_model_call_is_counted import SETTINGS, _judge, _model
 
-from maljan.core.model_assignments import model_label_for
-from maljan.core.spend import Price, SpendMeter, _clean
-from maljan.core.token_ledger import TokenLedger
+from malspark.core.model_assignments import model_label_for
+from malspark.core.spend import Price, SpendMeter, _clean
+from malspark.core.token_ledger import TokenLedger
 
-SRC = Path(__file__).resolve().parents[3] / "src" / "maljan"
+SRC = Path(__file__).resolve().parents[3] / "src" / "malspark"
 # Where calls are made. The provider layer (``llm/``) is the model client
 # itself, and forwards calls already admitted.
 SCANNED = ("agents", "reporting", "analysis", "loaders", "memory", "preprocessing", "pipeline")

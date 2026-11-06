@@ -9,12 +9,12 @@ from typing import Any
 import pytest
 from sigma.rule import SigmaRule
 
-from maljan.analysis.pcap_summary import _Intervals, capture_facts, summary_text
-from maljan.analysis.sigma_layer import SigmaMemoryEvaluator
-from maljan.analysis.sink_reachability import build_priority_hint
-from maljan.providers.sandbox_tools import sandbox_registry_ops
-from maljan.providers.static.ghidra.call_graph import call_graph_from_text
-from maljan.utils.written_forms import hint_escaped
+from malspark.analysis.pcap_summary import _Intervals, capture_facts, summary_text
+from malspark.analysis.sigma_layer import SigmaMemoryEvaluator
+from malspark.analysis.sink_reachability import build_priority_hint
+from malspark.providers.sandbox_tools import sandbox_registry_ops
+from malspark.providers.static.ghidra.call_graph import call_graph_from_text
+from malspark.utils.written_forms import hint_escaped
 
 HOST = b"\x0a\x00\x00\x02"
 C2 = b"\x08\x08\x08\x08"

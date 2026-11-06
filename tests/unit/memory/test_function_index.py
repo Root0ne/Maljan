@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
-from maljan.memory.function_index import (
+from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
+from malspark.memory.function_index import (
     BEHAVIOR_QUERIES,
     FunctionIndex,
     select_relevant_chunks,

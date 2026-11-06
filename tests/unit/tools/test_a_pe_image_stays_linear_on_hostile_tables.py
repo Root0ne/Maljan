@@ -25,8 +25,8 @@ from typing import Any
 import numpy as np
 import pytest
 
-from maljan.pipeline import triage_pack
-from maljan.tools import (
+from malspark.pipeline import triage_pack
+from malspark.tools import (
     api_hashes,
     artefact_index,
     call_sites,
@@ -34,7 +34,7 @@ from maljan.tools import (
     pe_image,
     upx,
 )
-from maljan.tools.pe_image import Image, Section
+from malspark.tools.pe_image import Image, Section
 
 from .synthetic_pe import TEXT_RVA, SyntheticPE
 

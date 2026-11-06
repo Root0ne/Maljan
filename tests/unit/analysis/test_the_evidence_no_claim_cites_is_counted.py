@@ -14,9 +14,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from maljan.analysis.efficiency import efficiency_lines, efficiency_record, uncited_record
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
+from malspark.analysis.efficiency import efficiency_lines, efficiency_record, uncited_record
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
 
 
 def _entry(seq: int, tool: str = "pe_info", agent: str = "static", **extra: object) -> LedgerEntry:
@@ -113,7 +113,7 @@ def test_the_record_and_the_report_carry_it() -> None:
 
 def _field_reads(monkeypatch: pytest.MonkeyPatch, build: Callable[[], object]) -> int:
     """How many entry fields ``build`` reads: the record's unit of work, not a clock."""
-    import maljan.analysis.efficiency as efficiency
+    import malspark.analysis.efficiency as efficiency
 
     counted = [0]
     real = efficiency._field

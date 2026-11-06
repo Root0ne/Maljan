@@ -20,14 +20,14 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.agents.composition import ResolvedAgent
-from maljan.core.agent_category import (
+from malspark.agents.composition import ResolvedAgent
+from malspark.core.agent_category import (
     AGENT_CATEGORIES,
     declared_category,
     fitting_category,
 )
-from maljan.core.config import AgentDefinition, Settings, ToolRef
-from maljan.pipeline.events import roster_payload
+from malspark.core.config import AgentDefinition, Settings, ToolRef
+from malspark.pipeline.events import roster_payload
 
 
 def _settings(**definitions: Any) -> Settings:

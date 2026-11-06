@@ -1,6 +1,6 @@
 """A credential no setting holds is masked by where it stands, whatever stands around it (T-481).
 
-The structural rules (``maljan.core.settings_masking``) read a user name and
+The structural rules (``malspark.core.settings_masking``) read a user name and
 password after a path in the same word, and an address followed by more text in
 that word. A path ends at a separator, an ``=`` or a closer, anything may follow
 the host after a separator or a closer, and a backslash in a password before a
@@ -16,9 +16,9 @@ import json
 import pytest
 from tests.credential_shapes import lowercase_body
 
-from maljan.core import settings_overrides as ov
-from maljan.core.settings_catalog import configured_secret_values
-from maljan.core.settings_masking import bare_addresses, masked_text
+from malspark.core import settings_overrides as ov
+from malspark.core.settings_catalog import configured_secret_values
+from malspark.core.settings_masking import bare_addresses, masked_text
 
 
 def _token() -> str:

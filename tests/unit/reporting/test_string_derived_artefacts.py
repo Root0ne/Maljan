@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     DynamicBehavior,
     EvidenceSection,
     FileHashes,
@@ -28,7 +28,7 @@ from maljan.reporting.models import (
     StaticAnalysis,
     StringIOC,
 )
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers.stix_renderer import (
     ExtendedSTIXRenderer,
     email_is_publishable,
     indicator_publish_reason,
@@ -275,7 +275,7 @@ class TestThePrivacyPathsAreAllChecked:
     def test_the_enrichment_looks_up_no_address(self) -> None:
         import inspect
 
-        from maljan.enrichment import orchestrator
+        from malspark.enrichment import orchestrator
 
         source = inspect.getsource(orchestrator)
         assert "interesting_strings" not in source

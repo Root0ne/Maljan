@@ -17,8 +17,8 @@ import json
 
 import pytest
 
-from maljan.pipeline import events as ev
-from maljan.pipeline.events import scrub, scrub_keeping_layout
+from malspark.pipeline import events as ev
+from malspark.pipeline.events import scrub, scrub_keeping_layout
 from tests.credential_shapes import lowercase_body, prefixed_key
 from tests.unit.pipeline.test_live_event_schema import _every_key_shape
 

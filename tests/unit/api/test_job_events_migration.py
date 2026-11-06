@@ -85,7 +85,7 @@ def test_this_revision_chains_onto_the_real_alembic_head() -> None:
 
 def test_the_revision_imports_no_application_code() -> None:
     text = _REV.read_text(encoding="utf-8")
-    assert "maljan" not in text
+    assert "malspark" not in text
     assert "from app" not in text
 
 

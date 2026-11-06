@@ -107,7 +107,7 @@ class TestEnrichWorkerHappy:
         get_patch, get_secret_patch = _enabled_patch()
         with (
             patch(
-                "maljan.enrichment.enrich_malware_report",
+                "malspark.enrichment.enrich_malware_report",
                 new=AsyncMock(return_value=updated_payload),
             ),
             get_patch,
@@ -162,7 +162,7 @@ class TestEnrichWorkerSessionLifetime:
             return payload
 
         with (
-            patch("maljan.enrichment.enrich_malware_report", new=_lookups),
+            patch("malspark.enrichment.enrich_malware_report", new=_lookups),
             patch(
                 "app.worker.enrich_worker.runtime_config.get",
                 AsyncMock(
@@ -203,7 +203,7 @@ class TestEnrichWorkerSessionLifetime:
     ) -> None:
         from types import SimpleNamespace
 
-        from maljan.core.config import MCPServerConfig
+        from malspark.core.config import MCPServerConfig
 
         fake_report = MagicMock()
         fake_report.job_id = uuid.uuid4()
@@ -234,7 +234,7 @@ class TestEnrichWorkerSessionLifetime:
             return payload
 
         with (
-            patch("maljan.enrichment.enrich_malware_report", new=_lookups),
+            patch("malspark.enrichment.enrich_malware_report", new=_lookups),
             patch(
                 "app.worker.enrich_worker.runtime_config.get",
                 AsyncMock(
@@ -306,7 +306,7 @@ class TestEnrichWorkerSessionLifetime:
         ctx = {"redis": AsyncMock(), "db_session": _factory}
         get_patch, get_secret_patch = _enabled_patch()
         with (
-            patch("maljan.enrichment.enrich_malware_report", new=_lookups),
+            patch("malspark.enrichment.enrich_malware_report", new=_lookups),
             get_patch,
             get_secret_patch,
         ):
@@ -359,7 +359,7 @@ class TestTheEnrichmentEventIsKept:
         get_patch, get_secret_patch = _enabled_patch()
         with (
             patch(
-                "maljan.enrichment.enrich_malware_report",
+                "malspark.enrichment.enrich_malware_report",
                 new=AsyncMock(return_value=_malware_report_dict()),
             ),
             get_patch,
@@ -399,7 +399,7 @@ class TestTheEnrichmentEventIsKept:
         get_patch, get_secret_patch = _enabled_patch()
         with (
             patch(
-                "maljan.enrichment.enrich_malware_report",
+                "malspark.enrichment.enrich_malware_report",
                 new=AsyncMock(return_value=_malware_report_dict()),
             ),
             get_patch,
@@ -467,7 +467,7 @@ class TestEnrichWorkerErrorIsContained:
         get_patch, get_secret_patch = _enabled_patch()
         with (
             patch(
-                "maljan.enrichment.enrich_malware_report",
+                "malspark.enrichment.enrich_malware_report",
                 new=AsyncMock(side_effect=RuntimeError("boom")),
             ),
             get_patch,
@@ -551,7 +551,7 @@ class TestTheMemoryStoreReadsOneSetOfSettings:
         import asyncio
 
         from app.worker import enrich_worker
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         settings = Settings(
             _env_file=None,
@@ -574,7 +574,7 @@ class TestTheMemoryStoreReadsOneSetOfSettings:
                 "app.worker.enrich_worker.runtime_config.core",
                 AsyncMock(return_value=settings),
             ),
-            patch("maljan.memory.qdrant_store.QdrantStore", _Store),
+            patch("malspark.memory.qdrant_store.QdrantStore", _Store),
         ):
             asyncio.run(enrich_worker._get_memory_store())
         enrich_worker._memory_store_built = False
@@ -582,18 +582,18 @@ class TestTheMemoryStoreReadsOneSetOfSettings:
         return built
 
     def test_the_client_is_built_from_the_core_memory_values(self) -> None:
-        built = self._store("http://qdrant:6333", "maljan_cases_v2", "s3cr3t")
+        built = self._store("http://qdrant:6333", "malspark_cases_v2", "s3cr3t")
 
         assert built == {
             "url": "http://qdrant:6333",
-            "collection": "maljan_cases_v2",
+            "collection": "malspark_cases_v2",
             "api_key": "s3cr3t",
-            "function_hash_collection": "maljan_function_hashes_v1",
+            "function_hash_collection": "malspark_function_hashes_v1",
         }
 
     def test_an_unset_key_reaches_the_client_as_no_key(self) -> None:
         """An empty credential is "no authentication", not the empty string."""
-        built = self._store("http://qdrant:6333", "maljan_cases_v2", None)
+        built = self._store("http://qdrant:6333", "malspark_cases_v2", None)
 
         assert built["api_key"] is None
 
@@ -682,7 +682,7 @@ class TestTheNumberingContinuesFromTheTable:
         get_patch, get_secret_patch = _enabled_patch()
         with (
             patch(
-                "maljan.enrichment.enrich_malware_report",
+                "malspark.enrichment.enrich_malware_report",
                 new=AsyncMock(return_value=_malware_report_dict()),
             ),
             get_patch,
@@ -718,7 +718,7 @@ class TestTheNumberingContinuesFromTheTable:
         get_patch, get_secret_patch = _enabled_patch()
         with (
             patch(
-                "maljan.enrichment.enrich_malware_report",
+                "malspark.enrichment.enrich_malware_report",
                 new=AsyncMock(return_value=_malware_report_dict()),
             ),
             get_patch,

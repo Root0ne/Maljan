@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from maljan.core.tool_declarations import ReputationFacts, ToolFacts
-from maljan.enrichment.declared import (
+from malspark.core.tool_declarations import ReputationFacts, ToolFacts
+from malspark.enrichment.declared import (
     EnrichmentSource,
     read_reputation_record,
     validate_sources,

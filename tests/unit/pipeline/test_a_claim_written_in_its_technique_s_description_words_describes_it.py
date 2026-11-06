@@ -27,8 +27,8 @@ from fractions import Fraction
 
 import pytest
 
-from maljan.pipeline import validation
-from maljan.pipeline.validation import (
+from malspark.pipeline import validation
+from malspark.pipeline.validation import (
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     DESCRIPTION_MAX_FAMILIES,
     DESCRIPTION_STEMS_NEEDED,
@@ -38,8 +38,8 @@ from maljan.pipeline.validation import (
     description_weights,
     validate_isr,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.tools import knowledge
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.tools import knowledge
 
 PE = {"platform": "windows", "file_type": "pe"}
 

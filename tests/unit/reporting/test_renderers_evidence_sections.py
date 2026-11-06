@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     EvidenceSection,
     FileHashes,
     MalwareReport,
     SampleIdentity,
 )
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 
 def _report(*sections: EvidenceSection) -> MalwareReport:

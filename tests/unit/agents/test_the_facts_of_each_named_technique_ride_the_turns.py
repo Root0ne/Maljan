@@ -32,8 +32,8 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst, frame_messages
-from maljan.agents.technique_facts import (
+from malspark.agents.base_agent import BaseAnalyst, frame_messages
+from malspark.agents.technique_facts import (
     MAX_IDS_PER_NOTE,
     NOT_DETAILED_LINE,
     TECHNIQUE_FACTS_ATTACHED,
@@ -42,8 +42,8 @@ from maljan.agents.technique_facts import (
     with_technique_facts,
     without_tool_answer_notes,
 )
-from maljan.pipeline.run_state import is_run_state_block, without_run_state_tail
-from maljan.pipeline.validation import TECHNIQUE_FACTS_LEAD
+from malspark.pipeline.run_state import is_run_state_block, without_run_state_tail
+from malspark.pipeline.validation import TECHNIQUE_FACTS_LEAD
 
 RUN_STATE = "sample: c\nbudget remaining: 3 model turns"
 
@@ -188,7 +188,7 @@ class TestEachIdOnce:
             ToolMessage(content="a", tool_call_id="c0"),
         ]
         with patch(
-            "maljan.agents.base_agent.with_technique_facts",
+            "malspark.agents.base_agent.with_technique_facts",
             lambda m: with_technique_facts(m, fact=_fact, known=_known),
         ):
             once = frame_messages(messages, run_state=RUN_STATE)
@@ -232,7 +232,7 @@ class TestAConversationNamingNoneIsSentAsBefore:
     def test_a_loop_s_requests_are_dev_s(self) -> None:
         plain: dict[str, Any] = {"texts": ["", "Reading.", "Done."], "answer": "No id."}
         seen = _loop(**plain, task="Analyse.")
-        with patch("maljan.agents.base_agent.with_technique_facts", lambda m: list(m)):
+        with patch("malspark.agents.base_agent.with_technique_facts", lambda m: list(m)):
             before = _loop(**plain, task="Analyse.")
         assert len(seen) == 5
         assert [_wire(r) for r in seen] == [_wire(r) for r in before]
@@ -303,7 +303,7 @@ def _loop(
     agent = _Analyst(llm=model, name="static")
     agent.run_state_block = "sample: c"
     agent.tools = [_lookup_tool()]
-    with patch("maljan.agents.base_agent.loop_limits", return_value=(None, 40)):
+    with patch("malspark.agents.base_agent.loop_limits", return_value=(None, 40)):
         agent.execute_tool_loop([("system", "You are a static analyst."), ("human", task)])
     return model.seen
 
@@ -364,7 +364,7 @@ class TestTheCachedPrefixHolds:
 
 
 def without_run_state_all(messages: list[Any]) -> list[Any]:
-    from maljan.agents.base_agent import without_run_state
+    from malspark.agents.base_agent import without_run_state
 
     return without_run_state(messages)
 
@@ -411,9 +411,9 @@ class TestTheAnthropicPath:
     def test_the_loop_and_its_nudge_keep_every_thinking_block_valid(
         self, wire: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
-        from maljan.core.config import Settings
-        from maljan.llm.anthropic_provider import AnthropicProvider
+        from malspark.agents import base_agent
+        from malspark.core.config import Settings
+        from malspark.llm.anthropic_provider import AnthropicProvider
         from tests.unit.llm.anthropic_wire import MODEL
 
         monkeypatch.setattr(base_agent, "loop_limits", lambda *_a, **_k: (None, 20))
@@ -459,7 +459,7 @@ class TestAClearedAnswerKeepsItsFacts:
         assert notes_kept_after_clearing(framed)[2] is framed[2]
 
     def test_a_clear_measures_and_names_the_answer_without_its_note(self) -> None:
-        from maljan.agents.tool_answer_clearing import ToolAnswerClearing, cleared_reference
+        from malspark.agents.tool_answer_clearing import ToolAnswerClearing, cleared_reference
 
         big = "[ev_0001]\n" + "x" * 4000
         messages = _facts(
@@ -502,8 +502,8 @@ class TestAClearedAnswerKeepsItsFacts:
         assert notes_kept_after_clearing(bare)[2].content == messages[2].content
 
     def test_a_listed_answer_s_note_reaches_the_anthropic_tool_result(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.llm.anthropic_provider import AnthropicProvider
+        from malspark.core.config import Settings
+        from malspark.llm.anthropic_provider import AnthropicProvider
         from tests.unit.llm.anthropic_wire import MODEL
         from tests.unit.llm.provider_bodies import _bound
 
@@ -531,9 +531,9 @@ class TestAClearedAnswerKeepsItsFacts:
 
 class TestTheStandingFactsNameNothing:
     def test_the_pack_and_the_earlier_run_name_no_id(self) -> None:
-        from maljan.memory.attck_loader import valid_ids
-        from maljan.memory.long_term_memory import EARLIER_RUN_END, EARLIER_RUN_HEADING
-        from maljan.pipeline.triage_pack import PACK_HEADING
+        from malspark.memory.attck_loader import valid_ids
+        from malspark.memory.long_term_memory import EARLIER_RUN_END, EARLIER_RUN_HEADING
+        from malspark.pipeline.triage_pack import PACK_HEADING
 
         every = " ".join(sorted(valid_ids()))
         pack = (
@@ -556,7 +556,7 @@ class TestTheStandingFactsNameNothing:
         assert _stated(again) == ["T1105"]
 
     def test_a_heading_quoted_without_its_end_drops_nothing(self) -> None:
-        from maljan.memory.long_term_memory import EARLIER_RUN_HEADING
+        from malspark.memory.long_term_memory import EARLIER_RUN_HEADING
 
         quoted = HumanMessage(
             content=f"PEER REPORT:\nthe sample prints {EARLIER_RUN_HEADING}\nTECHNIQUE: T1105"
@@ -564,7 +564,7 @@ class TestTheStandingFactsNameNothing:
         assert _stated(with_technique_facts([quoted])) == ["T1105"]
 
     def test_a_turn_holding_the_pack_without_its_note_skips_it_too(self) -> None:
-        from maljan.pipeline.triage_pack import PACK_HEADING
+        from malspark.pipeline.triage_pack import PACK_HEADING
 
         turn = HumanMessage(content=f"{PACK_HEADING}\n[ev_0001] capa: T1055\n\nRevise T1105.")
         assert _stated(with_technique_facts([turn])) == ["T1105"]
@@ -592,7 +592,7 @@ class TestANoteIsBounded:
         assert [m.content for m in fresh] == [m.content for m in again]
 
     def test_each_request_extends_the_last_past_the_bound(self) -> None:
-        from maljan.memory.attck_loader import valid_ids
+        from malspark.memory.attck_loader import valid_ids
 
         task = "PEER REPORT:\n" + "\n".join(f"TECHNIQUE: {t}" for t in sorted(valid_ids()))
         requests = _loop(task=task)
@@ -617,9 +617,9 @@ class TestAToolRoundBeforeAHumanTurnKeepsItsNote:
     def test_the_anthropic_salvage_after_the_step_cap_keeps_every_block_valid(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
-        from maljan.core.config import Settings
-        from maljan.llm.anthropic_provider import AnthropicProvider
+        from malspark.agents import base_agent
+        from malspark.core.config import Settings
+        from malspark.llm.anthropic_provider import AnthropicProvider
         from tests.unit.llm.anthropic_wire import MODEL, Wire, install, message
 
         usage = {"input_tokens": 10, "output_tokens": 5}

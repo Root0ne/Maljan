@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     CHECK_FAILED_CODE,
     FEEDBACK_PREAMBLE,
     Violation,
@@ -26,17 +26,17 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
     validation_metrics,
 )
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     corroboration as _corroboration,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import (
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import (
     UNVERIFIED_TECHNIQUE_MARKER,
     AgentISR,
     ClaimEvidence,
 )
-from maljan.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVerdict
-from maljan.schemas.stix_models import AttackPattern, Bundle, Indicator
+from malspark.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVerdict
+from malspark.schemas.stix_models import AttackPattern, Bundle, Indicator
 
 # The roots and the sources a row states beside its lists, tested apart
 # (``tests/unit/analysis/test_a_technique_on_one_source_or_on_artefacts_is_not_corroborated.py``).
@@ -231,7 +231,7 @@ class TestValidateVerdictBundle:
 
     def test_a_severity_outside_the_enum_is_reported(self):
         bundle = Bundle()
-        bundle.x_maljan_assessment = JudgeAssessment(
+        bundle.x_malspark_assessment = JudgeAssessment(
             severity=SeverityVerdict.model_construct(rating="Catastrophic", rationale="")
         )
 
@@ -239,7 +239,7 @@ class TestValidateVerdictBundle:
 
     def test_a_family_with_no_evidence_ids_is_reported(self):
         bundle = Bundle()
-        bundle.x_maljan_assessment = JudgeAssessment(family=FamilyVerdict(name="AsyncRAT"))
+        bundle.x_malspark_assessment = JudgeAssessment(family=FamilyVerdict(name="AsyncRAT"))
 
         assert [v.code for v in validate_verdict_bundle(bundle)] == [
             "attribution.ungrounded_family"
@@ -247,7 +247,7 @@ class TestValidateVerdictBundle:
 
     def test_a_family_that_cites_evidence_passes(self):
         bundle = Bundle()
-        bundle.x_maljan_assessment = JudgeAssessment(
+        bundle.x_malspark_assessment = JudgeAssessment(
             family=FamilyVerdict(name="AsyncRAT", evidence_ids=["ev_0004"])
         )
 
@@ -786,7 +786,7 @@ class TestATechniqueFindingNamesItsTechnique:
         assert mismatch.subject == "T1055"
 
     def test_a_row_rebuilt_from_the_state_channel_keeps_its_subject(self) -> None:
-        from maljan.pipeline.nodes import _violations_from_rows
+        from malspark.pipeline.nodes import _violations_from_rows
 
         (violation,) = validate_isr(_isr([_claim(technique_id="T9999")]), attck=_Attck())
         (rebuilt,) = _violations_from_rows([violation.to_dict()])

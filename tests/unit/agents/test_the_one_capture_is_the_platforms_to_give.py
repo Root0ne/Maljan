@@ -18,10 +18,10 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.tool_pinning import pin_paths
-from maljan.pipeline.nodes import brief_agent, job_captures
-from maljan.providers.sandbox_tools import sandbox_report_section
-from maljan.tools import staging
+from malspark.agents.tool_pinning import pin_paths
+from malspark.pipeline.nodes import brief_agent, job_captures
+from malspark.providers.sandbox_tools import sandbox_report_section
+from malspark.tools import staging
 
 
 class _PcapArgs(BaseModel):
@@ -40,7 +40,7 @@ def _tool(seen: list[dict[str, Any]], server: str = "network") -> StructuredTool
         description="extract_dns",
         args_schema=_PcapArgs,
         infer_schema=False,
-        metadata={"maljan_server": server},
+        metadata={"malspark_server": server},
     )
 
 
@@ -73,7 +73,7 @@ class TestPinning:
     ) -> None:
         import json
 
-        from maljan.tools.errors import PATH_OUTSIDE_ROOTS, tool_error
+        from malspark.tools.errors import PATH_OUTSIDE_ROOTS, tool_error
 
         monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path))
         capture = str(staging.job_capture_dir("abc") / "run.pcap")
@@ -87,7 +87,7 @@ class TestPinning:
             description="extract_dns",
             args_schema=_PcapArgs,
             infer_schema=False,
-            metadata={"maljan_server": "network"},
+            metadata={"malspark_server": "network"},
         )
         [tool] = pin_paths([refusing], default_path=None, captures=(capture,))
 
@@ -140,7 +140,7 @@ class TestPinning:
             description="t",
             args_schema=_Both,
             infer_schema=False,
-            metadata={"maljan_server": "analysis"},
+            metadata={"malspark_server": "analysis"},
         )
 
         [tool] = pin_paths([both], default_path="/s/sample.exe", captures=("/c/captures/1.pcap",))
@@ -174,7 +174,7 @@ class TestTheJobsCaptures:
     def test_the_brief_hands_them_to_every_analyst(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.pipeline import nodes
+        from malspark.pipeline import nodes
 
         captures = tmp_path / "job-1" / "captures"
         captures.mkdir(parents=True)

@@ -23,8 +23,8 @@ from typing import Any
 import pytest
 
 from app.services.report_service import ioc_feed_rows
-from maljan.reporting.builder import build_consolidated_iocs
-from maljan.reporting.call_bindings import (
+from malspark.reporting.builder import build_consolidated_iocs
+from malspark.reporting.call_bindings import (
     BOUND_SOURCE,
     BROWSER_LIKE,
     argument_roles,
@@ -32,17 +32,17 @@ from maljan.reporting.call_bindings import (
     bound_values_from_ledger,
     reads_as_a_browser_user_agent,
 )
-from maljan.reporting.misp import build_misp_attributes
-from maljan.reporting.models import FileHashes, JudgeIndicator, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.misp import build_misp_attributes
+from malspark.reporting.models import FileHashes, JudgeIndicator, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.stix_renderer import (
     NOT_BOUND,
     ExtendedSTIXRenderer,
     indicator_pattern,
     pattern_values,
     publish_answer,
 )
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 
 ROOT = Path(__file__).resolve().parents[3]
 MUTEX = "Global\\relay-lock-7"
@@ -502,7 +502,7 @@ class TestEverySurface:
                 }
             ]
         }
-        from maljan.schemas.stix_models import Bundle
+        from malspark.schemas.stix_models import Bundle
 
         rows = [r for r in build_consolidated_iocs(report) if r.value == MUTEX]
         exported = ExtendedSTIXRenderer().render(report, Bundle.model_validate(bundle))

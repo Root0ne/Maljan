@@ -5,17 +5,17 @@ x-backend-image: &backend-image
   build:
     context: ..
     dockerfile: docker/Dockerfile.backend
-  image: maljan-backend
+  image: malspark-backend
   # A fixed unprivileged uid/gid (the image's own account, 10001), no Linux
   # capability, and no way to gain one it was not started with (a setuid
   # binary, a file capability) (AUD-32-M5). The image's virtual environment
-  # and sources are root-owned, so read-only to this user. MALJAN_UID and
-  # MALJAN_GID run them under another id instead: a host whose login user
+  # and sources are root-owned, so read-only to this user. MALSPARK_UID and
+  # MALSPARK_GID run them under another id instead: a host whose login user
   # also writes data/ sets them to that user's ids (`make docker-up` and
   # `make dev-up` do, when neither the environment nor docker/.env does). The
   # volume-init service below hands what root owns in the writable volumes to
   # whichever id this is, and refuses to start the stack over anyone else's.
-  user: "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}"
+  user: "${MALSPARK_UID:-10001}:${MALSPARK_GID:-10001}"
   cap_drop:
     - ALL
   security_opt:
@@ -31,7 +31,7 @@ x-backend-image: &backend-image
 # platform credential: its only secret is its own token.
 x-cli-sidecar: &cli-sidecar
   restart: unless-stopped
-  user: "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}"
+  user: "${MALSPARK_UID:-10001}:${MALSPARK_GID:-10001}"
   cap_drop:
     - ALL
   security_opt:
@@ -61,18 +61,18 @@ services:
   # ─────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
-    container_name: maljan-postgres
+    container_name: malspark-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-maljan}
-      POSTGRES_USER: ${POSTGRES_USER:-maljan}
+      POSTGRES_DB: ${POSTGRES_DB:-malspark}
+      POSTGRES_USER: ${POSTGRES_USER:-malspark}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-maljan} -d ${POSTGRES_DB:-maljan}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-malspark} -d ${POSTGRES_DB:-malspark}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -82,7 +82,7 @@ services:
   # ─────────────────────────────────────────────
   redis:
     image: redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
-    container_name: maljan-redis
+    container_name: malspark-redis
     restart: unless-stopped
     command:
       [
@@ -127,7 +127,7 @@ services:
     # 1.17.1, which logged "Failed to obtain server version. Unable to check
     # client-server compatibility" on every run. Pinning removes that drift.
     image: qdrant/qdrant:v1.18.3@sha256:0bd98fa7977f1e75694779359ca4e212822e5a71334e28421182f72f209d5286
-    container_name: maljan-qdrant
+    container_name: malspark-qdrant
     restart: unless-stopped
     environment:
       # Not a `:?` guard: Compose interpolates every service, the ones whose
@@ -156,8 +156,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.minio
-    image: maljan-minio:RELEASE.2025-10-15T17-29-55Z
-    container_name: maljan-minio
+    image: malspark-minio:RELEASE.2025-10-15T17-29-55Z
+    container_name: malspark-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -191,7 +191,7 @@ services:
     image: ghidra-mcp-headless:latest
     # x86-64 only: Ghidra's release ships no linux_arm_64 decompiler; an arm64 host runs it emulated.
     platform: linux/amd64
-    container_name: maljan-ghidra-mcp
+    container_name: malspark-ghidra-mcp
     # `no` keeps a stopped container stopped across a reboot or a daemon
     # restart, for a host that starts Ghidra only for the runs that need it.
     restart: ${GHIDRA_RESTART:-unless-stopped}
@@ -204,7 +204,7 @@ services:
     # beyond the sample. The image ran as root before; volume-init hands
     # ghidra_projects to these ids, and HOME and the JVM's user.home point at
     # /tmp, since the ids have no home in the image.
-    user: "${MALJAN_UID:-10001}:${MALJAN_GID:-10001}"
+    user: "${MALSPARK_UID:-10001}:${MALSPARK_GID:-10001}"
     cap_drop:
       - ALL
     security_opt:
@@ -267,7 +267,7 @@ services:
     volumes:
       # The right-hand side is Ghidra's declared sample_mount
       # (core.static.ghidra.sample_mount): change the two together.
-      # The worker writes its mirrors 0700/0600 as MALJAN_UID, which is why
+      # The worker writes its mirrors 0700/0600 as MALSPARK_UID, which is why
       # Ghidra runs as that id (see `user:` above); a Ghidra that runs as
       # another user needs a group it shares with the worker and mirrors
       # written 0750/0640 for it.
@@ -300,7 +300,7 @@ services:
   ghidra-port:
     profiles: [ghidra]
     image: alpine/socat:1.8.1.3@sha256:603174b77eebaba25ba8f8ebb15e1234d6600409554e95d6fb203fd106150287
-    container_name: maljan-ghidra-port
+    container_name: malspark-ghidra-port
     restart: ${GHIDRA_RESTART:-unless-stopped}
     user: "65534:65534"
     cap_drop:
@@ -354,10 +354,10 @@ services:
     build:
       context: ../services
       dockerfile: die-mcp/Dockerfile
-    image: maljan-die-mcp:3.21
+    image: malspark-die-mcp:3.21
     # x86-64 only: the image installs DIE's amd64 .deb; an arm64 host runs it emulated.
     platform: linux/amd64
-    container_name: maljan-die-mcp
+    container_name: malspark-die-mcp
     environment:
       MCP_AUTH_TOKEN: ${DIE_MCP_AUTH_TOKEN:-}
     mem_limit: ${DIE_MEM_LIMIT:-2g}
@@ -376,7 +376,7 @@ services:
   die-port:
     <<: *sidecar-relay
     profiles: [die]
-    container_name: maljan-die-port
+    container_name: malspark-die-port
     command:
       - tcp-listen:8090,fork,reuseaddr
       - tcp-connect:die-mcp:8090
@@ -392,8 +392,8 @@ services:
     build:
       context: ../services
       dockerfile: ilspy-mcp/Dockerfile
-    image: maljan-ilspy-mcp:11.1.0.9782
-    container_name: maljan-ilspy-mcp
+    image: malspark-ilspy-mcp:11.1.0.9782
+    container_name: malspark-ilspy-mcp
     environment:
       MCP_AUTH_TOKEN: ${ILSPY_MCP_AUTH_TOKEN:-}
     mem_limit: ${ILSPY_MEM_LIMIT:-4g}
@@ -407,7 +407,7 @@ services:
   ilspy-port:
     <<: *sidecar-relay
     profiles: [ilspy]
-    container_name: maljan-ilspy-port
+    container_name: malspark-ilspy-port
     command:
       - tcp-listen:8091,fork,reuseaddr
       - tcp-connect:ilspy-mcp:8091
@@ -423,10 +423,10 @@ services:
     build:
       context: ../services
       dockerfile: goresym-mcp/Dockerfile
-    image: maljan-goresym-mcp:3.4.1
+    image: malspark-goresym-mcp:3.4.1
     # x86-64 only: the image unpacks GoReSym's x86-64 Linux build; an arm64 host runs it emulated.
     platform: linux/amd64
-    container_name: maljan-goresym-mcp
+    container_name: malspark-goresym-mcp
     environment:
       MCP_AUTH_TOKEN: ${GORESYM_MCP_AUTH_TOKEN:-}
     mem_limit: ${GORESYM_MEM_LIMIT:-2g}
@@ -440,7 +440,7 @@ services:
   goresym-port:
     <<: *sidecar-relay
     profiles: [goresym]
-    container_name: maljan-goresym-port
+    container_name: malspark-goresym-port
     command:
       - tcp-listen:8092,fork,reuseaddr
       - tcp-connect:goresym-mcp:8092
@@ -476,10 +476,10 @@ services:
     build:
       context: ../services
       dockerfile: yarax-mcp/Dockerfile
-    image: maljan-yarax-mcp:1.21.0
+    image: malspark-yarax-mcp:1.21.0
     # x86-64 only: the image unpacks yara-x's x86_64 Linux build; an arm64 host runs it emulated.
     platform: linux/amd64
-    container_name: maljan-yarax-mcp
+    container_name: malspark-yarax-mcp
     environment:
       MCP_AUTH_TOKEN: ${YARAX_MCP_AUTH_TOKEN:-}
     mem_limit: ${YARAX_MEM_LIMIT:-2g}
@@ -494,7 +494,7 @@ services:
   yarax-port:
     <<: *sidecar-relay
     profiles: [yarax]
-    container_name: maljan-yarax-port
+    container_name: malspark-yarax-port
     command:
       - tcp-listen:8093,fork,reuseaddr
       - tcp-connect:yarax-mcp:8093
@@ -510,8 +510,8 @@ services:
     build:
       context: ../services
       dockerfile: oletools-mcp/Dockerfile
-    image: maljan-oletools-mcp:0.60.2
-    container_name: maljan-oletools-mcp
+    image: malspark-oletools-mcp:0.60.2
+    container_name: malspark-oletools-mcp
     environment:
       MCP_AUTH_TOKEN: ${OLETOOLS_MCP_AUTH_TOKEN:-}
     mem_limit: ${OLETOOLS_MEM_LIMIT:-2g}
@@ -525,7 +525,7 @@ services:
   oletools-port:
     <<: *sidecar-relay
     profiles: [oletools]
-    container_name: maljan-oletools-port
+    container_name: malspark-oletools-port
     command:
       - tcp-listen:8094,fork,reuseaddr
       - tcp-connect:oletools-mcp:8094
@@ -541,10 +541,10 @@ services:
     build:
       context: ../services
       dockerfile: webcrack-mcp/Dockerfile
-    image: maljan-webcrack-mcp:2.16.0
+    image: malspark-webcrack-mcp:2.16.0
     # x86-64 only: the image unpacks Node's linux-x64 build; an arm64 host runs it emulated.
     platform: linux/amd64
-    container_name: maljan-webcrack-mcp
+    container_name: malspark-webcrack-mcp
     environment:
       MCP_AUTH_TOKEN: ${WEBCRACK_MCP_AUTH_TOKEN:-}
     mem_limit: ${WEBCRACK_MEM_LIMIT:-2g}
@@ -558,7 +558,7 @@ services:
   webcrack-port:
     <<: *sidecar-relay
     profiles: [webcrack]
-    container_name: maljan-webcrack-port
+    container_name: malspark-webcrack-port
     command:
       - tcp-listen:8095,fork,reuseaddr
       - tcp-connect:webcrack-mcp:8095
@@ -602,10 +602,10 @@ services:
     build:
       context: ../services
       dockerfile: unblob-mcp/Dockerfile
-    image: maljan-unblob-mcp:26.6.4
+    image: malspark-unblob-mcp:26.6.4
     # x86-64 only: the image installs sasquatch's amd64 .deb; an arm64 host runs it emulated.
     platform: linux/amd64
-    container_name: maljan-unblob-mcp
+    container_name: malspark-unblob-mcp
     environment:
       MCP_AUTH_TOKEN: ${UNBLOB_MCP_AUTH_TOKEN:-}
       UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-}
@@ -624,7 +624,7 @@ services:
   unblob-port:
     <<: *sidecar-relay
     profiles: [unblob]
-    container_name: maljan-unblob-port
+    container_name: malspark-unblob-port
     command:
       - tcp-listen:8096,fork,reuseaddr
       - tcp-connect:unblob-mcp:8096
@@ -640,10 +640,10 @@ services:
     build:
       context: ../services
       dockerfile: jadx-mcp/Dockerfile
-    image: maljan-jadx-mcp:1.5.6
+    image: malspark-jadx-mcp:1.5.6
     # x86-64 only: the image unpacks Temurin's x64 JRE; an arm64 host runs it emulated.
     platform: linux/amd64
-    container_name: maljan-jadx-mcp
+    container_name: malspark-jadx-mcp
     environment:
       MCP_AUTH_TOKEN: ${JADX_MCP_AUTH_TOKEN:-}
     tmpfs:
@@ -659,7 +659,7 @@ services:
   jadx-port:
     <<: *sidecar-relay
     profiles: [jadx]
-    container_name: maljan-jadx-port
+    container_name: malspark-jadx-port
     command:
       - tcp-listen:8097,fork,reuseaddr
       - tcp-connect:jadx-mcp:8097
@@ -685,7 +685,7 @@ services:
   # server declares its own tools, and a block pointed away from the server it
   # ships with reads that only once trusted. The worker then copies the
   # sample under the mount for it, and the triage pack's own readings of the
-  # sample (maljan.tools.readers) and every agent's call to that server run
+  # sample (malspark.tools.readers) and every agent's call to that server run
   # there. The worker still reads the sample for a few things of its own: its
   # hashes and routing, and the readings tests/unit/test_sample_reading_guard.py
   # lists as left for a later change.
@@ -694,7 +694,7 @@ services:
   # scratch, the unpacked program, an uploaded capture) is removed when the
   # job ends: the worker calls the server's release_job with the job's id. A
   # release that fails leaves it to the server's own sweep once nothing in it
-  # changed for MALJAN_STAGING_TTL_HOURS (24 h unless set); it counts against
+  # changed for MALSPARK_STAGING_TTL_HOURS (24 h unless set); it counts against
   # the tmpfs, and so against the memory ceiling, until then. Size the tmpfs
   # for the jobs that run at once, with room for a release that failed.
   #
@@ -712,7 +712,7 @@ services:
   analysis-mcp:
     <<: *backend-image
     profiles: [analysis]
-    container_name: maljan-analysis-mcp
+    container_name: malspark-analysis-mcp
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -724,7 +724,7 @@ services:
       MCP_AUTH_TOKEN: ${ANALYSIS_MCP_AUTH_TOKEN:-}
       MCP_BIND_ADDRESS: 0.0.0.0
       MCP_PORT: "8098"
-      MALJAN_SAMPLE_ROOTS: /data/samples
+      MALSPARK_SAMPLE_ROOTS: /data/samples
       HOME: /tmp
     mem_limit: ${ANALYSIS_MEM_LIMIT:-8g}
     memswap_limit: ${ANALYSIS_MEM_LIMIT:-8g}
@@ -746,7 +746,7 @@ services:
   analysis-port:
     <<: *sidecar-relay
     profiles: [analysis]
-    container_name: maljan-analysis-port
+    container_name: malspark-analysis-port
     command:
       - tcp-listen:8098,fork,reuseaddr
       - tcp-connect:analysis-mcp:8098
@@ -759,7 +759,7 @@ services:
   network-mcp:
     <<: *backend-image
     profiles: [network]
-    container_name: maljan-network-mcp
+    container_name: malspark-network-mcp
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -784,7 +784,7 @@ services:
   network-port:
     <<: *sidecar-relay
     profiles: [network]
-    container_name: maljan-network-port
+    container_name: malspark-network-port
     command:
       - tcp-listen:8099,fork,reuseaddr
       - tcp-connect:network-mcp:8099
@@ -801,7 +801,7 @@ services:
   # deployment's sample mirror, upload staging, ATT&CK cache and Ghidra
   # projects are owned by root, and the unprivileged services could not write
   # them. This hands the entries of those four that root owns, and nothing
-  # else, to MALJAN_UID:MALJAN_GID. It never
+  # else, to MALSPARK_UID:MALSPARK_GID. It never
   # takes a file from anyone else: an entry owned by neither root nor that id
   # stops it, before it has changed anything, with the id to set, and the stack
   # does not start. It changes ownership only (chown, never content or mode),
@@ -811,7 +811,7 @@ services:
   # directories, with no network, and exits.
   volume-init:
     <<: *backend-image
-    container_name: maljan-volume-init
+    container_name: malspark-volume-init
     restart: "no"
     user: "0:0"
     cap_add:
@@ -819,8 +819,8 @@ services:
       - DAC_READ_SEARCH
     network_mode: none
     environment:
-      MALJAN_UID: ${MALJAN_UID:-10001}
-      MALJAN_GID: ${MALJAN_GID:-10001}
+      MALSPARK_UID: ${MALSPARK_UID:-10001}
+      MALSPARK_GID: ${MALSPARK_GID:-10001}
     # Each target names its source after /own/, which is how a refusal names it.
     volumes:
       - ../data/samples:/own/data/samples
@@ -831,30 +831,30 @@ services:
       - /bin/sh
       - -euc
       - |
-        for id in "$$MALJAN_UID" "$$MALJAN_GID"; do
+        for id in "$$MALSPARK_UID" "$$MALSPARK_GID"; do
           case "$$id" in ''|*[!0-9]*) id=0;; esac
           if [ "$$id" -eq 0 ]; then
-            echo "volume-init: MALJAN_UID and MALJAN_GID must be non-zero numbers" >&2
+            echo "volume-init: MALSPARK_UID and MALSPARK_GID must be non-zero numbers" >&2
             exit 1
           fi
         done
         dirs="/own/data/samples /own/data/uploads /own/attck_cache /own/ghidra_projects"
         for dir in $$dirs; do
-          owner=$$(find "$$dir" -xdev ! -uid 0 ! -uid "$$MALJAN_UID" -printf '%U\n' -quit)
+          owner=$$(find "$$dir" -xdev ! -uid 0 ! -uid "$$MALSPARK_UID" -printf '%U\n' -quit)
           if [ -n "$$owner" ]; then
             echo "volume-init: $${dir#/own/} is owned by uid $$owner;" \
-              "set MALJAN_UID/MALJAN_GID=$$owner in docker/.env" >&2
+              "set MALSPARK_UID/MALSPARK_GID=$$owner in docker/.env" >&2
             exit 1
           fi
-          group=$$(find "$$dir" -xdev ! -gid 0 ! -gid "$$MALJAN_GID" -printf '%G\n' -quit)
+          group=$$(find "$$dir" -xdev ! -gid 0 ! -gid "$$MALSPARK_GID" -printf '%G\n' -quit)
           if [ -n "$$group" ]; then
             echo "volume-init: $${dir#/own/} is owned by gid $$group;" \
-              "set MALJAN_GID=$$group in docker/.env" >&2
+              "set MALSPARK_GID=$$group in docker/.env" >&2
             exit 1
           fi
         done
         for dir in $$dirs; do
-          find "$$dir" -xdev \( -uid 0 -o -gid 0 \) -exec chown -h "$$MALJAN_UID:$$MALJAN_GID" {} +
+          find "$$dir" -xdev \( -uid 0 -o -gid 0 \) -exec chown -h "$$MALSPARK_UID:$$MALSPARK_GID" {} +
         done
 
   # -────────────────────────────────────────────
@@ -867,15 +867,15 @@ services:
   # by hand. Runs to completion once; api and worker wait for its exit code.
   migrate:
     <<: *backend-image
-    container_name: maljan-migrate
+    container_name: malspark-migrate
     restart: "no"
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-maljan}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-malspark}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-malspark}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
       # Retired; read once into core.validation.attck_refresh_days by the
       # revision that retired it, when docker/.env still sets it.
-      MALJAN_ATTCK_MAX_AGE_DAYS: ${MALJAN_ATTCK_MAX_AGE_DAYS:-}
+      MALSPARK_ATTCK_MAX_AGE_DAYS: ${MALSPARK_ATTCK_MAX_AGE_DAYS:-}
     volumes:
       - ../src:/app/src:ro
       - ../apps:/app/apps:ro
@@ -890,14 +890,14 @@ services:
   # -────────────────────────────────────────────
   backend-api:
     <<: *backend-image
-    container_name: maljan-api
+    container_name: malspark-api
     restart: unless-stopped
     # Bootstrap contract only (apps/api/app/bootstrap.py) — every other
     # application setting (LLM provider, sandbox, static analyst, tool
     # servers, Qdrant access, rate limits, ...) lives in the settings store
     # and is edited from Settings -> Configuration, not passed as env.
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-maljan}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-malspark}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-malspark}
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env}@redis:6379/0
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
@@ -993,7 +993,7 @@ services:
   # -────────────────────────────────────────────
   backend-worker:
     <<: *backend-image
-    container_name: maljan-worker
+    container_name: malspark-worker
     restart: unless-stopped
     # Bootstrap contract only (apps/api/app/bootstrap.py, shared with the
     # API) — LLM provider, sandbox, static analyst and Qdrant access are
@@ -1004,15 +1004,15 @@ services:
     # Staging is deliberately not named here. What the tool sidecars stage —
     # uploads, carved payloads and the sandbox captures they are pointed at —
     # goes into this container's own temp directory, one directory per job
-    # (`/tmp/maljan-analysis-mcp/job-<id>/`), removed when the job ends and
+    # (`/tmp/malspark-analysis-mcp/job-<id>/`), removed when the job ends and
     # swept on a TTL after that. It is live malware, so it is left on the
     # container's writable layer rather than put on a named volume where it
     # would outlive the container. An operator who does want it elsewhere sets
-    # the analysis and network servers' MALJAN_STAGING_DIR in the console; the
+    # the analysis and network servers' MALSPARK_STAGING_DIR in the console; the
     # per-job directory inside it is composed by the worker and is not a
     # setting (see apps/docs/content/docs/configuration.mdx).
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-maljan}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-malspark}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-malspark}
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env}@redis:6379/0
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
@@ -1047,15 +1047,15 @@ services:
       # Ask the allocator to return freed heap at each job boundary, and report
       # how much came back — the reading that distinguishes fragmentation from
       # retention. Cheap; leave it on.
-      MALJAN_MALLOC_TRIM: "1"
+      MALSPARK_MALLOC_TRIM: "1"
       WORKER_RSS_RESTART_MB: ${WORKER_RSS_RESTART_MB:-6000}
       # onnxruntime sizes its CPU arena from the host core count. Left alone on
       # a 32-core box, embedding the 697 ATT&CK technique texts reserved 8.3 GB
       # and was OOM-killed; at these values the same work peaks near 1.3 GB.
-      # See ``src/maljan/memory/embeddings.py`` for the measurements. Raise them
+      # See ``src/malspark/memory/embeddings.py`` for the measurements. Raise them
       # on a host with memory to spare — the cost is only build time.
-      MALJAN_EMBED_THREADS: ${MALJAN_EMBED_THREADS:-2}
-      MALJAN_EMBED_BATCH: ${MALJAN_EMBED_BATCH:-32}
+      MALSPARK_EMBED_THREADS: ${MALSPARK_EMBED_THREADS:-2}
+      MALSPARK_EMBED_BATCH: ${MALSPARK_EMBED_BATCH:-32}
     # F8 (2026-07-05): resolve host.docker.internal on Linux (see backend-api).
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -1102,8 +1102,8 @@ services:
       # Without this volume both are rebuilt on every container recreation,
       # because HOME is in the container's writable layer and a rebuild
       # discards it. The volume keeps its name from when the worker ran as
-      # root and mounted it at /root/.cache/maljan; volume-init hands it over.
-      - attck_cache:/home/maljan/.cache/maljan
+      # root and mounted it at /root/.cache/malspark; volume-init hands it over.
+      - attck_cache:/home/malspark/.cache/malspark
     depends_on:
       volume-init:
         condition: service_completed_successfully
@@ -1147,10 +1147,10 @@ services:
   # enrichment between analyses.
   enrichment-worker:
     <<: *backend-image
-    container_name: maljan-enrichment-worker
+    container_name: malspark-enrichment-worker
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-maljan}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-malspark}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-malspark}
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env}@redis:6379/0
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
@@ -1202,7 +1202,7 @@ services:
         # explicit, deliberate choice — defaulting to SECURE. Set
         # NEXT_PUBLIC_AUTH_DISABLED=true in .env only for a local dev stack.
         NEXT_PUBLIC_AUTH_DISABLED: "${NEXT_PUBLIC_AUTH_DISABLED:-false}"
-    container_name: maljan-frontend
+    container_name: malspark-frontend
     restart: unless-stopped
     # The image runs as its unprivileged ``node`` user (Dockerfile.frontend),
     # which needs no capability and gains none.

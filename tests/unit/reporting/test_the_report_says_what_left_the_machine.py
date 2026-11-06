@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from maljan.analysis.disclosure import (
+from malspark.analysis.disclosure import (
     FOOTNOTE_SENTENCE,
     INTRO_SENTENCE,
     NOT_BUILT_REPORTING_OFF,
@@ -29,8 +29,8 @@ from maljan.analysis.disclosure import (
     with_enrichment,
     with_enrichment_asked,
 )
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 SNAPSHOT = {
     "llm.provider": "openai",
@@ -104,7 +104,7 @@ def test_what_prints_as_configured_is_read_from_the_record_never_the_process_set
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A later render of a stored run prints the hosts its own run addressed, and only those."""
-    from maljan.core import config
+    from malspark.core import config
 
     record = _record()
     before = _rendered(record)
@@ -118,7 +118,7 @@ def test_what_prints_as_configured_is_read_from_the_record_never_the_process_set
 
 
 def test_the_html_report_carries_the_block() -> None:
-    from maljan.reporting.renderers.html import HtmlRenderer
+    from malspark.reporting.renderers.html import HtmlRenderer
 
     html = HtmlRenderer().render(
         _report({"final_decision": "Malware", "disclosure": _record()}), nonce="fixed"
@@ -265,7 +265,7 @@ STORED_RENDERS = {
 
 @pytest.mark.parametrize("run", sorted(STORED_RENDERS))
 def test_a_stored_run_renders_as_it_did_before_the_block(run: str) -> None:
-    from maljan.reporting.renderers import HtmlRenderer
+    from malspark.reporting.renderers import HtmlRenderer
     from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import (
         _benchmark,
     )

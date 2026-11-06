@@ -35,7 +35,7 @@ branch_labels = None
 depends_on = None
 
 # Variable -> the settings key that now holds it, and that key's shipped value
-# (``maljan.core.settings_annotations.RETIRED_ENVIRONMENT``, copied: a revision
+# (``malspark.core.settings_annotations.RETIRED_ENVIRONMENT``, copied: a revision
 # imports no application code).
 READS: dict[str, tuple[str, str]] = {
     "GHIDRA_CONTAINER_SAMPLES_PATH": ("core.static.ghidra.sample_mount", "/data/samples"),

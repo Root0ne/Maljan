@@ -342,11 +342,11 @@ test.describe("Indicators & detection", () => {
     await serve(page);
     await page.goto(`${BASE}/indicators`);
     const rules = page.locator("#generated-rules");
-    await expect(rules.getByRole("button", { name: "Copy yara rule Maljan_AgentTesla_Injection" })).toBeVisible();
+    await expect(rules.getByRole("button", { name: "Copy yara rule Malspark_AgentTesla_Injection" })).toBeVisible();
     const download = page.waitForEvent("download");
-    await rules.getByRole("button", { name: "Download yara rule Maljan_AgentTesla_Injection" }).click();
-    expect((await download).suggestedFilename()).toBe("Maljan_AgentTesla_Injection.yar");
-    await rules.getByRole("button", { name: "Maljan_AgentTesla_Injection", exact: true }).click();
+    await rules.getByRole("button", { name: "Download yara rule Malspark_AgentTesla_Injection" }).click();
+    expect((await download).suggestedFilename()).toBe("Malspark_AgentTesla_Injection.yar");
+    await rules.getByRole("button", { name: "Malspark_AgentTesla_Injection", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText('$a = "VirtualAllocEx"');
   });
 

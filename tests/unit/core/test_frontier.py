@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.core.frontier import (
+from malspark.core.frontier import (
     CostMeter,
     FrontierBudgetExceeded,
     build_meter,
@@ -235,7 +235,7 @@ class TestTheDefaultConfigCannotSpendAnything:
     def test_the_shipped_default_is_disabled_and_unpriced(self) -> None:
         """A fresh clone, CI, or a deploy must not be one env var away from
         billing someone. Both the switch and the pricing have to be set."""
-        from maljan.core.config import FrontierConfig
+        from malspark.core.config import FrontierConfig
 
         cfg = FrontierConfig()
         assert cfg.enabled is False

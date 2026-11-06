@@ -20,19 +20,19 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.core.config import Settings, TriageConfig
-from maljan.core.container import ServiceContainer
-from maljan.pipeline.conditions import StageContext, TriageFacts, evaluate
-from maljan.pipeline.nodes import _reputation_lookup, make_triage_node, stage_context
-from maljan.pipeline.triage_pack import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.core.config import Settings, TriageConfig
+from malspark.core.container import ServiceContainer
+from malspark.pipeline.conditions import StageContext, TriageFacts, evaluate
+from malspark.pipeline.nodes import _reputation_lookup, make_triage_node, stage_context
+from malspark.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     PackInputs,
     run_pack,
 )
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, parse_structured
-from maljan.tools import pcap, rules
+from malspark.schemas.evidence import EvidenceCounter, LedgerEntry, parse_structured
+from malspark.tools import pcap, rules
 from tests.unit.pipeline.test_stage_events import _state
 from tests.unit.tools.test_binary import _elf, _elf_with_imports, _pe
 
@@ -252,7 +252,7 @@ class TestTheFormatTools:
     def test_a_format_with_no_vocabulary_is_asked_nothing(self, tmp_path: Path) -> None:
         """A Mach-O's symbols are neither Win32 nor libc, and the catalogue
         answering about the wrong system is worse than not answering."""
-        from maljan.pipeline import triage_pack as module
+        from malspark.pipeline import triage_pack as module
 
         assert "mach-o" not in module._BEHAVIOUR_PLATFORM_BY_FORMAT
         assert module._BEHAVIOUR_PLATFORM_BY_FORMAT == {"pe": "windows", "elf": "linux"}
@@ -511,7 +511,7 @@ class TestTheReputationStep:
     def test_the_count_is_read_from_both_answer_shapes(
         self, tool: str, output: str, expected: int | None
     ) -> None:
-        from maljan.core.reputation import reputation_of
+        from malspark.core.reputation import reputation_of
 
         entry = LedgerEntry(id="ev_0001", tool=tool, output=output)
         entry.structured = parse_structured(output)
@@ -558,7 +558,7 @@ class TestTheFactsAConditionReads:
         )
 
     def test_a_condition_names_only_the_four_fields(self) -> None:
-        from maljan.pipeline.conditions import validate_condition
+        from malspark.pipeline.conditions import validate_condition
 
         (problem,) = validate_condition("triage.verdict")
         assert "triage has no field 'verdict'" in problem
@@ -696,7 +696,7 @@ class TestTheNode:
     def test_a_pack_that_raises_is_a_stage_that_ran_and_says_it_failed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import maljan.pipeline.nodes as nodes
+        import malspark.pipeline.nodes as nodes
 
         def _explode(*_: Any, **__: Any) -> Any:
             raise RuntimeError("the pack itself broke")
@@ -819,7 +819,7 @@ class TestAReasonBesideNothingIsAFailure:
     def test_api_capability_with_no_catalogue_is_a_failed_entry(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.tools import knowledge
+        from malspark.tools import knowledge
 
         monkeypatch.setattr(
             knowledge,
@@ -866,7 +866,7 @@ class TestAReasonBesideNothingIsAFailure:
 class TestWhichPackFailuresDegradeTheRun:
     def test_every_pack_failure_does(self) -> None:
         """T-338: an optional tool that failed is still evidence the run went without."""
-        from maljan.pipeline.triage_pack import degrades_run, is_pack_reason, reason_sentence
+        from malspark.pipeline.triage_pack import degrades_run, is_pack_reason, reason_sentence
 
         for tool in (
             "identify_file",
@@ -889,7 +889,7 @@ class TestWhichPackFailuresDegradeTheRun:
         )
 
     def test_the_run_is_degraded_only_by_what_degrades_it(self) -> None:
-        from maljan.pipeline.triage_pack import run_is_degraded
+        from malspark.pipeline.triage_pack import run_is_degraded
 
         assert run_is_degraded(["triage.capa_failed", "triage.reputation_failed"]) is True
         assert run_is_degraded(["triage.hashes_failed"]) is True
@@ -897,7 +897,7 @@ class TestWhichPackFailuresDegradeTheRun:
         assert run_is_degraded([]) is False
 
     def test_an_informational_reason_does_not_degrade_the_run(self) -> None:
-        from maljan.pipeline.triage_pack import run_is_degraded
+        from malspark.pipeline.triage_pack import run_is_degraded
 
         note = (
             "The triage analyst's answer began 3 claim(s), and 2 were read; 1 could not be "
@@ -923,7 +923,7 @@ class TestADegradedAnswerIsAnAnswer:
     """
 
     def test_the_entry_is_recorded_as_a_success(self) -> None:
-        from maljan.pipeline.triage_pack import degradation_reason_for
+        from malspark.pipeline.triage_pack import degradation_reason_for
 
         answer = {
             "manifest_present": True,
@@ -934,7 +934,7 @@ class TestADegradedAnswerIsAnAnswer:
         assert degradation_reason_for("apk_info", answer) == "triage.apk_info_degraded"
 
     def test_an_answer_with_nothing_missing_contributes_no_reason(self) -> None:
-        from maljan.pipeline.triage_pack import degradation_reason_for
+        from malspark.pipeline.triage_pack import degradation_reason_for
 
         assert degradation_reason_for("apk_info", {"manifest_present": True}) is None
 
@@ -946,7 +946,7 @@ class TestADegradedAnswerIsAnAnswer:
         produced. Saying the pack could not run it, while the same prompt
         carries its dex count and its ABIs, is a deterministic statement that
         is false."""
-        from maljan.pipeline.triage_pack import reason_sentence
+        from malspark.pipeline.triage_pack import reason_sentence
 
         sentence = reason_sentence(f"triage.{tool}_degraded")
         assert tool in sentence
@@ -955,15 +955,15 @@ class TestADegradedAnswerIsAnAnswer:
 
     @pytest.mark.parametrize("tool", ["apk_info", "document_info", "capa"])
     def test_a_failed_tool_still_reads_as_one_that_could_not_run(self, tool: str) -> None:
-        from maljan.pipeline.triage_pack import reason_sentence
+        from malspark.pipeline.triage_pack import reason_sentence
 
         assert reason_sentence(f"triage.{tool}_failed") == (f"the triage pack could not run {tool}")
 
     def test_the_degraded_reason_makes_the_run_degraded_where_its_part_may_apply(self) -> None:
         """T-338: apk_info declares nothing about the part androguard reads, so
         what it could not answer may be this sample's: a loss."""
-        from maljan.pipeline.operator_choice import SampleFacts
-        from maljan.pipeline.triage_pack import run_is_degraded
+        from malspark.pipeline.operator_choice import SampleFacts
+        from malspark.pipeline.triage_pack import run_is_degraded
 
         assert run_is_degraded(["triage.apk_info_degraded"], facts=SampleFacts("apk")) is True
 
@@ -972,7 +972,7 @@ class TestAnApkFactAndroguardCouldNotRead:
     def test_is_not_counted_as_a_list(self) -> None:
         """``apk_info`` says an unread fact as ``no: <reason>``; its length is
         not a count of permissions, and the degraded note already says it."""
-        from maljan.pipeline.triage_pack import _apk as apk_line
+        from malspark.pipeline.triage_pack import _apk as apk_line
 
         unread = "no: the manifest could not be parsed"
         line = apk_line(
@@ -996,14 +996,14 @@ class TestAnApkFactAndroguardCouldNotRead:
     ) -> None:
         """Only the tool's own refusal reasons are its ``no:``; a manifest's
         package attribute is the sample's text, whatever it starts with."""
-        from maljan.pipeline.triage_pack import _apk as apk_line
+        from malspark.pipeline.triage_pack import _apk as apk_line
 
         line = apk_line({"package": "no: com.example.app", "dex_count": 1})
         assert "package no: com.example.app" in line
 
     def test_every_refusal_reason_of_the_tool_is_left_out(self) -> None:
-        from maljan.pipeline.triage_pack import _apk as apk_line
-        from maljan.tools.binary import _APK_UNREAD_REASONS
+        from malspark.pipeline.triage_pack import _apk as apk_line
+        from malspark.tools.binary import _APK_UNREAD_REASONS
 
         for reason in _APK_UNREAD_REASONS:
             line = apk_line({"package": f"{reason} (BadZipFile)", "dex_count": 1})
@@ -1011,8 +1011,8 @@ class TestAnApkFactAndroguardCouldNotRead:
             assert "package" not in apk_line({"package": reason, "dex_count": 1}), reason
 
     def test_a_package_name_that_begins_with_a_reason_s_words_is_printed(self) -> None:
-        from maljan.pipeline.triage_pack import _apk as apk_line
-        from maljan.tools.binary import MANIFEST_UNPARSED
+        from malspark.pipeline.triage_pack import _apk as apk_line
+        from malspark.tools.binary import MANIFEST_UNPARSED
 
         name = f"{MANIFEST_UNPARSED}.com.example"
         assert f"package {name}" in apk_line({"package": name, "dex_count": 1})

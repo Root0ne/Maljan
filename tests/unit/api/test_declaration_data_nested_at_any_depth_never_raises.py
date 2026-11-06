@@ -25,9 +25,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.services import settings_service as svc
-from maljan.core import tool_declarations
-from maljan.core.settings_overrides import build_settings
-from maljan.core.tool_declarations import CHANGES_FORM, CHANGES_MARK
+from malspark.core import tool_declarations
+from malspark.core.settings_overrides import build_settings
+from malspark.core.tool_declarations import CHANGES_FORM, CHANGES_MARK
 
 LEAF = "core.static.ghidra.tool_facts"
 SERVER_MAP = "core.mcp.servers"
@@ -147,7 +147,7 @@ def test_a_deep_stored_row_answers_the_schema_and_never_blocks_an_unrelated_save
     db.commit.assert_awaited_once()
 
 
-@pytest.mark.parametrize("path", ["patch", "maljan-settings/2", "maljan-settings/1"])
+@pytest.mark.parametrize("path", ["patch", "malspark-settings/2", "malspark-settings/1"])
 def test_a_deep_leaf_sent_is_refused_naming_the_leaf(path: str) -> None:
     value = {CHANGES_MARK: CHANGES_FORM, "zz": {"kind": "strings", "places": _nested(DEPTH)}}
     if path == "patch":
@@ -161,7 +161,7 @@ def test_a_deep_leaf_sent_is_refused_naming_the_leaf(path: str) -> None:
     db.commit.assert_not_awaited()
 
 
-@pytest.mark.parametrize("path", ["patch", "maljan-settings/2", "maljan-settings/1"])
+@pytest.mark.parametrize("path", ["patch", "malspark-settings/2", "malspark-settings/1"])
 def test_a_deep_server_entry_sent_is_refused_naming_the_entry(path: str) -> None:
     tool_facts = {CHANGES_MARK: CHANGES_FORM, "zz": {"kind": "strings", "places": _nested(DEPTH)}}
     values = {SERVER_MAP: {"analysis": _server_entry(tool_facts)}}

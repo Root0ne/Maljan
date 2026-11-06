@@ -61,9 +61,9 @@ export default function LoginPage() {
         {/* The mark is a static SVG in public/; next/image would route it
             through the image optimizer, which refuses SVG by default. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo.svg" alt="Maljan" width={53} height={56} />
+        <img src="/logo.svg" alt="Malspark" width={53} height={56} />
         <span className="ml-3 text-lg font-semibold text-text-primary tracking-wide">
-          MALJAN
+          MALSPARK
         </span>
       </div>
 

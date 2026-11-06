@@ -19,15 +19,15 @@ import tracemalloc
 from collections.abc import Callable
 from typing import Any
 
-from maljan.agents.base_agent import read_claim_blocks
-from maljan.pipeline.retry_merge import (
+from malspark.agents.base_agent import read_claim_blocks
+from malspark.pipeline.retry_merge import (
     flagged_blocks,
     merge_retry,
     numbering_unsettled,
     read_withdrawals,
 )
-from maljan.pipeline.validation import Violation, retry_drop_row, retry_drop_sentences
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
+from malspark.pipeline.validation import Violation, retry_drop_row, retry_drop_sentences
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 
 _FIELDS: dict[str, Any] = {

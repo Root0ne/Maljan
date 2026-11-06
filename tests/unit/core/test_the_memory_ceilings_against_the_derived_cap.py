@@ -16,8 +16,8 @@ conversation sum to strictly less than the room it began with — at most
 
 from __future__ import annotations
 
-from maljan.core.config import Settings
-from maljan.llm import context_window as cw
+from malspark.core.config import Settings
+from malspark.llm import context_window as cw
 
 
 def _whole_loop_chars(window_tokens: int, reply_tokens: int = 8192) -> int:
@@ -48,7 +48,7 @@ def _shipped_windows() -> list[int]:
     """
     import json
 
-    from maljan.core.paths import resolve_data
+    from malspark.core.paths import resolve_data
 
     raw = json.loads(resolve_data(cw.TABLE_PATH).read_text(encoding="utf-8"))
     return sorted(set(raw["windows"].values()) | {cw.FALLBACK_WINDOW_TOKENS, 4096, 32768})
@@ -222,7 +222,7 @@ class TestTheReplyReserveIsNeverSpentOnSayingTheRoomRanOut:
         """
         import logging
 
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         logging.disable(logging.WARNING)
         try:
@@ -248,7 +248,7 @@ class TestTheReplyReserveIsNeverSpentOnSayingTheRoomRanOut:
         """The one place the marker used to compound rather than stay constant."""
         import logging
 
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         logging.disable(logging.WARNING)
         try:
@@ -266,8 +266,8 @@ class TestTheReplyReserveIsNeverSpentOnSayingTheRoomRanOut:
             logging.disable(logging.NOTSET)
 
     def test_the_marker_comes_out_of_the_limit_rather_than_after_it(self) -> None:
-        from maljan.agents import mcp_client
-        from maljan.providers.static.ghidra import http_client as ghidra_http_client
+        from malspark.agents import mcp_client
+        from malspark.providers.static.ghidra import http_client as ghidra_http_client
 
         for module in (mcp_client, ghidra_http_client):
             assert module.truncation_target(4000) == 4000 - len(module.TRUNCATION_MARKER)
@@ -320,5 +320,5 @@ class TestTheShortenersOwnCeiling:
     def test_what_arrives_is_bounded_by_the_parse_and_not_by_the_cap(self) -> None:
         """The cap sizes what is kept; this bounds what the tool sent."""
         assert cw.derive_tool_output_chars(window_tokens=1_000_000) < (
-            __import__("maljan.agents.output_shortening", fromlist=["x"]).MAX_SHORTENABLE_CHARS
+            __import__("malspark.agents.output_shortening", fromlist=["x"]).MAX_SHORTENABLE_CHARS
         )

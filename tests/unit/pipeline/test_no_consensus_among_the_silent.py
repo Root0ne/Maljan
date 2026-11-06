@@ -19,13 +19,13 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.pipeline.mediation_models import MediatorVerdict
-from maljan.pipeline.nodes import make_negotiation_node
-from maljan.pipeline.routing import ConsensusRouter
-from maljan.pipeline.state import AgentArgument
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.pipeline.mediation_models import MediatorVerdict
+from malspark.pipeline.nodes import make_negotiation_node
+from malspark.pipeline.routing import ConsensusRouter
+from malspark.pipeline.state import AgentArgument
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 SAID_BY_THE_MEDIATOR = (
     "- no input from static analyst\n- no input from dynamic analyst\n"
@@ -160,7 +160,7 @@ class TestTheNegotiationRecordsNothing:
             **SILENT_STATE,
             "isr_reports": {"static": _isr("static", 2), "dynamic": _isr("dynamic", 1)},
         }
-        with patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False):
+        with patch("malspark.pipeline.nodes.detect_sycophancy", return_value=False):
             result = asyncio.run(make_negotiation_node(_container((argument, True)))(state))
 
         assert result["consensus_applicable"] is True
@@ -168,7 +168,7 @@ class TestTheNegotiationRecordsNothing:
         assert result["confidence_history"] == [pytest.approx(0.7)]
 
     def test_the_router_hands_the_analysts_to_the_judge(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         state = {
             "iteration_count": 1,
@@ -221,8 +221,8 @@ class TestNoSurfacePrintsAnAgreement:
         assert "not applicable" in text
 
     def test_the_verdict_section_states_no_agreement(self) -> None:
-        from maljan.reporting.models import MalwareReport
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.models import MalwareReport
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         report = MalwareReport.model_validate(
             {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": _summary().to_dict()}
@@ -238,9 +238,9 @@ class TestNoSurfacePrintsAnAgreement:
     def test_every_surface_names_no_cause_the_record_does_not_hold(self) -> None:
         # ``not_applicable`` is recorded both when fewer than two analysts
         # produced claims and when the debate stage did not run.
-        from maljan.analysis.run_summary import NOT_APPLICABLE_PHRASE, NOT_APPLICABLE_SENTENCE
-        from maljan.reporting.models import MalwareReport
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.analysis.run_summary import NOT_APPLICABLE_PHRASE, NOT_APPLICABLE_SENTENCE
+        from malspark.reporting.models import MalwareReport
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         report = MalwareReport.model_validate(
             {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": _summary().to_dict()}
@@ -255,7 +255,7 @@ class TestNoSurfacePrintsAnAgreement:
     def test_the_report_s_negotiation_block_does_not_borrow_the_verdict_s_confidence(
         self,
     ) -> None:
-        from maljan.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.builder import MalwareReportBuilder
 
         negotiation = _summary().to_dict()["negotiation"]
         summary = MalwareReportBuilder._negotiation_summary({"negotiation": negotiation}, 0.85)
@@ -302,14 +302,14 @@ def _round_with(model: _Scripted) -> dict[str, Any]:
     container.get_judge_agent.return_value = judge
     with (
         patch.object(judge, "_supports_structured_output", return_value=False),
-        patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False),
+        patch("malspark.pipeline.nodes.detect_sycophancy", return_value=False),
     ):
         return asyncio.run(make_negotiation_node(container)(CLAIMING_STATE))
 
 
 class TestListedContradictionsSendTheAnalystsToRevise:
     def test_the_run_s_shape_routes_to_revision(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         result = _round_with(_Scripted(RUN_SHAPE))
 
@@ -320,7 +320,7 @@ class TestListedContradictionsSendTheAnalystsToRevise:
         assert ConsensusRouter(Settings()).should_continue(state) == "revision"
 
     def test_none_at_full_agreement_goes_to_the_judge(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         result = _round_with(_Scripted("CONTRADICTIONS: NONE\nagreement_confidence: 1.0"))
 
@@ -331,7 +331,7 @@ class TestListedContradictionsSendTheAnalystsToRevise:
     def test_a_missing_block_is_asked_for_and_the_summary_states_it_when_still_missing(
         self,
     ) -> None:
-        from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
+        from malspark.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
 
         model = _Scripted("aligned\nagreement_confidence: 1.0", "agreement_confidence: 1.0")
         result = _round_with(model)
@@ -360,8 +360,8 @@ class TestListedContradictionsSendTheAnalystsToRevise:
 
 def _appendix_text(run_summary: dict) -> str:
     """The report's run-summary appendix for a report carrying ``run_summary``."""
-    from maljan.reporting.models import MalwareReport
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.models import MalwareReport
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     report = MalwareReport.model_validate(
         {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}
@@ -375,8 +375,8 @@ class TestTheRevisionIsToldWhatStillStands:
     def test_the_block_s_lines_reach_every_revising_analyst(self) -> None:
         from dataclasses import dataclass
 
-        from maljan.core.config import Settings
-        from maljan.pipeline.nodes import make_revision_node
+        from malspark.core.config import Settings
+        from malspark.pipeline.nodes import make_revision_node
 
         result = _round_with(_Scripted(RUN_SHAPE))
         state = {**CLAIMING_STATE, **result, "file_hash": "abc123"}
@@ -435,7 +435,7 @@ class TestStableAgreementDoesNotEndTheDebateOverStandingContradictions:
         }
 
     def _router(self) -> ConsensusRouter:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         settings = Settings()
         settings.negotiation.max_iterations = 10

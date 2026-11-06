@@ -12,11 +12,11 @@ is synthetic.
 
 from __future__ import annotations
 
-from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, retry_added_marker
+from malspark.extractors.capability_matrix import build_capability_matrix
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, retry_added_marker
 
 LEDGER = [
     LedgerEntry(id="ev_0001", agent="static", tool="pe_info", output="Run key"),

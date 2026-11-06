@@ -30,12 +30,12 @@ from app.worker.analysis_worker import (
     keep_the_built_report,
     keep_the_stopped_run,
 )
-from maljan.agents.delegation import _hand_over_the_record
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.pipeline.state import with_undrained_evidence
-from maljan.pipeline.stopped_run import partial_report
-from maljan.schemas.evidence import LedgerEntry, build_entry
+from malspark.agents.delegation import _hand_over_the_record
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.pipeline.state import with_undrained_evidence
+from malspark.pipeline.stopped_run import partial_report
+from malspark.schemas.evidence import LedgerEntry, build_entry
 
 NOTE = "Stopped by the operator 61 s into the run, node verdict."
 

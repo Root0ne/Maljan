@@ -13,7 +13,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.tool_pinning import is_path_argument, names_the_sample, pin_paths, server_of
+from malspark.agents.tool_pinning import is_path_argument, names_the_sample, pin_paths, server_of
 
 LOCAL = "/data/samples/abc123.exe"
 REMOTE = "/remote/staging/abc123.exe"
@@ -58,7 +58,7 @@ def _tool(
         description=name,
         args_schema=schema,
         infer_schema=False,
-        metadata={"maljan_server": server} if server else None,
+        metadata={"malspark_server": server} if server else None,
     )
 
 
@@ -293,8 +293,8 @@ class TestPerServerPaths:
 
 class TestTheRegistryStampsTheServer:
     def test_merge_tools_records_which_server_each_tool_came_from(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.providers.servers import ServerRegistry
+        from malspark.core.config import Settings
+        from malspark.providers.servers import ServerRegistry
 
         registry = ServerRegistry(Settings(_env_file=None))
         seen: list[dict[str, Any]] = []
@@ -305,8 +305,8 @@ class TestTheRegistryStampsTheServer:
         assert server_of(tools[0]) == "analysis"
 
     def test_a_renamed_tool_is_stamped_with_the_server_that_renamed_it(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.providers.servers import ServerRegistry
+        from malspark.core.config import Settings
+        from malspark.providers.servers import ServerRegistry
 
         registry = ServerRegistry(Settings(_env_file=None))
         seen_calls: list[dict[str, Any]] = []
@@ -346,7 +346,7 @@ class TestTheVirustotalStdioUpload:
             description="upload a local file to VirusTotal",
             args_schema=_PathArgs,
             infer_schema=False,
-            metadata={"maljan_server": "virustotal"},
+            metadata={"malspark_server": "virustotal"},
         )
 
     def test_a_bare_file_name_becomes_the_path_the_server_can_open(self) -> None:

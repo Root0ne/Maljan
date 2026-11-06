@@ -1,6 +1,6 @@
 """Reference lookups over stdio MCP: ATT&CK, API behaviour, LOLBins, prior cases.
 
-Delegates to ``maljan.tools.knowledge``, which owns the indices and the
+Delegates to ``malspark.tools.knowledge``, which owns the indices and the
 degradation contract: a lookup whose backend is missing answers with an empty
 result and a ``reason``, never an exception. This file adds the tool manifest
 and the same returned-error guard the analysis sidecar uses.
@@ -20,19 +20,19 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from maljan.core.stdio_safe import route_logging_to_stderr
+from malspark.core.stdio_safe import route_logging_to_stderr
 
 # Only when run as the stdio server: a test or tool that imports this module
 # in-process keeps its own logging.
 if __name__ == "__main__":
     route_logging_to_stderr()
 
-from maljan.tools import knowledge as knowledge_tools
-from maljan.tools import sidecar_needs
-from maljan.tools.arguments import read_unquoted, says_unquoted, with_read_as
-from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
-from maljan.tools.declared_facts import NO_EFFECT, tool_declaration
-from maljan.tools.errors import code_for_exception, normalise_error, tool_error
+from malspark.tools import knowledge as knowledge_tools
+from malspark.tools import sidecar_needs
+from malspark.tools.arguments import read_unquoted, says_unquoted, with_read_as
+from malspark.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
+from malspark.tools.declared_facts import NO_EFFECT, tool_declaration
+from malspark.tools.errors import code_for_exception, normalise_error, tool_error
 
 mcp = FastMCP("KnowledgeMCP")
 
@@ -42,7 +42,7 @@ def _apply_index_retry() -> None:
 
     This is the process where the build actually happens, so it is the process
     the operator's ``validation.index_retry_seconds`` has to reach. It arrives
-    as ``MALJAN_INDEX_RETRY_SECONDS`` because a sidecar reads its environment
+    as ``MALSPARK_INDEX_RETRY_SECONDS`` because a sidecar reads its environment
     and never the settings store; an unset or unreadable value leaves the
     module's own default alone.
     """
@@ -58,11 +58,11 @@ def _apply_index_retry() -> None:
 _apply_index_retry()
 
 # The two retrievals over a vector store need its client; every other lookup
-# reads the vendored catalogues (``maljan.tools.sidecar_needs``).
+# reads the vendored catalogues (``malspark.tools.sidecar_needs``).
 TOOL_NEEDS: list[ToolNeeds] = sidecar_needs.KNOWLEDGE
 CAPABILITIES = manifest("knowledge", TOOL_NEEDS)
 
-# What each tool declares of itself (``maljan.tools.declared_facts``). Each
+# What each tool declares of itself (``malspark.tools.declared_facts``). Each
 # reads the platform's own reference tables, so an identical call answers the
 # same, but for the case lookup, whose store grows with every run. The ATT&CK
 # lookups and the case lookup reach the network only to fetch or refresh the

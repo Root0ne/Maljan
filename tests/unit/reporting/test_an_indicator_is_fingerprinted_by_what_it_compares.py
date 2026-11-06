@@ -15,8 +15,8 @@ import time
 
 import pytest
 
-from maljan.reporting.dedupe import pattern_fingerprint
-from maljan.schemas.stix_pattern import canonical_pattern, read_comparisons
+from malspark.reporting.dedupe import pattern_fingerprint
+from malspark.schemas.stix_pattern import canonical_pattern, read_comparisons
 
 
 def _same(a: str, b: str, pattern_type: str = "stix") -> bool:

@@ -20,18 +20,18 @@ import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-SOURCES = (ROOT / "src" / "maljan", ROOT / "apps" / "api" / "app")
+SOURCES = (ROOT / "src" / "malspark", ROOT / "apps" / "api" / "app")
 # The readers' home: the registry and the reader functions it calls.
 READERS = frozenset(
     {
-        "src/maljan/providers/sandbox/readers.py",
-        "src/maljan/schemas/sandbox_report.py",
+        "src/malspark/providers/sandbox/readers.py",
+        "src/malspark/schemas/sandbox_report.py",
     }
 )
 FORMAT_ATTRIBUTES = frozenset({"source_format", "report_format", "reader"})
 READER_FUNCTIONS = frozenset({"cape_report_to_sandbox_report", "triage_overview_to_sandbox_report"})
 
-from maljan.schemas.sandbox_report import CAPE_RENAMES  # noqa: E402
+from malspark.schemas.sandbox_report import CAPE_RENAMES  # noqa: E402
 
 SOURCE_BLOCKS = frozenset(CAPE_RENAMES)
 
@@ -142,4 +142,4 @@ def test_the_guard_sees_each_form_it_refuses(tmp_path: Path) -> None:
         "    cape_report_to_sandbox_report(report, provider='x')\n",
         encoding="utf-8",
     )
-    assert len(_violations(sample, "src/maljan/sample.py")) == 5
+    assert len(_violations(sample, "src/malspark/sample.py")) == 5

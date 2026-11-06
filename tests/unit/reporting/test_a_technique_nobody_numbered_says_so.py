@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.narrative_agent import build_prompt_text
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.extractors.capability_matrix import build_capability_matrix
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.narrative_agent import build_prompt_text
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 
 def _bundle(verdict: str) -> dict:
@@ -30,7 +30,7 @@ def _bundle(verdict: str) -> dict:
                 "external_references": [{"source_name": "mitre-attack", "external_id": "T1490"}],
             }
         ],
-        "x_maljan_assessment": {"verdict": verdict, "confidence": 0.7},
+        "x_malspark_assessment": {"verdict": verdict, "confidence": 0.7},
     }
 
 
@@ -81,7 +81,7 @@ def test_a_number_somebody_gave_is_still_printed() -> None:
             "relationship_type": "uses",
             "source_ref": "malware--1",
             "target_ref": "attack-pattern--1",
-            "x_maljan_confidence": 0.6,
+            "x_malspark_confidence": 0.6,
         },
     ]
 
@@ -93,7 +93,7 @@ def test_a_number_somebody_gave_is_still_printed() -> None:
 def test_a_relationship_with_no_number_names_no_producer_for_an_analyst_s() -> None:
     """The judge's edge adds no number and so names no producer; the analyst's
     0.7 is the cell's number, stated by the analyst."""
-    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+    from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
     bundle = _bundle("Malware")
     bundle["objects"] += [

@@ -19,8 +19,8 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import artefact_index, pe_image
-from maljan.utils.written_forms import pack_escaped
+from malspark.tools import artefact_index, pe_image
+from malspark.utils.written_forms import pack_escaped
 from tests.unit.tools import test_the_function_index_stays_linear_on_hostile_images as hostile
 from tests.unit.tools.synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 
@@ -45,7 +45,7 @@ def server() -> Any:
 @pytest.fixture(autouse=True)
 def _the_test_s_own_directory_is_a_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The sample a test writes is a sample this server may read."""
-    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", str(tmp_path))
+    monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", str(tmp_path))
 
 
 def _call(at: int, target: int) -> bytes:

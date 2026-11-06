@@ -23,7 +23,7 @@ from app.models.evidence import EvidenceEntry
 from app.schemas.evidence import EvidenceEntryResponse
 from app.services import ledger_chain
 from app.worker.analysis_worker import _evidence_row, _returned_at
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 
 _REV = (
     Path(__file__).resolve().parents[3]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from maljan.qa.fp_linter import lint_report
+from malspark.qa.fp_linter import lint_report
 
 
 def _ns(**kw):  # type: ignore[no-untyped-def]
@@ -264,7 +264,7 @@ class TestRuleC6:
         assert c6[0].explanation
 
     def test_an_ungrounded_section_warns(self) -> None:
-        from maljan.reporting.models import EvidenceSection
+        from malspark.reporting.models import EvidenceSection
 
         report = _stub_report(
             sections=[EvidenceSection(key="imports", title="Imports", source="", evidence_ids=[])]

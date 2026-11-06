@@ -150,18 +150,18 @@ def markers() -> Markers:
     product no longer builds the way a marker expects shows up as a request
     answered as ``other``, which the checklist fails.
     """
-    from maljan.agents import configurable_analyst
-    from maljan.agents.base_agent import _REVISION_ISR_FRAMING
-    from maljan.agents.judge_agent import (
+    from malspark.agents import configurable_analyst
+    from malspark.agents.base_agent import _REVISION_ISR_FRAMING
+    from malspark.agents.judge_agent import (
         JUDGE_VERDICT_SYSTEM,
         MEDIATION_EXTRACTION_SYSTEM,
         MEDIATOR_SYSTEM_HEAD,
         TECHNIQUE_QUESTION_SYSTEM,
     )
-    from maljan.agents.prompt_fragments import no_tool_call_question
-    from maljan.agents.static_analyst import _extract_load_hint
-    from maljan.pipeline.validation import FEEDBACK_PREAMBLE, RetryDrops, retry_drop_question
-    from maljan.reporting import composer, narrative_agent, section_agreement
+    from malspark.agents.prompt_fragments import no_tool_call_question
+    from malspark.agents.static_analyst import _extract_load_hint
+    from malspark.pipeline.validation import FEEDBACK_PREAMBLE, RetryDrops, retry_drop_question
+    from malspark.reporting import composer, narrative_agent, section_agreement
 
     keep = re.search(r"KEEP <label>: <reason>", retry_drop_question(RetryDrops()))
     if keep is None:
@@ -647,9 +647,9 @@ class Brain:
                     "relationship_type": "uses",
                     "source_ref": "malware--1",
                     "target_ref": f"attack-pattern--{n}",
-                    "x_maljan_confidence": 0.8,
-                    "x_maljan_evidence_basis": "static",
-                    "x_maljan_contributing_agents": [],
+                    "x_malspark_confidence": 0.8,
+                    "x_malspark_evidence_basis": "static",
+                    "x_malspark_contributing_agents": [],
                 }
             )
         assessment: dict[str, Any] = {
@@ -667,7 +667,7 @@ class Brain:
         bundle = {
             "type": "bundle",
             "id": "bundle--1",
-            "x_maljan_assessment": assessment,
+            "x_malspark_assessment": assessment,
             "objects": objects,
         }
         return json.dumps(bundle, separators=(",", ":"))
@@ -889,7 +889,7 @@ def _answer_tools(request: wire.Request) -> list[dict[str, Any]]:
     A call outside a tool loop offers that read beside whatever it offered
     before (``agents.ledger_reads``); it is never the answer's schema.
     """
-    from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+    from malspark.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
 
     return [tool for tool in request.tools if tool.get("name") != READ_EVIDENCE_TOOL]
 

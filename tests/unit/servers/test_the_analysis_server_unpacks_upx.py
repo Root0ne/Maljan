@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import binary, upx
+from malspark.tools import binary, upx
 from tests.unit.tools import synthetic_upx as su
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -34,8 +34,8 @@ def server() -> Any:
 
 @pytest.fixture(autouse=True)
 def _the_test_s_own_directory_is_a_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", str(tmp_path / "samples"))
-    monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+    monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", str(tmp_path / "samples"))
+    monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
 
 
 def _sample(tmp_path: Path, data: bytes, name: str = "packed.exe") -> str:

@@ -15,15 +15,15 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents.base_agent import claims_unread_sentence, read_claim_blocks
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import claims_unread_sentence, read_claim_blocks
+from malspark.pipeline.validation import (
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     TECHNIQUE_LINE_UNREAD_CODE,
     parse_violations,
     validate_isr,
 )
-from maljan.schemas.isr_models import AgentISR
-from maljan.tools import knowledge
+from malspark.schemas.isr_models import AgentISR
+from malspark.tools import knowledge
 
 
 def _block(line: str) -> str:
@@ -124,7 +124,7 @@ def test_a_separator_closing_the_technique_line_is_not_part_of_it() -> None:
 
 
 def test_the_claim_format_asks_for_ids_alone() -> None:
-    from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
+    from malspark.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 
     assert "TECHNIQUE: <T-ID, several separated by commas, or NONE>" in CLAIM_FORMAT_FRAGMENT
 

@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     TECHNIQUE_ANSWER_FORM,
     TECHNIQUE_ANSWER_UNREAD,
     TECHNIQUE_QUESTION_NOT_ASKED,
@@ -27,23 +27,23 @@ from maljan.agents.judge_agent import (
     read_technique_answer,
     technique_question_text,
 )
-from maljan.agents.tool_fence import fenced
-from maljan.extractors.capability_matrix import (
+from malspark.agents.tool_fence import fenced
+from malspark.extractors.capability_matrix import (
     FINDING_ONLY_REASON,
     NOT_ASKED_UNKNOWN_ID,
     build_capability_matrix,
     judge_questions,
     techniques_for_the_judge,
 )
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.isr_models import (
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.isr_models import (
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
     AgentISR,
     ClaimEvidence,
     Finding,
 )
-from maljan.schemas.stix_models import Bundle, TechniqueDecision, TechniqueReview
+from malspark.schemas.stix_models import Bundle, TechniqueDecision, TechniqueReview
 
 # In the bundle; claimed by one analyst and left out of it; named on a finding only.
 IN_BUNDLE = "T1112"
@@ -147,14 +147,14 @@ def _ask(
 
 def _published(review: TechniqueReview | None) -> tuple[dict[str, Any], set[str]]:
     bundle = _bundle()
-    bundle.x_maljan_technique_review = review
+    bundle.x_malspark_technique_review = review
     cells, mappings = build_capability_matrix(stix_output=bundle.model_dump(), isr_reports=_isrs())
     return {c.technique_id: c for c in cells}, {m.technique_id for m in mappings}
 
 
 def _markdown(review: TechniqueReview | None) -> str:
     bundle = _bundle()
-    bundle.x_maljan_technique_review = review
+    bundle.x_malspark_technique_review = review
     cells, mappings = build_capability_matrix(stix_output=bundle.model_dump(), isr_reports=_isrs())
     report = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64), file_name="s.exe"),
@@ -307,9 +307,9 @@ class TestNoAnswer:
 
 class TestTheJudgeNodeKeepsTheAnswer:
     def test_the_answer_is_on_the_judge_s_bundle(self) -> None:
-        from maljan.agents.judge_agent import JudgeVerdict
-        from maljan.pipeline.nodes import make_judge_node
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.judge_agent import JudgeVerdict
+        from malspark.pipeline.nodes import make_judge_node
+        from malspark.schemas.evidence import EvidenceCounter
         from tests.unit.pipeline.test_degraded_mode_at_the_judge_node import _Container, _state
 
         container = _Container(EvidenceCounter())
@@ -325,7 +325,7 @@ class TestTheJudgeNodeKeepsTheAnswer:
 
         update = asyncio.run(make_judge_node(container)(_state([])))
 
-        assert update["stix_output"]["x_maljan_technique_review"] == review.model_dump()
+        assert update["stix_output"]["x_malspark_technique_review"] == review.model_dump()
         kwargs = judge.decide_techniques.await_args.kwargs
         assert kwargs["verdict_timed_out"] is False
         assert kwargs["run_state"]
@@ -401,7 +401,7 @@ class TestTheAnswerShapes:
         assert _read(answer) == [(LEFT_OUT, "drop", "on reflection")]
 
     def test_a_structured_answer_is_read_from_the_schema(self, monkeypatch) -> None:
-        from maljan.agents.judge_agent import TechniqueAnswer, TechniqueAnswerRow
+        from malspark.agents.judge_agent import TechniqueAnswer, TechniqueAnswerRow
 
         parsed = TechniqueAnswer(
             decisions=[TechniqueAnswerRow(id=LEFT_OUT, decision="drop", reason="schema")]
@@ -462,7 +462,7 @@ class TestTheQuestionShowsWhatItAsksAbout:
         assert judge._question_room(500, 200) == (1000 - 200) * 4 - 500
 
     def test_no_learned_window_shows_everything_whole(self) -> None:
-        from maljan.agents.judge_agent import _fit_evidence
+        from malspark.agents.judge_agent import _fit_evidence
 
         assert _fit_evidence(dict(EVIDENCE), None) == (dict(EVIDENCE), "")
 
@@ -520,7 +520,7 @@ class TestTheEvidenceIsShownAsStored:
     def test_stored_case_the_tool_and_the_marks(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.agents.judge_agent import (
+        from malspark.agents.judge_agent import (
             LOWERED_ENTRY_MARK,
             PARTIAL_ENTRY_MARK,
             question_evidence,
@@ -616,7 +616,7 @@ class TestTheStructuredPathsEdges:
         assert [(d.technique_id, d.decision) for d in review.decisions] == [(LEFT_OUT, "keep")]
 
     def test_an_answer_in_another_shape_is_still_a_call_on_the_ledger(self, monkeypatch) -> None:
-        from maljan.core.token_ledger import TokenLedger
+        from malspark.core.token_ledger import TokenLedger
 
         class _Bare:
             async def ainvoke(self, messages: list[Any]) -> Any:
@@ -649,7 +649,7 @@ class TestTheStructuredPathsEdges:
         assert admissions == ["technique question", "technique question"]
 
     def test_a_text_question_the_ceiling_refuses_is_not_asked(self, monkeypatch) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         class _Refused:
             async def ainvoke(self, messages: list[Any]) -> Any:

@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import transforms
+from malspark.tools import transforms
 from tests.unit.tools.synthetic_pe import SyntheticPE
 from tests.unit.tools.test_byte_transforms import PLAIN, _rc4_reference
 
@@ -35,8 +35,8 @@ def server() -> Any:
 
 @pytest.fixture(autouse=True)
 def _the_test_s_own_directory_is_a_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", str(tmp_path / "samples"))
-    monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+    monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", str(tmp_path / "samples"))
+    monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
 
 
 def _sample(tmp_path: Path) -> tuple[str, int]:

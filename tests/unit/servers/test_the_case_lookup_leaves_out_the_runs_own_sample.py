@@ -2,7 +2,7 @@
 
 ``similar_cases`` takes ``exclude_sample_id`` so a re-analysis is not its own
 prior art. The model never supplies it: the knowledge sidecar reads the run's
-sample sha256 from ``MALJAN_SAMPLE_SHA256``, which the platform writes into the
+sample sha256 from ``MALSPARK_SAMPLE_SHA256``, which the platform writes into the
 child's environment at attach, for a server that asks for it, and clears first.
 """
 
@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.providers.servers import ServerHandle, ServerRegistry
-from maljan.tools import knowledge as knowledge_tools
+from malspark.core.config import Settings
+from malspark.providers.servers import ServerHandle, ServerRegistry
+from malspark.tools import knowledge as knowledge_tools
 
 ROOT = Path(__file__).resolve().parents[3]
 SHA = "ab" * 32

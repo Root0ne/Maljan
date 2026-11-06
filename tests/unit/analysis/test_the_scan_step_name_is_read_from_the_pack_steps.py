@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from maljan.analysis.anti_analysis import SCAN_RENDERER, SCAN_TOOL
-from maljan.core.pack_steps import default_steps
+from malspark.analysis.anti_analysis import SCAN_RENDERER, SCAN_TOOL
+from malspark.core.pack_steps import default_steps
 
 
 def test_the_pass_is_named_by_the_shipped_step_of_its_renderer() -> None:
@@ -12,6 +12,6 @@ def test_the_pass_is_named_by_the_shipped_step_of_its_renderer() -> None:
 
 
 def test_the_pack_dispatches_the_pass_under_that_name() -> None:
-    from maljan.pipeline import triage_pack
+    from malspark.pipeline import triage_pack
 
     assert SCAN_TOOL in triage_pack._BUILTIN_STEPS

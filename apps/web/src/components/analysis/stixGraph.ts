@@ -5,7 +5,7 @@
  * node, edge and label here is something the bundle states. An object with no
  * relationship is still a node; a relationship is an edge labelled with its
  * own `relationship_type`; a confidence is printed only when the bundle holds
- * one on the 0–1 scale the platform writes (`x_maljan_confidence`) or on the
+ * one on the 0–1 scale the platform writes (`x_malspark_confidence`) or on the
  * standard's 0–100 scale (`confidence`), and never filled in. Where the nodes
  * sit is presentation: the layout below places them so that edges are short
  * and nodes do not overlap, and says nothing about the objects.
@@ -31,8 +31,8 @@ export interface GraphNode {
 /** A confidence exactly as the bundle states it, with the scale it is on. */
 export interface StatedConfidence {
   value: number;
-  /** `x_maljan_confidence` is 0–1; the standard's `confidence` is 0–100. */
-  property: "x_maljan_confidence" | "confidence";
+  /** `x_malspark_confidence` is 0–1; the standard's `confidence` is 0–100. */
+  property: "x_malspark_confidence" | "confidence";
 }
 
 export interface GraphEdge {
@@ -108,11 +108,11 @@ export function bundleObjects(bundle: unknown): StixObject[] {
 }
 
 /** The property the export writes an object's ledger ids under. */
-export const EVIDENCE_REFS_PROPERTY = "x_maljan_evidence_refs";
+export const EVIDENCE_REFS_PROPERTY = "x_malspark_evidence_refs";
 
 /**
  * The ledger ids an object carries: the `ev_` ids in the export's
- * `x_maljan_evidence_refs`, which it writes from the run's record and only
+ * `x_malspark_evidence_refs`, which it writes from the run's record and only
  * where the record ties the object to entries. No other property is read, and
  * an id in a description or a pattern stays text.
  */
@@ -177,10 +177,10 @@ export function labelOf(obj: StixObject): string {
  * then prints none. The object's JSON still shows whatever it holds.
  */
 export function statedConfidence(obj: Record<string, unknown>): StatedConfidence | null {
-  const own = obj.x_maljan_confidence;
+  const own = obj.x_malspark_confidence;
   if (typeof own === "number" || (typeof own === "string" && own.trim() !== "")) {
     const n = Number(own);
-    if (Number.isFinite(n) && n >= 0 && n <= 1) return { value: n, property: "x_maljan_confidence" };
+    if (Number.isFinite(n) && n >= 0 && n <= 1) return { value: n, property: "x_malspark_confidence" };
   }
   const std = obj.confidence;
   if (typeof std === "number" && Number.isInteger(std) && std >= 0 && std <= 100) {
@@ -587,10 +587,10 @@ export function graphViewHint(objectCount: number): string | null {
 }
 
 /** The file name a bundle downloads under: a draft never carries the export's. */
-export const STIX_EXPORT_FILE = "maljan-stix-bundle.json";
-export const STIX_DRAFT_FILE = "maljan-stix-bundle-draft.json";
+export const STIX_EXPORT_FILE = "malspark-stix-bundle.json";
+export const STIX_DRAFT_FILE = "malspark-stix-bundle-draft.json";
 /** The ATT&CK Navigator layer of the techniques the report publishes. */
-export const NAVIGATOR_LAYER_FILE = "maljan-attack-layer.json";
+export const NAVIGATOR_LAYER_FILE = "malspark-attack-layer.json";
 
 export interface StixAnswer {
   bundle: Record<string, unknown>;
@@ -602,7 +602,7 @@ export interface StixAnswer {
 /**
  * What `/stix` (or the stored report's bundle) holds, read for its label.
  * The API names the flag `published` in its envelope (`{published: false,
- * notice, bundle}`); only a stored bundle names it `x_maljan_published`.
+ * notice, bundle}`); only a stored bundle names it `x_malspark_published`.
  */
 export function readStixAnswer(data: unknown): StixAnswer {
   const record: Record<string, unknown> =
@@ -615,8 +615,8 @@ export function readStixAnswer(data: unknown): StixAnswer {
       notice: typeof record.notice === "string" ? record.notice : null,
     };
   }
-  if (record.x_maljan_published === false) {
-    const note = record.x_maljan_notice;
+  if (record.x_malspark_published === false) {
+    const note = record.x_malspark_notice;
     return { bundle: record, draft: true, notice: typeof note === "string" ? note : null };
   }
   return { bundle: record, draft: false, notice: null };

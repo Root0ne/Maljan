@@ -175,7 +175,7 @@ class TestAValueTheNewFieldWouldRefuse:
 
     def test_what_is_left_behind_is_still_the_budget_that_is_used(self) -> None:
         """The deprecated-map fallback reads it, held to the same bound."""
-        from maljan.agents.base_agent import a_budget
+        from malspark.agents.base_agent import a_budget
 
         assert a_budget(0) is None
         assert a_budget(True) is None
@@ -202,7 +202,7 @@ class TestAValueTheNewFieldWouldRefuse:
 
     def test_the_stored_settings_still_build_after_the_move(self) -> None:
         """The property the whole check exists for, asserted against the model."""
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         conn = _connect()
         _insert(conn, DEFINITIONS, {"scout": {"role": "generic", "prompt": "p"}})

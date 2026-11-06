@@ -100,8 +100,8 @@ for _row in _PINNED["observations"]:
 @pytest.fixture(autouse=True)
 def no_process_wide_setting_outlives_a_run() -> Iterator[None]:
     """Every run puts back the settings singleton and the sidecars' sample roots."""
-    from maljan.core import config
-    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+    from malspark.core import config
+    from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
     settings, roots = config._settings_instance, os.environ.get(SAMPLE_ROOTS_ENV)
     yield
@@ -153,7 +153,7 @@ def test_every_anthropic_composer_call_is_streamed_as_the_product_streams_it(
     answer's join carries; a rehearsal whose composer calls stopped streaming
     would pass without rehearsing that path at all.
     """
-    from maljan.llm.anthropic_provider import needs_streaming
+    from malspark.llm.anthropic_provider import needs_streaming
 
     rehearsal = Rehearsal(scenario="normal", provider="anthropic", work_dir=tmp_path / "run")
     record = asyncio.run(rehearse(rehearsal))
@@ -201,7 +201,7 @@ ALL_TOOLS = Path(__file__).resolve().parents[2] / "docs/examples/profiles/all-to
 
 
 def _all_tools_team() -> dict[str, object]:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     values = json.loads(ALL_TOOLS.read_text(encoding="utf-8"))["values"]
     analysis = build_settings({}).mcp.servers["analysis"].model_dump(mode="json")
@@ -261,7 +261,7 @@ _SMALL_JUDGE = {"llm.openai.judge_model": "deepseek-v3", "llm.agents": {}}
 
 @pytest.fixture
 def small_judge_priced(monkeypatch: pytest.MonkeyPatch) -> None:
-    from maljan.core import spend
+    from malspark.core import spend
 
     prices = dict(spend.table_prices())
     monkeypatch.setattr(spend, "_table", {**prices, "deepseek-v3": prices["deepseek-v4-flash"]})
@@ -299,7 +299,7 @@ def test_a_window_taken_over_fewer_models_than_the_job_calls_still_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The gate reads the job's models on its own, so a product window left wide is named."""
-    from maljan.agents import composition
+    from malspark.agents import composition
 
     real = composition.window_assignments
 
@@ -366,7 +366,7 @@ def test_a_lead_team_window_that_leaves_the_specialists_out_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A product window over the stages' agents alone is named by the gate."""
-    from maljan.agents import composition
+    from malspark.agents import composition
 
     real = composition.called_assignments
 

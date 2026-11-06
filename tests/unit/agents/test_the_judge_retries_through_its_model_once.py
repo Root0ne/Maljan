@@ -21,9 +21,9 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from maljan.agents import judge_agent
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.llm.transient import DEFAULT_ATTEMPTS, with_transient_retries
+from malspark.agents import judge_agent
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.llm.transient import DEFAULT_ATTEMPTS, with_transient_retries
 
 _REQUEST = httpx.Request("POST", "http://127.0.0.1:8080/v1")
 
@@ -102,8 +102,8 @@ class TestARetryNamesTheCallItRetried:
     """The judge and the mediator are both filed under ``judge``: the row says which call."""
 
     def test_the_no_tools_call_s_retries_name_it(self, caplog: pytest.LogCaptureFixture) -> None:
-        from maljan.core.token_ledger import TokenLedger
-        from maljan.llm.transient import attach_retry_recorder
+        from malspark.core.token_ledger import TokenLedger
+        from malspark.llm.transient import attach_retry_recorder
 
         ledger = TokenLedger()
         model = attach_retry_recorder(
@@ -119,8 +119,8 @@ class TestARetryNamesTheCallItRetried:
         assert any("Judge no-tools path" in record.getMessage() for record in caplog.records)
 
     def test_the_verdict_s_retries_name_it(self) -> None:
-        from maljan.core.token_ledger import TokenLedger
-        from maljan.llm.transient import attach_retry_recorder
+        from malspark.core.token_ledger import TokenLedger
+        from malspark.llm.transient import attach_retry_recorder
 
         ledger = TokenLedger()
         model = attach_retry_recorder(_model([]), ledger, "judge")
@@ -134,8 +134,8 @@ class TestARetryNamesTheCallItRetried:
         assert all(row["reason"].startswith("Judge verdict") for row in rows)
 
     def test_a_call_with_no_name_is_a_model_call(self) -> None:
-        from maljan.core.token_ledger import TokenLedger
-        from maljan.llm.transient import attach_retry_recorder
+        from malspark.core.token_ledger import TokenLedger
+        from malspark.llm.transient import attach_retry_recorder
 
         ledger = TokenLedger()
         model = attach_retry_recorder(_model([_status(503), "fine"]), ledger, "judge")
@@ -154,7 +154,7 @@ class TestARetryNamesTheCallItRetried:
                 return super()._generate(messages, stop, run_manager, **kw)
 
         model = with_transient_retries(_Seen)(script=["a", "b"], asked=[])
-        from maljan.llm.transient import as_call
+        from malspark.llm.transient import as_call
 
         asyncio.run(model.ainvoke([HumanMessage("x")]))
         asyncio.run(as_call("Judge verdict", model.ainvoke([HumanMessage("x")])))

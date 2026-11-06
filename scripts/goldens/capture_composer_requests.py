@@ -30,7 +30,7 @@ Two uses, both with no model and no network:
   Run once against a base tree and once against the change (``--concurrent``),
   then ``diff -r`` the two directories.
 
-The maljan package is whichever is first on ``PYTHONPATH``; ``--concurrent``
+The malspark package is whichever is first on ``PYTHONPATH``; ``--concurrent``
 passes ``concurrent=True``, which a base without it does not take.
 """
 
@@ -67,8 +67,8 @@ def _digest(text: str) -> str:
 
 
 def _compose(llm: Any, report: Any, isr: Any, concurrent: bool, **kwargs: Any) -> Any:
-    import maljan.reporting.composer as composer_module
-    from maljan.reporting.composer import ReportComposer
+    import malspark.reporting.composer as composer_module
+    from malspark.reporting.composer import ReportComposer
 
     composer = ReportComposer(llm=llm, per_section_timeout=60)
     if concurrent:
@@ -79,8 +79,8 @@ def _compose(llm: Any, report: Any, isr: Any, concurrent: bool, **kwargs: Any) -
 
 
 def _written(composer: Any, report: Any) -> dict[str, Any]:
-    from maljan.reporting.renderers.html import HtmlRenderer
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.renderers.html import HtmlRenderer
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     return {
         "report_sha256": _digest(report.model_dump_json()),
@@ -171,9 +171,9 @@ def replay(runs: list[Path], out: Path, concurrent: bool) -> None:
         _section_of,
     )
 
-    from maljan.reporting.models import MalwareReport
-    from maljan.reporting.renderers.html import HtmlRenderer
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.models import MalwareReport
+    from malspark.reporting.renderers.html import HtmlRenderer
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     class _Replay(_Recorder):
         def __init__(self, answers: dict[str, Any]) -> None:
@@ -236,7 +236,7 @@ def main() -> int:
         "its own commit and a run of today's code must not overwrite it by default)",
     )
     args = parser.parse_args()
-    import maljan.reporting.composer as composer_module
+    import malspark.reporting.composer as composer_module
 
     print(f"composer from {composer_module.__file__}", file=sys.stderr)
     if args.replay:

@@ -1,5 +1,5 @@
 version: "1.0"
-description: "Maljan built-in YARA-TTP rules for deterministic ATT&CK technique detection"
+description: "Malspark built-in YARA-TTP rules for deterministic ATT&CK technique detection"
 rules:
   # T1055 - Process Injection
   - id: process_injection_apis

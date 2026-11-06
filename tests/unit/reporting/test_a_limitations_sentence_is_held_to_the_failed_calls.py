@@ -22,8 +22,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
-from maljan.pipeline.validation import EntryTexts
-from maljan.reporting.models import (
+from malspark.pipeline.validation import EntryTexts
+from malspark.reporting.models import (
     EvidenceSection,
     FileHashes,
     KeyFinding,
@@ -32,7 +32,7 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.section_agreement import (
+from malspark.reporting.section_agreement import (
     CLAIM_LED,
     DROPPED_CODE,
     FACT,
@@ -45,7 +45,7 @@ from maljan.reporting.section_agreement import (
     passages_of,
     prompt_text,
 )
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 from tests.unit.reporting._report_inventory import stored_runs
 
 ROUTINE = 0x401A30
@@ -227,8 +227,8 @@ def test_a_sentence_calling_a_redone_call_failed_is_asked_with_the_failed_calls(
 
 def _held(body: str, ledger: list[LedgerEntry] | None = None) -> list[str]:
     """The sentences held, read with what production reads: the listed routines and bases."""
-    from maljan.reporting.agreement_facts import ledger_facts
-    from maljan.reporting.limitation_facts import limitation_facts
+    from malspark.reporting.agreement_facts import ledger_facts
+    from malspark.reporting.limitation_facts import limitation_facts
 
     ledger = ledger if ledger is not None else _ledger()
     found = ledger_facts(ledger)
@@ -519,7 +519,7 @@ def _left_out(body: str, sentence: str) -> str:
 
 
 def _stored(name: str) -> tuple[MalwareReport, list[LedgerEntry]]:
-    from maljan.reporting.follow_up import stored_ledger
+    from malspark.reporting.follow_up import stored_ledger
 
     root = stored_runs()
     if root is None or not (root / name / "report.json").is_file():
@@ -571,8 +571,8 @@ def test_no_stored_run_but_haiku8_and_haiku10_hold_their_limitations_to_the_fail
 def test_a_call_a_later_call_answered_but_did_not_redo_is_not_redone() -> None:
     # run3's ev_0182 (no function at 0x1360bc08690) is answered for its address
     # by ev_0270, which asked another question: it stands, and its fact says so.
-    from maljan.reporting.agreement_facts import ledger_facts
-    from maljan.reporting.limitation_facts import failed_calls
+    from malspark.reporting.agreement_facts import ledger_facts
+    from malspark.reporting.limitation_facts import failed_calls
 
     report, ledger = _stored("run3")
     found = ledger_facts(ledger)
@@ -587,8 +587,8 @@ def test_the_stored_run_s_reversing_tools_sentence_is_asked() -> None:
     report, ledger = _haiku8()
     passages = {p.id: p for p in passages_of(report, entries=ledger)}
     limitations = passages["limitations"]
-    from maljan.reporting.agreement_facts import ledger_facts
-    from maljan.reporting.limitation_facts import limitation_facts
+    from malspark.reporting.agreement_facts import ledger_facts
+    from malspark.reporting.limitation_facts import limitation_facts
 
     found = ledger_facts(ledger)
     read = limitation_facts(report, ledger, found.answered, found.image_bases)

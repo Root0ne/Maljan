@@ -17,9 +17,9 @@ from typing import Any
 import pytest
 
 from app.services.server_map import shown_trust_of, validate_server_map
-from maljan.core.config import Settings
-from maljan.core.settings_overrides import build_settings
-from maljan.core.tool_declarations import ToolDeclarations
+from malspark.core.config import Settings
+from malspark.core.settings_overrides import build_settings
+from malspark.core.tool_declarations import ToolDeclarations
 
 
 def _trusted(out: dict[str, Any], key: str) -> bool:
@@ -152,7 +152,7 @@ def test_an_untick_turns_the_trust_off() -> None:
 def test_a_grant_outlives_a_release_that_changes_nothing_of_the_launch(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import maljan.core.tool_declarations as td
+    import malspark.core.tool_declarations as td
 
     entry = {
         **_shipped(),

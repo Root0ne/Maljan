@@ -1,8 +1,8 @@
 """Tests for Parser implementations (unchanged imports)."""
 
-from maljan.parsers.dynamic_parser import DynamicParser
-from maljan.parsers.network_parser import NetworkParser
-from maljan.parsers.static_parser import StaticParser
+from malspark.parsers.dynamic_parser import DynamicParser
+from malspark.parsers.network_parser import NetworkParser
+from malspark.parsers.static_parser import StaticParser
 
 
 class TestStaticParser:

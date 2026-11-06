@@ -12,9 +12,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from maljan.agents.judge_agent import CONSENSUS_THRESHOLD, JudgeAgent
-from maljan.pipeline.mediation_models import MediatorVerdict
-from maljan.pipeline.state import AgentArgument
+from malspark.agents.judge_agent import CONSENSUS_THRESHOLD, JudgeAgent
+from malspark.pipeline.mediation_models import MediatorVerdict
+from malspark.pipeline.state import AgentArgument
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ class TestJudgeAgentInit:
     """JudgeAgent is a standalone class — no BaseAnalyst inheritance."""
 
     def test_is_not_base_analyst(self) -> None:
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         llm = MagicMock()
         judge = JudgeAgent(llm=llm)
@@ -257,7 +257,7 @@ class TestFallbackBundleFailsClosed:
 
     @staticmethod
     def _isr(*technique_ids: str):
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+        from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
         return {
             "static": AgentISR(
@@ -312,8 +312,8 @@ class TestFallbackBundleFailsClosed:
                 "T1486 and T1490 look likely.", {}, self._isr("T1055.001")
             )
         )
-        assert record["x_maljan_model_only_technique_ids"] == ["T1486", "T1490"]
-        assert record["x_maljan_degraded_path"] is True
+        assert record["x_malspark_model_only_technique_ids"] == ["T1486", "T1490"]
+        assert record["x_malspark_degraded_path"] is True
 
     def test_what_was_dropped_is_recorded_on_a_malware_verdict_too(self, judge) -> None:
         record = self._record(
@@ -322,13 +322,13 @@ class TestFallbackBundleFailsClosed:
             )
         )
         assert record["type"] == "malware"
-        assert record["x_maljan_model_only_technique_ids"] == ["T1486", "T1490"]
+        assert record["x_malspark_model_only_technique_ids"] == ["T1486", "T1490"]
 
     def test_no_empty_custom_property_when_nothing_was_dropped(self, judge) -> None:
         malware = self._record(
             judge._fallback_bundle_from_text("T1055.001 only.", {}, self._isr("T1055.001"))
         )
-        assert "x_maljan_model_only_technique_ids" not in malware, (
+        assert "x_malspark_model_only_technique_ids" not in malware, (
             "an empty array serialised as present is one of the two conformance "
             "defects an external validator found in this emitter"
         )
@@ -391,7 +391,7 @@ class TestJudgeToolCallsAreCitable:
         assert entries[0].structured == {"indicator": "c2.evil.tld", "malicious": 7}
 
     def test_the_ids_continue_the_job_s_sequence(self, mock_llm: MagicMock) -> None:
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.schemas.evidence import EvidenceCounter
 
         counter = EvidenceCounter()
         counter.next_id()
@@ -447,7 +447,7 @@ class _ScriptedModel:
 
 
 def _claiming_isrs() -> dict:
-    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+    from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
     return {
         name: AgentISR(
@@ -507,7 +507,7 @@ class TestAMediationThatListsContradictionsIsNotConsensus:
         assert len(model.sent) == 1
 
     def test_a_missing_block_is_asked_for_once(self) -> None:
-        from maljan.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION
+        from malspark.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION
 
         model = _ScriptedModel(
             "All aligned.\nagreement_confidence: 1.0",
@@ -523,7 +523,7 @@ class TestAMediationThatListsContradictionsIsNotConsensus:
         assert "ev_0004 says otherwise" in argument.finding
 
     def test_a_block_still_missing_is_stated_and_the_number_read_as_before(self) -> None:
-        from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
+        from malspark.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
 
         model = _ScriptedModel(
             "All aligned.\nagreement_confidence: 1.0", "agreement_confidence: 1.0"
@@ -547,7 +547,7 @@ class TestAMediationThatListsContradictionsIsNotConsensus:
         assert argument.confidence_score == pytest.approx(1.0)
 
     def test_the_prompt_asks_for_the_block_and_counts_a_ledger_contradiction(self) -> None:
-        from maljan.agents.judge_agent import CONTRADICTION_DEFINITION, CONTRADICTIONS_BLOCK_RULE
+        from malspark.agents.judge_agent import CONTRADICTION_DEFINITION, CONTRADICTIONS_BLOCK_RULE
 
         model = _ScriptedModel("CONTRADICTIONS: NONE\nagreement_confidence: 1.0")
         _mediate_with(model)
@@ -589,7 +589,7 @@ class TestTheBlockQuestionSurvivesADroppedConnection:
         """Asked again by the model itself, as every provider's model asks (``llm.transient``)."""
         import openai
 
-        from maljan.llm.transient import with_transient_retries
+        from malspark.llm.transient import with_transient_retries
 
         class _Flaky(_ScriptedModel):
             dropped = False
@@ -604,7 +604,7 @@ class TestTheBlockQuestionSurvivesADroppedConnection:
             "All aligned.\nagreement_confidence: 1.0",
             "CONTRADICTIONS:\n- static: x — ev_0004\nagreement_confidence: 0.9",
         )
-        with patch("maljan.llm.transient.asyncio.sleep", AsyncMock(return_value=None)):
+        with patch("malspark.llm.transient.asyncio.sleep", AsyncMock(return_value=None)):
             argument, is_consensus = _mediate_with(model)
 
         assert model.dropped is True
@@ -614,7 +614,7 @@ class TestTheBlockQuestionSurvivesADroppedConnection:
 
 class TestTheJudgeHasOneCapReader:
     def test_the_usage_check_and_the_judge_read_the_same_cap(self) -> None:
-        from maljan.agents.judge_agent import judge_output_cap
+        from malspark.agents.judge_agent import judge_output_cap
 
         judge = JudgeAgent(llm=MagicMock())
         assert judge.output_cap_tokens() == int(judge_output_cap().tokens or 0)
@@ -645,8 +645,8 @@ class TestTheBlockAsTheMediatorWroteIt:
         assert is_consensus is False
 
     def test_a_mixed_block_keeps_its_items_and_says_so(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
-        from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MIXED_NOTE
+        from malspark.analysis.run_summary import RunSummaryBuilder
+        from malspark.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MIXED_NOTE
 
         model = _ScriptedModel(
             "CONTRADICTIONS:\n- static: x — dynamic: y\nNONE\nagreement_confidence: 1.0"
@@ -674,7 +674,7 @@ class TestAnAmbiguousNoneIsAskedOnce:
 
     @pytest.mark.parametrize("first", SHAPES)
     def test_each_shape_is_asked_once_and_a_none_answer_is_consensus(self, first: str) -> None:
-        from maljan.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION
+        from malspark.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION
 
         model = _ScriptedModel(first, "CONTRADICTIONS: NONE\nagreement_confidence: 1.0")
         argument, is_consensus = _mediate_with(model)
@@ -697,7 +697,7 @@ class TestAnAmbiguousNoneIsAskedOnce:
         assert argument.contradictions == []
 
     def test_an_answer_still_mixed_goes_to_revision_with_the_note(self) -> None:
-        from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MIXED_NOTE
+        from malspark.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MIXED_NOTE
 
         model = _ScriptedModel(
             self.SHAPES[0],
@@ -710,7 +710,7 @@ class TestAnAmbiguousNoneIsAskedOnce:
         assert argument.note == CONTRADICTIONS_BLOCK_MIXED_NOTE
 
     def test_a_question_that_gets_no_answer_leaves_the_lines_standing(self) -> None:
-        from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MIXED_NOTE
+        from malspark.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MIXED_NOTE
 
         model = _ScriptedModel(self.SHAPES[0], "")
         argument, is_consensus = _mediate_with(model)

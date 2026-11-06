@@ -97,7 +97,7 @@ def _key_finding_cites_nothing(run: dict[str, Any]) -> None:
 
 
 def _stix_cites_nothing(run: dict[str, Any]) -> None:
-    run["stix"]["objects"][4]["x_maljan_evidence_refs"] = ["ev_0042"]
+    run["stix"]["objects"][4]["x_malspark_evidence_refs"] = ["ev_0042"]
 
 
 def _section_text_beside_rows(run: dict[str, Any]) -> None:

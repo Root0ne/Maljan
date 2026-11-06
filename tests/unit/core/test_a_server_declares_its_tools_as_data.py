@@ -1,7 +1,7 @@
 """A server's declaration: its schema, paths, patterns, merge rule and read API.
 
 The declaration is what the core will read about a tool instead of a table of
-tool names (``maljan.core.tool_declarations``). These tests hold the schema to
+tool names (``malspark.core.tool_declarations``). These tests hold the schema to
 an open vocabulary checked by shape, the field paths and the declared patterns
 to linear readers, a built-in's stored block to the merge rule ``sample_open``
 already follows, and the read API to the source an entry recorded when it was
@@ -17,8 +17,8 @@ import pytest
 from pydantic import ValidationError
 from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 
-from maljan.core.config import MCPServerConfig, Settings, StaticConfig
-from maljan.core.tool_declarations import (
+from malspark.core.config import MCPServerConfig, Settings, StaticConfig
+from malspark.core.tool_declarations import (
     PACK,
     SANDBOX,
     ErrorPattern,
@@ -58,7 +58,7 @@ def test_a_declaration_may_name_no_kind_and_state_kind_free_fields(kind: str) ->
 
 
 def test_effects_may_declare_a_tool_answers_offline_without_credentials() -> None:
-    from maljan.core.tool_declarations import ToolEffects
+    from malspark.core.tool_declarations import ToolEffects
 
     assert ToolEffects().offline_without_credentials is None
     facts = ToolFacts.model_validate(
@@ -87,7 +87,7 @@ def test_an_edit_a_kind_would_be_needed_to_read_is_refused(
     declared: dict[str, Any], message: str
 ) -> None:
     """The rules hold for what an operator types now (``strict_declarations``)."""
-    from maljan.core.tool_declarations import strict_declarations
+    from malspark.core.tool_declarations import strict_declarations
 
     with strict_declarations():
         with pytest.raises(ValidationError, match=message):
@@ -123,11 +123,11 @@ def test_what_was_already_accepted_is_read_with_what_this_version_cannot_read_le
     """Stored, shipped, runtime and imported declarations never fail on a key or field."""
     import logging
 
-    from maljan.core import tool_declarations
+    from malspark.core import tool_declarations
 
     tool_declarations._WARNED.clear()
     other = {"kind": "strings", "rows": "/strings/*"}
-    with caplog.at_level(logging.WARNING, logger="maljan"):
+    with caplog.at_level(logging.WARNING, logger="malspark"):
         block = MCPServerConfig.model_validate(
             {"command": "x", "tool_facts": {"scan": declared, "other": other}}
         )
@@ -150,11 +150,11 @@ def test_what_was_already_accepted_is_read_with_what_this_version_cannot_read_le
 def test_a_key_left_out_is_logged_on_one_line(caplog: pytest.LogCaptureFixture) -> None:
     import logging
 
-    from maljan.core import tool_declarations
+    from malspark.core import tool_declarations
 
     tool_declarations._WARNED.clear()
     forged = "note\nFAKE RECORD: everything is fine"
-    with caplog.at_level(logging.WARNING, logger="maljan"):
+    with caplog.at_level(logging.WARNING, logger="malspark"):
         MCPServerConfig.model_validate(
             {"command": "x", "tool_facts": {"scan\rtool": {"kind": "strings", forged: 1}}}
         )
@@ -164,8 +164,8 @@ def test_a_key_left_out_is_logged_on_one_line(caplog: pytest.LogCaptureFixture) 
 
 
 def test_a_runtime_provider_block_with_an_unknown_key_keeps_the_rest_of_its_declaration() -> None:
-    from maljan.core import declared_reading
-    from maljan.core.tool_declarations import (
+    from malspark.core import declared_reading
+    from malspark.core.tool_declarations import (
         forget_provider_declaration,
         provider_declarations,
         register_provider_declaration,
@@ -191,7 +191,7 @@ def test_a_runtime_provider_block_with_an_unknown_key_keeps_the_rest_of_its_decl
 
 
 def test_the_fields_split_once_into_kind_free_and_kind_dependent() -> None:
-    from maljan.core.tool_declarations import KIND_DEPENDENT_FIELDS, KIND_FREE_FIELDS
+    from malspark.core.tool_declarations import KIND_DEPENDENT_FIELDS, KIND_FREE_FIELDS
 
     assert not set(KIND_FREE_FIELDS) & set(KIND_DEPENDENT_FIELDS)
     assert {*KIND_FREE_FIELDS, *KIND_DEPENDENT_FIELDS, "kind"} == set(ToolFacts.model_fields)
@@ -204,8 +204,8 @@ def test_every_shipped_declaration_and_stored_record_loads_as_before() -> None:
 
     from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 
-    from maljan.core import declared_reading
-    from maljan.core.builtin_declarations import builtin_server_names, server_declaration
+    from malspark.core import declared_reading
+    from malspark.core.builtin_declarations import builtin_server_names, server_declaration
 
     for key in builtin_server_names():
         block = server_declaration(key)
@@ -218,7 +218,7 @@ def test_every_shipped_declaration_and_stored_record_loads_as_before() -> None:
     root = _benchmark()
     if root is None:
         pytest.skip("the stored benchmark runs are not on this machine")
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.schemas.evidence import LedgerEntry
 
     read = 0
     for run in ("run7", "run5", "run4", "local8"):
@@ -346,7 +346,7 @@ def test_a_tool_spelled_as_its_own_servers_renamed_tool_is_refused() -> None:
 
 
 def test_the_separator_is_read_only_after_the_known_server_key() -> None:
-    from maljan.core.tool_declarations import renamed_tool
+    from malspark.core.tool_declarations import renamed_tool
 
     assert renamed_tool("mine", "mine__get__thing") == "get__thing"
     assert renamed_tool("mine", "get__thing") == "get__thing"
@@ -590,7 +590,7 @@ def test_the_cape_mcp_block_carries_its_role() -> None:
 
 
 def test_a_filled_block_strips_back_to_what_the_operator_wrote() -> None:
-    from maljan.core.config import _builtin_servers
+    from malspark.core.config import _builtin_servers
 
     default = _builtin_servers()["analysis"]
     stored = MCPServerConfig.model_validate({"command": "python", "roles": ["mine"]})
@@ -602,7 +602,7 @@ def test_a_filled_block_strips_back_to_what_the_operator_wrote() -> None:
 
 
 def test_a_value_written_equal_to_the_shipped_one_is_not_recorded() -> None:
-    from maljan.core.config import _builtin_servers
+    from malspark.core.config import _builtin_servers
 
     default = _builtin_servers()["analysis"]
     stored = MCPServerConfig.model_validate({"command": "python", "sample_mount": ""})
@@ -679,7 +679,7 @@ def test_an_operator_server_named_like_the_pack_is_its_own_server() -> None:
 
 
 def test_the_generic_providers_entries_are_read_by_the_server_they_recorded() -> None:
-    from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+    from malspark.providers.static.generic_mcp import GenericMCPStaticProvider
 
     servers = {
         "mydis": {"command": "x", "tool_facts": {"pseudo_c": {"kind": "decompile"}}},
@@ -707,8 +707,8 @@ def test_the_generic_providers_entries_are_read_by_the_server_they_recorded() ->
 
 
 def test_radare2_and_ghidra_record_their_own_blocks() -> None:
-    from maljan.providers.static.ghidra import GhidraStaticProvider
-    from maljan.providers.static.r2 import R2StaticProvider
+    from malspark.providers.static.ghidra import GhidraStaticProvider
+    from malspark.providers.static.r2 import R2StaticProvider
 
     settings = Settings()
     assert R2StaticProvider.from_settings(settings).declaration_source == "provider:r2"
@@ -716,8 +716,8 @@ def test_radare2_and_ghidra_record_their_own_blocks() -> None:
 
 
 def test_the_provider_blocks_are_one_table() -> None:
-    from maljan.core.settings_overrides import declaration_blocks
-    from maljan.core.tool_declarations import block_at, provider_blocks
+    from malspark.core.settings_overrides import declaration_blocks
+    from malspark.core.tool_declarations import block_at, provider_blocks
 
     settings = Settings()
     blocks = declaration_blocks(settings)
@@ -769,7 +769,7 @@ def test_a_read_cannot_change_the_shipped_data() -> None:
 
 
 def test_the_module_functions_read_the_settings_given() -> None:
-    from maljan.core.tool_declarations import declaration_for, servers_with_role, tools_of_kind
+    from malspark.core.tool_declarations import declaration_for, servers_with_role, tools_of_kind
 
     settings = Settings()
     entry = {"source": "mcp:analysis", "tool": "strings"}
@@ -793,7 +793,7 @@ DEV_ANSWER = {"matches": [{"offset": "0x400", "tags": ["attack.t1055"]}]}
 
 
 def _dev_entry(facts: dict[str, Any]) -> Any:
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.schemas.evidence import LedgerEntry
 
     return LedgerEntry(
         id="ev_0001",
@@ -808,9 +808,9 @@ def _dev_entry(facts: dict[str, Any]) -> Any:
 
 
 def test_a_dev_record_of_kind_unclassified_with_rows_reads_as_on_dev() -> None:
-    from maljan.analysis.evidence_roots import reading_branch
-    from maljan.core import declared_reading
-    from maljan.pipeline.evidence_summary import asserted_techniques
+    from malspark.analysis.evidence_roots import reading_branch
+    from malspark.core import declared_reading
+    from malspark.pipeline.evidence_summary import asserted_techniques
 
     entry = _dev_entry({"v": 1, **DEV_UNCLASSIFIED})
     facts = declared_reading.facts_of(entry)
@@ -825,8 +825,8 @@ def test_a_dev_record_of_kind_unclassified_with_rows_reads_as_on_dev() -> None:
 
 
 def test_a_stored_declaration_of_kind_unclassified_with_rows_is_kept_whole() -> None:
-    from maljan.core.settings_overrides import build_settings
-    from maljan.core.tool_declarations import ToolFacts, strict_declarations
+    from malspark.core.settings_overrides import build_settings
+    from malspark.core.tool_declarations import ToolFacts, strict_declarations
 
     built = build_settings({"static.ghidra.tool_facts": {"scan_rules": DEV_UNCLASSIFIED}})
     facts = built.static.ghidra.tool_facts["scan_rules"]
@@ -843,8 +843,8 @@ def test_a_stored_declaration_of_kind_unclassified_with_rows_is_kept_whole() -> 
 
 
 def test_a_bare_unclassified_still_reads_as_undeclared() -> None:
-    from maljan.core import declared_reading
-    from maljan.core.tool_declarations import ToolFacts, strict_declarations
+    from malspark.core import declared_reading
+    from malspark.core.tool_declarations import ToolFacts, strict_declarations
 
     entry = _dev_entry({"v": 1, "kind": "unclassified"})
     assert declared_reading.facts_of(entry) is None
@@ -878,16 +878,16 @@ KIND_FREE_SAMPLES: dict[str, Any] = {
 
 
 def _stored_kind_free_fields() -> tuple[str, ...]:
-    from maljan.core.declared_reading import STORED_FACT_FIELDS
-    from maljan.core.tool_declarations import KIND_FREE_FIELDS
+    from malspark.core.declared_reading import STORED_FACT_FIELDS
+    from malspark.core.tool_declarations import KIND_FREE_FIELDS
 
     return tuple(name for name in STORED_FACT_FIELDS if name in KIND_FREE_FIELDS)
 
 
 @pytest.mark.parametrize("kind", ["", "unclassified", None])
 def test_every_stored_kind_free_field_is_read_for_a_record_of_no_kind(kind: str | None) -> None:
-    from maljan.core import declared_reading
-    from maljan.reporting import tool_kinds
+    from malspark.core import declared_reading
+    from malspark.reporting import tool_kinds
 
     assert set(_stored_kind_free_fields()) == set(KIND_FREE_SAMPLES)
     for name in _stored_kind_free_fields():
@@ -902,8 +902,8 @@ def test_every_stored_kind_free_field_is_read_for_a_record_of_no_kind(kind: str 
 
 
 def test_a_kind_free_field_the_validators_refuse_costs_no_other() -> None:
-    from maljan.core import declared_reading
-    from maljan.core.tool_declarations import strict_declarations
+    from malspark.core import declared_reading
+    from malspark.core.tool_declarations import strict_declarations
 
     entry = _dev_entry({"v": 1, "kind": "", "display_name": "S", "arguments": {"Not A Role": "x"}})
     with strict_declarations():
@@ -918,7 +918,7 @@ def test_a_kind_free_field_the_validators_refuse_costs_no_other() -> None:
 def test_a_report_argument_declared_without_a_kind_keeps_the_tool_off_the_file(
     kind: str,
 ) -> None:
-    from maljan.reporting.renderers.markdown import _looked_at_the_file
+    from malspark.reporting.renderers.markdown import _looked_at_the_file
 
     row = {
         "tool": "my_tool",
@@ -931,8 +931,8 @@ def test_a_report_argument_declared_without_a_kind_keeps_the_tool_off_the_file(
 
 
 def test_an_address_argument_declared_without_a_kind_is_read_first() -> None:
-    from maljan.core import declared_reading
-    from maljan.core.undeclared_tools import ADDRESS_ARGUMENTS, address_arguments
+    from malspark.core import declared_reading
+    from malspark.core.undeclared_tools import ADDRESS_ARGUMENTS, address_arguments
 
     entry = _dev_entry({"v": 1, "kind": "unclassified", "arguments": {"address": "offset_va"}})
     assert address_arguments(declared_reading.kind_free_facts(entry))[0] == "offset_va"
@@ -942,7 +942,7 @@ def test_an_address_argument_declared_without_a_kind_is_read_first() -> None:
 
 @pytest.mark.parametrize("kind", ["", "unclassified"])
 def test_an_entry_s_address_argument_declared_without_a_kind_is_read(kind: str) -> None:
-    from maljan.core.undeclared_tools import ADDRESS_ARGUMENTS, entry_address_arguments
+    from malspark.core.undeclared_tools import ADDRESS_ARGUMENTS, entry_address_arguments
 
     entry = _dev_entry({"v": 1, "kind": kind, "arguments": {"address": "offset_va"}})
     assert entry_address_arguments(entry)[0] == "offset_va"
@@ -1121,7 +1121,7 @@ def test_no_kind_free_field_is_read_only_through_a_kind() -> None:
 
     repo = Path(__file__).resolve().parents[3]
     found: list[str] = []
-    for root in ("src/maljan", "apps/api/app"):
+    for root in ("src/malspark", "apps/api/app"):
         for path in sorted((repo / root).rglob("*.py")):
             found += _kind_gated_reads(
                 path.read_text(encoding="utf-8"), str(path.relative_to(repo))

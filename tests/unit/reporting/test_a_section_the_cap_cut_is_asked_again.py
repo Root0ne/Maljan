@@ -16,8 +16,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.pipeline.validation import SECTION_CUT_CODE
-from maljan.reporting.composer import (
+from malspark.pipeline.validation import SECTION_CUT_CODE
+from malspark.reporting.composer import (
     _INSTRUCTIONS,
     ReportComposer,
     _HostIdentifiersOut,
@@ -59,7 +59,7 @@ def _compose(llm: _Answers) -> tuple[Any, ReportComposer]:
     composer = ReportComposer(llm=llm, section_max_tokens=8192)  # type: ignore[arg-type]
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+            "malspark.reporting.composer.structured_output_supported_for_llm", lambda _l: False
         )
         result = asyncio.run(
             composer._invoke(
@@ -122,7 +122,7 @@ def _compose_in_window(llm: _Answers, prompt_chars: int, window: int, cap: int) 
     composer.window_tokens = window
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+            "malspark.reporting.composer.structured_output_supported_for_llm", lambda _l: False
         )
         result = asyncio.run(
             composer._invoke(

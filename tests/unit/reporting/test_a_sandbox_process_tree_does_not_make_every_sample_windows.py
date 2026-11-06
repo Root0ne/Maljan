@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import (
     DynamicBehavior,
     FileHashes,
     ProcessNode,

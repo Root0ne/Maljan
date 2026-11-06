@@ -22,7 +22,7 @@ import threading
 
 import pytest
 
-from maljan.core.truncation_ledger import (
+from malspark.core.truncation_ledger import (
     INTEGRITY_REASONS,
     TruncationLedger,
     chars_dropped,
@@ -293,14 +293,14 @@ class TestTheCapIsDetectedWhenTheServerWillNotSaySo:
         )()
 
     def test_a_silent_truncation_is_counted(self) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+        from malspark.core.truncation_ledger import TruncationLedger, record_judge_response
 
         ledger = TruncationLedger()
         record_judge_response(ledger, self._response(tokens=8192), cap=8192)
         assert ledger.judge_token_cap_hits == 1
 
     def test_a_short_answer_is_not_counted(self) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+        from malspark.core.truncation_ledger import TruncationLedger, record_judge_response
 
         ledger = TruncationLedger()
         record_judge_response(ledger, self._response(tokens=412), cap=8192)
@@ -309,7 +309,7 @@ class TestTheCapIsDetectedWhenTheServerWillNotSaySo:
 
     def test_without_a_cap_it_falls_back_to_the_finish_reason(self) -> None:
         """The old behaviour must survive for providers that do report it."""
-        from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+        from malspark.core.truncation_ledger import TruncationLedger, record_judge_response
 
         ledger = TruncationLedger()
         record_judge_response(ledger, self._response(tokens=8192, reason="length"))
@@ -321,13 +321,13 @@ class TestTheCapIsDetectedWhenTheServerWillNotSaySo:
 
     def test_the_usage_metadata_shape_is_also_read(self) -> None:
         """LangChain exposes the count in two places depending on the provider."""
-        from maljan.core.truncation_ledger import completion_tokens_of
+        from malspark.core.truncation_ledger import completion_tokens_of
 
         r = type("R", (), {"usage_metadata": {"output_tokens": 77}, "response_metadata": {}})()
         assert completion_tokens_of(r) == 77
 
     def test_a_response_with_no_counts_is_not_a_hit(self) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+        from malspark.core.truncation_ledger import TruncationLedger, record_judge_response
 
         ledger = TruncationLedger()
         record_judge_response(ledger, object(), cap=8192)

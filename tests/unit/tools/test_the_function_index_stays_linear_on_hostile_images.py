@@ -18,8 +18,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from maljan.tools import artefact_index
-from maljan.tools.pe_image import Image, Section
+from malspark.tools import artefact_index
+from malspark.tools.pe_image import Image, Section
 
 BASE = 0x140000000
 TEXT_RVA = 0x1000

@@ -1,4 +1,4 @@
-"""No module in ``maljan.reporting`` reads an entry's tool by a tool's name.
+"""No module in ``malspark.reporting`` reads an entry's tool by a tool's name.
 
 The report reads a tool by the kind its entry stored (``reporting.tool_kinds``
 over ``core.declared_reading``). The detection is the one both guards share
@@ -33,7 +33,7 @@ import pytest
 
 from tests.tool_name_reads import NAME_READ_SNIPPETS, findings, tool_parameters_under, violations
 
-REPORTING = Path(__file__).resolve().parents[3] / "src" / "maljan" / "reporting"
+REPORTING = Path(__file__).resolve().parents[3] / "src" / "malspark" / "reporting"
 EXEMPT = REPORTING / "legacy_tool_names.py"
 GATEWAY = REPORTING / "tool_kinds.py"
 # Helpers any module of the product defines, for a literal handed to one imported.
@@ -91,8 +91,8 @@ def test_the_legacy_module_s_pinned_reads_only_shrink() -> None:
 
 
 def _tool_names() -> frozenset[str]:
-    from maljan.core.builtin_declarations import CONSUMER_KINDS
-    from maljan.core.declared_reading import shipped_by_name
+    from malspark.core.builtin_declarations import CONSUMER_KINDS
+    from malspark.core.declared_reading import shipped_by_name
 
     names = set(shipped_by_name())
     for spec in CONSUMER_KINDS.values():
@@ -188,12 +188,12 @@ def test_the_guard_sees_each_way_a_name_is_read(snippet: str) -> None:
 
 def test_the_gateway_reads_legacy_only_on_its_no_source_branch() -> None:
     bad = (
-        "from maljan.reporting import legacy_tool_names as legacy\n"
+        "from malspark.reporting import legacy_tool_names as legacy\n"
         "def is_of(entry, consumer):\n"
         "    return legacy.in_table(consumer, tool_of(entry))\n"
     )
     good = (
-        "from maljan.reporting import legacy_tool_names as legacy\n"
+        "from malspark.reporting import legacy_tool_names as legacy\n"
         "def is_of(entry, consumer):\n"
         "    if source_of(entry) is None:\n"
         "        return legacy.in_table(consumer, tool_of(entry))\n"

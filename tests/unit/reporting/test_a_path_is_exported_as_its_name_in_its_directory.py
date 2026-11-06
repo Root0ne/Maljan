@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents.judge_postprocess import enforce_bundle_integrity
-from maljan.reporting.dedupe import pattern_fingerprint
-from maljan.reporting.ledger_projection import value_key
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.agents.judge_postprocess import enforce_bundle_integrity
+from malspark.reporting.dedupe import pattern_fingerprint
+from malspark.reporting.ledger_projection import value_key
+from malspark.reporting.renderers.stix_renderer import (
     exported_indicator_values,
     indicator_pattern,
     joined_path,
@@ -22,7 +22,7 @@ from maljan.reporting.renderers.stix_renderer import (
     rule_values,
     split_path,
 )
-from maljan.schemas.stix_pattern import read_comparisons
+from malspark.schemas.stix_pattern import read_comparisons
 
 # (path, directory, name, the path read back)
 SPLITS = [
@@ -122,7 +122,7 @@ def test_a_name_and_a_directory_not_written_as_one_file_are_two_values(pattern: 
 
 
 def test_a_directory_written_as_a_shape_is_declined_by_the_export() -> None:
-    from maljan.reporting.renderers.stix_renderer import shape_is_asked_the_rule
+    from malspark.reporting.renderers.stix_renderer import shape_is_asked_the_rule
 
     pattern = "[file:name = 'a.exe' AND file:parent_directory_ref.path LIKE 'C:\\\\%']"
     assert [(v.kind, v.value) for v in rule_values(pattern)] == [("path", "a.exe")]

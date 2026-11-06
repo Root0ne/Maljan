@@ -15,8 +15,8 @@ from tests.credential_shapes import lowercase_body, password
 
 from app.config import APISettings as ApiSettings
 from app.worker import analysis_worker
-from maljan.core.config import Settings
-from maljan.pipeline import events as ev
+from malspark.core.config import Settings
+from malspark.pipeline import events as ev
 
 
 def _passphrase(variant: int) -> str:
@@ -31,7 +31,7 @@ def test_the_job_s_secrets_and_the_worker_s_own_are_masked(monkeypatch: Any) -> 
 
     api = ApiSettings(
         minio_secret_key=SecretStr(store_secret),
-        database_url="postgresql+asyncpg://maljan:" + db_password + "@db:5432/maljan",
+        database_url="postgresql+asyncpg://malspark:" + db_password + "@db:5432/malspark",
     )
     monkeypatch.setattr(analysis_worker, "get_settings", lambda: api)
 

@@ -20,21 +20,21 @@ open vocabulary, so whatever the judge keeps is published as it wrote it.
 
 from __future__ import annotations
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     INDICATOR_TYPE_VOCABULARY_CODE,
     UNKNOWN_OBJECT_PATH_CODE,
     UNKNOWN_OBSERVABLE_TYPE_CODE,
     validate_verdict_bundle,
 )
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import DynamicBehavior, JudgeIndicator, MalwareReport
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import DynamicBehavior, JudgeIndicator, MalwareReport
+from malspark.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_PATTERN_CODE,
     ExtendedSTIXRenderer,
 )
-from maljan.schemas.judgement import JudgeAssessment
-from maljan.schemas.stix_models import Bundle, Indicator, Malware
-from maljan.schemas.stix_pattern import (
+from malspark.schemas.judgement import JudgeAssessment
+from malspark.schemas.stix_models import Bundle, Indicator, Malware
+from malspark.schemas.stix_pattern import (
     object_path_problems,
     observable_type_for,
     unknown_object_types,
@@ -55,7 +55,7 @@ def _indicator(pattern: str, *types: str) -> Indicator:
 def _bundle(*indicators: Indicator) -> Bundle:
     return Bundle(
         objects=[Malware(name="sample", is_family=False), *indicators],
-        x_maljan_assessment=JudgeAssessment(verdict="Malware", confidence=0.9),
+        x_malspark_assessment=JudgeAssessment(verdict="Malware", confidence=0.9),
     )
 
 
@@ -181,8 +181,8 @@ class TestTheExport:
 
 class TestThePromptNamesBoth:
     def test_the_judge_is_told_the_types_and_the_vocabulary_before_it_answers(self) -> None:
-        from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM
-        from maljan.pipeline.validation import INDICATOR_TYPES
+        from malspark.agents.judge_agent import JUDGE_VERDICT_SYSTEM
+        from malspark.pipeline.validation import INDICATOR_TYPES
 
         assert "STIX Cyber-observable type (ipv4-addr" in JUDGE_VERDICT_SYSTEM
         for word in INDICATOR_TYPES:

@@ -6,7 +6,7 @@ An error pattern's message group that matched nothing filed the message
 
 from __future__ import annotations
 
-from maljan.core.tool_declarations import ErrorPattern, ReputationFacts
+from malspark.core.tool_declarations import ErrorPattern, ReputationFacts
 
 
 def test_a_message_group_that_took_part_in_no_match_files_the_whole_text() -> None:

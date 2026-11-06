@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents.base_agent import read_claim_blocks
+from malspark.agents.base_agent import read_claim_blocks
 
 GOOD = (
     "CLAIM: Routine 0x4100 decodes its strings at run time.\n"

@@ -16,8 +16,8 @@ import json
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.pipeline.validation import REPEATED_ITEMS_CODE, CapabilityGrounding
-from maljan.reporting.composer import ONLY_IN_THE_RETRY, ReportComposer, _HostIdentifiersOut
+from malspark.pipeline.validation import REPEATED_ITEMS_CODE, CapabilityGrounding
+from malspark.reporting.composer import ONLY_IN_THE_RETRY, ReportComposer, _HostIdentifiersOut
 from tests.unit.reporting.test_a_repeated_item_is_asked_about_once import (
     _DISTINCT,
     _LOOPING,
@@ -94,7 +94,7 @@ class TestFoundOnlyInTheRetry:
         composer._grounding = CapabilityGrounding(evidence_keys=frozenset({"pe_header"}))
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(
-                "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+                "malspark.reporting.composer.structured_output_supported_for_llm", lambda _l: False
             )
             asyncio.run(
                 composer._invoke(

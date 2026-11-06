@@ -98,8 +98,8 @@ from scripts.rehearsal.roles import (  # noqa: E402
 from scripts.rehearsal.sample import sample_bytes  # noqa: E402
 from scripts.rehearsal.stub_model import Pace, StubServer, StubState  # noqa: E402
 
-from maljan.core.config import _is_loopback  # noqa: E402
-from maljan.llm.provider_base import facts_of  # noqa: E402
+from malspark.core.config import _is_loopback  # noqa: E402
+from malspark.llm.provider_base import facts_of  # noqa: E402
 
 TERMINAL = {"completed", "failed", "cancelled", "canceled"}
 ACTIVE = ("pending", "queued", "running")
@@ -411,7 +411,7 @@ def windows_the_product_cannot_learn(
     a hosted OpenAI-compatible API reports no window, so the product sizes
     the paid run on its fallback while the stub serves the named window.
     """
-    from maljan.llm.context_window import table_window
+    from malspark.llm.context_window import table_window
 
     if _value(values, "core.llm.openai.context_size", 0):
         return []
@@ -440,7 +440,7 @@ def gate_changes(values: dict[str, dict[str, Any]], stub_root: str) -> dict[str,
 
     Refused when a provider in use is one the stub cannot stand in for.
     """
-    from maljan.llm.openai_provider import is_local_endpoint
+    from malspark.llm.openai_provider import is_local_endpoint
 
     provider = str(_value(values, "core.llm.provider", "openai"))
     agents = copy.deepcopy(_value(values, "core.llm.agents", {}) or {})
@@ -505,7 +505,7 @@ def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
     requests. The server map comes back masked and goes back masked; a masked
     token in a PATCH means "unchanged", so no token is lost.
     """
-    from maljan.llm.openai_provider import is_local_endpoint
+    from malspark.llm.openai_provider import is_local_endpoint
 
     changes: dict[str, Any] = {}
     if str(_value(values, "core.sandbox.provider", "mock")) != "mock":
@@ -614,9 +614,9 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
     which its block says before any of its tools is read
     (``core.derived_declarations``).
     """
-    from maljan.analysis.tool_effects import sends_sample_bytes
-    from maljan.core.builtin_declarations import server_declaration
-    from maljan.core.tool_declarations import (
+    from malspark.analysis.tool_effects import sends_sample_bytes
+    from malspark.core.builtin_declarations import server_declaration
+    from malspark.core.tool_declarations import (
         THIRD_PARTY_BYTES,
         THIRD_PARTY_HASH,
         ToolFacts,
@@ -682,8 +682,8 @@ def server_effects(key: str, server: dict[str, Any]) -> str:
 
 def _reputation_service(key: str, server: dict[str, Any]) -> bool:
     """Whether the block, as the settings build it, says its server is a reputation service."""
-    from maljan.core.reputation import REPUTATION_ROLE
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.reputation import REPUTATION_ROLE
+    from malspark.core.settings_overrides import build_settings
 
     try:
         block = build_settings({"mcp.servers": {key: server}}).mcp.servers[key]
@@ -699,8 +699,8 @@ def _served_in_force(key: str, server: dict[str, Any]) -> dict[str, Any]:
     served declaration read as the block trusts it. ``{}`` where nothing can
     be read.
     """
-    from maljan.core.declared_reading import tools_in_force
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.declared_reading import tools_in_force
+    from malspark.core.settings_overrides import build_settings
 
     try:
         block = build_settings({"mcp.servers": {key: server}}).mcp.servers[key]
@@ -722,9 +722,9 @@ def learn_declarations(values: dict[str, dict[str, Any]]) -> list[str]:
     decides which servers stay on. A server answering from outside this
     machine is not reached. The keys that declared themselves.
     """
-    from maljan.core.settings_overrides import build_settings
-    from maljan.llm.openai_provider import is_local_endpoint
-    from maljan.providers.served_listing import list_unlisted
+    from malspark.core.settings_overrides import build_settings
+    from malspark.llm.openai_provider import is_local_endpoint
+    from malspark.providers.served_listing import list_unlisted
 
     servers = _value(values, "core.mcp.servers", {}) or {}
     local = {
@@ -859,7 +859,7 @@ def profile_stages(values: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
     never from what the run reports about itself. A masked secret is left out:
     it plays no part in the profile.
     """
-    from maljan.agents.composition import active_profile
+    from malspark.agents.composition import active_profile
 
     try:
         profile = active_profile(_settings_of(values))
@@ -910,7 +910,7 @@ def _job_settings(values: dict[str, dict[str, Any]], changes: dict[str, Any] | N
 
 def _settings_of(values: dict[str, dict[str, Any]]) -> Any:
     """The settings the stack's values build, a masked secret left out."""
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     core = {
         key.removeprefix("core."): row.get("value")
@@ -1629,7 +1629,7 @@ def main(argv: list[str] | None = None) -> int:
 if __name__ == "__main__":
     # An in-process rehearsal runs the pipeline here: before any thread or the
     # YARA engine loads, C code is pinned to fold case as ASCII does.
-    from maljan.core.ctype_locale import pin_character_classification
+    from malspark.core.ctype_locale import pin_character_classification
 
     pin_character_classification()
     raise SystemExit(main())

@@ -69,7 +69,7 @@ def threatintel() -> Any:
 
 @pytest.fixture(autouse=True)
 def _the_test_s_own_directory_is_a_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", str(tmp_path))
+    monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", str(tmp_path))
 
 
 def _sample(tmp_path: Path) -> str:

@@ -17,18 +17,18 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from maljan.agents.base_agent import WRITTEN_BESIDES_CLAIMS, BaseAnalyst
-from maljan.agents.judge_agent import mediation_reports_text, verdict_reports_text
-from maljan.pipeline.events import REPORT_CHAR_LIMIT, emit_agent_message
-from maljan.pipeline.nodes import (
+from malspark.agents.base_agent import WRITTEN_BESIDES_CLAIMS, BaseAnalyst
+from malspark.agents.judge_agent import mediation_reports_text, verdict_reports_text
+from malspark.pipeline.events import REPORT_CHAR_LIMIT, emit_agent_message
+from malspark.pipeline.nodes import (
     RETRY_WORDS_HEAD,
     WRITTEN_ANSWER_HEAD,
     RevisionInput,
     make_revision_node,
     written_record,
 )
-from maljan.pipeline.state import AgentArgument
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
+from malspark.pipeline.state import AgentArgument
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 from tests.stages import paper_profile
 
 NAMES = ["static", "network"]
@@ -118,10 +118,10 @@ def _round(
 ) -> dict[str, Any]:
     with (
         patch(
-            "maljan.pipeline.nodes._revision_input",
+            "malspark.pipeline.nodes._revision_input",
             lambda _state, _container, _name: RevisionInput(text="data"),
         ),
-        patch("maljan.pipeline.nodes.brief_agent", lambda *_a, **_k: None),
+        patch("malspark.pipeline.nodes.brief_agent", lambda *_a, **_k: None),
     ):
         return asyncio.run(make_revision_node(_container(agents, events))(state))
 

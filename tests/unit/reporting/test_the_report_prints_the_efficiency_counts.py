@@ -14,9 +14,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from maljan.analysis.efficiency import INTRO_SENTENCE, efficiency_lines
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.analysis.efficiency import INTRO_SENTENCE, efficiency_lines
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 from tests.unit.reporting.test_the_report_says_what_left_the_machine import STORED_RENDERS
 
 GENERATED_AT = datetime(2026, 9, 1, tzinfo=UTC)
@@ -66,7 +66,7 @@ def test_a_recorded_block_prints_in_the_run_summary_appendix() -> None:
 
 
 def test_the_html_report_carries_the_block() -> None:
-    from maljan.reporting.renderers import HtmlRenderer
+    from malspark.reporting.renderers import HtmlRenderer
 
     html = HtmlRenderer().render(
         _report({"final_decision": "Malware", "efficiency": RECORD}), nonce="fixed"
@@ -82,7 +82,7 @@ def test_a_summary_without_the_record_prints_no_block() -> None:
 
 @pytest.mark.parametrize("run", sorted(STORED_RENDERS))
 def test_a_stored_run_renders_as_it_did_before_the_block(run: str) -> None:
-    from maljan.reporting.renderers import HtmlRenderer
+    from malspark.reporting.renderers import HtmlRenderer
     from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import (
         _benchmark,
     )

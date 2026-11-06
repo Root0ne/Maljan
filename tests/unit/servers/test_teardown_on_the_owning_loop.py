@@ -79,7 +79,7 @@ def _cached_judge(container: Any) -> Any:
     """
     from unittest.mock import MagicMock
 
-    from maljan.agents.judge_agent import JudgeAgent
+    from malspark.agents.judge_agent import JudgeAgent
 
     judge = JudgeAgent(llm=MagicMock(), config=container.config)
     judge._container = container
@@ -89,14 +89,14 @@ def _cached_judge(container: Any) -> Any:
 
 @pytest.mark.slow
 def test_a_job_shaped_attach_tears_down_inside_the_budget() -> None:
-    from maljan.core.config import Settings
-    from maljan.core.container import ServiceContainer
+    from malspark.core.config import Settings
+    from malspark.core.container import ServiceContainer
 
     before = _own_children()
     result: dict[str, Any] = {}
 
     async def scenario() -> None:
-        from maljan.agents.base_agent import run_on_agent_loop
+        from malspark.agents.base_agent import run_on_agent_loop
 
         container = ServiceContainer(config=Settings(_env_file=None), mock=True)
         registry = container.get_server_registry()

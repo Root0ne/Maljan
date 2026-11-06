@@ -27,8 +27,8 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.core.config import SampleOpenConfig
-from maljan.providers.sample_open import (
+from malspark.core.config import SampleOpenConfig
+from malspark.providers.sample_open import (
     SampleNotes,
     SampleOpener,
     open_key,
@@ -64,7 +64,7 @@ HOSTILE = {
     "a mixed backslash": "/data/samples/.work\\s.exe",
     "a doubled separator": "/data/samples//.work/s.exe",
     "a leading doubled separator": "//data/samples/.work/s.exe",
-    "the host's mount": "/home/user/Maljan/data/samples/.work/s.exe",
+    "the host's mount": "/home/user/Malspark/data/samples/.work/s.exe",
     "a file url": "file:///data/samples/.work/s.exe",
     "surrounding blanks": " /data/samples/.work/s.exe",
     "a control character": "/data/samples/.work/s.exe\x00.txt",

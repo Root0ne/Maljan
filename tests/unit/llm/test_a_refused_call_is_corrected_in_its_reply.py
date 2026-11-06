@@ -26,16 +26,16 @@ from unittest.mock import patch
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from maljan.llm.anthropic_history import LAST_REQUEST
-from maljan.llm.tool_replies import NO_REPLY_RECORDED
-from maljan.pipeline.validation import (
+from malspark.llm.anthropic_history import LAST_REQUEST
+from malspark.llm.tool_replies import NO_REPLY_RECORDED
+from malspark.pipeline.validation import (
     FEEDBACK_PREAMBLE,
     SECTION_CUT_CODE,
     Violation,
     _with_feedback,
     with_calls_said,
 )
-from maljan.reporting.composer import _PROSE_SECTIONS, ReportComposer, _message_text
+from malspark.reporting.composer import _PROSE_SECTIONS, ReportComposer, _message_text
 from tests.unit.reporting.test_the_composer_writes_its_sections_at_once import (
     _answer,
     _isr,
@@ -113,7 +113,9 @@ def _compose(monkeypatch: pytest.MonkeyPatch, answer: Any, **patches: Any) -> tu
     composer = ReportComposer(llm=_model(), per_section_timeout=60)
     for name, value in patches.items():
         monkeypatch.setattr(composer, name, value.__get__(composer))
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=True):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=True
+    ):
         asyncio.run(composer.compose(report, _isr(), facts_block=FACTS, concurrent=True))
     return wire, report
 
@@ -190,7 +192,7 @@ class TestTheRetryOfAnAnswerThatIsACall:
     def test_the_narrative_round_answers_its_call_the_same_way(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.reporting import narrative_agent
+        from malspark.reporting import narrative_agent
         from tests.unit.reporting.test_narrative_agent import _make_report, _valid_narrative
 
         thin = _valid_narrative().model_dump()
@@ -269,7 +271,7 @@ def _shapes(sent: list[list[BaseMessage]]) -> list[list[type]]:
 class TestARetryThatNeverOfferedTheToolKeepsItsShape:
     @pytest.mark.asyncio
     async def test_the_judge_verdict_loop(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
         from tests.unit.agents.test_judge_verdict_validation import REPORTS, _bundle_json
 
         sent: list[list[BaseMessage]] = []
@@ -298,7 +300,7 @@ class TestARetryThatNeverOfferedTheToolKeepsItsShape:
 
         composer = ReportComposer(llm=_Plain(), per_section_timeout=30)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(composer.compose(_report(), _isr(), concurrent=False))
         asked = sent["packing_obfuscation"]
@@ -306,7 +308,7 @@ class TestARetryThatNeverOfferedTheToolKeepsItsShape:
         assert "[composer.schema] (evidence_refs)" in str(asked[1][-1].content)
 
     def test_the_narrative_manual_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.reporting import narrative_agent
+        from malspark.reporting import narrative_agent
         from tests.unit.reporting.test_narrative_agent import _make_report, _valid_narrative
 
         thin = _valid_narrative().model_dump()
@@ -397,7 +399,7 @@ class TestTheCorrectionTurn:
     def test_said_as_text_the_call_keeps_its_arguments(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.pipeline import validation
+        from malspark.pipeline import validation
 
         said: list[str] = []
         monkeypatch.setattr(validation.logger, "info", lambda msg, *a: said.append(msg % a))
@@ -412,7 +414,7 @@ class TestTheCorrectionTurn:
         assert [line for line in said if "tool call(s) _ProseOut (toolu_1) are said" in line]
 
     def test_every_call_is_said_and_named(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.pipeline import validation
+        from malspark.pipeline import validation
 
         said: list[str] = []
         monkeypatch.setattr(validation.logger, "info", lambda msg, *a: said.append(msg % a))
@@ -425,13 +427,13 @@ class TestTheCorrectionTurn:
         assert [line for line in said if "_ProseOut (toolu_1), _ProseOut (toolu_11)" in line]
 
     def test_a_question_asked_at_the_end_of_a_turn_keeps_both_turns_notes(self) -> None:
-        from maljan.pipeline.turns import with_question
+        from malspark.pipeline.turns import with_question
 
-        asked = HumanMessage(content="Write it.", response_metadata={"maljan_shared_head": 3})
+        asked = HumanMessage(content="Write it.", response_metadata={"malspark_shared_head": 3})
         turns = with_question([asked], "Fix it.", notes={LAST_REQUEST: True})
         assert turns[-1].content == "Write it.\n\nFix it."
-        assert turns[-1].response_metadata == {"maljan_shared_head": 3, LAST_REQUEST: True}
-        assert asked.response_metadata == {"maljan_shared_head": 3}, "the turn sent is not edited"
+        assert turns[-1].response_metadata == {"malspark_shared_head": 3, LAST_REQUEST: True}
+        assert asked.response_metadata == {"malspark_shared_head": 3}, "the turn sent is not edited"
         assert with_question([asked], "Fix it.")[-1].response_metadata == asked.response_metadata
 
     def test_a_history_with_no_call_is_sent_as_it_is(self) -> None:

@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from maljan.enrichment.declared import ReadySource, effective_sources
-from maljan.enrichment.orchestrator import enrich_malware_report
+from malspark.enrichment.declared import ReadySource, effective_sources
+from malspark.enrichment.orchestrator import enrich_malware_report
 
 
 def _source() -> ReadySource:
@@ -70,7 +70,7 @@ async def test_a_fully_looked_up_address_holds_no_place_under_the_cap() -> None:
     whois.asn_lookup = AsyncMock(return_value="AS13335")
     whois.geoip = MagicMock(return_value="AU")
     wire = _Wire()
-    with patch("maljan.enrichment.orchestrator.WhoisClient", return_value=whois):
+    with patch("malspark.enrichment.orchestrator.WhoisClient", return_value=whois):
         async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as http:
             out = await enrich_malware_report(
                 {"network": {"domains": [], "ips": ips}},
@@ -87,7 +87,7 @@ async def test_a_fully_looked_up_address_holds_no_place_under_the_cap() -> None:
 async def test_rows_the_cap_leaves_unasked_are_counted_in_the_log() -> None:
     domains = [{"fqdn": f"d{i}.com"} for i in range(5)]
     wire = _Wire()
-    with patch("maljan.enrichment.orchestrator.logger") as log:
+    with patch("malspark.enrichment.orchestrator.logger") as log:
         async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as http:
             await enrich_malware_report(
                 {"network": {"domains": domains, "ips": []}},

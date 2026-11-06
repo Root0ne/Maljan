@@ -15,15 +15,15 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from maljan.agents.base_agent import BaseAnalyst, prompt_to_messages
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.pipeline.nodes import brief_agent
-from maljan.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END
-from maljan.pipeline.triage_pack import PACK_HEADING, PIPELINE
-from maljan.reporting.composer import ReportComposer
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.narrative_agent import NarrativeAgent
-from maljan.schemas.evidence import build_entry, format_entry_id
+from malspark.agents.base_agent import BaseAnalyst, prompt_to_messages
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.pipeline.nodes import brief_agent
+from malspark.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END
+from malspark.pipeline.triage_pack import PACK_HEADING, PIPELINE
+from malspark.reporting.composer import ReportComposer
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.narrative_agent import NarrativeAgent
+from malspark.schemas.evidence import build_entry, format_entry_id
 
 FACTS = f"{PACK_HEADING}\n[ev_0001] identity: pe windows, 1,536 bytes\n[ev_0003] signature: none"
 RUN_STATE = "sample: c\nledger: 3 entries (ev_0001–ev_0003), 3 from the triage pack"
@@ -104,15 +104,15 @@ class TestAnAnalystsPrompt:
         self, monkeypatch: Any
     ) -> None:
         """The retry asks for a ledger id; the pack is where the ids are."""
-        from maljan.pipeline.validation import Violation
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+        from malspark.pipeline.validation import Violation
+        from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
         # The validator runs three times: the check before the loop, the loop's
         # look at the prior answer, and the look at the retry.
         told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
         answers = iter([told, told, []])
         monkeypatch.setattr(
-            "maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
+            "malspark.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
         )
         agent = _briefed(_LLM())
         # Every real analyst carries a system prompt; the retry is built on it.
@@ -196,7 +196,7 @@ def _judge(seen: list[str]) -> JudgeAgent:
         async def ainvoke(self, messages: Any) -> Any:
             seen.append("\n".join(str(getattr(m, "content", m)) for m in messages))
             return MagicMock(
-                content='{"type": "bundle", "objects": [], "x_maljan_assessment": '
+                content='{"type": "bundle", "objects": [], "x_malspark_assessment": '
                 '{"severity": {"rating": "Low", "rationale": "thin"}, "confidence": 0.2}}'
             )
 
@@ -284,7 +284,7 @@ class TestTheReportRounds:
 
         composer._invoke = _invoke  # type: ignore[method-assign]
         with patch(
-            "maljan.reporting.composer.bundle_for", return_value={"facts": {"verdict": "x"}}
+            "malspark.reporting.composer.bundle_for", return_value={"facts": {"verdict": "x"}}
         ):
             composer._facts_block = FACTS
             composer._run_state = RUN_STATE
@@ -314,7 +314,7 @@ class TestTheReportRounds:
             return None
 
         composer._author = _author  # type: ignore[method-assign]
-        with patch("maljan.reporting.composer.CapabilityGrounding") as grounding:
+        with patch("malspark.reporting.composer.CapabilityGrounding") as grounding:
             grounding.from_report.return_value = MagicMock(unread="")
             asyncio.run(composer.compose(_report(), None, facts_block=FACTS, run_state=RUN_STATE))
         assert composer._facts_block == FACTS

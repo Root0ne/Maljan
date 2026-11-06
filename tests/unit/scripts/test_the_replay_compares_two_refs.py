@@ -9,7 +9,7 @@ fourth breaks one rule.
 
 ``--compare HEAD HEAD`` writes HEAD out of that repository's object store
 twice and replays the tiny run under each tree's own harness, in a process of
-its own, as well as the stored run ``MALJAN_REPLAY_RUN`` names when it is set
+its own, as well as the stored run ``MALSPARK_REPLAY_RUN`` names when it is set
 (the benchmark's runs are not in the repository). Each tree's record is the
 record this process replays, with no part that raised, and the comparison says
 no difference. A ref from before the replay tool cannot be compared (status
@@ -35,7 +35,7 @@ from scripts.replay.stored import read_run
 from tests.unit.scripts._replay_tiny import EXPECTED_TOTALS, FIXTURE
 
 ROOT = Path(__file__).resolve().parents[3]
-RULE_FILE = "src/maljan/agents/evidence_recorder.py"
+RULE_FILE = "src/malspark/agents/evidence_recorder.py"
 OLD_CODE = '"tool.argument_names_its_parameter"'
 NEW_CODE = '"tool.argument_is_its_own_name"'
 # A rule that raises whenever it is called, put after the one it replaces.
@@ -141,7 +141,7 @@ def test_each_ref_is_replayed_by_its_own_harness_and_a_crash_is_never_no_differe
     made = _repository(tmp_path)
     repo: Path = made["repo"]
     runs = [FIXTURE]
-    extra = os.environ.get("MALJAN_REPLAY_RUN")
+    extra = os.environ.get("MALSPARK_REPLAY_RUN")
     if extra:
         runs.append(Path(extra))
 

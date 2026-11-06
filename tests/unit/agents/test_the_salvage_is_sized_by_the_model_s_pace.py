@@ -20,13 +20,13 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     FINAL_ANSWER_EXPECTED_TOKENS,
     BaseAnalyst,
     salvage_chars_at_pace,
     synthesis_budget,
 )
-from maljan.llm.generation_rate import (
+from malspark.llm.generation_rate import (
     LLAMA_CPP_PROMPT_SOURCE,
     OLLAMA_PROMPT_SOURCE,
     TIMEOUT_MARGIN,
@@ -172,7 +172,7 @@ WINDOW_CHARS = 52_428
 @pytest.fixture(autouse=True)
 def _the_run_s_window(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "maljan.agents.base_agent.synthesis_budget",
+        "malspark.agents.base_agent.synthesis_budget",
         lambda *a, **k: (WINDOW_CHARS, f"{WINDOW_CHARS} characters — pinned"),
     )
 
@@ -236,12 +236,12 @@ class TestTheWindowSizesItAndTheRecordSaysHow:
     def test_a_cut_is_on_the_record_with_how_the_room_was_derived(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.config import Settings
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from malspark.core.config import Settings
+        from malspark.llm.context_window import CHARS_PER_TOKEN
 
         settings = Settings(_env_file=None, llm={"openai": {"context_size": 32_768}})
-        monkeypatch.setattr("maljan.agents.base_agent.synthesis_budget", synthesis_budget)
-        monkeypatch.setattr("maljan.agents.base_agent.get_settings", lambda: settings)
+        monkeypatch.setattr("malspark.agents.base_agent.synthesis_budget", synthesis_budget)
+        monkeypatch.setattr("malspark.agents.base_agent.get_settings", lambda: settings)
         agent = _Analyst(_Rates(None, None))
         conversation = _conversation(9_000, 19, 2_500)
 
@@ -277,12 +277,12 @@ class TestTheWindowSizesItAndTheRecordSaysHow:
         just accepted it: 1.7 windows' worth, sent whole before, is sent whole,
         and 2.0 is trimmed to at most 1.875 windows' worth less the directive.
         """
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         window = 32_768
         settings = Settings(_env_file=None, llm={"openai": {"context_size": window}})
-        monkeypatch.setattr("maljan.agents.base_agent.synthesis_budget", synthesis_budget)
-        monkeypatch.setattr("maljan.agents.base_agent.get_settings", lambda: settings)
+        monkeypatch.setattr("malspark.agents.base_agent.synthesis_budget", synthesis_budget)
+        monkeypatch.setattr("malspark.agents.base_agent.get_settings", lambda: settings)
         agent = _Analyst(_Rates(None, None))
         each = int(windows * window - 1_100) // 20 - len("tool-00-")
         conversation = _conversation(1_000, 20, each)
@@ -304,14 +304,14 @@ class TestTheWindowSizesItAndTheRecordSaysHow:
 
 def _directive_chars(conversation: list) -> int:
     """What the salvage's directive weighs at the ids of the whole conversation."""
-    from maljan.agents.base_agent import _SYNTHESIS_DIRECTIVE, _citable_sentence, ledger_ids_in
+    from malspark.agents.base_agent import _SYNTHESIS_DIRECTIVE, _citable_sentence, ledger_ids_in
 
     return len(_SYNTHESIS_DIRECTIVE) + len(_citable_sentence(ledger_ids_in(conversation)))
 
 
 class TestTheSummaryCarriesIt:
     def test_each_loop_s_salvage_is_listed_under_its_agent(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         salvage = {"outcome": "answered", "sent_chars": 30_000, "sized_by": "pace"}
         summary = (

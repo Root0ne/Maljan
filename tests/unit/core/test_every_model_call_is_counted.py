@@ -28,21 +28,21 @@ from tests.unit.agents.test_the_time_cap_salvages import _Analyst as _SlowAnalys
 from tests.unit.agents.test_the_time_cap_salvages import _Container as _SlowContainer
 from tests.unit.agents.test_the_time_cap_salvages import _settings as _time_cap_settings
 
-from maljan.agents import base_agent
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.dynamic_analyst import DynamicAnalyst
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.agents.network_analyst import NetworkAnalyst
-from maljan.agents.static_analyst import StaticAnalyst
-from maljan.analysis.function_summarizer import FunctionSummarizer
-from maljan.core.config import REPORTER_AGENT_KEY, Settings
-from maljan.core.model_assignments import model_label_for
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.fallback import FallbackChatModel
-from maljan.pipeline.mediation_models import MediatorVerdict
-from maljan.reporting.composer import ReportComposer
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.narrative_agent import NarrativeAgent
+from malspark.agents import base_agent
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.dynamic_analyst import DynamicAnalyst
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.agents.network_analyst import NetworkAnalyst
+from malspark.agents.static_analyst import StaticAnalyst
+from malspark.analysis.function_summarizer import FunctionSummarizer
+from malspark.core.config import REPORTER_AGENT_KEY, Settings
+from malspark.core.model_assignments import model_label_for
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.fallback import FallbackChatModel
+from malspark.pipeline.mediation_models import MediatorVerdict
+from malspark.reporting.composer import ReportComposer
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.narrative_agent import NarrativeAgent
 
 USAGE = {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}
 
@@ -186,7 +186,7 @@ class TestTheReport:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            "maljan.reporting.narrative_agent.structured_output_supported_for_llm",
+            "malspark.reporting.narrative_agent.structured_output_supported_for_llm",
             lambda _llm: True,
         )
         llm, ledger = _model(), TokenLedger()
@@ -213,7 +213,7 @@ class TestTheReport:
     ) -> None:
         for supported in (True, False):
             monkeypatch.setattr(
-                "maljan.reporting.composer.structured_output_supported_for_llm",
+                "malspark.reporting.composer.structured_output_supported_for_llm",
                 lambda _llm, s=supported: s,
             )
             llm, ledger = _model("{}"), TokenLedger()
@@ -243,10 +243,10 @@ class TestTheSummariser:
 def test_the_ledger_is_the_sum_of_every_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """One ledger, every path above, and not one call more or less than was served."""
     monkeypatch.setattr(
-        "maljan.reporting.narrative_agent.structured_output_supported_for_llm", lambda _llm: False
+        "malspark.reporting.narrative_agent.structured_output_supported_for_llm", lambda _llm: False
     )
     monkeypatch.setattr(
-        "maljan.reporting.composer.structured_output_supported_for_llm", lambda _llm: False
+        "malspark.reporting.composer.structured_output_supported_for_llm", lambda _llm: False
     )
     ledger = TokenLedger()
     served: list[_Counting] = []
@@ -381,7 +381,7 @@ class TestTheSlowModelPaths:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            "maljan.reporting.composer.structured_output_supported_for_llm", lambda _llm: False
+            "malspark.reporting.composer.structured_output_supported_for_llm", lambda _llm: False
         )
         answering = _model("{}")
         llm = FallbackChatModel(
@@ -534,7 +534,7 @@ class TestEveryLoopEndingCountsWhatWasServed:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The graph's own stop replaces a turn the model did answer: one call, usage unknown."""
-        from maljan.core.config import get_settings
+        from malspark.core.config import get_settings
 
         monkeypatch.setitem(get_settings().react_agent_max_steps_overrides, "static", 3)
         agent, llm, ledger = _scripted_analyst(["tool"] * 10)
@@ -575,7 +575,7 @@ class TestEveryLoopEndingCountsWhatWasServed:
     def test_a_turn_asked_again_on_a_connection_error_counts_what_it_was_served(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.llm.transient import with_transient_retries
+        from malspark.llm.transient import with_transient_retries
 
         monkeypatch.setattr(asyncio, "sleep", _no_wait)
         llm = with_transient_retries(_Scripted)(
@@ -595,7 +595,7 @@ class TestEveryLoopEndingCountsWhatWasServed:
         assert len(agent.drain_evidence_entries()) == 2, "no tool call is made twice"
 
     def test_a_loop_that_raised_an_analyst_error_counts_what_it_was_served(self) -> None:
-        from maljan.core.exceptions import AnalystError
+        from malspark.core.exceptions import AnalystError
 
         agent, llm, ledger = _scripted_analyst(["tool", "tool", AnalystError("gave up")])
 

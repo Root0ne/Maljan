@@ -18,21 +18,21 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline import events
-from maljan.pipeline.events import (
+from malspark.pipeline import events
+from malspark.pipeline.events import (
     FINDING_VALUE_LIMIT,
     UNPARSED_ANSWERS_RECORD,
     VALIDATION_FEEDBACK,
     remember_secret_values,
 )
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     UNPARSED_ANSWER_CODE,
     parse_violations,
     retry_with_feedback_sync,
     unparsed_answer_rows,
     validation_metrics,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.credential_shapes import lowercase_body
 
 PROSE = "The loader resolves its imports by hash and beacons over HTTPS.\n" * 40
@@ -138,7 +138,7 @@ def test_a_run_with_no_unread_answer_records_no_key() -> None:
 def test_the_analyst_hands_its_unread_answers_to_the_run_record_once() -> None:
     import logging
 
-    from maljan.agents.static_analyst import StaticAnalyst
+    from malspark.agents.static_analyst import StaticAnalyst
 
     analyst = StaticAnalyst.__new__(StaticAnalyst)
     analyst.name = "static"
@@ -155,7 +155,7 @@ def test_the_analyst_hands_its_unread_answers_to_the_run_record_once() -> None:
 def test_an_answer_and_its_retry_both_unread_are_both_kept() -> None:
     from unittest.mock import MagicMock
 
-    from maljan.agents.base_agent import BaseAnalyst
+    from malspark.agents.base_agent import BaseAnalyst
 
     retry_text = "Still prose after the question, and no claim block in it at all."
 

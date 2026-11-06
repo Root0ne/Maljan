@@ -22,16 +22,16 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.agents.base_agent import PACK_SUMMARY_NOTE, BaseAnalyst
-from maljan.agents.tool_fence import fenced
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import PACK_SUMMARY_NOTE, BaseAnalyst
+from malspark.agents.tool_fence import fenced
+from malspark.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
     VALIDATION_ENTRIES_HEAD,
     VALIDATION_ENTRIES_UNFIT,
     validation_entries_text,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR
 
 NAME = "all_tools_reverser_ghidra"
 BODY = "void FUN_3868(void) { CreateMutexW(0, 0); if (GetLastError() == 0xb7) ExitProcess(0); }"
@@ -88,14 +88,14 @@ class _Analyst(BaseAnalyst):
 def _check(analyst: _Analyst, evidence: str = "evidence", first: str = FIRST) -> AgentISR:
     isr = analyst._text_to_isr(first, 0)
     with (
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
     ):
         return analyst._validate_isr(isr, evidence)
 
 
 def _window(prompt_chars: int) -> Any:
-    from maljan.llm.context_window import WindowFact
+    from malspark.llm.context_window import WindowFact
 
     # Room for ``prompt_chars`` beside the analyst's 16,384-token cap, at 3 chars a token.
     return WindowFact(16_384 + prompt_chars // 3, "probed", "test")
@@ -153,7 +153,7 @@ class TestTheRetryShowsWhatTheAnswerCites:
 
 class TestTheEntriesFitTheWindow:
     def _analyst(self, window: Any) -> _Analyst:
-        from maljan.llm.context_window import ContextBudget
+        from malspark.llm.context_window import ContextBudget
 
         analyst = _Analyst([FIXED])
         analyst._evidence_entries[1] = LedgerEntry(
@@ -195,7 +195,7 @@ class TestTheEntriesText:
 
     def test_many_entries_are_fitted_in_linear_time(self) -> None:
         """Four times the entries take about four times as long; quadratic would take sixteen."""
-        from maljan.llm.context_window import ContextBudget
+        from malspark.llm.context_window import ContextBudget
 
         def _fit(count: int) -> float:
             analyst = _Analyst([FIXED])
@@ -239,7 +239,7 @@ class TestEveryTurnFitsTheLearnedWindow:
 
     @staticmethod
     def _analyst(replies: list[Any], window: Any, body: int) -> _Analyst:
-        from maljan.llm.context_window import ContextBudget
+        from malspark.llm.context_window import ContextBudget
 
         analyst = _Analyst(replies)
         analyst._evidence_entries[1] = LedgerEntry(
@@ -254,7 +254,7 @@ class TestEveryTurnFitsTheLearnedWindow:
     @staticmethod
     def _validate(analyst: _Analyst) -> AgentISR:
         isr = analyst._text_to_isr(FIRST, 0)
-        with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+        with patch("malspark.agents.base_agent.validity_check_available", return_value=True):
             return analyst._validate_isr(isr, "evidence")
 
     def test_the_retry_turn_fits_whatever_the_window(self) -> None:

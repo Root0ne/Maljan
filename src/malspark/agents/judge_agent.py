@@ -1,0 +1,5868 @@
+"""Chief Judge and Mediator agent.
+
+JudgeAgent is NOT an expert analyst — it does not inherit from BaseAnalyst.
+It has two distinct responsibilities:
+  1. mediate(): Find contradictions between expert reports during the
+     negotiation loop, using structured output for reliable confidence scoring.
+  2. give_verdict(): Produce the final STIX 2.1 Bundle after negotiation ends,
+     together with the severity, malware category and family attribution the
+     report prints.
+
+What the judge is shown:
+  - The analysts' reports and, compactly, their ISR summaries.
+  - An evidence summary (``pipeline.evidence_summary``): per technique id, the
+    sources that named it and each source's own confidence. No combined number,
+    because a combined number is one the judge defers to instead of reading the
+    evidence.
+  - Why the run is degraded, when it is. The judge weighs it and sets its own
+    confidence; nothing caps the number afterwards.
+  - Similar prior cases from long-term memory, as few-shot context.
+
+What comes back is checked by ``pipeline.validation`` and, when something is
+wrong, put back to the judge once as feedback. What is still wrong after that
+is returned alongside the bundle for the run summary to record.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import re
+import threading
+import uuid
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
+
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field, ValidationError
+
+from malspark.agents.base_agent import (
+    TOOL_LOOP_TURN_CALL,
+    BaseAnalyst,
+    BudgetMeter,
+    LoopBudget,
+    OfferReadAgainFirst,
+    _hold_the_turn,
+    _message_chars,
+    _stored_answer_of,
+    _stored_copy_of,
+    _trim_for_synthesis,
+    _turn_key,
+    counted_window_tokens,
+    describe_exception_for_log,
+    is_model_turn,
+    is_the_graph_s_step_stop,
+    limit_text,
+    loop_limits,
+    model_held_per_turn,
+    note_a_window_that_moved,
+    nudge_turns,
+    recursion_limit,
+    request_chars,
+    run_on_agent_loop,
+    steps_used,
+    synthesis_budget,
+)
+from malspark.agents.judge_postprocess import (
+    ASSESSMENT_READ_LOOSELY_CODE,
+    ASSESSMENT_RELOCATED_CODE,
+    ASSESSMENT_UNREADABLE_CODE,
+    PROPERTY_NOT_CARRIED_CODE,
+)
+from malspark.agents.prompt_fragments import tools_statement
+from malspark.agents.run_evidence_corpus import read_of_entry as _read_of_entry
+from malspark.agents.tool_answer_clearing import (
+    THE_RUNS_LEDGER,
+    THIS_ANALYSIS,
+    read_evidence_tool,
+)
+from malspark.agents.tool_fence import (
+    FENCE_STATEMENT,
+    QUOTED_VALUE_STATEMENT,
+    escaped,
+    escapes,
+    fence_lines_room,
+    fenced,
+    json_view,
+    needs_fence,
+)
+from malspark.core.config import MEDIATOR_AGENT_KEY, MEDIATOR_AGENT_NAME, get_settings
+from malspark.core.logger import logger
+from malspark.core.spend import AgentCeilingStop, SpendCeilingStop, call_deadline_of
+from malspark.core.token_ledger import TokenLedger, read_structured_reply, say_structured_reply
+from malspark.core.truncation_ledger import TruncationLedger, record_judge_response
+from malspark.llm.answer_text import answer_text, structured_answer_text, tool_call_arguments
+from malspark.llm.anthropic_history import TOOL_LOOP_TURN, keeps_turns_as_received
+from malspark.llm.context_window import (
+    ContextBudget,
+    tool_definition_chars,
+    window_full_error,
+)
+from malspark.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
+from malspark.llm.transient import as_call
+from malspark.memory.attck_loader import technique_label
+from malspark.memory.long_term_memory import (
+    StoredCase,
+    a_past_case_technique,
+    foreign_ids_written_out,
+    foreign_quoted_value,
+    similar_case_head,
+    similar_cases_shown,
+)
+from malspark.memory.technique_cards import technique_card_lines
+from malspark.pipeline.debate_facts import (
+    carries_line_field,
+    read_marks,
+    with_ledger_facts,
+    with_ledger_stated,
+)
+from malspark.pipeline.events import (
+    emit_judge_question,
+    safe_answer_text,
+    safe_finding_value,
+    scrub,
+)
+from malspark.pipeline.mediation_models import (
+    CONTRADICTIONS_BLOCK_MISSING_NOTE,
+    CONTRADICTIONS_BLOCK_MIXED_NOTE,
+    MEDIATOR_NO_ANSWER,
+    MediatorVerdict,
+    analysts_with_claims,
+    consensus_applies,
+    mediator_no_answer_note,
+)
+from malspark.pipeline.state import AgentArgument
+from malspark.pipeline.turns import with_question
+from malspark.pipeline.validation import (
+    ValidationTally,
+    Violation,
+    announce_resolved,
+    announce_unresolved,
+    assessment_conflict_violations,
+    assessment_violations,
+    count_claim_blocks,
+    drop_ungrounded_indicators,
+    kept_after_the_sandbox_fact,
+    not_asked,
+    retry_with_feedback,
+    stated_verdict_violations,
+    unattributed_indicator_violations,
+    unsupported_benign_violations,
+    unsupported_malware_violations,
+    validate_verdict_bundle,
+)
+from malspark.schemas.evidence import EvidenceCounter, LedgerEntry, answers_held
+from malspark.schemas.isr_models import AgentISR, retry_added_marker
+from malspark.schemas.stix_models import Bundle
+
+if TYPE_CHECKING:
+    from malspark.memory.long_term_memory import MemoryStore
+
+# Rows the judge's parse settles itself, so the retry is never spent on them:
+# an assessment moved to its property, an assessment leaf read in the one
+# reading its type allows, and a property the export does not carry.
+_SETTLED_CODES = frozenset(
+    {ASSESSMENT_RELOCATED_CODE, ASSESSMENT_READ_LOOSELY_CODE, PROPERTY_NOT_CARRIED_CODE}
+)
+
+# The settled rows that are announced as resolved when the parse makes them:
+# the act is done and nothing is left to ask.
+_RESOLVED_BY_THE_PARSE = frozenset({ASSESSMENT_RELOCATED_CODE, ASSESSMENT_READ_LOOSELY_CODE})
+
+# How many times the judge is asked again about a verdict answer that was
+# wrong. One: a second correction has never produced a better bundle than the
+# first, and every turn is a full judge timeout.
+_VERDICT_RETRIES = 1
+
+# The correction the judge is given for an answer that was not a bundle.
+_NOT_JSON_FEEDBACK = (
+    "Your previous answer was not a JSON STIX bundle. Your answer is the JSON bundle "
+    "alone, with no prose around it."
+)
+
+# The correction for an answer the output cap cut off. The benchmark's large
+# model wrote a bundle of about 25,000 characters on one sample, twice: both
+# answers stopped at exactly the 8,192 tokens ``judge_max_tokens`` allows,
+# before the bundle closed, and the only correction it was given said the
+# answer "was not a JSON STIX bundle" — so it wrote the same bundle again.
+VERDICT_CUT_CODE = "verdict.cut_at_output_cap"
+
+# An object begun in an answer: its ``type`` written as a bundle object's is.
+_OBJECT_TYPE_RE = re.compile(r'"type"\s*:\s*"([a-z][a-z0-9-]*)"')
+# A line an answer indents: a line break and the spaces after it.
+_INDENTED_LINE_RE = re.compile(r"\n[ \t]+")
+
+
+def judge_output_cap() -> Any:
+    """The judge's output cap as settings derive it, for a model built without a record.
+
+    A judge whose model the container built reads the cap that model was built
+    with (``JudgeAgent._output_cap``); this derivation answers only for a model
+    handed in by other means, which carries no record.
+    """
+    from malspark.llm.context_window import output_cap_for
+
+    return output_cap_for(get_settings(), "judge_max_tokens", "judge", role="judge")
+
+
+def verdict_cut_violation(cap: int, text: str = "") -> Violation:
+    """What a verdict the cap cut is told: the cap, the answer's size, and what filled it.
+
+    The size is the answer's characters and the objects it began, by type, and
+    how many of its lines were indented: a bundle is cut by the objects it
+    writes and by how it writes them, and the question names both, the way a
+    report section's cut question does. The length it was cut at is the
+    concrete bound the next answer has to stay under, and the kind of object
+    it began most of is named as where the room went. It asks for a shorter
+    bundle — the compact contract's — and never for fewer findings than the
+    evidence holds.
+
+    The cut answer itself is not sent back (``retry_with_feedback``'s
+    ``drop_answer_for``). It is a cap's worth of tokens that could not be read,
+    and a retry that carried it gave a model at temperature 0 its own answer to
+    continue: the benchmark's benign control answered this question with a
+    response one byte shorter than the one it was asked about.
+    """
+    counts: dict[str, int] = {}
+    for found in _OBJECT_TYPE_RE.finditer(text):
+        kind = found.group(1)
+        if kind != "bundle":
+            counts[kind] = counts.get(kind, 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: -item[1])
+    begun = ", ".join(f"{count} {kind}" for kind, count in ranked)
+    indented = len(_INDENTED_LINE_RE.findall(text))
+    size = (
+        f" It ran to {len(text):,} characters"
+        + (f" and began {safe_finding_value(begun)} object(s)" if begun else "")
+        + (f", on {indented:,} indented lines" if indented else "")
+        + ". It is not shown to you again."
+        if text
+        else ""
+    )
+    said = f" {safe_finding_value(size.strip())}" if size else ""
+    bound = (
+        f" The whole bundle has to be shorter than those {len(text):,} characters, the "
+        "length at which the limit cut it."
+        if text
+        else ""
+    )
+    most = (
+        f" Most of that room went on {ranked[0][1]} {safe_finding_value(ranked[0][0])} "
+        "object(s): write one only where the evidence in "
+        "this run supports it, and each only once."
+        if ranked and ranked[0][1] > 1
+        else ""
+    )
+    return Violation(
+        code=VERDICT_CUT_CODE,
+        message=(
+            f"Your previous answer stopped at the output limit of {int(cap)} tokens before "
+            f"the bundle closed, so it could not be read.{said}{bound}{most} Any reasoning "
+            f"you write counts against the same limit. Return a bundle that closes well inside "
+            f"{int(cap)} tokens: x_malspark_assessment first, then only the objects the "
+            "evidence supports; your confidence, basis and sources on the relationship "
+            "only, never repeated on the object it relates; an attack-pattern with at most "
+            "one sentence of description; no property the platform fills in (created, "
+            "modified, spec_version, valid_from, pattern_type); no Indicator whose value you "
+            "did not read verbatim in the evidence; the JSON on one line without "
+            "indentation. JSON only."
+        ),
+    )
+
+
+def _was_cut(answer: Any, cap: int | None) -> bool:
+    """Whether the output cap ended this answer, by the server's word or by its count."""
+    from malspark.core.truncation_ledger import completion_tokens_of, hit_length_cap
+
+    if hit_length_cap(answer):
+        return True
+    produced = completion_tokens_of(answer)
+    return bool(cap) and produced is not None and produced >= int(cap or 0)
+
+
+# The property the verdict prompt asks the assessment under. An answer the
+# output cap cut off usually wrote it whole before the cut: the prompt puts it
+# first.
+_ASSESSMENT_KEY = '"x_malspark_assessment"'
+
+
+def stated_assessment_in(text: str, notes: list[Any] | None = None) -> Any | None:
+    """The assessment an unreadable answer stated whole, read by the bundle's own readers.
+
+    The JSON object written under ``"x_malspark_assessment"``, read leaf by leaf
+    as a ``JudgeAssessment`` (``schemas.judgement.read_assessment``: a
+    mistyped leaf is left absent, not the reason the whole is) and kept only
+    when its verdict is one
+    ``pipeline.outcome.normalise_verdict`` recognises; then its confidence,
+    severity and family are the judge's own statements. The last whole one
+    counts: an answer that drafted an assessment in reasoning spilled into its
+    text and then wrote the bundle's own is read for the bundle's. Each object
+    is read as written first (``json.loads`` of the first balanced object) and
+    only then through the repairing reader a whole answer goes through, which
+    rewrites comments and quotes. ``None`` when no occurrence is whole and
+    states a verdict that can be read. Nothing is inferred from prose.
+    ``notes`` receives what reading the kept one took.
+    """
+    import json
+
+    from malspark.pipeline.outcome import normalise_verdict
+    from malspark.schemas.judgement import read_assessment
+    from malspark.utils.json_cleaner import extract_json, safe_parse_json
+
+    at = text.rfind(_ASSESSMENT_KEY)
+    while at >= 0:
+        found = _assessment_at(text, at, json, extract_json, safe_parse_json)
+        if found is not None:
+            assessment, read = read_assessment(found)
+            if assessment is not None and normalise_verdict(assessment.verdict) is not None:
+                if notes is not None:
+                    notes.extend(read)
+                return assessment
+        at = text.rfind(_ASSESSMENT_KEY, 0, at)
+    return None
+
+
+# Where a bundle begins: the object whose first key says it is one, as the
+# contract's shape writes it.
+_BUNDLE_START_RE = re.compile(r'\{\s*"type"\s*:\s*"bundle"')
+
+
+def _key_value_at(text: str, start: int, key: str) -> int | None:
+    """Where the value of ``key`` begins among the top-level keys of the object at ``start``.
+
+    A scan of the object's own depth, strings skipped whole, so a key of the
+    same name inside a string or a nested object is not the one found.
+    """
+    import json
+
+    depth = 0
+    index = start
+    decoder = json.JSONDecoder()
+    while index < len(text):
+        char = text[index]
+        if char == '"':
+            try:
+                value, after = decoder.raw_decode(text, index)
+            except ValueError:
+                return None
+            if depth == 1 and value == key:
+                rest = text[after:].lstrip()
+                if rest.startswith(":"):
+                    return len(text) - len(rest) + 1
+            index = after
+            continue
+        if char in "{[":
+            depth += 1
+        elif char in "}]":
+            depth -= 1
+            if depth == 0:
+                return None
+        index += 1
+    return None
+
+
+def stated_indicators_in(text: str) -> list[dict[str, Any]]:
+    """The indicator objects an unreadable answer's bundle wrote whole, each as written.
+
+    Only the items of the bundle's own top-level ``objects`` array are read:
+    the bundle is the last object in the answer that opens with ``"type":
+    "bundle"``, its ``objects`` is found among its own keys, and the array is
+    walked item by item (``json`` alone, no repair) until the first item that
+    does not read whole — the one the output cap reached. An indicator written
+    in reasoning before the bundle, inside a string, or nested inside another
+    object is not read, and nothing is inferred from prose. An item is kept
+    when it is an indicator with a pattern, once each, in the order written.
+    What is read here is asked every question a bundle's indicator is asked,
+    and the one publish rule after that: the fallback path publishes no more
+    than an answer that closed would have.
+    """
+    import json
+
+    starts = list(_BUNDLE_START_RE.finditer(text))
+    if not starts:
+        return []
+    at = _key_value_at(text, starts[-1].start(), "objects")
+    if at is None:
+        return []
+    rest = text[at:].lstrip()
+    if not rest.startswith("["):
+        return []
+    index = len(text) - len(rest) + 1
+    decoder = json.JSONDecoder()
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    while True:
+        while index < len(text) and text[index] in " \t\r\n,":
+            index += 1
+        if index >= len(text) or text[index] == "]":
+            break
+        try:
+            value, index = decoder.raw_decode(text, index)
+        except ValueError:
+            break
+        if isinstance(value, dict) and value.get("type") == "indicator" and value.get("pattern"):
+            key = json.dumps(value, sort_keys=True)
+            if key not in seen:
+                seen.add(key)
+                found.append(value)
+    return found
+
+
+def _assessment_at(
+    text: str, at: int, json_module: Any, extract: Any, repairing: Any
+) -> dict[str, Any] | None:
+    """The object written after the assessment key at ``at``, or ``None``."""
+    rest = text[at + len(_ASSESSMENT_KEY) :].lstrip()
+    if not rest.startswith(":"):
+        return None
+    rest = rest[1:].lstrip()
+    if not rest.startswith("{"):
+        return None
+    try:
+        value = json_module.loads(extract(rest))
+    except ValueError:
+        value = repairing(rest)
+    return value if isinstance(value, dict) else None
+
+
+# What is recorded when even the retry was not a bundle. The code lands in
+# ``run_summary.validation.unresolved``; the reason joins the report's
+# degradation reasons, where a reader looking at a verdict with no severity
+# will find out why it has none.
+VERDICT_FALLBACK_CODE = "verdict.fallback"
+VERDICT_FALLBACK_REASON = "judge verdict fell back to text extraction"
+
+
+def _indicator_findings(bundle: Any, found: Iterable[Violation]) -> list[Violation]:
+    """The rows of ``found`` about an indicator of ``bundle``, by its position.
+
+    A fallback bundle's other objects are this pipeline's own, built from the
+    analysts' claims; only the indicators are the model's words, so only their
+    rows are the model's findings.
+    """
+    objects = list(getattr(bundle, "objects", None) or [])
+    at = re.compile(r"objects\[(\d+)\]")
+    kept: list[Violation] = []
+    for violation in found:
+        where = at.search(violation.path or "")
+        index = int(where.group(1)) if where else -1
+        if 0 <= index < len(objects) and getattr(objects[index], "type", "") == "indicator":
+            kept.append(violation)
+    return kept
+
+
+# What is recorded when the judge never answered at all. A retry would cost a
+# second full judge timeout and could only produce the same fallback bundle, so
+# nothing is asked again — but a verdict extracted from the analysts' text
+# because the judge timed out is not a verdict the judge gave, and the run
+# summary says so rather than showing a clean validation block.
+VERDICT_TIMEOUT_CODE = "verdict.timeout"
+VERDICT_TIMEOUT_REASON = "the judge did not answer within its budget"
+
+# What is recorded when the judge's own ceiling (``llm.agents.judge``) refused
+# the verdict call: no answer, as with a timeout, so nothing is asked again and
+# the verdict is this pipeline's own fallback bundle. The row's message is the
+# ceiling's sentence; the degradation reason naming the agent and its ceiling
+# comes from the spend meter (``SpendMeter.agent_reasons``).
+VERDICT_AGENT_CEILING_CODE = "verdict.agent_ceiling"
+# What stands in for the answer of a verdict call the judge's own ceiling refused.
+AGENT_CEILING_ANSWER = "[AGENT CEILING]"
+
+# What is recorded when the judge's one retry failed — it timed out, answered
+# prose, or answered JSON that was not a bundle — after a first answer that was
+# a bundle. The first bundle is kept, with what was still wrong with it: a
+# failed correction says nothing about the sample, and a valid verdict replaced
+# by the text fallback or by a timeout published what the judge never wrote.
+# The row says the retry was spent and how it failed.
+VERDICT_RETRY_FAILED_CODE = "verdict.retry_failed"
+VERDICT_RETRY_FAILED_REASON = "the judge's retry failed and its first bundle was kept"
+
+
+def _answer_text(answer: Any) -> str:
+    """The text of a model answer, whatever shape it arrived in, thinking aside."""
+    return answer_text(getattr(answer, "content", answer))
+
+
+def _is_not_json(answer: Any) -> bool:
+    """Whether an answer is something other than a JSON object.
+
+    An empty ``content`` carrying ``tool_calls`` counts: the judge binds no
+    tools on the verdict path, so a tool call there is the local model
+    emitting its own control tokens rather than an answer.
+    """
+    from malspark.utils.json_cleaner import safe_parse_json
+
+    text = _answer_text(answer).strip()
+    if not text:
+        return True
+    return not isinstance(safe_parse_json(text), dict)
+
+
+# Consensus threshold: mediator confidence must reach this to stop negotiation early
+CONSENSUS_THRESHOLD = 0.85
+
+# How many calls of the judge's own time limit one mediation can spend one
+# after another, at most: the tool loop and its one second run after an empty
+# answer, then the question for a missing contradictions block and the
+# extraction. The negotiation node's outer cap is this many limits plus its
+# decode headroom.
+MEDIATION_CALL_SPANS = 4
+
+# What we assume when the mediator's agreement score cannot be read at all.
+# Deliberately below CONSENSUS_THRESHOLD: an unreadable mediator must not be
+# able to end the negotiation, and must not be mistakable for a real score.
+_UNREADABLE_AGREEMENT = 0.0
+
+# ``agreement_confidence: 0.95`` / ``**agreement_confidence:** 95%`` /
+# ``"agreement_confidence": 0.9`` / ``Agreement confidence = 0.9`` — the key the
+# system prompt asks for, written with an underscore or a space, and nothing
+# else. Any other "confidence: x" (a claim's, a technique's, the
+# mediator's own certainty) is not the agents' agreement, and read as one it
+# ended the negotiation on a consensus nobody stated. Only markdown emphasis and
+# quotes may sit around the separator; the number must follow them
+# immediately, so "agreement_confidence: 0.95 (based on 3 agents)" yields 0.95,
+# never the 3.
+_AGREEMENT_RE = re.compile(
+    r"\bagreement(?:_|[^\S\n])confidence\b[*_`\"']*[^\S\n]*[:=][*_`\"'\s]*(\d*\.?\d+)\s*(%?)",
+    re.IGNORECASE,
+)
+
+# An explicit verdict statement in the judge's prose: ``Verdict: Benign``,
+# ``**Verdict:** Malware``, ``Verdict:`` with the word on the next line,
+# ``Final verdict - Malware.``, ``the verdict is suspicious``,
+# ``"verdict": "Malware"``. Only emphasis and quotes may sit around the
+# separator; the word must follow them, stand whole and end the statement (a
+# sentence or clause end, a parenthesis, a line end), so "the verdict is not
+# malware", "verdict: malware-free" and "the analysts' verdict - benign - is
+# wrong" state nothing; :func:`malspark.pipeline.outcome.normalise_verdict` is
+# what reads the word.
+_VERDICT_STATEMENT_RE = re.compile(
+    r"\bverdict\b[*_`\"']*[^\S\n]*(?:[:=\-\u2013\u2014]|\bis\b)[*_`\"'\s]*"
+    r"([A-Za-z]+)\b(?![-'\w])(?=[*_`\"']*[^\S\n]*(?:[.;:!?,(\n]|\Z))",
+    re.IGNORECASE,
+)
+
+# What the mediator is told a contradiction is. A claim the evidence ledger
+# contradicts counts as much as two analysts saying incompatible things.
+CONTRADICTION_DEFINITION = (
+    "A contradiction is two analysts stating incompatible things, or an analyst's "
+    "claim that an evidence ledger entry contradicts."
+)
+
+# The field each listed line opens with: whom a revision round asks over it
+# (``pipeline.debate_facts.analysts_to_revise``).
+ANALYSTS_FIELD_RULE = (
+    "Open each line with [analysts: <name>, <name>] naming the analysts who must revise "
+    "over it, each written as its report is headed; a revision round asks only the analysts "
+    "the blocking lines name, and every other analyst keeps its answer as it stands."
+)
+
+# The closing block the mediator writes, and the only part of its answer the
+# contradictions are read from (``final_contradictions``).
+CONTRADICTIONS_BLOCK_RULE = (
+    "After your reasoning, write one final block. It begins with a line reading exactly "
+    "'CONTRADICTIONS:' and then lists each contradiction still standing on a line of its "
+    "own: the analyst, its claim, and what contradicts it (another analyst's claim, or the "
+    "id of the ledger entry). " + ANALYSTS_FIELD_RULE + " When none stands, write the single line "
+    "'CONTRADICTIONS: NONE'. Only this final block is counted: a contradiction you drafted "
+    "above it and then resolved is left out of it. End each line with "
+    "[blocking: <one-line reason>] when the analysts must revise over it, or "
+    "[not blocking: <one-line reason>] when it need not hold up agreement; a line you do "
+    "not mark sends the analysts to revise, whatever agreement_confidence you write."
+)
+
+# The one question asked when the mediator's answer carried no such block. The
+# turn carries no tools and follows the mediator's own answer.
+CONTRADICTIONS_BLOCK_QUESTION = (
+    "Your answer has no final 'CONTRADICTIONS:' block. Write it now: a line reading "
+    "exactly 'CONTRADICTIONS:' followed by one line per contradiction still standing (the "
+    "analyst, its claim, and what contradicts it: another analyst's claim or the id of the "
+    "ledger entry), each opening with [analysts: <name>, <name>] for the analysts who must "
+    "revise over it and ending in [blocking: <one-line reason>] or "
+    "[not blocking: <one-line reason>], or the single line 'CONTRADICTIONS: NONE'; then the "
+    "line 'agreement_confidence: <number>'."
+)
+# Said where the block question carries no tool: no ledger to read, or a model
+# that cannot bind ``read_evidence``.
+CONTRADICTIONS_BLOCK_QUESTION_WITHOUT_TOOLS = (
+    f"{CONTRADICTIONS_BLOCK_QUESTION} This turn carries no tools."
+)
+
+# The question of the turn after a mediation's tool loop ended on a limit (its
+# spend, its window, its repeats or a call deadline) before the mediator wrote
+# its reasoning. The turn truly carries no tools, and says why rather than
+# forbidding them.
+MEDIATION_SALVAGE_QUESTION = (
+    "Your tool loop has ended, so this turn carries no tools. Using the tool output "
+    "already in this conversation, write your mediation reasoning now: the "
+    "contradictions you found and a single agreement_confidence score."
+)
+
+# What the structured extraction is told: the contradictions are the final
+# block's lines, never the ones the reasoning drafted and then resolved.
+MEDIATION_EXTRACTION_SYSTEM = (
+    "Extract the final structured verdict from the mediator's reasoning log.\n"
+    "You MUST produce a structured response with:\n"
+    "- contradictions: the lines of the log's final 'CONTRADICTIONS:' block, one item "
+    "per line written whole with its [analysts: …] field and its [blocking: …] or "
+    "[not blocking: …] mark, and an empty "
+    "list when that block reads 'CONTRADICTIONS: NONE'. A "
+    "contradiction the log drafted above that block and then resolved is not one.\n"
+    "- resolution_summary: what was resolved and what remains\n"
+    "- confidence: the log's last agreement_confidence, a float 0.0-1.0"
+)
+
+# The mediator's system turn up to the sentence about its tools, which depends
+# on the run, and the line its human turn closes on.
+MEDIATOR_SYSTEM_HEAD = (
+    "You are the Lead Cyber Security Mediator. Your ONLY task is to "
+    "compare expert analyst reports and emit:\n"
+    "  1. The contradictions still standing, in a final "
+    "CONTRADICTIONS: block. " + CONTRADICTION_DEFINITION + "\n"
+    "  2. A single agreement_confidence in [0.0, 1.0] for how "
+    "aligned the agents are — NOT the maliciousness of the sample.\n\n"
+    "HARD RULES:\n"
+    "- DO NOT emit a verdict. Never write 'Malware', 'Benign', "
+    "'Suspicious', 'CLEAN', 'NO THREAT', or any synonym.\n"
+    "- DO NOT recommend re-running pipelines or filling data gaps.\n"
+    "- When an analyst has failed/empty output, write 'no input "
+    "from <agent>' and EXCLUDE that analyst from the contradiction "
+    "count. DO NOT treat absence of input as confirmation of "
+    "cleanliness.\n"
+    "- agreement_confidence reflects ONLY agent alignment, NOT how "
+    "suspicious the sample looks. Two analysts unanimously saying "
+    "nothing is still high alignment (1.0).\n"
+    "- " + CONTRADICTIONS_BLOCK_RULE + "\n"
+    "- Your LAST line, right after that block, MUST be exactly "
+    "'agreement_confidence: <number>' "
+    "with a decimal between 0.0 and 1.0 — no percent sign, no words, "
+    "no range. Nothing may follow it. When this line is missing or "
+    "unreadable the run is treated as no-consensus and every analyst "
+    "is made to revise again, so it is not optional.\n"
+    "- The downstream Judge alone decides Malware/Benign/Suspicious. "
+)
+MEDIATOR_HUMAN_CLOSING = (
+    "End with the CONTRADICTIONS: block and then the agreement_confidence line. "
+    "Do not state a verdict."
+)
+# Said before the closing line when the mediation offers ``read_evidence`` over
+# the run's ledger: a line about what an entry shows is ruled on the entry,
+# read, not on a report's account of it. It asks; it never limits the tools.
+MEDIATION_ENTRY_CHECK = (
+    "When a line turns on what a ledger entry shows (a value, a name, the arguments of a "
+    "call, what a citation holds), read that entry, and the entries the analysts cite "
+    "against the line, with read_evidence before you mark the line blocking, unless the "
+    "entry's text is in this conversation already; rule on what the entries show, not on "
+    "what a report says they show."
+)
+
+# The question asked once, in the mediation's own conversation, when the round
+# limit ends the debate on blocking lines no revision will answer
+# (``pipeline.limit_rulings``). The lines follow it, numbered as the block
+# listed them.
+LIMIT_RULING_QUESTION = (
+    "The debate has reached its round limit: no analyst revises again, so each blocking "
+    "line of your block stands undecided unless you decide it now. For each blocking line "
+    "below, read the ledger entries it cites and the entries the analysts cite against it, "
+    "and decide from what those entries show whether the line is UPHELD (the entries "
+    "contradict the claim the line contests) or NOT UPHELD (the entries support the claim "
+    "as its analyst wrote it). Write one line per blocking line and nothing else, each "
+    "reading 'L<number>: UPHELD: <one-sentence reason naming the entry ids>' or "
+    "'L<number>: NOT UPHELD: <one-sentence reason naming the entry ids>'."
+)
+# Said where that question carries no tool: no ledger to read, or a model that
+# cannot bind ``read_evidence``.
+LIMIT_RULING_QUESTION_WITHOUT_TOOLS = (
+    f"{LIMIT_RULING_QUESTION} This turn carries no tools: decide from the entries this "
+    "conversation holds."
+)
+
+# The block's opening line: the label in capitals, with any Markdown emphasis
+# or heading marks a model puts around it, and what follows on the same line.
+_CONTRADICTIONS_LINE_RE = re.compile(r"^[\s#>*_`]*CONTRADICTIONS[\s*_`]*:[\s*_`]*(.*)$")
+# A block line's list marker: a bullet or a number, then a space.
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
+# The agreement line that closes the block.
+_AGREEMENT_LINE_RE = re.compile(r"^[\s#>*_`]*(?:agreement_)?confidence\b", re.IGNORECASE)
+# "None stands", as a whole line from a closed vocabulary: ``NONE``, ``(none)``,
+# ``N/A``, "No contradictions", each optionally followed by "still standing",
+# "stands", "remain(s)" or "remaining", and punctuation. A line that says more,
+# such as "None of the analysts …" or "No contradiction on C2, but …", is not
+# one of these: it is a contradiction.
+_NONE_RE = re.compile(
+    r"^[\s*_`(]*(?:none|n/?a|no\s+contradictions?)"
+    r"(?:\s+(?:still\s+)?(?:stand(?:s|ing)?|remain(?:s|ing)?))?[\s*_`).!]*$",
+    re.IGNORECASE,
+)
+# A phrase that opens with "none" but says more than the closed wording does.
+_NONE_OPENING_RE = re.compile(r"^[\s*_`(]*none\b", re.IGNORECASE)
+# A line that sums the block up rather than stating a contradiction.
+_SUMMARY_LINE_RE = re.compile(r"^[\s*_`]*(?:summary|in summary|overall|in total)\b", re.I)
+
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*$")
+# A Markdown heading line.
+_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:\s|$)")
+
+
+def _next_line_continues(lines: list[str], index: int, *, listed: bool = False) -> bool:
+    """Whether the first non-blank line from ``index`` on is a block line with its fields.
+
+    With ``listed``, a list line is one too. The agreement line, the end of the
+    answer and any other line (``debate_facts.carries_line_field``) are not.
+    """
+    for at in range(index, len(lines)):
+        line = lines[at]
+        if line.strip():
+            if _AGREEMENT_LINE_RE.match(line):
+                return False
+            return bool(listed and _LIST_MARKER_RE.match(line)) or carries_line_field(line)
+    return False
+
+
+def _table_border_or_header(lines: list[str], index: int) -> bool:
+    """Whether a line is a Markdown table's separator row, or the header row above one."""
+    line = lines[index]
+    if _TABLE_SEPARATOR_RE.match(line):
+        return True
+    following = lines[index + 1] if index + 1 < len(lines) else ""
+    return line.lstrip().startswith("|") and bool(_TABLE_SEPARATOR_RE.match(following))
+
+
+class ContradictionsBlock(NamedTuple):
+    """How the answer's last ``CONTRADICTIONS:`` block reads.
+
+    ``items`` is ``None`` for no block, or a block that holds only table rows
+    and cannot be read either way. ``mixed`` is a block that lists
+    contradictions and also says none stands: the contradictions are kept and
+    the "none" line is not read, and the run's record says so.
+    """
+
+    items: list[str] | None
+    mixed: bool = False
+    # Why the block cannot be read either way until the mediator is asked once:
+    # ``none_beside_plain_lines`` (a NONE whose other lines are all plain, most
+    # often the mediator's own closing sentence) or ``none_phrase`` (a lone
+    # label-line phrase opening with "none" outside the closed wording).
+    ambiguous: str = ""
+
+
+def read_contradictions_block(text: str) -> ContradictionsBlock:
+    """The answer's last ``CONTRADICTIONS:`` block, read (:class:`ContradictionsBlock`).
+
+    Only the last block counts: one drafted earlier and then argued away is not
+    the mediator's word. The label is matched in capitals, as the prompt spells
+    it, so a prose heading such as "Contradictions:" in the reasoning is not
+    taken for it. The block runs to the agreement line, the end of the answer,
+    or a blank line followed by a line that is neither a list line nor one
+    holding a field every line is asked for (opening with ``[analysts: ...]``
+    or ending with a ``[blocking ...]`` mark, ``debate_facts.carries_line_field``):
+    blank lines between plain lines that carry those fields do not end it, and
+    a remark after a blank line followed by such a line is read past and is no
+    item. A heading with no blank line above it is no item: inside the block it
+    is read past, and before the block's first line it heads the lines under
+    it when the next line is a list line or holds the fields and ends the
+    block otherwise, which leaves the block unreadable. After a NONE, a blank
+    line ends the block.
+
+    Each line is one contradiction, bulleted, numbered or plain, the text on
+    the label line included; an indented line under an item continues it. A
+    table's border and header rows and a summary line are not contradictions.
+    A "none" (:data:`_NONE_RE`) empties the block only as its whole content;
+    beside contradictions it is not read and the block is ``mixed``. A block
+    with nothing in it is empty; one with only table rows is unreadable.
+    Label-line text ending in ":" introduces the list and is not an item. Two
+    shapes are ``ambiguous`` and asked about once: a NONE whose other lines are
+    all plain, and a lone label-line phrase that opens with "none" outside the
+    closed wording.
+    """
+    lines = (text or "").splitlines()
+    start = None
+    for index in range(len(lines) - 1, -1, -1):
+        if _CONTRADICTIONS_LINE_RE.match(lines[index]):
+            start = index
+            break
+    if start is None:
+        return ContradictionsBlock(None)
+    match = _CONTRADICTIONS_LINE_RE.match(lines[start])
+    rest = (match.group(1) if match else "").strip()
+    found: list[str] = []
+    listed_items = 0
+    said_none = False
+    table_rows = False
+    none_phrase = False
+    if rest:
+        if _NONE_RE.match(rest):
+            said_none = True
+        elif rest.rstrip("*_` ").endswith(":"):
+            # An introduction to the list below ("the following still stand:").
+            pass
+        else:
+            none_phrase = bool(_NONE_OPENING_RE.match(rest))
+            found.append(rest.strip("*_`").strip())
+    after_blank = False
+    ended_at_heading = False
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if _AGREEMENT_LINE_RE.match(line):
+            break
+        if not line.strip():
+            after_blank = True
+            continue
+        if after_blank and said_none and not found:
+            # What follows a NONE and a blank line is a remark on the block.
+            break
+        listed = _LIST_MARKER_RE.match(line)
+        fielded = not listed and carries_line_field(line)
+        if not listed and not fielded and after_blank:
+            # Prose after a blank line ends the block, unless the next line
+            # holds a field of the block's lines: then it is a heading or a
+            # remark between them and no item.
+            if not _next_line_continues(lines, index + 1):
+                break
+            after_blank = False
+            continue
+        if not listed and not fielded and _HEADING_RE.match(line):
+            # A heading with no blank line above it is no item. Inside the
+            # block it is read past, whatever follows it. Before the block's
+            # first line it heads the lines below it when the next is a list
+            # line or holds the fields, and otherwise ends the block.
+            if not found and not _next_line_continues(lines, index + 1, listed=True):
+                ended_at_heading = True
+                break
+            continue
+        new_paragraph = after_blank
+        after_blank = False
+        stripped = line.strip()
+        if not listed:
+            if _NONE_RE.match(stripped):
+                said_none = True
+            elif stripped.startswith("|"):
+                table_rows = table_rows or not _table_border_or_header(lines, index)
+            elif _table_border_or_header(lines, index) or _SUMMARY_LINE_RE.match(stripped):
+                continue
+            elif line[:1].isspace() and found and not new_paragraph:
+                found[-1] = f"{found[-1]} {stripped}"
+            elif stripped.strip("*_`").strip():
+                found.append(stripped.strip("*_`").strip())
+            continue
+        item = line[listed.end() :].strip().strip("*_`").strip()
+        if not item:
+            continue
+        if _NONE_RE.match(item):
+            said_none = True
+            continue
+        found.append(item)
+        listed_items += 1
+    if found:
+        if said_none and not listed_items:
+            return ContradictionsBlock(found, mixed=True, ambiguous="none_beside_plain_lines")
+        if none_phrase and len(found) == 1 and not said_none:
+            return ContradictionsBlock(found, ambiguous="none_phrase")
+        return ContradictionsBlock(found, mixed=said_none)
+    if (table_rows or ended_at_heading) and not said_none:
+        # Only table rows, or a heading the block ended at before any line:
+        # nothing says what stands, and the mediator is asked once.
+        return ContradictionsBlock(None)
+    return ContradictionsBlock([])
+
+
+def final_contradictions(text: str) -> list[str] | None:
+    """The contradictions the answer's last block lists, or ``None`` (``read_contradictions_block``)."""
+    return read_contradictions_block(text).items
+
+
+# The notice a judge prompt carries when its parts did not fit the judge's
+# window whole. Said in the prompt, where the model reads it, and recorded as
+# a degradation reason, where the reader of the report does.
+PROMPT_SHORTENED_NOTICE = (
+    "NOTE: this prompt did not fit this model's window whole. {cut} of {total} parts "
+    "({names}) were shortened to {width} characters each, largest first; a shortened "
+    "part ends in …."
+)
+
+
+def verdict_report_parts(
+    reports: Mapping[str, str],
+    isr_reports: Mapping[str, AgentISR] | None,
+    evidence_summary: str = "",
+    degradation_note: str = "",
+) -> dict[str, str]:
+    """The parts the analysts' reports are shown to the judge in, each whole, in order.
+
+    Keyed by what a shortening notice calls them: each analyst's report
+    under its name, then the ISR summaries, the evidence summary and the
+    degradation note. Nothing here is cut; :func:`fit_prompt_parts` does
+    that, and only when the judge's window cannot hold them.
+    """
+    from malspark.agents.base_agent import report_rendered_again
+    from malspark.utils.written_forms import markers_written_out
+
+    parts: dict[str, str] = {}
+    for name, report in reports.items():
+        # A report is what a model wrote: a run-state marker in it is written
+        # out, so the judge never reads one as the platform's block. A claims
+        # summary is rendered again from its ISR, with every mark set since.
+        shown = report_rendered_again(report, (isr_reports or {}).get(name))
+        parts[f"{name} report"] = f"--- {name.upper()} ANALYST ---\n{markers_written_out(shown)}"
+    if isr_reports:
+        isr_block = "\n".join(
+            f"[{name}] domain={isr.domain} | "
+            # A claim mapped to several techniques is one claim.
+            f"claims={count_claim_blocks(isr.claims)} | "
+            f"mean_conf={isr.mean_confidence:.2f}"
+            for name, isr in isr_reports.items()
+            if isr.claims
+        )
+        if isr_block:
+            parts["ISR summaries"] = f"=== ISR SUMMARIES ===\n{isr_block}"
+    if evidence_summary:
+        parts["evidence summary"] = evidence_summary
+    if degradation_note:
+        parts["degradation note"] = degradation_note
+    return parts
+
+
+def join_prompt_parts(parts: Mapping[str, str]) -> str:
+    """The parts as one block, a blank line between each."""
+    return "\n\n".join(text for text in parts.values() if text)
+
+
+def verdict_reports_text(
+    reports: Mapping[str, str],
+    isr_reports: Mapping[str, AgentISR] | None,
+    evidence_summary: str = "",
+    degradation_note: str = "",
+) -> str:
+    """The analysts' reports as the verdict call is shown them, whole.
+
+    One function for the verdict and the technique question asked after it,
+    so the question is asked over what the verdict was drawn from. Each report
+    is whole: a fixed cut at 500 characters used to leave the judge the first
+    paragraph of every analyst and the ends of none.
+    """
+    return join_prompt_parts(
+        verdict_report_parts(reports, isr_reports, evidence_summary, degradation_note)
+    )
+
+
+def fit_prompt_parts(parts: Mapping[str, str], room: int | None) -> tuple[dict[str, str], str]:
+    """``parts`` whole when they fit ``room`` characters; else the largest shortened first.
+
+    The shortening the tool answers get, for text: characters come off the
+    largest parts first, down to one width every shortened part shares, so a
+    short part is never cut to make room for a long one. A cut ends in the cut
+    mark. Returns the parts and the notice saying what was shortened (``""``
+    when nothing was). ``room`` of ``None`` is no window to measure against:
+    everything goes whole.
+    """
+    from malspark.utils.marked_cut import CUT_MARK, marked_cut
+
+    texts = {key: str(text or "") for key, text in parts.items()}
+    total = sum(len(text) for text in texts.values())
+    if room is None or total <= room or not texts:
+        return texts, ""
+    budget = max(0, int(room))
+    lengths = sorted(len(text) for text in texts.values())
+    # The width every part longer than it is cut to: the largest width at
+    # which the parts at or under it, whole, and the rest, at it, fit.
+    width = 0
+    kept = 0
+    for index, length in enumerate(lengths):
+        longer = len(lengths) - index
+        candidate = (budget - kept) // longer
+        if candidate < length:
+            width = max(0, candidate)
+            break
+        kept += length
+    else:  # pragma: no cover — every part fitted whole, which the total ruled out
+        return texts, ""
+    shown: dict[str, str] = {}
+    cut: list[str] = []
+    for key, text in texts.items():
+        if len(text) <= width:
+            shown[key] = text
+            continue
+        cut.append(key)
+        shown[key] = (
+            marked_cut(text, width) if width > len(CUT_MARK) else f"{CUT_MARK} (no room left)"
+        )
+    notice = PROMPT_SHORTENED_NOTICE.format(
+        cut=len(cut), total=len(texts), names=", ".join(cut), width=width
+    )
+    return shown, notice
+
+
+_MEMORY_END = "=== END LONG-TERM MEMORY ==="
+
+
+def closed_memory_cut(shown: str, whole: str) -> str:
+    """The long-term memory block as fitted, its quoted value and its end line closed after a cut.
+
+    A cut ends the block mid-line, and a case's summary is one quoted value
+    (``tool_fence.quoted_value``): left open, its quote would run into the
+    rest of the prompt. The quote is closed in front of the cut mark, found by
+    a scan that reads a backslash as escaping the character after it (a lone
+    backslash the cut left at the end is dropped). Another run's ids the cut
+    completed are renamed (``long_term_memory.foreign_ids_written_out``). A
+    block that was not cut is returned as it is, and so is one with nothing of it left (only the cut
+    mark's own line).
+    """
+    from malspark.utils.marked_cut import CUT_MARK
+
+    if shown == whole or not shown.startswith("=== LONG-TERM MEMORY"):
+        return shown
+    cut = shown.endswith(CUT_MARK)
+    body = shown[: -len(CUT_MARK)] if cut else shown
+    # The block is other runs' text under fixed headings, and a cut can end an
+    # item id where its text went on (``net:44x`` cut to ``net:4``): renamed
+    # again here. The renaming writes no backslash and no quote.
+    body = foreign_ids_written_out(body)
+    inside = False
+    escaped = False
+    for char in body.rsplit("\n", 1)[-1]:
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == '"':
+            inside = not inside
+    if inside:
+        body = f'{body[:-1] if escaped else body}"'
+    return f"{body}{CUT_MARK if cut else ''}\n{_MEMORY_END}"
+
+
+# The key the negotiation history is fitted under beside the report parts.
+_HISTORY_PART = "negotiation history"
+# Kept back for the shortening notice itself, which is written only once the
+# parts are fitted: the notice names the parts it cut, so its length is known
+# only then, and this is more than any notice over a dozen parts needs.
+_NOTICE_ROOM = 600
+
+
+# What the verdict prompt says where retrieving similar past cases failed.
+MEMORY_UNAVAILABLE_NOTE = (
+    "=== LONG-TERM MEMORY: unavailable ===\n"
+    "Retrieving similar past cases failed; no prior case is shown, which says nothing "
+    "about whether one exists.\n"
+    "=== END LONG-TERM MEMORY ==="
+)
+
+
+class JudgeVerdict(NamedTuple):
+    """What ``give_verdict`` produced, and what was still wrong with it.
+
+    The violations travel with the bundle rather than being logged and dropped:
+    they are what ``run_summary.validation.unresolved`` is made of, and a run
+    whose judge could not ground an indicator should say so where a reader
+    looks, not only in a worker log nobody keeps.
+    """
+
+    bundle: Bundle
+    violations: list[Violation]
+    retries: int
+    # Every violation the judge was shown, by code — including the ones the
+    # retry fixed, which nothing else in the run records.
+    fed_back: dict[str, int] = {}
+    # ``{the judge's label: the published id}`` for the answer this verdict
+    # stands on, so the judge's own bundle and the export can be read together.
+    labels: dict[str, str | list[str]] = {}
+    # The judge's answer this verdict stands on, as it wrote it: parsed and
+    # otherwise untouched, the record the export's decline and not-carried
+    # rows point at. ``None`` when the verdict is not the judge's own bundle.
+    written: dict[str, Any] | None = None
+
+
+# How the judge keeps its bundle short without leaving out anything it decides.
+# A benchmark judge's bundle, pretty-printed and with each relationship's
+# confidence, basis and credits written again on the object it relates, was cut
+# at the output cap twice. Every relationship stays the judge's own: which
+# indicator indicates the sample, and which does not, is its decision.
+COMPACT_BUNDLE_RULES = (
+    "- Relate them as malware uses attack-pattern and indicator indicates "
+    "malware, and relate an indicator only to what it indicates. On every "
+    "Relationship set x_malspark_confidence (0.0-1.0) and x_malspark_evidence_basis "
+    "(static|dynamic|network|all|unknown), and list in "
+    "x_malspark_contributing_agents only the sources that named what it is about, "
+    "by the names the EVIDENCE SUMMARY gives them. Write those three on the "
+    "relationship only, never again on the attack-pattern or indicator it "
+    "relates.\n"
+    "- Keep the bundle short: an attack-pattern is its name, its mitre-attack "
+    "reference and at most one sentence of description; leave out pattern_type, "
+    "which is always stix and is filled in; and write the JSON on one line "
+    "without indentation.\n"
+)
+
+
+# The mediator's sentence about a reputation lookup, when no analyst consulted
+# one: the sample's sha256 known (``{sha256}`` is replaced with it), and the
+# same with no hash to name. The sentence about the tools the request carries
+# (``tools_statement``) follows it. Module constants so the run fingerprint
+# hashes them as templates (``analysis.setup_prompts``).
+MEDIATOR_LOOKUP_ONCE_BY_HASH = (
+    "You have reputation tools and no analyst has consulted one. "
+    "Look the sample's hash up once — its sha256 is {sha256} "
+    "and it is in the sample identity block below — cite what comes back "
+    "as evidence, and treat a reputation label as one source rather than "
+    "as the verdict.\n"
+)
+MEDIATOR_LOOKUP_ONCE = (
+    "You have reputation tools and no analyst has consulted one. "
+    "Look the sample up once to settle its identity, cite what comes "
+    "back as evidence, and treat a reputation label as one source "
+    "rather than as the verdict.\n"
+)
+
+
+# The question asked once after the verdict about the techniques the verdict's
+# bundle does not carry (the ones an analyst claimed, and the ones named only on
+# a finding) and the ones no claim naming them describes, by the ATT&CK check's
+# finding. The judge decides; with no answer nothing is withheld. The system
+# text says exactly what the question shows.
+_TECHNIQUE_QUESTION_HEAD = (
+    "You are the Chief Malware Judge. Your verdict is given. The analysts named some "
+    "techniques that your bundle does not carry, some that appear only on an "
+    "analyst's finding, which no check has asked about, and some for which the ATT&CK "
+    "check found that no claim naming them uses the catalogue's terms for them; a "
+    "technique of that last kind carries the check's finding. You decide, for each one, whether the report "
+    "publishes it. You are shown the run state and the pack, the analysts' reports as "
+    "your verdict call was shown them, your verdict and the techniques your bundle "
+    "carries, and for each technique the claims or findings that name it with the "
+    "text of every evidence entry they cite. "
+)
+# The question offers ``read_evidence`` over the run's ledger
+# (``agents.ledger_reads``); a model that cannot bind it is asked with the
+# tools-free wording.
+TECHNIQUE_QUESTION_SYSTEM = (
+    f"{_TECHNIQUE_QUESTION_HEAD}Decide from what is shown; where what is shown of an "
+    "entry is not enough, read it by its id with read_evidence."
+)
+TECHNIQUE_QUESTION_SYSTEM_WITHOUT_TOOLS = (
+    f"{_TECHNIQUE_QUESTION_HEAD}This turn carries no tools: decide from what is shown."
+)
+# The answer's form: a JSON array the reader parses.
+TECHNIQUE_ANSWER_FORM = (
+    "Answer with one JSON array and nothing else, one object per technique above:\n"
+    '[{"id": "<technique id>", "decision": "keep", "reason": "<why>"}]\n'
+    'The decision is "keep" or "drop". Keep a technique the evidence shown here shows '
+    "the sample doing; drop one it does not, and say why in the reason. A technique "
+    "you leave out is reported as it would be without this question, marked as not "
+    "confirmed by you."
+)
+# Why a technique question has no answer, for ``TechniqueReview.unanswered``.
+TECHNIQUE_QUESTION_NOT_ASKED = "not asked: the verdict call timed out"
+TECHNIQUE_ANSWER_UNREAD = "the answer named none of the techniques in a form that could be read"
+# The notice put in the question when its evidence did not fit the window.
+EVIDENCE_SHORTENED_NOTICE = (
+    "NOTE: the evidence entries below did not fit this model's window whole. "
+    "{cut} of {total} were shortened to {width} characters each; a shortened entry "
+    "ends in …."
+)
+
+# Said once above the techniques when any of them shows its card, so a
+# question without cards carries none of it.
+TECHNIQUE_CARDS_INTRO = (
+    "A technique with a card shows it under its claims, as reference: whether the action "
+    "alone is the technique or it needs a stated purpose, what the evidence has to show, "
+    "what to look for, and sibling techniques it is confused with, each with what tells "
+    "them apart."
+)
+
+# An ATT&CK technique id where it stands in an answer.
+# A sub-technique written with a slash is the same id: read, and written
+# back with its dot (``_technique_id``).
+_TECHNIQUE_ID_RE = re.compile(r"(?<![A-Za-z0-9])(T\d{4}(?:[./]\d{3})?)(?![0-9])", re.IGNORECASE)
+# A decision word standing on its own. ``kept``/``dropped`` are read only in
+# the decision position, straight after the id's separator: elsewhere they are
+# words of the reason ("the second stage is dropped to disk").
+_DECISION_RE = re.compile(r"(?<![A-Za-z'])(keep|drop)(?![A-Za-z'])", re.IGNORECASE)
+# The separator after an id (and any name written after it) that the decision
+# follows: a colon, a table bar, a dash or an arrow, never a line break.
+_ID_SEPARATOR_RE = re.compile(r"[:|=\u2013\u2014\u2192]|->|[ \t]-[ \t]")
+# The decision in the decision position: past markup and an optional
+# "Decision:" label, the whole word.
+_DECISION_AT_RE = re.compile(
+    r"^[ \t*_`>]*(?:decision[ \t*_`]*[:\-\u2013\u2014][ \t*_`]*)?"
+    r"(keep|kept|drop|dropped)(?![A-Za-z'])",
+    re.IGNORECASE,
+)
+# What leads a line and what separates a decision from its reason: markdown
+# list and table marks, numbering, arrows, colons and dashes. Never a line break.
+_LINE_LEAD_RE = re.compile(r"^[ \t|*_`>#\-•]*(?:\d+[.)][ \t]*)?")
+_REASON_LEAD_RE = re.compile(r"^[ \t|*_`:\-–—→>=,.;)\]]*")
+# A model's reasoning block, which is not its answer.
+_THINK_RE = re.compile(r"<think>.*?(?:</think>|\Z)", re.IGNORECASE | re.DOTALL)
+
+
+class QuestionEvidence(NamedTuple):
+    """One cited entry as the technique question shows it."""
+
+    text: str
+    tool: str = ""
+    # The run holds only part of this entry's answer.
+    partial: bool = False
+    # The stored output was blanked and this is the run's lower-cased search copy.
+    lowered: bool = False
+    # Whether the call answered: a failed call's text is its failure, which
+    # the pack row says in the platform's words.
+    ok: bool = True
+
+
+# What an entry's heading says when what is shown is not the whole answer as stored.
+PARTIAL_ENTRY_MARK = "incomplete: this run holds only part of this entry's answer"
+LOWERED_ENTRY_MARK = "the stored output was not kept; this is the run's lower-cased search copy"
+NO_ENTRY_TEXT = "(no text recorded in this run)"
+# What a pack row says after its head in the technique question when the
+# entry's stored output, from which the row is rendered, is shown whole under
+# EVIDENCE CITED.
+PACK_ROW_SHOWN_BELOW = (
+    "the items of this line are in its stored output, shown whole under EVIDENCE CITED below"
+)
+_PACK_ROW_RE = re.compile(r"\[([^\]\s]+)\] ")
+
+
+def pack_rows_shown_below(
+    facts_block: str, whole: Mapping[str, str], heads: Mapping[str, str] | None = None
+) -> str:
+    """``facts_block`` with each row whose entry is shown whole below cut to its head and a pointer.
+
+    The technique question shows the pack and, under EVIDENCE CITED, the
+    stored output of every entry a question cites. A pack row is rendered
+    from its entry's stored output, so where that output is shown whole
+    (``whole``: id, lower-cased, to the text shown) the row keeps its head and
+    says where the output is; the fuller text is shown once. The head is what
+    the row says besides the items it lists: a row of several lines, its
+    first line (the lines below it are its items); a row of one line, the
+    line its renderer writes with no item listed (``heads``,
+    ``triage_pack.pack_row_heads``), which keeps every sentence the renderer
+    adds of its own. A one-line row with no head given stays whole.
+
+    A row is a line of the pack (below its heading, up to the first blank
+    line: the earlier run's block after it is left as it is) opening with
+    ``[id] ``, with the list lines (``- ``) or indented lines right below it.
+    A row is left whole when its pointed form would be no shorter, or when the
+    output shown is shorter than the row: then the row is the fuller text.
+    Linear in the block.
+    """
+    from malspark.pipeline.triage_pack import PACK_HEADING
+
+    if not facts_block or not whole:
+        return facts_block
+    heads = heads or {}
+    lines = facts_block.split("\n")
+    out: list[str] = []
+    in_pack = False
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line == PACK_HEADING or not line.strip():
+            in_pack = line == PACK_HEADING
+        opened = _PACK_ROW_RE.match(line) if in_pack else None
+        end = index + 1
+        if opened is not None:
+            while end < len(lines) and lines[end][:1] in ("-", " ", "\t") and lines[end].strip():
+                end += 1
+        key = opened.group(1).lower() if opened is not None else ""
+        shown = whole.get(key, "") if opened is not None else ""
+        head = line if end > index + 1 else heads.get(key, "")
+        if opened is None or not shown or not head:
+            out.extend(lines[index:end])
+            index = end
+            continue
+        row = "\n".join(lines[index:end])
+        pointed = f"{head} — {PACK_ROW_SHOWN_BELOW}."
+        out.append(pointed if len(pointed) < len(row) and len(shown) >= len(row) else row)
+        index = end
+    return "\n".join(out)
+
+
+# The labels the question's head writes before its technique list.
+QUESTION_REPORTS_LABEL = "Expert Reports:"
+QUESTION_VERDICT_LABEL = "YOUR VERDICT:"
+QUESTION_CARRIED_LABEL = "TECHNIQUES YOUR BUNDLE CARRIES:"
+# The label of a technique's line stating its layers beside the distinct places
+# in the sample its mentions cite (``analysis.evidence_roots``).
+QUESTION_ROOTS_LABEL = "evidence roots:"
+
+
+def technique_question_head(reports_text: str, verdict: str, carried: Sequence[str]) -> str:
+    """What the question shows before its list: the reports, the verdict, the carried ids."""
+    return (
+        f"{QUESTION_REPORTS_LABEL}\n{reports_text}\n\n"
+        f"{QUESTION_VERDICT_LABEL} {verdict}\n"
+        f"{QUESTION_CARRIED_LABEL} "
+        f"{', '.join(technique_label(tid) for tid in carried) if carried else 'none'}\n\n"
+    )
+
+
+def question_evidence(ledger: Iterable[Any], corpus: Any = None) -> dict[str, QuestionEvidence]:
+    """Each ledger entry as the technique question shows it, keyed by its lower-cased id.
+
+    The output as stored, in its own case; where the byte budget blanked it,
+    the run's search copy, which is lower-cased and says so. An entry the
+    ledger records as trimmed is marked incomplete. A repeat is shown as the
+    entry that holds its answer (``repeated_of``, followed to its end), never
+    as the guard's note. Never raises.
+    """
+    from malspark.schemas.evidence import repeat_holders
+
+    ledger = list(ledger or ())
+    shown: dict[str, QuestionEvidence] = {}
+    for entry in ledger:
+        written = str(getattr(entry, "id", "") or "").strip()
+        if not written:
+            continue
+        text = str(getattr(entry, "output", "") or "")
+        lowered = False
+        if not text and corpus is not None:
+            try:
+                text = _read_of_entry(corpus, written)
+            except Exception:  # noqa: BLE001 — no copy is no text
+                text = ""
+            lowered = bool(text)
+        elif text and corpus is not None:
+            # Pages of this entry the model read past what the ledger stored.
+            try:
+                pages = str(getattr(corpus, "pages_of", lambda _id: "")(written) or "")
+            except Exception:  # noqa: BLE001 — no page is no text
+                pages = ""
+            if pages:
+                text, lowered = f"{text.lower()}\n{pages}", True
+        shown[written.lower()] = QuestionEvidence(
+            text=text,
+            tool=str(getattr(entry, "tool", "") or ""),
+            partial=bool(getattr(entry, "truncated", False)),
+            lowered=lowered,
+            ok=bool(getattr(entry, "ok", True)),
+        )
+    holders = repeat_holders(ledger)
+    for repeat, holder in holders.items():
+        # A loop, or a chain to an id the ledger lacks, holds no answer: shown
+        # as nothing, as the citation check reads it.
+        if holder and holder in shown and holder not in holders:
+            shown[repeat] = shown[holder]
+        else:
+            shown.pop(repeat, None)
+    return shown
+
+
+def _as_evidence(value: Any) -> QuestionEvidence:
+    return value if isinstance(value, QuestionEvidence) else QuestionEvidence(str(value or ""))
+
+
+def technique_question_text(
+    questions: Sequence[Any],
+    evidence: Mapping[str, Any] | None = None,
+    *,
+    notice: str = "",
+    cards: bool = True,
+) -> str:
+    """The question's list of techniques and the answer's form, as the judge reads it.
+
+    ``questions`` are ``capability_matrix.TechniqueQuestion`` rows; each is
+    listed with every claim or finding that names it, in the analyst's words,
+    and the evidence ids it cites, then the check's finding it carries and the
+    technique's card where it has one. ``evidence`` is what is shown for each id
+    (text, or :class:`QuestionEvidence`), looked up whatever the case the id
+    was cited in, and listed once under the techniques with the tool behind
+    it and a mark when it is not the whole answer as stored; ``notice`` says
+    what was shortened. ``cards=False`` leaves the technique cards out.
+    """
+    shown = {str(k).lower(): _as_evidence(v) for k, v in (evidence or {}).items()}
+    lines = ["TECHNIQUES TO DECIDE"]
+    cited: list[str] = []
+    for n, question in enumerate(questions, 1):
+        where = {
+            "claimed": "claimed by an analyst and not in your bundle",
+            "undescribed": (
+                "in your bundle; the ATT&CK check found no claim naming it uses the "
+                "catalogue's terms for it"
+            ),
+        }.get(question.kind, "named only on an analyst's finding")
+        lines.append(f"{n}. {technique_label(question.technique_id)} — {where}")
+        for agent, text, ids in question.mentions:
+            listed = ", ".join(ids) if ids else "none cited"
+            lines.append(f"   - {agent}: {' '.join(str(text).split())} (evidence: {listed})")
+            cited.extend(i.lower() for i in ids if i.lower() not in cited)
+        roots = str(getattr(question, "roots", "") or "")
+        if roots:
+            lines.append(f"   {QUESTION_ROOTS_LABEL} {roots}")
+        check = str(getattr(question, "check", "") or "")
+        if check:
+            lines.append(f"   check: {check}")
+        card = technique_card_lines(question.technique_id) if cards else []
+        if card and TECHNIQUE_CARDS_INTRO not in lines:
+            lines.insert(1, TECHNIQUE_CARDS_INTRO)
+        lines.extend(f"   {line}" for line in card)
+    if cited:
+        lines += ["", "EVIDENCE CITED"]
+        if any(needs_fence(e.text) for e in (shown.get(i) for i in cited) if e is not None):
+            lines.append(FENCE_STATEMENT)
+        if notice:
+            lines.append(notice)
+        for entry_id in cited:
+            entry = shown.get(entry_id)
+            if entry is None or not entry.text:
+                lines.append(f"[{entry_id}] {NO_ENTRY_TEXT}")
+                continue
+            marks = [
+                m
+                for m, on in (
+                    (PARTIAL_ENTRY_MARK, entry.partial),
+                    (LOWERED_ENTRY_MARK, entry.lowered),
+                )
+                if on
+            ]
+            heading = f"[{entry_id}]" + (f" ({entry.tool})" if entry.tool else "")
+            if marks:
+                heading += " — " + "; ".join(marks)
+            lines.append(f"{heading}\n{fenced(entry_id, entry.text)}")
+    return "\n".join(lines) + "\n\n" + TECHNIQUE_ANSWER_FORM
+
+
+def _without_reasoning(text: str) -> str:
+    """``text`` with any ``<think>`` block taken out: the answer is what follows it."""
+    return _THINK_RE.sub("", str(text or ""))
+
+
+def _json_values(text: str) -> list[Any]:
+    """Every JSON array or object written in ``text``, outermost only, in order.
+
+    Read with the decoder at each opening bracket, so a bracketed id in the
+    prose before the answer does not hide it; an answer that reads as none is
+    given the repo's repair pass (``utils.json_cleaner.safe_parse_json``).
+    """
+    import json
+
+    from malspark.utils.json_cleaner import safe_parse_json
+
+    decoder = json.JSONDecoder()
+    values: list[Any] = []
+    index = 0
+    while index < len(text):
+        if text[index] not in "[{":
+            index += 1
+            continue
+        try:
+            value, after = decoder.raw_decode(text, index)
+        except ValueError:
+            index += 1
+            continue
+        values.append(value)
+        index = after
+    if not any(isinstance(v, list | dict) and v for v in values):
+        repaired = safe_parse_json(text)
+        if repaired is not None:
+            values.append(repaired)
+    return values
+
+
+def _json_rows(text: str) -> list[dict[str, Any]]:
+    """Each ``{id, decision, reason}`` object a JSON answer in ``text`` holds, in order.
+
+    An array of objects, an object holding one under ``decisions``, or an
+    object keyed by technique id; fenced or bare. The last JSON value that
+    reads as any of these is the answer.
+    """
+    found: list[dict[str, Any]] = []
+    for value in _json_values(text):
+        rows: list[dict[str, Any]] = []
+        if isinstance(value, dict) and isinstance(value.get("decisions"), list):
+            value = value["decisions"]
+        if isinstance(value, list):
+            rows = [row for row in value if isinstance(row, dict)]
+        elif isinstance(value, dict):
+            rows = [
+                {"id": key, **(item if isinstance(item, dict) else {"decision": item})}
+                for key, item in value.items()
+                if _TECHNIQUE_ID_RE.fullmatch(str(key).strip().replace("/", "."))
+            ]
+        if any(_TECHNIQUE_ID_RE.search(str(row.get(k) or "")) for row in rows for k in _ID_KEYS):
+            found = rows
+    return found
+
+
+# A decision as the answer's record holds it.
+_Decision = Literal["keep", "drop"]
+
+
+def _technique_id(match: re.Match[str]) -> str:
+    """The id a match names, upper-cased and with a sub-technique's dot."""
+    return match.group(1).upper().replace("/", ".")
+
+
+def _as_decision(word: str) -> _Decision:
+    return "keep" if word.lower() in ("keep", "kept") else "drop"
+
+
+# The keys a JSON row may name its technique under.
+_ID_KEYS = ("id", "technique_id", "technique")
+
+
+def _row_decision(row: Mapping[str, Any]) -> tuple[str, _Decision, str] | None:
+    """``(id, keep|drop, reason)`` for one JSON row, or ``None`` when it states none.
+
+    The ``decision`` field is read as one whole word — keep, drop, kept or
+    dropped — and anything else ("do not keep; drop") states no decision.
+    """
+    tid = ""
+    for key in _ID_KEYS:
+        match = _TECHNIQUE_ID_RE.search(str(row.get(key) or ""))
+        if match:
+            tid = _technique_id(match)
+            break
+    word = str(row.get("decision") or "").strip().strip(".").strip()
+    if not tid or word.lower() not in ("keep", "kept", "drop", "dropped"):
+        return None
+    return tid, _as_decision(word), str(row.get("reason") or "").strip()
+
+
+def _line_decision(line: str) -> tuple[str, _Decision, str] | None:
+    """``(id, keep|drop, reason)`` for one line of a free answer, or ``None``.
+
+    The line's first technique id, then its decision from the decision
+    position: the word straight after the first separator that follows the id
+    (past a technique name, markup or a "Decision:" label), and failing that
+    the last standalone keep or drop on the line — never a word inside the
+    reason that follows the decision. The reason is the rest of the line after
+    the decision, without its separators or a table's closing bar, and the
+    text before the decision when nothing follows it.
+    """
+    body = _LINE_LEAD_RE.sub("", line)
+    tid = _TECHNIQUE_ID_RE.search(body)
+    if tid is None:
+        return None
+    rest = body[tid.end() :]
+    separator = _ID_SEPARATOR_RE.search(rest)
+    at = _DECISION_AT_RE.match(rest[separator.end() :]) if separator else None
+    if separator is not None and at is not None:
+        end = separator.end() + at.end(1)
+        word = at.group(1)
+        before = ""
+    else:
+        standalone = list(_DECISION_RE.finditer(rest))
+        if not standalone:
+            return None
+        start, end, word = standalone[-1].start(1), standalone[-1].end(1), standalone[-1].group(1)
+        # A decision the line ends on: what came before it is the reason.
+        before = rest[separator.end() if separator is not None else 0 : start]
+    reason = _REASON_LEAD_RE.sub("", rest[end:]).strip().rstrip(" \t|*_`").strip()
+    if not reason:
+        reason = before.strip(" \t|*_`:;,.-\u2013\u2014\u2192>")
+    return _technique_id(tid), _as_decision(word), reason
+
+
+# What the token ledger calls the question asked after the verdict.
+TECHNIQUE_QUESTION_CALL = "technique question"
+
+
+class TechniqueAnswerRow(BaseModel):
+    """One row of the judge's answer about a technique, as a schema asks for it."""
+
+    id: str
+    decision: str
+    reason: str = ""
+
+
+class TechniqueAnswer(BaseModel):
+    """The judge's answer about the techniques, for a provider with structured output."""
+
+    decisions: list[TechniqueAnswerRow] = Field(default_factory=list)
+
+
+def _structured_decisions(parsed: Any, asked: Sequence[str]) -> list[Any]:
+    """The decisions a structured answer states for the ``asked`` techniques, last per id."""
+    from malspark.schemas.stix_models import TechniqueDecision
+
+    rows = (
+        parsed.get("decisions") if isinstance(parsed, dict) else getattr(parsed, "decisions", None)
+    )
+    if not isinstance(rows, list):
+        return []
+    wanted = [str(t).upper() for t in asked]
+    found: dict[str, TechniqueDecision] = {}
+    for row in rows:
+        if not isinstance(row, BaseModel | dict):
+            continue
+        stated = _row_decision(row.model_dump() if isinstance(row, BaseModel) else dict(row))
+        if stated is None or stated[0] not in wanted:
+            continue
+        found.pop(stated[0], None)
+        found[stated[0]] = TechniqueDecision(
+            technique_id=stated[0], decision=stated[1], reason=stated[2]
+        )
+    return sorted(found.values(), key=lambda d: wanted.index(d.technique_id))
+
+
+def fit_shown_evidence(
+    texts: dict[str, str], room: int | None
+) -> tuple[dict[str, str], str, int | None]:
+    """``texts`` as the one view of a tool answer shows them, fitted to ``room``.
+
+    Each text is put through the view first (``agents.tool_fence``): a text
+    answer escaped as its fence holds it, a JSON one with its raw breaks
+    escaped. A JSON excerpt the fit cuts is text, and fenced, so the escapes
+    the cut texts then hold are kept back from the room and the texts fitted
+    again until what is kept back covers them. Returns the fitted texts, the
+    notice saying what was shortened, and the room left for them (``room``
+    less what was kept back). The fence lines are the caller's to keep back.
+    """
+    viewed = {i: escaped(t) if needs_fence(t) else json_view(t) for i, t in texts.items()}
+    reserved = 0
+    while True:
+        room_now = None if room is None else max(0, room - reserved)
+        fitted, notice = _fit_evidence(viewed, room_now)
+        grown = sum(escapes(t) for t in fitted.values() if needs_fence(t))
+        if room is None or grown <= reserved:
+            return fitted, notice, room_now
+        reserved = grown
+
+
+def _fit_evidence(texts: dict[str, str], room: int | None) -> tuple[dict[str, str], str]:
+    """``texts`` whole when they fit ``room`` characters, else each cut to an equal share.
+
+    Returns the texts the question carries and the notice saying what was
+    shortened, ``""`` when nothing was. ``room`` of ``None`` is no window to
+    measure against: everything goes whole.
+    """
+    from malspark.utils.marked_cut import CUT_MARK, marked_cut
+
+    total = sum(len(t) for t in texts.values())
+    if room is None or total <= room or not texts:
+        return dict(texts), ""
+    width = max(0, int(room) // len(texts))
+    shown: dict[str, str] = {}
+    cut = 0
+    for entry_id, text in texts.items():
+        if len(text) <= width:
+            shown[entry_id] = text
+            continue
+        cut += 1
+        shown[entry_id] = (
+            marked_cut(text, width) if width > len(CUT_MARK) else f"{CUT_MARK} (no room left)"
+        )
+    notice = EVIDENCE_SHORTENED_NOTICE.format(cut=cut, total=len(texts), width=width)
+    return shown, notice
+
+
+def read_technique_answer(text: str, asked: Sequence[str]) -> list[Any]:
+    """The decisions ``text`` states for the ``asked`` techniques.
+
+    A reasoning block is taken out first. A JSON answer is read when there is
+    one; otherwise each line is read on its own. The last answer for an id
+    wins, since a model restates before it concludes. Each reason is kept
+    whole, as written, and a decision with no reason has an empty one. A
+    technique that was not asked is not read.
+    """
+    from malspark.schemas.stix_models import TechniqueDecision
+
+    body = _without_reasoning(text)
+    wanted = {str(tid).upper() for tid in asked}
+    rows = _json_rows(body)
+    if rows:
+        # A JSON answer is read as JSON only: a row whose decision is not one
+        # word states none, and the JSON's own lines are not read again.
+        stated = [d for row in rows if (d := _row_decision(row)) is not None]
+    else:
+        stated = [d for line in body.splitlines() if (d := _line_decision(line)) is not None]
+    found: dict[str, TechniqueDecision] = {}
+    for tid, decision, reason in stated:
+        if tid not in wanted:
+            continue
+        found.pop(tid, None)
+        found[tid] = TechniqueDecision(technique_id=tid, decision=decision, reason=reason)
+    order = [str(t).upper() for t in asked]
+    return sorted(found.values(), key=lambda d: order.index(d.technique_id))
+
+
+# The judge's system prompt. A module constant so that
+# ``composition.builtin_prompt("judge")`` and ``give_verdict`` cannot disagree
+# about what the judge is told.
+# How the judge writes its malware object: when it stands for the family, and
+# which vocabulary its kind is written in. The vocabulary is named, not listed;
+# the question that asks about a kind outside it lists it
+# (``validation.malware_object_violations``).
+MALWARE_OBJECT_RULE = (
+    "- Write a STIX ``malware`` object only for a sample you conclude is "
+    "malware, with is_family: true when the object stands for the family you "
+    "name under family.name (an object you name after that family stands for "
+    "it), false when it stands for this one sample. Give its kind under "
+    "malware_types, in values from the STIX 2.1 malware-type-ov vocabulary; "
+    "labels is not carried into the export.\n"
+)
+
+
+JUDGE_VERDICT_SYSTEM = (
+    "You are the Chief Malware Judge. Based on the expert reports below, "
+    "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
+    "RULES:\n"
+    "- Map findings to MITRE ATT&CK with AttackPattern objects, each naming its "
+    "technique in external_references: "
+    '{"source_name": "mitre-attack", "external_id": "T####" or "T####.###"}. '
+    "A behaviour you cannot give a technique id is not an AttackPattern: say "
+    "what was observed in severity.rationale instead.\n"
+    f"{COMPACT_BUNDLE_RULES}"
+    "- Leave out created, modified, spec_version and valid_from: they are "
+    "stamped after you answer.\n"
+    "- Give every object an ``id`` of the form ``<type>--<label>``, unique in "
+    "this bundle, and name those ids in every ``*_ref``. A short label is "
+    "enough (``malware--1``): the published ids are assigned after you answer.\n"
+    "- DO NOT emit Indicator objects whose pattern values are inferred, "
+    "hypothetical, or example. Every Indicator's pattern value MUST "
+    "appear verbatim in the deterministic evidence (static strings, "
+    "sandbox observations, or network IOCs). When in doubt, emit zero "
+    "Indicators — the deterministic renderer will fill them in.\n"
+    "- An Indicator's pattern compares a STIX Cyber-observable type (ipv4-addr, "
+    "ipv6-addr, domain-name, url, file, email-addr, mutex, windows-registry-key, "
+    "process, network-traffic), and its indicator_types say what the value "
+    "indicates: malicious-activity, anomalous-activity, benign, compromised, "
+    "anonymization, attribution or unknown.\n"
+    "- You decide the verdict, the severity, the malware category and the "
+    "family; nothing downstream computes them for you and nothing overrides "
+    "what you say. ``x_malspark_assessment`` is a sibling of ``objects``, beside "
+    "the list and not inside it:\n"
+    '    "x_malspark_assessment": {\n'
+    '      "verdict": "Malware" or "Suspicious" or "Benign" — exactly one of '
+    "those three words,\n"
+    '      "severity": {"rating": "Critical|High|Medium|Low|Informational",\n'
+    '                   "rationale": "why the evidence supports that rating"},\n'
+    '      "malware_category": "free text, e.g. ransomware / loader / infostealer",\n'
+    '      "family": {"name": "...", "confidence": 0.0-1.0,\n'
+    '                 "evidence_ids": ["ev_0012"]},\n'
+    '      "confidence": 0.0-1.0\n'
+    "    }\n"
+    "  ``verdict`` is exactly one of those three words and nothing else — no "
+    "qualifier, no parenthesis, no sentence; anything you want to qualify it "
+    "with goes in ``severity.rationale``. Give your own confidence in it under "
+    "``confidence``; both are published as you wrote them. Omit any of "
+    "the other three you cannot support. A family name MUST cite the evidence "
+    "ids it was read from; a family with no evidence ids is a guess, and the "
+    "report will say so.\n"
+    + MALWARE_OBJECT_RULE
+    + "- The objects illustrate the verdict you stated; they are not a "
+    "second way of stating one, and a malware object added as a container for "
+    "a sample you call benign contradicts your own assessment.\n"
+    "- Benign is a finding, not a default. It says the evidence was examined "
+    "and nothing malicious was in it. If this run produced no evidence and no "
+    "analyst claim, say so and return Suspicious: an empty report is not a "
+    "clean sample.\n"
+    "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers.\n"
+    "\n"
+    "The answer has exactly this shape, on one line. Both top-level keys are "
+    "required, and ``x_malspark_assessment`` sits beside ``objects`` rather than "
+    "inside it:\n"
+    '{"type": "bundle", "id": "bundle--1", "x_malspark_assessment": {'
+    '"verdict": "Malware" | "Suspicious" | "Benign", "confidence": 0.0-1.0, '
+    '"severity": {"rating": "...", "rationale": "..."}, "malware_category": "...", '
+    '"family": {"name": "...", "confidence": 0.0-1.0, "evidence_ids": ["ev_0012"]}}, '
+    '"objects": [ ... ]}'
+)
+
+
+# What the judge is told about the sample itself, before any analysis of it.
+# The hash the job was queued under, the name it arrived with and the format
+# detection are the router's; the md5 and size are read from the sandbox's own
+# file block. They are in the prompt always, not only when a lookup is due.
+#
+# The file name is whatever the submitter typed, so it is labelled as
+# submitted, and every value is written on its own line with its line breaks
+# removed: a name that carried a newline could otherwise close the block and
+# open one of its own.
+#
+# A live run made the case: the mediator told the judge to look the sample's
+# hash up, and no message in the conversation carried a hash. The static
+# analyst had produced no claims, so there was nothing in the prose either, and
+# the judge opened a seventeen-tool loop with nothing to ask about.
+SAMPLE_IDENTITY_HEADER = (
+    "SAMPLE IDENTITY (established by the router and the sandbox's own file block, not by analysis)"
+)
+# The same, where the sandbox report names another target and nothing in the
+# block came from it (``sandbox_status.sample_file_identity``): the sample's
+# own bytes gave its hashes and size, or nothing did.
+SAMPLE_BYTES_IDENTITY_HEADER = (
+    "SAMPLE IDENTITY (established by the router and the sample's own bytes, not by analysis)"
+)
+ROUTER_ONLY_IDENTITY_HEADER = (
+    "SAMPLE IDENTITY (established by the router, not by analysis; the sandbox report "
+    "names another target)"
+)
+
+_IDENTITY_FIELDS: tuple[tuple[str, str], ...] = (
+    ("sha256", "sha256"),
+    ("sha1", "sha1"),
+    ("md5", "md5"),
+    ("file_name", "file name (as submitted)"),
+    ("size_bytes", "size (bytes)"),
+    ("file_type", "file type"),
+    ("platform", "platform"),
+)
+
+
+# The identity fields a submitter writes, shown as quoted values.
+_QUOTED_IDENTITY_FIELDS = frozenset({"file_name"})
+
+
+def sample_identity_block(sample: Any) -> str:
+    """The sample's own facts as one block, or ``""`` when there are none."""
+    from malspark.pipeline.sandbox_status import (
+        FROM_ROUTER_ONLY,
+        FROM_SAMPLE_BYTES,
+        IDENTITY_SOURCE_KEY,
+    )
+    from malspark.utils.written_forms import pack_escaped
+
+    data = sample if isinstance(sample, dict) else {}
+    # The submitted name is the submitter's text: quoted and escaped as the
+    # pack writes a sample's strings, one value on one line.
+    rows = [
+        f'{label}: "{pack_escaped(str(data[key]))}"'
+        if key in _QUOTED_IDENTITY_FIELDS
+        else f"{label}: {' '.join(str(data[key]).split())}"
+        for key, label in _IDENTITY_FIELDS
+        if str(data.get(key) or "").strip()
+    ]
+    if not rows:
+        return ""
+    header = {
+        FROM_SAMPLE_BYTES: SAMPLE_BYTES_IDENTITY_HEADER,
+        FROM_ROUTER_ONLY: ROUTER_ONLY_IDENTITY_HEADER,
+    }.get(str(data.get(IDENTITY_SOURCE_KEY) or ""), SAMPLE_IDENTITY_HEADER)
+    return f"=== {header} ===\n" + "\n".join(rows)
+
+
+def _identity_prefix(sample: Any) -> str:
+    """The identity block as a prompt prefix, with its blank line."""
+    block = sample_identity_block(sample)
+    return f"{block}\n\n" if block else ""
+
+
+class NotedText(str):
+    """A turn's text with the notes its message carries (``response_metadata``).
+
+    A string everywhere a string is read; copied, deep-copied and pickled with
+    its notes. Any string operation gives back a plain string, without them.
+    """
+
+    notes: dict[str, Any]
+
+    def __new__(cls, text: str = "", notes: Mapping[str, Any] | None = None) -> NotedText:
+        made = super().__new__(cls, text)
+        made.notes = dict(notes or {})
+        return made
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (type(self), (str(self), dict(self.notes)))
+
+
+def _notes_of(text: Any) -> dict[str, Any]:
+    """The notes a turn's text carries (:class:`NotedText`), or none."""
+    return dict(getattr(text, "notes", None) or {})
+
+
+def _standing_blocks(run_state: str, facts_block: str) -> str:
+    """The run-state block and the pack as a prompt prefix, each with its blank line.
+
+    The run state first, between its markers, because it is the shorter and
+    the one a reader orients by; the pack after it, under its own heading.
+    The verdict and the technique question are built so. The mediation calls
+    it twice instead, the pack alone and then the run state alone, so every
+    round's turn leads with the same head (``standing_head`` in the mediation).
+    """
+    from malspark.pipeline.run_state import with_run_state
+
+    parts: list[str] = []
+    if run_state:
+        parts.append(with_run_state("", run_state))
+    if facts_block:
+        parts.append(facts_block)
+    return "".join(f"{part}\n\n" for part in parts if part)
+
+
+def mediation_reports_text(
+    reports: dict[str, str], isr_reports: dict[str, AgentISR] | None = None
+) -> str:
+    """The analysts' reports as the mediator reads them, each analyst's claims once.
+
+    Each report under its analyst's heading, then the structured claims of
+    every ISR whose summary is not already one of those reports word for
+    word. An analyst's first answer is its ISR summary, so in a first
+    mediation every report was sent a second time; a revised report is the
+    analyst's own words and its ISR the claims in force, which differ and are
+    both kept. Empty ISRs are left out, as before.
+    """
+    from malspark.agents.base_agent import report_rendered_again
+    from malspark.utils.written_forms import markers_written_out
+
+    # A report that is an answer's claims summary is rendered again from its
+    # ISR, so a mark set since cannot make the two differ and show it twice.
+    isrs = isr_reports or {}
+    reports = {
+        name: report_rendered_again(report, isrs.get(name)) for name, report in reports.items()
+    }
+    # A report and a claim's words are what a model wrote: a run-state marker
+    # in them is written out, so the mediator never reads one as the
+    # platform's block.
+    reports_text = "\n\n".join(
+        f"--- {name.upper()} ANALYST ---\n{markers_written_out(report)}"
+        for name, report in reports.items()
+    )
+    if not isr_reports:
+        return reports_text
+    shown = set(reports.values())
+
+    def _shown(name: str, summary: str) -> bool:
+        # A report that is the summary, or the summary with the findings in
+        # force after it (``base_agent.answer_in_force_text``), already holds it.
+        report = reports.get(name, "")
+        return summary in shown or report.startswith(f"{summary}\n")
+
+    isr_block = "\n\n".join(
+        f"[ISR] {markers_written_out(summary)}"
+        for name, summary in (
+            (name, isr.to_text_summary()) for name, isr in isr_reports.items() if isr.claims
+        )
+        if not _shown(name, summary)
+    )
+    if not isr_block:
+        return reports_text
+    return f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
+
+
+# The standing of each line a mediation listed, as the history states it once
+# beside the line: the platform reads the mediator's mark and overrides it in
+# neither direction; a mark it could not read leaves the line blocking. Said
+# in words and parentheses, never in the mediator's bracketed mark syntax, so
+# a line copied from the history is read by its own mark alone.
+HISTORY_LINE_BLOCKING = "blocking"
+HISTORY_LINE_NOT_BLOCKING = "not blocking"
+HISTORY_LINE_MARK_UNREAD = "blocking, its mark was not read"
+_CONFIDENCE_TAIL_RE = re.compile(r"\nConfidence: (\d+\.\d+)\Z")
+
+
+def _listed_in_order(argument: AgentArgument) -> tuple[str, list[str], str] | None:
+    """The finding's own words, its listed lines in order and its confidence, or ``None``.
+
+    A mediation's finding ends with the lines it listed, joined by ``"; "``,
+    and the confidence it wrote (``JudgeAgent._mediate_round``); the lines are
+    also its ``contradictions`` and ``not_blocking``. When the finding's tail
+    is exactly those lines, in some order, that order is read off it and the
+    words before it are returned; any other finding (an error, a mediation
+    that did not apply, state written another way) is ``None``. Linear in the
+    finding.
+    """
+    finding = str(argument.finding or "")
+    at = finding.rfind("\n\nContradictions: ")
+    if at < 0:
+        return None
+    tail = finding[at + len("\n\nContradictions: ") :]
+    confidence = _CONFIDENCE_TAIL_RE.search(tail)
+    if confidence is None:
+        return None
+    joined = tail[: confidence.start()]
+    lines = list(dict.fromkeys([*argument.contradictions, *argument.not_blocking]))
+    if not lines:
+        return (finding[:at], [], confidence.group(1)) if joined == "None" else None
+    # The tail read from its start: at each "; " (and at its end) the text
+    # since the last line placed is a line when its length is one a line not
+    # yet placed has and it is that line. Each separator is visited once and a
+    # slice is taken only at a length that can match. Tail left over, or a
+    # line never placed, is no match.
+    left = set(lines)
+    lengths = Counter(len(line) for line in lines)
+    ends: list[int] = []
+    sep = joined.find("; ")
+    while sep >= 0:
+        ends.append(sep)
+        sep = joined.find("; ", sep + 2)
+    ends.append(len(joined))
+    ordered: list[str] = []
+    start = 0
+    for end in ends:
+        if end < start or not lengths.get(end - start):
+            continue
+        candidate = joined[start:end]
+        if candidate in left:
+            left.discard(candidate)
+            lengths[len(candidate)] -= 1
+            ordered.append(candidate)
+            start = end + 2
+    if left or start != len(joined) + 2:
+        return None
+    return finding[:at], ordered, confidence.group(1)
+
+
+_FACT_LINE_HEAD = 'For the line "'
+_FACT_LINE_END = '": '
+
+
+def _quoted_line(fact: str, lines: Iterable[str]) -> tuple[str, str] | None:
+    """The listed line a ledger fact quotes whole and what it says of it, or ``None``.
+
+    The debate's facts open ``For the line "<line>": `` (``debate_facts``).
+    The longest listed line the fact opens with is the one it quotes, so a
+    line that is the start of another (``says "abc`` and ``says "abc": def``)
+    never takes the other's fact. Linear in the lines.
+    """
+    if not fact.startswith(_FACT_LINE_HEAD):
+        return None
+    best = ""
+    for line in lines:
+        if len(line) > len(best) and fact.startswith(f"{_FACT_LINE_HEAD}{line}{_FACT_LINE_END}"):
+            best = line
+    if not best:
+        return None
+    return best, fact[len(_FACT_LINE_HEAD) + len(best) + len(_FACT_LINE_END) :]
+
+
+def _history_entry_text(argument: Any, number: int, total: int) -> str:
+    """One history entry as text: its words once, each listed line once with its standing."""
+    from malspark.utils.written_forms import markers_written_out
+
+    if not isinstance(argument, AgentArgument):
+        # Not an argument this module wrote: shown as it reads, under its head.
+        return f"--- entry {number} of {total} ---\n{argument}"
+    unread = set(argument.unread_marks)
+    not_blocking = set(argument.not_blocking)
+
+    def standing(line: str) -> str:
+        if line in unread:
+            return HISTORY_LINE_MARK_UNREAD
+        return HISTORY_LINE_NOT_BLOCKING if line in not_blocking else HISTORY_LINE_BLOCKING
+
+    # A ledger fact quoting a listed line whole is said under that line, the
+    # quote left out: the line is shown once.
+    held = {*argument.contradictions, *argument.not_blocking}
+    under: dict[str, list[str]] = {}
+    apart: list[str] = []
+    for fact in argument.ledger_facts:
+        quoted = _quoted_line(str(fact), held)
+        if quoted is None:
+            apart.append(str(fact))
+        else:
+            under.setdefault(quoted[0], []).append(quoted[1])
+
+    def listed(lines: Sequence[str]) -> list[str]:
+        rows: list[str] = []
+        for line in lines:
+            rows.append(f"- (standing: {standing(line)}) {markers_written_out(line)}")
+            rows.extend(f"  Ledger: {said}" for said in under.get(line, ()))
+        return rows
+
+    out = [f"--- {argument.agent_name} (entry {number} of {total}) ---"]
+    read = _listed_in_order(argument)
+    if read is not None:
+        words, lines, confidence = read
+        if words.strip():
+            out.append(markers_written_out(words))
+        out.append("Contradictions:" if lines else "Contradictions: None")
+        out.extend(listed(lines))
+        out.append(f"Confidence: {confidence}")
+        if argument.confidence_score is None:
+            out.append("Confidence score: none recorded")
+    else:
+        # A finding in no form the lines can be placed in (an error, a
+        # mediation consensus did not apply to, state written another way) is
+        # shown whole, then each line the platform holds with its standing.
+        finding = str(argument.finding or "")
+        if finding.strip():
+            out.append(markers_written_out(finding))
+        lines = list(dict.fromkeys([*argument.contradictions, *argument.not_blocking, *unread]))
+        if lines:
+            out.append("Contradictions:")
+            out.extend(listed(lines))
+        score = argument.confidence_score
+        out.append(f"Confidence score: {'none recorded' if score is None else f'{score:.2f}'}")
+    if argument.status != "complete":
+        out.append(f"Status: {argument.status}")
+    if argument.note:
+        out.append(f"Note: {argument.note}")
+    if apart:
+        out.append("Ledger facts:")
+        out.extend(f"- {fact}" for fact in apart)
+    return "\n".join(out)
+
+
+def negotiation_history_text(history: Sequence[Any]) -> str:
+    """The negotiation history as the mediator and the verdict read it, each line once.
+
+    One entry per argument, in order: the mediator's words, then every line
+    its final block listed, once, each with its standing (blocking, not
+    blocking, or blocking because its mark was not read), the confidence it
+    wrote, and the status, note and ledger facts where there are any (a fact
+    about one line under that line, its quote of the line left out). The
+    lines were shown up to four times before (in the finding, again in
+    ``contradictions``, ``not_blocking`` and ``unread_marks``, and quoted by
+    the ledger facts); the routing
+    fields the platform keeps for itself are not shown, as they never were.
+    Model words have their run-state markers written out, as the reports do.
+    Linear in the history.
+    """
+    items = list(history or [])
+    return "\n\n".join(
+        _history_entry_text(argument, number, len(items))
+        for number, argument in enumerate(items, 1)
+    )
+
+
+def mediator_system_prompt(
+    *,
+    identity_unanswered: bool,
+    lookup_attached: bool,
+    sha256: str,
+    tools: Any,
+) -> str:
+    """The mediator's system prompt for one mediation: its head and the sentences about its tools.
+
+    The sentence about a lookup when no analyst consulted a reputation source
+    and one is attached, then the sentence about every tool the request
+    carries: every mediation runs its tool loop, and what to read, look up or
+    ask is the model's decision. The one builder ``JudgeAgent.mediate`` sends
+    it through, and the run fingerprint renders it through
+    (``analysis.setup_prompts``) for every case.
+    """
+    lookup = (
+        MEDIATOR_LOOKUP_ONCE_BY_HASH.replace("{sha256}", sha256)
+        if identity_unanswered and lookup_attached and sha256
+        else MEDIATOR_LOOKUP_ONCE
+        if identity_unanswered and lookup_attached
+        else ""
+    )
+    return MEDIATOR_SYSTEM_HEAD + lookup + tools_statement(tools) + "\n"
+
+
+def _sha256_of(sample: Any) -> str:
+    """The sha256 the identity block carries, for a sentence that names it."""
+    data = sample if isinstance(sample, dict) else {}
+    return str(data.get("sha256") or "").strip()
+
+
+def _who_is_asked(message: Any) -> str | None:
+    """The agent a judge turn is asking, when the same turn delegates to one.
+
+    The judge's own ``ask_<key>`` tools are the only place a question in this
+    loop names a recipient. A turn that calls none is asking the room.
+    """
+    from malspark.agents.delegation import tool_name
+
+    prefix = tool_name("")
+    for call in list(getattr(message, "tool_calls", None) or []):
+        name = str((call or {}).get("name") or "")
+        if name.startswith(prefix):
+            return name[len(prefix) :] or None
+    return None
+
+
+def _seconds_or_none(value: Any) -> float | None:
+    """``value`` as seconds, or ``None`` for no limit."""
+    return None if value is None else float(value)
+
+
+def _prompt_chars(messages: Sequence[Any]) -> int:
+    """How many characters a call's turns carry, which its wait is sized from."""
+    return sum(len(str(getattr(message, "content", ""))) for message in messages)
+
+
+def _last_ledger_facts(history: Sequence[Any], field: str = "ledger_facts") -> list[str]:
+    """What the platform recorded in ``field`` for the last mediation's lines, or none.
+
+    ``ledger_facts`` are the ledger counts it stated; ``ledger_stated`` the
+    blocking lines every count of which the ledger states and the analysts
+    were told before.
+    """
+    for argument in reversed(list(history or [])):
+        if getattr(argument, "agent_name", "") == MEDIATOR_AGENT_NAME:
+            return [str(f) for f in getattr(argument, field, None) or []]
+    return []
+
+
+@dataclass(frozen=True)
+class VerdictCheckInputs:
+    """What the verdict round's bundle checks read, on the run's side.
+
+    No field has a default: an input added here is one every caller states,
+    the replay of a stored run (``scripts/replay``) included.
+    """
+
+    evidence_corpus: Any
+    attck: Any
+    sample: Any
+    shortened_tools: Sequence[str]
+    searched: Sequence[str]
+    corpus_state: Any
+    technique_sources: Mapping[str, Sequence[str]] | None
+    sandbox_facts: Any
+    analyst_claims: int
+    ledger_ids: Sequence[str] | None
+
+
+def verdict_checks(bundle: Bundle, inputs: VerdictCheckInputs) -> list[Violation]:
+    """Whether the verdict was stated, and what a Benign or a Malware one cites.
+
+    Its own function because it runs on every way the round can end, not only
+    on the one where the judge answered a bundle: prose the model stood by
+    twice, JSON that was not a bundle, and a timeout all produce a verdict, and
+    the two paths that produce one out of *text* were the two that reached a
+    report unasked. Where the loop ran them they were fed back once; everywhere
+    else they are recorded, because they annotate the verdict and never change
+    it. One reading of the verdict serves all three checks and the pipeline
+    with it (``pipeline.outcome.decide_from_bundle``).
+    """
+    return [
+        *stated_verdict_violations(bundle),
+        *unsupported_benign_violations(
+            bundle, analyst_claims=inputs.analyst_claims, ledger_ids=inputs.ledger_ids
+        ),
+        *unsupported_malware_violations(
+            bundle, analyst_claims=inputs.analyst_claims, ledger_ids=inputs.ledger_ids
+        ),
+    ]
+
+
+def _unasked_unreadable_leaves(
+    shape: Sequence[Violation], violations: Sequence[Violation]
+) -> list[Violation]:
+    """The assessment leaves a text fallback's stated assessment left absent, not yet recorded.
+
+    A fallback bundle's round asks about the answer's shape, not its leaves, so
+    these were never put to the judge; they are recorded as such, because a
+    leaf left absent is never left absent in silence.
+    """
+    have = {(v.code, v.path) for v in violations}
+    return [
+        replace(v, asked=False)
+        for v in shape
+        if v.code == ASSESSMENT_UNREADABLE_CODE and (v.code, v.path) not in have
+    ]
+
+
+def verdict_bundle_checks(
+    bundle: Bundle,
+    shape: Sequence[Violation],
+    inputs: VerdictCheckInputs,
+    *,
+    origins: Any,
+    written: Any,
+) -> list[Violation]:
+    """Every finding the verdict round asks about a bundle the judge answered.
+
+    The set-aside objects of the parse (``shape``) but the settled ones (the
+    relocation is announced and done, and a retry for it would be a turn spent
+    on a problem that no longer exists), then the bundle's own checks.
+    """
+    return [
+        *(v for v in shape if v.code not in _SETTLED_CODES),
+        *validate_verdict_bundle(
+            bundle,
+            inputs.evidence_corpus,
+            attck=inputs.attck,
+            sample=inputs.sample,
+            shortened_tools=inputs.shortened_tools,
+            searched=inputs.searched,
+            corpus_state=inputs.corpus_state,
+            technique_sources=inputs.technique_sources,
+            origins=origins,
+            written=written,
+        ),
+        *assessment_violations(bundle),
+        *assessment_conflict_violations(bundle),
+        *verdict_checks(bundle, inputs),
+        *unattributed_indicator_violations(bundle, inputs.sandbox_facts),
+    ]
+
+
+class JudgeAgent(BudgetMeter):
+    """Chief controller responsible for mediation, consensus detection, and final verdict.
+
+    Usage:
+        judge = JudgeAgent(llm=some_llm)
+        argument, is_consensus = judge.mediate(reports, history)
+        bundle = judge.give_verdict(reports, history, attck_validator=validator)
+    """
+
+    # With no entry of its own the judge runs on the judge model.
+    _model_role = "judge"
+
+    def __init__(
+        self,
+        llm: BaseChatModel,
+        config: Any | None = None,
+    ) -> None:
+        self.llm = llm
+        self.logger = logger.getChild("judge")
+        # Read by ``_supports_structured_output``. Optional so standalone use
+        # (tests, scripts) still works; the container passes the real one.
+        self._config = config
+        # Per-run token ledger (findings-log §4 Item 1); attached by the
+        # container in get_judge_agent(). None when run standalone.
+        self.token_ledger: TokenLedger | None = None
+        # The job's measured generation rates, attached by the container; the
+        # verdict call's timeout is sized from them. None when run standalone,
+        # and the configured timeout then stands.
+        self.generation_rates: GenerationRates | None = None
+        # Which stage of the active team this judge is running as. Set by the
+        # node before it works — the debate stage when it mediates, the verdict
+        # stage when it rules — and read by the evidence recorder.
+        self.pipeline_stage: str = "analysis"
+        # The job this agent serves, set by the container that built it. Every
+        # attach asks for it, so two agents in one job share their handles.
+        self._job_id: str = ""
+        # Per-run truncation ledger (pitfall P6); same lifecycle. The judge is
+        # where ``judge_max_tokens`` binds and where the STIX integrity pass
+        # runs, so this is the most load-bearing attachment point of the three.
+        self.truncation_ledger: TruncationLedger | None = None
+        # Hand the judge a way back to its container, the same way
+        # ``BaseAnalyst`` does — read by ``_server_registry`` below. None for
+        # standalone use (tests, scripts).
+        self._container: Any = None
+        # Reasons the run summary should carry, filled in by
+        # ``_initialize_mcp_client``. Empty when it attached everything, or
+        # never ran.
+        self.tools: list[Any] = []
+        self.degradation_reasons: list[Any] = []
+        # Said when the judge's model could not bind ``read_evidence`` for its
+        # verdict or its technique question (``agents.ledger_reads``); the
+        # judge node adds it to the run's degradation reasons.
+        self.read_degradations: list[str] = []
+        # The run's ledger while a mediation round runs (:meth:`mediate`).
+        self._mediation_ledger: list[Any] | None = None
+        # The last mediation's prompt and the answer its block was read from
+        # (:meth:`rule_on_standing_lines`), ``None`` before one answered.
+        self._mediation_turns: tuple[list[Any], str] | None = None
+        # Why the last question after a mediation brought no answer, and why
+        # the last ruling question did, or ``""``.
+        self._after_mediation_failure: str = ""
+        self.limit_ruling_failure: str = ""
+        # The notice the last verdict prompt carried when its parts did not
+        # fit the judge's window whole, or ``""``; the judge node records it
+        # as a degradation reason.
+        self.verdict_prompt_notice: str = ""
+        # The similar cases of other samples whose techniques the last verdict
+        # prompt showed (``stix_models.SimilarCases``), or ``None``; the judge
+        # node records it on the bundle.
+        self.similar_cases_shown: Any = None
+        # The judge calls tools too — threat intel on a disputed indicator, an
+        # ATT&CK or family lookup — and a verdict that cites one has to be
+        # checkable the same way an analyst's claim is. Same counter as the
+        # analysts, so the ids are one sequence across the whole job.
+        self.evidence_counter: EvidenceCounter | None = None
+        # What the run saw, handed down by the container. ``None`` for a judge
+        # built outside a job.
+        self.evidence_corpus: Any = None
+        # The job's store for the parts of an answer an entry does not keep
+        # whole (``schemas.evidence_spill``). ``None`` outside a job.
+        self.evidence_spill: Any = None
+        # The name the meter and the console draw this agent under. Fixed:
+        # there is one judge, and the ledger already stamps its entries with
+        # this word.
+        self.name: str = "judge"
+        # The budget meter's rows for this agent's loops, drained by the node
+        # that reads its ledger. The meter itself comes from ``BudgetMeter``,
+        # so the judge's rows are the shape the analysts' rows are.
+        self._budget_records: list[dict[str, Any]] = []
+        # Accumulated across mediation rounds and drained by the judge node,
+        # for the reason the analysts' buffer is: ``mediate`` runs the loop
+        # once per round, and a buffer replaced on each of them would persist
+        # only the last round's calls while the earlier ones consumed ids.
+        self._evidence_entries: list[LedgerEntry] = []
+        # Which of the container's models this instance was built on: the
+        # verdict's judge model, or the mediator's (``llm.agents.mediator``,
+        # else the expert model). A call is recorded under the model that
+        # answered it, and the mediator's answers are its own model's whatever
+        # an entry for the judge says.
+        self._runs_on: str = "judge"
+        # What the tool definitions of the current loop weigh with each
+        # request, for the budget record and the ticks; none before a loop.
+        self._tool_definition_chars: int = 0
+        # What the last loop's reasoning salvage sent and how it was sized,
+        # put on that loop's budget record once the record is written.
+        self._salvage_row: dict[str, Any] | None = None
+        # The model message the last tool loop's text was read from, the
+        # bound its call was sent with, and how a loop with no final answer
+        # of its own ended.
+        self._last_answer: Any = None
+        self._last_answer_cap: int | None = None
+        self._last_loop_ending: str = ""
+        # What an ask reads on its caller (``agents.delegation``): the judge
+        # asks the agents its definition names. Nobody asks the judge, so its
+        # chain is empty; ``loop_budget`` is the running loop's, so an ask is
+        # held to the time the loop has left; its asks run one at a time unless
+        # the asked agents' models serve concurrent requests
+        # (``delegation.asks_run_at_once``). The
+        # node that runs a mediation hands the judge the pack, the run state
+        # and the sample's paths an ask hands on (``pipeline.nodes``). What a
+        # callee's checks told it is handed over onto the validation fields
+        # and drained by the debate node, as a stage node drains an analyst's.
+        self.call_chain: tuple[str, ...] = ()
+        self.loop_budget: LoopBudget | None = None
+        self.current_round: int = 0
+        self.asks_lock = threading.Lock()
+        # Taken to add to or drain the entries, which an ask that ran beside
+        # the judge's other asks hands over from its own thread.
+        self.evidence_lock = threading.Lock()
+        self._meter_lock = threading.Lock()
+        self.validation_findings: list[Violation] = []
+        self.validation_retries: int = 0
+        self.validation_fed_back: dict[str, int] = {}
+        self.validation_not_run: list[str] = []
+        self.validation_unparsed_answers: list[dict[str, str]] = []
+
+    def servers_its_asks_may_not_reach(self) -> set[str]:
+        """What the judge's asks may not reach: the profile's policy and the debate stage's.
+
+        The judge asks while it mediates, in the stage the node set
+        (``pipeline_stage``); its verdict stage's policy is not that stage's
+        (``delegation._own_policy``).
+        """
+        from malspark.agents.composition import active_profile
+        from malspark.core.config import shipped_server_keys
+
+        config = getattr(getattr(self, "_container", None), "config", None)
+        if config is None:
+            return set()
+        team = active_profile(config)
+        withheld = set(team.exclude_servers)
+        here = str(getattr(self, "pipeline_stage", "") or "")
+        for stage in team.stages:
+            if str(stage.key) == here and not stage.builtin_tools:
+                withheld.update(shipped_server_keys(config.mcp.servers))
+        return withheld
+
+    def drain_validation_findings(self) -> tuple[list[dict[str, str]], int, dict[str, int]]:
+        """What the agents the judge asked were told by their checks, handed over once."""
+        rows = [v.to_dict() for v in getattr(self, "validation_findings", None) or []]
+        retries = int(getattr(self, "validation_retries", 0) or 0)
+        fed_back = dict(getattr(self, "validation_fed_back", None) or {})
+        self.validation_findings = []
+        self.validation_retries = 0
+        self.validation_fed_back = {}
+        return rows, retries, fed_back
+
+    def drain_validation_not_run(self) -> list[str]:
+        """The checks that could not run on an asked agent's answer, handed over once."""
+        codes = list(getattr(self, "validation_not_run", None) or [])
+        self.validation_not_run = []
+        return codes
+
+    def drain_unparsed_answers(self) -> list[dict[str, str]]:
+        """An asked agent's answers no claim could be read from, handed over once."""
+        rows = list(getattr(self, "validation_unparsed_answers", None) or [])
+        self.validation_unparsed_answers = []
+        return rows
+
+    def _output_cap(self) -> Any:
+        """The output cap this judge's model was built with, and how it was reached.
+
+        Read from the record the container left on the model
+        (``context_window.built_output_cap``): the mediator's instance runs on
+        the expert model and carries its cap, the verdict's on the judge model.
+        Nothing derives it again after the build. A model the container did
+        not build carries no record, and only then is the cap derived from
+        settings (``judge_output_cap``).
+        """
+        from malspark.llm.context_window import built_output_cap
+
+        built = built_output_cap(self.llm)
+        if built is not None:
+            return built
+        self.logger.debug(
+            "output cap: the judge's %s carries no built cap; derived from settings.",
+            type(self.llm).__name__,
+        )
+        return judge_output_cap()
+
+    def output_cap_tokens(self) -> int:
+        """The judge's cap in tokens, from the one reader the judge has (``_output_cap``)."""
+        return int(self._output_cap().tokens or 0)
+
+    def _spend_admits(
+        self,
+        kind: str,
+        messages: list[Any],
+        *,
+        slot: Any = None,
+        holdable: bool | None = None,
+        deadline_s: float | None = None,
+        wait_s: float | None = None,
+    ) -> int | None:
+        """The spend ceiling's word on one judge call before it is made (``SpendMeter.admit``).
+
+        With ``slot`` the call's worst case is reserved until it is released.
+        ``holdable`` defaults to whether the judge's model takes a cap of its
+        own per call; one that does not is admitted only at its whole cap.
+        """
+        from malspark.core.spend import SpendMeter
+        from malspark.llm.context_window import accepts_output_bound
+
+        meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+        if not isinstance(meter, SpendMeter):
+            return None
+        if holdable is None:
+            holdable = accepts_output_bound(self.llm)
+        # As an analyst's call is measured: tool calls and reasoning counted
+        # with the text, and the tool definitions sent with it.
+        prompt_chars = sum(_message_chars(m) for m in messages) + max(
+            0, int(getattr(self, "_tool_definition_chars", 0) or 0)
+        )
+        return cast(
+            "int | None",
+            meter.admit(
+                kind=kind,
+                model=self._model_label() or model_name_of(self.llm),
+                prompt_chars=prompt_chars,
+                cap_tokens=int(self._output_cap().tokens or 0),
+                slot=slot,
+                holdable=holdable,
+                # The call's own deadline where the caller has one, else the
+                # whole-call deadline its request is sent with.
+                deadline_s=(
+                    call_deadline_of(self.llm, messages) if deadline_s is None else deadline_s
+                ),
+                wait_s=wait_s,
+            ),
+        )
+
+    def _spend_release(self, slot: Any) -> None:
+        from malspark.core.spend import SpendMeter
+
+        meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+        if isinstance(meter, SpendMeter):
+            meter.release(slot)
+
+    def _model_label(self) -> str:
+        """The label of the model this instance calls first, or ``""`` outside a job."""
+        if getattr(self, "_runs_on", "judge") != MEDIATOR_AGENT_KEY:
+            return super()._model_label()
+        config = getattr(getattr(self, "_container", None), "config", None)
+        if config is None:
+            return ""
+        from malspark.core.model_assignments import model_label_for
+
+        return model_label_for(config, MEDIATOR_AGENT_KEY)
+
+    def _publish_questions(self, conversation: list[Any], already: set[str]) -> None:
+        """Publish each question the judge has asked and not published yet.
+
+        A question, not every intermediate turn. The judge's loop narrates as
+        much as it asks, and a console that drew the narration as a question
+        card would put a card in front of the reader on nearly every turn; a
+        turn whose text ends in a question mark is the one a reader can
+        actually answer or wait on. A turn that also calls ``ask_<key>`` names
+        that agent as the addressee, because that is who the judge is asking.
+
+        Identified by where the turn sits and what it said, so a hook that
+        sees the same conversation twice — which it does, once per model turn
+        — publishes each question once, while a judge that asks the identical
+        question a second time is published twice. Never raises: this is
+        telemetry inside a prompt hook, and a hook that throws ends the loop.
+        """
+        try:
+            for index, message in enumerate(conversation):
+                if getattr(message, "type", "") != "ai":
+                    continue
+                marker = _turn_key(message, index)
+                if marker in already:
+                    continue
+                already.add(marker)
+                text = _answer_text(message).strip()
+                if not text or not text.rstrip().endswith("?"):
+                    continue
+                emit_judge_question(
+                    self._event_sink(),
+                    stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+                    text=scrub(text),
+                    addressed_to=_who_is_asked(message),
+                )
+        except Exception as exc:  # noqa: BLE001 — a prompt hook never fails a loop
+            self.logger.debug("judge question not published (%s).", exc)
+
+    def _context_budget(self) -> Any | None:
+        """The job's context budget, or None when the judge runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        try:
+            return container.get_context_budget()
+        except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
+            self.logger.debug("judge: the context budget is unavailable (%s).", exc)
+            return None
+
+    def _server_registry(self) -> Any | None:
+        """The job's tool-server registry, or None when this judge runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        return container.get_server_registry()
+
+    def _job_key(self) -> str:
+        """A per-job identity for the handles' same-job short circuit."""
+        return self._job_id or "job"
+
+    def _definition_role(self) -> str | None:
+        """The role the judge's definition declares, or ``None`` when the judge runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        from malspark.agents.composition import role_of
+        from malspark.core.config import JUDGE_AGENT_KEY
+
+        return role_of(container.config, JUDGE_AGENT_KEY)
+
+    def _definition_tab(self) -> str | None:
+        """The console tab the judge's definition declares, or ``None`` when the judge runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        from malspark.agents.composition import tab_of
+        from malspark.core.config import JUDGE_AGENT_KEY
+
+        return tab_of(container.config, JUDGE_AGENT_KEY)
+
+    def _definition_tool_refs(self) -> list[Any]:
+        """The judge definition's ``ToolRef``s, under the active profile.
+
+        ``JudgeAgent`` is not a ``BaseAnalyst`` and has no ``ResolvedAgent``,
+        so it reads its definition itself. The key is always ``judge``: the
+        settings validator refuses a second definition with that role.
+        """
+        config = getattr(getattr(self, "_container", None), "config", None)
+        if config is None:
+            return []
+        from malspark.agents.composition import mcp_refs_for
+
+        return list(mcp_refs_for(config, "judge"))
+
+    def _profile_excluded_servers(self) -> str:
+        """The servers the active profile withholds, as ``atools_for``'s argument."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return ""
+        from malspark.agents.composition import _excluded_servers
+
+        return _excluded_servers(container.config, "judge")
+
+    async def _initialize_mcp_client(self) -> None:
+        """Attach every tool server bound to the ``judge`` role, on this loop.
+
+        Awaited rather than handed to the shared agent loop, for the reason
+        ``aclose`` below spells out: whichever loop enters the toolkit's exit
+        stack has to be the one that unwinds it.
+        """
+        if getattr(self, "tools", None):
+            return
+        registry = self._server_registry()
+        if registry is None:
+            return
+        # The judge's definition names its servers the same way an analyst's
+        # does, and ``knowledge`` reaches it by that reference alone — it is
+        # bound to no role. Awaited here rather than taken from a
+        # ``ResolvedAgent`` for the reason ``aclose`` spells out: whichever
+        # loop enters a toolkit's exit stack has to be the one that unwinds it.
+        # The built-in servers and the definition's own claim their names
+        # before an operator's server bound by ``agents``.
+        # The definition's in-process half first, as resolution puts it: the
+        # sandbox report's tools and an ``ask_<agent>`` tool per agent it
+        # names, each ask run for this instance (``delegation.ask_tool``).
+        from malspark.agents.composition import in_process_tools_for
+
+        tools, seen = in_process_tools_for(self._container, "judge", self)
+        served, reasons = await registry.aagent_tools(
+            "judge",
+            self._job_key(),
+            self._definition_tool_refs(),
+            exclude=self._profile_excluded_servers(),
+            seen=seen,
+        )
+        # The notes after each description, settled over the whole list as
+        # resolution settles an analyst's.
+        from malspark.providers.servers import settle_tool_notes
+
+        tools = settle_tool_notes([*tools, *served], getattr(self._container, "config", None))
+        config = getattr(self._container, "config", None)
+        if config is not None:
+            from malspark.agents.composition import note_unresolved_capabilities
+
+            reasons = [*reasons, *note_unresolved_capabilities(registry, config, "judge")]
+        self.tools = tools
+        self.degradation_reasons = reasons
+        self.logger.info("Judge tool servers: %s", [t.name for t in self.tools])
+        # The judge's setup, as an analyst's is noted where it is resolved
+        # (``ServiceContainer.note_role_setup``): what the run fingerprint reads.
+        note = getattr(getattr(self, "_container", None), "note_role_setup", None)
+        if callable(note):
+            note(str(getattr(self, "_runs_on", "judge") or "judge"), tools, self.bound_servers())
+
+    def bound_servers(self) -> set[str]:
+        """The tool servers this agent's role and definition bind, by name; never attaches."""
+        registry = self._server_registry()
+        if registry is None:
+            return set()
+        try:
+            names = {
+                handle.name
+                for handle in registry.for_agent("judge", exclude=self._profile_excluded_servers())
+            }
+        except Exception:  # noqa: BLE001 — a name never costs a mediation
+            names = set()
+        names |= {
+            str(ref.server) for ref in self._definition_tool_refs() if getattr(ref, "server", None)
+        }
+        return names
+
+    async def aclose(self) -> None:
+        """Release every judge-bound tool server and its stdio subprocess.
+
+        Deliberately *not* routed through the shared agent loop, unlike the
+        analysts'. The judge enters its toolkits with a plain ``await`` on
+        whichever loop the graph node is running — see
+        ``_initialize_mcp_client`` above — so that is the loop that owns the
+        exit stacks, and handing the close to a different one is exactly how
+        anyio's "cancel scope in a different task" error is produced.
+
+        Without this, every mediation round that failed to initialise left
+        another ``threatintel-mcp`` subprocess running: the guard on the
+        caller is ``if self.tools: return``, and a failed init never sets
+        ``tools``. ``ServerHandle.aclose`` carries the bound this used to
+        apply itself.
+        """
+        self.tools = []
+        registry = self._server_registry()
+        if registry is None:
+            return
+        # ``handles_for`` rather than ``for_agent``: a server the registry
+        # attached on a second loop has a handle of its own, and this judge
+        # cannot tell which of them is the one it was handed. Each closes on
+        # the loop that opened it, so it does not need to.
+        for handle in registry.handles_for("judge"):
+            await handle.aclose()
+
+    async def execute_tool_loop(self, prompt_messages: list) -> str:
+        """Execute a tool-calling ReAct loop for the agent."""
+        import asyncio
+
+        from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+        from langgraph.prebuilt import create_react_agent
+
+        from malspark.llm.fallback import restart_models
+
+        messages_pre: list[BaseMessage] = []
+        for role, content in prompt_messages:
+            if role == "system":
+                messages_pre.append(SystemMessage(content=content))
+            elif role == "human":
+                messages_pre.append(
+                    HumanMessage(content=str(content), response_metadata=_notes_of(content))
+                )
+        # The model message the returned text was read from, for a caller that
+        # has to say why the text is empty (an answer cut at the output cap),
+        # the bound that call was sent with, and how the loop ended when it
+        # ended without a final answer of its own.
+        self._last_answer = None
+        self._last_answer_cap = None
+        self._last_loop_ending = ""
+        # Whether the call of a loop with no tools was refused by the spend
+        # ceiling before it was made.
+        self._last_not_admitted = False
+
+        # The job's spend meter: a loop that starts after its ceiling was
+        # reached runs no tool phase, and one running ends its tool phase there.
+        from malspark.core.spend import SpendMeter
+
+        spend_meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+        if not isinstance(spend_meter, SpendMeter):
+            spend_meter = None
+        spent_out = bool(spend_meter is not None and spend_meter.exhausted() is True)
+        if spent_out:
+            self.logger.warning(
+                "JudgeAgent: the job's spend ceiling is reached; answering without tools."
+            )
+        if not getattr(self, "tools", None) or spent_out:
+            if not spent_out:
+                self.logger.warning("No tools initialized. Falling back to standard LLM invoke.")
+            else:
+                from malspark.agents.base_agent import SPEND_CEILING_QUESTION
+
+                # Said, as the analysts' tool-free turn says it: the prompt
+                # described tools, and this call carries none.
+                messages_pre = with_question(messages_pre, SPEND_CEILING_QUESTION)
+            # Wrap the no-tools ainvoke in the
+            # same hard timeout used by the tools path so a stalled / queued
+            # llama-server cannot freeze the judge node.
+            no_tools_timeout = loop_limits("judge")[0]
+            # Sticky for this call only, with a deadline shorter than its clock.
+            restart_models(self.llm, loop_seconds=no_tools_timeout, share=self._turn_share())
+            from malspark.llm.context_window import output_bound_kwargs
+
+            mediation_slot = object()
+            try:
+                bound = self._spend_admits("mediation", messages_pre, slot=mediation_slot)
+            except SpendCeilingStop as stop:
+                self.logger.warning("JudgeAgent: %s.", stop)
+                self._last_not_admitted = True
+                return ""
+            held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
+            try:
+                response = await asyncio.wait_for(
+                    as_call("Judge no-tools path", self.llm.ainvoke(messages_pre, **held)),
+                    timeout=None if no_tools_timeout is None else float(no_tools_timeout),
+                )
+                self._record_usage(response, call="no-tools answer")
+            finally:
+                self._spend_release(mediation_slot)
+            record_judge_response(
+                getattr(self, "truncation_ledger", None),
+                response,
+                # The cap this call was actually built with. Passed because the
+                # local server truncates silently — same token count, same
+                # ``finish_reason: "stop"`` — so the count is the only evidence.
+                cap=self._output_cap().tokens,
+            )
+            self._last_answer = response
+            self._last_answer_cap = bound if held else None
+            return answer_text(response.content)
+
+        self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
+
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+
+        # As in ``BaseAnalyst.execute_tool_loop``: without a container there is
+        # no counter, and one per mediation round would reissue ``ev_0001``.
+        if self.evidence_counter is None:
+            self.evidence_counter = EvidenceCounter()
+        recorder = EvidenceRecorder(
+            "judge",
+            counter=self.evidence_counter,
+            # The stage the node set before it called: mediation happens in a
+            # debate stage and the verdict in the verdict stage, and a ledger
+            # entry that says "analysis" for either sends a reader looking for
+            # an analyst that never made the call.
+            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+            sink=self._event_sink(),
+            corpus=getattr(self, "evidence_corpus", None),
+            spill=getattr(self, "evidence_spill", None),
+            agent_role=self._definition_role(),
+            agent_tab=self._definition_tab(),
+        )
+        messages = messages_pre
+
+        settings = get_settings()
+        # The judge's own budget, read the way every other agent's is: its
+        # definition, then the deprecated override maps, then the
+        # deployment's values — ``None`` in either dimension is no limit.
+        timeout, max_steps = loop_limits("judge")
+        # Sticky for this loop only, with a turn deadline shorter than its clock;
+        # the judge's next loop starts at its first model.
+        restart_models(self.llm, loop_seconds=timeout, share=self._turn_share())
+        # The judge is an agent by every other measure here — its ledger
+        # entries carry its name, it binds servers by role, the console draws
+        # it as a step — so its loop is metered like one. Without this the one
+        # loop with a hard wall-clock timeout was the only one that never said
+        # a cap had ended it.
+        budget = LoopBudget(max_steps, timeout)
+        # The running loop's budget, where an ask made from inside it reads
+        # the time it has left (``agents.delegation``).
+        self.loop_budget = budget
+        cap: str | None = None
+        turns: list[Any] = []
+
+        asked: set[str] = set()
+
+        # The job's context budget, and the judge's conversation in it under
+        # the judge's own name — the analysts' accounting, the same rule: its
+        # messages, the definitions of its tools, and the server's own count
+        # of the last request as a floor. Without it every judge answer was
+        # capped against whatever conversation happened to be live, which
+        # after the analysts had finished was none, so each reputation answer
+        # got the widest cap and nothing could say the room was gone.
+        room = self._context_budget()
+        # The analysts' repeat guard, on the judge's tools too: a judge that
+        # re-asks the same lookup is ended there, as an analyst is, rather than
+        # left to fill its window.
+        from malspark.agents.evidence_recorder import RepeatGuard
+
+        repeats = RepeatGuard()
+        recorded = record_tools(self.tools, recorder, repeats, context_budget=room)
+        definitions = tool_definition_chars(recorded)
+        # On the budget record and the ticks, as the analysts' loop puts it.
+        self._tool_definition_chars = definitions
+
+        # Old tool answers cleared to references where the request is past the
+        # point in force or the server refuses it (``tool_answer_clearing``),
+        # as an analyst's loop does. ``read_evidence`` is offered from the
+        # loop's first turn: whether to read an answer again is the model's.
+        self._offered_after_clear: list[Any] = []
+        clearing = self._tool_answer_clearing()
+        # The loop's own answers first, then the run's ledger: an analyst's id
+        # reads that analyst's entry, filed as a repeat of it.
+        run_reads = self._run_ledger_reads()
+        own_answer, own_copy = _stored_answer_of(recorder), _stored_copy_of(recorder)
+
+        def _answer_of(entry_id: str) -> str | None:
+            found = own_answer(entry_id)
+            if found is None and run_reads is not None:
+                found = run_reads.lookup(entry_id)
+            return found
+
+        def _copy_of(entry_id: str) -> Any:
+            if recorder.filed(recorder.holder_of(entry_id)) or run_reads is None:
+                return own_copy(entry_id)
+            return run_reads.stored_copy(entry_id)
+
+        recorder.outside = run_reads
+        read_tool = record_tools(
+            [
+                read_evidence_tool(
+                    _answer_of,
+                    self._answer_sizer(),
+                    _copy_of,
+                    # An unknown id is none the ledger it reads holds.
+                    holds=THIS_ANALYSIS if run_reads is None else THE_RUNS_LEDGER,
+                )
+            ],
+            recorder,
+            repeats,
+            context_budget=room,
+        )[0]
+
+        def _note_the_conversation(conversation: list[Any], cleared_chars: int = 0) -> None:
+            if not isinstance(room, ContextBudget):
+                return
+            try:
+                room.note_conversation(
+                    recorder.agent,
+                    request_chars(conversation, definitions, room.chars_per_token, cleared_chars),
+                )
+            except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
+                self.logger.debug("judge: the conversation size was not recorded (%s).", exc)
+
+        def _out_of_room() -> bool:
+            try:
+                return isinstance(room, ContextBudget) and room.out_of_room(recorder.agent)
+            except Exception:  # noqa: BLE001 — a budget is never worth a lost loop
+                return False
+
+        def _count_the_turns(state: Any) -> list[Any]:
+            """Count the conversation before every model turn, and change nothing.
+
+            The analysts' loop counts on the same hook because it is already
+            there to refresh their run-state block. The judge has no block to
+            refresh, and without something counting, a loop cut off at its
+            wall clock hands the meter an empty conversation and records the
+            zero steps this meter exists to stop recording.
+
+            The same hook is where a question the judge asks mid-loop is
+            published. It is the one seam the loop offers between two model
+            turns, so a question reaches a reader while the judge is still
+            waiting on the answer rather than after the verdict, which is the
+            whole point of showing it.
+            """
+            conversation = state.get("messages") if isinstance(state, dict) else None
+            if conversation is None:
+                conversation = getattr(state, "messages", None) or []
+            conversation = list(conversation)
+            # The turn about to be taken counts. The hook runs before the
+            # model, so a loop cut off *during* its first turn would otherwise
+            # record nothing at all — and the judge's characteristic failure is
+            # exactly that, one verdict call that ran past its wall clock.
+            budget.note_turns(conversation)
+            budget.own_steps += 1
+            conversation, cleared_chars = self._cleared_request(
+                clearing,
+                conversation,
+                self._note_clearing,
+                lambda: bool(self._offered_after_clear),
+            )
+            _note_the_conversation(conversation, cleared_chars)
+            # The spend ceiling's word on the turn about to be sent, reserved
+            # under the loop's key until the step is counted, and held as an
+            # analyst's turn is: the model is bound to its tools here, so the
+            # held cap is set on the binding the turn is sent through. A model
+            # that cannot be bound that way is admitted only at its whole cap.
+            held = self._spend_admits(
+                "mediation turn",
+                conversation,
+                slot=spend_key,
+                holdable=binding_now["held"] is not None,
+                wait_s=budget.seconds_left(),
+            )
+            _hold_the_turn(binding_now["held"], self.llm, held)
+            self._publish_questions(conversation, asked)
+            # What the request is made of, measured as it is sent
+            # (``core.input_meter``); nothing in it changes.
+            from malspark.core.input_meter import TOOL_LOOP
+
+            self._note_request(conversation, kind=TOOL_LOOP, loop=budget, definitions=definitions)
+            # Each turn after the loop's first tool round says it is a loop
+            # turn, as an analyst's does, for a provider that caches a
+            # conversation it will send again (``anthropic_history``): that
+            # turn writes the prompt's prefix and every later turn reads it.
+            # The first request is not noted: most mediations answer on it, and
+            # a single-turn call pays no write premium for a prefix nothing
+            # reads. The note rides the request alone, never the loop's own
+            # messages.
+            if conversation and any(isinstance(m, AIMessage) for m in conversation):
+                last = conversation[-1]
+                sent = last.model_copy()
+                sent.response_metadata = {
+                    **(getattr(last, "response_metadata", None) or {}),
+                    TOOL_LOOP_TURN: True,
+                }
+                return [*conversation[:-1], sent]
+            return conversation
+
+        # The key this loop's turns are counted and reserved under.
+        spend_key = object()
+        # The binding a turn's held cap is set on, and the loop's graph.
+        binding_now: dict[str, Any] = {"held": None}
+        graph: dict[str, Any] = {}
+
+        def _offer_read_again() -> bool:
+            """Build the loop's graph with ``read_evidence``; whether it has it.
+
+            Built so from the first turn. A model that cannot be bound with it
+            is built without it, said once, and its old answers are then not
+            cleared in this loop.
+            """
+            nonlocal definitions
+            if self._offered_after_clear:
+                return True
+            try:
+                model, binding = model_held_per_turn(self.llm, [*recorded, read_tool])
+                recorded.append(read_tool)
+                binding_now["held"] = binding
+                graph["executor"] = create_react_agent(model, recorded, prompt=_count_the_turns)
+            except Exception as exc:  # noqa: BLE001 — said, and the loop runs without it
+                if recorded and recorded[-1] is read_tool:
+                    recorded.pop()
+                clearing.enabled = False
+                self.logger.warning(
+                    "JudgeAgent: read_evidence could not be offered (%s: %s); old tool answers "
+                    "are not cleared in this loop.",
+                    type(exc).__name__,
+                    exc,
+                )
+                return False
+            definitions = self._tool_definition_chars = tool_definition_chars(recorded)
+            self._offered_after_clear = [read_tool]
+            return True
+
+        if not _offer_read_again():
+            loop_model, binding_now["held"] = model_held_per_turn(self.llm, recorded)
+            graph["executor"] = create_react_agent(loop_model, recorded, prompt=_count_the_turns)
+
+        self.logger.info(
+            "JudgeAgent invoking ReAct (timeout=%s, steps=%s, tools=%d)...",
+            limit_text(timeout, "s"),
+            limit_text(max_steps),
+            len(self.tools),
+        )
+        # Streamed rather than awaited whole, for the analysts' reason: a loop
+        # that has run out of room is ended on the step it did, with the
+        # conversation as it stands, and a server that says the window is full
+        # leaves behind what was gathered rather than nothing.
+        latest: dict[str, Any] = {"messages": list(messages)}
+        ended: dict[str, bool] = {
+            "no_room": False,
+            "window_full": False,
+            "spend": False,
+            "repeats": False,
+            "call_deadline": False,
+        }
+        # The sentence of a model call deadline that ended the tool phase.
+        deadline_said: dict[str, str] = {"why": ""}
+        # The refusal that ended it, when the spend ceiling refused its next turn.
+        spend_said: dict[str, str] = {"why": ""}
+
+        async def _until_it_answers_or_runs_out(start: list[Any] | None = None) -> None:
+            resend = False
+            begun = messages if start is None else start
+            # A pass sent again goes on from the steps the conversation has
+            # spent: the step limit is the loop's, not each pass's.
+            left = None if max_steps is None else max(1, max_steps - steps_used(begun))
+            stream: Any = graph["executor"].astream(
+                {"messages": begun},
+                {"recursion_limit": recursion_limit(left)},
+                stream_mode="values",
+            )
+            async with contextlib.aclosing(stream) as snapshots:
+                try:
+                    async for snapshot in snapshots:
+                        latest.update(snapshot)
+                        if repeats.ending_the_loop():
+                            ended["repeats"] = True
+                            break
+                        if _out_of_room():
+                            ended["no_room"] = True
+                            break
+                        if spend_meter is not None:
+                            # Priced under the judge's own model label, as an
+                            # analyst's turns are: a lone model stamps nothing
+                            # on its answers, and a turn priced as "" costs 0.
+                            spend_meter.note_loop(
+                                spend_key,
+                                list(latest.get("messages") or [])[len(messages) :],
+                                self._model_label() or model_name_of(self.llm),
+                            )
+                            if spend_meter.exhausted():
+                                ended["spend"] = True
+                                break
+                except SpendCeilingStop as stop:
+                    ended["spend"] = True
+                    spend_said["why"] = str(stop)
+                except ModelCallDeadline as exc:
+                    # One model call ran past its whole-call deadline: a failed
+                    # turn, not the loop's clock. With something gathered the
+                    # reasoning is written from it, as an analyst's is.
+                    deadline_said["why"] = f"model call deadline: {exc}"
+                    if not answers_held(recorder.entries):
+                        raise
+                    ended["call_deadline"] = True
+                except Exception as exc:
+                    if isinstance(exc, OfferReadAgainFirst) or isinstance(
+                        exc.__cause__, OfferReadAgainFirst
+                    ):
+                        # The request about to be sent carries the loop's first
+                        # clear: the graph is built again with the tool that
+                        # reads a cleared answer and the turn is sent again.
+                        _offer_read_again()
+                        resend = True
+                    elif (
+                        window_full_error(exc)
+                        and clearing.enabled
+                        and clearing.refused(list(latest.get("messages") or []), _message_chars)
+                        and _offer_read_again()
+                    ):
+                        # A refusal as over the window: one batch of the oldest
+                        # answers is cleared and the turn is sent again, again
+                        # only while each resend is refused and something is
+                        # left to clear.
+                        resend = True
+                    elif not (window_full_error(exc) and answers_held(recorder.entries)):
+                        # Only a provider's own full-window answer, and only once
+                        # something was gathered; anything else fails the judge's
+                        # loop as it always did.
+                        raise
+                    else:
+                        ended["window_full"] = True
+                        note_a_window_that_moved(exc)
+            if resend:
+                await _until_it_answers_or_runs_out(list(latest.get("messages") or []))
+
+        turns_recorded = False
+
+        def _record_the_turns() -> None:
+            """The loop's answered turns onto the run's ledger, once however the loop ends."""
+            nonlocal turns_recorded
+            if turns_recorded:
+                return
+            turns_recorded = True
+            for _m in list(latest.get("messages") or [])[len(messages) :]:
+                if is_model_turn(_m):
+                    self._record_usage(_m, call=TOOL_LOOP_TURN_CALL)
+            if spend_meter is not None:
+                spend_meter.forget_loop(spend_key)
+
+        try:
+            await asyncio.wait_for(
+                _until_it_answers_or_runs_out(),
+                timeout=None if timeout is None else float(timeout),
+            )
+            _msgs = list(latest.get("messages") or [])
+            turns = list(_msgs)
+            msg_count = len(_msgs)
+            self.logger.info("JudgeAgent ReAct loop completed: %d messages.", msg_count)
+            # Record every AI turn the ReAct executor produced
+            # so the mediator's tool-loop LLM calls land in the per-run
+            # TokenLedger (the tools path previously recorded nothing — only
+            # the no-tools fallback above did).
+            _record_the_turns()
+            if (
+                ended["no_room"]
+                or ended["window_full"]
+                or ended["spend"]
+                or ended["repeats"]
+                or ended["call_deadline"]
+            ):
+                cap = (
+                    "spend"
+                    if ended["spend"]
+                    else "repeats"
+                    if ended["repeats"]
+                    else "time"
+                    if ended["call_deadline"]
+                    else "no_room"
+                )
+                why = (
+                    (spend_said["why"] or "the job's spend ceiling was reached")
+                    if ended["spend"]
+                    else deadline_said["why"]
+                    if ended["call_deadline"]
+                    else f"{repeats.served_repeats} repeated tool call(s)"
+                    if ended["repeats"]
+                    else "the model server reported its context window full"
+                    if ended["window_full"]
+                    else "the conversation had no room left for a tool answer"
+                )
+                self.logger.warning(
+                    "JudgeAgent ReAct loop ended: %s; writing the reasoning from what it gathered.",
+                    why,
+                )
+                # What is left of the loop's own time, as the analysts'
+                # salvage gets: loop and salvage together stay inside it.
+                return await self._reasoning_from_what_was_gathered(
+                    clearing.apply(_msgs),
+                    budget.seconds_left(),
+                    settings,
+                    counted_window_tokens(room),
+                    ended_why=why,
+                    refused=ended["window_full"],
+                )
+            # The graph's own sentence at its step limit is not the judge's
+            # reasoning, and what reads the reasoning next is a model. The
+            # judge wrote none; the budget record says why.
+            if _msgs and is_the_graph_s_step_stop(_msgs[-1]):
+                cap = "steps"
+                self._last_loop_ending = "the tool loop stopped at its step limit with no text"
+                return ""
+            self._last_answer = _msgs[-1] if _msgs else None
+            return answer_text(_msgs[-1].content) if _msgs else ""
+        except ModelCallDeadline:
+            # A model call's own deadline with nothing gathered: that call
+            # failed, recorded as the call deadline it was, not the loop's clock.
+            self.logger.error("JudgeAgent ReAct ended: %s.", deadline_said["why"])
+            cap = "time"
+            _record_the_turns()
+            raise
+        except TimeoutError:
+            self.logger.error("JudgeAgent ReAct timed out after %s.", limit_text(timeout, "s"))
+            cap = "time"
+            # The turns the loop took before its clock ran out were answered
+            # and spent; they are on the ledger like the turns of a loop that
+            # finished.
+            _record_the_turns()
+            raise
+        except Exception:
+            # So are the turns of a loop that failed any other way.
+            _record_the_turns()
+            raise
+        finally:
+            # A loop a cancellation ended (``JobCancelled``, ``CancelledError``:
+            # not ``Exception``s) made the calls it made too, and its loop's
+            # reservation with the spend meter goes with them. Once only.
+            with contextlib.suppress(Exception):
+                _record_the_turns()
+            # The loop's row on the input meter, closed with the turns the
+            # ledger recorded just above, however the loop ended.
+            self._close_input_loop(budget, list(latest.get("messages") or [])[len(messages) :])
+            # In a ``finally`` for the reason the analysts' loop uses one: a
+            # mediation that timed out still made the calls it made.
+            self._keep_the_loop_s_entries(recorder.entries)
+            self._offered_after_clear = []
+            self.loop_budget = None
+            details = {
+                "time": deadline_said["why"]
+                or f"the loop did not answer within {limit_text(timeout, 's')}",
+                "no_room": (
+                    "the model server reported its context window full"
+                    if ended["window_full"]
+                    else "the conversation had no room left for a tool answer"
+                ),
+                "spend": str(spend_meter.reason()) if spend_meter is not None else "",
+                "repeats": f"{repeats.served_repeats} repeated tool call(s)",
+            }
+            self._record_budget(budget, turns, cap, detail=details.get(cap or "", ""))
+            salvage, self._salvage_row = self._salvage_row, None
+            if salvage is not None:
+                BaseAnalyst._note_on_last_loop(self, "salvage", salvage)  # type: ignore[arg-type]
+            self._budget_tick(budget, turns, final=True, ledger_entries=len(recorder.entries))
+            # The loop is over, so its size stops binding every later cap.
+            if isinstance(room, ContextBudget):
+                with contextlib.suppress(Exception):
+                    room.forget_conversation(recorder.agent)
+
+    def _run_ledger_reads(self) -> Any:
+        """``LedgerReads`` over the run's ledger of the mediation round running, or ``None``."""
+        if not self._mediation_ledger:
+            return None
+        from malspark.agents.ledger_reads import LedgerReads
+
+        return LedgerReads(
+            self._mediation_ledger,
+            sizer=self._answer_sizer(),
+            spill=getattr(self, "evidence_spill", None),
+        )
+
+    def _reading_model(
+        self, ledger: Sequence[Any] | None, tools: Sequence[Any] = ()
+    ) -> tuple[Any, Any]:
+        """``read_evidence`` over ``ledger`` and the judge's model bound with ``tools`` and it.
+
+        ``(None, None)`` for no ledger, or an empty one. A model that cannot bind it gives
+        ``(reads, None)``: the call is asked as it always was, and the judge's
+        ``read_degradations`` and the server registry's reasons say so once.
+        """
+        if not ledger:
+            return None, None
+        from malspark.agents.ledger_reads import LedgerReads, not_bound_reason, say_once
+
+        reads = LedgerReads(
+            ledger,
+            sizer=self._answer_sizer(),
+            spill=getattr(self, "evidence_spill", None),
+            container=getattr(self, "_container", None),
+        )
+        try:
+            return reads, reads.bind(self.llm, tools)
+        except Exception as exc:  # noqa: BLE001 — said, and the call is asked without it
+            self.logger.warning(
+                "JudgeAgent: its model could not bind read_evidence (%s: %s); the call is "
+                "asked without it.",
+                type(exc).__name__,
+                exc,
+            )
+            reason = not_bound_reason(str(self.name))
+            say_once(self.read_degradations, reason)
+            try:
+                registry = self._server_registry()
+            except Exception:  # noqa: BLE001 — the reason is still on the judge
+                registry = None
+            say_once(getattr(registry, "degradation_reasons", None), reason)
+            return reads, None
+
+    def _salvage_model(self, keeps_turns: bool) -> Any:
+        """The judge's model for its salvage: its loop's tools withheld where turns are kept."""
+        tools = list(getattr(self, "tools", None) or [])
+        bind = getattr(self.llm, "bind_tools", None)
+        if not keeps_turns or not tools or bind is None:
+            return self.llm
+        try:
+            # ``read_evidence`` too once the loop offered it: the turns it
+            # kept name it.
+            return bind(
+                [*tools, *(getattr(self, "_offered_after_clear", None) or [])],
+                tool_choice="none",
+            )
+        except Exception as exc:  # noqa: BLE001 — the unbound model is the salvage's fallback
+            self.logger.debug("JudgeAgent: tools not bound for the salvage (%s).", exc)
+            return self.llm
+
+    async def _reasoning_from_what_was_gathered(
+        self,
+        msgs: list[Any],
+        timeout: float | None,
+        settings: Any,
+        window_tokens: int = 0,
+        *,
+        ended_why: str = "",
+        refused: bool = False,
+    ) -> str:
+        """The judge's reasoning, asked for once from what its loop gathered.
+
+        The analysts' salvage, for the judge: the conversation trimmed to the
+        salvage budget, and one turn with no tools asking for the reasoning
+        the loop did not get to write. What comes back is the model's own; a
+        salvage that fails leaves the reasoning empty, which mediation records
+        as no answer with how the loop ended (``_last_loop_ending``).
+        """
+        if timeout is not None and timeout < 1.0:
+            self.logger.warning("JudgeAgent reasoning salvage skipped: no time left.")
+            self._salvage_row = {
+                "seconds_left": timeout,
+                "outcome": "not sent",
+                "detail": "no time left",
+            }
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) with no time "
+                "left to write its reasoning"
+            )
+            return ""
+        # Kept whole where the model binds its thinking to the turns before it
+        # (``anthropic_history``); the tool-reply completion answers an
+        # unparsed call as not run.
+        keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
+        sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
+        # The loop's tool definitions go with kept turns, and the question after
+        # them, outside what the trim measures.
+        room, room_how = synthesis_budget(settings, "judge", window_tokens, refused=refused)
+        beside = (self._definitions_sent() if keeps_turns else 0) + len(MEDIATION_SALVAGE_QUESTION)
+        room_how += f", less {beside} characters sent beside the turns"
+        fits = max(0, room - beside)
+        trimmed = _trim_for_synthesis(sendable, fits)
+        dropped = len(sendable) - len(trimmed)
+        row: dict[str, Any] = {
+            "conversation_chars": sum(_message_chars(m) for m in sendable),
+            "sent_chars": sum(_message_chars(m) for m in trimmed),
+            "budget_chars": fits,
+            "sized_by": "window",
+            "window_budget": room_how,
+        }
+        self._salvage_row = row
+        if dropped:
+            row["messages_dropped"] = dropped
+            self.logger.warning(
+                "JudgeAgent reasoning salvage: trimmed %d of %d messages to fit %d chars.",
+                dropped,
+                len(sendable),
+                fits,
+            )
+        directive = HumanMessage(content=MEDIATION_SALVAGE_QUESTION)
+        from malspark.llm.context_window import output_bound_kwargs
+
+        asked = with_question(trimmed, str(directive.content))
+        salvage_slot = object()
+        try:
+            bound = self._spend_admits("salvage", asked, slot=salvage_slot, deadline_s=timeout)
+        except SpendCeilingStop as stop:
+            self.logger.warning("JudgeAgent reasoning salvage not made: %s.", stop)
+            row["outcome"] = "not sent"
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) and the call "
+                "to write its reasoning was not admitted under the job's spend ceiling"
+            )
+            return ""
+        held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
+        try:
+            # Asked at the end of the last user turn when the trim left one
+            # last, rather than as a second user turn after it.
+            # With the turns kept whole, the loop's tools go with it, withheld
+            # (``tool_choice`` none), so the re-sent history is the loop's.
+            model = self._salvage_model(keeps_turns)
+            response = await asyncio.wait_for(model.ainvoke(asked, **held), timeout)
+            self._record_usage(response, call="reasoning salvage")
+        except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves no reasoning
+            self.logger.warning("JudgeAgent reasoning salvage failed (%s).", type(exc).__name__)
+            row.update(outcome="failed", detail=type(exc).__name__)
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) and the call "
+                f"to write its reasoning failed ({type(exc).__name__})"
+            )
+            return ""
+        finally:
+            self._spend_release(salvage_slot)
+        row["outcome"] = "answered"
+        self._last_answer = response
+        self._last_answer_cap = bound if held else None
+        text = _answer_text(response)
+        if not text.strip():
+            # A limit ended the loop: the round says so, and mediation does
+            # not run the loop again over what a limit already ended.
+            cut = self._cut_reason(response, bound if held else self._built_cap_tokens())
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) and the call "
+                f"to write its reasoning came back with no text" + (f" ({cut})" if cut else "")
+            )
+        return text
+
+    def _keep_the_loop_s_entries(self, entries: list[LedgerEntry]) -> None:
+        """Add a loop's entries, under the lock an ask's hand-over takes too."""
+        with getattr(self, "evidence_lock", None) or contextlib.nullcontext():
+            self._evidence_entries.extend(entries)
+
+    def drain_evidence_entries(self) -> list[LedgerEntry]:
+        """Every entry the judge's tool loops gathered, handing over ownership."""
+        with getattr(self, "evidence_lock", None) or contextlib.nullcontext():
+            entries = self._evidence_entries
+            self._evidence_entries = []
+        return entries
+
+    def _holds_a_lookup_tool(self) -> bool:
+        """Whether a reputation lookup is among this judge's own tools.
+
+        A tool attached to it that declares ``kind: reputation``, or a server
+        its definition references that declares one (``core.reputation``):
+        the loop can only answer an identity question if something in it can
+        look a hash up, and a judge holding only the knowledge sidecar would
+        spend a full timeout to learn nothing.
+        """
+        from malspark.core.declared_reading import declarations
+        from malspark.core.reputation import lookup_servers
+
+        if self._holds_attached_lookup_tool():
+            return True
+        referenced = {str(ref.server) for ref in self._definition_tool_refs()}
+        return bool(referenced & lookup_servers(declarations()))
+
+    def _holds_attached_lookup_tool(self) -> bool:
+        """Whether a tool that declares ``kind: reputation`` is in this judge's attached list.
+
+        Unlike ``_holds_a_lookup_tool``, a reference that did not attach does
+        not count: this answers what the mediator's prompt may say it has.
+        """
+        from malspark.agents.tool_pinning import declared_facts_of
+        from malspark.core.reputation import is_lookup
+
+        return any(is_lookup(declared_facts_of(t)) for t in getattr(self, "tools", None) or [])
+
+    def _can_ask_an_identity_question(self, reputation_asked: bool) -> bool:
+        """Whether the judge should open its tool loop to ask who this sample is.
+
+        The loop used to run on dissent alone, so a run where every analyst
+        agreed — and none of them had a reputation tool to agree *about* —
+        ended with a judge holding a bound lookup it never called and a family
+        of None.
+
+        What settles it is the run's own record: whether the evidence ledger
+        holds a call to a reputation lookup (``core.reputation.asked``). An
+        earlier version read the analysts' prose for words like "malware
+        family", which turned the trigger *off* for the sentence an analyst
+        writes when it consulted nothing at all ("no malware family could be
+        determined") — the very case the trigger exists for. A tool call is a
+        fact, and a sentence is not one.
+        """
+        return self._holds_a_lookup_tool() and not reputation_asked
+
+    async def mediate(
+        self,
+        reports: dict[str, str],
+        history: list[AgentArgument],
+        isr_reports: dict[str, AgentISR] | None = None,
+        consensus_threshold: float | None = None,
+        reputation_asked: bool = False,
+        sample: Any = None,
+        facts_block: str = "",
+        run_state: str = "",
+        round_facts: str = "",
+        cited_entries: Mapping[str, str] | None = None,
+        ledger: Sequence[Any] | None = None,
+    ) -> tuple[AgentArgument, bool | None]:
+        """One mediation round (:meth:`_mediate_round`), or the round the mediator's ceiling ends.
+
+        A call the mediator's own ceiling refuses (``llm.agents.mediator``)
+        ends the round as a call the job's ceiling does not admit ends it: the
+        mediator wrote no answer, the note says why in the ceiling's words,
+        and consensus is neither reached nor refused.
+
+        ``ledger`` is the run's ledger: the round's ``read_evidence`` (in its
+        loop and in the block question) reads every entry of it by id, not
+        only the loop's own (``agents.ledger_reads``).
+        """
+        self._mediation_ledger = list(ledger) if ledger else None
+        self._mediation_turns = None
+        try:
+            return await self._mediate_round(
+                reports,
+                history,
+                isr_reports=isr_reports,
+                consensus_threshold=consensus_threshold,
+                reputation_asked=reputation_asked,
+                sample=sample,
+                facts_block=facts_block,
+                run_state=run_state,
+                round_facts=round_facts,
+                cited_entries=cited_entries,
+            )
+        except AgentCeilingStop as stop:
+            self.logger.warning("Mediator: %s; the round is not mediated.", stop)
+            return (
+                AgentArgument(
+                    agent_name=MEDIATOR_AGENT_NAME,
+                    finding="",
+                    confidence_score=None,
+                    status=MEDIATOR_NO_ANSWER,
+                    note=mediator_no_answer_note(str(stop)),
+                ),
+                None,
+            )
+        finally:
+            self._mediation_ledger = None
+
+    async def _mediate_round(
+        self,
+        reports: dict[str, str],
+        history: list[AgentArgument],
+        isr_reports: dict[str, AgentISR] | None = None,
+        consensus_threshold: float | None = None,
+        reputation_asked: bool = False,
+        sample: Any = None,
+        facts_block: str = "",
+        run_state: str = "",
+        round_facts: str = "",
+        cited_entries: Mapping[str, str] | None = None,
+    ) -> tuple[AgentArgument, bool | None]:
+        """Find contradictions between expert reports and determine consensus.
+
+        Accepts a generic dict of agent reports so any number of agents can
+        participate without requiring changes to this method's signature.
+
+        Every mediation runs its tool loop, the first round as much as a round
+        with explicit dissent: whether to read an answer again, look a sample
+        up or ask the reverser or the static analyst about the code is the
+        model's decision. An ask comes back as evidence on the ledger; the
+        mediator still decides.
+
+        Args:
+            reports: Mapping of agent name to their latest report text.
+            history: Accumulated negotiation arguments from prior rounds.
+            isr_reports: Optional structured ISR objects. When provided, their
+                summaries are appended to give the judge per-claim confidence
+                scores and explicit dissent signals.
+            round_facts: What the revision round before did on each blocking
+                line of the last mediation, with the question for the
+                carried-or-new mark (``debate_facts.round_facts_text``),
+                carried after the ledger's counts.
+            cited_entries: The stored texts of the entries those lines cite,
+                by id, shown after them whole, as many as the room the
+                reports and the history leave (``debate_facts.fit_entries``).
+
+        Returns:
+            Tuple of (AgentArgument with mediator findings, bool indicating
+            consensus). The bool is ``None`` when fewer than two of the
+            reporting analysts produced claims: consensus does not apply, and
+            the argument carries no confidence.
+        """
+        self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
+        # The texts this mediation's requests embed, for the input meter
+        # (``BudgetMeter._note_request``) to count as the pack and as the
+        # analysts' reports.
+        self._measured_pack = str(facts_block or "")
+        self._measured_peers = tuple(str(text) for text in (reports or {}).values() if text)
+        answered_by: Any = None
+        # The output bound the answer's call was sent with: what a cut is
+        # measured against. ``None`` reads the model's built cap.
+        answered_cap: int | None = None
+        # How the loop ended when it wrote no final answer of its own.
+        loop_ending = ""
+        # Attached before the prompt is written: the sentence about tools below
+        # says what this request carries, and a server that would not attach is
+        # not a tool the mediator has.
+        await self._initialize_mcp_client()
+        identity_unanswered = self._can_ask_an_identity_question(reputation_asked)
+        lookup_attached = self._holds_attached_lookup_tool()
+
+        # The reports, then the ISR summaries that are not one of them word
+        # for word: per-claim confidence and dissent, each analyst's once.
+        reports_text = mediation_reports_text(reports, isr_reports)
+
+        # The mediator is NOT allowed to state a
+        # verdict or describe the sample as "clean". Its only job is to
+        # surface explicit contradictions between agents and quantify how
+        # aligned they are. The downstream judge LLM owns the verdict
+        # decision — earlier prompt wording let "CLEAN / NO THREAT DETECTED"
+        # prose leak into the judge prompt and bias the verdict toward
+        # benign even when YARA had a hit.
+        # The counts the ledger states for the lines the last mediation listed,
+        # carried on this call rather than asked in one of their own.
+        # And the blocking lines of it every count of which the ledger states
+        # and the analysts were told: the mediator decides whether each still
+        # blocks.
+        last_counts = with_ledger_stated(
+            with_ledger_facts("", _last_ledger_facts(history)),
+            _last_ledger_facts(history, "ledger_stated"),
+        )
+        carried_facts = f"{last_counts}\n\n" if last_counts else ""
+        if round_facts:
+            carried_facts += f"{round_facts}\n\n"
+        system_text = mediator_system_prompt(
+            identity_unanswered=identity_unanswered,
+            lookup_attached=lookup_attached,
+            sha256=_sha256_of(sample),
+            tools=self.tools,
+        )
+        history_text = negotiation_history_text(history)
+        # The pack and the sample's identity first, then the run state: every
+        # round sends the same head, so its own breakpoint is read in each
+        # later round (``anthropic_history``, ``STANDING_FACTS_CHARS``); the
+        # run state, regenerated each round, stands after it.
+        standing_head = f"{_standing_blocks('', facts_block)}{_identity_prefix(sample)}"
+        # The round's ``read_evidence`` reads the run's ledger: the mediator is
+        # asked to read an entry a line turns on before it rules on it. A
+        # mediation with no ledger is asked as before.
+        closing = (
+            f"{MEDIATION_ENTRY_CHECK} {MEDIATOR_HUMAN_CLOSING}"
+            if self._mediation_ledger
+            else MEDIATOR_HUMAN_CLOSING
+        )
+
+        def _mediation_human(
+            reports_shown: str, history_shown: str, notice: str, entries_shown: str = ""
+        ) -> str:
+            note = f"{notice}\n\n" if notice else ""
+            entries = f"{entries_shown}\n\n" if entries_shown else ""
+            return (
+                f"{standing_head}{_standing_blocks(run_state, '')}{note}"
+                f"Expert Reports:\n{reports_shown}\n\nPrevious Discussion:\n{history_shown}\n\n"
+                f"{carried_facts}{entries}"
+                f"{closing}"
+            )
+
+        # Whole when the judge's window holds it with its output cap kept
+        # free; otherwise the largest part shortened first, the prompt saying
+        # so, as the verdict prompt does (``fit_prompt_parts``).
+        mediation_room = self._question_room(
+            len(system_text) + len(_mediation_human("", "", "")) + _NOTICE_ROOM,
+            int(self._built_cap_tokens() or 0),
+        )
+        fitted_parts, fitted_notice = fit_prompt_parts(
+            {"expert reports": reports_text, _HISTORY_PART: history_text}, mediation_room
+        )
+        if fitted_notice:
+            self.logger.warning("JudgeAgent mediation prompt: %s", fitted_notice)
+        # The entries take what the reports and the history leave of the room,
+        # so they never shorten either, less what the turns after this one
+        # need (``_mediation_entries_reserve``).
+        entries_text = ""
+        if cited_entries:
+            entries_text = self._mediation_entries(
+                cited_entries,
+                None
+                if mediation_room is None
+                else mediation_room
+                - len(fitted_parts["expert reports"])
+                - len(fitted_parts[_HISTORY_PART])
+                - len(fitted_notice)
+                - self._mediation_entries_reserve(),
+            )
+        from malspark.agents.technique_facts import STANDING_FACTS_CHARS
+
+        prompt_messages = [
+            ("system", system_text),
+            (
+                "human",
+                NotedText(
+                    _mediation_human(
+                        fitted_parts["expert reports"],
+                        fitted_parts[_HISTORY_PART],
+                        fitted_notice,
+                        entries_text,
+                    ),
+                    {STANDING_FACTS_CHARS: len(standing_head)} if standing_head else {},
+                ),
+            ),
+        ]
+        window_full_reason = ""
+
+        async def _run_the_loop() -> tuple[str, Any, int | None, str, bool]:
+            """The mediation's tool loop: its text, the answer read, its bound, how it ended.
+
+            And whether its call was refused by the spend ceiling before it was made.
+            """
+            text = await self.execute_tool_loop(prompt_messages)
+            return (
+                text,
+                getattr(self, "_last_answer", None),
+                getattr(self, "_last_answer_cap", None),
+                getattr(self, "_last_loop_ending", ""),
+                bool(getattr(self, "_last_not_admitted", False)),
+            )
+
+        self.logger.info(
+            "Mediator: running its tool loop with %d tool(s)%s.",
+            len(getattr(self, "tools", None) or []),
+            "; no analyst consulted a reputation source" if identity_unanswered else "",
+        )
+        not_admitted = False
+        try:
+            (
+                reasoning_text,
+                answered_by,
+                answered_cap,
+                loop_ending,
+                not_admitted,
+            ) = await _run_the_loop()
+        except Exception as exc:  # noqa: BLE001 — only a full window is handled here
+            if not window_full_error(exc):
+                raise
+            # The server's own word that the prompt did not fit before anything
+            # was gathered: the round's reason, not an error out of the debate.
+            self.logger.error("Mediator: the model server reported its window full.")
+            window_full_reason = "the model server reported its context window full"
+            reasoning_text = ""
+
+        # Agreement among fewer than two analysts that said something measures
+        # nothing, whatever number the reasoning ended on: the mediator's words
+        # are kept, no agreement value is extracted, and ``None`` tells the
+        # caller consensus does not apply. ``isr_reports`` absent is a caller
+        # with no structured claims to count, which keeps the measured path.
+        if isr_reports is not None and not consensus_applies(reports, isr_reports):
+            claimants = analysts_with_claims(reports, isr_reports)
+            self.logger.info(
+                "Consensus not applicable: %d of %d analyst(s) produced claims.",
+                len(claimants),
+                len(reports),
+            )
+            return (
+                AgentArgument(
+                    agent_name=MEDIATOR_AGENT_NAME,
+                    # The mediator's words whole, and the platform's own
+                    # sentence in a field of its own rather than inside them.
+                    finding=reasoning_text.strip(),
+                    confidence_score=None,
+                    answer=safe_answer_text(reasoning_text) if reasoning_text.strip() else "",
+                    note=(
+                        f"Consensus: not applicable — {len(claimants)} of {len(reports)} "
+                        "analyst(s) produced claims."
+                    ),
+                ),
+                None,
+            )
+
+        # A mediator that wrote no answer — an empty one, or one the output cap
+        # cut before any text — stated neither agreement nor a contradiction.
+        # A loop that answered with an empty text the cap did not cut is run
+        # once more, as it was sent; a cut answer never is, because the same
+        # call at the same budget would be cut again, and neither is a loop a
+        # limit ended. Still without an answer, the round records that fact
+        # and why, consensus is neither reached nor refused, and the router
+        # sends the answers in force to the judge rather than reading the
+        # silence as disagreement and opening a revision round of every
+        # analyst.
+        # What became of a second ask, stated as it happened.
+        second_ask = ""
+        if (
+            not reasoning_text.strip()
+            and not loop_ending
+            and not window_full_reason
+            and not not_admitted
+        ):
+            first = self._no_answer_reason(answered_by, answered_cap)
+            if self._cut_reason(answered_by, answered_cap or self._built_cap_tokens()):
+                second_ask = f"{first}; not asked again, as the same call would be cut again"
+            else:
+                self.logger.warning("Mediator wrote no answer; asking once more.")
+                try:
+                    (
+                        reasoning_text,
+                        answered_by,
+                        answered_cap,
+                        loop_ending,
+                        not_admitted,
+                    ) = await _run_the_loop()
+                except AgentCeilingStop as stop:
+                    self.logger.warning("Mediator not asked once more: %s.", stop)
+                    second_ask = f"{first}; asking once more was not made: {stop}"
+                except Exception as exc:  # noqa: BLE001 — a second ask that fails leaves no answer
+                    self.logger.warning("Mediator asked once more failed (%s).", type(exc).__name__)
+                    second_ask = f"{first}; asking once more failed ({type(exc).__name__})"
+                else:
+                    again_reason = loop_ending or self._no_answer_reason(answered_by, answered_cap)
+                    second_ask = (
+                        f"{first}; asking once more was refused by the job's spend ceiling"
+                        if not_admitted
+                        else f"{first}; asked once more, "
+                        + (
+                            "the answer was empty again"
+                            if again_reason == "the answer was empty"
+                            else again_reason
+                        )
+                    )
+        if not reasoning_text.strip():
+            reason = (
+                second_ask
+                or window_full_reason
+                or (f"{loop_ending}; the tool loop was not run again" if loop_ending else "")
+                or self._no_answer_reason(answered_by, answered_cap, not_asked=not_admitted)
+            )
+            self.logger.warning(
+                "Mediator wrote no answer; the round is not mediated (the round's note says why)."
+            )
+            return (
+                AgentArgument(
+                    agent_name=MEDIATOR_AGENT_NAME,
+                    finding="",
+                    confidence_score=None,
+                    status=MEDIATOR_NO_ANSWER,
+                    note=mediator_no_answer_note(reason),
+                ),
+                None,
+            )
+
+        # The contradictions are read from the answer's final block alone. An
+        # answer without one is asked once for it, in the conversation that
+        # produced it; still without one, the note says so and agreement is
+        # read from the number as before.
+        # A block that cannot be read either way (``ContradictionsBlock.ambiguous``)
+        # is asked about the same once. Answered with a NONE again, a closing
+        # sentence beside it is the mediator's prose, not a contradiction.
+        block_missing = False
+        reading = read_contradictions_block(reasoning_text)
+        if reasoning_text.strip() and (reading.items is None or reading.ambiguous):
+            asked_text = await self._ask_for_contradictions_block(prompt_messages, reasoning_text)
+            answered = asked_text != reasoning_text
+            reasoning_text = asked_text
+            reading = read_contradictions_block(reasoning_text)
+            block_missing = reading.items is None
+            if block_missing:
+                self.logger.warning(
+                    "Mediator: no final CONTRADICTIONS: block, also when asked once; "
+                    "agreement is read from agreement_confidence alone."
+                )
+            elif answered and reading.ambiguous == "none_beside_plain_lines":
+                reading = ContradictionsBlock([])
+        stated_block = reading.items
+
+        # Now extract the final structured output from the detailed reasoning.
+        # IMPORTANT: reasoning_text may contain curly braces from LLM output
+        # (e.g. JSON, {type}), so we use a template variable instead of f-string.
+        extract_prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    MEDIATION_EXTRACTION_SYSTEM,
+                ),
+                (
+                    "human",
+                    "{reasoning_log}",
+                ),
+            ]
+        )
+
+        # Structured output extraction with bounded retry; if every attempt
+        # still fails, fall back to the regex-based extractor so the
+        # negotiation loop can keep running. A loop that wrote no reasoning has
+        # nothing for a model to extract from: it is read as no agreement,
+        # which is what the text fallback makes of an empty log.
+        verdict = (
+            await self._extract_mediator_verdict(extract_prompt, reasoning_text)
+            if reasoning_text.strip()
+            else self._fallback_mediate(reasoning_text)
+        )
+        # The mediator's own final block is its word on what still stands; a
+        # structured extraction is a second model's transcription of it, and
+        # where the two differ the block is what is read.
+        stated = stated_block
+        if stated is not None and list(verdict.contradictions) != stated:
+            self.logger.info(
+                "Mediator: the extraction listed %d contradiction(s) and the mediator's final "
+                "block %d; the block is read.",
+                len(verdict.contradictions),
+                len(stated),
+            )
+            verdict = verdict.model_copy(update={"contradictions": stated})
+
+        # The mediator's own mark on each line decides whether it stands: a
+        # line it marked [not blocking: <reason>] does not, and an unmarked
+        # line does, as every line did before marks existed. The platform
+        # overrides a mark in neither direction.
+        listed = list(verdict.contradictions)
+        marks = read_marks(listed)
+        blocking = [m.line for m in marks if m.blocking]
+        not_blocking = [m.line for m in marks if not m.blocking]
+        unread_marks = [m.line for m in marks if m.unread]
+        if unread_marks:
+            self.logger.info(
+                "Mediator: %d listed line(s) carry a mark that was not read; they block.",
+                len(unread_marks),
+            )
+
+        # A contradiction still standing is not consensus, whatever number the
+        # mediator wrote; the number is kept and shown beside the list.
+        reached = verdict.confidence >= self._consensus_threshold(consensus_threshold)
+        is_consensus = reached and not blocking
+        if reached and blocking:
+            self.logger.info(
+                "No consensus: the mediator lists %d contradiction(s) still standing "
+                "(confidence=%.2f).",
+                len(blocking),
+                verdict.confidence,
+            )
+        else:
+            log_msg = "Consensus reached" if is_consensus else "No consensus yet"
+            self.logger.info("%s (confidence=%.2f)", log_msg, verdict.confidence)
+        if not_blocking:
+            self.logger.info(
+                "Mediator: %d listed line(s) marked not blocking by the mediator.",
+                len(not_blocking),
+            )
+
+        finding = (
+            f"{verdict.resolution_summary}\n\n"
+            f"Contradictions: {'; '.join(listed) or 'None'}\n"
+            f"Confidence: {verdict.confidence:.2f}"
+        )
+        argument = AgentArgument(
+            agent_name=MEDIATOR_AGENT_NAME,
+            finding=finding,
+            confidence_score=verdict.confidence,
+            contradictions=blocking,
+            not_blocking=not_blocking,
+            unread_marks=unread_marks,
+            # The words the block was read from, kept for the run record.
+            answer=safe_answer_text(reasoning_text),
+            note=(
+                CONTRADICTIONS_BLOCK_MISSING_NOTE
+                if block_missing
+                else CONTRADICTIONS_BLOCK_MIXED_NOTE
+                if reading.mixed and verdict.contradictions
+                else ""
+            ),
+        )
+        # The conversation the block was read from, for the one question the
+        # round limit may ask after it (:meth:`rule_on_standing_lines`).
+        self._mediation_turns = (list(prompt_messages), reasoning_text)
+        return argument, is_consensus
+
+    def _mediation_entries_reserve(self) -> int:
+        """The characters the turns after a mediation's first need, kept free of its entries.
+
+        One tool answer's share of the conversation's room
+        (``context_window.ANSWER_SHARE`` of ``ContextBudget.tool_budget_chars``,
+        as an analyst's input room keeps it) for the tool loop, the first
+        answer at the output cap, and the question for a missing block
+        (:data:`CONTRADICTIONS_BLOCK_QUESTION`): the follow-up turn resends the
+        prompt with both. The second answer's cap is already out of the room.
+        No budget known keeps the question's length alone. Never raises.
+        """
+        from malspark.llm.context_window import ANSWER_SHARE, ContextBudget
+
+        reserve = len(CONTRADICTIONS_BLOCK_QUESTION)
+        try:
+            budget = self._context_budget()
+            if isinstance(budget, ContextBudget) and budget.derives:
+                reserve += int(budget.tool_budget_chars() * ANSWER_SHARE)
+                cap = int(self._built_cap_tokens() or 0)
+                reserve += int(cap * float(budget.chars_per_token))
+        except Exception as exc:  # noqa: BLE001 — a reserve not read keeps the question's
+            self.logger.debug("Mediator: the entries' reserve was not read (%s).", exc)
+        return reserve
+
+    def _mediation_entries(self, entries: Mapping[str, str], room: int | None) -> str:
+        """The entries block a mediation shows after the round's facts, or ``""``.
+
+        ``room`` is the characters the mediation's window leaves once its
+        reports and history are in; ``None`` is no window known, and every
+        entry is shown. An entry that does not fit is named by id; nothing
+        is cut (``debate_facts.fit_entries``).
+        """
+        from malspark.pipeline.debate_facts import entries_block, fit_entries
+
+        shown, unfit = fit_entries(entries, room, mediation=True)
+        if unfit:
+            self.logger.warning(
+                "Mediator: %d of the %d ledger entries the last mediation's blocking lines cite "
+                "do not fit beside this mediation and are named by id: %s.",
+                len(unfit),
+                len(entries),
+                ", ".join(unfit),
+            )
+        elif not shown:
+            self.logger.warning(
+                "Mediator: none of the %d ledger entries the last mediation's blocking lines "
+                "cite fits beside this mediation; it mediates without them.",
+                len(entries),
+            )
+        return entries_block(shown, unfit, mediation=True)
+
+    def _built_cap_tokens(self) -> int | None:
+        """The output cap this judge's model was built with, or ``None`` when it cannot be read."""
+        try:
+            cap = self._output_cap().tokens
+        except Exception:  # noqa: BLE001 — a cap that cannot be read is no cap
+            return None
+        return cap if isinstance(cap, int) else None
+
+    @staticmethod
+    def _cut_reason(answer: Any, cap: int | None) -> str | None:
+        """How the output cap cut ``answer``, or ``None`` when it did not."""
+        if answer is None or not _was_cut(answer, cap):
+            return None
+        from malspark.core.truncation_ledger import completion_tokens_of
+
+        produced = completion_tokens_of(answer)
+        tokens = produced if produced is not None else cap
+        if isinstance(tokens, int):
+            return f"the answer was cut at {tokens} tokens with no text"
+        return "the answer was cut at the output cap with no text"
+
+    def _no_answer_reason(
+        self, answer: Any, sent_cap: int | None = None, *, not_asked: bool = False
+    ) -> str:
+        """Why the mediator's text is empty: not asked, cut at the bound it was sent with, or empty.
+
+        ``sent_cap`` is the output bound the call carried; without one the
+        model's built cap is what bound it.
+        """
+        if not_asked:
+            return "the call was not admitted under the job's spend ceiling"
+        cap = sent_cap or self._built_cap_tokens()
+        return self._cut_reason(answer, cap) or "the answer was empty"
+
+    async def _ask_for_contradictions_block(
+        self, prompt_messages: list[tuple[str, str]], reasoning_text: str
+    ) -> str:
+        """The mediation with the answer to one question for its missing block.
+
+        One question after the mediator's own answer in the conversation that
+        produced it, offering ``read_evidence`` over the run's ledger where the
+        model binds it (``agents.ledger_reads``), each turn after a read
+        admitted on its own. What comes back is appended to the answer, so its
+        last agreement line is the one read; a question that is not made or
+        fails leaves the answer as it was.
+        """
+        answer = await self._ask_after_mediation(
+            prompt_messages,
+            reasoning_text,
+            CONTRADICTIONS_BLOCK_QUESTION,
+            CONTRADICTIONS_BLOCK_QUESTION_WITHOUT_TOOLS,
+            "mediation block question",
+            "Mediator block question",
+        )
+        return f"{reasoning_text.rstrip()}\n\n{answer}" if answer else reasoning_text
+
+    async def rule_on_standing_lines(self, lines_text: str, ledger: Sequence[Any] | None) -> str:
+        """The mediator's rulings on the blocking lines the round limit leaves, or ``""``.
+
+        One question (:data:`LIMIT_RULING_QUESTION`, then ``lines_text``) after
+        the last mediation's answer, in the conversation that produced it,
+        offering ``read_evidence`` over ``ledger`` (the run's) where the model
+        binds it. Bounded as the block question is: the spend ceiling admits
+        each turn, and the judge's own time limit holds the whole. ``""`` when
+        no mediation answered in this agent, or the question was not made or
+        failed (logged); why is left in :attr:`limit_ruling_failure` for the
+        caller to state.
+        """
+        if self._mediation_turns is None:
+            self.limit_ruling_failure = "no mediation answered in this agent"
+            return ""
+        prompt_messages, reasoning_text = self._mediation_turns
+        self._mediation_ledger = list(ledger) if ledger else None
+        try:
+            answer = await self._ask_after_mediation(
+                prompt_messages,
+                reasoning_text,
+                f"{LIMIT_RULING_QUESTION}\n\n{lines_text}",
+                f"{LIMIT_RULING_QUESTION_WITHOUT_TOOLS}\n\n{lines_text}",
+                "mediation limit rulings",
+                "Mediator limit rulings",
+            )
+        finally:
+            self._mediation_ledger = None
+        self.limit_ruling_failure = self._after_mediation_failure or (
+            "" if answer else "the answer was empty"
+        )
+        return answer
+
+    async def _ask_after_mediation(
+        self,
+        prompt_messages: list[tuple[str, str]],
+        reasoning_text: str,
+        question: str,
+        question_without_tools: str,
+        call: str,
+        what: str,
+    ) -> str:
+        """The answer to one question after the mediator's answer, or ``""``.
+
+        In the conversation that produced it, with ``read_evidence`` over the
+        mediation's ledger where the model binds it (``question``) and without
+        it otherwise (``question_without_tools``). ``call`` names the call to
+        the spend ceiling and the usage record, ``what`` to the log. A question
+        the ceiling refuses or that fails answers ``""``, and says why in
+        ``_after_mediation_failure``.
+        """
+        self._after_mediation_failure = ""
+        from langchain_core.messages import AIMessage, BaseMessage
+
+        from malspark.llm.context_window import output_bound_kwargs
+
+        turns: list[BaseMessage] = [
+            SystemMessage(content=text)
+            if role == "system"
+            else HumanMessage(content=str(text), response_metadata=_notes_of(text))
+            for role, text in prompt_messages
+        ]
+        reads, reading = self._reading_model(self._mediation_ledger)
+        turns += [
+            AIMessage(content=reasoning_text),
+            HumanMessage(content=question if reading is not None else question_without_tools),
+        ]
+        timeout = _seconds_or_none(loop_limits("judge")[0])
+        slot = object()
+        try:
+            bound = self._spend_admits(call, turns, slot=slot, deadline_s=timeout)
+        except SpendCeilingStop as stop:
+            self.logger.warning("%s not asked: %s.", what, stop)
+            self._after_mediation_failure = "the question was refused by the job's spend ceiling"
+            return ""
+        held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
+        try:
+            # A provider saying "not now" is asked again inside the model call
+            # (``llm.transient``): a socket that closed is not an answer that
+            # left the block out.
+            sent = [0]
+
+            async def _turn(conversation: list[Any]) -> Any:
+                kept = held
+                if sent[0]:
+                    later = self._spend_admits(call, conversation, slot=slot, deadline_s=timeout)
+                    kept = output_bound_kwargs(self.llm, later) if later is not None else {}
+                sent[0] += 1
+                model = self.llm if reading is None else reading
+                return await as_call(what, model.ainvoke(conversation, **kept))
+
+            response = await asyncio.wait_for(
+                _turn(turns)
+                if reads is None or reading is None
+                else reads.answer(
+                    _turn,
+                    turns,
+                    on_read=lambda reply: self._record_usage(reply, call=call),
+                    what=what,
+                    call=call,
+                ),
+                timeout,
+            )
+            self._record_usage(response, call=call)
+            record_judge_response(
+                getattr(self, "truncation_ledger", None), response, cap=self._output_cap().tokens
+            )
+        except Exception as exc:  # noqa: BLE001 — an unanswered question changes nothing
+            self.logger.warning("%s failed (%s).", what, type(exc).__name__)
+            self._after_mediation_failure = (
+                "a turn of the question was refused by the job's spend ceiling"
+                if isinstance(exc, SpendCeilingStop)
+                else f"the question failed: {type(exc).__name__}"
+            )
+            return ""
+        finally:
+            self._spend_release(slot)
+        return _answer_text(response).strip()
+
+    async def give_verdict(
+        self,
+        reports: dict[str, str],
+        history: list[AgentArgument],
+        isr_reports: dict[str, AgentISR] | None = None,
+        evidence_summary: str = "",
+        degradation_note: str = "",
+        memory_store: MemoryStore | None = None,
+        evidence_corpus: set[str] | None = None,
+        shortened_tools: Sequence[str] = (),
+        searched: Sequence[str] = (),
+        corpus_state: Any = None,
+        current_sample_id: str | None = None,
+        sample: Any = None,
+        ledger_ids: Sequence[str] | None = None,
+        facts_block: str = "",
+        run_state: str = "",
+        technique_sources: Mapping[str, Sequence[str]] | None = None,
+        sandbox_facts: Any = None,
+        ledger: Sequence[Any] | None = None,
+    ) -> JudgeVerdict:
+        """The final decision: a STIX bundle plus the judge's own assessment.
+
+        ``evidence_summary`` is the block from ``pipeline.evidence_summary`` —
+        who named which technique and how sure each one was. ``degradation_note``
+        says why this run is thin, when it is; both go into the prompt because
+        the judge is the component that should be weighing them. ``facts_block``
+        is the triage pack as every analyst saw it and ``run_state`` the run's
+        state block; both lead the human turn so the verdict is drawn over the
+        same facts the analysts were given. ``technique_sources`` is the
+        evidence summary as data, ``{technique id: [source]}``: a relationship
+        crediting an agent with a technique it never named is asked about
+        against it, and ``None`` asks nothing. ``sandbox_facts`` is
+        ``(kind, value) -> the sandbox's fact`` for a value the sandbox recorded
+        and attributes no flow, or no process, of the sample to
+        (``stix_renderer.sandbox_facts_for_the_judge``): an indicator naming one
+        is asked about once, with the fact, and a keep after that question is
+        recorded as the judge's answer, which is what publishes the value.
+        ``ledger`` is the run's ledger: the call offers ``read_evidence`` over
+        it from its first turn (``agents.ledger_reads``); ``None`` offers none.
+
+        The answer is validated (``pipeline.validation.validate_verdict_bundle``)
+        and, when something is wrong, handed back once with the problems named.
+        Whatever is still wrong comes back in :class:`JudgeVerdict.violations`
+        rather than being fixed in place — except an ungrounded indicator, which
+        is dropped, because a STIX consumer has no way to read a caveat.
+        """
+        self.logger.info("Formulating final malware verdict with MITRE ATT&CK mapping...")
+
+        parts = verdict_report_parts(reports, isr_reports, evidence_summary, degradation_note)
+
+        # Long-term memory — inject top-K similar past cases as weighted
+        # priors, each case's summary whole. Degrades gracefully to an empty
+        # string when the store is empty or retrieval fails.
+        from malspark.memory.long_term_memory import memory_owner_of
+
+        self.similar_cases_shown = None
+        cases = self._similar_cases(
+            isr_reports,
+            memory_store,
+            current_sample_id=current_sample_id,
+            owner=memory_owner_of(self._container),
+            container=self._container,
+        )
+        memory_block = MEMORY_UNAVAILABLE_NOTE if cases is None else self._memory_block(cases)
+        if memory_block:
+            parts["long-term memory"] = memory_block
+        # The negotiation history whole, as its own part: a fixed cut at 800
+        # characters kept the first round and none of the ones that decided.
+        # Each listed line once, with its standing (``negotiation_history_text``).
+        history_text = negotiation_history_text(history)
+
+        # Built as messages rather than through ``ChatPromptTemplate``: the
+        # system turn now contains a JSON skeleton, and a template would read
+        # its braces as placeholders and refuse the prompt outright.
+        cap = self._output_cap().tokens or None
+        # The answer's own budget, said where the answer is asked for. Nothing
+        # told the judge its bundle had to close inside it, and a bundle that
+        # does not close cannot be read at all.
+        within = (
+            f" It must close within {cap} output tokens, any reasoning included: "
+            "x_malspark_assessment first, then only the objects the evidence supports."
+            if cap
+            else ""
+        )
+        lead = f"{_standing_blocks(run_state, facts_block)}{_identity_prefix(sample)}"
+        tail = f"Return a JSON STIX 2.1 Bundle.{within}"
+
+        def _human(fitted: Mapping[str, str], notice: str) -> str:
+            shown = dict(fitted)
+            history_shown = shown.pop(_HISTORY_PART, "")
+            note = f"{notice}\n\n" if notice else ""
+            return (
+                f"{lead}{note}"
+                f"Expert Reports:\n{join_prompt_parts(shown)}\n\n"
+                f"Negotiation History:\n{history_shown}\n\n"
+                f"{tail}"
+            )
+
+        # Everything whole when the judge's window holds it, with its output
+        # cap kept free; otherwise the largest parts shortened first, the
+        # prompt saying so and the run recording it.
+        whole = {**parts, _HISTORY_PART: history_text}
+        fixed = len(JUDGE_VERDICT_SYSTEM) + len(_human(dict.fromkeys(whole, ""), ""))
+        room = self._question_room(fixed + _NOTICE_ROOM, int(cap or 0))
+        fitted, notice = fit_prompt_parts(whole, room)
+        if "long-term memory" in fitted:
+            fitted["long-term memory"] = closed_memory_cut(
+                fitted["long-term memory"], whole["long-term memory"]
+            )
+            # Which similar cases' techniques the prompt carries, as the
+            # judge is shown them: the node records it on the bundle, where
+            # it decides nothing (``long_term_memory.similar_cases_shown``).
+            self.similar_cases_shown = similar_cases_shown(cases or [], fitted["long-term memory"])
+        self.verdict_prompt_notice = notice
+        if notice:
+            self.logger.warning("JudgeAgent verdict prompt: %s", notice)
+        messages: list[Any] = [
+            SystemMessage(content=JUDGE_VERDICT_SYSTEM),
+            HumanMessage(content=_human(fitted, notice)),
+        ]
+
+        # Resolved the same way an analyst's loop is: the judge definition's
+        # own ``timeout_seconds`` first, then the deprecated override map
+        # (which ships 600 for the judge, so a local Qwen3.6-35B has headroom
+        # for the verdict round), then the global ``react_agent_timeout``.
+        # And then held to the model's measured pace: the verdict may take its
+        # whole ``judge_max_tokens``, which a slow model cannot generate inside
+        # a timeout chosen for a fast one (``llm.generation_rate``).
+        configured_timeout = _seconds_or_none(loop_limits("judge")[0])
+        timeout = self._verdict_timeout(configured_timeout, _prompt_chars(messages))
+        self.logger.info(
+            "JudgeAgent invoking verdict LLM (timeout=%s)...", limit_text(timeout, "s")
+        )
+        # A model list's turn deadline is a share of the clock it was last
+        # started on — mediation's, by now. The verdict call is its own clock,
+        # sized from the model's pace, so the list starts again on it; without
+        # this the primary was declared stalled long before the sized wait.
+        from malspark.llm.fallback import restart_models
+
+        restart_models(self.llm, loop_seconds=timeout, share=self._turn_share())
+
+        # Reset per call, not once: a first call that timed out and left the
+        # flag set made every later parse return the fallback, and a fallback
+        # that happened to validate dirty would then spend a second full judge
+        # timeout and throw the answer away.
+        timed_out = False
+        # The sentence of the judge's own ceiling, when it refused a verdict
+        # call: no answer, read the way a timeout is.
+        ceiling_said = ""
+
+        # ``read_evidence`` over the run's ledger from the first turn, where
+        # the model binds it; else the call as it always was.
+        reads, reading = self._reading_model(ledger)
+
+        async def _turn(model: Any, turns: list[Any]) -> Any:
+            # The verdict is always made; past the spend ceiling its output cap
+            # is what the remaining spend pays for. Each turn of a call that
+            # reads is admitted and recorded as the verdict's.
+            from malspark.llm.context_window import output_bound_kwargs
+
+            verdict_slot = object()
+            bound = self._spend_admits("verdict", turns, slot=verdict_slot)
+            held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
+            try:
+                answer = await as_call("Judge verdict", model.ainvoke(turns, **held))
+                self._record_usage(answer, call="verdict")
+            finally:
+                self._spend_release(verdict_slot)
+            return answer
+
+        async def _ask(turns: list[Any]) -> Any:
+            if reads is None or reading is None:
+                answer = await _turn(self.llm, turns)
+            else:
+                answer = await reads.answer(
+                    lambda conversation: _turn(reading, conversation),
+                    turns,
+                    what="JudgeAgent verdict",
+                    call="verdict",
+                )
+            # Whether the verdict reached its token cap, recorded like every
+            # other judge call: a cut bundle reads as malformed JSON, and the
+            # count is what says the cap, not the model, ended it.
+            record_judge_response(getattr(self, "truncation_ledger", None), answer, cap=cap)
+            return answer
+
+        # How many verdict calls were sent. The retry's prompt is the first
+        # one with the answer and the feedback after it, so its wait is sized
+        # from its own prompt at the model's pace, as the first call's was —
+        # a retry held to the first call's wait timed out where its longer
+        # prompt needed longer.
+        calls = 0
+
+        async def _run(turns: list[Any]) -> Any:
+            nonlocal timed_out, calls, ceiling_said
+            timed_out = False
+            calls += 1
+            wait = timeout
+            if calls > 1:
+                wait = self._verdict_timeout(
+                    configured_timeout, _prompt_chars(turns), call="judge:verdict_retry"
+                )
+                self.logger.info(
+                    "JudgeAgent invoking verdict retry (timeout=%s)...", limit_text(wait, "s")
+                )
+                restart_models(self.llm, loop_seconds=wait, share=self._turn_share())
+            try:
+                # On the shared agent loop, not on the graph's. The judge's
+                # model is one cached client and the mediator has already used
+                # it — from ``run_on_agent_loop`` — by the time the verdict is
+                # asked for, so its httpx pool holds connections bound to that
+                # loop. Awaiting the same client here on the worker's loop made
+                # the *first* verdict request of every run die instantly with
+                # ``APIConnectionError("Connection error.")`` before a byte
+                # reached llama-server; the SDK then dropped the dead
+                # connection and the retry, opening a fresh one, always
+                # succeeded. See ``run_on_agent_loop`` for the same fault in
+                # the mediator, and for why one loop owns every LLM call.
+                return await run_on_agent_loop(_ask(turns), wait, label="judge:verdict")
+            except TimeoutError:
+                self.logger.error("JudgeAgent verdict timed out after %s.", limit_text(wait, "s"))
+                timed_out = True
+                return "[TIMEOUT]"
+            except AgentCeilingStop as stop:
+                # Not made: no answer, as a timeout leaves none, so nothing is
+                # asked again and the fallback bundle is the verdict.
+                self.logger.error("JudgeAgent verdict not made: %s.", stop)
+                timed_out = True
+                ceiling_said = str(stop)
+                return AGENT_CEILING_ANSWER
+
+        # Whether the answer being validated was a JSON bundle at all, and how
+        # many turns have been spent. A model that answered with prose or with
+        # a tool call has said nothing about the sample, and the fallback
+        # extraction over that text is worth building only once the model has
+        # had its one chance to answer properly.
+        not_json = False
+        # Whether the output cap ended that answer, and how much of it there was.
+        cut_at: int | None = None
+        cut_text = ""
+        attempts = 0
+        # What the shape pass did to this answer before the schema saw it: an
+        # assessment moved to the property it belongs to, an object the bundle
+        # cannot hold set aside. Refilled per parse, because the retry's answer
+        # is a different answer and the previous one's findings are spent.
+        shape: list[Violation] = []
+        # Where each parsed object sits in the answer as the judge wrote it,
+        # and the label it gave it: feedback names the judge's own positions,
+        # not the ones left after set-aside objects and folded duplicates.
+        where: list[tuple[int | None, str]] = []
+        labels: dict[str, str | list[str]] = {}
+        as_written: list[dict[str, Any]] = []
+        tally = ValidationTally()
+
+        # What the first parse left for the checks to read, so that a first
+        # bundle kept over a failed retry is validated as it was, not with the
+        # retry's state; and how the failed retry failed, for its row.
+        first_state: dict[str, Any] | None = None
+        retry_failure = ""
+
+        def _parse(answer: Any) -> Bundle:
+            nonlocal first_state
+            parsed = _parse_answer(answer)
+            if attempts == 1:
+                first_state = {
+                    "timed_out": timed_out,
+                    "not_json": not_json,
+                    "cut_at": cut_at,
+                    "cut_text": cut_text,
+                    "shape": list(shape),
+                    "where": list(where),
+                    "labels": dict(labels),
+                    "as_written": list(as_written),
+                }
+            return parsed
+
+        def _keep(first: Bundle, last: Bundle) -> Bundle:
+            """The first bundle when the retry failed and the first was a bundle; else the last.
+
+            A retry that timed out, or answered prose or JSON that was not a
+            bundle without stating an assessment, has said nothing about the
+            sample, and the bundle the first answer stated is the judge's
+            verdict, with what is still wrong with it. A retry that stated its
+            assessment is kept, however it ended. The first parse's state is restored, so it is
+            validated, dropped from and published as it was.
+            """
+            nonlocal timed_out, not_json, cut_at, cut_text, retry_failure
+            state = first_state
+            if (
+                state is None
+                or state["timed_out"]
+                or state["not_json"]
+                or first.x_malspark_fallback_verdict is not None
+            ):
+                return last
+            if not timed_out and last.x_malspark_assessment is not None:
+                # The retry stated its assessment — whole, cut after it, or in
+                # JSON that was not a bundle — and that statement is its
+                # correction, read as written.
+                return last
+            if timed_out:
+                failure = (
+                    f"it was not made: {ceiling_said}"
+                    if ceiling_said
+                    else "it did not answer within its budget"
+                )
+            elif not_json:
+                failure = "it answered with text that is not a JSON bundle"
+            elif last.x_malspark_fallback_verdict is not None:
+                failure = "it answered JSON that is not a bundle"
+            else:
+                return last
+            timed_out = state["timed_out"]
+            not_json = state["not_json"]
+            cut_at = state["cut_at"]
+            cut_text = state["cut_text"]
+            shape[:] = state["shape"]
+            where[:] = state["where"]
+            labels.clear()
+            labels.update(state["labels"])
+            as_written[:] = state["as_written"]
+            retry_failure = failure
+            self.logger.warning(
+                "Judge verdict: the retry failed (%s); the first bundle is kept with what is "
+                "still wrong with it.",
+                failure,
+            )
+            return first
+
+        def _parse_answer(answer: Any) -> Bundle:
+            nonlocal not_json, attempts, cut_at, cut_text
+            attempts += 1
+            cut_at = None
+            shape.clear()
+            where.clear()
+            labels.clear()
+            as_written.clear()
+            if timed_out:
+                not_json = False
+                return self._fallback_bundle_from_text(
+                    AGENT_CEILING_ANSWER if ceiling_said else "[TIMEOUT]",
+                    reports,
+                    isr_reports,
+                    extracted=False,
+                )
+            not_json = _is_not_json(answer)
+            if not_json and _was_cut(answer, cap):
+                cut_text = _answer_text(answer)
+                cut_at = len(cut_text)
+            if not_json:
+                self.logger.warning(
+                    "Judge verdict: the model answered with %d character(s) that are not a JSON "
+                    "bundle%s; asking once more before falling back to text extraction.",
+                    len(_answer_text(answer)),
+                    f", cut off at its {cap}-token output limit" if cut_at is not None else "",
+                )
+                if attempts <= _VERDICT_RETRIES:
+                    # A retry is coming and this bundle would be thrown away.
+                    return Bundle(objects=[])
+            parsed = self._bundle_from_response(
+                answer,
+                reports,
+                isr_reports,
+                record=shape,
+                origins=where,
+                labels=labels,
+                as_written=as_written,
+            )
+            # The relocation, or the one reading of a mistyped assessment leaf,
+            # is done and nothing is left to ask about, so it is published as
+            # settled and counted where the round's other codes
+            # are, rather than spending the one retry this round has.
+            moved = [v for v in shape if v.code in _RESOLVED_BY_THE_PARSE]
+            if moved:
+                tally.count(moved)
+                announce_resolved(
+                    self._event_sink(),
+                    agent="judge",
+                    stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+                    violations=moved,
+                    retry_index=attempts - 1,
+                )
+            return parsed
+
+        # The same catalogue the analyst loop consults. Absent (an air-gapped
+        # box with no vendored id list) the technique question is skipped
+        # rather than answered wrongly.
+        try:
+            from malspark.tools import knowledge as _knowledge
+        except Exception as exc:  # noqa: BLE001 — a knowledge lookup degrades, never raises
+            self.logger.debug("Judge verdict: the knowledge tools are unavailable (%s).", exc)
+            _knowledge = None  # type: ignore[assignment]
+
+        _analyst_claims = sum(
+            len(getattr(isr, "claims", None) or []) for isr in (isr_reports or {}).values()
+        )
+
+        # What the round's bundle checks read, composed once with the replay of
+        # a stored run (``verdict_checks``, ``verdict_bundle_checks``).
+        inputs = VerdictCheckInputs(
+            evidence_corpus=evidence_corpus,
+            attck=_knowledge,
+            sample=sample,
+            shortened_tools=shortened_tools,
+            searched=searched,
+            corpus_state=corpus_state,
+            technique_sources=technique_sources,
+            sandbox_facts=sandbox_facts,
+            analyst_claims=_analyst_claims,
+            ledger_ids=ledger_ids,
+        )
+
+        def _verdict_checks(bundle: Bundle) -> list[Violation]:
+            return verdict_checks(bundle, inputs)
+
+        def _validate(bundle: Bundle) -> list[Violation]:
+            # A timeout produced no answer, so there is nothing to give
+            # feedback about. Reporting no violations ends the loop: a retry
+            # would cost a second full judge timeout and could only produce the
+            # same fallback bundle. What the checks below have to say about the
+            # fallback bundle is recorded after the loop instead.
+            if timed_out:
+                return []
+            if not_json and cut_at is not None and cap:
+                return [verdict_cut_violation(int(cap), cut_text)]
+            if not_json:
+                return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
+            return verdict_bundle_checks(
+                bundle,
+                shape,
+                inputs,
+                origins=where,
+                written=as_written[0] if as_written else None,
+            )
+
+        # What the judge was shown. A finding its retry's answer raised first
+        # was never put to it, and a row saying it "kept" something "when
+        # asked" is only true of one that was.
+        shown: list[Violation] = []
+
+        def _told(found: Sequence[Violation]) -> None:
+            shown.extend(found)
+            tally.count(found)
+
+        bundle, violations, retries = await retry_with_feedback(
+            _run,
+            messages,
+            [_validate],
+            max_retries=_VERDICT_RETRIES,
+            parse=_parse,
+            on_feedback=_told,
+            sink=self._event_sink(),
+            agent="judge",
+            stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+            # The cut answer is described, not repeated: see verdict_cut_violation.
+            drop_answer_for=frozenset({VERDICT_CUT_CODE}),
+            keep=_keep,
+            # A kept indicator after the sandbox's fact is the judge's answer,
+            # and the conversation is told so before it is told the rest.
+            answered=lambda left, told: kept_after_the_sandbox_fact(not_asked(left, told)),
+        )
+        violations = kept_after_the_sandbox_fact(not_asked(violations, shown))
+        _from_the_loop = list(violations)
+        if retry_failure:
+            # The first bundle stands; the retry's failure is its own row, not
+            # a timeout or a fallback of the verdict the run publishes.
+            violations = [
+                *violations,
+                Violation(
+                    code=VERDICT_RETRY_FAILED_CODE,
+                    message=f"{VERDICT_RETRY_FAILED_REASON}: {retry_failure}",
+                ),
+            ]
+        if timed_out and ceiling_said:
+            # The judge's own ceiling refused the call: no answer, as below,
+            # and the row says why in the ceiling's words.
+            violations = [
+                *violations,
+                Violation(code=VERDICT_AGENT_CEILING_CODE, message=ceiling_said),
+            ]
+        elif timed_out:
+            # No answer at all, so there is nothing to feed back and nothing
+            # was: the bundle is this pipeline's own conservative verdict.
+            # Cheap to record and invisible without it.
+            violations = [
+                *violations,
+                Violation(code=VERDICT_TIMEOUT_CODE, message=VERDICT_TIMEOUT_REASON),
+            ]
+        elif bundle.x_malspark_fallback_verdict is not None:
+            # The bundle says it is one this pipeline built, which happens two
+            # ways: the model answered prose twice, or it answered JSON that
+            # was not a bundle. The second used to say nothing at all, so a
+            # verdict no judge expressed reached the report with a confidence
+            # derived from the analysts' own claims. Asked off the bundle's own
+            # mark rather than off the path, so neither way can be forgotten.
+            # It is a fact about this run as well as a schema problem the
+            # model was shown: the answer that was not a bundle is kept among
+            # the leftovers, because the conversation published it as one and a
+            # summary that dropped it would disagree with the feed, and the
+            # fallback code is added beside it so the run summary and the
+            # report's degradation reasons carry what the pipeline did about
+            # it.
+            if not any(v.code == VERDICT_FALLBACK_CODE for v in violations):
+                violations.append(
+                    Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
+                )
+            violations.extend(_unasked_unreadable_leaves(shape, violations))
+            # The indicators the answer wrote whole are asked what every
+            # bundle's indicator is asked. Nobody can be asked again, so what
+            # is wrong is recorded, and an ungrounded one is dropped below
+            # like one that survived a retry.
+            violations.extend(
+                replace(finding, asked=False)
+                for finding in _indicator_findings(
+                    bundle,
+                    validate_verdict_bundle(
+                        bundle,
+                        evidence_corpus,
+                        sample=sample,
+                        shortened_tools=shortened_tools,
+                        searched=searched,
+                        corpus_state=corpus_state,
+                    ),
+                )
+            )
+        # The judge's own answer, when the verdict stands on it: what the
+        # export does not carry of it is recorded beside the run's findings
+        # (never fed back — nothing in it is wrong), and the answer itself is
+        # kept as written.
+        written: dict[str, Any] | None = None
+        if not timed_out and bundle.x_malspark_fallback_verdict is None:
+            written = as_written[0] if as_written else None
+            violations.extend(v for v in shape if v.code == PROPERTY_NOT_CARRIED_CODE)
+        # And the two verdict checks over the bundle that is actually going to
+        # be reported, on every ending. One row each: a check the loop already
+        # fed back and that survived is in ``violations`` already, and asking
+        # the run summary to carry it twice would say the judge was told twice.
+        _already = {(v.code, v.path) for v in violations}
+        violations.extend(v for v in _verdict_checks(bundle) if (v.code, v.path) not in _already)
+        # What was added after the loop — the timeout, the fallback, the two
+        # verdict checks — is in the run summary, and the conversation showed
+        # none of it. Nobody was asked about them, so they are published as
+        # what they are: findings that survived this round.
+        announce_unresolved(
+            self._event_sink(),
+            agent="judge",
+            stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+            violations=[v for v in violations if v not in _from_the_loop],
+            retry_index=retries,
+        )
+        dropped = drop_ungrounded_indicators(bundle, violations, origins=where)
+        if dropped:
+            self.logger.warning(
+                "Judge verdict: %d indicator(s) stayed ungrounded after the retry and were "
+                "dropped; they are recorded in the run summary.",
+                dropped,
+            )
+        return JudgeVerdict(
+            bundle=bundle,
+            violations=violations,
+            retries=retries,
+            fed_back=dict(tally.by_code),
+            labels=dict(labels),
+            written=written,
+        )
+
+    async def decide_techniques(
+        self,
+        bundle: Bundle,
+        isr_reports: dict[str, AgentISR] | None,
+        *,
+        reports: Mapping[str, str] | None = None,
+        evidence_summary: str = "",
+        degradation_note: str = "",
+        evidence_texts: Mapping[str, str] | None = None,
+        sample: Any = None,
+        routed: dict[str, Any] | None = None,
+        facts_block: str = "",
+        run_state: str = "",
+        verdict_timed_out: bool = False,
+        ledger: Sequence[Any] | None = None,
+    ) -> Any:
+        """Ask once, after the verdict, about the techniques the bundle does not carry.
+
+        The techniques an analyst claimed that the bundle carries on no
+        attack-pattern and no edge, and the ones named only on a finding, go to
+        the judge in one question to keep or drop with a reason. The question
+        shows what it asks the judge to decide from: the run state and the
+        pack, the analysts' reports as the verdict call was shown them
+        (:func:`verdict_reports_text`), the verdict and the techniques the
+        bundle carries, and each claim or finding naming a technique with the
+        text of every evidence entry it cites (``evidence_texts``). What does
+        not fit the judge's window is shortened, marked, said in the question
+        and recorded on the answer. ``routed`` is the routed platform and file
+        type: a technique the sample cannot host, or one the catalogue
+        rejects, is not asked about and is recorded as such. ``ledger`` is
+        the run's tool calls: with it, each technique states its layers beside
+        the distinct evidence roots its mentions cite.
+
+        Returns the :class:`~malspark.schemas.stix_models.TechniqueReview`, or
+        ``None`` when there is nothing to ask or record. A question that times
+        out or fails, or an answer in no form that can be read, is recorded as
+        unanswered and withholds nothing. Never raises.
+
+        One tool-free call with the verdict's framing — the run state and the
+        pack leading its one human turn — and the verdict's sizing. A provider
+        with structured output is asked for the answer as a schema; any other
+        is asked for a JSON array and read tolerantly
+        (:func:`read_technique_answer`).
+        """
+        from malspark.extractors.capability_matrix import bundle_technique_ids, judge_questions
+        from malspark.pipeline.outcome import decide_from_bundle
+        from malspark.schemas.stix_models import TechniqueReview
+
+        try:
+            dumped = bundle.model_dump()
+            attck: Any = None
+            try:
+                from malspark.tools import knowledge
+
+                attck = knowledge
+            except Exception:  # noqa: BLE001 — no catalogue, no describe check
+                attck = None
+            questions, not_asked = judge_questions(
+                dumped, isr_reports, routed, attck=attck, ledger=ledger
+            )
+        except Exception as exc:  # noqa: BLE001 — a question not built is none asked
+            self.logger.warning("Judge technique question not built (%s).", type(exc).__name__)
+            return None
+        if not questions:
+            return TechniqueReview(not_asked=not_asked) if not_asked else None
+        asked = [q.technique_id for q in questions]
+        # The check's finding each question carried, kept on the answer for the report.
+        undescribed = {q.technique_id: q.check for q in questions if q.check}
+        if verdict_timed_out:
+            return TechniqueReview(
+                asked=asked,
+                undescribed=undescribed,
+                unanswered=TECHNIQUE_QUESTION_NOT_ASKED,
+                not_asked=not_asked,
+            )
+
+        carried = sorted(bundle_technique_ids(dumped))
+        decided = str(decide_from_bundle(bundle))
+        report_parts = verdict_report_parts(
+            reports or {}, isr_reports, evidence_summary, degradation_note
+        )
+        lead = f"{_standing_blocks(run_state, facts_block)}{_identity_prefix(sample)}"
+        known = {str(k).lower(): _as_evidence(v) for k, v in (evidence_texts or {}).items()}
+        cited = list(
+            dict.fromkeys(i.lower() for q in questions for _a, _t, ids in q.mentions for i in ids)
+        )
+        entries = {i: known.get(i, QuestionEvidence("")) for i in cited}
+        cap = self._output_cap().tokens or None
+        bare = technique_question_text(
+            questions, {i: e._replace(text="") for i, e in entries.items()}, cards=False
+        )
+        empty_head = lead + technique_question_head("", decided, carried)
+        from malspark.llm.registry import schema_tool_worth_offering
+
+        # Not where the read is offered beside the schema on a model that
+        # writes such a schema as text: the answer is then asked for in text.
+        structured = self._supports_structured_output() and (
+            not ledger or schema_tool_worth_offering(self.llm)
+        )
+        # ``read_evidence`` over the run's ledger from the first turn, beside
+        # the answer's schema on the structured path, where the model binds
+        # it; else the question as it always was, its system text saying so.
+        reads, reading = self._reading_model(ledger, [TechniqueAnswer] if structured else ())
+        system = (
+            TECHNIQUE_QUESTION_SYSTEM
+            if reading is not None
+            else TECHNIQUE_QUESTION_SYSTEM_WITHOUT_TOOLS
+        )
+        room = self._question_room(
+            len(system) + len(empty_head) + len(bare) + _NOTICE_ROOM,
+            int(cap or 0),
+        )
+        # The reports the verdict was drawn from and the evidence each question
+        # cites share the room: whole when they fit, the largest first when not.
+        report_room: int | None = None
+        if room is not None:
+            evidence_chars = sum(len(e.text) for e in entries.values())
+            report_room = max(0, room - min(evidence_chars, room // 2))
+        fitted_reports, reports_notice = fit_prompt_parts(report_parts, report_room)
+        head = lead + technique_question_head(join_prompt_parts(fitted_reports), decided, carried)
+        evidence_room = None if room is None else max(0, room - (len(head) - len(empty_head)))
+        # Each excerpt is shown through the one view of a tool answer
+        # (``agents.tool_fence``), applied before it is fitted. The fence lines
+        # and the one sentence saying what a fence is are kept back from the
+        # room for every entry with text, since a JSON answer cut to fit is
+        # text too; so are the escapes a JSON excerpt cut to text then holds,
+        # fitted again until what is kept back covers them.
+        if evidence_room is not None:
+            fences = sum(1 for e in entries.values() if e.text) * fence_lines_room()
+            evidence_room = max(0, evidence_room - fences - len(FENCE_STATEMENT) - 1)
+        texts, evidence_notice, evidence_room = fit_shown_evidence(
+            {i: e.text for i, e in entries.items()}, evidence_room
+        )
+        # One notice for both, said in the question and recorded on the answer.
+        notice = " ".join(n for n in (reports_notice, evidence_notice) if n)
+        if notice:
+            self.logger.warning("JudgeAgent technique question: %s", notice)
+        fitted = {i: e._replace(text=texts[i]) for i, e in entries.items()}
+        # A pack row whose entry's stored output is shown whole below keeps its
+        # head and points there: the output the row is rendered from is shown
+        # once. Only after the fit, so it frees room and takes none; an entry
+        # shortened, incomplete, a lower-cased copy or a failed call leaves its
+        # row whole.
+        whole = {
+            i: texts[i]
+            for i, e in entries.items()
+            if e.ok and e.text and texts[i] == e.text and not e.partial and not e.lowered
+        }
+        heads: dict[str, str] = {}
+        if whole and ledger:
+            from malspark.pipeline.triage_pack import pack_row_heads
+
+            try:
+                heads = pack_row_heads(ledger)
+            except Exception as exc:  # noqa: BLE001 — no head, the row stays whole
+                self.logger.debug("Technique question: pack row heads not read (%s).", exc)
+        pointed = pack_rows_shown_below(facts_block, whole, heads)
+        if pointed != facts_block:
+            head = (
+                f"{_standing_blocks(run_state, pointed)}{_identity_prefix(sample)}"
+                + technique_question_head(join_prompt_parts(fitted_reports), decided, carried)
+            )
+        # The technique cards are reference beside the claims: they go in only
+        # where the window has room left after the reports and the evidence,
+        # so they never shorten either.
+        question_text = technique_question_text(questions, fitted, notice=notice)
+        if evidence_room is not None:
+            without_cards = technique_question_text(questions, fitted, notice=notice, cards=False)
+            left = evidence_room - sum(len(t) for t in texts.values())
+            if len(question_text) - len(without_cards) > left:
+                self.logger.info(
+                    "JudgeAgent technique question: the technique cards (%d characters) are "
+                    "left out; %d characters of the window were left after the reports and "
+                    "the evidence.",
+                    len(question_text) - len(without_cards),
+                    max(0, left),
+                )
+                question_text = without_cards
+        messages: list[Any] = [
+            SystemMessage(content=system),
+            HumanMessage(content=head + question_text),
+        ]
+        timeout = self._verdict_timeout(
+            _seconds_or_none(loop_limits("judge")[0]),
+            sum(len(str(getattr(message, "content", ""))) for message in messages),
+            call="judge:techniques",
+        )
+        self.logger.info(
+            "JudgeAgent asking about %d technique(s) after its verdict (timeout=%s): %s",
+            len(asked),
+            limit_text(timeout, "s"),
+            ", ".join(asked),
+        )
+        from malspark.llm.fallback import restart_models
+
+        restart_models(self.llm, loop_seconds=timeout, share=self._turn_share())
+        # Made at its whole cap or not at all: the structured path takes no
+        # per-call cap. Reserved while it runs.
+        question_slot = object()
+        try:
+            self._spend_admits("technique question", messages, slot=question_slot, holdable=False)
+        except SpendCeilingStop as stop:
+            return TechniqueReview(
+                asked=asked,
+                undescribed=undescribed,
+                unanswered=f"not asked: {stop}",
+                not_asked=not_asked,
+            )
+        turns_sent = [0]
+
+        async def _turn(model: Any, conversation: list[Any]) -> Any:
+            # A turn after a read is admitted on its own, under the same reservation.
+            if turns_sent[0]:
+                self._spend_admits(
+                    "technique question", conversation, slot=question_slot, holdable=False
+                )
+            turns_sent[0] += 1
+            return await as_call("Judge technique question", model.ainvoke(conversation))
+
+        def _read_turn(reply: Any) -> None:
+            self._record_usage(reply, call=TECHNIQUE_QUESTION_CALL)
+
+        async def _reading(model: Any) -> Any:
+            return await reads.answer(
+                lambda conversation: _turn(model, conversation),
+                messages,
+                on_read=_read_turn,
+                what="JudgeAgent technique question",
+                call=TECHNIQUE_QUESTION_CALL,
+            )
+
+        async def _ask() -> tuple[Any, Any]:
+            if structured:
+                try:
+                    if reading is not None:
+                        from malspark.agents.ledger_reads import structured_reply
+
+                        result = structured_reply(await _reading(reading), TechniqueAnswer)
+                    else:
+                        runnable = self.llm.with_structured_output(
+                            TechniqueAnswer, include_raw=True
+                        )
+                        result = await as_call(
+                            "Judge technique question", runnable.ainvoke(messages)
+                        )
+                except (TimeoutError, asyncio.CancelledError, SpendCeilingStop):
+                    # A turn after a read the ceiling refused ends the question,
+                    # as a refused first turn does.
+                    raise
+                except Exception as exc:  # noqa: BLE001 — refused schema: asked once in text
+                    self.logger.warning(
+                        "JudgeAgent technique question: the schema was refused (%s); asking "
+                        "for the answer in text.",
+                        type(exc).__name__,
+                    )
+                else:
+                    if isinstance(result, dict) and "raw" in result:
+                        read = read_structured_reply(
+                            result,
+                            self.token_ledger,
+                            agent=str(self.name),
+                            model=self._model_label(),
+                            call=TECHNIQUE_QUESTION_CALL,
+                            announce=self._announce_fallback,
+                        )
+                        raw = read.raw
+                        # A refused object is read from the call's own
+                        # arguments; an answer with no call, from its text.
+                        parsed = read.parsed
+                        if parsed is None:
+                            parsed = tool_call_arguments(raw)
+                            if read.kept is not None:
+                                say_structured_reply("JudgeAgent technique question", read)
+                        record_judge_response(
+                            getattr(self, "truncation_ledger", None), raw, cap=cap
+                        )
+                        return raw, parsed
+                    # An answer in no shape the ledger reads is still a call.
+                    self._record_usage(result, call=TECHNIQUE_QUESTION_CALL)
+                    return result, result
+                # The schema was refused, and the question in text is a second
+                # call: admitted on its own, under the same reservation.
+                self._spend_admits(
+                    "technique question", messages, slot=question_slot, holdable=False
+                )
+            if reading is not None and not structured:
+                answer = await _reading(reading)
+            elif reading is not None:
+                # The schema refused: the question in text offers the read alone.
+                turns_sent[0] = 0
+                answer = await _reading(reads.bind(self.llm))
+            else:
+                answer = await as_call("Judge technique question", self.llm.ainvoke(messages))
+            self._record_usage(answer, call=TECHNIQUE_QUESTION_CALL)
+            record_judge_response(getattr(self, "truncation_ledger", None), answer, cap=cap)
+            return answer, None
+
+        def _unanswered(reason: str) -> Any:
+            return TechniqueReview(
+                asked=asked,
+                undescribed=undescribed,
+                unanswered=reason,
+                not_asked=not_asked,
+                shortened=notice or None,
+            )
+
+        try:
+            try:
+                answer, parsed = await run_on_agent_loop(_ask(), timeout, label="judge:techniques")
+            finally:
+                self._spend_release(question_slot)
+        except TimeoutError:
+            self.logger.error(
+                "JudgeAgent technique question timed out after %s.", limit_text(timeout, "s")
+            )
+            return _unanswered(f"the question timed out after {limit_text(timeout, 's')}")
+        except SpendCeilingStop as stop:
+            # The text question after a refused schema, or a turn after a
+            # read, not admitted.
+            return _unanswered(f"not asked: {stop}")
+        except Exception as exc:  # noqa: BLE001 — an unanswered question withholds nothing
+            self.logger.error("JudgeAgent technique question failed (%s).", type(exc).__name__)
+            return _unanswered(f"the question failed ({type(exc).__name__})")
+        decisions = _structured_decisions(parsed, asked)
+        if not decisions:
+            decisions = read_technique_answer(_answer_text(answer), asked)
+        self.logger.info(
+            "JudgeAgent answered for %d of %d technique(s): %s",
+            len(decisions),
+            len(asked),
+            ", ".join(f"{d.technique_id} {d.decision}" for d in decisions) or "none",
+        )
+        if not decisions:
+            return _unanswered(TECHNIQUE_ANSWER_UNREAD)
+        return TechniqueReview(
+            asked=asked,
+            undescribed=undescribed,
+            decisions=decisions,
+            not_asked=not_asked,
+            shortened=notice or None,
+        )
+
+    def _question_room(self, fixed_chars: int, cap_tokens: int) -> int | None:
+        """How many characters of evidence text the technique question can carry, or ``None``.
+
+        The job's learned window, less the judge's output cap, in the budget's
+        own characters per token, less what the rest of the question weighs.
+        ``None`` when no window is learned: there is nothing to measure
+        against, and the evidence goes whole.
+        """
+        budget = self._context_budget()
+        if budget is None or not getattr(budget, "derives", False):
+            return None
+        try:
+            per_token = float(budget.chars_per_token)
+            room = int((int(budget.window.tokens) - int(cap_tokens)) * per_token)
+        except Exception:  # noqa: BLE001 — a budget that cannot say measures nothing
+            return None
+        return max(0, room - int(fixed_chars))
+
+    def _bundle_from_response(
+        self,
+        answer: Any,
+        reports: dict[str, str],
+        isr_reports: dict[str, AgentISR] | None,
+        record: list[Violation] | None = None,
+        origins: list[tuple[int | None, str]] | None = None,
+        labels: dict[str, Any] | None = None,
+        as_written: list[dict[str, Any]] | None = None,
+    ) -> Bundle:
+        """The model's raw answer as a Bundle, or the text fallback.
+
+        ``record`` collects what the shape pass had to do to the answer before
+        the schema could read it. It is the caller's list because the findings
+        belong to the round rather than to this method, and because an answer
+        that ends in the text fallback has nothing to record.
+        """
+        raw = _answer_text(answer)
+
+        from malspark.utils.json_cleaner import safe_parse_json
+
+        data = safe_parse_json(raw)
+        if not isinstance(data, dict):
+            self.logger.warning(
+                "LLM did not return a JSON object (got %s). Attempting text-based fallback.",
+                type(data).__name__,
+            )
+            return self._fallback_bundle_from_text(raw, reports, isr_reports, record=record)
+
+        try:
+            # No technique-id filter here. Dropping the object silently is what
+            # made ``stix.unknown_technique`` unreachable: the judge never
+            # learned it had invented an id, and the report showed one fewer
+            # attack-pattern with nothing saying why. ``pipeline.validation`` is
+            # the single place that decides an id is wrong, and it says so.
+            from malspark.agents.judge_postprocess import (
+                duplicate_label_violations,
+                lift_misplaced_extensions,
+                postprocess_judge_bundle,
+                read_judge_assessment,
+            )
+
+            # Before the schema, and before anything that walks the objects: an
+            # item the Bundle cannot hold fails the whole model, and the judge's
+            # other twenty-four objects are not the model's to lose.
+            if as_written is not None:
+                import copy
+
+                as_written.append(copy.deepcopy(data))
+            # Positions and labels as the judge wrote them, before anything is
+            # set aside or folded: the dicts are the same objects after both.
+            written = {
+                id(obj): (index, str(obj.get("id") or ""))
+                for index, obj in enumerate(data.get("objects") or [])
+                if isinstance(obj, dict)
+            }
+            lifted = lift_misplaced_extensions(data)
+            if record is not None:
+                record.extend(lifted)
+            if record is not None:
+                record.extend(
+                    duplicate_label_violations(
+                        data,
+                        {key: index for key, (index, _label) in written.items()},
+                    )
+                )
+            data = postprocess_judge_bundle(
+                data, ledger=getattr(self, "truncation_ledger", None), labels=labels
+            )
+            # The assessment is read apart from the objects, leaf by leaf: one
+            # mistyped leaf is left absent and asked about, never the reason
+            # the objects are lost.
+            read_rows = read_judge_assessment(data)
+            bundle = Bundle.model_validate(data)
+            if record is not None:
+                record.extend(read_rows)
+            if origins is not None:
+                origins[:] = [written.get(id(obj), (None, "")) for obj in data["objects"]]
+            return bundle
+        except Exception as exc:  # noqa: BLE001 — a malformed bundle degrades to the fallback
+            self.logger.warning(
+                "LLM did not return a valid Bundle: %s. Attempting text-based fallback.", exc
+            )
+            return self._fallback_bundle_from_text(raw, reports, isr_reports, record=record)
+
+    async def _extract_mediator_verdict(
+        self,
+        extract_prompt: ChatPromptTemplate,
+        reasoning_text: str,
+        max_attempts: int = 3,
+        base_delay: float = 0.5,
+    ) -> MediatorVerdict:
+        """Run ``with_structured_output`` with bounded exponential-backoff retry.
+
+        ``with_structured_output`` itself may raise for providers that don't
+        support the structured-output path — we build the wrapper inside the
+        loop so a provider-level failure also routes through the fallback.
+
+        Check the provider
+        capability table before attempting ``with_structured_output``.
+        Ollama (and any future provider that lacks tool-calling) is routed
+        directly to the text fallback so we don't pay 3 retry rounds for a
+        feature that will never work. The capability table lives in
+        ``malspark.llm.registry``.
+        """
+        if not self._supports_structured_output():
+            self.logger.info(
+                "Provider lacks structured-output support; using text fallback "
+                "for mediator verdict extraction."
+            )
+            return self._fallback_mediate(reasoning_text)
+
+        last_exc: Exception | None = None
+        try:
+            extraction_turns = list(extract_prompt.format_messages(reasoning_log=reasoning_text))
+        except Exception:  # noqa: BLE001 — sized from the reasoning alone when it will not format
+            extraction_turns = [HumanMessage(content=reasoning_text)]
+        for attempt in range(1, max_attempts + 1):
+            extraction_slot = object()
+            try:
+                # The structured path takes no per-call cap: made at its whole
+                # cap or not at all, and reserved while it runs.
+                self._spend_admits(
+                    "mediation extraction", extraction_turns, slot=extraction_slot, holdable=False
+                )
+            except SpendCeilingStop as stop:
+                self.logger.warning("Structured mediator output not asked: %s.", stop)
+                return self._fallback_mediate(reasoning_text)
+            try:
+                llm_structured = self.llm.with_structured_output(MediatorVerdict, include_raw=True)
+                try:
+                    read = read_structured_reply(
+                        await (extract_prompt | llm_structured).ainvoke(
+                            {"reasoning_log": reasoning_text}
+                        ),
+                        self.token_ledger,
+                        agent=str(self.name),
+                        model=self._model_label(),
+                        call="mediation extraction",
+                        announce=self._announce_fallback,
+                    )
+                finally:
+                    self._spend_release(extraction_slot)
+                result = read.parsed
+                if isinstance(result, MediatorVerdict):
+                    return result
+                if read.kept is not None:
+                    # The verdict written as text, or a call the schema refused:
+                    # the model's answer, read rather than asked again.
+                    from malspark.utils.json_cleaner import safe_parse_json
+
+                    written = safe_parse_json(structured_answer_text(read.kept))
+                    if not isinstance(written, dict):
+                        raise ValueError(
+                            "the verdict written in the answer is not an object "
+                            f"({type(written).__name__})"
+                        )
+                    try:
+                        verdict = MediatorVerdict.model_validate(written)
+                    except ValidationError as refused:
+                        # Not the verdict: asked again, saying why.
+                        raise ValueError(
+                            "the verdict written in the answer does not fit the schema: "
+                            + "; ".join(
+                                f"{'.'.join(str(part) for part in error['loc']) or 'verdict'}: "
+                                f"{error['msg']}"
+                                for error in refused.errors()
+                            )
+                        ) from refused
+                    say_structured_reply("JudgeAgent mediation extraction", read)
+                    return verdict
+                raise ValueError(
+                    f"Structured output produced unexpected type: {type(result).__name__}"
+                )
+            except Exception as exc:
+                last_exc = exc
+                self.logger.warning(
+                    "Structured mediator output failed (attempt %d/%d): %s",
+                    attempt,
+                    max_attempts,
+                    exc,
+                )
+                if attempt < max_attempts:
+                    await asyncio.sleep(base_delay * (2 ** (attempt - 1)))
+
+        self.logger.error(
+            "Structured mediator output exhausted retries (%d). Falling back to text extraction. "
+            "Last error: %s",
+            max_attempts,
+            last_exc,
+        )
+        return self._fallback_mediate(reasoning_text)
+
+    # ------------------------------------------------------------------
+    # Verdict keyword detection (used by the text fallback path)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _verdict_from_text(text: str) -> str:
+        """The verdict the judge's prose states explicitly, or the inconclusive one.
+
+        Only a verdict statement counts (``_VERDICT_STATEMENT_RE``). Statements
+        that disagree — the judge's own and a quoted one, a draft and a
+        correction — leave the verdict inconclusive: which one is the judge's
+        cannot be read from the words. Any other mention of a verdict word is
+        not a verdict. The previous reader
+        took the first "malware" not preceded by a negator, before it looked
+        for "benign" at all, so "isn't malware", "no evidence of malware" and
+        "a legitimate anti-malware updater" were published as Malware.
+        """
+        from malspark.pipeline.outcome import INCONCLUSIVE_VERDICT, normalise_verdict
+
+        stated: set[str] = set()
+        for match in _VERDICT_STATEMENT_RE.finditer(text or ""):
+            word = normalise_verdict(match.group(1))
+            if word is not None:
+                stated.add(word)
+        return next(iter(stated)) if len(stated) == 1 else INCONCLUSIVE_VERDICT
+
+    def _fallback_bundle_from_text(
+        self,
+        text: str,
+        reports: dict[str, str],
+        isr_reports: dict[str, AgentISR] | None = None,
+        *,
+        extracted: bool = True,
+        record: list[Violation] | None = None,
+    ) -> Bundle:
+        """Build a minimal STIX Bundle when the LLM fails to produce valid JSON.
+
+        ``record`` collects what reading the stated assessment took
+        (``read_assessment``), as ``_bundle_from_response``'s does.
+
+        The verdict is read out of the judge's own text and the bundle's object
+        set follows it: a ``malware`` object only when the verdict is Malware.
+        It used to be emitted unconditionally, and since the pipeline read the
+        verdict off the objects, the bundle's shape overrode the verdict the
+        judge had actually expressed — a judge that timed out reported Malware
+        over a signed sample with no claim behind it.
+
+        ``extracted`` is false when there was no answer to read at all, which is
+        what a timeout leaves. Then the verdict is this pipeline's own
+        conservative one rather than anything a model said, and the bundle says
+        so in ``x_malspark_fallback_verdict``.
+        """
+        from malspark.pipeline.outcome import INCONCLUSIVE_VERDICT, normalise_verdict
+        from malspark.schemas.stix_models import Bundle
+
+        # An answer that stated its assessment whole before it went wrong —
+        # the output cap cuts a bundle after the assessment the prompt puts
+        # first — has said its verdict, confidence, severity and family, and
+        # those are kept as it said them. Anything less is read for the
+        # verdict word alone.
+        notes: list[Any] = []
+        stated = stated_assessment_in(text, notes) if extracted else None
+        if stated is not None and record is not None:
+            from malspark.agents.judge_postprocess import assessment_rows
+
+            record.extend(assessment_rows(notes))
+        if stated is not None:
+            decision = str(normalise_verdict(stated.verdict))
+        else:
+            decision = self._verdict_from_text(text) if extracted else INCONCLUSIVE_VERDICT
+
+        if stated is not None:
+            self.logger.info(
+                "Fallback Bundle: the answer (%d chars) stated its assessment whole; its "
+                "verdict '%s' and what it stated beside it are kept as written.",
+                len(text),
+                decision,
+            )
+        elif extracted:
+            self.logger.info(
+                "Fallback Bundle: extracted verdict='%s' from text response (%d chars).",
+                decision,
+                len(text),
+            )
+        else:
+            self.logger.info(
+                "Fallback Bundle: no answer to read; the verdict is the pipeline's own '%s'.",
+                decision,
+            )
+
+        # Fail closed. This used to union two sets and emit them as one: the
+        # technique identifiers the analysts had claimed against cited evidence,
+        # and any identifier matching the pattern anywhere in the model's raw
+        # response. Both became attack-patterns in the same bundle, with nothing
+        # to tell them apart -- so on the path where the judge had failed, the
+        # model had more influence over what reached an analyst than on the path
+        # where it worked. Identifiers scraped from the raw text are real ATT&CK
+        # identifiers no evidence source claimed, which is exactly what a schema
+        # check cannot catch. They are recorded for audit and are not emitted.
+        from malspark.analysis.technique_ids import TECHNIQUE_WORD_RE, is_technique_id
+
+        tids: set[str] = set()
+        # Who claimed each one, named the way the evidence summary names them.
+        # A relationship this pipeline builds names the agents whose claims it
+        # carries and nobody else.
+        claimed_by: dict[str, list[str]] = {}
+        # The round of each claim naming a technique that a tool-less retry
+        # added (``ClaimEvidence.added_by_retry_in_round``), ``None`` for any
+        # other: a technique every claim of which a retry added says so.
+        retried: dict[str, list[int | None]] = {}
+        if isr_reports:
+            for name, isr in isr_reports.items():
+                source = str(getattr(isr, "agent_id", "") or name)
+                for claim in isr.claims:
+                    if is_technique_id(claim.technique_id):
+                        tids.add(claim.technique_id)
+                        agents = claimed_by.setdefault(claim.technique_id, [])
+                        if source not in agents:
+                            agents.append(source)
+                        retried.setdefault(claim.technique_id, []).append(
+                            claim.added_by_retry_in_round
+                        )
+        model_only = sorted(set(TECHNIQUE_WORD_RE.findall(text)) - tids)
+        if model_only:
+            self.logger.warning(
+                "Fallback Bundle: %d technique identifier(s) appeared in the model's raw "
+                "response and in no evidence claim; recorded, not emitted: %s",
+                len(model_only),
+                ", ".join(model_only),
+            )
+
+        # Don't bake the raw fallback text (which may contain ``[TIMEOUT]``
+        # or other internal markers) into the malware SDO description —
+        # downstream cross-layer aggregation can upgrade the verdict in
+        # ``report_node`` and the user-visible description should reflect
+        # the final verdict, not the intermediate fallback. The judge
+        # rationale is preserved in ``x_malspark_fallback_reasoning`` for
+        # debug consumers — whole and as written: it is the judge's text, and
+        # a cut at a fixed length ended its reasoning mid-sentence with
+        # nothing saying so.
+        text_snippet = text if text else "No structured output available."
+        objects: list[dict[str, Any]] = []
+        malware_id = ""
+        if decision == "Malware":
+            malware_id = f"malware--{uuid.uuid4()}"
+            malware: dict[str, Any] = {
+                "type": "malware",
+                "id": malware_id,
+                "name": "analyzed-sample",
+                "malware_types": ["unknown"],
+                "is_family": False,
+                "description": (
+                    f"Verdict: {decision} (judge fallback; subject to cross-layer review)"
+                ),
+                "x_malspark_fallback_reasoning": text_snippet,
+                "x_malspark_degraded_path": True,
+            }
+            # Only when non-empty: the STIX validator refuses a property
+            # serialised as null or as an empty array, which is one of the two
+            # conformance defects an external validator found in this emitter.
+            if model_only:
+                malware["x_malspark_model_only_technique_ids"] = model_only
+            objects.append(malware)
+        # A verdict that is not Malware gets no malware object, so the
+        # rationale and the record of what was dropped need somewhere else to
+        # live: a Note, which is where STIX puts an analyst's own words about a
+        # set of objects. It is written last, about the objects this bundle
+        # holds, because STIX requires a note to name at least one; it once went
+        # out naming none, and the export failed the official validator.
+        note: dict[str, Any] | None = None
+        if decision != "Malware":
+            note = {
+                "type": "note",
+                "id": f"note--{uuid.uuid4()}",
+                "abstract": f"Verdict: {decision} (judge fallback)",
+                "content": text_snippet,
+                "x_malspark_degraded_path": True,
+            }
+            if model_only:
+                note["x_malspark_model_only_technique_ids"] = model_only
+
+        for tid in sorted(tids):
+            attack_id = f"attack-pattern--{uuid.uuid4()}"
+            pattern: dict[str, Any] = {
+                "type": "attack-pattern",
+                "id": attack_id,
+                "name": tid,
+                "external_references": [
+                    {
+                        "source_name": "mitre-attack",
+                        "external_id": tid,
+                        "url": (f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"),
+                    }
+                ],
+            }
+            rounds = retried.get(tid) or []
+            if rounds and all(r is not None for r in rounds):
+                # Only claims a tool-less retry added name it: the pattern
+                # carries the note those claims carry.
+                first = min(r for r in rounds if r is not None)
+                pattern["description"] = retry_added_marker(first)
+            objects.append(pattern)
+            if not malware_id:
+                # Nothing to relate the technique to, and a relationship with a
+                # dangling source is a defect the integrity pass would prune.
+                continue
+            # No confidence: the judge gave none, and the 0.5 this used to
+            # carry was published as the judge's own number on every technique
+            # of every fallback run.
+            objects.append(
+                {
+                    "type": "relationship",
+                    "id": f"relationship--{uuid.uuid4()}",
+                    "relationship_type": "uses",
+                    "source_ref": malware_id,
+                    "target_ref": attack_id,
+                    "x_malspark_contributing_agents": claimed_by.get(tid, []),
+                    "x_malspark_technique_id": tid,
+                }
+            )
+
+        # The indicators the answer wrote whole before it went wrong, as it
+        # wrote them, with the ids the platform mints. The one publish rule
+        # decides each of them downstream exactly as it decides an indicator
+        # of an answer that closed; without them a cut answer's decoded
+        # command-and-control hosts were never put to the rule at all.
+        objects.extend(self._stated_indicators(text) if extracted else [])
+
+        # The note is about every object the bundle holds. A bundle holding
+        # none has nothing a note could name, and then the record stays on the
+        # bundle's own fallback mark below, where it is on every fallback.
+        if note is not None and objects:
+            note["object_refs"] = [str(obj["id"]) for obj in objects]
+            objects.append(note)
+
+        return Bundle.model_validate(
+            {
+                "objects": objects,
+                "x_malspark_fallback_verdict": {
+                    "decision": decision,
+                    "source": "extracted" if extracted else "pipeline",
+                    **({"model_only_technique_ids": model_only} if model_only else {}),
+                    # With no note written, the judge's text it would have
+                    # carried stays on the mark instead.
+                    **({"reasoning": text_snippet} if note is not None and not objects else {}),
+                },
+                **({"x_malspark_assessment": stated} if stated is not None else {}),
+            }
+        )
+
+    def _stated_indicators(self, text: str) -> list[dict[str, Any]]:
+        """:func:`stated_indicators_in` with minted ids, each one the Indicator model reads."""
+        from malspark.schemas.stix_models import Indicator
+
+        kept: list[dict[str, Any]] = []
+        for written in stated_indicators_in(text):
+            obj = {**written, "id": f"indicator--{uuid.uuid4()}"}
+            try:
+                Indicator.model_validate(obj)
+            except Exception as exc:  # noqa: BLE001 — one that does not read is not kept
+                self.logger.info(
+                    "Fallback Bundle: an indicator the answer wrote does not read as one (%s).",
+                    type(exc).__name__,
+                )
+                continue
+            kept.append(obj)
+        if kept:
+            self.logger.info(
+                "Fallback Bundle: %d indicator(s) the answer wrote whole are kept as written, "
+                "for the checks and the publish rule to answer.",
+                len(kept),
+            )
+        return kept
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _consensus_threshold(self, override: float | None = None) -> float:
+        """The confidence at which mediation counts as consensus.
+
+        ``NEGOTIATION__CONSENSUS_THRESHOLD`` was documented, validated and
+        never read: the check used the module constant, so setting the
+        variable changed nothing. The debate stage's own threshold wins when
+        the caller passes one, then the configured global, and the constant
+        remains the default for standalone use.
+        """
+        if override is not None:
+            return float(override)
+        negotiation = getattr(self._config, "negotiation", None)
+        value = getattr(negotiation, "consensus_threshold", None)
+        return float(value) if value is not None else CONSENSUS_THRESHOLD
+
+    def _verdict_timeout(
+        self, configured: float | None, prompt_chars: int = 0, call: str = "judge:verdict"
+    ) -> float | None:
+        """The verdict call's timeout: configured, or what its budget needs at the model's pace.
+
+        ``GenerationRates.call_timeout`` decides and records it; with no rates
+        attached, no rate measured yet or no ``judge_max_tokens``, the
+        configured value stands. ``None`` configured is the judge with no time
+        limit: the call waits what its answer takes at the model's measured
+        pace, or — with nothing measured — as long as its request timeout.
+        """
+        rates = getattr(self, "generation_rates", None)
+        if rates is None:
+            return configured
+        output = self._output_cap()
+        from malspark.llm.context_window import tokens_for_chars
+
+        seconds = rates.call_timeout(
+            call,
+            model_name_of(self.llm),
+            configured,
+            output.tokens,
+            budget=output.sentence,
+            prompt_tokens=tokens_for_chars(prompt_chars),
+        )
+        return None if seconds is None else float(seconds)
+
+    def _supports_structured_output(self) -> bool:
+        """Delegates to the registry — see ``structured_output_supported``.
+
+        ``self._config`` was read here but never assigned (``JudgeAgent`` took
+        no config), so the provider name came from ``ChatOpenAI._llm_type`` =
+        ``"openai-chat"``, which named no provider, and every provider got
+        the unknown-provider default. The container passes the
+        config now, and the decision itself is shared with the two other
+        callers that were making it independently.
+        """
+        from malspark.llm.registry import structured_output_supported
+
+        return structured_output_supported(getattr(self, "_config", None), self.llm)
+
+    def _fallback_mediate(
+        self,
+        reasoning_text: str,
+    ) -> MediatorVerdict:
+        """Plain-text fallback when structured output is unavailable.
+
+        Not really a fallback: the capability check in
+        ``_extract_mediator_verdict`` routes every provider here, so this is
+        the only path that decides consensus in production.
+        """
+        confidence = self._extract_confidence_from_text(reasoning_text)
+        if confidence is None:
+            # Previously this returned a hardcoded 0.5, indistinguishable from
+            # a mediator that genuinely scored 0.5 and logged nowhere. Since
+            # 0.5 < CONSENSUS_THRESHOLD it also meant the negotiation loop
+            # could never converge: the 2026-07-29 run showed exactly
+            # ``confidence=0.50`` every round and burned all five revisions.
+            # An unreadable log is now loud, and still cannot end the loop.
+            self.logger.warning(
+                "Mediator agreement score not found in the reasoning log; "
+                "treating as no-consensus. First 200 chars: %r",
+                reasoning_text.strip()[:200],
+            )
+            confidence = _UNREADABLE_AGREEMENT
+        # The mediator's reasoning whole: it is what the next round's
+        # analysts and the judge read as the mediation, and a cut at a fixed
+        # length removed its conclusion without a mark.
+        return MediatorVerdict(
+            # The final block's lines; none when the answer has no block.
+            contradictions=final_contradictions(reasoning_text) or [],
+            resolution_summary=reasoning_text,
+            confidence=confidence,
+        )
+
+    @staticmethod
+    def _extract_confidence_from_text(text: str) -> float | None:
+        """Read the mediator's agreement score, or ``None`` if it is not there.
+
+        Only the ``agreement_confidence`` line the system prompt asks for is
+        read (``_AGREEMENT_RE``); anything else is unreadable, which the caller
+        records as ``_UNREADABLE_AGREEMENT``. The bare word used to be accepted
+        too, so a claim's "confidence: 0.92" quoted in the reasoning was read
+        as the agents' agreement and ended the negotiation on a consensus no
+        one stated.
+
+        The number must sit **adjacent to the key** — an earlier version
+        accepted any token on any line mentioning "confidence" and clamped it
+        into range, so ``"Confidence: 0.95 (based on 3 agents)"`` scanned in
+        reverse, hit ``3``, clamped to 1.0 and declared instant consensus off
+        a number that was never a score. Out-of-range values are therefore
+        rejected rather than clamped: clamping is what made the wrong token
+        look legitimate.
+        """
+        matches = _AGREEMENT_RE.findall(text or "")
+        for raw, pct in reversed(matches):  # the model's last word wins
+            try:
+                value = float(raw)
+            except ValueError:
+                continue
+            if pct:
+                value /= 100.0
+            if 0.0 <= value <= 1.0:
+                return value
+        return None
+
+    @staticmethod
+    def _build_memory_context(
+        isr_reports: dict | None,
+        memory_store: MemoryStore | None,
+        current_sample_id: str | None = None,
+        owner: str | None = None,
+        container: Any = None,
+    ) -> str:
+        """Retrieve similar past cases and format them as a few-shot prompt block.
+
+        Queries the MemoryStore with a summary of the
+        current ISR claims. The retrieved cases are formatted as a structured
+        context block to help the judge leverage historical analysis patterns.
+
+        The judge is explicitly instructed to treat retrieved cases as weighted
+        priors — not to copy technique IDs blindly, but to corroborate them with
+        current evidence. This prevents retrieval hallucination (assuming a past
+        case's TTPs must apply to the current sample).
+
+        Args:
+            isr_reports: Current ISR reports (used to build the search query).
+            memory_store: MemoryStore-protocol object, or None to skip.
+            owner: Whose cases may be read: the job's owner, or ``None`` for
+                the unscoped ones (``long_term_memory.recall``).
+            container: The job's container, which keeps the cases read for
+                it (``long_term_memory.similar_cases``); ``None`` reads anew.
+
+        Returns:
+            Formatted prompt block string, or "" when store is None/empty or
+            no similar cases are found.
+        """
+        cases = JudgeAgent._similar_cases(
+            isr_reports,
+            memory_store,
+            current_sample_id=current_sample_id,
+            owner=owner,
+            container=container,
+        )
+        return MEMORY_UNAVAILABLE_NOTE if cases is None else JudgeAgent._memory_block(cases)
+
+    @staticmethod
+    def _similar_cases(
+        isr_reports: dict | None,
+        memory_store: MemoryStore | None,
+        current_sample_id: str | None = None,
+        owner: str | None = None,
+        container: Any = None,
+    ) -> list[StoredCase] | None:
+        """The similar past cases of other samples for this verdict; ``None`` when the read failed.
+
+        Empty when there is no store, nothing to search with, or no case.
+        """
+        if memory_store is None or not isr_reports:
+            return []
+
+        # Build search query from all current ISR claims
+        query_parts: list[str] = []
+        for isr in isr_reports.values():
+            for claim in isr.claims:
+                query_parts.append(claim.claim)
+                if claim.evidence_ref:
+                    query_parts.append(claim.evidence_ref)
+                # The same rule the stored case follows: an id that is no
+                # technique of this case does not look for cases that had it.
+                if claim.technique_id and a_past_case_technique(claim):
+                    query_parts.append(claim.technique_id)
+        query = " ".join(query_parts)
+
+        if not query.strip():
+            return []
+
+        try:
+            # Never retrieve the current sample's own past run as a "weighted
+            # prior", and only the job's owner's cases (``recall``, which also
+            # serves a backend older than ``exclude_sample_id``). Read once
+            # per job, so every verdict prompt of it shows the same cases.
+            from malspark.memory.long_term_memory import similar_cases
+
+            return similar_cases(
+                memory_store,
+                query,
+                exclude_sample_id=current_sample_id,
+                owner=owner,
+                container=container,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Never let retrieval failure block verdict generation, and never
+            # let it pass unsaid: the verdict is then drawn without the prior
+            # cases, and the prompt and the log both say so.
+            logging.getLogger(__name__).warning(
+                "JudgeAgent: long-term memory retrieval failed (%s); the verdict is drawn "
+                "without prior cases.",
+                describe_exception_for_log(exc),
+            )
+            return None
+
+    @staticmethod
+    def _memory_block(cases: Sequence[StoredCase]) -> str:
+        """The similar past cases as the judge's prompt block, or ``""`` for none."""
+        if not cases:
+            return ""
+
+        total = len(cases)
+        lines: list[str] = [
+            "=== LONG-TERM MEMORY: Similar Past Case(s) ===",
+            "Use these historical analyses as WEIGHTED PRIORS for TTP selection.",
+            "Do NOT copy technique IDs blindly — corroborate with current evidence.",
+            QUOTED_VALUE_STATEMENT,
+            "",
+        ]
+
+        for idx, case in enumerate(cases, 1):
+            # Whole: the verdict prompt is fitted to the judge's window as a
+            # whole, and a case's summary is shortened there only when it must be.
+            # A past run's summary is built from that run's claims, which carry
+            # its sample's strings: one quoted value on its line, so no line of
+            # it can read as a line of this prompt (``tool_fence.quoted_value``).
+            # The category is stored text of the same run, written the same way.
+            # Its ledger and item ids are that run's numbers, which this run
+            # issues too: each is renamed so none can be cited as this run's
+            # (``long_term_memory.foreign_ids_written_out``).
+            summary = foreign_quoted_value(case.summary_text)
+            lines.append(similar_case_head(idx, total, case))
+            lines.append(f"  Behavioral summary: {summary}")
+
+        lines.append(_MEMORY_END)
+        return "\n".join(lines)

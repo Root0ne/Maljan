@@ -17,11 +17,11 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.composition import ResolvedAgent
-from maljan.agents.configurable_analyst import ConfigurableAnalyst
-from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-from maljan.core.declaration_proposals import propose, sample_open_in
-from maljan.providers.sample_open import (
+from malspark.agents.composition import ResolvedAgent
+from malspark.agents.configurable_analyst import ConfigurableAnalyst
+from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+from malspark.core.declaration_proposals import propose, sample_open_in
+from malspark.providers.sample_open import (
     OPEN_METADATA_KEY,
     declared_open,
     load_line,
@@ -36,7 +36,7 @@ SPEC = SimpleNamespace(open_tool="import_it", path_argument="binary_path")
 def _tool(name: str) -> StructuredTool:
     """A tool of an MCP server, as the registry offers it (its server key in metadata)."""
     return StructuredTool.from_function(
-        func=lambda: name, name=name, description=name, metadata={"maljan_server": "programs"}
+        func=lambda: name, name=name, description=name, metadata={"malspark_server": "programs"}
     )
 
 
@@ -61,7 +61,7 @@ def test_the_open_tool_is_marked_on_a_copy() -> None:
         "open_tool": "import_it",
         "path_argument": "binary_path",
     }
-    assert marked[0].metadata["maljan_server"] == "programs"
+    assert marked[0].metadata["malspark_server"] == "programs"
     assert OPEN_METADATA_KEY not in raw[0].metadata
     assert marked[1] is raw[1]
     assert mark_open_tool(raw, None) == raw
@@ -224,7 +224,7 @@ def test_a_real_open_tool_is_still_proposed() -> None:
 def test_the_real_tool_fixtures_name_only_their_open_tools() -> None:
     from pathlib import Path
 
-    from maljan.core.declaration_proposals import _opens_read_only
+    from malspark.core.declaration_proposals import _opens_read_only
 
     root = Path(__file__).resolve().parents[2] / "fixtures" / "tools"
     accepted = set()
@@ -238,7 +238,7 @@ def test_the_real_tool_fixtures_name_only_their_open_tools() -> None:
 
 def _human_turn_of(analyst: ConfigurableAnalyst, call: Any) -> str:
     """The human turn ``call`` sends, the loop stopped before any model runs."""
-    from maljan.agents.configurable_analyst import _Run
+    from malspark.agents.configurable_analyst import _Run
 
     sent: list[list[tuple[str, str]]] = []
 
@@ -258,7 +258,7 @@ def test_the_isr_analysis_names_the_open_tool_as_the_text_analysis_does() -> Non
 
 
 def test_a_delegated_task_names_the_open_tool_to_its_callee() -> None:
-    from maljan.agents.delegation import _task_turn
+    from malspark.agents.delegation import _task_turn
 
     callee = _generic(mark_open_tool([_tool("import_it"), _tool("list_it")], SPEC))
     turn = _task_turn("lead", "list the exports", "", callee)
@@ -272,8 +272,8 @@ def test_a_delegated_task_names_the_open_tool_to_its_callee() -> None:
 def test_a_built_in_callee_is_told_its_declared_open_tool() -> None:
     from unittest.mock import MagicMock
 
-    from maljan.agents.delegation import _task_turn
-    from maljan.agents.dynamic_analyst import DynamicAnalyst
+    from malspark.agents.delegation import _task_turn
+    from malspark.agents.dynamic_analyst import DynamicAnalyst
 
     callee = DynamicAnalyst(llm=MagicMock(), name="dynamic")
     callee.tools = mark_open_tool([_tool("import_it"), _tool("list_it")], SPEC)

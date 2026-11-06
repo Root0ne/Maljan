@@ -11,7 +11,7 @@ What every such server does the same way:
 
 * **The sample is read where the deployment put it.** A path argument is
   resolved with ``realpath`` and must name a regular file under one of the
-  directories ``MALJAN_SAMPLE_ROOTS`` lists (the container's read-only sample
+  directories ``MALSPARK_SAMPLE_ROOTS`` lists (the container's read-only sample
   mount); anything else is refused, and the refusal names no host path.
 * **The program reads the file; nothing runs it.** The program is started
   with the path as an argument, its standard input closed, a scratch working
@@ -61,7 +61,7 @@ from typing import Any
 
 logger = logging.getLogger("cli_sidecar")
 
-# The codes, as the platform's tool servers write them (``maljan.tools.errors``).
+# The codes, as the platform's tool servers write them (``malspark.tools.errors``).
 MISSING_DEPENDENCY = "missing_dependency"
 TIMEOUT = "timeout"
 BAD_ARGUMENT = "bad_argument"
@@ -93,7 +93,7 @@ REMEDIATIONS: dict[str, str] = {
 }
 
 # The variables a sidecar reads.
-SAMPLE_ROOTS_ENV = "MALJAN_SAMPLE_ROOTS"
+SAMPLE_ROOTS_ENV = "MALSPARK_SAMPLE_ROOTS"
 TIMEOUT_ENV = "TOOL_TIMEOUT_SECONDS"
 BIND_ENV = "MCP_BIND_ADDRESS"
 PORT_ENV = "MCP_PORT"
@@ -338,7 +338,7 @@ def json_document(text: str, program: str) -> Any:
 
 
 def sample_roots() -> list[Path]:
-    """The directories a path argument may be under, from ``MALJAN_SAMPLE_ROOTS``.
+    """The directories a path argument may be under, from ``MALSPARK_SAMPLE_ROOTS``.
 
     Empty when the variable is unset: such a server reads nothing.
     """
@@ -409,9 +409,9 @@ def capabilities(
 
 # The key of a tool definition's ``_meta`` under which its server declares it,
 # in the vocabulary of the platform's tool declarations; the platform's own
-# helper (``maljan.tools.declared_facts``) writes the same, and the client
+# helper (``malspark.tools.declared_facts``) writes the same, and the client
 # reads it for every server alike.
-FACTS_META_KEY = "maljan/tool_facts"
+FACTS_META_KEY = "malspark/tool_facts"
 # The capabilities tool's declaration, the same on every server.
 CAPABILITIES_FACTS: dict[str, Any] = {"kind": "capabilities"}
 # A call runs nothing of the sample, reaches nothing beyond this server and

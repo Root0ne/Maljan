@@ -51,7 +51,7 @@ PRO_UNDOCUMENTED = "acme-hosted-pro"
 
 def _shipped_entry(key: str) -> dict[str, Any]:
     """A built-in server's entry as the stack serves it: its launch as shipped, switched on."""
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     entry = Settings(_env_file=None).mcp.servers[key].model_dump(mode="json")
     entry.pop("auth_token", None)
@@ -253,7 +253,7 @@ class TestTheGateChangesOnlyTheEndpoints:
 
     def test_no_third_party_is_reached_whether_or_not_a_server_was_listed(self) -> None:
         """Nothing kept yet (a fresh install): no server stays on unless known to stay local."""
-        from maljan.core import served_declarations
+        from malspark.core import served_declarations
 
         served_declarations.forget_served()
         values = _values(
@@ -677,7 +677,7 @@ class TestTheJobsRoster:
 def test_the_in_process_run_requires_the_stages_of_its_own_profile() -> None:
     from scripts.rehearsal.inprocess import _required_stages
 
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     core = {
         key.removeprefix("core."): row["value"]
@@ -1250,8 +1250,8 @@ def test_the_gate_lists_only_the_servers_this_machine_reaches_before_it_decides(
     """Declarations are read as a job reads them; a server answering from afar is not reached."""
     from scripts.rehearsal.run import learn_declarations
 
-    from maljan.core import served_declarations
-    from maljan.providers import served_listing
+    from malspark.core import served_declarations
+    from malspark.providers import served_listing
 
     served_declarations.forget_served()
     asked: list[Any] = []

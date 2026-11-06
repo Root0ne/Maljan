@@ -14,8 +14,8 @@ from collections.abc import Iterator
 
 import pytest
 
-from maljan.core import tracing
-from maljan.core.tracing import apply_tracing_setting, tracing_in_environment
+from malspark.core import tracing
+from malspark.core.tracing import apply_tracing_setting, tracing_in_environment
 
 
 @pytest.fixture(autouse=True)
@@ -28,10 +28,10 @@ def _nothing_saved() -> Iterator[None]:
 def test_a_job_with_the_setting_off_undoes_what_an_earlier_job_set() -> None:
     environ: dict[str, str] = {"PATH": "/bin"}
 
-    first = apply_tracing_setting(True, project="maljan", api_key="k", environ=environ)
+    first = apply_tracing_setting(True, project="malspark", api_key="k", environ=environ)
     assert first is True
     assert environ["LANGCHAIN_TRACING_V2"] == "true"
-    assert environ["LANGCHAIN_PROJECT"] == "maljan"
+    assert environ["LANGCHAIN_PROJECT"] == "malspark"
 
     second = apply_tracing_setting(False, environ=environ)
 
@@ -102,7 +102,7 @@ def test_the_container_switches_tracing_through_the_one_place(
 ) -> None:
     from types import SimpleNamespace
 
-    from maljan.core.container import ServiceContainer
+    from malspark.core.container import ServiceContainer
 
     calls: list[tuple[bool, dict[str, str]]] = []
 

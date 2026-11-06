@@ -41,9 +41,9 @@ branch_labels = None
 depends_on = None
 
 # Copied, as a revision imports no application code: the memory plugins'
-# entry-point group (``maljan.core.plugins.PLUGIN_GROUPS``), the shipped
-# backends (``maljan.memory.store_factory.BUILT_IN_BACKENDS``) and the two keys.
-MEMORY_GROUP = "maljan.memory_backends"
+# entry-point group (``malspark.core.plugins.PLUGIN_GROUPS``), the shipped
+# backends (``malspark.memory.store_factory.BUILT_IN_BACKENDS``) and the two keys.
+MEMORY_GROUP = "malspark.memory_backends"
 SHIPPED_BACKENDS = frozenset({"memory", "qdrant"})
 BACKEND_KEY = "core.memory.backend"
 ALLOW_LIST_KEY = "core.plugins.allowed"

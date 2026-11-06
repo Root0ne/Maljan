@@ -47,8 +47,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import (
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import (
     MemoryStore,
     StoredCase,
     build_stored_case,
@@ -76,7 +76,7 @@ def _make_case(
 
 def _make_isr(claims_data: list[dict]) -> object:
     """Build a minimal AgentISR mock for build_stored_case tests."""
-    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+    from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
     claims = [
         ClaimEvidence(
@@ -334,7 +334,7 @@ class TestInMemoryStore:
 
 class TestQdrantStore:
     def test_raises_when_qdrant_client_not_installed(self) -> None:
-        from maljan.memory.qdrant_store import QdrantNotAvailableError, QdrantStore
+        from malspark.memory.qdrant_store import QdrantNotAvailableError, QdrantStore
 
         with patch.dict("sys.modules", {"qdrant_client": None}):
             with pytest.raises((QdrantNotAvailableError, ImportError)):
@@ -347,7 +347,7 @@ class TestQdrantStore:
 
 
 class TestBuildMemoryContext:
-    from maljan.agents.judge_agent import JudgeAgent
+    from malspark.agents.judge_agent import JudgeAgent
 
     def _make_isr_reports(self) -> dict:
         isr = _make_isr(
@@ -358,27 +358,27 @@ class TestBuildMemoryContext:
         return {"static": isr}
 
     def test_none_memory_store_returns_empty(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         result = JudgeAgent._build_memory_context({}, None)
         assert result == ""
 
     def test_none_isr_reports_returns_empty(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         store = InMemoryStore()
         result = JudgeAgent._build_memory_context(None, store)
         assert result == ""
 
     def test_empty_store_returns_empty(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         store = InMemoryStore()
         result = JudgeAgent._build_memory_context(self._make_isr_reports(), store)
         assert result == ""
 
     def test_with_cases_returns_nonempty_block(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         store = InMemoryStore()
         store.store(_make_case("past_1", "ransomware encryption files T1486"))
@@ -386,7 +386,7 @@ class TestBuildMemoryContext:
         assert result != ""
 
     def test_block_contains_section_headers(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         store = InMemoryStore()
         store.store(_make_case("past_1", "ransomware encryption files T1486"))
@@ -395,7 +395,7 @@ class TestBuildMemoryContext:
         assert "END LONG-TERM MEMORY" in result
 
     def test_block_contains_technique_ids(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         store = InMemoryStore()
         store.store(_make_case("past_1", "ransomware encryption", ["T1486", "T1490"]))
@@ -403,7 +403,7 @@ class TestBuildMemoryContext:
         assert "T1486" in result
 
     def test_block_contains_sample_id(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         store = InMemoryStore()
         store.store(_make_case("my_past_sample", "ransomware T1486"))
@@ -411,7 +411,7 @@ class TestBuildMemoryContext:
         assert "my_past_sample" in result
 
     def test_retrieval_exception_returns_empty(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         broken_store = MagicMock()
         broken_store.retrieve.side_effect = RuntimeError("Qdrant unavailable")
@@ -432,13 +432,13 @@ class TestContainerGetMemoryStore:
 
         Use ``backend="memory"`` explicitly for in-process/test scenarios.
         """
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         assert Settings().memory.backend == "qdrant"
 
     def test_returns_cached_instance_on_second_call(self) -> None:
-        from maljan.core.config import MemoryConfig, Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import MemoryConfig, Settings
+        from malspark.core.container import ServiceContainer
 
         cfg = Settings(memory=MemoryConfig(backend="memory"))
         container = ServiceContainer(config=cfg, mock=True)
@@ -447,8 +447,8 @@ class TestContainerGetMemoryStore:
         assert store1 is store2
 
     def test_memory_config_backend_memory_selects_inmemory(self) -> None:
-        from maljan.core.config import MemoryConfig, Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import MemoryConfig, Settings
+        from malspark.core.container import ServiceContainer
 
         cfg = Settings(memory=MemoryConfig(backend="memory"))
         container = ServiceContainer(config=cfg, mock=True)

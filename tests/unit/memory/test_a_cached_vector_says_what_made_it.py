@@ -5,7 +5,7 @@ cannot be loaded, and it projects into the model's own dimension so the vector
 store's schema stays stable. The embedding cache keyed on version, dimension
 and corpus, and the file it wrote recorded version and dimension — so a process
 that could not load the model wrote a bag-of-words corpus into
-``~/.cache/maljan/attck``, deleted every other file there as stale, and the
+``~/.cache/malspark/attck``, deleted every other file there as stale, and the
 next process logged "reused cached embeddings" and ranked techniques with it.
 It is durable, it is shared, and nothing about it looks wrong.
 
@@ -24,10 +24,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.memory import embeddings
-from maljan.memory import semantic_attck_index as sai
-from maljan.memory.attck_loader import ATTCKTechnique
-from maljan.memory.semantic_attck_index import SemanticATTCKIndex
+from malspark.memory import embeddings
+from malspark.memory import semantic_attck_index as sai
+from malspark.memory.attck_loader import ATTCKTechnique
+from malspark.memory.semantic_attck_index import SemanticATTCKIndex
 
 MODEL = embeddings.model_backend_id()
 FALLBACK = embeddings.FALLBACK_BACKEND

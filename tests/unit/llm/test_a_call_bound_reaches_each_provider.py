@@ -17,8 +17,8 @@ import pytest
 from langchain_core.messages import HumanMessage
 from pydantic import SecretStr
 
-from maljan.core.config import Settings
-from maljan.llm.context_window import (
+from malspark.core.config import Settings
+from malspark.llm.context_window import (
     accepts_output_bound,
     output_bound_kwargs,
     prompt_overflow_sentence,
@@ -30,7 +30,7 @@ ASK = [HumanMessage(content="write the report")]
 
 
 def _openai(base_url: str, compat: str = "auto") -> Any:
-    from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
+    from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only
 
     forget_standard_only()
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
@@ -41,7 +41,7 @@ def _openai(base_url: str, compat: str = "auto") -> Any:
 
 
 def _anthropic() -> Any:
-    from maljan.llm.anthropic_provider import AnthropicProvider
+    from malspark.llm.anthropic_provider import AnthropicProvider
 
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     settings.llm.anthropic.api_key = SecretStr("key")
@@ -49,7 +49,7 @@ def _anthropic() -> Any:
 
 
 def _gemini() -> Any:
-    from maljan.llm.gemini_provider import GeminiProvider
+    from malspark.llm.gemini_provider import GeminiProvider
 
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     settings.llm.gemini.api_key = SecretStr("key")
@@ -159,9 +159,9 @@ class TestAPromptLargerThanTheWindow:
 def test_the_sized_classes_are_named_where_they_are_made() -> None:
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    from maljan.llm.generation_rate import with_sized_request_timeout
+    from malspark.llm.generation_rate import with_sized_request_timeout
 
     sized = with_sized_request_timeout(ChatGoogleGenerativeAI)
 
-    assert sized.__module__ == "maljan.llm.generation_rate"
+    assert sized.__module__ == "malspark.llm.generation_rate"
     assert sized.__qualname__ == ChatGoogleGenerativeAI.__qualname__

@@ -12,9 +12,9 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse
-from maljan.core.logger import logger
-from maljan.core.settings_overrides import redact_url
-from maljan.reporting.section_servers import with_source_servers
+from malspark.core.logger import logger
+from malspark.core.settings_overrides import redact_url
+from malspark.reporting.section_servers import with_source_servers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -84,7 +84,7 @@ def _section_tabs(malware_report: Any) -> dict[str, str]:
     """
     if not isinstance(malware_report, dict):
         return {}
-    from maljan.reporting.section_tabs import section_tabs
+    from malspark.reporting.section_tabs import section_tabs
 
     try:
         return section_tabs(malware_report)
@@ -206,10 +206,10 @@ async def get_stix_bundle(
     The judge's bundle is labelled ``"published": false`` with a notice: it is
     an unpublished draft that did not pass the publish rule. A run that made no
     export stores that bundle as the report's bundle, and the stored bundle
-    then carries ``x_maljan_published: false`` and the same notice, and the
+    then carries ``x_malspark_published: false`` and the same notice, and the
     default source answers it in the same envelope: ``published: false``, the
     notice and the bundle under ``bundle``. ``published`` is the envelope's
-    name for the flag, ``x_maljan_published`` only the stored bundle's.
+    name for the flag, ``x_malspark_published`` only the stored bundle's.
     """
     if source == "judge":
         report = await svc.get_report(report_id, user)
@@ -226,7 +226,7 @@ async def get_stix_bundle(
                 "bundle": None,
                 "labels": {},
             }
-        from maljan.schemas.stix_models import UNPUBLISHED_NOTICE
+        from malspark.schemas.stix_models import UNPUBLISHED_NOTICE
 
         # Served as the run's record and labelled: it is a draft that did not
         # pass the publish rule, never the export.
@@ -242,8 +242,8 @@ async def get_stix_bundle(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Report not found or STIX bundle not available",
         )
-    if isinstance(bundle, dict) and bundle.get("x_maljan_published") is False:
-        from maljan.schemas.stix_models import UNPUBLISHED_NOTICE
+    if isinstance(bundle, dict) and bundle.get("x_malspark_published") is False:
+        from malspark.schemas.stix_models import UNPUBLISHED_NOTICE
 
         return {"published": False, "notice": UNPUBLISHED_NOTICE, "bundle": bundle}
     return bundle
@@ -266,7 +266,7 @@ async def get_attack_navigator_layer(
     no published technique answers 200 with an empty layer; only an unknown or
     unauthorized report, or one with no stored report document, is 404.
     """
-    from maljan.reporting.navigator_layer import build_layer
+    from malspark.reporting.navigator_layer import build_layer
 
     mr = await svc.get_malware_report(report_id, user)
     if mr is None:
@@ -277,7 +277,7 @@ async def get_attack_navigator_layer(
     # The bundle-free build runs off the event loop all the same: it walks the
     # stored mappings and the vendored tables.
     return await asyncio.to_thread(
-        build_layer, mr, name=f"Maljan report {report_id}", domain=domain
+        build_layer, mr, name=f"Malspark report {report_id}", domain=domain
     )
 
 
@@ -411,7 +411,7 @@ async def get_full_malware_report_pdf(
     503 (not 500) when the PDF toolchain is unavailable on the host — the report
     is fine, only this one export cannot be produced.
     """
-    from maljan.reporting.renderers import PdfUnavailableError
+    from malspark.reporting.renderers import PdfUnavailableError
 
     # The analyst report's PDF names where the API serves the bundle, as a path in
     # text: no setting names the public address, and the request's Host is not one.

@@ -16,17 +16,17 @@ from typing import Any
 import pytest
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.delegation import TEAM_SERVER
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.agents.prompt_fragments import (
+from malspark.agents.delegation import TEAM_SERVER
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.agents.prompt_fragments import (
     DECLARED_SOURCE_METADATA_KEY,
     PROVIDER_FAMILY,
     stamp_source,
 )
-from maljan.agents.tool_pinning import SERVER_METADATA_KEY, declared_source_of
-from maljan.providers.base import StaticEvidenceBundle
-from maljan.providers.static.capa_yara import ledger_entries
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
+from malspark.agents.tool_pinning import SERVER_METADATA_KEY, declared_source_of
+from malspark.providers.base import StaticEvidenceBundle
+from malspark.providers.static.capa_yara import ledger_entries
+from malspark.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
 
 
 def _tool(name: str = "decompile_function", metadata: dict[str, Any] | None = None) -> Any:
@@ -62,7 +62,7 @@ def test_the_recorder_writes_the_source_it_is_given() -> None:
 
 
 def test_a_recorded_tool_call_writes_the_tools_source() -> None:
-    from maljan.agents.evidence_recorder import record_tools
+    from malspark.agents.evidence_recorder import record_tools
 
     recorder = EvidenceRecorder("static", counter=EvidenceCounter())
     (stamped,) = stamp_source([_tool()], PROVIDER_FAMILY, declared="provider:r2")
@@ -102,7 +102,7 @@ def test_the_evidence_providers_entries_record_its_source() -> None:
 def test_the_probe_only_sandbox_entry_records_the_sandbox_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.reporting import ledger_projection
+    from malspark.reporting import ledger_projection
 
     seen: list[Any] = []
     monkeypatch.setattr(
@@ -115,8 +115,8 @@ def test_the_probe_only_sandbox_entry_records_the_sandbox_source(
 def test_every_triage_pack_entry_records_the_packs_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.pipeline.triage_pack import PIPELINE, run_pack
-    from maljan.tools import rules
+    from malspark.pipeline.triage_pack import PIPELINE, run_pack
+    from malspark.tools import rules
     from tests.unit.pipeline.test_triage_pack import _inputs, _write
     from tests.unit.tools.test_binary import _pe
 

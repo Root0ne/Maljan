@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.ledger_projection import persistence_from_ledger
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.reporting.ledger_projection import persistence_from_ledger
+from malspark.schemas.evidence import EvidenceCounter
 from tests.unit._ledger_helpers import entry
 
 

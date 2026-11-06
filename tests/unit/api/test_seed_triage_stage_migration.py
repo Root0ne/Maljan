@@ -97,7 +97,7 @@ def test_the_revision_follows_the_qdrant_one():
 
 
 def test_the_stage_it_inserts_is_the_one_the_settings_model_seeds():
-    from maljan.core.config import triage_stage
+    from malspark.core.config import triage_stage
 
     # A triage stage runs no agents side by side, so its mode means nothing:
     # the revision wrote ``sequential`` there, and the model now leaves it unset.
@@ -198,7 +198,7 @@ def test_a_secret_profiles_row_is_never_rewritten():
 def test_the_migrated_document_loads_and_the_default_still_matches_its_seed():
     """The reason the revision exists: a stored default converted by the
     previous revision must load against a seed that now carries the pack."""
-    from maljan.core.config import Settings, stages_from_analysts
+    from malspark.core.config import Settings, stages_from_analysts
 
     mod = _load()
     stored_default = {

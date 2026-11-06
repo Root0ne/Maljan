@@ -127,7 +127,7 @@ describe("the import preview of a block's tool declarations", () => {
 
   it("names only the tool a /2 file changes over an unstored leaf", () => {
     const preview = buildImportPreview(
-      { format: "maljan-settings/2", values: { [LEAF.key]: { ...MARK, [FIRST]: { timeout_seconds: 5 } } } },
+      { format: "malspark-settings/2", values: { [LEAF.key]: { ...MARK, [FIRST]: { timeout_seconds: 5 } } } },
       entries,
       { [LEAF.key]: SHIPPED },
       FIELDS
@@ -140,7 +140,7 @@ describe("the import preview of a block's tool declarations", () => {
     const whole = { ...SHIPPED };
     delete whole[SECOND];
     const preview = buildImportPreview(
-      { format: "maljan-settings/1", values: { [LEAF.key]: whole } },
+      { format: "malspark-settings/1", values: { [LEAF.key]: whole } },
       entries,
       { [LEAF.key]: { ...MARK } },
       FIELDS
@@ -150,7 +150,7 @@ describe("the import preview of a block's tool declarations", () => {
 
   it("leaves out a file whose declarations put in force what is in force now", () => {
     const preview = buildImportPreview(
-      { format: "maljan-settings/1", values: { [LEAF.key]: SHIPPED } },
+      { format: "malspark-settings/1", values: { [LEAF.key]: SHIPPED } },
       entries,
       { [LEAF.key]: { ...MARK } },
       FIELDS
@@ -202,7 +202,7 @@ describe("the import preview of a server's tool declarations", () => {
     const stored = { ...MARK, [FIRST]: { timeout_seconds: 5 } };
     const whole = mergeToolFacts(SHIPPED, stored);
     const preview = buildImportPreview(
-      { format: "maljan-settings/1", values: { [SERVER_MAP.key]: server(whole) } },
+      { format: "malspark-settings/1", values: { [SERVER_MAP.key]: server(whole) } },
       entries,
       { [SERVER_MAP.key]: server(stored) },
       FIELDS
@@ -214,7 +214,7 @@ describe("the import preview of a server's tool declarations", () => {
     const whole = { ...SHIPPED };
     delete whole[SECOND];
     const preview = buildImportPreview(
-      { format: "maljan-settings/1", values: { [SERVER_MAP.key]: server(whole) } },
+      { format: "malspark-settings/1", values: { [SERVER_MAP.key]: server(whole) } },
       entries,
       { [SERVER_MAP.key]: server({ ...MARK }) },
       FIELDS
@@ -229,7 +229,7 @@ describe("the import preview of a server's tool declarations", () => {
   it("names each tool that changes in force, and how", () => {
     const sent = server({ ...MARK, [FIRST]: { timeout_seconds: 7 }, zz_new: { kind: "strings" } });
     const preview = buildImportPreview(
-      { format: "maljan-settings/2", values: { [SERVER_MAP.key]: sent } },
+      { format: "malspark-settings/2", values: { [SERVER_MAP.key]: sent } },
       entries,
       { [SERVER_MAP.key]: server({ ...MARK }) },
       FIELDS
@@ -245,7 +245,7 @@ describe("the import preview of a server's tool declarations", () => {
     const stored = server({ ...MARK });
     const sent = { srv: { ...stored.srv, call_timeout_seconds: 9, tool_facts: SHIPPED } };
     const preview = buildImportPreview(
-      { format: "maljan-settings/1", values: { [SERVER_MAP.key]: sent } },
+      { format: "malspark-settings/1", values: { [SERVER_MAP.key]: sent } },
       entries,
       { [SERVER_MAP.key]: stored },
       FIELDS

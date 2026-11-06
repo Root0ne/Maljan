@@ -19,11 +19,11 @@ from typing import Any
 import pytest
 import yaml
 
-from maljan.core import config as config_module
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.core.declared_reading import builtin_tools
-from maljan.core.pack_steps import effective_steps, server_steps, steps_on_servers
-from maljan.core.settings_overrides import build_settings
+from malspark.core import config as config_module
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.core.declared_reading import builtin_tools
+from malspark.core.pack_steps import effective_steps, server_steps, steps_on_servers
+from malspark.core.settings_overrides import build_settings
 
 COMPOSE = Path(__file__).resolve().parents[3] / "docker" / "docker-compose.yml"
 

@@ -18,7 +18,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
-from maljan.tools import artefact_index
+from malspark.tools import artefact_index
 
 from .synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 
@@ -238,7 +238,7 @@ class TestAThreadStartThroughAnImport:
         site = _start_thread(code, lambda: code.call_slot(slots["CreateThread"]))
         target = tmp_path / "s.exe"
         target.write_bytes(image.build())
-        from maljan.tools import emulated_strings
+        from malspark.tools import emulated_strings
 
         monkeypatch.setattr(emulated_strings, "remembered_rows", lambda path: [])
         served = artefact_index.served_index(str(target), address=_va(WORKER))

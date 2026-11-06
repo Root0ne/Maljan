@@ -68,8 +68,8 @@ ABOUT = (
 # block that ships declarations, its declarations.
 _DUMP = r"""
 import json
-from maljan.core.settings_overrides import build_settings
-from maljan.core.tool_declarations import ToolFacts
+from malspark.core.settings_overrides import build_settings
+from malspark.core.tool_declarations import ToolFacts
 
 
 

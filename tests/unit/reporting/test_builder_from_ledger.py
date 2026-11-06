@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.schemas.isr_models import AgentISR, Artifact
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import MalwareReport
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.schemas.isr_models import AgentISR, Artifact
 from tests.unit._ledger_helpers import entry, ledger_from_sandbox
 
 _SHA = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
@@ -271,7 +271,7 @@ class TestTheCapabilityProfile:
         """Counted from the knowledge table's rows, never from a label the
         extractor put on an import, and the entry id travels with it. The
         payload is what the tool returns for this import set."""
-        from maljan.tools.knowledge import api_capability
+        from malspark.tools.knowledge import api_capability
 
         names = ["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread", "RegQueryValueExA"]
         payload = api_capability(names)
@@ -334,7 +334,7 @@ class TestSigningFromThePack:
         )
 
     def test_a_signed_sample_reads_signed_with_its_signer_and_the_entry_id(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         counter = EvidenceCounter()
         signed = self._signing_entry(
@@ -417,7 +417,7 @@ class TestTheHeaderFactsAreStatedAsTheToolReadThem:
         assert report.static.exports == ["extra", "run"]
 
     def test_the_report_says_the_exports_share_an_address(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         report = _build([entry("pe_info", self._pe_info(), EvidenceCounter())])
         markdown = MarkdownRenderer().render(report)

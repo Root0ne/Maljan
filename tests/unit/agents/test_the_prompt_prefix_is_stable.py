@@ -40,23 +40,23 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     FINAL_ANSWER_NUDGE,
     BaseAnalyst,
     frame_messages,
     prompt_to_messages,
     without_run_state,
 )
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.agents.tool_fence import fenced
-from maljan.pipeline.run_state import (
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.agents.tool_fence import fenced
+from malspark.pipeline.run_state import (
     RUN_STATE_BEGIN,
     RUN_STATE_END,
     is_run_state_block,
     without_run_state_tail,
 )
-from maljan.pipeline.triage_pack import PACK_HEADING
-from maljan.pipeline.validation import Violation, retry_with_feedback
+from malspark.pipeline.triage_pack import PACK_HEADING
+from malspark.pipeline.validation import Violation, retry_with_feedback
 
 FACTS = f"{PACK_HEADING}\n[ev_0001] identity: pe windows"
 RUN_STATE = "sample: c\nledger: 1 entries (ev_0001), 1 from the triage pack"
@@ -187,7 +187,7 @@ def _analyst(model: _Scripted) -> _Analyst:
 
 def _loop(answer: str = REPORT, max_steps: int | None = None) -> list[list[Any]]:
     model = _Scripted(seen=[], answer=answer)
-    with patch("maljan.agents.base_agent.loop_limits", return_value=(None, max_steps)):
+    with patch("malspark.agents.base_agent.loop_limits", return_value=(None, max_steps)):
         _analyst(model).execute_tool_loop([("system", SYSTEM), ("human", "Analyse.")])
     return model.seen
 
@@ -308,8 +308,8 @@ class TestTheShapeEveryTemplateTakes:
 @contextlib.contextmanager
 def _judge_settings() -> Iterator[None]:
     with (
-        patch("maljan.agents.judge_agent.get_settings") as settings,
-        patch("maljan.agents.base_agent.get_settings", settings),
+        patch("malspark.agents.judge_agent.get_settings") as settings,
+        patch("malspark.agents.base_agent.get_settings", settings),
     ):
         cfg = settings.return_value
         cfg.react_agent_timeout = 600
@@ -322,7 +322,7 @@ def _judge_settings() -> Iterator[None]:
 
 class TestTheJudgesToolLoop:
     def test_each_request_is_the_last_one_plus_new_turns(self) -> None:
-        from maljan.agents.judge_agent import _standing_blocks
+        from malspark.agents.judge_agent import _standing_blocks
 
         model = _Scripted(seen=[], answer="agreement_confidence: 0.8")
         judge = JudgeAgent(llm=model)
@@ -337,7 +337,7 @@ class TestTheJudgesToolLoop:
 class TestTheRetries:
     def test_a_composer_retry_extends_the_first_request(self) -> None:
         """The composer's retry is ``retry_with_feedback`` over its first request."""
-        from maljan.pipeline.run_state import with_run_state
+        from malspark.pipeline.run_state import with_run_state
 
         first = [
             SystemMessage(content="You write one report section."),
@@ -358,7 +358,7 @@ class TestTheRetries:
 
     def test_an_analysts_validation_retry_moves_the_block_to_its_question(self) -> None:
         """Through the analyst's own retry, which frames each request it sends."""
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+        from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
         told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
         answers = iter([told, told, []])
@@ -374,7 +374,9 @@ class TestTheRetries:
                 ClaimEvidence(claim="c", evidence_ref="x", confidence=0.5, technique_id="T1055")
             ],
         )
-        with patch("maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])):
+        with patch(
+            "malspark.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
+        ):
             agent._validate_isr(isr, "the raw data")
         sent = model.seen
         assert sent
@@ -389,14 +391,14 @@ class TestAQuestionAfterAUserTurn:
     """Where a retry or a salvage asks right after a user turn, it asks at its end."""
 
     def test_the_question_ends_the_user_turn_with_its_own_text(self) -> None:
-        from maljan.pipeline.turns import with_question
+        from malspark.pipeline.turns import with_question
 
         turns = with_question([SystemMessage(content=SYSTEM), HumanMessage(content="task")], "Q?")
         assert [t.type for t in turns] == ["system", "human"]
         assert turns[-1].content == "task\n\nQ?"
 
     def test_after_a_model_turn_or_a_tool_answer_it_is_a_turn_of_its_own(self) -> None:
-        from maljan.pipeline.turns import with_question
+        from malspark.pipeline.turns import with_question
 
         for last in (AIMessage(content="said"), ToolMessage(content="r", tool_call_id="c")):
             turns = with_question([HumanMessage(content="task"), last], "Q?")
@@ -404,7 +406,7 @@ class TestAQuestionAfterAUserTurn:
             assert turns[-2] is last
 
     def test_a_block_on_that_turn_comes_off_and_one_block_ends_the_framed_request(self) -> None:
-        from maljan.pipeline.turns import with_question
+        from malspark.pipeline.turns import with_question
 
         framed = frame_messages([HumanMessage(content="task")], run_state=RUN_STATE)
         asked = frame_messages(with_question(framed, "Q?"), run_state=RUN_STATE)
@@ -413,7 +415,7 @@ class TestAQuestionAfterAUserTurn:
         assert text.count(RUN_STATE_BEGIN) == 1
 
     def test_the_analyst_s_retry_after_an_answer_cut_at_its_cap(self) -> None:
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         cap = 64
         cut = "CLAIM: one\nEVIDENCE: [ev_0001] x\nCONFIDENCE: 0.5\nTECHNIQUE: NONE\n---\nCLAIM: tw"
@@ -445,7 +447,7 @@ class TestAQuestionAfterAUserTurn:
         assert all("CLAIM: tw" not in str(t.content) for t in retry), "the cut answer stays out"
 
     def test_the_synthesis_when_the_trim_kept_only_the_task(self) -> None:
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         with patch.object(base_agent, "_trim_for_synthesis", lambda msgs, _budget: msgs[:2]):
             requests = _loop(answer="")
@@ -456,7 +458,7 @@ class TestAQuestionAfterAUserTurn:
         assert str(salvage[-1].content).startswith(f"{FACTS}\n\nAnalyse.\n\n")
 
     def test_the_judge_s_salvage_when_the_trim_kept_only_the_task(self) -> None:
-        from maljan.agents import judge_agent
+        from malspark.agents import judge_agent
 
         model = _Scripted(seen=[], calls=0, answer="agreement_confidence: 0.8")
         judge = JudgeAgent(llm=model)

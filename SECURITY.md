@@ -1,12 +1,12 @@
 # Security policy
 
-Maljan analyses live malware and holds credentials for the services that help
+Malspark analyses live malware and holds credentials for the services that help
 it do so. Vulnerabilities in it matter, and we want to hear about them.
 
 ## Reporting a vulnerability
 
 Use GitHub's private vulnerability reporting:
-<https://github.com/Root0ne/Maljan/security/advisories/new>. Do not open a
+<https://github.com/Root0ne/Malspark/security/advisories/new>. Do not open a
 public issue or pull request for an unfixed vulnerability.
 
 Include the version or commit, the configuration that reproduces the problem
@@ -30,8 +30,8 @@ supported; deployments should track it.
 
 In scope: the API, the worker, the web console, the MCP sidecars under
 `services/`, the compose stack, and the CI configuration. Out of scope: the
-third-party tools Maljan drives (Ghidra, CAPEv2, radare2, the model servers)
-except where Maljan's integration with them creates the exposure, and issues
+third-party tools Malspark drives (Ghidra, CAPEv2, radare2, the model servers)
+except where Malspark's integration with them creates the exposure, and issues
 that require an already-compromised host.
 
 How authentication, roles, secret storage and exports work is described in

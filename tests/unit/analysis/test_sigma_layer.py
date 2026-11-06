@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.analysis.sigma_layer import (
+from malspark.analysis.sigma_layer import (
     SigmaLayer,
     SigmaMatch,
     _classify_log_source,

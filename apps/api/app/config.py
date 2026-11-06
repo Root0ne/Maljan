@@ -1,4 +1,4 @@
-"""Maljan API — Application configuration.
+"""Malspark API — Application configuration.
 
 Loads from the process environment only, with sensible defaults for local
 development. No ``.env`` file is discovered or read — set variables in the
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.core.platform_secrets import PlatformSecrets
+from malspark.core.platform_secrets import PlatformSecrets
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -45,7 +45,7 @@ def _is_test_env() -> bool:
     variable that ships to production with it turned off, and
     ``PYTEST_CURRENT_TEST=1`` would have handed a real deployment the
     published ``TEST_JWT_SECRET`` exactly the way
-    ``MALJAN_API_SKIP_SECRET_CHECK`` did. The import is what every real run
+    ``MALSPARK_API_SKIP_SECRET_CHECK`` did. The import is what every real run
     has: pytest imports itself in the main process and in each xdist worker.
     """
     import sys as _sys
@@ -54,14 +54,14 @@ def _is_test_env() -> bool:
 
 
 class APISettings(BaseSettings, PlatformSecrets):
-    """API-level configuration (separate from maljan-core Settings).
+    """API-level configuration (separate from malspark-core Settings).
 
     The variables whose values open the platform's own stores -- the database
     and Redis URLs, the object store's keys, the settings key and the JWT
     signing keys -- are marked on ``PlatformSecrets``, which this model
     inherits; each is declared here again with its development default. The
     names no tool server's environment may carry are read from those marks
-    (``maljan.core.platform_secrets``).
+    (``malspark.core.platform_secrets``).
     """
 
     model_config = SettingsConfigDict(
@@ -70,7 +70,7 @@ class APISettings(BaseSettings, PlatformSecrets):
     )
 
     # ── Application ──────────────────────────────────────────────
-    app_name: str = "Maljan"
+    app_name: str = "Malspark"
     app_version: str = "0.1.0"
     debug: bool = False
     # Echo every SQL statement to the log. Deliberately independent of ``debug``:
@@ -90,7 +90,7 @@ class APISettings(BaseSettings, PlatformSecrets):
     )
 
     # ── Database ─────────────────────────────────────────────────
-    database_url: str = "postgresql+asyncpg://maljan:maljan_dev@127.0.0.1:5433/maljan"
+    database_url: str = "postgresql+asyncpg://malspark:malspark_dev@127.0.0.1:5433/malspark"
     # Bounds, here and on every numeric leaf below:
     # each of these is a size, a count or a period, and a value at or below
     # zero does not mean "unlimited" for any of them -- it means a pool that
@@ -112,7 +112,7 @@ class APISettings(BaseSettings, PlatformSecrets):
     minio_endpoint: str = "127.0.0.1:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: SecretStr = SecretStr("minioadmin")
-    minio_bucket: str = "maljan-samples"
+    minio_bucket: str = "malspark-samples"
     minio_secure: bool = False
 
     # ── Audit chain anchor ───────────────────────────────────────
@@ -130,7 +130,7 @@ class APISettings(BaseSettings, PlatformSecrets):
 
     # ── Settings-store encryption ──────────────────────────────
     # Fernet key that encrypts secret values in the runtime settings store.
-    # Read directly from the environment by ``maljan.core.settings_secrets``
+    # Read directly from the environment by ``malspark.core.settings_secrets``
     # too (that reader is unchanged by this field); declared here as well so
     # bootstrap validation can see it alongside the rest of the contract.
     settings_encryption_key: SecretStr = SecretStr("")
@@ -138,8 +138,8 @@ class APISettings(BaseSettings, PlatformSecrets):
     # ── JWT Auth ─────────────────────────────────────────────────
     jwt_secret_key: SecretStr = SecretStr("")
     jwt_algorithm: str = "HS256"
-    jwt_issuer: str = "maljan-api"
-    jwt_audience: str = "maljan-clients"
+    jwt_issuer: str = "malspark-api"
+    jwt_audience: str = "malspark-clients"
 
     # Secret rotation. New tokens carry the ``kid`` header set to
     # ``jwt_key_id``. During rotation an operator sets

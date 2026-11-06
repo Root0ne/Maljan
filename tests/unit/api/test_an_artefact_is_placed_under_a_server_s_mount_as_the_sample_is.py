@@ -16,8 +16,8 @@ from typing import Any
 import pytest
 
 from app.worker import analysis_worker, sample_files
-from maljan.core.config import MCPServerConfig
-from maljan.core.settings_overrides import build_settings
+from malspark.core.config import MCPServerConfig
+from malspark.core.settings_overrides import build_settings
 
 JOB = "8d7f1c1e-0000-4000-8000-000000000001"
 BLOB = b"\x00carved payload"

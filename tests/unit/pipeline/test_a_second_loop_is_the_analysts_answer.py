@@ -14,10 +14,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.agents.base_agent import UNPARSED_ANSWER_REASON
-from maljan.pipeline.nodes import make_stage_agent_node
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.base_agent import UNPARSED_ANSWER_REASON
+from malspark.pipeline.nodes import make_stage_agent_node
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.stages import ANALYSIS_STAGE
 from tests.unit.pipeline.test_evidence_ledger_channel import (
     _analysis_state,

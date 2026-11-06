@@ -3,13 +3,13 @@
 Targets the in-memory backend so the contract is exercised without
 requiring a running Qdrant. The Qdrant code path is structurally
 identical and is covered by a separate integration test that runs only
-when ``MALJAN_QDRANT_URL`` is set.
+when ``MALSPARK_QDRANT_URL`` is set.
 """
 
 from __future__ import annotations
 
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import StoredCase, build_stored_case
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import StoredCase, build_stored_case
 
 
 def _case(
@@ -94,7 +94,7 @@ class TestBuildStoredCaseQualitySignals:
     """build_stored_case should propagate the audit quality signals."""
 
     def test_propagates_quality_signals_from_kwargs(self) -> None:
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+        from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
         isr = AgentISR(
             agent_id="static",
@@ -121,7 +121,7 @@ class TestBuildStoredCaseQualitySignals:
         assert case.has_analyst_errors is True
 
     def test_defaults_total_techniques_from_collected_ids(self) -> None:
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+        from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
         isr = AgentISR(
             agent_id="static",

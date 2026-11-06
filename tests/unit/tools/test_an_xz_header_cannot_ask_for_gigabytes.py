@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.tools import binary
+from malspark.tools import binary
 
 LEGACY_LZMA_4_GIB = (
     bytes([0x5D]) + (0xFFFFFFFF).to_bytes(4, "little") + (0).to_bytes(8, "little") + b"\x00" * 64

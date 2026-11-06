@@ -1,5 +1,5 @@
 {
-  "schema": "maljan-api-attck/v1",
+  "schema": "malspark-api-attck/v1",
   "version": "1.0",
   "techniques": [
     {

@@ -16,9 +16,9 @@ import time
 import pytest
 from tests.credential_shapes import password
 
-from maljan.core import host_locality
-from maljan.core.host_locality import LOCAL, REMOTE, UNKNOWN, host_of, taken_as_service_name
-from maljan.core.host_locality import host_locality as locality
+from malspark.core import host_locality
+from malspark.core.host_locality import LOCAL, REMOTE, UNKNOWN, host_of, taken_as_service_name
+from malspark.core.host_locality import host_locality as locality
 
 # Built at run time: a credential written down is a secret to a scanner.
 PW = password()
@@ -197,7 +197,7 @@ def test_a_number_past_32_bits_is_no_address_and_no_service_name() -> None:
 
 
 def test_the_analyst_mode_reads_the_same_address_and_name_rules() -> None:
-    from maljan.pipeline import analyst_mode
+    from malspark.pipeline import analyst_mode
 
     assert analyst_mode.local_address is host_locality.local_address
     assert analyst_mode.named_locally is host_locality.named_locally
@@ -208,7 +208,7 @@ def test_the_analyst_mode_reads_the_same_address_and_name_rules() -> None:
 
 def test_the_analyst_mode_reads_a_transition_address_by_the_ipv4_address_it_carries() -> None:
     """Stricter than before, on purpose: a 6to4 address of a public IPv4 is hosted."""
-    from maljan.pipeline import analyst_mode
+    from malspark.pipeline import analyst_mode
 
     assert analyst_mode.locality("http://[2002:808:808::1]:8080/v1")[0] == "hosted"
     assert analyst_mode.locality("http://[2002:a00:5::1]:8080/v1")[0] == "local"
@@ -250,7 +250,7 @@ def test_the_compat_guess_is_not_the_disclosure_rule(
     url: str, compat_local: bool, placed: str
 ) -> None:
     """``compat: auto`` guesses the server software; the disclosure rule places the host."""
-    from maljan.llm.openai_provider import is_local_endpoint
+    from malspark.llm.openai_provider import is_local_endpoint
 
     assert is_local_endpoint(url) is compat_local
     assert locality(host_of(url)) == placed

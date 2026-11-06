@@ -30,9 +30,9 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.composition import aresolve_agent, prompt_for
-from maljan.agents.network_analyst import UNDECLARED_TOOLS_LINE
-from maljan.agents.prompt_fragments import (
+from malspark.agents.composition import aresolve_agent, prompt_for
+from malspark.agents.network_analyst import UNDECLARED_TOOLS_LINE
+from malspark.agents.prompt_fragments import (
     NO_TOOLS_STATEMENT,
     PROVIDER_FAMILY,
     SANDBOX_FAMILY,
@@ -41,9 +41,13 @@ from maljan.agents.prompt_fragments import (
     tool_families,
     tool_names,
 )
-from maljan.core.config import ALL_SERVERS, Settings
-from maljan.core.container import ServiceContainer
-from maljan.providers.registry import discover_providers, sandbox_provider_ids, static_provider_ids
+from malspark.core.config import ALL_SERVERS, Settings
+from malspark.core.container import ServiceContainer
+from malspark.providers.registry import (
+    discover_providers,
+    sandbox_provider_ids,
+    static_provider_ids,
+)
 
 discover_providers()
 
@@ -125,7 +129,7 @@ class _Tool:
 
     def __init__(self, name: str, server: str = "") -> None:
         self.name = name
-        self.metadata = {"maljan_server": server} if server else {}
+        self.metadata = {"malspark_server": server} if server else {}
 
 
 class _Registry:
@@ -198,7 +202,7 @@ def _container(static_provider: str, sandbox_provider: str, profile: str) -> Ser
     container.get_server_registry = lambda: registry  # type: ignore[method-assign]
     # A mock container answers with the mock sandbox whatever is configured;
     # the guard wants the configured one, built as the registry builds it.
-    from maljan.providers.registry import get_sandbox_provider
+    from malspark.providers.registry import get_sandbox_provider
 
     sandbox = get_sandbox_provider(settings)
     container.get_sandbox_provider = lambda: sandbox  # type: ignore[method-assign]
@@ -329,7 +333,7 @@ class TestTheGuardWouldCatchOne:
         assert _violations(prompt, [_Tool("x", "analysis")], statement_expected=False)
 
     def test_a_workflow_for_a_sandbox_server_that_is_not_attached(self) -> None:
-        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+        from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider
 
         prompt = CAPE2SandboxProvider.CAPE_PROMPT_FRAGMENT
         assert _violations(prompt, [_Tool("sandbox_processes")], statement_expected=False)
@@ -472,13 +476,13 @@ def test_the_validation_turn_is_told_it_carries_no_tools(monkeypatch: Any) -> No
     """The retry after a cut answer is tools-free, and its prompt says so."""
     from langchain_core.messages import AIMessage
 
-    from maljan.pipeline.validation import Violation
-    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+    from malspark.pipeline.validation import Violation
+    from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
     told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
     answers = iter([told, told, []])
     monkeypatch.setattr(
-        "maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
+        "malspark.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
     )
     agent = _static_agent([_Tool("x", "knowledge")])
     sent: list[list[Any]] = []
@@ -531,7 +535,7 @@ class TestTheGuardCatchesAGenericPromise:
         assert not _violations(old, [_Tool("x", "analysis")], statement_expected=False)
 
     def test_a_script_fragment_naming_invoke_expression_is_not_a_promise(self) -> None:
-        from maljan.agents.prompt_fragments import format_fragment
+        from malspark.agents.prompt_fragments import format_fragment
 
         assert not _violations(format_fragment("ps1", "windows"), [], statement_expected=False)
 
@@ -574,13 +578,13 @@ class TestAToolsFreeCallKeepsTheProvidersGuidance:
     ) -> None:
         from langchain_core.messages import AIMessage
 
-        from maljan.pipeline.validation import Violation
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+        from malspark.pipeline.validation import Violation
+        from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
         told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
         answers = iter([told, told, []])
         monkeypatch.setattr(
-            "maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
+            "malspark.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
         )
         agent = _static_agent([_Tool("x", "knowledge")], provider="ghidra")
         sent: list[list[Any]] = []
@@ -607,7 +611,7 @@ class TestAToolsFreeCallKeepsTheProvidersGuidance:
         assert NO_TOOLS_STATEMENT in system
 
     def test_the_attached_fragment_carries_the_same_guidance(self) -> None:
-        from maljan.providers.static.ghidra import GHIDRA_GUIDANCE, GHIDRA_PROMPT_FRAGMENT
+        from malspark.providers.static.ghidra import GHIDRA_GUIDANCE, GHIDRA_PROMPT_FRAGMENT
 
         assert GHIDRA_GUIDANCE in GHIDRA_PROMPT_FRAGMENT
         assert "TOOL USAGE WORKFLOW" not in GHIDRA_GUIDANCE
@@ -667,7 +671,7 @@ class TestThePromptIsBuiltAfterTheToolsAttach:
 
 class TestTheListIsTheOneTheLoopBinds:
     def test_a_server_that_offers_only_delivery_tools_is_not_named(self) -> None:
-        from maljan.agents.prompt_fragments import tools_statement
+        from malspark.agents.prompt_fragments import tools_statement
 
         sent = [_Tool("put_sample", "remote"), _Tool("x", "knowledge")]
         assert "`remote`" not in tools_statement(sent)
@@ -676,7 +680,7 @@ class TestTheListIsTheOneTheLoopBinds:
     def test_a_stamped_provider_tool_is_the_providers_whatever_its_name(self) -> None:
         from langchain_core.tools import StructuredTool
 
-        from maljan.agents.prompt_fragments import stamp_source, tool_family
+        from malspark.agents.prompt_fragments import stamp_source, tool_family
 
         tool = StructuredTool.from_function(func=lambda: "", name="sandbox_like", description="d")
         (stamped,) = stamp_source([tool], PROVIDER_FAMILY)
@@ -687,8 +691,8 @@ class TestATurnThatCanCallNoToolSaysSo:
     def test_the_nudge_and_synthesis_system_turn_drops_the_loops_sentence(self) -> None:
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        from maljan.agents.base_agent import tool_free_turns
-        from maljan.agents.prompt_fragments import TOOL_FREE_TURN_STATEMENT, tools_statement
+        from malspark.agents.base_agent import tool_free_turns
+        from malspark.agents.prompt_fragments import TOOL_FREE_TURN_STATEMENT, tools_statement
 
         system = "HEAD\n\n" + tools_statement([_Tool("x", "knowledge")]) + "\n\nTAIL"
         out = tool_free_turns([SystemMessage(content=system), HumanMessage(content="h")])
@@ -743,7 +747,7 @@ def test_the_second_nudge_keeps_the_loops_system_turn() -> None:
     """Tools bound and forbidden: the transcript is the loop's, and only the nudge says no tool."""
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    from maljan.agents.prompt_fragments import tools_statement
+    from malspark.agents.prompt_fragments import tools_statement
 
     agent = _static_agent([_Tool("x", "knowledge")])
     system = "HEAD\n\n" + tools_statement([_Tool("x", "knowledge")]) + "\n\nTAIL"

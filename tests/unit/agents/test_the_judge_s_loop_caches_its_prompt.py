@@ -20,10 +20,10 @@ from unittest.mock import MagicMock
 from langchain_core.messages import HumanMessage
 from langchain_core.outputs import ChatResult
 
-from maljan.agents.technique_facts import STANDING_FACTS_CHARS
-from maljan.llm.anthropic_history import TOOL_LOOP_TURN, Memory, prepared
-from maljan.llm.anthropic_provider import cache_control
-from maljan.pipeline.run_state import RUN_STATE_BEGIN
+from malspark.agents.technique_facts import STANDING_FACTS_CHARS
+from malspark.llm.anthropic_history import TOOL_LOOP_TURN, Memory, prepared
+from malspark.llm.anthropic_provider import cache_control
+from malspark.pipeline.run_state import RUN_STATE_BEGIN
 from tests.unit.agents.test_standing_blocks_reach_the_prompts import FACTS
 from tests.unit.agents.test_standing_blocks_reach_the_prompts import _judge as _standing_judge
 from tests.unit.agents.test_the_judge_s_loop_is_budgeted import (
@@ -173,7 +173,7 @@ class TestTheNotedText:
     def test_the_note_survives_copy_deepcopy_and_pickle(self) -> None:
         import pickle
 
-        from maljan.agents.judge_agent import NotedText
+        from malspark.agents.judge_agent import NotedText
 
         text = NotedText("head and rest", {STANDING_FACTS_CHARS: 4})
         for again in (

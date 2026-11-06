@@ -25,15 +25,15 @@ from unittest.mock import patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     DECODE_EXCERPT_AROUND,
     Violation,
     _with_feedback,
     schema_violations,
 )
-from maljan.reporting import composer as composer_module
-from maljan.reporting.composer import _HostIdentifiersOut
-from maljan.utils import json_cleaner
+from malspark.reporting import composer as composer_module
+from malspark.reporting.composer import _HostIdentifiersOut
+from malspark.utils import json_cleaner
 from tests.credential_shapes import prefixed_key
 from tests.unit.reporting.test_a_repeated_item_is_asked_about_once import (
     _DISTINCT,

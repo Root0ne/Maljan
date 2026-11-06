@@ -598,7 +598,7 @@ class TestThePublisherIsTheGuarantee:
     """
 
     SECRET = "sk-" + "P" * 32
-    HOST_PATH = "/home/operator/maljan/data/samples/ab12/evil.exe"
+    HOST_PATH = "/home/operator/malspark/data/samples/ab12/evil.exe"
 
     def _published(self, redis_conn: _FakeRedis) -> list[dict[str, Any]]:
         return [json.loads(message) for _channel, message in redis_conn.published]
@@ -701,8 +701,8 @@ class TestThePublisherIsTheGuarantee:
         """
         from tests.credential_shapes import password
 
-        from maljan.core.model_assignments import model_label
-        from maljan.pipeline.events import remember_secret_values
+        from malspark.core.model_assignments import model_label
+        from malspark.pipeline.events import remember_secret_values
 
         remember_secret_values([password(20, variant=380)])
         for event_type, label in (
@@ -732,7 +732,7 @@ class TestThePublisherIsTheGuarantee:
         """The keys of a ``models`` mapping are model labels, held to the same rule."""
         from tests.credential_shapes import password
 
-        from maljan.pipeline.events import remember_secret_values
+        from malspark.pipeline.events import remember_secret_values
 
         remember_secret_values([password(20, variant=380)])
         key = prefixed_key("sk-ant-")
@@ -757,7 +757,7 @@ class TestThePublisherIsTheGuarantee:
         """
         from tests.credential_shapes import password
 
-        from maljan.pipeline.events import remember_secret_values
+        from malspark.pipeline.events import remember_secret_values
 
         secret = password(20, variant=380)
         remember_secret_values([secret])
@@ -794,7 +794,7 @@ class TestThePublisherIsTheGuarantee:
     def test_a_url_in_a_model_label_loses_its_userinfo(self) -> None:
         from tests.credential_shapes import password
 
-        from maljan.pipeline.events import remember_secret_values
+        from malspark.pipeline.events import remember_secret_values
 
         remember_secret_values([password(20, variant=380)])
         userinfo = f"ops:{password(12, variant=7)}"
@@ -808,7 +808,7 @@ class TestThePublisherIsTheGuarantee:
     def test_with_no_values_registered_a_model_label_gets_the_whole_scrub(self) -> None:
         """No configured value to mask by (a process that registered none, or a failed
         registration): the shape rules are what keeps a key out, as for a finding row."""
-        from maljan.pipeline.events import secret_registration_failed
+        from malspark.pipeline.events import secret_registration_failed
 
         key = prefixed_key("sk-ant-")
         (row,) = self._publish("model_usage", {"model": f"anthropic/{key}"})[1].added

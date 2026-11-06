@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from maljan.analysis.efficiency import efficiency_lines, efficiency_record, output_record
-from maljan.analysis.run_summary import spend_blocks
-from maljan.core.token_ledger import (
+from malspark.analysis.efficiency import efficiency_lines, efficiency_record, output_record
+from malspark.analysis.run_summary import spend_blocks
+from malspark.core.token_ledger import (
     RETRY_DROPS_QUESTION_CALL,
     VALIDATION_RETRY_CALL,
     WHOLE_ANSWER_RETRY_CALL,

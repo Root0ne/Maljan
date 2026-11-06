@@ -18,14 +18,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import BaseModel, SecretStr
 
-from maljan.core import plugins
-from maljan.core.config import Settings
-from maljan.core.exceptions import MemoryStoreError
-from maljan.memory import store_factory
-from maljan.memory.function_hash_store import FunctionHashStore, FunctionMatch
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import MemoryStore, StoredCase
-from maljan.memory.qdrant_store import QdrantStore
+from malspark.core import plugins
+from malspark.core.config import Settings
+from malspark.core.exceptions import MemoryStoreError
+from malspark.memory import store_factory
+from malspark.memory.function_hash_store import FunctionHashStore, FunctionMatch
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import MemoryStore, StoredCase
+from malspark.memory.qdrant_store import QdrantStore
 
 URL = "http://qdrant.internal:6333"
 
@@ -210,7 +210,7 @@ def _payload(case: StoredCase) -> dict[str, Any]:
 
 
 def _seed_cases(*cases: StoredCase) -> None:
-    _FakeQdrant.seed = {"maljan_cases_v2": {i: _payload(c) for i, c in enumerate(cases)}}
+    _FakeQdrant.seed = {"malspark_cases_v2": {i: _payload(c) for i, c in enumerate(cases)}}
 
 
 def _in_process_with(*cases: StoredCase) -> InMemoryStore:
@@ -291,7 +291,7 @@ class TestReadiness:
 
     def test_qdrant_answers_from_its_server(self) -> None:
         answer = store_factory.build_memory_store(_settings("qdrant")).readiness()
-        assert "maljan_cases_v2" in answer
+        assert "malspark_cases_v2" in answer
 
     def test_an_unreachable_qdrant_raises_a_memory_store_error_naming_no_password(self) -> None:
         _FakeQdrant.down = True
@@ -440,7 +440,7 @@ class TestHealthProbesTheConfiguredBackend:
 class TestTheFunctionMatchStepUsesTheConfiguredBackend:
     @staticmethod
     def _step(config: Any) -> Any:
-        from maljan.pipeline.nodes import _function_matches_step
+        from malspark.pipeline.nodes import _function_matches_step
 
         provider = SimpleNamespace(
             capabilities=SimpleNamespace(provides_function_hashes=True),
@@ -459,7 +459,7 @@ class TestTheFunctionMatchStepUsesTheConfiguredBackend:
 
     def test_qdrant_answers_from_its_function_hash_collection(self) -> None:
         _FakeQdrant.seed = {
-            "maljan_function_hashes_v1": {
+            "malspark_function_hashes_v1": {
                 1: {"func_hash": "h1", "family": "FamilyA", "sample_id": "older", "func_name": "f1"}
             }
         }
@@ -486,7 +486,7 @@ class TestTheFunctionMatchStepUsesTheConfiguredBackend:
         assert "pw-123" not in value["reason"]
 
     def test_no_store_is_built_for_a_provider_that_cannot_hash(self) -> None:
-        from maljan.pipeline.nodes import _function_matches_step
+        from malspark.pipeline.nodes import _function_matches_step
 
         provider = SimpleNamespace(capabilities=SimpleNamespace(provides_function_hashes=False))
         container = SimpleNamespace(
@@ -504,7 +504,7 @@ class TestTheFunctionMatchStepUsesTheConfiguredBackend:
 class TestTheStaticAnalystHintUsesTheConfiguredBackend:
     @staticmethod
     def _hint(config: Any) -> tuple[str, list[str]]:
-        from maljan.agents.static_analyst import StaticAnalyst
+        from malspark.agents.static_analyst import StaticAnalyst
 
         asked: list[str] = []
 
@@ -528,7 +528,7 @@ class TestTheStaticAnalystHintUsesTheConfiguredBackend:
                 use_function_hash_attribution=True, function_hash_max_matches=8
             ),
         )
-        with patch("maljan.core.config.get_settings", return_value=settings):
+        with patch("malspark.core.config.get_settings", return_value=settings):
             hint = StaticAnalyst._compute_function_hash_hint(analyst, "/m/s.bin", "this")  # type: ignore[arg-type]
         return hint, asked
 
@@ -540,7 +540,7 @@ class TestTheStaticAnalystHintUsesTheConfiguredBackend:
         assert "FamilyA" in hint and asked == ["/m/s.bin"]
 
     def test_an_analyst_with_no_container_reads_no_memory(self, third_backend: Any) -> None:
-        from maljan.agents.static_analyst import StaticAnalyst
+        from malspark.agents.static_analyst import StaticAnalyst
 
         analyst = SimpleNamespace(
             _provider=lambda: SimpleNamespace(
@@ -555,7 +555,7 @@ class TestTheStaticAnalystHintUsesTheConfiguredBackend:
                 use_function_hash_attribution=True, function_hash_max_matches=8
             ),
         )
-        with patch("maljan.core.config.get_settings", return_value=settings):
+        with patch("malspark.core.config.get_settings", return_value=settings):
             hint = StaticAnalyst._compute_function_hash_hint(analyst, "/m/s.bin", "this")  # type: ignore[arg-type]
         assert hint == ""
 
@@ -564,7 +564,7 @@ class TestTheCommandLineUsesTheFactory:
     def test_the_dry_run_counts_on_any_backend(self, monkeypatch: Any) -> None:
         from typer.testing import CliRunner
 
-        from maljan import cli
+        from malspark import cli
 
         _seed_cases(THIN, RICH, FAILED)
         monkeypatch.setattr(cli, "Settings", lambda: _settings("qdrant"))
@@ -599,7 +599,7 @@ class TestABackendIsSelectedAndConfiguredThroughTheSettings:
     def test_its_settings_reach_the_catalogue_with_the_annotations_it_registered(
         self, third_backend: Any
     ) -> None:
-        from maljan.core.settings_catalog import core_catalog
+        from malspark.core.settings_catalog import core_catalog
 
         by_key = {e.key: e for e in core_catalog()}
         assert by_key["core.memory.third.endpoint"].title == "Third endpoint"
@@ -607,7 +607,7 @@ class TestABackendIsSelectedAndConfiguredThroughTheSettings:
         assert "third" in by_key["core.memory.backend"].choices
 
     def test_the_backend_choice_is_the_registry(self) -> None:
-        from maljan.core.settings_catalog import core_catalog
+        from malspark.core.settings_catalog import core_catalog
 
         (entry,) = [e for e in core_catalog() if e.key == "core.memory.backend"]
         assert entry.type == "enum"
@@ -673,7 +673,7 @@ class TestTheOldFlatKeysAreStillRead:
 
 class TestABackendWithoutTheNewMethods:
     def test_one_built_on_the_defaults_degrades_like_any_other(self) -> None:
-        from maljan.memory.long_term_memory import MemoryStoreDefaults
+        from malspark.memory.long_term_memory import MemoryStoreDefaults
 
         class _Plain(MemoryStoreDefaults):
             def store(self, case: Any) -> None: ...
@@ -756,7 +756,7 @@ class TestTheFunctionHashStoreIsBuiltOncePerSettings:
 class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
     @staticmethod
     def _run(config: Any, decision: str = "Malware") -> tuple[list[dict[str, Any]], Any, list[str]]:
-        from maljan.pipeline import nodes
+        from malspark.pipeline import nodes
 
         asked: list[str] = []
 
@@ -767,13 +767,13 @@ class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
         provider = SimpleNamespace(
             capabilities=SimpleNamespace(provides_function_hashes=True), function_hashes=_hashes
         )
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer(config)
         container.get_static_provider = lambda: provider  # type: ignore[method-assign]
         state = {"static_sample_path": "/mirror/s.bin", "file_hash": "this"}
         with (
-            patch("maljan.core.config.get_settings", return_value=config),
+            patch("malspark.core.config.get_settings", return_value=config),
             patch.object(nodes, "_assessed_family", return_value="FamilyB"),
         ):
             report = nodes._function_hash_attribution(  # type: ignore[arg-type]
@@ -787,7 +787,7 @@ class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
 
     def test_qdrant_reads_and_holds_its_function_hash_collection(self) -> None:
         _FakeQdrant.seed = {
-            "maljan_function_hashes_v1": {
+            "malspark_function_hashes_v1": {
                 1: {"func_hash": "h1", "family": "FamilyA", "sample_id": "older", "func_name": "f1"}
             }
         }
@@ -795,14 +795,14 @@ class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
         assert [row["family"] for row in report] == ["FamilyA"]
         store, sample_id, family, functions = held
         assert isinstance(store, FunctionHashStore)
-        assert store._collection == "maljan_function_hashes_v1"
+        assert store._collection == "malspark_function_hashes_v1"
         assert (sample_id, family, functions) == ("this", "FamilyB", [("f1", "h1"), ("f2", "h2")])
         assert asked == ["/mirror/s.bin"]
 
     @pytest.mark.parametrize("decision", ["Suspicious", "Benign", ""])
     def test_a_family_beside_a_softer_verdict_is_read_but_never_held(self, decision: str) -> None:
         _FakeQdrant.seed = {
-            "maljan_function_hashes_v1": {
+            "malspark_function_hashes_v1": {
                 1: {"func_hash": "h1", "family": "FamilyA", "sample_id": "older", "func_name": "f1"}
             }
         }
@@ -816,7 +816,7 @@ class TestTheContainerStoreIsTheFactorys:
 
     @staticmethod
     def _container_store(config: Any) -> Any:
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer(config)
         first = container.get_memory_store()
@@ -881,7 +881,7 @@ class TestABrokenPackageBackendNeverStopsTheSettings:
         assert "vectorhub_client is not installed" in component["error"]
 
     def test_a_run_goes_on_without_memory(self, broken: Any) -> None:
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer(broken)
         with pytest.raises(store_factory.MemoryBackendNotConfiguredError):
@@ -892,8 +892,8 @@ class TestABrokenPackageBackendNeverStopsTheSettings:
 
 class TestOneMapOfMovedKeys:
     def test_the_flat_memory_keys_are_read_off_the_renamed_settings(self) -> None:
-        from maljan.core.config import LEGACY_MEMORY_KEYS
-        from maljan.core.settings_annotations import RENAMED_SETTINGS
+        from malspark.core.config import LEGACY_MEMORY_KEYS
+        from malspark.core.settings_annotations import RENAMED_SETTINGS
 
         assert LEGACY_MEMORY_KEYS == {
             old.removeprefix("core.memory."): tuple(new.removeprefix("core.memory.").split(".", 1))
@@ -937,8 +937,8 @@ class TestARunningJobKeepsTheStoreItHolds:
 
     @staticmethod
     def _job(config: Any) -> Any:
-        from maljan.core.container import ServiceContainer
-        from maljan.pipeline import nodes
+        from malspark.core.container import ServiceContainer
+        from malspark.pipeline import nodes
 
         provider = SimpleNamespace(
             capabilities=SimpleNamespace(provides_function_hashes=True),
@@ -948,7 +948,7 @@ class TestARunningJobKeepsTheStoreItHolds:
         container.get_static_provider = lambda: provider  # type: ignore[method-assign]
         state = {"static_sample_path": "/mirror/s.bin", "file_hash": "this"}
         with (
-            patch("maljan.core.config.get_settings", return_value=config),
+            patch("malspark.core.config.get_settings", return_value=config),
             patch.object(nodes, "_assessed_family", return_value="FamilyB"),
         ):
             nodes._function_hash_attribution(  # type: ignore[arg-type]
@@ -966,7 +966,7 @@ class TestARunningJobKeepsTheStoreItHolds:
         assert held_client.closed == 0  # still held by the running job
 
         assert container.remember_the_run() is True  # the job's write succeeds
-        assert set(held_client.collections["maljan_function_hashes_v1"]) != set()
+        assert set(held_client.collections["malspark_function_hashes_v1"]) != set()
         assert held_client.closed == 1  # closed once the job let go
         assert _FakeQdrant.built[-1].closed == 0  # the new store stays open
 
@@ -1030,7 +1030,7 @@ class TestHoldsAreNeverLost:
         assert closed_while_held == []
 
     def test_a_replaced_pending_write_lets_go_of_its_store(self) -> None:
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer(_settings("qdrant"))
         first = store_factory.acquire_function_hash_store(_settings("qdrant"))
@@ -1042,7 +1042,7 @@ class TestHoldsAreNeverLost:
         assert container.pending_function_hashes[0] is second
 
     def test_a_hold_handed_over_after_teardown_is_let_go_of_at_once(self) -> None:
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer(_settings("qdrant"))
         asyncio.run(container.aclose())
@@ -1108,14 +1108,14 @@ class TestQdrantDescribesItsOwnSettings:
     LEAVES = {"url", "collection", "function_hash_collection", "api_key"}
 
     def test_the_registration_carries_the_annotations_and_the_shared_table_none(self) -> None:
-        from maljan.core.settings_annotations import ANNOTATIONS
-        from maljan.memory.store_factory import registered_backends
+        from malspark.core.settings_annotations import ANNOTATIONS
+        from malspark.memory.store_factory import registered_backends
 
         assert set(registered_backends()["qdrant"].annotations) == self.LEAVES
         assert not [key for key in ANNOTATIONS if key.startswith("memory.qdrant.")]
 
     def test_the_catalogue_still_shows_each_leaf_as_described(self) -> None:
-        from maljan.core.settings_catalog import core_catalog
+        from malspark.core.settings_catalog import core_catalog
 
         entries = {e.path: e for e in core_catalog() if e.path.startswith("memory.qdrant.")}
         assert set(entries) == {f"memory.qdrant.{leaf}" for leaf in self.LEAVES}

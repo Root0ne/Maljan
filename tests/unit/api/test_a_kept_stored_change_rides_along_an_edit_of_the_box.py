@@ -11,8 +11,8 @@ from __future__ import annotations
 import pytest
 
 from app.services.server_map import ServerMapError, validate_server_map
-from maljan.core.config import Settings
-from maljan.core.tool_declarations import with_mark
+from malspark.core.config import Settings
+from malspark.core.tool_declarations import with_mark
 
 RANKED = {"reputation": {"rank": 30}}
 

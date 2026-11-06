@@ -21,11 +21,11 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.composition import aresolve_agent, resolve_agent
-from maljan.agents.mcp_client import MCPLangChainToolkit
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import MCPServerConfig, Settings, ToolRef
-from maljan.core.container import ServiceContainer
+from malspark.agents.composition import aresolve_agent, resolve_agent
+from malspark.agents.mcp_client import MCPLangChainToolkit
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.core.config import MCPServerConfig, Settings, ToolRef
+from malspark.core.container import ServiceContainer
 
 
 class _McpTool:
@@ -83,7 +83,7 @@ def attached(monkeypatch):
     monkeypatch.setattr(MCPLangChainToolkit, "__init__", _record)
     monkeypatch.setattr(MCPLangChainToolkit, "initialize", _initialize)
     monkeypatch.setattr(
-        "maljan.providers.servers._run_async",
+        "malspark.providers.servers._run_async",
         lambda coro, label="": asyncio.run(coro),
     )
     return made
@@ -195,7 +195,7 @@ def test_every_toolkit_of_the_job_holds_the_containers_own_ledger(attached, atta
 
 def test_a_toolkit_asked_for_another_ledger_still_records_on_the_jobs(attached):
     container = ServiceContainer(_settings(), mock=True)
-    from maljan.core.truncation_ledger import TruncationLedger
+    from malspark.core.truncation_ledger import TruncationLedger
 
     registry = container.get_server_registry()
     registry.tools_for("network", container.job_key(), truncation_ledger=TruncationLedger())

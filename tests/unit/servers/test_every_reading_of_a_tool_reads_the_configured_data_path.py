@@ -22,10 +22,10 @@ from typing import Any
 import pytest
 
 from app.services.tool_availability import as_rows, unavailable_tools
-from maljan.core.config import Settings
-from maljan.providers.servers import ServerHandle
-from maljan.tools import capabilities, emulated_strings, rules, sidecar_needs
-from maljan.tools.capabilities import ToolNeeds, data, module
+from malspark.core.config import Settings
+from malspark.providers.servers import ServerHandle
+from malspark.tools import capabilities, emulated_strings, rules, sidecar_needs
+from malspark.tools.capabilities import ToolNeeds, data, module
 
 ROOT = Path(__file__).resolve().parents[3]
 ANALYSIS_SERVER = ROOT / "services" / "analysis-mcp" / "server.py"
@@ -69,7 +69,7 @@ class TestWhatTheLaunchIsHanded:
         assert sidecar_needs.handed_env(block, settings) == {OVERRIDE: "/srv/rules/capa"}
 
     def test_a_relative_setting_is_handed_absolute_and_stripped(self) -> None:
-        from maljan.core.paths import resolve_data
+        from malspark.core.paths import resolve_data
 
         settings = Settings()
         settings.static.capa.rules_dir = "  rules/capa  "
@@ -79,7 +79,7 @@ class TestWhatTheLaunchIsHanded:
         }
 
     def test_the_default_spelt_otherwise_hands_nothing(self) -> None:
-        from maljan.core.paths import resolve_data
+        from malspark.core.paths import resolve_data
 
         settings = Settings()
         block = settings.mcp.servers["analysis"]
@@ -131,7 +131,7 @@ class _Toolkit:
 
 
 def _launch_env(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> dict[str, str]:
-    import maljan.agents.mcp_client as mcp_client
+    import malspark.agents.mcp_client as mcp_client
 
     monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", _Toolkit)
     handle = ServerHandle("analysis", settings.mcp.servers["analysis"])
@@ -157,9 +157,9 @@ class TestTheServerProcess:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A handle and its replica for another loop launch with the job's settings."""
-        import maljan.agents.mcp_client as mcp_client
-        from maljan.core import config as core_config
-        from maljan.providers.servers import ServerRegistry
+        import malspark.agents.mcp_client as mcp_client
+        from malspark.core import config as core_config
+        from malspark.providers.servers import ServerRegistry
 
         monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", _Toolkit)
         monkeypatch.setattr(core_config, "_settings_instance", None)
@@ -182,8 +182,8 @@ class TestTheServerProcess:
 
     def test_a_providers_handle_carries_the_settings_it_was_built_from(self) -> None:
         """The generic static provider and the CAPE provider hand their launch the job's."""
-        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
-        from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+        from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider
+        from malspark.providers.static.generic_mcp import GenericMCPStaticProvider
 
         cfg = Settings()
         cfg.static.capa.rules_dir = "/srv/rules/capa"
@@ -198,8 +198,8 @@ class TestTheServerProcess:
     def test_a_launch_of_no_declared_sidecar_reads_no_settings(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core import config as core_config
-        from maljan.core.config import MCPServerConfig
+        from malspark.core import config as core_config
+        from malspark.core.config import MCPServerConfig
 
         def _unread() -> Settings:
             raise AssertionError("settings read for a launch nothing is handed to")
@@ -213,12 +213,12 @@ class TestTheServerProcess:
     def test_its_capa_reads_the_handed_directory_else_the_default(
         self, root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.providers.static import capa_yara
+        from malspark.providers.static import capa_yara
 
         staging = root / "staging"
         staging.mkdir()
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(staging))
-        monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", "")
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(staging))
+        monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", "")
         spec = importlib.util.spec_from_file_location("analysis_mcp_server_t499", ANALYSIS_SERVER)
         assert spec and spec.loader
         analysis = importlib.util.module_from_spec(spec)

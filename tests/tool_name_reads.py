@@ -507,14 +507,14 @@ def findings(
     modules: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and (
-            node.level or (node.module or "").startswith("maljan")
+            node.level or (node.module or "").startswith("malspark")
         ):
             for alias in node.names:
                 if alias.name in shared and alias.name not in tool_params:
                     tool_params[alias.asname or alias.name] = shared[alias.name]
                 modules.add(alias.asname or alias.name)
         elif isinstance(node, ast.Import):
-            modules |= {a.asname or a.name for a in node.names if a.name.startswith("maljan")}
+            modules |= {a.asname or a.name for a in node.names if a.name.startswith("malspark")}
 
     seen: set[tuple[int, int, str]] = set()
 
@@ -603,7 +603,7 @@ NAME_READ_SNIPPETS: tuple[str, ...] = (
     'def f(tool):\n    if tool == "floss":\n        pass\n',
     'found = tool_of(row) in ("strings", "iocs_from_file")\n',
     'name = entry.tool\nif name == "capa":\n    pass\n',
-    "from maljan.analysis.sandbox_sections import ITEMS_TOOL\nok = row.tool == ITEMS_TOOL\n",
+    "from malspark.analysis.sandbox_sections import ITEMS_TOOL\nok = row.tool == ITEMS_TOOL\n",
     "def f(entry):\n    names = {'capa'}\n    return entry.tool in names\n",
     'match entry.tool:\n    case "capa":\n        pass\n',
     'x = {"capa": 1}.get(entry.tool)\n',
@@ -614,7 +614,7 @@ NAME_READ_SNIPPETS: tuple[str, ...] = (
     "value = getattr(module, entry.tool)\n",
     'ok = entry["tool"] in BUILDERS\n',
     "x = TABLE[str(entry.tool)]\n",
-    "from maljan.reporting import legacy_tool_names as legacy\nok = legacy.X\n",
+    "from malspark.reporting import legacy_tool_names as legacy\nok = legacy.X\n",
     'ok = str(getattr(entry, "tool", "") or "") != "function_index"\n',
     'ok = getattr(entry, "tool", None) == "capa"\n',
     "ok = bare_name(entry.tool) in ASSERTING_SOURCES\n",
@@ -622,9 +622,9 @@ NAME_READ_SNIPPETS: tuple[str, ...] = (
     'ok = entry.tool.lower() == "capa"\n',
     'ok = entry["tool"] == "capa"\n',
     'ok = _tool(entry) == "pe_info"\n',
-    "from maljan.core.legacy_tool_tables import RULE_TOOLS\n",
+    "from malspark.core.legacy_tool_tables import RULE_TOOLS\n",
     'ok = "decompil" in entry.tool\n',
-    "from maljan.core.legacy_reputation import stored_report_counts\n",
+    "from malspark.core.legacy_reputation import stored_report_counts\n",
     'tool, ok = entry.tool, entry.ok\nfound = tool == "capa"\n',
     'tool, ok = entry.tool, entry.ok\nfound = ok == tool\nbad = tool.startswith("x")\n',
     'tools = [e.tool for e in entries]\nfound = "capa" in tools\n',

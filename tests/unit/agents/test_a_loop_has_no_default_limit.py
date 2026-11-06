@@ -23,7 +23,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     NO_LIMIT,
     BaseAnalyst,
     BudgetCeiling,
@@ -34,10 +34,10 @@ from maljan.agents.base_agent import (
     model_turns_left,
     recursion_limit,
 )
-from maljan.core.spend import SpendMeter
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.generation_rate import model_name_of
-from maljan.pipeline.run_state import budget_line, render_run_state
+from malspark.core.spend import SpendMeter
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.generation_rate import model_name_of
+from malspark.pipeline.run_state import budget_line, render_run_state
 from tests.unit.agents.test_no_room_ends_the_loop import (
     _a_budget_that_runs_out,
     _loop_turns,
@@ -123,7 +123,7 @@ def _analyst(model: _Model, ledger: TokenLedger | None = None) -> _Analyst:
 
 
 def _run(agent: _Analyst) -> str:
-    with patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)):
+    with patch("malspark.agents.base_agent.loop_limits", return_value=(None, None)):
         return agent.execute_tool_loop([("system", "s"), ("human", TASK)])
 
 
@@ -133,20 +133,20 @@ def _records(agent: _Analyst) -> list[dict[str, Any]]:
 
 class TestTheDefaultsAreNone:
     def test_loop_limits_reads_none_from_a_deployment_that_set_none(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         cfg = Settings(_env_file=None)
-        with patch("maljan.agents.base_agent.get_settings", lambda: cfg):
+        with patch("malspark.agents.base_agent.get_settings", lambda: cfg):
             for agent in ("static", "dynamic", "network", "judge", "lead", "static_r2"):
                 assert loop_limits(agent) == (None, None), agent
 
     def test_an_operator_s_value_still_wins(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         cfg = Settings(
             _env_file=None, react_agent_timeout=240, react_agent_max_steps_overrides={"judge": 7}
         )
-        with patch("maljan.agents.base_agent.get_settings", lambda: cfg):
+        with patch("malspark.agents.base_agent.get_settings", lambda: cfg):
             assert loop_limits("judge") == (240, 7)
             assert loop_limits("static") == (240, None)
 
@@ -255,7 +255,7 @@ class TestALoopWithNoLimit:
         assert record["cap"] == "spend"
 
     def test_a_chunk_is_not_started_past_the_ceiling(self) -> None:
-        from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+        from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
 
         model = _Model(calls=10_000, seen=[])
         meter = SpendMeter(
@@ -279,7 +279,7 @@ class TestALoopWithNoLimit:
         ]
         import pytest
 
-        from maljan.core.exceptions import AnalystError
+        from malspark.core.exceptions import AnalystError
 
         with pytest.raises(AnalystError, match="not started, the spend ceiling is reached"):
             agent.safe_analyze_isr_chunked(chunks)

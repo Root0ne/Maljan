@@ -23,8 +23,8 @@ from app.api.v1.jobs import router as jobs_router
 from app.api.v1.system import router as system_router
 from app.database import get_db
 from app.deps import get_current_user, optional_current_user
-from maljan.core.config import Settings
-from maljan.tools import capabilities, emulated_strings
+from malspark.core.config import Settings
+from malspark.tools import capabilities, emulated_strings
 
 # A corpus that holds: the check before a job looks for a non-empty file, and
 # the scan for a rule, so a fixture that means "held" writes one.
@@ -142,7 +142,7 @@ def _status(user: Any, settings: Settings | None = None) -> dict[str, Any]:
     app = FastAPI()
     app.include_router(system_router, prefix="/api/v1")
     app.dependency_overrides[optional_current_user] = lambda: user
-    fake = MagicMock(app_name="Maljan", app_version="0.1.0")
+    fake = MagicMock(app_name="Malspark", app_version="0.1.0")
     with (
         patch("app.api.v1.system.settings", fake),
         patch(

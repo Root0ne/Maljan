@@ -25,10 +25,10 @@ from tests.unit.core.test_every_model_call_is_counted import (
     _Tooling,
 )
 
-from maljan.agents import base_agent
-from maljan.core.exceptions import AnalystError
-from maljan.core.input_meter import InputMeter
-from maljan.core.token_ledger import TokenLedger
+from malspark.agents import base_agent
+from malspark.core.exceptions import AnalystError
+from malspark.core.input_meter import InputMeter
+from malspark.core.token_ledger import TokenLedger
 
 
 def _metered(agent: Any) -> InputMeter:

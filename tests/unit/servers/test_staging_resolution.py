@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from maljan.agents import composition, sample_staging
+from malspark.agents import composition, sample_staging
 
 
 class _Handle:
@@ -72,7 +72,7 @@ def _tool_from(server: str) -> Any:
         func=lambda: "x",
         name="identify_file",
         description="x",
-        metadata={"maljan_server": server},
+        metadata={"malspark_server": server},
     )
 
 
@@ -97,7 +97,7 @@ class TestNothingRemoteToStageTo:
         def _must_not_run(*args: Any, **kwargs: Any) -> Any:
             raise AssertionError("a stdio-only deployment must not submit a staging coroutine")
 
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         original = base_agent.run_coro_blocking
         base_agent.run_coro_blocking = _must_not_run  # type: ignore[assignment]
@@ -147,7 +147,7 @@ class TestTheWarningNamesTheJob:
     ) -> None:
         container = _Container(_Registry({"remote": _Handle("remote", "http")}), _sample(tmp_path))
 
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         original = base_agent.run_coro_blocking
 
@@ -170,8 +170,8 @@ class TestTheWarningNamesTheJob:
         assert "sample staging skipped for job job-42" in caplog.text
 
     def test_the_container_hands_the_resolver_its_job_id(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         assert ServiceContainer(Settings(), mock=True, job_id="job-9").job_key() == "job-9"
 
@@ -181,8 +181,8 @@ class TestTheWarningNamesTheJob:
         the process alone would hand a recycled pid the last run's directory."""
         import os
 
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer(Settings(), mock=True)
         key = container.job_key()

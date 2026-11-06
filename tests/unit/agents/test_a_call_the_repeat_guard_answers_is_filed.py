@@ -15,24 +15,24 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import earlier_chunks_block
-from maljan.agents.evidence_recorder import (
+from malspark.agents.base_agent import earlier_chunks_block
+from malspark.agents.evidence_recorder import (
     EvidenceRecorder,
     RepeatGuard,
     record_tools,
     seeded_repeat_guard,
 )
-from maljan.agents.function_map import keeps_for_the_map
-from maljan.pipeline.nodes import evidence_summary
-from maljan.pipeline.validation import decompiled_functions
-from maljan.reporting.models import (
+from malspark.agents.function_map import keeps_for_the_map
+from malspark.pipeline.nodes import evidence_summary
+from malspark.pipeline.validation import decompiled_functions
+from malspark.reporting.models import (
     EvidenceIndexRow,
     FileHashes,
     MalwareReport,
     SampleIdentity,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import EvidenceCounter, LedgerEntry
 
 LISTING = "int FUN_00401000(void)\n{ return decode(0x10); }"
 
@@ -176,7 +176,7 @@ class TestARepeatIsReadAsARepeat:
 
 class TestARepeatCostsNoBudget:
     def test_a_later_answer_fits_however_many_repeats_came_before(self) -> None:
-        from maljan.schemas.evidence import apply_budget
+        from malspark.schemas.evidence import apply_budget
 
         first = LedgerEntry(id="ev_0001", tool="strings", output="a" * 40)
         repeats = [

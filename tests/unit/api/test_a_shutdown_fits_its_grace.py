@@ -39,7 +39,7 @@ def test_docker_waits_as_long_as_the_worker_s_own_shutdown_bounds_add_up_to() ->
 def _isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from app import config as api_config
     from app import runtime_config as rc
-    from maljan.core.config import reset_settings_cache
+    from malspark.core.config import reset_settings_cache
 
     async def _allowed() -> dict[str, Any]:
         return {"api.mock_mode_allowed": True}
@@ -50,7 +50,7 @@ def _isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         patch("minio.Minio", side_effect=ConnectionError("no object store here")),
         patch.dict(
             "os.environ",
-            {"MALJAN_MOCK_MODE": "true", "UPLOAD_TEMP_DIR": str(tmp_path / "tmp")},
+            {"MALSPARK_MOCK_MODE": "true", "UPLOAD_TEMP_DIR": str(tmp_path / "tmp")},
             clear=False,
         ),
     ):
@@ -80,7 +80,7 @@ async def test_a_keep_that_does_not_fit_is_abandoned_and_the_stop_still_recorded
         return True
 
     with (
-        patch("maljan.app.MaljanApp.arun", new=_long_run),
+        patch("malspark.app.MalsparkApp.arun", new=_long_run),
         patch.object(worker_module, "keep_the_stopped_run", _slow_keep),
         patch.object(worker_module, "STOP_KEEP_GRACE", 0.05),
     ):

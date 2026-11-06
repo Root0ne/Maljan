@@ -23,12 +23,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.extractors.capability_matrix import FINDING_ONLY_REASON, build_capability_matrix
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import Bundle
+from malspark.extractors.capability_matrix import FINDING_ONLY_REASON, build_capability_matrix
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import Bundle
 
 # Enterprise-only, on a sample that is not.
 ENTERPRISE = "T1027"
@@ -193,8 +193,8 @@ class TestWhatIsLeftAlone:
         assert [cell.not_published for cell in cells] == [""]
 
     def test_the_check_itself_says_nothing_about_it(self) -> None:
-        from maljan.pipeline.validation import expected_technique_scope, platform_mismatch_message
-        from maljan.tools import knowledge
+        from malspark.pipeline.validation import expected_technique_scope, platform_mismatch_message
+        from malspark.tools import knowledge
 
         scope = expected_technique_scope(ANDROID)
 
@@ -209,7 +209,7 @@ class TestWhatIsLeftAlone:
         difference worth printing. What it is not is a reason to withhold the
         technique.
         """
-        from maljan.qa.fp_linter import lint_report
+        from malspark.qa.fp_linter import lint_report
 
         report = _report(ANDROID, PRE_ONLY)
 

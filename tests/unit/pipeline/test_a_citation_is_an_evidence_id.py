@@ -15,15 +15,15 @@ import json
 from typing import Any
 from unittest.mock import patch
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     CITATION_NOT_EVIDENCE_CODE,
     FEEDBACK_PREAMBLE,
     citation_violations,
     pack_line_ids,
 )
-from maljan.reporting.composer import ReportComposer
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.narrative_agent import NarrativeAgent
+from malspark.reporting.composer import ReportComposer
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.narrative_agent import NarrativeAgent
 
 CITABLE = ["ev_0001", "ev_0004", "ev_0011"]
 
@@ -86,8 +86,8 @@ class TestAnIdInsideTheSamplesOwnTextIsNotCitable:
     )
 
     def _block(self) -> str:
-        from maljan.pipeline.triage_pack import render_pack
-        from maljan.schemas.evidence import build_entry, format_entry_id
+        from malspark.pipeline.triage_pack import render_pack
+        from malspark.schemas.evidence import build_entry, format_entry_id
 
         answer = {
             "strings": [
@@ -130,7 +130,7 @@ class TestAnIdInsideTheSamplesOwnTextIsNotCitable:
         )
         composer = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(composer.compose(_report(), facts_block=self._block()))
 
@@ -141,7 +141,7 @@ class TestAnIdInsideTheSamplesOwnTextIsNotCitable:
         llm = _Answers(_intro("Packed [ev_0042]."))
         composer = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(
                 composer.compose(
@@ -188,7 +188,7 @@ class TestTheComposer:
         composer = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
         facts = "Facts established before analysis\n[ev_0001] identity: pe\n[ev_0004] pe: dll"
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(composer.compose(report, facts_block=facts))
         return report, composer
@@ -246,7 +246,7 @@ class TestTheNarrative:
         agent = NarrativeAgent(llm=llm)  # type: ignore[arg-type]
         facts = "Facts established before analysis\n[ev_0011] reputation: VirusTotal 52/75"
         with patch(
-            "maljan.reporting.narrative_agent.structured_output_supported_for_llm",
+            "malspark.reporting.narrative_agent.structured_output_supported_for_llm",
             return_value=False,
         ):
             out = asyncio.run(agent.generate(_report(), facts_block=facts))
@@ -275,8 +275,8 @@ class TestOnlyProseIsAskedAboutItsBrackets:
         assert citation_violations(channel, CITABLE, prose=("body", "text")) == []
 
     def test_the_composer_reads_no_record_section(self) -> None:
-        from maljan.reporting.composer import _PROSE_FIELDS, _C2Out, _CliFlagsOut
-        from maljan.reporting.models import EncryptionScheme, RansomNote
+        from malspark.reporting.composer import _PROSE_FIELDS, _C2Out, _CliFlagsOut
+        from malspark.reporting.models import EncryptionScheme, RansomNote
 
         for schema in (_C2Out, _CliFlagsOut, EncryptionScheme, RansomNote):
             assert _PROSE_FIELDS.get(schema, ()) == ()
@@ -343,7 +343,7 @@ class TestAdjacentBracketsAreEachJudged:
 
 class TestTheNarrativeProseFields:
     def test_a_key_finding_s_text_is_read_and_its_id_list_is_not(self) -> None:
-        from maljan.reporting.narrative_agent import NARRATIVE_PROSE
+        from malspark.reporting.narrative_agent import NARRATIVE_PROSE
 
         answer = {
             "executive_summary": "A loader [ev_0011].",

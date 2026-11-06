@@ -31,8 +31,8 @@ from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.core.config import ChunkingConfig
-from maljan.pipeline.nodes import REVISION_INPUT_NOT_LOADED, make_revision_node
+from malspark.core.config import ChunkingConfig
+from malspark.pipeline.nodes import REVISION_INPUT_NOT_LOADED, make_revision_node
 
 
 @dataclass
@@ -216,7 +216,7 @@ class TestAnInputThatCannotBeLoadedIsNotRevisedAndIsSaid:
         import time
         from types import SimpleNamespace
 
-        from maljan.pipeline.nodes import _debate_record
+        from malspark.pipeline.nodes import _debate_record
 
         record = _debate_record(
             SimpleNamespace(key="debate"), time.monotonic(), agent_reasons={"dynamic": "why"}
@@ -287,7 +287,7 @@ class TestRoundZeroClaimsSurviveTheRevisionRound:
     def test_the_guard_sees_the_sandbox_report_as_data(self) -> None:
         """The guard itself, directly: a sandbox report present means the
         analyst had data, whatever the file loader says."""
-        from maljan.pipeline.nodes import _revision_input_is_absent
+        from malspark.pipeline.nodes import _revision_input_is_absent
 
         c = _container({"dynamic": _placeholder("dynamic")})
         c.load_sandbox_data_for_agent.return_value = [_Chunk(content='{"processes": []}')]
@@ -299,7 +299,7 @@ class TestRoundZeroClaimsSurviveTheRevisionRound:
     def test_without_a_sandbox_report_the_loader_check_still_applies(self) -> None:
         """(b) A truly data-less analyst: no sandbox report, loader placeholder
         only. It is skipped, and it stays empty."""
-        from maljan.pipeline.nodes import _revision_input_is_absent
+        from malspark.pipeline.nodes import _revision_input_is_absent
 
         c = _container({"static": _REAL_DATA, "dynamic": _placeholder("dynamic")})
         state = _state()
@@ -336,7 +336,7 @@ class TestTheDataLessDistinctionIsCarriedAsDataAndInTheReason:
     """
 
     def test_the_skipped_reason_names_its_cause_and_its_analysts(self) -> None:
-        from maljan.pipeline.nodes import NO_SANDBOX_DATA_REASON, skipped_analysts_reason
+        from malspark.pipeline.nodes import NO_SANDBOX_DATA_REASON, skipped_analysts_reason
 
         assert (
             skipped_analysts_reason(NO_SANDBOX_DATA_REASON, ["dynamic", "network"])
@@ -344,7 +344,7 @@ class TestTheDataLessDistinctionIsCarriedAsDataAndInTheReason:
         )
 
     def test_the_report_reads_a_skipped_reason_back(self) -> None:
-        from maljan.reporting.renderers.markdown import _skipped_after
+        from malspark.reporting.renderers.markdown import _skipped_after
 
         assert _skipped_after(["analysts skipped (no sandbox data): dynamic, network"]) == [
             ("no sandbox data", ["dynamic", "network"])
@@ -353,7 +353,7 @@ class TestTheDataLessDistinctionIsCarriedAsDataAndInTheReason:
 
     def test_the_reason_string_stays_partitionable(self) -> None:
         """The degradation reason keeps the shape a reader partitions on."""
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         summary = (
             RunSummaryBuilder(start_time=0.0)
@@ -367,7 +367,7 @@ class TestTheDataLessDistinctionIsCarriedAsDataAndInTheReason:
         assert {p.strip() for p in tail.split(",")} == {"dynamic", "network"}
 
     def test_a_dataless_analyst_is_flagged_in_agent_stats(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         summary = (
             RunSummaryBuilder(start_time=0.0)
@@ -389,7 +389,7 @@ class TestTheDataLessDistinctionIsCarriedAsDataAndInTheReason:
         }
 
     def test_the_markdown_says_no_data_beside_that_analyst(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         summary = (
             RunSummaryBuilder(start_time=0.0)
@@ -409,7 +409,7 @@ class TestTheDataLessDistinctionIsCarriedAsDataAndInTheReason:
 
     def test_omitting_the_flag_keeps_every_analyst_unflagged(self) -> None:
         """Existing callers pass no `no_data` at all, and must be unaffected."""
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         summary = (
             RunSummaryBuilder(start_time=0.0)

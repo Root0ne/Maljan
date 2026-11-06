@@ -16,14 +16,14 @@ from typing import Any
 
 from stix2validator import ValidationOptions, validate_instance
 
-from maljan.pipeline.validation import UNKNOWN_OBJECT_PATH_CODE, validate_verdict_bundle
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.pipeline.validation import UNKNOWN_OBJECT_PATH_CODE, validate_verdict_bundle
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_PATTERN_CODE,
     ExtendedSTIXRenderer,
 )
-from maljan.schemas.stix_models import Bundle
-from maljan.schemas.stix_pattern import object_path_problems
+from malspark.schemas.stix_models import Bundle
+from malspark.schemas.stix_pattern import object_path_problems
 
 SHA256 = "e" * 64
 REFUSED = (

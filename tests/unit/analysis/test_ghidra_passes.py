@@ -15,7 +15,7 @@ import httpx
 import pytest
 from tests.unit.fake_ghidra import X64_BASE, FakeGhidra
 
-from maljan.providers.static.ghidra.passes import (
+from malspark.providers.static.ghidra.passes import (
     ANTI_ANALYSIS_TOOL,
     SCAN_CHECKS,
     GhidraPasses,
@@ -59,7 +59,7 @@ def _image(code: dict[int, bytes], functions: list[tuple[int, int]] | None = Non
     """A synthetic x64 image with ``code`` written at offsets into ``.text``."""
     from tests.unit.tools.synthetic_pe import TEXT_RVA, SyntheticPE
 
-    from maljan.tools import pe_image
+    from malspark.tools import pe_image
 
     image = SyntheticPE(image_base=X64_BASE, functions=functions or [(TEXT_RVA, TEXT_RVA + 0x300)])
     for offset, blob in code.items():
@@ -183,7 +183,7 @@ class TestWhatIsStated:
     def test_a_32_bit_file_and_no_file_give_no_gs_read(self) -> None:
         from tests.unit.tools.synthetic_pe import TEXT_RVA, SyntheticPE
 
-        from maljan.tools import pe_image
+        from malspark.tools import pe_image
 
         built = SyntheticPE(
             image_base=0x400000, is64=False, functions=[(TEXT_RVA, TEXT_RVA + 0x300)]

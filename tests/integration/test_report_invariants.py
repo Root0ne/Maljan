@@ -9,7 +9,7 @@ layer that computed it and wrong in the layer the user actually reads**. The
 * View-decomposition produced ATT&CK technique IDs that the free-text parser
   then dropped, so the report shipped with none.
 * The D11 guardrail let a rule through and the namer fell back to
-  ``Maljan_AutoGen_unknown`` — the exact placeholder the gate exists to stop.
+  ``Malspark_AutoGen_unknown`` — the exact placeholder the gate exists to stop.
 
 So these tests deliberately span layers: one report object is pushed through
 the persistence extractor *and* every renderer, and the assertions are about
@@ -25,9 +25,9 @@ from typing import Any
 import pytest
 
 from app.worker.analysis_worker import _extract_confidence
-from maljan.reporting.detection_signatures import build_detection_rules
-from maljan.reporting.figures import build_figures
-from maljan.reporting.models import (
+from malspark.reporting.detection_signatures import build_detection_rules
+from malspark.reporting.figures import build_figures
+from malspark.reporting.models import (
     CapabilityCell,
     FileHashes,
     MalwareReport,
@@ -38,7 +38,7 @@ from maljan.reporting.models import (
     StaticAnalysis,
     TTPMapping,
 )
-from maljan.reporting.renderers import (
+from malspark.reporting.renderers import (
     ExtendedSTIXRenderer,
     HtmlRenderer,
     MarkdownRenderer,
@@ -193,12 +193,12 @@ class TestSignatureNamingIsNeverAPlaceholder:
         report = _report()
         suricata = [r for r in build_detection_rules(report) if r.kind == "suricata"]
         assert suricata, "no Suricata rule generated from the network IOCs"
-        assert suricata[0].name == f"Maljan_AutoGen_Suricata_Sample_{'c' * 12}"
+        assert suricata[0].name == f"Malspark_AutoGen_Suricata_Sample_{'c' * 12}"
 
     def test_rule_bodies_never_contain_the_autogen_stub(self) -> None:
         report = _report()
         for rule in build_detection_rules(report):
-            assert "Maljan_AutoGen_unknown" not in rule.body
+            assert "Malspark_AutoGen_unknown" not in rule.body
             assert "Family: unknown" not in rule.body
 
 

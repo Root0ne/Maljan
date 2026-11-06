@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core import builtin_declarations as shipped
-from maljan.core.settings_overrides import shipped_tool_facts
-from maljan.core.tool_declarations import (
+from malspark.core import builtin_declarations as shipped
+from malspark.core.settings_overrides import shipped_tool_facts
+from malspark.core.tool_declarations import (
     FIELDS_AFTER_WHOLE_MAPS,
     WHOLE_MAP_FIELDS,
     ToolFacts,

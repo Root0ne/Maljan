@@ -14,8 +14,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder, build_consolidated_iocs
-from maljan.reporting.models import (
+from malspark.reporting.builder import MalwareReportBuilder, build_consolidated_iocs
+from malspark.reporting.models import (
     EvidenceSection,
     FileHashes,
     JudgeIndicator,
@@ -24,7 +24,7 @@ from maljan.reporting.models import (
     StaticAnalysis,
     StringIOC,
 )
-from maljan.schemas.evidence import build_entry
+from malspark.schemas.evidence import build_entry
 
 NAME = "only-judge.example.net"
 SEEN = "no: seen only in the text of ev_0007 (floss), and no second source in this run records it"

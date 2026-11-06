@@ -2,7 +2,7 @@
 
 ``ran_on`` (T-324) names, as sources, where the platform's readings behind a
 triage pack entry ran when one ran on a server of its own
-(``maljan.tools.readers``). It goes into the row ``_evidence_row`` builds,
+(``malspark.tools.readers``). It goes into the row ``_evidence_row`` builds,
 comes out of the reader as the entry carried it, and reads back into a ledger
 entry unchanged. A row written before the column, or for an entry whose
 readings all ran in the worker, holds none and reads as empty; the chain
@@ -29,7 +29,7 @@ from app.models.evidence import EvidenceEntry
 from app.schemas.evidence import EvidenceEntryResponse
 from app.services import ledger_chain
 from app.worker.analysis_worker import _evidence_row
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 
 _REV = (
     Path(__file__).resolve().parents[3]

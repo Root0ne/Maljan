@@ -17,12 +17,12 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis.run_summary import RunSummaryBuilder, unknown_window_split_sentence
-from maljan.core.config import ChunkingConfig
-from maljan.core.container import unknown_window_split_line
-from maljan.core.truncation_ledger import TruncationLedger
-from maljan.llm.context_window import unknown_window_remedy
-from maljan.loaders.binary_chunker import (
+from malspark.analysis.run_summary import RunSummaryBuilder, unknown_window_split_sentence
+from malspark.core.config import ChunkingConfig
+from malspark.core.container import unknown_window_split_line
+from malspark.core.truncation_ledger import TruncationLedger
+from malspark.llm.context_window import unknown_window_remedy
+from malspark.loaders.binary_chunker import (
     CHUNK_CHARS,
     SHIPPED_CHUNK_CHARS,
     SIZED_BY,
@@ -73,7 +73,7 @@ class TestAnUnknownWindowSplitIsStated:
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         container = _container(network="n" * 200_000)
-        with caplog.at_level(logging.WARNING, logger="maljan"):
+        with caplog.at_level(logging.WARNING, logger="malspark"):
             container.load_data_for_agent(
                 "network", file_hash="abc", sandbox_report={"network": {}}, room=_room(None)
             )
@@ -156,7 +156,7 @@ class TestTheSplitIsStatedOnceAndCountedAsTheNodeSendsIt:
         # The generic role's static context is a load of its own inside the
         # agent's load: only the outermost states the split, with the whole count.
         container = _container(role="generic", sample="s" * 200_000)
-        with caplog.at_level(logging.WARNING, logger="maljan"):
+        with caplog.at_level(logging.WARNING, logger="malspark"):
             chunks = container.load_data_for_agent(
                 "agent", file_hash="abc", sandbox_report={"rows": ["r" * 150_000]}, room=_room(None)
             )

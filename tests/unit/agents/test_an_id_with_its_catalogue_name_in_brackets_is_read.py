@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents.base_agent import read_claim_blocks, read_technique_line
+from malspark.agents.base_agent import read_claim_blocks, read_technique_line
 
 
 @pytest.mark.parametrize(

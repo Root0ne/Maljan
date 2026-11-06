@@ -12,11 +12,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from maljan.analysis.sigma_layer import _OS_PRODUCTS
-from maljan.extractors.sample_identity import PLATFORM_BY_FILE_TYPE
-from maljan.memory.attck_loader import MITRE_PLATFORM_MAP
-from maljan.qa.fp_linter import _PLATFORM_INCOMPATIBLE_TERMS
-from maljan.reporting.models import KNOWN_PLATFORMS
+from malspark.analysis.sigma_layer import _OS_PRODUCTS
+from malspark.extractors.sample_identity import PLATFORM_BY_FILE_TYPE
+from malspark.memory.attck_loader import MITRE_PLATFORM_MAP
+from malspark.qa.fp_linter import _PLATFORM_INCOMPATIBLE_TERMS
+from malspark.reporting.models import KNOWN_PLATFORMS
 
 _WEB_TYPES = (
     Path(__file__).resolve().parents[3] / "apps" / "web" / "src" / "types" / "malware-report.ts"

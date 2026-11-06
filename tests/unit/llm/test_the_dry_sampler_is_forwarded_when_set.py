@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import OpenAIConfig, Settings
-from maljan.llm.openai_provider import LLAMA_CPP_EXTRA_KEYS, OpenAIProvider, forget_standard_only
+from malspark.core.config import OpenAIConfig, Settings
+from malspark.llm.openai_provider import LLAMA_CPP_EXTRA_KEYS, OpenAIProvider, forget_standard_only
 
 DRY = {"dry_multiplier": 0.8, "dry_base": 1.75, "dry_allowed_length": 2, "dry_penalty_last_n": -1}
 

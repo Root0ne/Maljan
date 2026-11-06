@@ -10,7 +10,7 @@ The integration points verified:
   - container.get_memory_store() returns the shared InMemoryStore.
   - After a mock run, the store can be queried.
   - Manually storing a case makes it retrievable by the next run's judge.
-  - MaljanApp exposes the memory store through its container.
+  - MalsparkApp exposes the memory store through its container.
   - Memory store survives multiple app.run() calls (cross-run retention).
 """
 
@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import MemoryStore, StoredCase, build_stored_case
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import MemoryStore, StoredCase, build_stored_case
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -27,9 +27,9 @@ from maljan.memory.long_term_memory import MemoryStore, StoredCase, build_stored
 
 
 def _make_app(mock: bool = True) -> object:
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
-    return MaljanApp(mock=mock)
+    return MalsparkApp(mock=mock)
 
 
 def _make_case(sample_id: str, summary: str, ttps: list[str]) -> StoredCase:
@@ -56,8 +56,8 @@ class TestContainerMemoryLifecycle:
 
     @staticmethod
     def _make_container() -> Any:
-        from maljan.core.config import MemoryConfig, Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import MemoryConfig, Settings
+        from malspark.core.container import ServiceContainer
 
         cfg = Settings(memory=MemoryConfig(backend="memory"))
         return ServiceContainer(config=cfg, mock=True)
@@ -88,15 +88,15 @@ class TestContainerMemoryLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# MaljanApp memory store exposure
+# MalsparkApp memory store exposure
 # ---------------------------------------------------------------------------
 
 
-class TestMaljanAppMemoryStore:
+class TestMalsparkAppMemoryStore:
     def test_app_container_has_memory_store(self) -> None:
-        from maljan.app import MaljanApp
+        from malspark.app import MalsparkApp
 
-        app = MaljanApp(mock=True)
+        app = MalsparkApp(mock=True)
         store = app.container.get_memory_store()
         assert isinstance(store, MemoryStore)
 
@@ -106,11 +106,11 @@ class TestMaljanAppMemoryStore:
         Forces ``backend='memory'`` so the test gets a fresh InMemoryStore
         regardless of the global default (which is ``qdrant`` in production).
         """
-        from maljan.app import MaljanApp
-        from maljan.core.config import MemoryConfig, Settings
+        from malspark.app import MalsparkApp
+        from malspark.core.config import MemoryConfig, Settings
 
         cfg = Settings(memory=MemoryConfig(backend="memory"))
-        app = MaljanApp(config=cfg, mock=True)
+        app = MalsparkApp(config=cfg, mock=True)
         store = app.container.get_memory_store()
 
         # Pre-populate with a past case
@@ -130,11 +130,11 @@ class TestMaljanAppMemoryStore:
 
     def test_multiple_runs_accumulate_cases(self) -> None:
         """Each successful verdict stores a case; count grows across runs."""
-        from maljan.app import MaljanApp
+        from malspark.app import MalsparkApp
 
         # Mock mode judge node returns stix_output={} and skips LTM store.
         # This test verifies no crash occurs and the store stays stable.
-        app = MaljanApp(mock=True)
+        app = MalsparkApp(mock=True)
         store = app.container.get_memory_store()
 
         initial_count = store.count()
@@ -153,7 +153,7 @@ class TestMaljanAppMemoryStore:
 
 class TestBuildStoredCaseIntegration:
     def test_build_and_store_then_retrieve(self) -> None:
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+        from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
         store = InMemoryStore()
 
@@ -192,7 +192,7 @@ class TestBuildStoredCaseIntegration:
         assert "T1490" in results[0].technique_ids
 
     def test_upsert_updates_existing_case(self) -> None:
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+        from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
         store = InMemoryStore()
 

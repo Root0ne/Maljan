@@ -13,9 +13,9 @@ actually decides whether the negotiation continues — instead.
 
 from __future__ import annotations
 
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import Settings, install_settings, reset_settings_cache
-from maljan.pipeline.routing import ConsensusRouter
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.core.config import Settings, install_settings, reset_settings_cache
+from malspark.pipeline.routing import ConsensusRouter
 
 
 def _install(**agents) -> Settings:
@@ -48,7 +48,7 @@ class TestTheRouterRespectsWhicheverProfileIsRunning:
 
     def test_a_reduced_profile_runs_only_the_analysts_it_names(self) -> None:
         _install(profiles={"lean": {"analysts": ["static", "network"]}}, profile="lean")
-        from maljan.agents.composition import current_analyst_keys
+        from malspark.agents.composition import current_analyst_keys
 
         assert current_analyst_keys() == ["static", "network"]
 
@@ -160,7 +160,7 @@ class TestTheRunSummaryRecordsTheProfileThatRan:
             profiles={"wide": {"analysts": ["network", "strings"]}},
             profile="wide",
         )
-        from maljan.analysis.run_summary import _attribution_layers
+        from malspark.analysis.run_summary import _attribution_layers
 
         # The rule layers are every declared asserting tool's corroboration name.
         assert _attribution_layers() == [
@@ -175,6 +175,6 @@ class TestTheRunSummaryRecordsTheProfileThatRan:
 
     def test_the_judges_empty_analyst_check_covers_exactly_the_profile(self) -> None:
         _install(profiles={"lean": {"analysts": ["network"]}}, profile="lean")
-        from maljan.agents.composition import current_analyst_keys
+        from malspark.agents.composition import current_analyst_keys
 
         assert current_analyst_keys() == ["network"]

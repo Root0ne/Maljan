@@ -22,8 +22,8 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.judge_agent import final_contradictions
-from maljan.pipeline.debate_facts import analysts_to_revise, read_claim_references, read_marks
+from malspark.agents.judge_agent import final_contradictions
+from malspark.pipeline.debate_facts import analysts_to_revise, read_claim_references, read_marks
 from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 
 GOLDEN = (

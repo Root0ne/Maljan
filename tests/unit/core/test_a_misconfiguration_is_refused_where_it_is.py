@@ -14,16 +14,16 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import Settings
-from maljan.core.exceptions import LLMError
-from maljan.core.model_assignments import assignment_chain_for
-from maljan.core.settings_overrides import (
+from malspark.core.config import Settings
+from malspark.core.exceptions import LLMError
+from malspark.core.model_assignments import assignment_chain_for
+from malspark.core.settings_overrides import (
     StoredValueRefused,
     build_settings,
     settings_from_store,
     stored_settings,
 )
-from maljan.llm.registry import LLMProviderRegistry
+from malspark.llm.registry import LLMProviderRegistry
 
 UNKNOWN_PROVIDER = "nosuchprovider"
 
@@ -88,7 +88,7 @@ class TestAnAgentModelNamesARegisteredProvider:
 
 
 def _entry(provider: str):
-    from maljan.core.config import AgentLLMConfig
+    from malspark.core.config import AgentLLMConfig
 
     return AgentLLMConfig.model_construct(
         provider=provider,

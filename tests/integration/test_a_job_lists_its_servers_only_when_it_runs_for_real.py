@@ -33,7 +33,7 @@ class _FakeMinioClient:
 def _isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
     from app import config as api_config
     from app import runtime_config as rc
-    from maljan.core.config import reset_settings_cache
+    from malspark.core.config import reset_settings_cache
 
     async def _allowed() -> dict[str, Any]:
         return {"api.mock_mode_allowed": True}
@@ -74,9 +74,9 @@ async def _run(mock: bool, listed: list[Any]) -> dict[str, Any]:
 
     result = _pipeline_result()
     with (
-        patch.dict("os.environ", {"MALJAN_MOCK_MODE": "true" if mock else "false"}),
+        patch.dict("os.environ", {"MALSPARK_MOCK_MODE": "true" if mock else "false"}),
         patch.object(served_declarations_store, "list_before_run", _list),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=result)),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=result)),
     ):
         return await run_analysis({"redis": _redis(), "db_session": factory}, str(job.id))
 
@@ -93,7 +93,7 @@ async def test_a_mock_run_lists_no_server() -> None:
 @pytest.mark.asyncio
 async def test_a_run_for_real_lists_them_before_its_app_is_built() -> None:
     listed: list[Any] = []
-    with patch("maljan.app.MaljanApp.__init__", side_effect=AssertionError("built first")):
+    with patch("malspark.app.MalsparkApp.__init__", side_effect=AssertionError("built first")):
         result = await _run(False, listed)
     assert len(listed) == 1
     # The listing stood in for the rest of the run: it stopped there.

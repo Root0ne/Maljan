@@ -35,7 +35,7 @@ import pytest
 
 class TestTheCeilingIsExplicit:
     def test_threads_and_batch_are_bounded_by_default(self) -> None:
-        from maljan.memory import embeddings
+        from malspark.memory import embeddings
 
         assert 1 <= embeddings._EMBED_THREADS <= 4, (
             "onnxruntime allocates per thread; the default must not follow the "
@@ -47,33 +47,33 @@ class TestTheCeilingIsExplicit:
 
     def test_both_are_tunable_from_the_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A host with memory to spare should not need a patch to go faster."""
-        from maljan.memory import embeddings
+        from malspark.memory import embeddings
 
-        monkeypatch.setenv("MALJAN_EMBED_THREADS", "8")
-        monkeypatch.setenv("MALJAN_EMBED_BATCH", "128")
+        monkeypatch.setenv("MALSPARK_EMBED_THREADS", "8")
+        monkeypatch.setenv("MALSPARK_EMBED_BATCH", "128")
         reloaded = importlib.reload(embeddings)
         try:
             assert reloaded._EMBED_THREADS == 8
             assert reloaded._EMBED_BATCH == 128
         finally:
-            monkeypatch.delenv("MALJAN_EMBED_THREADS", raising=False)
-            monkeypatch.delenv("MALJAN_EMBED_BATCH", raising=False)
+            monkeypatch.delenv("MALSPARK_EMBED_THREADS", raising=False)
+            monkeypatch.delenv("MALSPARK_EMBED_BATCH", raising=False)
             importlib.reload(embeddings)
 
     def test_a_nonsense_value_cannot_disable_the_bound(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.memory import embeddings
+        from malspark.memory import embeddings
 
-        monkeypatch.setenv("MALJAN_EMBED_THREADS", "0")
-        monkeypatch.setenv("MALJAN_EMBED_BATCH", "-5")
+        monkeypatch.setenv("MALSPARK_EMBED_THREADS", "0")
+        monkeypatch.setenv("MALSPARK_EMBED_BATCH", "-5")
         reloaded = importlib.reload(embeddings)
         try:
             assert reloaded._EMBED_THREADS >= 1
             assert reloaded._EMBED_BATCH >= 1
         finally:
-            monkeypatch.delenv("MALJAN_EMBED_THREADS", raising=False)
-            monkeypatch.delenv("MALJAN_EMBED_BATCH", raising=False)
+            monkeypatch.delenv("MALSPARK_EMBED_THREADS", raising=False)
+            monkeypatch.delenv("MALSPARK_EMBED_BATCH", raising=False)
             importlib.reload(embeddings)
 
 
@@ -92,7 +92,7 @@ class TestTheLimitsReachTheModel:
         """
         import inspect
 
-        from maljan.memory import embeddings
+        from malspark.memory import embeddings
 
         source = inspect.getsource(embeddings._try_load_fastembed)
         assert "threads=_EMBED_THREADS" in source
@@ -100,7 +100,7 @@ class TestTheLimitsReachTheModel:
     def test_the_batch_size_is_passed_to_embed(self) -> None:
         import inspect
 
-        from maljan.memory import embeddings
+        from malspark.memory import embeddings
 
         source = inspect.getsource(embeddings.encode_batch_with_backend)
         assert "batch_size=_EMBED_BATCH" in source

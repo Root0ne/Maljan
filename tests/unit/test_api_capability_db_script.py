@@ -153,7 +153,7 @@ class TestTheLinuxBlock:
     says something a reader could not have assumed."""
 
     def test_every_linux_rule_names_a_technique_the_catalogue_allows_on_linux(self) -> None:
-        from maljan.memory.attck_loader import technique_entry
+        from malspark.memory.attck_loader import technique_entry
 
         script = _script()
         linux = [t for t in script.ATTCK_TECHNIQUES if "linux" in (t.get("platforms") or [])]

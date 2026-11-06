@@ -1,7 +1,7 @@
 """What each tool server last declared of its own tools, kept past the process that listed it.
 
 A server may declare its tools itself when it lists them
-(``maljan.core.served_declarations``); the platform's own sidecars do, and
+(``malspark.core.served_declarations``); the platform's own sidecars do, and
 ship no table of their tools anywhere else. One row per source (``mcp:<key>``,
 ``provider:<id>``): the declaration its last listing gave, under the launch
 identity of the block that reached it (``tool_declarations.launch_identity``).

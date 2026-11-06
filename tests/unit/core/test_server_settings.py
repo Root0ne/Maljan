@@ -8,7 +8,7 @@ import sys
 import pytest
 from pydantic import SecretStr
 
-from maljan.core.config import (
+from malspark.core.config import (
     SERVER_KEY_PATTERN,
     MCPServerConfig,
     Settings,
@@ -26,7 +26,7 @@ def test_the_two_sidecars_are_seeded_with_todays_launch_parameters():
     assert network.cwd == "services/network-mcp"
     # The two that say which directories a capture may be read from, and
     # nothing else: no credential of any kind reaches this sidecar.
-    assert network.env_allow == ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"]
+    assert network.env_allow == ["MALSPARK_STAGING_DIR", "MALSPARK_SAMPLE_ROOTS"]
     assert network.agents == ["network"]
     assert network.tools is None, "None means every tool, which is today's behaviour"
 
@@ -67,7 +67,7 @@ def test_static_generic_is_a_reference_to_a_server_key():
 
 
 def test_the_sandbox_gains_rest_with_a_full_default_tree():
-    from maljan.providers.registry import sandbox_provider_ids
+    from malspark.providers.registry import sandbox_provider_ids
 
     assert "rest" in sandbox_provider_ids()
     rest = Settings(_env_file=None).sandbox.rest

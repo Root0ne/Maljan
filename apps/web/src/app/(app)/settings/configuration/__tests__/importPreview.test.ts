@@ -44,7 +44,7 @@ const entriesByKey: Record<string, CatalogEntry> = {
   [listEntry.key]: listEntry,
 };
 
-function doc(values: Record<string, unknown>, format = "maljan-settings/1"): ImportDoc {
+function doc(values: Record<string, unknown>, format = "malspark-settings/1"): ImportDoc {
   return { format, values };
 }
 
@@ -77,7 +77,7 @@ describe("buildImportPreview", () => {
   });
 
   it("reads the format an export writes now and the one written before", () => {
-    for (const format of ["maljan-settings/3", "maljan-settings/2", "maljan-settings/1"]) {
+    for (const format of ["malspark-settings/3", "malspark-settings/2", "malspark-settings/1"]) {
       const result = buildImportPreview(doc({ [knownEntry.key]: 20 }, format), entriesByKey, {
         [knownEntry.key]: 5,
       });
@@ -88,7 +88,7 @@ describe("buildImportPreview", () => {
 
   it("errors an unsupported format and skips every value", () => {
     const result = buildImportPreview(
-      doc({ [knownEntry.key]: 20 }, "maljan-settings/4"),
+      doc({ [knownEntry.key]: 20 }, "malspark-settings/4"),
       entriesByKey,
       { [knownEntry.key]: 5 }
     );
@@ -142,7 +142,7 @@ describe("buildImportPreview", () => {
 
   it("errors as an unsupported format when values is missing or not an object", () => {
     const missing = buildImportPreview(
-      { format: "maljan-settings/1", values: undefined },
+      { format: "malspark-settings/1", values: undefined },
       entriesByKey,
       {}
     );
@@ -150,7 +150,7 @@ describe("buildImportPreview", () => {
     expect(missing.errors).toEqual({ format: "unsupported format" });
 
     const notAnObject = buildImportPreview(
-      { format: "maljan-settings/1", values: "not an object" },
+      { format: "malspark-settings/1", values: "not an object" },
       entriesByKey,
       {}
     );

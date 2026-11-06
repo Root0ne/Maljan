@@ -14,11 +14,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.worker.analysis_worker import run_analysis
-from maljan.app import MaljanApp
-from maljan.core.container import ServiceContainer
-from maljan.memory import embeddings
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import StoredCase, memory_owner_of, recall
+from malspark.app import MalsparkApp
+from malspark.core.container import ServiceContainer
+from malspark.memory import embeddings
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import StoredCase, memory_owner_of, recall
 from tests.integration.test_worker_job_lifecycle import (  # noqa: F401 — fixtures
     _answer_reads,
     _isolated_runtime_settings,
@@ -60,8 +60,8 @@ async def _run_as(ctx: dict[str, Any], session: AsyncMock, owner: uuid.UUID, aru
     _answer_reads(session, [_result(job), _result(_make_sample())])
     api_config._settings = None
     with (
-        patch.dict("os.environ", {"MALJAN_MOCK_MODE": "true"}, clear=False),
-        patch("maljan.app.MaljanApp.arun", new=arun),
+        patch.dict("os.environ", {"MALSPARK_MOCK_MODE": "true"}, clear=False),
+        patch("malspark.app.MalsparkApp.arun", new=arun),
     ):
         result = await run_analysis(ctx, str(job.id))
     api_config._settings = None
@@ -77,7 +77,7 @@ async def test_two_users_jobs_never_read_each_other_s_memory(
     monkeypatch.setattr(embeddings, "_try_load_fastembed", lambda: _Model())
     shared = InMemoryStore()
     monkeypatch.setattr(ServiceContainer, "get_memory_store", lambda self: shared)
-    original = MaljanApp.arun
+    original = MalsparkApp.arun
     owners: list[str | None] = []
     read: list[list[str]] = []
 

@@ -4,7 +4,7 @@
  * Any server whose tool declares `kind: reputation` is a reputation source.
  * Its answer is read once, through the paths its declaration gives, when the
  * entry is written, and the report carries every such record in `reputation`
- * (`maljan.core.reputation`): the service's declared name, the engine counts,
+ * (`malspark.core.reputation`): the service's declared name, the engine counts,
  * the labels, the dates, the link and the service's own words. This module
  * reads only that record — no tool name, no service's answer shape — so a
  * reputation server an operator adds draws the same section as the built-ins.

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from maljan.utils.peak_memory import maxrss_bytes, rss_to_bytes
+from malspark.utils.peak_memory import maxrss_bytes, rss_to_bytes
 
 
 class TestPeakMemoryInBytes:

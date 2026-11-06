@@ -1,6 +1,6 @@
-"""Every module the repository tracks under src/maljan must still import by name.
+"""Every module the repository tracks under src/malspark must still import by name.
 
-The layout branch moves directories. ``maljan.*`` is the one namespace it may
+The layout branch moves directories. ``malspark.*`` is the one namespace it may
 not move. A move that renames a module, drops one from the wheel, or breaks an
 import chain shows up here as a failing import rather than as a 500 in the API
 three tasks later.
@@ -31,9 +31,9 @@ GOLDEN_MODULES: tuple[str, ...] = (
 
 
 def tracked_modules() -> list[str]:
-    """Dotted module names for every tracked .py file under src/maljan."""
+    """Dotted module names for every tracked .py file under src/malspark."""
     out = subprocess.run(
-        ["git", "ls-files", "src/maljan"],
+        ["git", "ls-files", "src/malspark"],
         cwd=ROOT,
         capture_output=True,
         text=True,

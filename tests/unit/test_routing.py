@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from maljan.pipeline.routing import (
+from malspark.pipeline.routing import (
     MIN_CONVERGENCE_CONFIDENCE,
     ConsensusRouter,
     is_confidence_stable,
 )
-from maljan.pipeline.state import AnalysisState
+from malspark.pipeline.state import AnalysisState
 
 # ---------------------------------------------------------------------------
 # Helpers

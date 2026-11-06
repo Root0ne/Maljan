@@ -9,8 +9,8 @@ turn never asked about them and the judge never saw them.
 
 from __future__ import annotations
 
-from maljan.analysis.chunk_merger import merge_chunk_isrs
-from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
+from malspark.analysis.chunk_merger import merge_chunk_isrs
+from malspark.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
 
 
 def _isr(claims: list[ClaimEvidence] | None = None) -> AgentISR:

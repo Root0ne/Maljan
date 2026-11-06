@@ -19,14 +19,14 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.nodes import evidence_summary
-from maljan.reporting.composer import _bundle_text
-from maljan.reporting.composer_pro import analyst_bundle
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.redone_calls import redone_failures
-from maljan.reporting.renderers import MarkdownRenderer
-from maljan.reporting.renderers.layout import ANALYST, BUNDLE
-from maljan.schemas.evidence import LedgerEntry
+from malspark.pipeline.nodes import evidence_summary
+from malspark.reporting.composer import _bundle_text
+from malspark.reporting.composer_pro import analyst_bundle
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.redone_calls import redone_failures
+from malspark.reporting.renderers import MarkdownRenderer
+from malspark.reporting.renderers.layout import ANALYST, BUNDLE
+from malspark.schemas.evidence import LedgerEntry
 from tests.unit.reporting._report_inventory import stored_runs
 
 GATE, OTHER = 0x2475A10, 0x2475B20
@@ -599,7 +599,7 @@ def test_without_a_redone_call_the_limitations_are_shown_what_they_were() -> Non
 
 
 def _stored_ledger(run: str) -> list[Any]:
-    from maljan.reporting.follow_up import stored_ledger
+    from malspark.reporting.follow_up import stored_ledger
 
     root = stored_runs()
     path = root / run / "evidence.json" if root is not None else None

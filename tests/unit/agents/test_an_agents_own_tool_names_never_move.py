@@ -17,8 +17,8 @@ from typing import Any
 import pytest
 from langchain_core.tools import StructuredTool
 
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.providers.servers import ServerHandle
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.providers.servers import ServerHandle
 
 # What each server offers, by key; a tool answers with its owner's name.
 OFFERS: dict[str, list[str]] = {
@@ -50,7 +50,7 @@ def _served(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _container(kit_roles: list[str]) -> Any:
-    from maljan.core.container import ServiceContainer
+    from malspark.core.container import ServiceContainer
 
     cfg = Settings(_env_file=None)
     cfg.mcp.servers["kit"] = MCPServerConfig(enabled=True, command="kit", agents=kit_roles)
@@ -136,7 +136,7 @@ class TestABuiltInRole:
     async def test_the_judge_s_own_servers_keep_their_names(self) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         container = _container(["judge"])
         judge = JudgeAgent(llm=MagicMock(), config=container.config)
@@ -170,12 +170,12 @@ class TestAGenericAgent:
         return cfg
 
     def _container(self) -> Any:
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         return ServiceContainer(config=self._settings(), mock=True)
 
     def test_the_resolved_definition_keeps_its_names(self) -> None:
-        from maljan.agents.composition import resolve_agent
+        from malspark.agents.composition import resolve_agent
 
         resolved = resolve_agent("x", self._container())
         answers = _answers(list(resolved.tools))
@@ -183,10 +183,10 @@ class TestAGenericAgent:
         assert answers["kit__pe_info"] == "kit"
 
     def test_the_awaited_resolution_does_the_same(self) -> None:
-        from maljan.agents.composition import aresolve_agent
+        from malspark.agents.composition import aresolve_agent
 
         resolved = asyncio.run(aresolve_agent("x", self._container()))
-        names = {t.name: (t.metadata or {}).get("maljan_server") for t in resolved.tools}
+        names = {t.name: (t.metadata or {}).get("malspark_server") for t in resolved.tools}
         assert names["pe_info"] == "analysis"
         assert names["kit__pe_info"] == "kit"
 
@@ -195,7 +195,7 @@ def test_many_colliding_tools_are_claimed_in_linear_time(monkeypatch: pytest.Mon
     import gc
     import time
 
-    from maljan.providers.servers import ServerRegistry
+    from malspark.providers.servers import ServerRegistry
 
     def _timed(n: int) -> float:
         names = [f"t{i}" for i in range(n)]

@@ -21,11 +21,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.reporting.ledger_projection import static_from_ledger
-from maljan.reporting.renderers.markdown import _rule_words
-from maljan.schemas.evidence import LedgerEntry
-from maljan.tools import knowledge
+from malspark.extractors.capability_matrix import build_capability_matrix
+from malspark.reporting.ledger_projection import static_from_ledger
+from malspark.reporting.renderers.markdown import _rule_words
+from malspark.schemas.evidence import LedgerEntry
+from malspark.tools import knowledge
 
 INJECTION = ["CreateRemoteThread", "QueueUserAPC", "VirtualAllocEx", "WriteProcessMemory"]
 IMPORTS = ["PeekNamedPipe", "GetLastError", "CreateMutexW", "MessageBeep", "MessageBoxA"]
@@ -143,7 +143,7 @@ STATEMENTS = [
 
 
 def _report_with(hit: dict[str, Any], isrs: dict[str, Any]) -> Any:
-    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity, StaticAnalysis
+    from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity, StaticAnalysis
 
     cells, mappings = build_capability_matrix(stix_output=_judge_bundle("T1055"), isr_reports=isrs)
     return MalwareReport(
@@ -167,7 +167,7 @@ _RESOLVED_ONLY_HIT = {
 
 class TestARuleMatchOnRuntimeNamesIsStatedAndNotCounted:
     def test_the_source_says_the_match_is_on_runtime_names_and_not_corroboration(self) -> None:
-        from maljan.reporting.renderers.markdown import (
+        from malspark.reporting.renderers.markdown import (
             RESOLVED_ONLY_RULE_LABEL,
             MarkdownRenderer,
         )
@@ -178,7 +178,7 @@ class TestARuleMatchOnRuntimeNamesIsStatedAndNotCounted:
         assert f"api_capability ({RESOLVED_ONLY_RULE_LABEL})" in markdown
 
     def test_the_analysts_statements_are_printed_verbatim_not_classified(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         isrs = {
             f"a{index}": _finding_isr(f"a{index}", "static" if index % 2 else "dynamic", text)
@@ -201,7 +201,7 @@ class TestARuleMatchOnRuntimeNamesIsStatedAndNotCounted:
         assert "never called" not in (report.capability_matrix[0].note or "")
 
     def test_a_rule_that_matched_an_import_is_a_plain_rule_match(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         hit = {**_RESOLVED_ONLY_HIT, "resolved_apis": INJECTION[:2]}
         isrs = {"static": _finding_isr("static", "static", STATEMENTS[0])}
@@ -213,7 +213,7 @@ class TestARuleMatchOnRuntimeNamesIsStatedAndNotCounted:
 
 def _listed_imports() -> dict[str, Any]:
     """A static analyst that wrote the resolved names down as a table of imports."""
-    from maljan.schemas.isr_models import AgentISR, Artifact
+    from malspark.schemas.isr_models import AgentISR, Artifact
 
     return {
         "static_r2": AgentISR(
@@ -234,7 +234,7 @@ def _listed_imports() -> dict[str, Any]:
 
 
 def _built(isrs: dict[str, Any]) -> Any:
-    from maljan.reporting.builder import MalwareReportBuilder
+    from malspark.reporting.builder import MalwareReportBuilder
 
     return MalwareReportBuilder(
         file_hash="a" * 64,
@@ -271,7 +271,7 @@ class TestAnAnalystsImportTableIsNotTheImportTable:
         assert static.api_capabilities_resolved
 
     def test_the_report_counts_the_tool_s_imports_and_keeps_the_names_resolved(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         markdown = MarkdownRenderer().render(_built(_listed_imports()))
 
@@ -287,7 +287,7 @@ class TestAnAnalystsImportTableIsNotTheImportTable:
         assert "matched only names resolved at runtime from hashes, no import" in section_8
 
     def test_the_analyst_s_table_stays_visible_as_its_own(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         markdown = MarkdownRenderer().render(_built(_listed_imports()))
 

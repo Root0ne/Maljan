@@ -68,7 +68,7 @@ logger = get_logger("api.auth")
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-REFRESH_COOKIE = "maljan_refresh"
+REFRESH_COOKIE = "malspark_refresh"
 REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 
@@ -300,7 +300,7 @@ async def refresh_token(
     request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
-    maljan_refresh: str | None = Cookie(default=None),
+    malspark_refresh: str | None = Cookie(default=None),
 ) -> dict | Response:
     """Exchange the refresh cookie for a new access token and rotate it.
 
@@ -315,10 +315,10 @@ async def refresh_token(
     ``fingerprint_match``. A token minted under an earlier generation is
     refused as revoked without moving the generation again.
     """
-    if not maljan_refresh:
+    if not malspark_refresh:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh session")
 
-    payload = decode_token(maljan_refresh)
+    payload = decode_token(malspark_refresh)
     if payload is None or payload.get("type") != "refresh":
         await _audit(db, None, "auth.refresh.invalid", request=request)
         raise HTTPException(
@@ -403,15 +403,15 @@ async def refresh_token(
 async def logout(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    maljan_refresh: str | None = Cookie(default=None),
+    malspark_refresh: str | None = Cookie(default=None),
 ) -> Response:
     """Consume the refresh cookie's session, if any, and always clear it.
 
     A missing or already-consumed cookie is not an error: logout is
     idempotent so a client can call it defensively without checking state.
     """
-    if maljan_refresh:
-        payload = decode_token(maljan_refresh) or {}
+    if malspark_refresh:
+        payload = decode_token(malspark_refresh) or {}
         if payload.get("type") == "refresh":
             await refresh_token_consume(payload.get("sub"), payload.get("jti", ""))
             await _audit(
@@ -431,15 +431,15 @@ async def get_me(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-async def _consume_callers_refresh(user: User, maljan_refresh: str | None) -> None:
+async def _consume_callers_refresh(user: User, malspark_refresh: str | None) -> None:
     """Consume the caller's own refresh token, if it is this account's.
 
     The generation bump already refuses it; consuming it as well removes it
     from the store now rather than at its expiry, and opens no grace window.
     """
-    if not maljan_refresh:
+    if not malspark_refresh:
         return
-    payload = decode_token(maljan_refresh) or {}
+    payload = decode_token(malspark_refresh) or {}
     if payload.get("type") == "refresh" and payload.get("sub") == str(user.id):
         await refresh_token_consume(str(user.id), payload.get("jti", ""))
 
@@ -452,7 +452,7 @@ async def update_me(
     user: User = Depends(get_current_user),
     api_key: str | None = Depends(api_key_scheme),
     db: AsyncSession = Depends(get_db),
-    maljan_refresh: str | None = Cookie(default=None),
+    malspark_refresh: str | None = Cookie(default=None),
 ) -> UserUpdateResponse:
     """Update the caller's own profile (full_name and/or password).
 
@@ -496,7 +496,7 @@ async def update_me(
         # generation the database never reached, and the old ones still valid.
         await db.commit()
         if credential_changed:
-            await _consume_callers_refresh(user, maljan_refresh)
+            await _consume_callers_refresh(user, malspark_refresh)
             await clear_login_throttle(user.email)
             await runtime_config.get("jwt_access_token_expire_minutes")
             refresh_days = await runtime_config.get("jwt_refresh_token_expire_days")

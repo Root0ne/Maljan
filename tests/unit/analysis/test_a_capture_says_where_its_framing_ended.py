@@ -19,9 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from maljan.analysis import capture_reader
-from maljan.analysis.capture_reader import Record, decode
-from maljan.analysis.pcap_summary import CaptureRead, capture_facts, each_packet
+from malspark.analysis import capture_reader
+from malspark.analysis.capture_reader import Record, decode
+from malspark.analysis.pcap_summary import CaptureRead, capture_facts, each_packet
 
 PUBLIC = b"\x08\x08\x08\x08"
 

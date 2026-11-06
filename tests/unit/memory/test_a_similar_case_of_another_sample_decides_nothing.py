@@ -20,15 +20,15 @@ from typing import Any
 
 import pytest
 
-from maljan.extractors.capability_matrix import (
+from malspark.extractors.capability_matrix import (
     EARLIER_RUN_UNSUPPORTED_NOTE,
     SIMILAR_CASE_UNSUPPORTED_NOTE,
     build_capability_matrix,
     similar_case_techniques,
 )
-from maljan.memory import embeddings
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import (
+from malspark.memory import embeddings
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import (
     StoredCase,
     build_stored_case,
     similar_case_head,
@@ -36,8 +36,8 @@ from maljan.memory.long_term_memory import (
     similar_cases_shown,
     with_published_techniques,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import (
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import (
     EARLIER_RUN_PROPERTY,
     SIMILAR_CASES_PROPERTY,
     Bundle,
@@ -45,7 +45,7 @@ from maljan.schemas.stix_models import (
     SimilarCase,
     SimilarCases,
 )
-from maljan.tools import knowledge
+from malspark.tools import knowledge
 from tests.unit.memory.test_an_earlier_run_on_the_sample_is_a_hypothesis import (
     CAPA,
     _bundle,
@@ -126,7 +126,7 @@ class TestTheSimilarCasesDecideNothing:
     ) -> None:
         ledger: Any = None
         if unreadable:
-            from maljan.pipeline import validation
+            from malspark.pipeline import validation
 
             def _raise(*_a: Any, **_k: Any) -> Any:
                 raise RuntimeError("the record cannot be read")
@@ -327,7 +327,7 @@ class TestTheRecordIsWhatThePromptCarried:
         assert [c.sample_id for c in record.cases] == [OTHER, THIRD]
 
     def test_the_lines_the_record_matches_are_the_ones_the_judge_writes(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         cases = [_case(techniques=["T1055"]), _case(THIRD, ["T1055"])]
         block = JudgeAgent._memory_block(cases)
@@ -337,7 +337,7 @@ class TestTheRecordIsWhatThePromptCarried:
 
     def test_the_matrix_reads_the_record_off_the_dumped_bundle(self) -> None:
         bundle = Bundle(
-            x_maljan_similar_cases=SimilarCases(
+            x_malspark_similar_cases=SimilarCases(
                 cases=[
                     SimilarCase(sample_id=OTHER, techniques=["t1055"]),
                     SimilarCase(sample_id=THIRD, techniques=["T1082"]),
@@ -440,9 +440,9 @@ class TestTheJudgeNodeSetsTheRecordOnEveryBundle:
     def _run(self, shown: Any, written: SimilarCases | None) -> dict[str, Any]:
         from unittest.mock import AsyncMock
 
-        from maljan.agents.judge_agent import JudgeVerdict
-        from maljan.pipeline.nodes import make_judge_node
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.judge_agent import JudgeVerdict
+        from malspark.pipeline.nodes import make_judge_node
+        from malspark.schemas.evidence import EvidenceCounter
         from tests.unit.pipeline.test_degraded_mode_at_the_judge_node import _Container as _Base
         from tests.unit.pipeline.test_degraded_mode_at_the_judge_node import _state
 
@@ -459,7 +459,7 @@ class TestTheJudgeNodeSetsTheRecordOnEveryBundle:
         container = _WithMemory()
         judge = container.get_judge_agent(role="judge")
         # A record the model wrote into its own answer is never read as the platform's.
-        bundle = Bundle(objects=[], x_maljan_similar_cases=written)
+        bundle = Bundle(objects=[], x_malspark_similar_cases=written)
         judge.give_verdict = AsyncMock(
             return_value=JudgeVerdict(bundle=bundle, violations=[], retries=0, fed_back={})
         )
@@ -507,7 +507,7 @@ class TestAStoredRunWithTheRecordReplaysTheSame:
 class TestTheReportsBundleCarriesNoOtherSample:
     def _stored(self, judge: Bundle) -> Any:
         from app.worker.analysis_worker import _report_inputs
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         stored, _ = _report_inputs(
             {"stix_output": judge.model_dump()},
@@ -520,8 +520,8 @@ class TestTheReportsBundleCarriesNoOtherSample:
     def test_the_judge_s_draft_stored_as_the_report_s_drops_both_records(self) -> None:
         judge = Bundle(
             objects=[{"type": "malware", "id": "malware--1", "name": "x", "is_family": False}],
-            x_maljan_earlier_run=EarlierRun(sample_id=SHA, techniques=["T1055"]),
-            x_maljan_similar_cases=SimilarCases(
+            x_malspark_earlier_run=EarlierRun(sample_id=SHA, techniques=["T1055"]),
+            x_malspark_similar_cases=SimilarCases(
                 cases=[SimilarCase(sample_id=OTHER, techniques=["T1055"])]
             ),
         )

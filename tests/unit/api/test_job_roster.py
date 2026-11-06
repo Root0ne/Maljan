@@ -414,8 +414,8 @@ def test_the_run_and_the_job_endpoint_describe_the_same_team() -> None:
     from app.api.v1.jobs import _server_labels
     from app.services.agent_map import effective_definitions, effective_profiles
     from app.worker.analysis_worker import _roster_for
-    from maljan.core.config import Settings
-    from maljan.pipeline.events import roster_payload
+    from malspark.core.config import Settings
+    from malspark.pipeline.events import roster_payload
 
     settings = Settings()
 

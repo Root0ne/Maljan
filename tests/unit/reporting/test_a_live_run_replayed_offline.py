@@ -18,12 +18,12 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.builder import MalwareReportBuilder, build_consolidated_iocs
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer, publishes
-from maljan.schemas.evidence import build_entry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import Bundle
+from malspark.reporting.builder import MalwareReportBuilder, build_consolidated_iocs
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer, publishes
+from malspark.schemas.evidence import build_entry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import Bundle
 
 RESOLVER = "9.9.9.9"
 BACKGROUND = "203.0.113.94"

@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.reporting.run_diff import (
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.reporting.run_diff import (
     ADDED,
     CHANGED,
     MATCH_KEYS,
@@ -470,7 +470,7 @@ class TestRunFacts:
     def test_a_choice_a_stored_run_lists_among_its_reasons_pairs_with_the_newer_choice(
         self, stored
     ) -> None:
-        from maljan.providers.sample_open import UNCOVERED, withheld_unpinned
+        from malspark.providers.sample_open import UNCOVERED, withheld_unpinned
 
         withheld = withheld_unpinned("remote http://localhost:8089 (backend 1)", "x", UNCOVERED)
 
@@ -738,7 +738,7 @@ class TestADraftBundleIsNotCompared:
             "objects": [{"type": "malware", "id": "m--1", "name": name, "is_family": True}]
         }
         if draft:
-            bundle["x_maljan_published"] = False
+            bundle["x_malspark_published"] = False
         return RunRecord(report_id="r", job_id="j", stix_bundle=bundle)
 
     def test_a_draft_side_is_stated_and_keeps_its_items_out(self) -> None:

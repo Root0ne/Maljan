@@ -16,11 +16,11 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.agents.run_evidence_corpus import CorpusState, RunEvidenceCorpus
-from maljan.pipeline.validation import Haystack, validate_verdict_bundle
-from maljan.schemas.stix_models import Bundle, Indicator
-from maljan.utils.written_forms import pack_escaped, written_forms
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.agents.run_evidence_corpus import CorpusState, RunEvidenceCorpus
+from malspark.pipeline.validation import Haystack, validate_verdict_bundle
+from malspark.schemas.stix_models import Bundle, Indicator
+from malspark.utils.written_forms import pack_escaped, written_forms
 
 # Invented values of the shapes that were refused: a command line with a
 # quoted argument, and a Windows path with format specifiers after it.
@@ -144,7 +144,7 @@ class TestThePackLine:
         assert pack_escaped("Software\\ExampleVendor\\") == "Software\\ExampleVendor\\x5c"
 
     def test_the_pack_line_writes_what_the_search_reads(self) -> None:
-        from maljan.pipeline.triage_pack import _quoted
+        from malspark.pipeline.triage_pack import _quoted
 
         assert _quoted(QUOTED_COMMAND) == f'"{pack_escaped(QUOTED_COMMAND)}"'
 

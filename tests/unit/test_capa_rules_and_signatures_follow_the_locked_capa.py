@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.core.config import StaticCapaConfig
+from malspark.core.config import StaticCapaConfig
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = ROOT / "docker" / "Dockerfile.backend"
@@ -107,7 +107,7 @@ def _sigma_image_pins() -> dict[str, str]:
 
 
 def test_the_image_fetches_the_sigma_tag_setup_clones() -> None:
-    from maljan.tools.rules import DEFAULT_SIGMA_RULES
+    from malspark.tools.rules import DEFAULT_SIGMA_RULES
 
     pins = _sigma_image_pins()
     external = _text(ROOT / "scripts" / "dev" / "fetch_external.sh")

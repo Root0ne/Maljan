@@ -17,16 +17,16 @@ import json
 import pytest
 
 from app.services.report_service import ioc_feed_rows
-from maljan.reporting.builder import build_consolidated_iocs
-from maljan.reporting.misp import build_misp_attributes
-from maljan.reporting.models import (
+from malspark.reporting.builder import build_consolidated_iocs
+from malspark.reporting.misp import build_misp_attributes
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkIOCs,
     NetworkIP,
     SampleIdentity,
 )
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers.stix_renderer import (
     UNATTRIBUTED_CAPTURE_VALUE,
     ExtendedSTIXRenderer,
     indicator_publish_reason,

@@ -17,15 +17,15 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
-from maljan.agents.evidence_recorder import RepeatGuard
-from maljan.agents.judge_agent import (
+from malspark.agents.evidence_recorder import RepeatGuard
+from malspark.agents.judge_agent import (
     TECHNIQUE_QUESTION_SYSTEM,
     TECHNIQUE_QUESTION_SYSTEM_WITHOUT_TOOLS,
     JudgeAgent,
 )
-from maljan.agents.ledger_reads import LedgerReads, not_bound_reason
-from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
-from maljan.schemas.evidence import LedgerEntry
+from malspark.agents.ledger_reads import LedgerReads, not_bound_reason
+from malspark.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+from malspark.schemas.evidence import LedgerEntry
 from tests.unit.agents.test_the_judge_decides_what_it_did_not_name import (
     EVIDENCE,
     LEFT_OUT,
@@ -101,7 +101,7 @@ def _bundle_json() -> str:
                     "is_family": False,
                 }
             ],
-            "x_maljan_assessment": {
+            "x_malspark_assessment": {
                 "verdict": "Malware",
                 "severity": {"rating": "High", "rationale": "it does harm"},
                 "malware_category": "loader",
@@ -163,8 +163,8 @@ class TestTheVerdict:
         # A repeat's id reads the entry that holds its answer, under that id.
         assert second[-1].content.startswith("[ev_0012]\n")
         assert DECODED in second[-1].content
-        assert verdict.bundle.x_maljan_assessment is not None
-        assert verdict.bundle.x_maljan_assessment.verdict == "Malware"
+        assert verdict.bundle.x_malspark_assessment is not None
+        assert verdict.bundle.x_malspark_assessment.verdict == "Malware"
 
     def test_an_unknown_id_is_answered_as_one_the_run_s_ledger_does_not_hold(self) -> None:
         llm = _ReadingLlm(_read("ev_9999"), _bundle_json())
@@ -182,7 +182,7 @@ class TestTheVerdict:
 
         assert [m.content for m in reading.calls[0][1]] == [m.content for m in plain.calls[0][1]]
         assert plain.calls[0][0] is None
-        assert with_reads.bundle.x_maljan_assessment == without.bundle.x_maljan_assessment
+        assert with_reads.bundle.x_malspark_assessment == without.bundle.x_malspark_assessment
         assert [o.type for o in with_reads.bundle.objects] == [
             o.type for o in without.bundle.objects
         ]
@@ -195,7 +195,7 @@ class TestTheVerdict:
 
         assert len(llm.calls) == 2
         assert judge.read_degradations == [not_bound_reason(str(judge.name))]
-        assert verdict.bundle.x_maljan_assessment is not None
+        assert verdict.bundle.x_malspark_assessment is not None
 
     def test_repeated_reads_end_the_loop_with_the_reply_kept_without_its_calls(self) -> None:
         last = 2 + RepeatGuard.ENDS_AT
@@ -214,7 +214,7 @@ class TestTheVerdict:
         ]
         assert len(refused) == RepeatGuard.ENDS_AT - 1
         assert len(llm.calls) == last + 1
-        assert verdict.bundle.x_maljan_assessment is not None
+        assert verdict.bundle.x_malspark_assessment is not None
         # Each refusal names the id it already holds, and how to page it.
         assert "ev_0012 not read again" in str(refused[0].content)
         assert "Pass another offset, and a limit" in str(refused[0].content)
@@ -373,7 +373,7 @@ class TestTheMediatorReadsTheRunsLedger:
         assert "ev_0012 is no evidence id this analysis filed" in said
 
     def test_the_block_question_may_read_the_run_s_ledger(self) -> None:
-        from maljan.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION
+        from malspark.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION
 
         block = "CONTRADICTIONS: NONE\nagreement_confidence: 0.9"
         llm = _ReadingLlm(_read("ev_0013"), block)
@@ -391,7 +391,7 @@ class TestTheMediatorReadsTheRunsLedger:
         assert "resolver calls" in llm.calls[1][1][-1].content
 
     def test_with_no_ledger_the_block_question_says_it_carries_no_tools(self) -> None:
-        from maljan.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION_WITHOUT_TOOLS
+        from malspark.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION_WITHOUT_TOOLS
 
         llm = _ReadingLlm("CONTRADICTIONS: NONE")
         judge = JudgeAgent(llm=llm)
@@ -424,8 +424,8 @@ class TestTheReadsAreCounted:
     def test_each_read_is_counted_by_call_and_stated_in_the_efficiency_block(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.agents.ledger_reads import ledger_reads_record
-        from maljan.analysis.efficiency import efficiency_lines
+        from malspark.agents.ledger_reads import ledger_reads_record
+        from malspark.analysis.efficiency import efficiency_lines
 
         container = SimpleNamespace()
         llm = _ReadingLlm(_read("ev_0012"), _read("ev_9999", "c2"), _bundle_json())
@@ -445,7 +445,7 @@ class TestTheReadsAreCounted:
     def test_a_job_whose_calls_offered_no_read_records_nothing(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.agents.ledger_reads import ledger_reads_record
+        from malspark.agents.ledger_reads import ledger_reads_record
 
         assert ledger_reads_record(SimpleNamespace()) is None
 
@@ -483,11 +483,11 @@ class TestAReadBesideTheSchemasCall:
     def test_the_schema_call_refused_is_the_kept_text_and_the_retry_answers_it(self) -> None:
         from langchain_core.messages import HumanMessage
 
-        from maljan.agents.judge_agent import TechniqueAnswer
-        from maljan.agents.ledger_reads import structured_reply
-        from maljan.core.token_ledger import read_structured_reply
-        from maljan.llm.answer_text import structured_answer_text, tool_call_arguments
-        from maljan.pipeline.validation import Violation, _with_feedback
+        from malspark.agents.judge_agent import TechniqueAnswer
+        from malspark.agents.ledger_reads import structured_reply
+        from malspark.core.token_ledger import read_structured_reply
+        from malspark.llm.answer_text import structured_answer_text, tool_call_arguments
+        from malspark.pipeline.validation import Violation, _with_feedback
 
         raw = _answered(_mixed())
 
@@ -511,8 +511,8 @@ class TestAReadBesideTheSchemasCall:
         assert replies and replies[0].tool_call_id == "toolu_schema"
 
     def test_a_valid_schema_call_beside_a_read_is_parsed_from_the_same_reply(self) -> None:
-        from maljan.agents.judge_agent import TechniqueAnswer
-        from maljan.agents.ledger_reads import structured_reply
+        from malspark.agents.judge_agent import TechniqueAnswer
+        from malspark.agents.ledger_reads import structured_reply
 
         args = {"decisions": [{"id": LEFT_OUT, "decision": "drop", "reason": "lookups only"}]}
 
@@ -537,7 +537,7 @@ class TestAReadOfAFailedEntry:
     FAILED = [LedgerEntry(id="ev_0040", tool="unpack", ok=False, output="error: no section")]
 
     def test_the_served_repeat_carries_the_analysts_failed_entry_notice(self) -> None:
-        from maljan.agents.evidence_recorder import served_repeat_notice
+        from malspark.agents.evidence_recorder import served_repeat_notice
 
         reads = LedgerReads(self.FAILED)
         notice = served_repeat_notice(
@@ -592,7 +592,7 @@ class TestAModelThatCannotBindRecordsNoReads:
     def test_no_efficiency_record_is_made_for_a_read_never_offered(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.agents.ledger_reads import ledger_reads_record
+        from malspark.agents.ledger_reads import ledger_reads_record
 
         container = SimpleNamespace()
         judge = JudgeAgent(llm=_ToolsFreeLlm(_bundle_json()))
@@ -606,7 +606,7 @@ class TestAModelThatCannotBindRecordsNoReads:
     def test_a_model_that_binds_it_and_reads_nothing_records_none_made(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.agents.ledger_reads import ledger_reads_record
+        from malspark.agents.ledger_reads import ledger_reads_record
 
         container = SimpleNamespace()
         judge = JudgeAgent(llm=_ReadingLlm(_bundle_json()))
@@ -621,7 +621,7 @@ class TestTheStructuredTechniqueQuestionAtTheCeiling:
     def test_a_turn_after_a_read_the_ceiling_refuses_ends_the_question(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         monkeypatch.setattr(JudgeAgent, "_supports_structured_output", lambda self: True)
         admitted: list[str] = []
@@ -649,10 +649,10 @@ class TestTheJudgeNodeSaysATechniqueQuestionsBindFailure:
     def test_the_reason_reaches_the_run_s_degradations(self) -> None:
         from unittest.mock import AsyncMock
 
-        from maljan.agents.judge_agent import JudgeVerdict
-        from maljan.pipeline.nodes import make_judge_node
-        from maljan.schemas.evidence import EvidenceCounter
-        from maljan.schemas.stix_models import TechniqueReview
+        from malspark.agents.judge_agent import JudgeVerdict
+        from malspark.pipeline.nodes import make_judge_node
+        from malspark.schemas.evidence import EvidenceCounter
+        from malspark.schemas.stix_models import TechniqueReview
         from tests.unit.pipeline.test_degraded_mode_at_the_judge_node import _Container, _state
 
         container = _Container(EvidenceCounter())
@@ -675,7 +675,7 @@ class TestTheJudgeNodeSaysATechniqueQuestionsBindFailure:
 
 class TestACallWhoseArgumentsDidNotParse:
     def test_a_reply_whose_only_read_did_not_parse_is_its_text_without_the_call(self) -> None:
-        from maljan.llm.answer_text import structured_answer_text
+        from malspark.llm.answer_text import structured_answer_text
 
         bad = {"name": READ_EVIDENCE_TOOL, "args": '{"evidence_id": "ev_00', "id": "c1"}
         reply = AIMessage(content="", invalid_tool_calls=[{**bad, "error": "unparsed"}])
@@ -687,7 +687,7 @@ class TestACallWhoseArgumentsDidNotParse:
         assert structured_answer_text(raw) == ""
 
     def test_a_schema_call_that_did_not_parse_beside_a_read_is_the_answer(self) -> None:
-        from maljan.llm.answer_text import structured_answer_text
+        from malspark.llm.answer_text import structured_answer_text
 
         sent = '{"decisions": [{"id": "T1568.002", "decision": "keep"'
         reply = AIMessage(
@@ -734,7 +734,7 @@ class TestTheMediatorSaysWhichLedgerItReads:
     def test_with_the_run_s_ledger_an_unknown_id_names_it_and_the_tool_is_the_same(self) -> None:
         from langchain_core.utils.function_calling import convert_to_openai_tool
 
-        from maljan.agents.tool_answer_clearing import THE_RUNS_LEDGER, read_evidence_tool
+        from malspark.agents.tool_answer_clearing import THE_RUNS_LEDGER, read_evidence_tool
         from tests.unit.agents.test_the_mediator_decides_whether_to_read_or_ask import (
             MEDIATION,
             PROMPT,

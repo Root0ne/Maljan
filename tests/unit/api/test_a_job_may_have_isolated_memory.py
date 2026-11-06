@@ -22,7 +22,7 @@ from app.api.v1.jobs import _job_details
 from app.schemas.job import JobCreateRequest
 from app.worker import analysis_worker, enrich_worker
 from app.worker.job_memory import ISOLATED_MEMORY_OPTION, job_memory_owner
-from maljan.memory.long_term_memory import memory_owner_for
+from malspark.memory.long_term_memory import memory_owner_for
 
 BYTES = b"MZ synthetic sample bytes, never run\x00" * 64
 INTAKE = hashlib.sha256(BYTES).hexdigest()
@@ -100,7 +100,7 @@ class TestTheAnalysisWorker:
 
         from app import config as api_config
         from app import runtime_config as rc
-        from maljan.core.config import reset_settings_cache
+        from malspark.core.config import reset_settings_cache
 
         async def _mock_mode_allowed() -> dict[str, Any]:
             return {"api.mock_mode_allowed": True}
@@ -110,7 +110,7 @@ class TestTheAnalysisWorker:
         with patch.dict(
             "os.environ",
             {
-                "MALJAN_MOCK_MODE": "true",
+                "MALSPARK_MOCK_MODE": "true",
                 "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
                 "SAMPLES_DIR": str(tmp_path / "samples"),
             },
@@ -163,7 +163,7 @@ class TestTheAnalysisWorker:
         with (
             patch.object(object_store, "client", return_value=MagicMock()),
             patch.object(object_store, "download", side_effect=_download),
-            patch("maljan.app.MaljanApp.arun", new=_arun),
+            patch("malspark.app.MalsparkApp.arun", new=_arun),
             patch.object(analysis_worker, "_report_inputs", side_effect=_inputs),
         ):
             result = await analysis_worker.run_analysis(
@@ -207,7 +207,7 @@ def _stored_state(container: Any) -> dict[str, Any]:
     """A run's state with the summary its judge built, which never says isolated_memory."""
     import time
 
-    from maljan.pipeline.stopped_run import partial_report
+    from malspark.pipeline.stopped_run import partial_report
 
     state: dict[str, Any] = {
         "file_hash": INTAKE,
@@ -227,8 +227,8 @@ def _stored_state(container: Any) -> dict[str, Any]:
 
 
 def _isolated_container(isolated: bool) -> Any:
-    from maljan.core.config import Settings
-    from maljan.core.container import ServiceContainer
+    from malspark.core.config import Settings
+    from malspark.core.container import ServiceContainer
 
     job = uuid.uuid4()
     return ServiceContainer(
@@ -254,7 +254,7 @@ class TestEveryStoreSaysIt:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("isolated", [True, False])
     async def test_a_report_kept_after_a_failure(self, isolated: bool) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         container = _isolated_container(isolated)
         job = fake_job()
@@ -285,7 +285,7 @@ class TestEveryStoreSaysIt:
     async def test_a_stopped_run(self, isolated: bool) -> None:
         from types import SimpleNamespace
 
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         container = _isolated_container(isolated)
         state = _stored_state(container)

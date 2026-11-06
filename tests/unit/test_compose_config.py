@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # services (Ghidra, Qdrant) are not among them: see OPTIONAL_ENV.
 REQUIRED_ENV = {
     "REDIS_PASSWORD": "p" * 32,
-    "MINIO_ROOT_USER": "maljan",
+    "MINIO_ROOT_USER": "malspark",
     "MINIO_ROOT_PASSWORD": "m" * 32,
     "JWT_SECRET_KEY": "j" * 32,
     "SETTINGS_ENCRYPTION_KEY": "s" * 32,
@@ -109,7 +109,7 @@ def test_compose_binds_loopback_and_requires_the_secrets(tmp_path):
         text=True,
         check=True,
     ).stdout
-    assert "maljan_ghidra_secret_2026" not in out
+    assert "malspark_ghidra_secret_2026" not in out
     config = yaml.safe_load(out)
     found_a_published_port = False
     for service in config["services"].values():
@@ -201,7 +201,7 @@ def test_migrations_run_once_before_the_api_and_the_worker(tmp_path):
     # One image for the three services that run this codebase, not one built
     # and stored per service (re-review M2).
     images = {config["services"][s]["image"] for s in ("migrate", "backend-api", "backend-worker")}
-    assert images == {"maljan-backend"}
+    assert images == {"malspark-backend"}
 
 
 def test_every_pulled_image_names_a_version() -> None:
@@ -259,12 +259,12 @@ def test_minio_is_built_from_the_release_its_tag_names() -> None:
     release = set(re.findall(r"^ARG MINIO_RELEASE=(RELEASE\.\S+)$", text, re.MULTILINE))
     commit = set(re.findall(r"^ARG MINIO_COMMIT=([0-9a-f]{40})$", text, re.MULTILINE))
     assert len(release) == 1 and len(commit) == 1, (release, commit)
-    assert minio["image"] == f"maljan-minio:{release.pop()}"
+    assert minio["image"] == f"malspark-minio:{release.pop()}"
     assert '"${commit}" != "${MINIO_COMMIT}"' in text
     assert 'GOARCH="${TARGETARCH:-' in text
     assert minio["command"] == 'server /data --console-address ":9001"'
     assert minio["volumes"] == ["minio_data:/data"]
-    assert minio["container_name"] == "maljan-minio"
+    assert minio["container_name"] == "malspark-minio"
     assert set(minio["environment"]) == {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"}
     assert "/minio/health/live" in " ".join(minio["healthcheck"]["test"])
     # The build copies nothing from docker/, where docker/.env lives, and is
@@ -526,7 +526,7 @@ def test_the_migration_sees_the_retired_attck_variable() -> None:
     # in compose is the migrate service's.
     config = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())
     environment = config["services"]["migrate"]["environment"]
-    assert environment["MALJAN_ATTCK_MAX_AGE_DAYS"] == "${MALJAN_ATTCK_MAX_AGE_DAYS:-}"
+    assert environment["MALSPARK_ATTCK_MAX_AGE_DAYS"] == "${MALSPARK_ATTCK_MAX_AGE_DAYS:-}"
 
 
 # ---------------------------------------------------------------------------
@@ -537,7 +537,7 @@ def test_the_migration_sees_the_retired_attck_variable() -> None:
 # hold the platform's credentials by design. Every other container that
 # mounts the sample directory opens the sample, and is found from its mounts,
 # not by its name.
-BACKEND_IMAGE = "maljan-backend"
+BACKEND_IMAGE = "malspark-backend"
 # The project network every service is on unless it names others.
 DEFAULT_NETWORK = "default"
 
@@ -620,7 +620,7 @@ STACKS = [
 def test_every_container_that_opens_the_sample_is_kept_from_the_platform(
     tmp_path: Path, files: tuple[str, ...]
 ) -> None:
-    from maljan.core.platform_secrets import is_platform_secret
+    from malspark.core.platform_secrets import is_platform_secret
 
     # A value no service could hold by chance, so finding one is finding the secret.
     secrets = {var: f"x2-{var.lower()}-value" for var in REQUIRED_ENV}
@@ -767,7 +767,7 @@ def test_ghidra_starts_as_its_user_only_after_its_projects_changed_hands(tmp_pat
 def test_each_one_program_sidecar_is_held_as_ghidra_is(
     tmp_path: Path, files: tuple[str, ...], profile: str
 ) -> None:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     sidecar_name, relay_name, port = ONE_PROGRAM[profile]
     config = _render_with(tmp_path, *files, profiles=(profile,))
@@ -884,12 +884,12 @@ def test_each_sample_reader_is_held_as_the_sidecars_are(
         "MCP_AUTH_TOKEN",
         "MCP_BIND_ADDRESS",
         "MCP_PORT",
-        "MALJAN_SAMPLE_ROOTS",
+        "MALSPARK_SAMPLE_ROOTS",
         "HOME",
     }
     assert environment["MCP_AUTH_TOKEN"] == OPTIONAL_ENV[f"{profile.upper()}_MCP_AUTH_TOKEN"]
     assert str(environment["MCP_PORT"]) == str(port)
-    assert environment["MALJAN_SAMPLE_ROOTS"] == "/data/samples"
+    assert environment["MALSPARK_SAMPLE_ROOTS"] == "/data/samples"
     # Everything it mounts is read-only: the worker's source and data, and the
     # samples at /data/samples, the mount its block is pointed at.
     volumes = server["volumes"]

@@ -25,9 +25,9 @@ from jinja2.sandbox import ImmutableSandboxedEnvironment
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import SecretStr
 
-from maljan.agents.tool_fence import fenced, template_tokens_written_out
-from maljan.core.config import Settings
-from maljan.llm import special_tokens
+from malspark.agents.tool_fence import fenced, template_tokens_written_out
+from malspark.core.config import Settings
+from malspark.llm import special_tokens
 
 QWEN = (Path(__file__).parents[2] / "fixtures" / "qwen3_chat_template.jinja").read_text()
 QWEN_TOKENS = {
@@ -109,7 +109,7 @@ def _read(url: str) -> None:
 
 
 def _model(base_url: str, compat: str = "llama_cpp") -> Any:
-    from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
+    from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only
 
     forget_standard_only()
     settings = Settings(_env_file=None)  # type: ignore[call-arg]

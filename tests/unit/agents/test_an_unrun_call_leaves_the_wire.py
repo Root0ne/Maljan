@@ -20,7 +20,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import SecretStr
 
-from maljan.agents.base_agent import without_unanswered_calls
+from malspark.agents.base_agent import without_unanswered_calls
 
 TEXT = "Let me read a few more strings."
 

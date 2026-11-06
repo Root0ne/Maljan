@@ -20,9 +20,9 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.core.spend import TAIL_CALLS
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.follow_up import (
+from malspark.core.spend import TAIL_CALLS
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.follow_up import (
     CURRENT_MODEL,
     FOLLOW_UP_CALL,
     FOLLOW_UP_WHAT,
@@ -38,18 +38,20 @@ from maljan.reporting.follow_up import (
     stored_open_questions,
     stored_run,
 )
-from maljan.reporting.ledger_report import build_sections
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.question_round import (
+from malspark.reporting.ledger_report import build_sections
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.question_round import (
     ESTABLISHED_UNGROUNDED_CODE,
     NEGATIVE_ON_OPEN_QUESTION_CODE,
     SYSTEM_PROMPT,
     UNISSUED_ID_CODE,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, OpenQuestion
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, OpenQuestion
 
-BENCHMARK = Path("/home/user/Belgeler/kingston/Projects/Maljan/.superpowers/sdd/mandate-2026-09-17")
+BENCHMARK = Path(
+    "/home/user/Belgeler/kingston/Projects/Malspark/.superpowers/sdd/mandate-2026-09-17"
+)
 STORED_RUN = BENCHMARK / "benchmark" / "deepseek" / "run7"
 
 OPEN = OpenQuestion(
@@ -365,7 +367,7 @@ class TestTheModel:
         assert merged["llm.agents"]["reporter"]["model"] == "gpt-run"
 
     def test_the_current_ceilings_are_kept_under_the_runs_model(self) -> None:
-        from maljan.core.settings_overrides import settings_from_store
+        from malspark.core.settings_overrides import settings_from_store
 
         snapshot = {
             "llm.openai.base_url": self.HOST,
@@ -467,8 +469,8 @@ class TestTheModel:
         assert said == source
 
     def test_the_recorded_model_builds_settings(self) -> None:
-        from maljan.core.model_assignments import model_label_for
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.model_assignments import model_label_for
+        from malspark.core.settings_overrides import build_settings
 
         merged, _ = reporter_overrides(
             {}, {"llm.provider": "anthropic", "llm.anthropic.judge_model": "claude-run"}

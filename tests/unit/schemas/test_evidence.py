@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from maljan.schemas.evidence import (
+from malspark.schemas.evidence import (
     EvidenceCounter,
     LedgerEntry,
     apply_budget,
@@ -12,7 +12,7 @@ from maljan.schemas.evidence import (
     format_entry_id,
     parse_structured,
 )
-from maljan.schemas.tool_evidence import MAX_OUTPUT_CHARS, CapturedToolOutput
+from malspark.schemas.tool_evidence import MAX_OUTPUT_CHARS, CapturedToolOutput
 
 
 class TestEntryIds:
@@ -184,7 +184,7 @@ class TestTheFullResultSurvivesTheTextCut:
         }
 
     def _entry(self, payload: dict, tool: str):
-        from maljan.schemas.evidence import build_entry, format_entry_id
+        from malspark.schemas.evidence import build_entry, format_entry_id
 
         text = json.dumps(payload)
         assert len(text) > MAX_OUTPUT_CHARS
@@ -207,7 +207,7 @@ class TestTheFullResultSurvivesTheTextCut:
 
     def test_a_caller_with_a_ceiling_of_its_own_gets_a_flagged_prefix(self) -> None:
         """No silent trailing ellipsis: a stored prefix says it is one."""
-        from maljan.schemas.evidence import build_entry, format_entry_id
+        from malspark.schemas.evidence import build_entry, format_entry_id
 
         text = json.dumps(self._pe_info())
         entry = build_entry(
@@ -224,14 +224,14 @@ class TestTheFullResultSurvivesTheTextCut:
         assert entry.truncated is True
 
     def test_the_technique_ids_of_a_long_capa_result_are_readable(self) -> None:
-        from maljan.pipeline.evidence_summary import _technique_ids
+        from malspark.pipeline.evidence_summary import _technique_ids
 
         entry = self._entry(self._capa(), "capa")
         assert entry.structured == self._capa()
         assert {"T1055.001", "T1055.012"} <= _technique_ids(entry.structured)
 
     def test_the_byte_budget_counts_the_result_that_is_kept(self) -> None:
-        from maljan.schemas.evidence import apply_budget, stored_bytes
+        from malspark.schemas.evidence import apply_budget, stored_bytes
 
         entry = self._entry(self._pe_info(), "pe_info")
         size = stored_bytes(entry)

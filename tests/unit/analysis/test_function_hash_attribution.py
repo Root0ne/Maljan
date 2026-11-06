@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import json
 
-from maljan.analysis.function_hash_attribution import (
+from malspark.analysis.function_hash_attribution import (
     FamilyHashAttribution,
     aggregate_matches,
     build_attribution_hint,
     to_report_dicts,
 )
-from maljan.memory.function_hash_store import FunctionMatch
-from maljan.providers.static.ghidra.function_hashes import _extract_functions
+from malspark.memory.function_hash_store import FunctionMatch
+from malspark.providers.static.ghidra.function_hashes import _extract_functions
 
 
 def _m(func_hash: str, family: str, sample_id: str, func_name: str = "") -> FunctionMatch:
@@ -156,7 +156,7 @@ class TestToReportDicts:
         assert row["source"] == "acme_disassembler"
 
     def test_a_stored_row_keeps_the_label_it_was_written_with(self) -> None:
-        from maljan.reporting.models import FamilyAttribution
+        from malspark.reporting.models import FamilyAttribution
 
         stored = {
             "family": "Emotet",

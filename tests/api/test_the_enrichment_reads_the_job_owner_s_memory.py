@@ -40,9 +40,9 @@ async def test_an_owner_that_cannot_be_read_is_none(answer: Any) -> None:
 async def test_the_orchestrator_hands_the_owner_to_the_similar_samples(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.enrichment import orchestrator
-    from maljan.memory.in_memory_store import InMemoryStore
-    from maljan.memory.long_term_memory import StoredCase
+    from malspark.enrichment import orchestrator
+    from malspark.memory.in_memory_store import InMemoryStore
+    from malspark.memory.long_term_memory import StoredCase
 
     store = InMemoryStore()
     store._cases.append(

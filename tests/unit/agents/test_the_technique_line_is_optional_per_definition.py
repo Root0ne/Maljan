@@ -20,16 +20,16 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import ValidationError
 
-from maljan.agents.base_agent import revision_messages
-from maljan.agents.composition import ResolvedAgent
-from maljan.agents.configurable_analyst import ConfigurableAnalyst
-from maljan.core.config import (
+from malspark.agents.base_agent import revision_messages
+from malspark.agents.composition import ResolvedAgent
+from malspark.agents.configurable_analyst import ConfigurableAnalyst
+from malspark.core.config import (
     ATTCK_OPT_OUT_RULE,
     PROMPT_ROLES,
     AgentDefinition,
     _builtin_definitions,
 )
-from maljan.pipeline.validation import TECHNIQUE_LINE_UNREAD_CODE, parse_violations
+from malspark.pipeline.validation import TECHNIQUE_LINE_UNREAD_CODE, parse_violations
 
 # The ISR instruction and the negotiation round's closing as dev sent them.
 DEV_ISR_INSTRUCTION = (
@@ -185,7 +185,7 @@ class TestTheParserIsTheSame:
 DEV_CLOSING = (
     "Fix them and write your whole answer again in the format it is read in: every claim "
     "as its own block of CLAIM:, EVIDENCE:, CONFIDENCE: and TECHNIQUE: lines, the blocks "
-    "separated by a line of three dashes (---), then your fenced maljan-findings block if "
+    "separated by a line of three dashes (---), then your fenced malspark-findings block if "
     "your answer had one. Only CLAIM blocks are read as claims: a claim written another "
     "way, or left out, is not in the answer."
 )
@@ -196,7 +196,7 @@ DEV_CLOSING_BY_NUMBER = (
     "blocks separated by a line of three dashes (---), and a new claim under a number your "
     "answer did not use. A claim you do not write again stays in your answer as you wrote "
     "it. To take a claim out, write a line WITHDRAW CLAIM <number>: <reason>. Your fenced "
-    "maljan-findings block is kept the same way by each finding's title: write it with only "
+    "malspark-findings block is kept the same way by each finding's title: write it with only "
     'the findings you change or add, and a line WITHDRAW FINDING "<title>": <reason> takes '
     "one out; a finding written under a new title is a new finding. Only CLAIM blocks are "
     "read as claims."
@@ -234,7 +234,7 @@ DEV_REPEATED = (
 
 
 def _repeated() -> Any:
-    from maljan.pipeline.validation import ClaimsRepeated
+    from malspark.pipeline.validation import ClaimsRepeated
 
     return ClaimsRepeated(
         begun=7, distinct=7, margin=7, chars=7, before="CLAIM: a\nEVIDENCE: b\n", first_repeat=7
@@ -256,7 +256,7 @@ def _prose_isr() -> Any:
 
 class TestTheValidationQuestionsFollowTheSwitch:
     def test_on_every_question_is_the_dev_text(self) -> None:
-        from maljan.pipeline import validation as v
+        from malspark.pipeline import validation as v
 
         assert v.analyst_feedback_closing(whole=True) == DEV_CLOSING
         assert v.analyst_feedback_closing(whole=False) == DEV_CLOSING_BY_NUMBER
@@ -272,7 +272,7 @@ class TestTheValidationQuestionsFollowTheSwitch:
         assert repeated.message == DEV_REPEATED
 
     def test_off_every_question_names_the_block_without_its_technique_line(self) -> None:
-        from maljan.pipeline import validation as v
+        from malspark.pipeline import validation as v
 
         off = {
             "closing": v.analyst_feedback_closing(whole=True, techniques=False),
@@ -327,7 +327,7 @@ class TestTheValidationQuestionsFollowTheSwitch:
 class TestTheResolverCarriesTheSwitch:
     @staticmethod
     def _settings(**over: Any) -> Any:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         checker = {"role": "generic", "prompt": "Check the configuration.", **over}
         return Settings(
@@ -343,7 +343,7 @@ class TestTheResolverCarriesTheSwitch:
     def test_both_resolvers_carry_the_definition_s_switch(self, techniques: bool) -> None:
         import asyncio
 
-        from maljan.agents.composition import aresolve_agent, resolve_agent
+        from malspark.agents.composition import aresolve_agent, resolve_agent
         from tests.unit.agents.test_composition import _Container
 
         cfg = self._settings(attck_techniques=techniques)
@@ -354,8 +354,8 @@ class TestTheResolverCarriesTheSwitch:
         assert agent.asks_for_techniques() is techniques
 
     def test_a_provider_s_attck_focus_sentence_is_left_out_when_off(self) -> None:
-        from maljan.agents.composition import resolve_agent
-        from maljan.providers.base import ATTCK_FOCUS, CLAIM_ARTIFACT_CITATION, CLAIM_CITATION
+        from malspark.agents.composition import resolve_agent
+        from malspark.providers.base import ATTCK_FOCUS, CLAIM_ARTIFACT_CITATION, CLAIM_CITATION
         from tests.unit.agents.test_composition import _Container, _Provider
 
         class _Citing(_Provider):
@@ -376,9 +376,9 @@ class TestTheResolverCarriesTheSwitch:
 
 class TestTheProviderTextsLoseOnlyTheirAttckClause:
     def test_the_split_constants_join_into_the_dev_texts(self) -> None:
-        from maljan.analysis.sink_reachability import FOLLOW_UP
-        from maljan.providers.base import CLAIM_CITATION
-        from maljan.providers.static.ghidra.call_graph import PRIORITY_FOLLOW_UP
+        from malspark.analysis.sink_reachability import FOLLOW_UP
+        from malspark.providers.base import CLAIM_CITATION
+        from malspark.providers.static.ghidra.call_graph import PRIORITY_FOLLOW_UP
 
         assert CLAIM_CITATION == (
             "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
@@ -410,10 +410,10 @@ class TestTheProviderTextsLoseOnlyTheirAttckClause:
 
         from langchain_core.tools import StructuredTool
 
-        from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-        from maljan.analysis.sink_reachability import FOLLOW_UP
-        from maljan.providers import base as provider_base
-        from maljan.providers.static.ghidra.call_graph import PRIORITY_FOLLOW_UP
+        from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+        from malspark.analysis.sink_reachability import FOLLOW_UP
+        from malspark.providers import base as provider_base
+        from malspark.providers.static.ghidra.call_graph import PRIORITY_FOLLOW_UP
 
         def decompile() -> str:
             """Decompile."""
@@ -437,7 +437,7 @@ class TestTheProviderTextsLoseOnlyTheirAttckClause:
 
 class TestTheViewAndTierPilotFollowTheSwitch:
     def test_on_the_view_system_and_the_ladder_are_the_dev_texts(self) -> None:
-        from maljan.agents import base_agent as b
+        from malspark.agents import base_agent as b
 
         claim_format = DEV_ISR_INSTRUCTION[DEV_ISR_INSTRUCTION.index("Format each finding") : -1]
         assert b._VIEW_SYSTEM == (
@@ -456,7 +456,7 @@ class TestTheViewAndTierPilotFollowTheSwitch:
     def test_an_agent_s_view_call_carries_its_own_claim_format(
         self, techniques: bool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent as b
+        from malspark.agents import base_agent as b
 
         agent = _agent(_NO_LINE, techniques=techniques)
         sent: list[str] = []
@@ -477,7 +477,7 @@ class TestTheViewAndTierPilotFollowTheSwitch:
     def test_an_agent_s_tiers_follow_its_switch(
         self, techniques: bool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent as b
+        from malspark.agents import base_agent as b
 
         agent = _agent(_NO_LINE, techniques=techniques)
         asked: list[str] = []

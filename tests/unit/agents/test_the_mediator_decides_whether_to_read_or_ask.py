@@ -23,12 +23,12 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.composition import ResolvedAgent
-from maljan.agents.configurable_analyst import ConfigurableAnalyst
-from maljan.agents.delegation import TEAM_SERVER, ask_tool, tool_name
-from maljan.agents.judge_agent import JudgeAgent, mediator_system_prompt
-from maljan.core.config import Settings, _builtin_definitions
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.agents.composition import ResolvedAgent
+from malspark.agents.configurable_analyst import ConfigurableAnalyst
+from malspark.agents.delegation import TEAM_SERVER, ask_tool, tool_name
+from malspark.agents.judge_agent import JudgeAgent, mediator_system_prompt
+from malspark.core.config import Settings, _builtin_definitions
+from malspark.schemas.evidence import EvidenceCounter
 
 REVERSER_REPORT = (
     "CLAIM: 0x309c reads the PEB BeingDebugged byte\nEVIDENCE: ev_0001\nCONFIDENCE: 0.8\n"
@@ -99,7 +99,7 @@ class _Container:
         return None
 
     def get_static_provider(self, _provider_id: str | None = None) -> Any:
-        from maljan.providers.registry import get_static_provider
+        from malspark.providers.registry import get_static_provider
 
         return get_static_provider(self.config)
 
@@ -172,7 +172,7 @@ class TestTheJudgeDefinitionAsksTheAgentsThatReadTheCode:
         assert tool_name("reverser") in names and tool_name("static") in names
         assert "sandbox_processes" in names
         ask = next(tool for tool in judge.tools if tool.name == tool_name("reverser"))
-        assert ask.metadata["maljan_server"] == TEAM_SERVER
+        assert ask.metadata["malspark_server"] == TEAM_SERVER
 
     def test_a_profile_with_nothing_to_call_gives_the_judge_no_ask(self) -> None:
         judge, container = _mediator([], [])
@@ -342,7 +342,7 @@ class TestTheMediatorsPromptSaysWhatItCarries:
         assert "No Threat Intelligence tools are needed" not in text
 
     def test_the_lookup_sentence_comes_before_the_sentence_about_the_tools(self) -> None:
-        from maljan.agents.prompt_fragments import tools_statement
+        from malspark.agents.prompt_fragments import tools_statement
 
         text = mediator_system_prompt(
             identity_unanswered=True, lookup_attached=True, sha256="ab" * 32, tools=[]
@@ -367,7 +367,7 @@ class TestTheJudgesAsksCountWhereTheJudgeMediates:
     """Only the mediator runs a tool loop, so the judge's asks count in a team with a debate."""
 
     def test_a_team_with_a_debate_reaches_the_agents_the_judge_may_ask(self) -> None:
-        from maljan.agents.composition import reachable_agents
+        from malspark.agents.composition import reachable_agents
 
         settings = Settings(_env_file=None)
 
@@ -375,14 +375,14 @@ class TestTheJudgesAsksCountWhereTheJudgeMediates:
         assert reachable_agents(settings, ["judge"], mediated=False) == ["judge"]
 
     def test_a_team_without_one_does_not(self) -> None:
-        from maljan.agents.composition import reachable_agents
+        from malspark.agents.composition import reachable_agents
 
         settings = Settings(_env_file=None, agents={"profile": "team_lead"})
 
         assert reachable_agents(settings, ["judge"]) == ["judge"]
 
     def test_the_roster_names_the_reverser_as_one_the_judge_may_task(self) -> None:
-        from maljan.pipeline.events import roster_payload
+        from malspark.pipeline.events import roster_payload
 
         settings = Settings(_env_file=None)
         definitions = settings.agents.definitions
@@ -399,14 +399,14 @@ class TestNoJobIsRefusedOverAnAgentOnlyTheMediatorMayAsk:
     """A failed ask is a failed call on the ledger; it never turns a job away."""
 
     def test_a_profile_that_withholds_every_server_from_the_judge_reaches_none(self) -> None:
-        from maljan.agents.composition import reachable_agents
+        from malspark.agents.composition import reachable_agents
 
         settings = Settings(_env_file=None, agents={"profile": "measurement"})
 
         assert reachable_agents(settings, ["judge"], mediated=True) == ["judge"]
 
     def test_the_probe_gate_asks_about_no_agent_only_the_mediator_may_ask(self) -> None:
-        from maljan.agents.composition import called_assignments
+        from malspark.agents.composition import called_assignments
 
         for profile in ("default", "mobile", "measurement"):
             settings = Settings(_env_file=None, agents={"profile": profile})
@@ -442,7 +442,7 @@ class TestTheJudgesAsksFollowTheStageTheyAreMadeFrom:
     def test_a_verdict_stage_that_withholds_built_ins_does_not_refuse_the_mediator(
         self,
     ) -> None:
-        from maljan.agents.delegation import refusal
+        from malspark.agents.delegation import refusal
 
         judge, container = _mediator([], [])
         container.config = _staged(debate_builtin=True, verdict_builtin=False)
@@ -451,7 +451,7 @@ class TestTheJudgesAsksFollowTheStageTheyAreMadeFrom:
         assert refusal(container, judge, "reverser") is None
 
     def test_a_debate_stage_that_withholds_them_does(self) -> None:
-        from maljan.agents.delegation import refusal
+        from malspark.agents.delegation import refusal
 
         judge, container = _mediator([], [])
         container.config = _staged(debate_builtin=False, verdict_builtin=True)
@@ -468,7 +468,7 @@ class TestALimitEndedLoopIsNotRunAgain:
 
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        import maljan.agents.judge_agent as judge_agent
+        import malspark.agents.judge_agent as judge_agent
 
         class _Empty:
             async def ainvoke(self, _messages: Any, **_kw: Any) -> AIMessage:
@@ -510,7 +510,7 @@ class TestALimitEndedLoopIsNotRunAgain:
 
 
 def _claiming(name: str) -> Any:
-    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+    from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
     return AgentISR(
         agent_id=name,
@@ -523,7 +523,7 @@ def test_a_mediation_settles_a_code_dispute_by_asking_the_reverser() -> None:
     """End to end: ``mediate`` runs its loop, asks, and still writes its own block."""
     from unittest.mock import AsyncMock, patch
 
-    from maljan.pipeline.mediation_models import MediatorVerdict
+    from malspark.pipeline.mediation_models import MediatorVerdict
 
     judge, container = _mediator(
         judge_script=[
@@ -559,7 +559,7 @@ def test_a_mediation_settles_a_code_dispute_by_asking_the_reverser() -> None:
 
 class TestTheSettingsRefuseWhatStaysRefused:
     def test_a_reporter_that_asks_another_agent_is_refused(self) -> None:
-        from maljan.core.config import AgentDefinition, ToolRef, agent_reference_problems
+        from malspark.core.config import AgentDefinition, ToolRef, agent_reference_problems
 
         definitions = Settings(_env_file=None).agents.definitions
         reporter = AgentDefinition(role="report", tools=[ToolRef(kind="agent", agent="static")])
@@ -569,7 +569,7 @@ class TestTheSettingsRefuseWhatStaysRefused:
         ]
 
     def test_no_definition_may_ask_the_judge(self) -> None:
-        from maljan.core.config import AgentDefinition, ToolRef, agent_reference_problems
+        from malspark.core.config import AgentDefinition, ToolRef, agent_reference_problems
 
         definitions = Settings(_env_file=None).agents.definitions
         asker = AgentDefinition(

@@ -26,11 +26,11 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
-from maljan.core.token_ledger import TokenLedger
-from maljan.core.truncation_ledger import TruncationLedger
-from maljan.pipeline.nodes import _overall_confidence, make_judge_node, with_verdict_fallback
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.core.token_ledger import TokenLedger
+from malspark.core.truncation_ledger import TruncationLedger
+from malspark.pipeline.nodes import _overall_confidence, make_judge_node, with_verdict_fallback
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.stages import paper_profile
 from tests.unit.pipeline.test_evidence_ledger_channel import _JudgeContainer
 
@@ -117,8 +117,8 @@ class TestAJudgeThatAnsweredClearsTheChannel:
         """
         from unittest.mock import AsyncMock
 
-        from maljan.agents.judge_agent import JudgeVerdict
-        from maljan.schemas.stix_models import Bundle
+        from malspark.agents.judge_agent import JudgeVerdict
+        from malspark.schemas.stix_models import Bundle
 
         container = _Container(EvidenceCounter())
         judge = container.get_judge_agent(role="judge")
@@ -179,7 +179,7 @@ class TestTheSummaryCarriesTheNote:
 def _report_container() -> Any:
     from unittest.mock import MagicMock
 
-    from maljan.pipeline.validation import ValidationTally
+    from malspark.pipeline.validation import ValidationTally
 
     container = MagicMock()
     # The report round's own tally is merged into the summary's validation
@@ -218,7 +218,7 @@ def _report_state(fallback: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _run_report(fallback: dict[str, Any] | None) -> dict[str, Any]:
-    from maljan.pipeline.nodes import make_report_node
+    from malspark.pipeline.nodes import make_report_node
 
     update = asyncio.run(make_report_node(_report_container())(_report_state(fallback)))
     assert update.get("report_error") is None
@@ -304,8 +304,8 @@ class TestAJudgeThatAnsweredWithNoVerdict:
         """
         from unittest.mock import AsyncMock
 
-        from maljan.agents.judge_agent import JudgeVerdict
-        from maljan.schemas.stix_models import Bundle
+        from malspark.agents.judge_agent import JudgeVerdict
+        from malspark.schemas.stix_models import Bundle
 
         container = _Container(EvidenceCounter())
         judge = container.get_judge_agent(role="judge")
@@ -314,7 +314,7 @@ class TestAJudgeThatAnsweredWithNoVerdict:
                 bundle=Bundle.model_validate(
                     {
                         "objects": [],
-                        "x_maljan_fallback_verdict": {
+                        "x_malspark_fallback_verdict": {
                             "decision": "Suspicious",
                             "source": "extracted",
                         },
@@ -364,20 +364,20 @@ class TestAJudgeThatAnsweredWithNoVerdict:
     def _timed_out_verdict(claims: bool) -> dict[str, Any]:
         from unittest.mock import AsyncMock
 
-        from maljan.agents.judge_agent import (
+        from malspark.agents.judge_agent import (
             VERDICT_TIMEOUT_CODE,
             VERDICT_TIMEOUT_REASON,
             JudgeVerdict,
         )
-        from maljan.pipeline.validation import Violation
-        from maljan.schemas.stix_models import Bundle
+        from malspark.pipeline.validation import Violation
+        from malspark.schemas.stix_models import Bundle
 
         container = _Container(EvidenceCounter())
         judge = container.get_judge_agent(role="judge")
         bundle = Bundle.model_validate(
             {
                 "objects": [],
-                "x_maljan_fallback_verdict": {"decision": "Suspicious", "source": "pipeline"},
+                "x_malspark_fallback_verdict": {"decision": "Suspicious", "source": "pipeline"},
             }
         )
         judge.give_verdict = AsyncMock(
@@ -431,13 +431,13 @@ class TestAJudgeThatAnsweredWithNoVerdict:
         """The first bundle stands; the report says the judge's retry failed."""
         from unittest.mock import AsyncMock
 
-        from maljan.agents.judge_agent import (
+        from malspark.agents.judge_agent import (
             VERDICT_RETRY_FAILED_CODE,
             VERDICT_RETRY_FAILED_REASON,
             JudgeVerdict,
         )
-        from maljan.pipeline.validation import Violation
-        from maljan.schemas.stix_models import Bundle
+        from malspark.pipeline.validation import Violation
+        from malspark.schemas.stix_models import Bundle
 
         container = _Container(EvidenceCounter())
         judge = container.get_judge_agent(role="judge")

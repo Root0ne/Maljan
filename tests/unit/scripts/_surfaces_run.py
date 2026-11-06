@@ -21,7 +21,7 @@ IP = "192.0.2.1"
 TECHNIQUE = ("T1059", "Command and Scripting Interpreter")
 FINDING = "The sample talks to bad.example over HTTPS."
 CELL = "hello world from the sample"
-RULE = "maljan_rule_one"
+RULE = "malspark_rule_one"
 PROCESS = {"pid": 4, "name": "sample.exe", "command_line": "sample.exe /run", "children": []}
 
 # The kinds the shipped map names that no tab renders today: none since the
@@ -116,7 +116,7 @@ def _stix() -> dict[str, Any]:
                 "type": "indicator",
                 "id": "indicator--2",
                 "pattern": f"[domain-name:value = '{DOMAIN}']",
-                "x_maljan_evidence_refs": ["ev_0002"],
+                "x_malspark_evidence_refs": ["ev_0002"],
             },
             {"type": "process", "id": "process--1", "pid": 4, "command_line": "sample.exe /run"},
         ],

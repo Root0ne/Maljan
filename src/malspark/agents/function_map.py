@@ -1,0 +1,1062 @@
+"""The function map: an analyst's working memory of the functions it has read.
+
+A reversing loop on a local model re-derives what it has already read from a
+transcript the window keeps cutting, and then decompiles the same routine
+again. The map is kept for it by the platform, from facts only:
+
+* the functions the analyst's own calls decompiled or listed, with the ledger
+  entries that hold each listing (read the way the decompiled-not-described
+  check reads them, ``pipeline.validation.decompiled_functions``);
+* the artefacts the analysis server tied to each function: the Windows names a
+  hash in it resolves to (``resolve_api_hashes``), the texts it refers to and
+  the call sites they are passed to (``decode_string_blobs``), and the strings
+  FLOSS decoded in it (``floss``) — only where the answer puts the place
+  *inside* the function, never after a function start;
+* the first sentence of the first of the analyst's own parsed claims that
+  names the function;
+* whether the function is a row of the pack's function index
+  (``tools.artefact_index``): with an index, the coverage line counts the
+  visited functions among the index's rows, and the not-visited line lists
+  the other rows in the pack's rank order;
+* the functions named and never read: a read function's callees no listing
+  holds, and the functions the analyst's claims name that no listing holds
+  (``function_callees.named_unread``). A fact; it asks for no call.
+
+The model never writes to it. The block is rendered fresh on every turn beside
+the run-state lines and replaces nothing the model already sees.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from malspark.core.declared_reading import kind_free_facts, kind_of, reads_as
+from malspark.core.undeclared_tools import (
+    entry_address_arguments,
+    entry_lists_a_function,
+    entry_lists_any_code,
+    entry_lists_code,
+)
+from malspark.pipeline.validation import (
+    _DIGIT_RUN,
+    _NAME_ARGUMENTS,
+    _address_value,
+    _addresses_written,
+    decompiled_functions,
+    generic_function_name,
+    image_bases_in,
+)
+from malspark.schemas.evidence import answer_not_shown
+from malspark.utils.written_forms import pack_escaped
+
+if TYPE_CHECKING:
+    from malspark.agents.function_callees import NamedUnread
+
+__all__ = [
+    "FUNCTION_MAP_HEAD",
+    "Artefact",
+    "FunctionArtefacts",
+    "FunctionMap",
+    "MapEntry",
+    "address_spellings",
+    "build_function_map",
+    "keeps_for_the_map",
+    "function_artefacts",
+    "merged_artefacts",
+    "function_map_block",
+    "one_spelling",
+    "same_function",
+]
+
+FUNCTION_MAP_HEAD = (
+    "function map (kept by the platform from the ledger and your parsed claims; you do not "
+    "write to it):"
+)
+
+# The kinds of answer that tie an artefact to a function, by the tool's declared
+# kind (``core.declared_reading``; ``builtin_declarations.CONSUMER_KINDS``
+# ``function_map``): an API hash resolution, a static string decoder, the
+# function index, and an emulator's recovered strings, read as every other kind.
+_HASH_KIND = "api_hash_resolution"
+_BLOB_KIND = "decoded_strings"
+_INDEX_KIND = "function_index"
+
+
+def _map_kind(entry: Any) -> str:
+    """The kind of an entry the map reads, ``""`` for any other entry."""
+    return kind_of(entry) if reads_as(entry, "function_map") else ""
+
+
+# How each kind of artefact is counted in the block, singular and plural.
+_KIND_WORDS: dict[str, tuple[str, str]] = {
+    "name": ("resolved name", "resolved names"),
+    "text": ("decoded text", "decoded texts"),
+    "call": ("call-site fact", "call-site facts"),
+    # Named by the emulator's declared display name where one names them all
+    # (:func:`_kind_words`); these words where none does.
+    "decoded": ("string decoded by emulation", "strings decoded by emulation"),
+}
+_KIND_ORDER = tuple(_KIND_WORDS)
+
+
+def _kind_words(kind: str, artefacts: Sequence[Artefact]) -> tuple[str, str]:
+    """How a count of ``kind`` is worded, singular and plural.
+
+    A decoded string is counted under the display name the tool that placed
+    it declares, where every one of them was placed by tools of one name.
+    """
+    if kind != "decoded":
+        return _KIND_WORDS[kind]
+    names = {a.by for a in artefacts if a.kind == kind}
+    name = next(iter(names)) if len(names) == 1 else ""
+    if name:
+        return f"string {name} decoded", f"strings {name} decoded"
+    return _KIND_WORDS[kind]
+
+
+# Why the run holds no whole function index, when an index entry is there.
+INDEX_FAILED = "no: [{entry}] the function index failed"
+INDEX_NOT_KEPT = "no: [{entry}] the function index's answer is not kept whole"
+
+
+@dataclass(frozen=True)
+class Artefact:
+    """One thing the analysis server tied to a function, and the entry that says so."""
+
+    kind: str
+    value: str
+    entry: str
+    # The declared display name of the tool whose answer placed it, where
+    # the count names it (a decoded string); empty for none.
+    by: str = ""
+
+
+@dataclass
+class FunctionArtefacts:
+    """The artefacts per function, keyed by offset from the image base where one is known.
+
+    ``virtual`` holds the keys that are virtual addresses no image base could
+    turn into an offset.
+    """
+
+    by_function: dict[int, list[Artefact]] = field(default_factory=dict)
+    image_bases: tuple[int, ...] = ()
+    virtual: set[int] = field(default_factory=set)
+    # The offsets of the function index's rows, and the entry that holds them.
+    indexed: set[int] = field(default_factory=set)
+    index_entry: str = ""
+    # The rows as ``(offset, distinct artefacts of its own)``, in the pack's rank order.
+    index_rows: list[tuple[int, int]] = field(default_factory=list)
+    # The whole index answer the rows come from, and the entry's own state:
+    # whether its answer was cut for the model, or why none could be read.
+    index_data: Mapping[str, Any] | None = None
+    index_cut: bool = False
+    index_unread: str = ""
+
+    def add(self, address: int, artefact: Artefact, *, virtual: bool = False) -> None:
+        self.by_function.setdefault(address, []).append(artefact)
+        if virtual:
+            self.virtual.add(address)
+
+
+@dataclass
+class MapEntry:
+    """One visited function: where it is, the entries that read it, what it reaches."""
+
+    address: int | None
+    names: tuple[str, ...]
+    decompiled: tuple[str, ...] = ()
+    listed: tuple[str, ...] = ()
+    artefacts: list[Artefact] = field(default_factory=list)
+    summary: str = ""
+    indexed: bool = False
+
+
+@dataclass
+class FunctionMap:
+    """The visited functions and the functions reaching artefacts that were not visited."""
+
+    visited: list[MapEntry] = field(default_factory=list)
+    unvisited: list[tuple[int, list[Artefact]]] = field(default_factory=list)
+    image_bases: tuple[int, ...] = ()
+    virtual: frozenset[int] = frozenset()
+    # How many rows the function index has, and the entry that holds it.
+    indexed: int = 0
+    index_entry: str = ""
+    # The index's rows no visited function is, in the pack's rank order, as
+    # ``(offset, distinct artefacts of its own)``.
+    index_unvisited: list[tuple[int, int]] = field(default_factory=list)
+    # What the map was read from, for the functions named and never read
+    # (``function_callees.named_unread``), read when the block is rendered:
+    # the entries it kept and its claims' texts.
+    read_from: tuple[Any, ...] = field(default=(), repr=False, compare=False)
+    said: tuple[str, ...] = field(default=(), repr=False, compare=False)
+
+    def coverage(self) -> str:
+        """``N functions visited (…); M functions reach artefacts …, K of them visited``.
+
+        With a function index, ``M`` is its rows and ``K`` the visited
+        functions among them: the index counts every function the run's
+        answers place an artefact in, the pack's own decoding included.
+        """
+        decompiled = sum(1 for e in self.visited if e.decompiled)
+        listed = sum(1 for e in self.visited if e.listed and not e.decompiled)
+        how = []
+        if decompiled:
+            how.append(f"{decompiled} decompiled")
+        if listed:
+            how.append(f"{listed} listed")
+        visited = _count(len(self.visited), "function", "functions") + " visited"
+        if how:
+            visited += f" ({', '.join(how)})"
+        if self.indexed:
+            held = sum(1 for e in self.visited if e.indexed)
+            verb = "holds" if self.indexed == 1 else "hold"
+            return (
+                f"{visited}; {_count(self.indexed, 'function', 'functions')} {verb} artefacts "
+                f"in the function index ({self.index_entry}), {held} of them visited"
+            )
+        reached_visited = sum(1 for e in self.visited if e.artefacts)
+        reaching = reached_visited + len(self.unvisited)
+        verb = "reaches" if reaching == 1 else "reach"
+        return (
+            f"{visited}; {_count(reaching, 'function', 'functions')} {verb} artefacts the "
+            f"analysis server tied to them, {reached_visited} of them visited"
+        )
+
+    def empty(self) -> bool:
+        return not self.visited and not self.unvisited and not self.index_unvisited
+
+
+def _count(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def _display_name(entry: Any) -> str:
+    """The display name ``entry``'s tool declares, ``""`` for none."""
+    return str(kind_free_facts(entry).display_name or "")
+
+
+def _parsed(entry: Any) -> Any:
+    structured = getattr(entry, "structured", None)
+    if isinstance(structured, dict | list):
+        return structured
+    try:
+        return json.loads(str(getattr(entry, "output", "") or ""))
+    except (ValueError, TypeError, RecursionError):
+        return None
+
+
+def _hex(value: Any) -> int | None:
+    match = re.fullmatch(r"\s*0x([0-9a-fA-F]{1,16})\s*", str(value or ""))
+    return int(match.group(1), 16) if match else None
+
+
+def _stated_base(data: Mapping[str, Any]) -> int | None:
+    return _hex(data.get("image_base"))
+
+
+def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
+    """What the analysis server's answers among ``entries`` tie to each function.
+
+    Read from answered calls only. A hash hit's place and a blob's reference
+    count for a function only where the answer states the function around the
+    place (``function``); a place after a function start is not inside it. A
+    decoded blob referred to from a function is one decoded text for it, and
+    one call-site fact more when the answer followed where its bytes are
+    passed. A FLOSS string counts for the routine FLOSS names, as an offset
+    when FLOSS gave one and otherwise as a virtual address, made an offset by
+    the image base another answer stated.
+    """
+    entries = list(entries)
+    rows = [e for e in entries if getattr(e, "ok", True)]
+    found = FunctionArtefacts()
+    for entry in entries:
+        if _map_kind(entry) != _INDEX_KIND:
+            continue
+        data = _parsed(entry) if getattr(entry, "ok", True) else None
+        if isinstance(data, dict) and isinstance(data.get("rows"), list):
+            continue
+        if isinstance(data, dict) and not getattr(entry, "truncated", False):
+            # An answer by address or an error: no whole index, and nothing unread.
+            continue
+        entry_id = str(getattr(entry, "id", "") or "")
+        found.index_unread = (
+            INDEX_FAILED.format(entry=entry_id)
+            if not getattr(entry, "ok", True)
+            else INDEX_NOT_KEPT.format(entry=entry_id)
+        )
+    bases: list[int] = list(image_bases_in(rows))
+    parsed: list[tuple[Any, str, Any]] = []
+    for entry in rows:
+        kind = _map_kind(entry)
+        if not kind:
+            continue
+        data = _parsed(entry)
+        if not isinstance(data, dict):
+            continue
+        if kind == _INDEX_KIND:
+            _index_rows(found, data, str(getattr(entry, "id", "") or ""), entry)
+            base = _stated_base(data)
+            if base and base not in bases:
+                bases.append(base)
+            continue
+        base = _stated_base(data)
+        if base and base not in bases:
+            bases.append(base)
+        parsed.append((entry, kind, data))
+    found.image_bases = tuple(bases)
+    for entry, kind, data in parsed:
+        entry_id = str(getattr(entry, "id", "") or "")
+        if kind == _HASH_KIND:
+            _hash_artefacts(found, data, entry_id)
+        elif kind == _BLOB_KIND:
+            _blob_artefacts(found, data, entry_id)
+        else:
+            _floss_artefacts(found, data, entry_id, _display_name(entry))
+    return found
+
+
+def _index_rows(
+    found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str, entry: Any = None
+) -> None:
+    """The function index's rows, by offset and in its rank order; the last index read counts.
+
+    The index's own ``image_base`` is one of the bases the map joins an
+    offset and its virtual address by (``function_artefacts`` adds it).
+    """
+    ranked: list[tuple[int, int]] = []
+    for row in data.get("rows") or []:
+        offset = _hex(row.get("offset")) if isinstance(row, dict) else None
+        if offset is not None:
+            direct = row.get("direct")
+            ranked.append((offset, int(direct) if isinstance(direct, int) else 0))
+    found.index_rows = ranked
+    found.indexed = {offset for offset, _ in ranked}
+    found.index_entry = entry_id
+    if isinstance(data.get("rows"), list):
+        found.index_data = data
+        found.index_cut = bool(getattr(entry, "truncated", False)) if entry is not None else False
+        found.index_unread = ""
+
+
+def _hash_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str) -> None:
+    for hit in data.get("hits") or []:
+        if not isinstance(hit, dict):
+            continue
+        names = [
+            str(reading.get("name") or "")
+            for reading in hit.get("readings") or []
+            if isinstance(reading, dict) and reading.get("set") != "modules" and reading.get("name")
+        ]
+        if not names:
+            continue
+        for place in hit.get("occurrences") or []:
+            address = _hex(place.get("function")) if isinstance(place, dict) else None
+            if address is None:
+                continue
+            for name in dict.fromkeys(names):
+                found.add(address, Artefact("name", name, entry_id))
+
+
+def _blob_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str) -> None:
+    for result in data.get("results") or []:
+        if not isinstance(result, dict):
+            continue
+        text = str(result.get("text") or "")
+        if not text:
+            continue
+        for place in result.get("references") or []:
+            address = _hex(place.get("function")) if isinstance(place, dict) else None
+            if address is None:
+                continue
+            found.add(address, Artefact("text", text, entry_id))
+            fact = _call_fact(text, place.get("passed_to"))
+            if fact:
+                found.add(address, Artefact("call", fact, entry_id))
+
+
+def _call_fact(text: str, passed: Any) -> str:
+    """One call-site fact as counted: the text, the argument position, the call and its callee.
+
+    Two places passing one text to two calls are two facts; the same call
+    recorded by two entries is one.
+    """
+    if not isinstance(passed, dict) or not passed.get("call_at"):
+        return ""
+    callee = passed.get("callee")
+    target = ""
+    if isinstance(callee, dict):
+        target = str(next((v for v in callee.values() if isinstance(v, str) and v), ""))
+    argument = passed.get("argument")
+    said = f"argument {argument} of the call" if argument is not None else "the call"
+    return f"{text}: {said} at {passed['call_at']}" + (f" to {target}" if target else "")
+
+
+def _floss_artefacts(
+    found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str, by: str = ""
+) -> None:
+    for row in data.get("strings") or []:
+        if not isinstance(row, dict) or not row.get("string"):
+            continue
+        address = _hex(row.get("function_rva"))
+        virtual = False
+        if address is None:
+            address = _hex(row.get("function"))
+            if address is None:
+                continue
+            # Made an offset only by the one image base the run read; with no
+            # base, or with several, it is kept as FLOSS wrote it.
+            bases = found.image_bases
+            if len(bases) == 1 and address > bases[0]:
+                address -= bases[0]
+            else:
+                virtual = True
+        found.add(address, Artefact("decoded", str(row["string"]), entry_id, by), virtual=virtual)
+
+
+def keeps_for_the_map(entry: Any) -> bool:
+    """Whether the map reads this entry: a call that decompiles or disassembles, or
+    one of the analysis server's tools that tie artefacts to functions."""
+    if getattr(entry, "repeated_of", None):
+        return False
+    return entry_lists_any_code(entry) or bool(_map_kind(entry))
+
+
+def _listed_at(entry: Any) -> tuple[int | None, list[str]]:
+    """The address and the names a listing call was given, from its arguments alone."""
+    args = getattr(entry, "args", None) or {}
+    address: int | None = None
+    for argument in entry_address_arguments(entry):
+        if argument in args and address is None:
+            address = _address_value(args[argument])
+    names: list[str] = []
+    for argument in _NAME_ARGUMENTS:
+        value = str(args.get(argument) or "").strip()
+        if value:
+            names.append(value)
+            generic = generic_function_name().fullmatch(value)
+            if generic is not None and address is None:
+                address = int(generic.group(1), 16)
+    return address, names
+
+
+def _merged(pack: FunctionArtefacts | None, own: FunctionArtefacts) -> FunctionArtefacts:
+    """The pack's artefacts and the ones the analyst's own analysis-server calls tied, together.
+
+    An artefact two entries tie to one function stays one per entry: the two
+    entries are two citations of it.
+    """
+    if pack is None:
+        return own
+    if not own.by_function and not own.indexed:
+        return pack
+    merged = FunctionArtefacts(
+        by_function={k: list(v) for k, v in pack.by_function.items()},
+        image_bases=tuple(dict.fromkeys([*pack.image_bases, *own.image_bases])),
+        virtual=set(pack.virtual) | set(own.virtual),
+        indexed=set(own.indexed or pack.indexed),
+        index_entry=own.index_entry if own.indexed else pack.index_entry,
+        index_rows=list(own.index_rows if own.indexed else pack.index_rows),
+        index_data=own.index_data if own.index_data is not None else pack.index_data,
+        index_cut=own.index_cut if own.index_data is not None else pack.index_cut,
+        index_unread=own.index_unread if own.index_data is not None else pack.index_unread,
+    )
+    for key, tied in own.by_function.items():
+        merged.by_function.setdefault(key, []).extend(tied)
+    return merged
+
+
+def merged_artefacts(pack: FunctionArtefacts | None, own: FunctionArtefacts) -> FunctionArtefacts:
+    """The pack's artefacts and an analyst's own, together (see ``_merged``)."""
+    return _merged(pack, own)
+
+
+def _same(a: int | None, b: int | None, bases: Sequence[int]) -> bool:
+    """Whether two addresses are one function: equal, or apart by an image base the run read.
+
+    With a base known, the two are an offset (below the base) and its virtual
+    address (not below it). With none known, only equal addresses are one
+    function: the decompiled-not-described check's 64 KiB fallback is a
+    guess, and the map does not guess.
+    """
+    if a is None or b is None:
+        return False
+    if a == b:
+        return True
+    low, high = sorted((a, b))
+    # An offset and its virtual address: exactly one of the two below the
+    # base, and apart by it. Two virtual addresses a base apart are two.
+    return any(low < base <= high and high - low == base for base in bases)
+
+
+def address_spellings(address: int, bases: Sequence[int]) -> tuple[int, ...]:
+    """Every address ``_same`` may join ``address`` to: itself, and a base apart either way."""
+    return (address, *(address + b for b in bases), *(address - b for b in bases if address >= b))
+
+
+def one_spelling(address: int, bases: Sequence[int]) -> int:
+    """One spelling per function: the virtual address, where the one image base read makes one."""
+    if len(bases) == 1 and address < bases[0]:
+        return address + bases[0]
+    return address
+
+
+def same_function(a: int | None, b: int | None, bases: Sequence[int]) -> bool:
+    """Whether two addresses are one function by the map's rule (``_same``)."""
+    return _same(a, b, bases)
+
+
+class _ByAddress:
+    """Visited entries by their address, for the first one ``_same`` joins an address to.
+
+    A lookup reads the address's spellings (:func:`address_spellings`), never every
+    entry, and returns the earliest entry held that ``_same`` joins: what a
+    scan of the entries in order returns.
+    """
+
+    def __init__(self, bases: Sequence[int]) -> None:
+        self.bases = tuple(bases)
+        self.at: dict[int, list[tuple[int, MapEntry]]] = {}
+        self.count = 0
+
+    def add(self, entry: MapEntry) -> None:
+        if entry.address is not None:
+            self.at.setdefault(entry.address, []).append((self.count, entry))
+        self.count += 1
+
+    def move(self, entry: MapEntry, address: int) -> None:
+        """Hold ``entry`` under ``address`` in place of the address it had."""
+        old = entry.address
+        held = self.at.get(old, []) if old is not None else []
+        place = next((n for n, e in held if e is entry), self.count)
+        if old is not None:
+            held[:] = [(n, e) for n, e in held if e is not entry]
+        entry.address = address
+        self.at.setdefault(address, []).append((place, entry))
+        self.at[address].sort(key=lambda pair: pair[0])
+
+    def first(self, address: int | None) -> MapEntry | None:
+        if address is None:
+            return None
+        found = [
+            (n, e)
+            for key in address_spellings(address, self.bases)
+            for n, e in self.at.get(key, ())
+            if _same(e.address, address, self.bases)
+        ]
+        return min(found, key=lambda pair: pair[0])[1] if found else None
+
+
+def _fold_spellings(visited: list[MapEntry], bases: Sequence[int]) -> list[MapEntry]:
+    """``visited`` with an offset and its virtual address made one entry, at the larger address."""
+    out: list[MapEntry] = []
+    held = _ByAddress(bases)
+    for entry in visited:
+        into = held.first(entry.address)
+        if into is None:
+            out.append(entry)
+            held.add(entry)
+            continue
+        if entry.address is not None and into.address is not None:
+            held.move(into, max(into.address, entry.address))
+        into.names = tuple(dict.fromkeys([*into.names, *entry.names]))
+        into.decompiled = tuple(dict.fromkeys([*into.decompiled, *entry.decompiled]))
+        into.listed = tuple(dict.fromkeys([*into.listed, *entry.listed]))
+    return out
+
+
+def _first_sentence(text: str) -> str:
+    said = " ".join(str(text or "").split())
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(])", said, maxsplit=1)
+    return parts[0] if parts else said
+
+
+def build_function_map(
+    own: Iterable[Any],
+    artefacts: FunctionArtefacts | None,
+    claims: Iterable[Any],
+    image_bases: Sequence[int] = (),
+) -> FunctionMap:
+    """The map of ``own`` entries, the artefacts tied to functions and the analyst's claims.
+
+    A decompiled function is one ``decompiled_functions`` reads out of the
+    entries. A listed one is a disassembly call of a whole function, or one at
+    an address that is a function the map already knows. Artefacts join a
+    visited function when its address and the artefact's offset are one
+    function (``_same``: equal, or apart by an image base the run read). An
+    offset and its virtual address are one visited function the same way; with
+    no base known, both are kept as written.
+    """
+    # A call whose answer the conversation had no room for was not read, and a
+    # repeat holds a note in place of the answer the earlier entry holds.
+    entries = [
+        e
+        for e in own
+        if getattr(e, "ok", True)
+        and not answer_not_shown(e)
+        and not getattr(e, "repeated_of", None)
+    ]
+    found = _merged(artefacts, function_artefacts(entries))
+    bases = tuple(dict.fromkeys([*image_bases, *found.image_bases, *image_bases_in(entries)]))
+    visited: list[MapEntry] = _fold_spellings(
+        [
+            MapEntry(address=f.address, names=f.names, decompiled=f.entries)
+            for f in decompiled_functions(entries)
+        ],
+        bases,
+    )
+    known = {e.address for e in visited if e.address is not None} | set(found.by_function)
+    by_address = _ByAddress(bases)
+    for visit in visited:
+        by_address.add(visit)
+    for entry in entries:
+        if not entry_lists_code(entry):
+            continue
+        address, names = _listed_at(entry)
+        if address is None:
+            continue
+        if not entry_lists_a_function(entry) and not any(
+            k in known and _same(address, k, bases) for k in address_spellings(address, bases)
+        ):
+            continue
+        entry_id = str(getattr(entry, "id", "") or "")
+        into = by_address.first(address)
+        if into is None:
+            into = MapEntry(address=address, names=tuple(names))
+            visited.append(into)
+            by_address.add(into)
+            known.add(address)
+        else:
+            into.names = tuple(dict.fromkeys([*into.names, *names]))
+        if entry_id and entry_id not in into.listed:
+            into.listed = (*into.listed, entry_id)
+
+    reached: set[int] = set()
+    # Each visited function's artefacts in the order the functions were tied,
+    # looked up by its address's spellings rather than read off every key.
+    order = {key: n for n, key in enumerate(found.by_function)}
+    for entry in visited:
+        if entry.address is None:
+            continue
+        keys = sorted(
+            {
+                key
+                for key in address_spellings(entry.address, bases)
+                if key in order
+                and (
+                    entry.address == key
+                    if key in found.virtual
+                    else _same(entry.address, key, bases)
+                )
+            },
+            key=order.__getitem__,
+        )
+        for key in keys:
+            entry.artefacts.extend(found.by_function[key])
+            reached.add(key)
+
+    said = [
+        f"{getattr(c, 'claim', '') or ''} {getattr(c, 'evidence_ref', '') or ''}" for c in claims
+    ]
+    texts = [str(getattr(c, "claim", "") or "") for c in claims]
+    for entry in visited:
+        for text, sentence in zip(said, texts, strict=True):
+            if _claim_names(text, entry, bases):
+                entry.summary = _first_sentence(sentence)
+                break
+
+    held: set[int] = set()
+    for entry in visited:
+        # The spellings ``_same`` joins, looked up rather than compared row by row.
+        address = entry.address
+        if address is None:
+            continue
+        for key in (address, *(address - b for b in bases), *(address + b for b in bases)):
+            if key in found.indexed and _same(address, key, bases):
+                entry.indexed = True
+                held.add(key)
+
+    unvisited = sorted(
+        ((key, tied) for key, tied in found.by_function.items() if key not in reached),
+        key=lambda pair: pair[0],
+    )
+    return FunctionMap(
+        visited=visited,
+        unvisited=unvisited,
+        image_bases=bases,
+        virtual=frozenset(found.virtual),
+        indexed=len(found.indexed),
+        index_entry=found.index_entry,
+        index_unvisited=[row for row in found.index_rows if row[0] not in held],
+        read_from=tuple(entries),
+        said=tuple(said),
+    )
+
+
+def _claim_names(text: str, entry: MapEntry, bases: Sequence[int]) -> bool:
+    """Whether a claim's text names this visited function.
+
+    By an address written out that is the same function by the map's own rule
+    (``_same``: equal, or an offset and its virtual address apart by a base the
+    run read; with no base, only equal), by the function's own hex spelling
+    written as digits alone, or by a name the decompiler gave it. A name that
+    is an ordinary word (``entry``, ``start``) names it only written as code
+    or beside a word that says it is a function. No address is guessed.
+    """
+    if entry.address is not None:
+        if any(_same(entry.address, address, bases) for address in _addresses_written(text)):
+            return True
+        spelled = f"{entry.address:x}"
+        if spelled.isdigit() and any(
+            run.group(1).lstrip("0") == spelled.lstrip("0") for run in _DIGIT_RUN.finditer(text)
+        ):
+            return True
+    for name in entry.names:
+        if generic_function_name().fullmatch(name):
+            continue
+        # A dotted name (``sym.entry``, ``fcn.main``) written whole names it;
+        # its last label is read by the same rule as a plain name.
+        if "." in name and _written_bare(text, name):
+            return True
+        last = name.rsplit(".", 1)[-1]
+        if len(last) < 3 or generic_function_name().fullmatch(last):
+            continue
+        if _WORD_NAME.fullmatch(last):
+            if _named_as_a_function(text, last):
+                return True
+            continue
+        if _written_bare(text, last):
+            return True
+    return False
+
+
+def _written_bare(text: str, spelling: str) -> bool:
+    """Whether ``text`` writes ``spelling`` as a whole word, as the decompiled check reads a name."""
+    return re.search(r"(?<![\w.])" + re.escape(spelling) + r"(?![\w])", text) is not None
+
+
+# A function name spelled like a word of prose: letters only, at most the first
+# a capital ("entry", "Start").
+_WORD_NAME = re.compile(r"[A-Za-z][a-z]+")
+# The words that say a name beside them is a function's.
+_FUNCTION_CUE = (
+    r"(?:functions?|routines?|subroutines?|procedures?|methods?|exports?|exported|"
+    r"handlers?|callbacks?|symbols?)"
+)
+
+
+def _named_as_a_function(text: str, name: str) -> bool:
+    """Whether ``text`` writes the word ``name`` as code or beside a word that says it is a function.
+
+    As code: in backticks or quotes, or with a call's parenthesis after it.
+    Beside a cue: the cue straight before it or straight after it
+    (``the export entry``, ``the entry function``).
+    """
+    word = re.escape(name)
+    quoted = r"[`'\"]" + word + r"[`'\"]"
+    called = r"(?<![\w.])" + word + r"\s*\("
+    bare = r"[`'\"]?" + word + r"[`'\"]?"
+    before = r"(?i:\b" + _FUNCTION_CUE + r")\s+" + bare + r"(?![\w])"
+    after = r"(?<![\w.])" + bare + r"\s+(?i:" + _FUNCTION_CUE + r"\b)"
+    return any(re.search(pattern, text) for pattern in (quoted, called, before, after))
+
+
+def _kinds(artefacts: Sequence[Artefact]) -> list[tuple[str, int, list[str]]]:
+    """``(kind, count, entry ids)`` in a fixed order of kinds, for the kinds present.
+
+    The count is of distinct values: a text referred to from two places of a
+    function, or an answer two entries recorded, is one artefact, and every
+    entry that holds it is cited.
+    """
+    out: list[tuple[str, int, list[str]]] = []
+    for kind in _KIND_ORDER:
+        of = [a for a in artefacts if a.kind == kind]
+        if of:
+            distinct = len({a.value for a in of})
+            out.append((kind, distinct, list(dict.fromkeys(a.entry for a in of if a.entry))))
+    return out
+
+
+def _name(name: str) -> str:
+    """A function's name as the block shows it: quoted, as the pack quotes a sample's text.
+
+    A decompiler builds a name from the sample's own export and symbol names,
+    so a name is shown as one quoted, escaped value on one line.
+    """
+    return f'"{pack_escaped(str(name))}"'
+
+
+def _where(address: int | None, names: Sequence[str]) -> str:
+    head = hex(address) if address is not None else (_name(names[0]) if names else "unnamed")
+    shown = list(names) if address is not None else list(names[1:])
+    shown = [n for n in shown if address is None or n != head]
+    quoted = ", ".join(_name(n) for n in shown)
+    return f"{head} ({quoted})" if shown else head
+
+
+def _folded(entry: MapEntry) -> str:
+    """A bare visit on the "also visited" line: its address, with the names that are not
+    a decompiler's generic ``FUN_``/``sub_``/``fcn.`` name."""
+    kept = [n for n in entry.names if not generic_function_name().fullmatch(n)]
+    if entry.address is None:
+        return _where(None, kept or list(entry.names))
+    return _where(entry.address, kept)
+
+
+def _visited_line(entry: MapEntry) -> str:
+    parts: list[str] = []
+    if entry.decompiled:
+        parts.append(f"decompiled in {', '.join(entry.decompiled)}")
+    if entry.listed:
+        parts.append(f"listed in {', '.join(entry.listed)}")
+    kinds = _kinds(entry.artefacts)
+    if kinds:
+        parts.append(
+            "reaches "
+            + ", ".join(
+                f"{_count(n, *_kind_words(kind, entry.artefacts))} ({', '.join(ids)})"
+                for kind, n, ids in kinds
+            )
+        )
+    if entry.summary:
+        parts.append(f"summary: {entry.summary}")
+    return f"- {_where(entry.address, entry.names)}: {'; '.join(parts)}"
+
+
+def _unvisited_item(found: FunctionMap, address: int, artefacts: Sequence[Artefact]) -> str:
+    if address in found.virtual:
+        where = hex(address)
+    elif len(found.image_bases) == 1 and address < found.image_bases[0]:
+        where = hex(found.image_bases[0] + address)
+    else:
+        where = f"offset {hex(address)}"
+    kinds = _kinds(artefacts)
+    counts = ", ".join(_count(n, *_kind_words(kind, artefacts)) for kind, n, _ in kinds)
+    ids = list(dict.fromkeys(i for _, _, entry_ids in kinds for i in entry_ids))
+    return f"{where} ({counts}; {', '.join(ids)})" if ids else f"{where} ({counts})"
+
+
+def function_map_block(found: FunctionMap, room: int | None = None) -> str:
+    """The map as the model reads it, or ``""`` when nothing is visited or tied.
+
+    A head, the coverage line, one line per visited function that reaches an
+    artefact or has a summary, one line of the other visited addresses, one
+    line of the functions named and never read (:func:`_named_unread_line`),
+    and one line of the functions reaching artefacts that were not visited.
+
+    With a function index, that last line lists the index's rows not visited
+    and takes only the room the other lines leave of ``room``, the characters
+    the caller derived for the whole block: the ranked rows that fit, then how
+    many more there are and where the index is. With no ``room`` it states the
+    count, the entry and the tool that serves the index, and no rows.
+    """
+    if found.empty():
+        return ""
+    lines = [FUNCTION_MAP_HEAD, f"coverage: {found.coverage()}"]
+    said = [e for e in found.visited if e.artefacts or e.summary]
+    bare = [e for e in found.visited if not (e.artefacts or e.summary)]
+    lines.extend(_visited_line(entry) for entry in said)
+    if bare:
+        # A visit with nothing but its entry id: the transcript already
+        # stamps the id on the listing, so the address is enough here.
+        lines.append("also visited: " + ", ".join(_folded(e) for e in bare))
+    # The named line shares the room left with the not-visited line after it:
+    # when that line has rows to list, half of what its fixed clauses leave,
+    # so its rows keep half the room they had; all of it when it has none.
+    left = None if room is None else room - sum(len(line) + 1 for line in lines)
+    fixed = _rows_line_fixed(found)
+    if left is not None and fixed:
+        left = max(0, left - fixed) // 2
+    named = _named_unread_line(found, left)
+    if named:
+        lines.append(named)
+    if found.indexed:
+        # With an index, the not-visited line reads the index's rows, as the
+        # coverage line does, in the pack's rank order.
+        if found.index_unvisited:
+            left = None if room is None else room - sum(len(line) + 1 for line in lines)
+            lines.append(_index_line(found, left))
+    elif found.unvisited:
+        left = None if room is None else room - sum(len(line) + 1 for line in lines)
+        lines.append(_unvisited_line(found, left))
+    return "\n".join(lines)
+
+
+def _rows_line_fixed(found: FunctionMap) -> int:
+    """The characters the not-visited line takes besides its rows, ``0`` when it lists none.
+
+    Its head and its closing clause at their longest, as the line itself keeps
+    room for them (:func:`_index_line`, :func:`_unvisited_line`).
+    """
+    if found.indexed:
+        if not found.index_unvisited:
+            return 0
+        head = f"not visited, holding artefacts in the function index ({found.index_entry}): "
+        closing = f"; and {len(found.index_unvisited)} more; " + INDEX_ELSEWHERE.format(
+            entry=found.index_entry
+        )
+        return len(head) + len(closing) + 1
+    if not found.unvisited:
+        return 0
+    closing = f"; and {len(found.unvisited)} more not listed here for want of room"
+    return len("not visited, reaching artefacts: ") + len(closing) + 1
+
+
+def _unvisited_line(found: FunctionMap, room: int | None) -> str:
+    """The functions reaching artefacts that were not visited, in ``room`` characters.
+
+    Every one when they fit, or when no room is derived. Otherwise the ones
+    that fit, room being kept for the closing clause at its longest, then how
+    many more there are; when none fits, the count alone, which stands even in
+    a room smaller than itself, as the index line's does.
+    """
+    head = "not visited, reaching artefacts: "
+    items = [_unvisited_item(found, a, tied) for a, tied in found.unvisited]
+    whole = head + "; ".join(items)
+    if room is None or len(whole) <= room:
+        return whole
+    total = len(items)
+    unlisted = "not listed here for want of room"
+    budget = room - len(f"; and {total} more {unlisted}")
+    shown: list[str] = []
+    used = len(head)
+    for item in items:
+        cost = len(item) + (2 if shown else 0)
+        if used + cost > budget:
+            break
+        shown.append(item)
+        used += cost
+    if not shown:
+        return f"{head}{_count(total, 'function', 'functions')}, {unlisted}"
+    return f"{head}{'; '.join(shown)}; and {total - len(shown)} more {unlisted}"
+
+
+# The functions named and never read: how the line is headed, and how many it
+# lists at most, whatever the room, so the rows after it keep theirs.
+NAMED_UNREAD_HEAD = (
+    "named, not read (none of your listings holds its code; a function you read "
+    "calls it, or your claims name it): "
+)
+NAMED_UNREAD_SHOWN = 24
+# How many of a function's read callers its item names.
+_CALLERS_SHOWN = 2
+
+
+# The closing clause naming the listed ones the analyst's claims name.
+NAMED_IN_CLAIMS = "named in your claims: "
+
+
+def _named_unread_item(item: NamedUnread) -> str:
+    if not item.callers:
+        return hex(item.address)
+    callers = ", ".join(hex(c) for c in item.callers[:_CALLERS_SHOWN])
+    more = len(item.callers) - _CALLERS_SHOWN
+    return f"{hex(item.address)} (called by {callers}" + (f" and {more} more)" if more > 0 else ")")
+
+
+def _named_unread_text(items: Sequence[NamedUnread], cut: str = "") -> str:
+    """The line for ``items``: each item, the cut clause, then the ones the claims name."""
+    text = NAMED_UNREAD_HEAD + "; ".join(_named_unread_item(n) for n in items) + cut
+    named = [hex(n.address) for n in items if n.named]
+    return f"{text}; {NAMED_IN_CLAIMS}{', '.join(named)}" if named else text
+
+
+def _named_unread_line(found: FunctionMap, room: int | None) -> str:
+    """The functions named and never read, in ``room`` characters; ``""`` for none (T-403).
+
+    A fact, as every line of the map is: it asks for no call and refuses
+    none. Addresses only, written by the platform, so no sample text rides
+    it. At most :data:`NAMED_UNREAD_SHOWN` of them, fewer when the room is
+    smaller; a list cut says how many there are in all, and when none fits
+    the count stands alone where it fits, and no line is given where it does
+    not, so the block stays inside its room. The ones the claims
+    name are said once, in a closing clause, not on each item.
+    """
+    from malspark.agents.function_callees import named_unread
+
+    try:
+        found_unread = named_unread(found.read_from, found, found.said)
+    except Exception:  # noqa: BLE001 — a fact left out never costs the map
+        return ""
+    if not found_unread:
+        return ""
+    total = len(found_unread)
+    items = found_unread[:NAMED_UNREAD_SHOWN]
+    whole = _named_unread_text(items)
+    if total == len(items) and (room is None or len(whole) <= room):
+        return whole
+    # The longest the line may be with ``shown`` items: they, the cut clause
+    # at its longest, and the claims clause over them. One pass, each item's
+    # length added once.
+    cut = f"; {{shown}} of {total} listed"
+    fixed = len(NAMED_UNREAD_HEAD) + len(cut.format(shown=total))
+    shown = 0
+    body = claims = 0
+    for item in items:
+        body_next = body + len(_named_unread_item(item)) + (2 if shown else 0)
+        claims_next = claims + (len(hex(item.address)) + (2 if claims else 0) if item.named else 0)
+        claims_cost = len(f"; {NAMED_IN_CLAIMS}") + claims_next if claims_next else 0
+        if room is not None and fixed + body_next + claims_cost > room:
+            break
+        shown += 1
+        body, claims = body_next, claims_next
+    if not shown:
+        # The count alone, where it fits; in a room smaller than that, no
+        # line: the not-visited line after it keeps the room it had.
+        count = (
+            f"{NAMED_UNREAD_HEAD}{_count(total, 'function', 'functions')}, "
+            "not listed here for want of room"
+        )
+        return count if room is None or len(count) <= room else ""
+    return _named_unread_text(items[:shown], cut.format(shown=shown))
+
+
+# Where the whole index is, said after the rows the room left out.
+INDEX_ELSEWHERE = "the index is {entry}, served by the analysis server's function_index tool"
+
+
+def _index_line(found: FunctionMap, room: int | None) -> str:
+    """The index's rows not visited, in rank order, in ``room`` characters; ``None``: no rows.
+
+    Every row when they all fit; otherwise the rows that fit, room being kept
+    for the last clause at its longest, then "and N more" with where the index
+    is. With no room derived, the count, the entry and the tool only. That
+    count form is the line's floor: it stands even in a room smaller than
+    itself, since a fact is stated whole or not at all, and it does not grow
+    with the index.
+    """
+    rows = found.index_unvisited
+    head = f"not visited, holding artefacts in the function index ({found.index_entry}): "
+    elsewhere = INDEX_ELSEWHERE.format(entry=found.index_entry)
+    if room is None:
+        return f"{head}{_count(len(rows), 'row', 'rows')}; {elsewhere}"
+    items = [_indexed_item(found, a, n) for a, n in rows]
+    whole = head + "; ".join(items)
+    if len(whole) <= room:
+        return whole
+    budget = room - len(f"; and {len(rows)} more; {elsewhere}")
+    shown: list[str] = []
+    used = len(head)
+    for item in items:
+        cost = len(item) + (2 if shown else 0)
+        if used + cost > budget:
+            break
+        shown.append(item)
+        used += cost
+    if not shown:
+        return f"{head}{_count(len(rows), 'row', 'rows')}; {elsewhere}"
+    return f"{head}{'; '.join(shown)}; and {len(rows) - len(shown)} more; {elsewhere}"
+
+
+def _indexed_item(found: FunctionMap, address: int, artefacts: int) -> str:
+    where = (
+        hex(found.image_bases[0] + address)
+        if len(found.image_bases) == 1 and address < found.image_bases[0]
+        else f"offset {hex(address)}"
+    )
+    return f"{where} ({_count(artefacts, 'artefact', 'artefacts')})"

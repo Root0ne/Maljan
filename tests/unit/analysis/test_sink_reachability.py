@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from maljan.analysis.sink_reachability import (
+from malspark.analysis.sink_reachability import (
     FOLLOW_UP,
     CallGraph,
     _normalize_api,
@@ -11,7 +11,7 @@ from maljan.analysis.sink_reachability import (
     priority_hint,
     rank_suspicious_functions,
 )
-from maljan.providers.static.ghidra.call_graph import (
+from malspark.providers.static.ghidra.call_graph import (
     PRIORITY_FOLLOW_UP,
     call_graph_from_text,
 )

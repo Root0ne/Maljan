@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.pipeline import analyst_mode
+from malspark.pipeline import analyst_mode
 from tests.credential_shapes import password
 
 ANSWERS: dict[str, list[str]] = {

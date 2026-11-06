@@ -20,11 +20,11 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import SecretStr
 
-from maljan.agents.composition import ResolvedAgent
-from maljan.agents.configurable_analyst import ConfigurableAnalyst
-from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-from maljan.agents.static_analyst import StaticAnalyst
-from maljan.core.config import GHIDRA_SAMPLE_OPEN
+from malspark.agents.composition import ResolvedAgent
+from malspark.agents.configurable_analyst import ConfigurableAnalyst
+from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+from malspark.agents.static_analyst import StaticAnalyst
+from malspark.core.config import GHIDRA_SAMPLE_OPEN
 
 
 class _Resp:
@@ -105,14 +105,14 @@ def client(monkeypatch: pytest.MonkeyPatch) -> _Client:
 
 
 def _ghidra(settings: Any) -> Any:
-    from maljan.providers.static.ghidra import GhidraStaticProvider
+    from malspark.providers.static.ghidra import GhidraStaticProvider
 
     return GhidraStaticProvider(settings.static.ghidra, settings.preprocessing, None)
 
 
 def _shipped(provider_id: str) -> Any:
-    from maljan.core.config import Settings
-    from maljan.providers.registry import static_provider_class
+    from malspark.core.config import Settings
+    from malspark.providers.registry import static_provider_class
 
     return static_provider_class(provider_id).from_settings(Settings())
 
@@ -167,7 +167,7 @@ class _GraphProvider:
         return True
 
     def priority_functions(self, path: str) -> Any:
-        from maljan.analysis.sink_reachability import CallGraph, rank_suspicious_functions
+        from malspark.analysis.sink_reachability import CallGraph, rank_suspicious_functions
 
         graph = CallGraph.of_edges([("entry", "CreateProcessA")], {"entry": "0x1000"})
         return rank_suspicious_functions(graph)
@@ -254,10 +254,10 @@ def test_the_pre_pass_waits_what_one_tool_call_may_take(
     client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The deployment's floor (none here), Ghidra's own declared budget, or the operator's."""
-    from maljan.providers.base import prepare_sample
+    from malspark.providers.base import prepare_sample
 
     settings = _settings("ghidra")
-    monkeypatch.setattr("maljan.core.config.get_settings", lambda: settings)
+    monkeypatch.setattr("malspark.core.config.get_settings", lambda: settings)
     prepare_sample(_ghidra(settings), "/data/samples/x.exe")
 
     class _Breaker:
@@ -285,7 +285,7 @@ JOINED_HEAD = HEAD_CHUNK + "\n\n" + SANDBOX_SLICE
 
 def _r2_with_recorded_open(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list[str]]:
     """The shipped r2 provider, its session's open tool answered by a stub that records it."""
-    from maljan.providers.static import r2 as r2_module
+    from malspark.providers.static import r2 as r2_module
 
     opened: list[str] = []
 
@@ -339,7 +339,7 @@ class TestAJoinedHeadChunk:
         assert provider.opened == []
 
     def test_the_static_role_reads_the_joined_head(self) -> None:
-        from maljan.agents.static_analyst import (
+        from malspark.agents.static_analyst import (
             _extract_analysis_path,
             _extract_load_hint,
             _extract_sample_hash,
@@ -358,7 +358,7 @@ class TestAJoinedHeadChunk:
 def test_the_head_is_read_in_one_pass_over_its_first_value() -> None:
     import time
 
-    from maljan.loaders.binary_chunker import head_object
+    from malspark.loaders.binary_chunker import head_object
 
     def _timed(n: int) -> float:
         tail = json.dumps({"rows": ["x" * 40] * n})

@@ -15,10 +15,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.core.config import RestMappingConfig
-from maljan.core.safe_json import dumps
-from maljan.providers.errors import ProviderConfigurationError
-from maljan.providers.sandbox.rest_mapping import CHANNELS, apply_mapping, compile_mapping
+from malspark.core.config import RestMappingConfig
+from malspark.core.safe_json import dumps
+from malspark.providers.errors import ProviderConfigurationError
+from malspark.providers.sandbox.rest_mapping import CHANNELS, apply_mapping, compile_mapping
 
 # A pasted sample response, not a real report: 4 MiB is generous for one and
 # far below the 64 MiB an uploaded report is allowed, which is deliberate —

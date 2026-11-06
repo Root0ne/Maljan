@@ -14,9 +14,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.pipeline.nodes import make_judge_node
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.pipeline.nodes import make_judge_node
+from malspark.schemas.evidence import EvidenceCounter
 from tests.unit.agents.test_judge_verdict_validation import _bundle_json, _Llm
 from tests.unit.pipeline.test_a_fallback_verdict_assesses_nothing import _Container, _state
 

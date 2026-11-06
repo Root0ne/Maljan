@@ -17,9 +17,9 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage
 
-from maljan.core.spend import TAIL_CALLS
-from maljan.pipeline.validation import ValidationTally
-from maljan.reporting.models import (
+from malspark.core.spend import TAIL_CALLS
+from malspark.pipeline.validation import ValidationTally
+from malspark.reporting.models import (
     BoundValue,
     ConfigItem,
     EncryptionScheme,
@@ -32,7 +32,7 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.section_agreement import (
+from malspark.reporting.section_agreement import (
     AGREEMENT_CALL,
     CLAIM_LED,
     DEBATE,
@@ -517,7 +517,7 @@ def test_a_failed_round_leaves_the_report_as_written_and_says_so() -> None:
 
 
 def test_the_round_never_raises_wherever_it_fails(monkeypatch: Any) -> None:
-    from maljan.reporting import section_agreement
+    from malspark.reporting import section_agreement
 
     def _boom(*_args: Any, **_kwargs: Any) -> Any:
         raise ValueError("broken")
@@ -545,7 +545,7 @@ def test_the_question_is_a_report_call_of_the_spend_plan() -> None:
 
 
 def _node_round(report: MalwareReport, reporter: Any) -> ValidationTally:
-    from maljan.pipeline.nodes import _ask_section_agreement
+    from malspark.pipeline.nodes import _ask_section_agreement
 
     tally = ValidationTally()
     asyncio.run(
@@ -592,7 +592,7 @@ def test_the_node_says_what_the_question_could_not_do() -> None:
 
 
 def test_the_node_keeps_every_section_when_the_question_raises(monkeypatch: Any) -> None:
-    from maljan.reporting import section_agreement
+    from malspark.reporting import section_agreement
 
     async def _boom(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("down")
@@ -612,7 +612,7 @@ def test_the_node_asks_only_once_the_composer_wrote_its_sections() -> None:
     import inspect
     import textwrap
 
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     tree = ast.parse(textwrap.dedent(inspect.getsource(nodes.make_report_node)))
     guarded = [

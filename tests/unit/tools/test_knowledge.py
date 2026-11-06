@@ -1,4 +1,4 @@
-"""``maljan.tools.knowledge`` answers from the vendored tables, or says why not.
+"""``malspark.tools.knowledge`` answers from the vendored tables, or says why not.
 
 The two lookups backed by a vendored JSON file — the API-behaviour catalog and
 the LOLBin table — are checked against real values. The three backed by an
@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from maljan.tools import knowledge
+from malspark.tools import knowledge
 
 _ELF_IMPORTS: dict[str, dict[str, list[str]]] = json.loads(
     (Path(__file__).resolve().parents[2] / "fixtures" / "elf_import_lists.json").read_text(
@@ -362,7 +362,7 @@ class TestDegradation:
         def _explode(*args: Any, **kwargs: Any) -> Any:
             raise RuntimeError("no model on this box")
 
-        monkeypatch.setattr("maljan.memory.family_fingerprint_index.load_family_index", _explode)
+        monkeypatch.setattr("malspark.memory.family_fingerprint_index.load_family_index", _explode)
         result = knowledge.family_lookup("ransomware")
         assert result["families"] == []
         assert "could not be read" in result["reason"]
@@ -391,7 +391,7 @@ class TestDegradation:
                 attempts.append(1)
                 raise RuntimeError("offline")
 
-        monkeypatch.setattr("maljan.memory.hybrid_attck_index.HybridATTCKIndex", _Broken)
+        monkeypatch.setattr("malspark.memory.hybrid_attck_index.HybridATTCKIndex", _Broken)
 
         for _ in range(3):
             knowledge.resolve_technique("process injection")
@@ -427,7 +427,7 @@ class TestAFailedIndexBuildIsRetried:
     ) -> None:
         attempts: list[int] = []
         monkeypatch.setattr(
-            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+            "malspark.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
         )
         knowledge.set_index_retry_after(60)
 
@@ -444,7 +444,7 @@ class TestAFailedIndexBuildIsRetried:
     def test_a_retry_that_succeeds_clears_the_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
         attempts: list[int] = []
         monkeypatch.setattr(
-            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+            "malspark.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
         )
         knowledge.set_index_retry_after(60)
         knowledge.resolve_technique("process injection")
@@ -459,7 +459,7 @@ class TestAFailedIndexBuildIsRetried:
             def search(_text: str, top_k: int = 5) -> list[Any]:
                 return []
 
-        monkeypatch.setattr("maljan.memory.hybrid_attck_index.HybridATTCKIndex", _Working)
+        monkeypatch.setattr("malspark.memory.hybrid_attck_index.HybridATTCKIndex", _Working)
         monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 61)
         assert knowledge.resolve_technique("process injection") == {"candidates": []}
         assert knowledge.index_is_warm()
@@ -469,7 +469,7 @@ class TestAFailedIndexBuildIsRetried:
     ) -> None:
         attempts: list[int] = []
         monkeypatch.setattr(
-            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+            "malspark.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
         )
         knowledge.set_index_retry_after(0)
         knowledge.resolve_technique("process injection")
@@ -493,7 +493,7 @@ class TestAFailedIndexBuildIsRetried:
                 time.sleep(0.2)
                 raise RuntimeError("offline")
 
-        monkeypatch.setattr("maljan.memory.hybrid_attck_index.HybridATTCKIndex", _Slow)
+        monkeypatch.setattr("malspark.memory.hybrid_attck_index.HybridATTCKIndex", _Slow)
         knowledge.set_index_retry_after(60)
         knowledge.resolve_technique("process injection")
         assert len(attempts) == 1
@@ -515,7 +515,7 @@ class TestAFailedIndexBuildIsRetried:
     ) -> None:
         attempts: list[int] = []
         monkeypatch.setattr(
-            "maljan.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
+            "malspark.memory.hybrid_attck_index.HybridATTCKIndex", self._broken(attempts)
         )
         knowledge.set_index_retry_after(60)
         assert knowledge.warm_index_in_background() is True
@@ -557,7 +557,7 @@ class TestTheCitationIsTheSameInEveryProcess:
         import sys
 
         code = (
-            "import json; from maljan.tools import knowledge; "
+            "import json; from malspark.tools import knowledge; "
             f"print(json.dumps(knowledge.api_capability({self._NAMES!r})))"
         )
         env = {**os.environ, "PYTHONHASHSEED": seed}
@@ -584,7 +584,7 @@ class TestTheLinuxVocabulary:
 
     @pytest.fixture(autouse=True)
     def _fresh_catalogues(self) -> Iterator[None]:
-        from maljan.analysis import api_capability_db
+        from malspark.analysis import api_capability_db
 
         api_capability_db.reset_cache()
         yield
@@ -710,8 +710,8 @@ class TestTheLinuxVocabulary:
 
     def test_every_linux_rule_says_what_it_is_and_who_else_does_it(self) -> None:
         """A rule with no mechanism and no ordinary user reads as an accusation."""
-        from maljan.analysis.api_capability_db import load_api_attck_map
-        from maljan.tools.knowledge import DEFAULT_API_ATTCK_MAP, resolve_data
+        from malspark.analysis.api_capability_db import load_api_attck_map
+        from malspark.tools.knowledge import DEFAULT_API_ATTCK_MAP, resolve_data
 
         table = load_api_attck_map(str(resolve_data(DEFAULT_API_ATTCK_MAP)), "linux")
 

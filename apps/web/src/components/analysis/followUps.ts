@@ -27,7 +27,7 @@ export function modelLine(row: FollowUp): string {
 }
 
 /** The window event a newly answered follow-up is announced on, with the row as its detail. */
-export const FOLLOW_UP_EVENT = "maljan:follow-up";
+export const FOLLOW_UP_EVENT = "malspark:follow-up";
 
 /**
  * What a key press in the chat composer does: Enter sends, Shift+Enter (or

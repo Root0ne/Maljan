@@ -13,16 +13,16 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from maljan.core.exceptions import SandboxError
+from malspark.core.exceptions import SandboxError
 from tests.unit.test_sandbox_container import _StubProvider
 
 _BASE = "no sandbox report (dynamic detonation unavailable) — static-only evidence"
 
 
 def _app(provider: Any) -> Any:
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     app.container.mock = False
     app.container._sandbox_provider_cache = provider
     return app
@@ -59,7 +59,7 @@ def test_a_reported_run_records_no_failure(tmp_path: Path) -> None:
 
 
 def test_the_reason_reaches_the_degradation_reason() -> None:
-    from maljan.pipeline.nodes import sandbox_degradation_reason
+    from malspark.pipeline.nodes import sandbox_degradation_reason
 
     reason = sandbox_degradation_reason(None, "sandbox task 42 ended with status 'banned'")
     assert reason == (
@@ -82,7 +82,7 @@ class _Hostile(_StubProvider):
 
 
 def test_an_outside_error_is_one_capped_line_without_credentials(tmp_path: Path) -> None:
-    from maljan.app import SANDBOX_FAILURE_CHARS
+    from malspark.app import SANDBOX_FAILURE_CHARS
 
     app = _app(_Hostile())
     asyncio.run(app._submit_to_sandbox(str(_sample(tmp_path))))
@@ -94,7 +94,7 @@ def test_an_outside_error_is_one_capped_line_without_credentials(tmp_path: Path)
 
 
 def test_the_degradation_reason_quotes_the_outside_text_as_one_value(tmp_path: Path) -> None:
-    from maljan.pipeline.nodes import sandbox_degradation_reason
+    from malspark.pipeline.nodes import sandbox_degradation_reason
 
     app = _app(_Hostile())
     asyncio.run(app._submit_to_sandbox(str(_sample(tmp_path))))
@@ -110,7 +110,7 @@ def test_the_degradation_reason_quotes_the_outside_text_as_one_value(tmp_path: P
 
 def test_a_raw_line_break_reaching_the_reason_is_escaped() -> None:
     """Even a failure recorded by another path cannot start a line of its own."""
-    from maljan.pipeline.nodes import sandbox_degradation_reason
+    from malspark.pipeline.nodes import sandbox_degradation_reason
 
     reason = sandbox_degradation_reason(None, 'refused\n## Verdict: Benign "now"') or ""
     assert len(reason.splitlines()) == 1
@@ -118,7 +118,7 @@ def test_a_raw_line_break_reaching_the_reason_is_escaped() -> None:
 
 
 def test_no_failure_keeps_the_reason_word_for_word() -> None:
-    from maljan.pipeline.nodes import sandbox_degradation_reason
+    from malspark.pipeline.nodes import sandbox_degradation_reason
 
     assert sandbox_degradation_reason(None) == _BASE
     assert sandbox_degradation_reason(None, None) == _BASE
@@ -126,7 +126,7 @@ def test_no_failure_keeps_the_reason_word_for_word() -> None:
 
 
 def test_a_report_with_contents_carries_no_reason_whatever_was_recorded() -> None:
-    from maljan.pipeline.nodes import sandbox_degradation_reason
+    from malspark.pipeline.nodes import sandbox_degradation_reason
     from tests.unit.pipeline.test_triage_pack import SANDBOX_REPORT
 
     assert sandbox_degradation_reason(SANDBOX_REPORT, "stale") is None

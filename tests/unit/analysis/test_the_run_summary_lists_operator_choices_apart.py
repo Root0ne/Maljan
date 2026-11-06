@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.providers.sample_open import LISTED_SHARED_WITHHELD, withheld_unpinned
-from maljan.reporting.builder import MalwareReportBuilder
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.providers.sample_open import LISTED_SHARED_WITHHELD, withheld_unpinned
+from malspark.reporting.builder import MalwareReportBuilder
 
 WITHHELD = withheld_unpinned(
     "remote http://localhost:8089 (backend 1)", "run_ghidra_script", LISTED_SHARED_WITHHELD

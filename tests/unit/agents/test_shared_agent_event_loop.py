@@ -17,8 +17,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.base_agent import _get_agent_loop, _run_coro_blocking, run_on_agent_loop
-from maljan.agents.static_analyst import StaticAnalyst
+from malspark.agents.base_agent import _get_agent_loop, _run_coro_blocking, run_on_agent_loop
+from malspark.agents.static_analyst import StaticAnalyst
 
 
 def test_agent_loop_is_single_persistent_running_loop() -> None:

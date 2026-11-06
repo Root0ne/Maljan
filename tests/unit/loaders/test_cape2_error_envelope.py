@@ -20,8 +20,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.loaders.cape2_client import CAPEv2Client
-from maljan.loaders.sandbox_client import SandboxError
+from malspark.loaders.cape2_client import CAPEv2Client
+from malspark.loaders.sandbox_client import SandboxError
 
 
 def _client() -> CAPEv2Client:
@@ -151,8 +151,8 @@ class TestThePcapEnvelope:
 
 class TestTheProviderFetch:
     def test_the_provider_fetch_raises_rather_than_reading_an_empty_report(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+        from malspark.core.config import Settings
+        from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider
 
         provider = CAPE2SandboxProvider.from_settings(Settings(_env_file=None))
         c = _client()
@@ -168,8 +168,8 @@ class TestTheProbe:
 
         import httpx
 
-        from maljan.core.config import Settings
-        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+        from malspark.core.config import Settings
+        from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider
 
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(status, json=body)
@@ -246,7 +246,7 @@ class TestTheCapeReportIsReadWhole:
     def test_a_huge_error_body_is_read_only_as_far_as_the_error_quotes(self, status: int) -> None:
         import httpx
 
-        from maljan.loaders.cape2_client import BODY_SHOWN
+        from malspark.loaders.cape2_client import BODY_SHOWN
 
         pulled: list[int] = []
 
@@ -275,7 +275,7 @@ class TestTheCapeReportIsReadWhole:
         assert c.fetch_report("7").sample_sha256 == "ab"
 
     def test_a_capture_is_streamed_whole_past_any_response_cap(self, monkeypatch, tmp_path) -> None:
-        from maljan.providers.sandbox import limits
+        from malspark.providers.sandbox import limits
 
         monkeypatch.setattr(limits, "MAX_RESPONSE_BYTES", 64)
         body = PCAP_HEAD + b"\0" * 500_000
@@ -322,7 +322,7 @@ class TestACaptureThatFailsToFetchIsNeverLostSilently:
         assert slept == [4.0]
 
     def test_a_502_every_time_is_the_degraded_reason_with_the_status(self, tmp_path) -> None:
-        from maljan.providers.errors import ArtefactFetchFailed
+        from malspark.providers.errors import ArtefactFetchFailed
 
         c, slept = self._client([502])
         with pytest.raises(ArtefactFetchFailed) as exc:
@@ -334,7 +334,7 @@ class TestACaptureThatFailsToFetchIsNeverLostSilently:
     def test_an_exception_is_the_degraded_reason_with_its_type(self, tmp_path) -> None:
         import httpx
 
-        from maljan.providers.errors import ArtefactFetchFailed
+        from malspark.providers.errors import ArtefactFetchFailed
 
         c, _slept = self._client([httpx.ReadTimeout("timed out")])
         with pytest.raises(ArtefactFetchFailed) as exc:
@@ -342,7 +342,7 @@ class TestACaptureThatFailsToFetchIsNeverLostSilently:
         assert exc.value.reason == "packet capture not fetched (ReadTimeout)"
 
     def test_an_empty_file_is_its_own_reason(self, tmp_path) -> None:
-        from maljan.providers.errors import ArtefactFetchFailed
+        from malspark.providers.errors import ArtefactFetchFailed
 
         c, slept = self._client([b"\0" * 10])
         with pytest.raises(ArtefactFetchFailed) as exc:

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity, TTPMapping
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity, TTPMapping
 
 
 def _rec(action: str) -> dict[str, str]:

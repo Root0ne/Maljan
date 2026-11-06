@@ -5,11 +5,11 @@ protocol breakdown of a capture the sandbox produced.
 
 Four tools: `read_pcap_summary`, `extract_dns` and `extract_http` walk packets,
 and `pcap_summary` gives the whole-capture view — external conversations, TLS
-SNI destinations and detected beaconing — from `maljan.tools.pcap`.
+SNI destinations and detected beaconing — from `malspark.tools.pcap`.
 
 Every one of them reads the whole capture as a stream, one packet in memory at
-a time (`maljan.analysis.pcap_summary.each_packet`), with Maljan's own
-pcap/pcapng reader (`maljan.analysis.capture_reader`, no optional library, so
+a time (`malspark.analysis.pcap_summary.each_packet`), with Malspark's own
+pcap/pcapng reader (`malspark.analysis.capture_reader`, no optional library, so
 every tool is always available). `packet_limit` is
 optional and has no default: a limit applies only when the caller passes one.
 Every answer states how many packets it read and how many the capture holds —
@@ -19,10 +19,10 @@ read.`), `pcap_summary` as `packets_read`, `packets_in_capture` and
 capture's facts, as `pcap_summary` writes them; with one it lists that many
 packets from `offset`, one line each, and names the offset of the next page.
 
-Launched by `maljan.core.config._builtin_servers()` as the `network` server —
+Launched by `malspark.core.config._builtin_servers()` as the `network` server —
 `sys.executable services/network-mcp/server.py`, cwd `services/network-mcp`,
-with `MALJAN_STAGING_DIR` and `MALJAN_SAMPLE_ROOTS` passed through, plus the
-one directory name the spawn composes for the job (`MALJAN_STAGING_JOB`) — and
+with `MALSPARK_STAGING_DIR` and `MALSPARK_SAMPLE_ROOTS` passed through, plus the
+one directory name the spawn composes for the job (`MALSPARK_STAGING_JOB`) — and
 its tools are bound to the `network` analyst.
 
 With `--http` it listens over streamable HTTP behind its token instead, as the
@@ -38,16 +38,16 @@ a reading left for a later change. A job's staging directory in the
 container's `/tmp` (the capture handed over) is removed when the job ends,
 over `release_job`, the delivery primitive the worker calls with the job's id
 (that job's directory only, as on the analysis server); a release that fails
-leaves it to the sweep `MALJAN_STAGING_TTL_HOURS` (24 h unless set) after it
+leaves it to the sweep `MALSPARK_STAGING_TTL_HOURS` (24 h unless set) after it
 last changed, and it counts against the tmpfs until then.
 
 ## Which captures it may read
 
 Every `pcap_path` is resolved (symlinks followed) and refused unless it lands
-inside this job's staging directory — `MALJAN_STAGING_DIR` plus the job leaf,
+inside this job's staging directory — `MALSPARK_STAGING_DIR` plus the job leaf,
 the same directory the analysis sidecar writes this job's uploads into, and
 whose `captures/` child holds the captures fetched for this job — or one of the
-directories listed in `MALJAN_SAMPLE_ROOTS` (separated by `:`, empty by
+directories listed in `MALSPARK_SAMPLE_ROOTS` (separated by `:`, empty by
 default). A capture fetched for another job is refused by every spelling, even
 where a sample root contains the staging base; nothing here writes. The capture a sandbox run produced is in one of them because the
 worker exports the directory it fetched it to. A relative `pcap_path` is read
@@ -59,7 +59,7 @@ and names no host path. Its remediation lists this run's captures by those
 job-relative names, or says the run holds none; `pcap_path` is required on
 every tool, so it never says to leave the argument out. When a job has exactly
 one capture, the platform hides `pcap_path` from the schema the network tools
-are bound with and fills it in (`maljan.agents.tool_pinning`), the way it fills
+are bound with and fills it in (`malspark.agents.tool_pinning`), the way it fills
 the sample's own path; see "Which directories a sidecar may read" in
 `apps/docs/content/docs/configuration.mdx`.
 

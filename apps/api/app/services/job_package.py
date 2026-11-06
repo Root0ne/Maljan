@@ -23,10 +23,10 @@ is. It holds:
   layout the served report prints (``reporting.full_report_in_one_file``);
 - ``report/evidence-bundle.html`` and ``report/evidence-bundle.json``: the
   evidence bundle behind the analyst report, beside it under the names its
-  links name (``maljan.reporting.renderers.bundle``);
+  links name (``malspark.reporting.renderers.bundle``);
 - ``export/stix-bundle.json``: the STIX bundle the report row serves;
 - ``ledger/spilled.json`` and ``ledger/objects/<sha256>``: every part of an
-  answer the ledger does not keep whole (``maljan.schemas.evidence_spill``),
+  answer the ledger does not keep whole (``malspark.schemas.evidence_spill``),
   with the kept bytes where the build could read them back, bounded, and
   verify them, else its reference and digest with the reason the bytes are
   not here;
@@ -89,7 +89,7 @@ from typing import IO, Any, BinaryIO, Protocol
 from app.services import ledger_chain
 from app.services.run_export import LAYOUT
 
-FORMAT = "maljan-job-package/2"
+FORMAT = "malspark-job-package/2"
 # The HKDF purpose label the signature key is derived under.
 SIGNATURE_LABEL = b"maljan-job-package-v1"
 _SIGNATURE_TAG = b"maljan-job-package-manifest/1\n"
@@ -132,7 +132,7 @@ _HEX = frozenset("0123456789abcdef")
 # A package built before the file digest: the same archive under the plain
 # gzip header the builder wrote then (no flags, no time, maximum compression,
 # no named system).
-LEGACY_FORMAT = "maljan-job-package/1"
+LEGACY_FORMAT = "malspark-job-package/1"
 _LEGACY_HEADER = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff"
 # The current header: the same fields with FEXTRA set, and one extra subfield
 # ("MJ") holding the SHA-256 of the rest of the file and its HMAC.
@@ -190,7 +190,7 @@ NOT_CANONICAL = (
     "byte or the end of the archive differs, or data follows the gzip end."
 )
 FILE_DIGEST_LEGACY = (
-    "Built before the file digest (maljan-job-package/1): the gzip header, every tar header "
+    "Built before the file digest (malspark-job-package/1): the gzip header, every tar header "
     "and padding byte, the archive's end and the gzip CRC, length and end are checked against "
     "what the builder wrote then; only an equivalent encoding of the deflate stream, which "
     "yields the same archive, cannot be told apart."
@@ -350,8 +350,8 @@ def _markdown(report: Any, job: Any, layout: str | None = None) -> tuple[str | N
     ``layout`` is the served report's (``renderers/layout.py``); ``None`` reads
     the process's own setting.
     """
-    from maljan.reporting.renderers import MarkdownRenderer
-    from maljan.reporting.renderers.layout import report_layout
+    from malspark.reporting.renderers import MarkdownRenderer
+    from malspark.reporting.renderers.layout import report_layout
 
     typed, why = _typed(report, job)
     if typed is None:
@@ -361,9 +361,9 @@ def _markdown(report: Any, job: Any, layout: str | None = None) -> tuple[str | N
 
 def _bundle(report: Any, job: Any) -> tuple[tuple[str, str] | None, str | None]:
     """The evidence bundle's HTML and JSON, or ``None`` and why they are not rendered."""
-    from maljan.reporting.renderers import HtmlRenderer
-    from maljan.reporting.renderers.bundle import bundle_json
-    from maljan.reporting.renderers.layout import BUNDLE
+    from malspark.reporting.renderers import HtmlRenderer
+    from malspark.reporting.renderers.bundle import bundle_json
+    from malspark.reporting.renderers.layout import BUNDLE
 
     typed, why = _typed(report, job)
     if typed is None:
@@ -381,7 +381,7 @@ def _typed(report: Any, job: Any) -> tuple[Any, str | None]:
     """
     if not isinstance(report, Mapping):
         return None, "The run holds no report document (report.json), so nothing is rendered."
-    from maljan.reporting.models import MalwareReport, key_ordered
+    from malspark.reporting.models import MalwareReport, key_ordered
 
     document = key_ordered(report)
     if not document.get("generated_at"):
@@ -546,7 +546,7 @@ def build_package(
         raise PackageError(f"not a run directory: {run_dir}")
     if not _is_count(max_bytes) or max_bytes <= 0:
         raise PackageError("no valid upload_max_bytes bounds the package's files")
-    with tempfile.TemporaryDirectory(prefix="maljan-package-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="malspark-package-") as tmp:
         stage = _Stage(Path(tmp), max_bytes)
         parts: list[dict[str, Any]] = []
         absent: list[dict[str, Any]] = []
@@ -787,7 +787,7 @@ def archive_stream(
     ``key``, which must be the manifest's signature key, or zeros for an
     unsigned package) is written into ``out``, then the body.
     """
-    with tempfile.TemporaryFile(prefix="maljan-package-body-") as body:
+    with tempfile.TemporaryFile(prefix="malspark-package-body-") as body:
         stream = _Deflating(body)
         yield stream
         stream.finish()
@@ -1186,7 +1186,7 @@ def verify_package(
         return _broken(str(path), UNREADABLE)
     file_hash = hashlib.sha256()
     canonical = _Canonical()
-    with raw, tempfile.TemporaryDirectory(prefix="maljan-package-verify-") as tmp:
+    with raw, tempfile.TemporaryDirectory(prefix="malspark-package-verify-") as tmp:
         root = Path(tmp).resolve()
         try:
             # One pass over the file: the header, then every later byte into
@@ -1495,7 +1495,7 @@ async def build_for_job(
             response.release_conn()
 
     refs = spilled_refs(rows.evidence)
-    with tempfile.TemporaryDirectory(prefix="maljan-package-run-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="malspark-package-run-") as tmp:
         run_dir = Path(tmp) / RUN
         await asyncio.to_thread(write_files, run_files(rows), run_dir)
         del rows

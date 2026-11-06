@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from maljan.analysis import directed_text
-from maljan.analysis.directed_text import (
+from malspark.analysis import directed_text
+from malspark.analysis.directed_text import (
     FAMILIES,
     Groups,
     Region,
@@ -31,7 +31,7 @@ from maljan.analysis.directed_text import (
     scan_items_into,
     scan_text,
 )
-from maljan.utils.written_forms import pack_escaped
+from malspark.utils.written_forms import pack_escaped
 
 # One phrase per family, each with whitespace between its parts.
 PHRASES = {
@@ -467,8 +467,8 @@ class TestTheAnswer:
 # Run in a process of its own, so its peak resident memory is the scan's alone.
 _MEASURE = """
 import json, resource, time
-from maljan.utils.peak_memory import rss_to_bytes
-from maljan.analysis.directed_text import Groups, scan_bytes_into
+from malspark.utils.peak_memory import rss_to_bytes
+from malspark.analysis.directed_text import Groups, scan_bytes_into
 blob = b"[inst]" * 200_000
 before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 started = time.process_time()
@@ -514,8 +514,8 @@ class TestTheCostIsBoundedByTheFile:
 # Run in a process of its own, so its peak resident memory is the scan's alone.
 _SPACED_MEASURE = """
 import json, resource, time
-from maljan.utils.peak_memory import rss_to_bytes
-from maljan.analysis.directed_text import Groups, scan_bytes_into
+from malspark.utils.peak_memory import rss_to_bytes
+from malspark.analysis.directed_text import Groups, scan_bytes_into
 blob = b"a " * 6_000_000
 before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 started = time.process_time()

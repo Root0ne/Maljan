@@ -18,9 +18,9 @@ import pytest
 from pydantic import BaseModel, SecretStr
 from tests.credential_shapes import password
 
-from maljan.core import settings_masking as sm
-from maljan.core.config import Settings
-from maljan.core.settings_catalog import (
+from malspark.core import settings_masking as sm
+from malspark.core.config import Settings
+from malspark.core.settings_catalog import (
     _SECRET_NAMES,
     _names_an_identifier,
     configured_secret_values,
@@ -77,7 +77,7 @@ def test_shown_text_keeps_every_stage_name_and_masks_the_credential() -> None:
 
 
 def test_the_default_settings_hold_nothing() -> None:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     assert shown_secret_values(build_settings({})) == set()
 
@@ -211,7 +211,7 @@ def test_a_database_password_equal_to_a_core_name_is_held_beside_the_core_settin
 
 
 def test_a_typed_credential_is_held_even_where_it_reads_as_a_name() -> None:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     settings = build_settings({"llm.provider": "openai", "llm.openai.api_key": "ollama"})
     stored = {**_stored(password(20, variant=8)), "core.llm.openai.api_key": "analysis"}

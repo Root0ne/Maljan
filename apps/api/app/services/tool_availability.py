@@ -49,8 +49,8 @@ import sys
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from maljan.core.logger import logger
-from maljan.tools.capabilities import ToolNeeds, Unavailable
+from malspark.core.logger import logger
+from malspark.tools.capabilities import ToolNeeds, Unavailable
 
 from app.logsafe import log_safe
 
@@ -72,7 +72,7 @@ def _same_interpreter(command: str) -> bool:
 
 def _sidecar_directory(config: Any) -> str | None:
     """The ``services/<dir>`` whose ``server.py`` ``config`` launches, or ``None``."""
-    from maljan.tools.sidecar_needs import sidecar_of
+    from malspark.tools.sidecar_needs import sidecar_of
 
     return sidecar_of(config)
 
@@ -83,7 +83,7 @@ def _sidecar_needs(config: Any) -> list[ToolNeeds] | None:
     ``None`` for anything this host cannot check without starting it: a
     server reached at an address, another interpreter, another program.
     """
-    from maljan.tools.sidecar_needs import BY_DIRECTORY
+    from malspark.tools.sidecar_needs import BY_DIRECTORY
 
     if str(getattr(config, "transport", "")) != "stdio":
         return None
@@ -99,8 +99,8 @@ def _environ(key: str, config: Any, settings: Any = None) -> dict[str, str]:
     With ``settings``, what its launch hands it of a tool's declared data as
     well (``tools.sidecar_needs.handed_env``), as ``ServerHandle`` does.
     """
-    from maljan.agents.subprocess_env import child_env
-    from maljan.tools.sidecar_needs import handed_env
+    from malspark.agents.subprocess_env import child_env
+    from malspark.tools.sidecar_needs import handed_env
 
     environ = child_env(
         dict(getattr(config, "env", None) or {}),
@@ -118,7 +118,7 @@ def _reading_needs(config: Any, tool: str) -> tuple[str, ToolNeeds] | None:
     The declaring server's own sidecar when its launch names one, else the
     sidecar that declares the tool: the reading runs the same code either way.
     """
-    from maljan.tools.sidecar_needs import BY_DIRECTORY
+    from malspark.tools.sidecar_needs import BY_DIRECTORY
 
     directory = _sidecar_directory(config) if config is not None else None
     candidates = [directory] if directory in BY_DIRECTORY else list(BY_DIRECTORY)
@@ -145,17 +145,17 @@ def _in_process_readings(
     answer can be kept per environment. ``level`` is what the choice of a
     switched-off or one of several declaring servers is logged at.
     """
-    from maljan.agents.sample_staging import REMOTE_TRANSPORTS
-    from maljan.core.pack_servers import _declaring_server_key
-    from maljan.core.pack_steps import effective_steps, steps_on_servers
-    from maljan.providers.servers import READER_DELIVERY_KIND
-    from maljan.tools.readers import READERS
+    from malspark.agents.sample_staging import REMOTE_TRANSPORTS
+    from malspark.core.pack_servers import _declaring_server_key
+    from malspark.core.pack_steps import effective_steps, steps_on_servers
+    from malspark.providers.servers import READER_DELIVERY_KIND
+    from malspark.tools.readers import READERS
 
     servers = settings.mcp.servers
     steps, _off = steps_on_servers(
         effective_steps(getattr(settings.triage, "steps", None) or ()), servers
     )
-    from maljan.core.declared_reading import tools_in_force
+    from malspark.core.declared_reading import tools_in_force
 
     run = {step.called for step in steps if step.enabled and step.builtin}
     # Each block's declarations with what its server declares of itself under them.
@@ -229,8 +229,8 @@ def _missing(
             absent.append(req)
     if not reasons:
         return None
-    from maljan.tools.capabilities import remedy_for
-    from maljan.tools.errors import MISSING_DEPENDENCY
+    from malspark.tools.capabilities import remedy_for
+    from malspark.tools.errors import MISSING_DEPENDENCY
 
     return Unavailable(
         server="",
@@ -261,8 +261,8 @@ def unavailable_tools(
     What is found is logged at ``level``: a warning for a job being accepted,
     a debug line for a status read.
     """
-    from maljan.agents.composition import servers_a_job_calls
-    from maljan.tools.sidecar_needs import handed_env
+    from malspark.agents.composition import servers_a_job_calls
+    from malspark.tools.sidecar_needs import handed_env
 
     if profile and profile != str(settings.agents.profile):
         agents = settings.agents.model_copy(update={"profile": profile})

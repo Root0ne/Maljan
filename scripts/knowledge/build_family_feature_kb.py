@@ -1,9 +1,9 @@
 """Offline builder for the family-feature RAG fingerprint catalog (§4 U3).
 
 Produces the vendored ``data/family_fingerprints_v1.json`` that
-``maljan.memory.family_fingerprint_index`` loads at runtime. This is an OPERATOR /
+``malspark.memory.family_fingerprint_index`` loads at runtime. This is an OPERATOR /
 OFFLINE script — never imported by the pipeline. It needs NO heavy ML deps: it
-reuses Maljan's own static-feature extractor and profile renderer so the family
+reuses Malspark's own static-feature extractor and profile renderer so the family
 fingerprints are written in the exact vocabulary the runtime query uses (the index
 embeds the text at load, guaranteeing one embedding space).
 
@@ -60,14 +60,14 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from maljan.analysis.family_feature_rag import (
+from malspark.analysis.family_feature_rag import (
     build_family_fingerprint_text,
     build_sample_profile_text,
 )
-from maljan.extractors.pe_extractor import build_static_analysis
-from maljan.memory.family_fingerprint_index import build_record_path
+from malspark.extractors.pe_extractor import build_static_analysis
+from malspark.memory.family_fingerprint_index import build_record_path
 
-_CATALOG_SCHEMA = "maljan-family-fingerprints/v1"
+_CATALOG_SCHEMA = "malspark-family-fingerprints/v1"
 _EMBED_MODEL = "BAAI/bge-small-en-v1.5"  # what the runtime index embeds the text with
 
 
@@ -291,7 +291,7 @@ def build_manifest(
     family-RAG loader warns about it.
     """
     return {
-        "schema": "maljan-family-fingerprints-build/v1",
+        "schema": "malspark-family-fingerprints-build/v1",
         "catalog": out_path.name,
         "catalog_sha256": hashlib.sha256(catalog_bytes).hexdigest(),
         "inputs": {

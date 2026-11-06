@@ -25,13 +25,13 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.core import config as config_module
-from maljan.core.config import MCPServerConfig, Settings, TriageConfig
-from maljan.core.container import ServiceContainer
-from maljan.core.pack_steps import effective_steps
-from maljan.pipeline import artefacts as store_module
-from maljan.pipeline.artefacts import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.core import config as config_module
+from malspark.core.config import MCPServerConfig, Settings, TriageConfig
+from malspark.core.container import ServiceContainer
+from malspark.core.pack_steps import effective_steps
+from malspark.pipeline import artefacts as store_module
+from malspark.pipeline.artefacts import (
     FETCH_TOOL,
     ArtefactStore,
     open_beneath,
@@ -39,16 +39,16 @@ from maljan.pipeline.artefacts import (
     take_in_outputs,
     written_names,
 )
-from maljan.pipeline.nodes import _server_step_call
-from maljan.pipeline.triage_pack import (
+from malspark.pipeline.nodes import _server_step_call
+from malspark.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     PackInputs,
     ServerAnswer,
     run_pack,
 )
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.tools import staging
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.tools import staging
 
 PAYLOAD = b"\x00payload written by one server\xff"
 DIGEST = hashlib.sha256(PAYLOAD).hexdigest()
@@ -381,7 +381,7 @@ class TestHandingAFileOver:
         assert [record["state"] for record in stagings] == ["done"]
         # The record says what was sent, and the disclosure line says it too.
         assert [record["what"] for record in stagings] == ["artefact"]
-        from maljan.analysis.disclosure import _staging_uploads, _upload_line
+        from malspark.analysis.disclosure import _staging_uploads, _upload_line
 
         (row,) = _staging_uploads(stagings)
         assert _upload_line(row, lambda text: text).startswith(
@@ -391,7 +391,7 @@ class TestHandingAFileOver:
     def test_a_large_file_is_streamed_from_disk_in_chunks_with_its_digest_checked(
         self, base: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import sample_staging
+        from malspark.agents import sample_staging
 
         monkeypatch.setattr(sample_staging, "CHUNK_BYTES", 8)
         blob = bytes(range(30))
@@ -425,7 +425,7 @@ class TestHandingAFileOver:
     def test_a_file_changed_on_disk_is_not_finished_and_a_large_one_needs_chunks(
         self, base: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import sample_staging
+        from malspark.agents import sample_staging
 
         store = ArtefactStore("job-stream-2")
         artefact = store.take_in_bytes(b"original", "f.bin")
@@ -460,8 +460,8 @@ class TestHandingAFileOver:
     def test_each_call_waits_no_longer_than_the_step_s_declared_budget(
         self, base: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
-        from maljan.pipeline.artefacts import hand_over
+        from malspark.agents import base_agent
+        from malspark.pipeline.artefacts import hand_over
 
         waited: list[float | None] = []
 
@@ -923,8 +923,8 @@ class TestTheNodeHandsAFileFromOneServerToAnother:
         assert scanned.pack_step["read"] == {"artefact_path": f"art_{DIGEST}"}
         # The run's isolation part counts the call handed the file as a read of
         # what came out of the sample, though its server declares nothing.
-        from maljan.analysis.disclosure import job_sample_paths
-        from maljan.analysis.isolation import sample_readers
+        from malspark.analysis.disclosure import job_sample_paths
+        from malspark.analysis.isolation import sample_readers
 
         assert container.artefact_paths == [asked["file"]]
         assert asked["file"] in job_sample_paths(container)
@@ -936,7 +936,7 @@ class TestTheNodeHandsAFileFromOneServerToAnother:
     def test_the_node_keeps_a_store_for_the_job(
         self, base: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.pipeline.nodes import make_triage_node
+        from malspark.pipeline.nodes import make_triage_node
         from tests.unit.pipeline.test_stage_events import _state
 
         settings = Settings(_env_file=None)

@@ -1,5 +1,5 @@
 {
-  "name": "maljan-webcrack-mcp",
+  "name": "malspark-webcrack-mcp",
   "private": true,
   "description": "webcrack for the webcrack-mcp sidecar; installed with npm ci --ignore-scripts",
   "license": "MIT",

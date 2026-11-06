@@ -27,7 +27,7 @@ from typing import Any
 import pytest
 from tests.credential_shapes import password
 
-from maljan.analysis.disclosure import (
+from malspark.analysis.disclosure import (
     STAGING_DONE,
     addressed_hosts,
     disclosure_lines,
@@ -35,8 +35,8 @@ from maljan.analysis.disclosure import (
     model_list,
     staging_record,
 )
-from maljan.core.config import Settings
-from maljan.core.settings_overrides import public_snapshot
+from malspark.core.config import Settings
+from malspark.core.settings_overrides import public_snapshot
 
 LOCAL_LLM = {"llm.provider": "openai", "llm.openai.base_url": "http://127.0.0.1:8080/v1"}
 RUNTIME = {"http://127.0.0.1:8080": "llama.cpp /props"}

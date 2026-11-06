@@ -24,8 +24,8 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage
 
-from maljan.core.config import Settings
-from maljan.llm.generation_rate import (
+from malspark.core.config import Settings
+from malspark.llm.generation_rate import (
     IN_CALL_SOURCE,
     LLAMA_CPP_PROMPT_SOURCE,
     LLAMA_CPP_SOURCE,
@@ -34,7 +34,7 @@ from maljan.llm.generation_rate import (
     ModelCallDeadline,
     attach_rate_meter,
 )
-from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
+from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only
 
 from .virtual_time import run, run_expecting
 
@@ -529,7 +529,7 @@ class TestAServerErrorAlwaysReachesTheCaller:
 
         import openai
 
-        from maljan.llm.openai_provider import _as_status_error
+        from malspark.llm.openai_provider import _as_status_error
 
         real_import = builtins.__import__
 

@@ -1,7 +1,7 @@
 """A judge relationship that credits an agent with a technique it never named is asked about.
 
 The ELF run's bundle published ``malware uses T1490`` with
-``x_maljan_contributing_agents: ["STATIC ANALYST"]``, and the same credit on
+``x_malspark_contributing_agents: ["STATIC ANALYST"]``, and the same credit on
 T1048.001; the static analyst claimed neither, and no tool named either. The
 relationships were the judge's own — the platform mints no annotation — and
 nothing asked about them, although the run knows exactly who named which
@@ -18,11 +18,11 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.pipeline.validation import CREDIT_WITHOUT_CLAIM_CODE, validate_verdict_bundle
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.judgement import JudgeAssessment
-from maljan.schemas.stix_models import (
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.pipeline.validation import CREDIT_WITHOUT_CLAIM_CODE, validate_verdict_bundle
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.judgement import JudgeAssessment
+from malspark.schemas.stix_models import (
     AttackPattern,
     Bundle,
     ConfidenceAnnotatedRelationship,
@@ -42,13 +42,13 @@ def _bundle(tid: str, agents: list[str], relationship_type: str = "uses") -> Bun
         relationship_type=relationship_type,
         source_ref=malware.id,
         target_ref=pattern.id,
-        x_maljan_confidence=0.95,
-        x_maljan_evidence_basis="static",
-        x_maljan_contributing_agents=agents,
+        x_malspark_confidence=0.95,
+        x_malspark_evidence_basis="static",
+        x_malspark_contributing_agents=agents,
     )
     return Bundle(
         objects=[malware, pattern, edge],
-        x_maljan_assessment=JudgeAssessment(verdict="Malware", confidence=0.95),
+        x_malspark_assessment=JudgeAssessment(verdict="Malware", confidence=0.95),
     )
 
 
@@ -96,7 +96,7 @@ class TestTheQuestion:
         bundle = _bundle("T1490", ["STATIC ANALYST"])
         _rows(bundle)
 
-        assert bundle.objects[2].x_maljan_contributing_agents == ["STATIC ANALYST"]
+        assert bundle.objects[2].x_malspark_contributing_agents == ["STATIC ANALYST"]
 
 
 def _judge(answer: str) -> Any:
@@ -125,9 +125,9 @@ _ANSWER = (
     ' "external_references": [{"source_name": "mitre-attack", "external_id": "T1490"}]},'
     '{"type": "relationship", "id": "relationship--1", "relationship_type": "uses",'
     ' "source_ref": "malware--1", "target_ref": "attack-pattern--1",'
-    ' "x_maljan_confidence": 0.95, "x_maljan_evidence_basis": "static",'
-    ' "x_maljan_contributing_agents": ["STATIC ANALYST"]}],'
-    ' "x_maljan_assessment": {"verdict": "Malware", "confidence": 0.95,'
+    ' "x_malspark_confidence": 0.95, "x_malspark_evidence_basis": "static",'
+    ' "x_malspark_contributing_agents": ["STATIC ANALYST"]}],'
+    ' "x_malspark_assessment": {"verdict": "Malware", "confidence": 0.95,'
     ' "severity": {"rating": "High", "rationale": "a reverse shell"}}}'
 )
 

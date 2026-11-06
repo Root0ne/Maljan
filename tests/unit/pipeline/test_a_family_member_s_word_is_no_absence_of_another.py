@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.memory.attck_loader import sub_technique_entries, technique_names
-from maljan.pipeline.validation import (
+from malspark.memory.attck_loader import sub_technique_entries, technique_names
+from malspark.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     _another_member_s_word,
     _family_name_stems,
@@ -32,8 +32,8 @@ from maljan.pipeline.validation import (
     absence_claim_violation,
     name_stem_families,
 )
-from maljan.schemas.isr_models import ClaimEvidence
-from maljan.tools import knowledge
+from malspark.schemas.isr_models import ClaimEvidence
+from malspark.tools import knowledge
 
 
 def _claim(text: str, technique: str) -> ClaimEvidence:

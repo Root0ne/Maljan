@@ -19,17 +19,17 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.report_formats import SignatureScale, recorded_signature_scale
-from maljan.providers.sandbox import readers
-from maljan.providers.sandbox.formats import sniff_format
-from maljan.providers.sandbox.readers import (
+from malspark.core.config import Settings
+from malspark.core.report_formats import SignatureScale, recorded_signature_scale
+from malspark.providers.sandbox import readers
+from malspark.providers.sandbox.formats import sniff_format
+from malspark.providers.sandbox.readers import (
     ReportReader,
     register_report_reader,
     report_reader,
     unregister_report_reader,
 )
-from maljan.schemas.sandbox_report import (
+from malspark.schemas.sandbox_report import (
     SandboxNetwork,
     SandboxProcess,
     SandboxReport,
@@ -144,7 +144,7 @@ def acme() -> Any:
 
 
 def _upload_provider() -> Any:
-    from maljan.providers.sandbox.upload import UploadSandboxProvider
+    from malspark.providers.sandbox.upload import UploadSandboxProvider
 
     cfg = Settings(_env_file=None)
     cfg.sandbox.provider = "upload"
@@ -157,11 +157,11 @@ def _upload_provider() -> Any:
 def _submitted(tmp_path: Path, provider: Any) -> tuple[Any, dict[str, Any] | None]:
     import asyncio
 
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
     sample = tmp_path / "invoice.bin"
     sample.write_bytes(b"payload")
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     app.container.mock = False
     app.container._sandbox_provider_cache = provider
     return app, asyncio.run(app._submit_to_sandbox(str(sample)))
@@ -183,7 +183,7 @@ class TestTheUploadIsSniffedAndRead:
         assert provider.signature_scale(run) == ACME_SCALE
 
     def test_without_the_reader_the_upload_is_refused(self) -> None:
-        from maljan.providers.errors import ProviderError
+        from malspark.providers.errors import ProviderError
 
         assert report_reader("acmebox") is None
         with pytest.raises(ProviderError):
@@ -215,12 +215,12 @@ class TestItReachesEveryConsumer:
         assert "192.0.2.44:8443" in text
 
     def test_the_pack_indexes_and_records_its_sections(self, acme: Any, tmp_path: Path) -> None:
-        from maljan.agents.evidence_recorder import EvidenceRecorder
-        from maljan.pipeline.triage_pack import PIPELINE, run_pack
-        from maljan.reporting.ledger_projection import dynamic_from_ledger
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.evidence_recorder import EvidenceRecorder
+        from malspark.pipeline.triage_pack import PIPELINE, run_pack
+        from malspark.reporting.ledger_projection import dynamic_from_ledger
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.schemas.evidence import EvidenceCounter
         from tests.unit.pipeline.test_triage_pack import _inputs, _write
         from tests.unit.tools.test_binary import _pe
 
@@ -261,7 +261,7 @@ class TestItReachesEveryConsumer:
 
 
 def test_the_rest_provider_reads_a_body_through_it(acme: Any) -> None:
-    from maljan.providers.sandbox.rest import RestSandboxProvider
+    from malspark.providers.sandbox.rest import RestSandboxProvider
 
     cfg = Settings(_env_file=None)
     cfg.sandbox.provider = "rest"

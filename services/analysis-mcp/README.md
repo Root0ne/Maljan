@@ -1,14 +1,14 @@
 # analysis-mcp
 
-Static analysis over stdio MCP. Every tool delegates to `maljan.tools`, which
+Static analysis over stdio MCP. Every tool delegates to `malspark.tools`, which
 the sidecar imports directly — it runs in the same uv environment as the
 pipeline, so there is one implementation and no copy to drift.
 
-Launched by `maljan.core.config._builtin_servers()` as the `analysis` server —
+Launched by `malspark.core.config._builtin_servers()` as the `analysis` server —
 `sys.executable services/analysis-mcp/server.py`, cwd `services/analysis-mcp`,
-with only `MALJAN_STAGING_DIR`, `MALJAN_STAGING_TTL_HOURS` and
-`MALJAN_SAMPLE_ROOTS` passed through, plus the one directory name the spawn
-composes for the job it is starting this server for (`MALJAN_STAGING_JOB`).
+with only `MALSPARK_STAGING_DIR`, `MALSPARK_STAGING_TTL_HOURS` and
+`MALSPARK_SAMPLE_ROOTS` passed through, plus the one directory name the spawn
+composes for the job it is starting this server for (`MALSPARK_STAGING_JOB`).
 It is registered with `agents: []` and reaches the static analyst solely
 through the `ToolRef`s in the built-in agent definitions, so a definition that
 drops the reference really runs without these tools.
@@ -542,7 +542,7 @@ about that program, named by the digest the answer states.
 | `put_sample_chunk` | `upload_id`, `seq`, `content_b64` |
 | `put_sample_finish` | `upload_id` |
 
-`put_sample*` is what lets this server run on another host. Maljan uploads only
+`put_sample*` is what lets this server run on another host. Malspark uploads only
 to servers reached over HTTP: as a stdio sidecar this one shares the worker's
 filesystem and is handed the path instead, so these four tools sit unused in
 the default deployment and exist for the operator who runs this same file
@@ -551,17 +551,17 @@ behind an HTTP transport. See the "Tool servers on another host" section of
 
 | variable | default | meaning |
 | --- | --- | --- |
-| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | the base uploads land under |
-| `MALJAN_STAGING_JOB` | empty | the one directory name inside that base this job writes in; composed by the spawn, never set by hand |
-| `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample is kept; `0` disables pruning |
-| `MALJAN_SAMPLE_ROOTS` | empty | the other directories a path argument may name, separated by `:` |
+| `MALSPARK_STAGING_DIR` | a `malspark-analysis-mcp` directory under the system temp dir | the base uploads land under |
+| `MALSPARK_STAGING_JOB` | empty | the one directory name inside that base this job writes in; composed by the spawn, never set by hand |
+| `MALSPARK_STAGING_TTL_HOURS` | `24` | how long a staged sample is kept; `0` disables pruning |
+| `MALSPARK_SAMPLE_ROOTS` | empty | the other directories a path argument may name, separated by `:` |
 
 Staging is per job: uploads, carved payloads and the sandbox captures fetched
 for that job (in a `captures/` child) land in `<base>/job-<id>/`, the job's
 owner removes that directory when the run ends, and the TTL sweep prunes a job
 directory whole once the newest file in it is past the cutoff — unless the job
 is still running, which it says by keeping its own directory's mtime current. A
-server started without `MALJAN_STAGING_JOB` — by hand, or by a settings probe —
+server started without `MALSPARK_STAGING_JOB` — by hand, or by a settings probe —
 writes in the base itself. The name cannot be set in a server's `env` or
 `env_allow`: settings validation refuses it and the spawn clears it, because a
 stored value would point that server at another job's bytes.
@@ -571,14 +571,14 @@ directory, `maljan-cape-pcap` under the system temp directory. Nothing writes
 there now.
 
 Every `path` argument is resolved (symlinks followed) and refused unless it
-lands inside *this job's* staging directory or one of `MALJAN_SAMPLE_ROOTS` —
+lands inside *this job's* staging directory or one of `MALSPARK_SAMPLE_ROOTS` —
 another job's staged bytes are refused even where a sample root contains the
 base; `ruleset` is held the same way to the `data` tree and to
-`MALJAN_YARA_RULES_DIR` / `MALJAN_SIGMA_RULES_DIR`.
+`MALSPARK_YARA_RULES_DIR` / `MALSPARK_SIGMA_RULES_DIR`.
 
 `carved_path` is the one file argument a model chooses, and it is held to
 `<staging>/job-<id>/carved/<sha256 of the file the call is pinned to>/` plus
-that file itself — **not** the staging base, and not `MALJAN_SAMPLE_ROOTS`. A
+that file itself — **not** the staging base, and not `MALSPARK_SAMPLE_ROOTS`. A
 base-wide bound let a run read another run's carved payload or another run's
 `put_sample` upload; the digest is what `carve_payloads` writes under and what
 this server can derive from the bytes it was handed, so a run reaches
@@ -606,7 +606,7 @@ pair of quotes enclosing the whole pattern is not part of it, so
 `"CreateMutex"` finds `CreateMutexW`. Nothing else is rewritten, a value
 without a surrounding pair is passed through exactly, and an answer to a call
 whose pattern was read this way carries `read_as` first — the pattern it
-searched for. The shared reading is `maljan.tools.arguments`; the knowledge and
+searched for. The shared reading is `malspark.tools.arguments`; the knowledge and
 threatintel servers apply it to their lookup arguments too.
 
 The directory is created with mode 0o700 and refused if what is already at that
@@ -639,7 +639,7 @@ a sized `/tmp` tmpfs, the samples read-only at `/data/samples`, an internal
 network of its own and no platform credential. Its built-in block pointed at
 it (transport `streamable-http`, url `http://analysis-mcp:8098/mcp`, the token,
 `sample_mount` `/data/samples`), the triage pack runs each of its own readings
-of the sample here (`maljan.tools.readers`: the format readers, YARA, capa,
+of the sample here (`malspark.tools.readers`: the format readers, YARA, capa,
 FLOSS, the byte readings, the UPX unpacker and the directed-text scan of a
 file) and the worker reads only the answers. Only a reading that stands in for
 a tool this server offers is run; its file arguments are held to the sample
@@ -651,7 +651,7 @@ job's, by the one directory name the id composes (a `..`, a separator or an
 absolute path in the id cannot name anything else; a link standing there is
 unlinked, never followed). A release that fails, does not answer within its
 few seconds, or reaches a server built before the call leaves the directory to
-the sweep of the staging base (`MALJAN_STAGING_TTL_HOURS`, 24 h after it last
+the sweep of the staging base (`MALSPARK_STAGING_TTL_HOURS`, 24 h after it last
 changed), and never fails the job; until then it counts against the `/tmp`
 tmpfs and the memory ceiling. `run_reader`'s capa reading uses the
 `rules_dir`, `signatures_dir` and `backend` the worker's settings name,
@@ -677,7 +677,7 @@ reason, timeout_s}]}`, computed when the server starts by probing each optional
 module. The `transform_bytes` cell also carries `facts`, its arguments and
 operations in plain sentences, and the `unpack_upx` cell the formats, methods
 and filters it reads. A tool that cannot answer returns `{"error": {"code", "message",
-"remediation"}, "tool"}` (`maljan.tools.errors`); see *Writing a tool server*
+"remediation"}, "tool"}` (`malspark.tools.errors`); see *Writing a tool server*
 in `apps/docs/content/docs/configuration.mdx`.
 
 ## Optional dependencies
@@ -703,14 +703,14 @@ inside it has sha256
 `d71b9ea4fe3b2de974dc1ae3c5d0f67569921bc118dcb02ed72e905a662411cb`. The release
 publishes no digest, so both were computed when it was pinned.
 
-The tool looks for the executable at `MALJAN_FLOSS_PATH` (set in this server's
+The tool looks for the executable at `MALSPARK_FLOSS_PATH` (set in this server's
 `env`) and, when that is unset, in the user tools directory and then on `PATH`,
 and runs it only when its sha256 is the pinned one: each run copies the executable
 into the run's own directory, hashing the bytes as it writes them, and runs that
 copy, so a file changed after it was checked is refused rather than run.
 `scripts/install_floss.sh`
 downloads the asset, checks both digests and installs the executable at
-`~/.local/share/maljan/tools/floss-3.1.1/floss`, the first
+`~/.local/share/malspark/tools/floss-3.1.1/floss`, the first
 place looked. The backend image does the same in a build stage and puts it at
 `/usr/local/bin/floss`. Without it the manifest marks `floss` unavailable with
 the reason (not installed, or not the pinned build) and the remedy, and a call

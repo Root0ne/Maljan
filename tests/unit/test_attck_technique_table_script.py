@@ -282,7 +282,7 @@ class TestTheBundlesOwnRevokedAndDeprecatedPatterns:
 
 class TestTheTwoDomainTuplesAgree:
     def test_the_script_and_the_loader_spell_the_domains_the_same(self) -> None:
-        from maljan.memory import attck_loader
+        from malspark.memory import attck_loader
 
         assert _script().DOMAINS == attck_loader.DOMAINS
 

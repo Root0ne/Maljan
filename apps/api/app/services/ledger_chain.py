@@ -243,11 +243,11 @@ def platform_key_status(label: bytes = KEY_LABEL) -> tuple[ChainKey | None, str 
 
     The bootstrap settings are read first; only a failure to import or to
     validate them is caught, and it is named in the reason. The process
-    environment is read next, as ``maljan.core.settings_secrets`` reads it.
+    environment is read next, as ``malspark.core.settings_secrets`` reads it.
     """
     import os
 
-    from maljan.core.settings_secrets import ENV_VAR
+    from malspark.core.settings_secrets import ENV_VAR
     from pydantic import ValidationError
 
     secret = ""

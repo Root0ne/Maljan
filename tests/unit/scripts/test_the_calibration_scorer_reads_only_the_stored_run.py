@@ -19,7 +19,7 @@ from scripts.calibration import score as scoring
 from scripts.calibration.run import HeldOut, gate, main, score_run
 from scripts.replay.stored import digests
 
-from maljan.reporting.models import MalwareReport
+from malspark.reporting.models import MalwareReport
 from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 
 TUNING_CASE = next(c for c in cases.build_all() if c.split == "tuning" and c.format == "pe64")

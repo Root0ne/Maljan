@@ -22,15 +22,15 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import Settings, TriageConfig
-from maljan.core.pack_steps import (
+from malspark.core.config import Settings, TriageConfig
+from malspark.core.pack_steps import (
     PackStep,
     check_steps,
     default_steps,
     effective_steps,
     placeholder_values,
 )
-from maljan.extractors import sample_identity
+from malspark.extractors import sample_identity
 
 SERVER = {"command": "invented-inventory", "enabled": True}
 

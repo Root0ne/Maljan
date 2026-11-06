@@ -17,8 +17,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from maljan.analysis.run_summary import spend_lines
-from maljan.core.spend import SpendCeilingStop, SpendMeter
+from malspark.analysis.run_summary import spend_lines
+from malspark.core.spend import SpendCeilingStop, SpendMeter
 
 FLASH = "deepseek-flash"
 FLASH_CAP = 393_216
@@ -98,7 +98,7 @@ class TestTheGatesReadTheLatch:
     def test_no_new_loop_starts_after_a_refusal(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.agents.base_agent import spend_reached
+        from malspark.agents.base_agent import spend_reached
 
         assert (
             spend_reached(SimpleNamespace(token_ledger=SimpleNamespace(spend=_meter_after(1.0))))
@@ -111,7 +111,7 @@ class TestTheGatesReadTheLatch:
         from types import SimpleNamespace
         from unittest.mock import MagicMock
 
-        from maljan.agents.delegation import refusal
+        from malspark.agents.delegation import refusal
 
         meter = self._refused()
         container = MagicMock()
@@ -121,7 +121,7 @@ class TestTheGatesReadTheLatch:
         )
         with pytest.MonkeyPatch.context() as patch:
             patch.setattr(
-                "maljan.agents.delegation._servers_the_caller_may_not_reach", lambda *a: []
+                "malspark.agents.delegation._servers_the_caller_may_not_reach", lambda *a: []
             )
             said = refusal(container, caller, "helper")
         assert said is not None and "spend ceiling" in said

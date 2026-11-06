@@ -25,8 +25,8 @@ from typing import Any
 import pytest
 from tests.linear_cost import assert_scales
 
-from maljan.core.rule_matches import clean_rule_name, rule_matches_of, shaped_rule_matches
-from maljan.schemas.evidence import LedgerEntry
+from malspark.core.rule_matches import clean_rule_name, rule_matches_of, shaped_rule_matches
+from malspark.schemas.evidence import LedgerEntry
 
 _DECLARED = {
     "v": 1,

@@ -22,14 +22,14 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     STATED_VALUE_UNHELD_CODE,
     EntryTexts,
     stated_value_violations,
 )
-from maljan.reporting.composer import ReportComposer, _ConfigOut, _HostIdentifiersOut
-from maljan.reporting.models import (
+from malspark.reporting.composer import ReportComposer, _ConfigOut, _HostIdentifiersOut
+from malspark.reporting.models import (
     ConfigItem,
     FileHashes,
     HostIdentifier,
@@ -37,8 +37,8 @@ from maljan.reporting.models import (
     SampleIdentity,
     TechnicalAnalysis,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import LedgerEntry
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import LedgerEntry
 
 KEY = "Software\\ExampleVendor\\Updater"
 JOINED = KEY + "\\ExampleExport"
@@ -243,7 +243,9 @@ def _compose_section(section: str, schema: type, *answers: str) -> tuple[Any, _R
     comp._citable = ["ev_0005", "ev_0006", "ev_0020", "ev_0022"]
     comp._report = _report()
     validators = [lambda p: stated_value_violations(p, comp._entries)]
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+    ):
         result = asyncio.run(
             comp._invoke(
                 [HumanMessage(content="write it")], schema, section=section, validators=validators

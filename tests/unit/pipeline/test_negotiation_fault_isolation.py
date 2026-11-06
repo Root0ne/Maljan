@@ -18,8 +18,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from maljan.pipeline.nodes import make_negotiation_node
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.nodes import make_negotiation_node
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _claiming(name: str) -> AgentISR:
@@ -52,7 +52,7 @@ def _run_node(container: Any) -> dict[str, Any]:
         "reports": {"static": "finding", "dynamic": "finding"},
         "isr_reports": {"static": _claiming("static"), "dynamic": _claiming("dynamic")},
     }
-    with patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False):
+    with patch("malspark.pipeline.nodes.detect_sycophancy", return_value=False):
         return asyncio.run(node_fn(state))
 
 
@@ -81,9 +81,9 @@ def test_negotiation_isolates_mediation_failure(exc: BaseException) -> None:
 
 def test_a_failed_mediation_publishes_no_agreement_anywhere() -> None:
     """The run summary, the report projection and the router read the failure, not a 0.0."""
-    from maljan.analysis.run_summary import MEDIATION_FAILED, RunSummaryBuilder
-    from maljan.pipeline.routing import ConsensusRouter
-    from maljan.reporting.builder import MalwareReportBuilder
+    from malspark.analysis.run_summary import MEDIATION_FAILED, RunSummaryBuilder
+    from malspark.pipeline.routing import ConsensusRouter
+    from malspark.reporting.builder import MalwareReportBuilder
 
     result = _run_node(_container_with_failing_judge(RuntimeError("Connection error.")))
     state = {**result, "consensus_applicable": result.get("consensus_applicable", True)}
@@ -100,7 +100,7 @@ def test_a_failed_mediation_publishes_no_agreement_anywhere() -> None:
     assert "final_confidence" not in projected
     assert projected["termination_reason"] == MEDIATION_FAILED
 
-    from maljan.core.config import get_settings
+    from malspark.core.config import get_settings
 
     assert ConsensusRouter(get_settings()).should_continue(state) == "judge"
 
@@ -113,7 +113,7 @@ def test_negotiation_labels_timeout_distinctly() -> None:
 
 def test_negotiation_success_path_unaffected() -> None:
     """A successful mediation still returns consensus + the judge's argument."""
-    from maljan.pipeline.state import AgentArgument
+    from malspark.pipeline.state import AgentArgument
 
     container = MagicMock()
     container.is_mock = False

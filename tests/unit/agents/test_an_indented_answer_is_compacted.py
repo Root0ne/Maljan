@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.output_shortening import BOOKKEEPING_KEY, shorten_json_document
+from malspark.agents.output_shortening import BOOKKEEPING_KEY, shorten_json_document
 
 COMPACT = (",", ":")
 MARKER = "[OUTPUT TRUNCATED]"
@@ -85,13 +85,13 @@ class _Ledger:
 
 
 def _toolkit(cap: int, ledger: Any) -> Any:
-    from maljan.agents.mcp_client import MCPLangChainToolkit
+    from malspark.agents.mcp_client import MCPLangChainToolkit
 
     return MCPLangChainToolkit(max_output_chars=cap, truncation_ledger=ledger)
 
 
 def _ghidra(cap: int, ledger: Any) -> Any:
-    from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+    from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
     client = GhidraHTTPClient.__new__(GhidraHTTPClient)
     client._max_output_chars = cap
@@ -138,7 +138,7 @@ class TestAnAnswerThatFitsCompactIsHandedOverWhole:
         assert ledger.rows[-1]["compacted"] is True
 
     def test_the_ledger_entry_carries_the_data_and_no_shortening_notice(self) -> None:
-        from maljan.agents.evidence_recorder import EvidenceRecorder, shortened_notice
+        from malspark.agents.evidence_recorder import EvidenceRecorder, shortened_notice
 
         kept = _toolkit(8486, None)._apply_output_guardrail(_indented(_elf_info()))
         entry = EvidenceRecorder("static").record(
@@ -149,8 +149,8 @@ class TestAnAnswerThatFitsCompactIsHandedOverWhole:
         assert shortened_notice(kept) == ""
 
     def test_the_run_counts_it_as_its_own_outcome(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.analysis.run_summary import RunSummaryBuilder
+        from malspark.core.truncation_ledger import TruncationLedger
 
         ledger = TruncationLedger()
         _toolkit(8486, ledger)._apply_output_guardrail(_indented(_elf_info()))

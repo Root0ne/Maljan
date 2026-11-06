@@ -20,12 +20,12 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.pipeline import triage_pack
-from maljan.pipeline.nodes import make_triage_node
-from maljan.pipeline.triage_pack import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.pipeline import triage_pack
+from malspark.pipeline.nodes import make_triage_node
+from malspark.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     FlossSettings,
@@ -34,8 +34,8 @@ from maljan.pipeline.triage_pack import (
     render_pack,
     run_pack,
 )
-from maljan.schemas.evidence import EvidenceCounter, build_entry, format_entry_id
-from maljan.tools import emulated_strings, rules, staging
+from malspark.schemas.evidence import EvidenceCounter, build_entry, format_entry_id
+from malspark.tools import emulated_strings, rules, staging
 from tests.unit.pipeline.test_stage_events import _state
 from tests.unit.tools.test_binary import _elf, _pe
 

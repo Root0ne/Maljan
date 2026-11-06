@@ -14,19 +14,19 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.base_agent import earlier_chunks_block
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools, seeded_repeat_guard
-from maljan.core.truncation_ledger import record_guardrail_outcome
-from maljan.pipeline.nodes import evidence_summary
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import LedgerEntry, apply_budget, holds_its_answer
+from malspark.agents.base_agent import earlier_chunks_block
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools, seeded_repeat_guard
+from malspark.core.truncation_ledger import record_guardrail_outcome
+from malspark.pipeline.nodes import evidence_summary
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import LedgerEntry, apply_budget, holds_its_answer
 
 LISTING = "void FUN_00401000(void) {\n  int counter = 0;\n  return;\n}\n" * 400
 
 
 def _client(limit: int) -> Any:
-    from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+    from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
     client = GhidraHTTPClient.__new__(GhidraHTTPClient)
     client._max_output_chars = limit
@@ -66,7 +66,7 @@ class TestTheEntry:
 
     def test_an_answer_that_fits_is_whole(self) -> None:
         # The answer and the fence a text answer is shown in (``agents.tool_fence``).
-        from maljan.agents.tool_fence import view_room
+        from malspark.agents.tool_fence import view_room
 
         client = _client(len(LISTING) + view_room(LISTING))
 

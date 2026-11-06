@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.schemas.judgement import JudgeAssessment
-from maljan.schemas.stix_models import Bundle, Identity, Indicator, Malware, Report
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.schemas.judgement import JudgeAssessment
+from malspark.schemas.stix_models import Bundle, Identity, Indicator, Malware, Report
 
 
 def _report(verdict: str = "Malware") -> MalwareReport:
@@ -52,7 +52,7 @@ def _judge_bundle() -> Bundle:
                 indicator_types=["malicious-activity"],
             ),
         ],
-        x_maljan_assessment=JudgeAssessment(verdict="Malware", confidence=0.9),
+        x_malspark_assessment=JudgeAssessment(verdict="Malware", confidence=0.9),
     )
 
 

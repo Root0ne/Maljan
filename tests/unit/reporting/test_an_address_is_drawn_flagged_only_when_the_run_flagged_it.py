@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from maljan.reporting.figures import build_network_graph
-from maljan.reporting.models import (
+from malspark.reporting.figures import build_network_graph
+from malspark.reporting.models import (
     ConsolidatedIOC,
     FileHashes,
     MalwareReport,

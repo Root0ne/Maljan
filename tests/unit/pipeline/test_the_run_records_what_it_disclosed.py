@@ -23,18 +23,18 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.analysis import disclosure
-from maljan.analysis.disclosure import (
+from malspark.analysis import disclosure
+from malspark.analysis.disclosure import (
     INTRO_SENTENCE,
     STOPPED_PART_WAY,
     disclosure_record,
     run_disclosure,
     staging_record,
 )
-from maljan.core.config import Settings
-from maljan.core.token_ledger import TokenLedger
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers import MarkdownRenderer
+from malspark.core.config import Settings
+from malspark.core.token_ledger import TokenLedger
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers import MarkdownRenderer
 from tests.stages import paper_profile
 from tests.unit.pipeline.test_what_is_served_is_the_final_report import _run, _state
 
@@ -223,7 +223,7 @@ def _stopped_container(settings: Settings) -> SimpleNamespace:
 
 
 def test_a_stopped_run_s_summary_and_partial_report_carry_the_record_as_of_the_stop() -> None:
-    from maljan.pipeline.stopped_run import partial_report, stopped_run_summary
+    from malspark.pipeline.stopped_run import partial_report, stopped_run_summary
 
     settings = Settings.model_validate(
         {"llm": {"provider": "openai", "openai": {"base_url": "http://127.0.0.1:1/v1"}}}
@@ -245,7 +245,7 @@ def test_a_stopped_run_s_summary_and_partial_report_carry_the_record_as_of_the_s
 
 
 def test_a_stopped_run_keeps_the_record_its_report_node_closed() -> None:
-    from maljan.pipeline.stopped_run import partial_report, stopped_run_summary
+    from malspark.pipeline.stopped_run import partial_report, stopped_run_summary
 
     held = _stopped_container(Settings(_env_file=None))
     closed = _local_record()
@@ -270,7 +270,7 @@ class _Provider:
     id = "stub"
 
     def __init__(self, *, raises: bool = False, host: str | None = "sandbox.example") -> None:
-        from maljan.providers.base import SandboxCapabilities
+        from malspark.providers.base import SandboxCapabilities
 
         self.capabilities = SandboxCapabilities(
             can_submit=True, can_poll=True, report_format="mock"
@@ -293,11 +293,11 @@ class _Provider:
 
 
 def _submitted(tmp_path: Path, provider: Any) -> list[dict[str, Any]]:
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
     sample = tmp_path / "s.exe"
     sample.write_bytes(b"payload")
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     app.container.mock = False
     app.container._sandbox_provider_cache = provider
     asyncio.run(app._submit_to_sandbox(str(sample)))
@@ -327,9 +327,9 @@ def test_a_provider_says_where_its_submission_goes(
 
 
 def test_a_run_with_no_sample_submits_nothing() -> None:
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     app.container.sample_uploads = [{"provider": "left over", "submitted": True}]
 
     asyncio.run(app._submit_to_sandbox(None))
@@ -364,7 +364,7 @@ def test_a_run_with_no_sample_submits_nothing() -> None:
 def test_each_built_in_provider_names_the_host_its_submission_reaches(
     provider: str, values: dict[str, Any], host: str | None
 ) -> None:
-    from maljan.providers.registry import sandbox_provider_class
+    from malspark.providers.registry import sandbox_provider_class
 
     settings = Settings.model_validate({"sandbox": values})
     made = sandbox_provider_class(provider).from_settings(settings)
@@ -377,7 +377,7 @@ def test_each_built_in_provider_names_the_host_its_submission_reaches(
 )
 def test_the_rest_submission_host_is_the_one_the_request_reaches(tmp_path: Path, path: str) -> None:
     """Merged as the client merges them: the recorded host is the request's own."""
-    from maljan.providers.registry import sandbox_provider_class
+    from malspark.providers.registry import sandbox_provider_class
 
     settings = Settings.model_validate(
         {
@@ -410,7 +410,7 @@ def test_the_rest_submission_host_is_the_one_the_request_reaches(tmp_path: Path,
 
 @pytest.fixture
 def learned() -> Any:
-    from maljan.llm import context_window
+    from malspark.llm import context_window
 
     context_window.forget_learned_windows()
     yield context_window
@@ -441,7 +441,7 @@ def test_an_endpoint_that_answered_as_a_runtime_is_read_from_the_learned_windows
 
 
 def test_the_container_keeps_the_answers_where_the_windows_are_learned(learned: Any) -> None:
-    from maljan.core.container import ServiceContainer
+    from malspark.core.container import ServiceContainer
 
     fact = learned.WindowFact(65536, learned.PROBED, "the Ollama model description")
     learned._remembered(("openai", "http://10.0.0.5:11434", "q"), fact)

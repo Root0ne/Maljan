@@ -17,12 +17,12 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.analysis.disclosure import EnrichmentAsks
-from maljan.enrichment.declared import ReadySource, SourceAsker, effective_sources
-from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
-from maljan.tools import api_hashes, emulated_strings
-from maljan.tools.api_hashes import resolve_api_hashes
-from maljan.utils.json_cleaner import extract_json, json_decode_error, safe_parse_json
+from malspark.analysis.disclosure import EnrichmentAsks
+from malspark.enrichment.declared import ReadySource, SourceAsker, effective_sources
+from malspark.schemas.sandbox_report import cape_report_to_sandbox_report
+from malspark.tools import api_hashes, emulated_strings
+from malspark.tools.api_hashes import resolve_api_hashes
+from malspark.utils.json_cleaner import extract_json, json_decode_error, safe_parse_json
 from tests.unit.tools.synthetic_pe import SyntheticPE
 
 OBJ = '{"verdict": "malicious", "claims": [{"id": 1}], "score": 0.9}'
@@ -114,7 +114,7 @@ def test_tb14_one_entry_per_given_string_unresolved_only_when_no_reading_resolve
 def test_tb16_a_cap_that_cannot_be_set_still_tracks_the_child_and_says_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
-    from maljan.tools import children
+    from malspark.tools import children
 
     if failure == "missing":
         monkeypatch.delattr(emulated_strings.resource, "prlimit", raising=False)
@@ -165,7 +165,7 @@ async def test_tb18_an_error_status_proves_arrival_and_is_not_counted_failed(sta
 
 
 def test_tb18_the_disclosure_says_it_arrived() -> None:
-    from maljan.analysis.disclosure import _asked_parts
+    from malspark.analysis.disclosure import _asked_parts
 
     row = {"source": "x", "host": "h.example", "kinds": {"domain": 2}, "failed": 1, "errored": 1}
     said = _asked_parts([row], lambda text: text)
@@ -196,7 +196,7 @@ def test_tb17_a_long_answer_of_prose_markers_is_read_in_linear_time() -> None:
 
 
 def test_l1_an_uppercase_hash_is_still_the_runs_own_sample() -> None:
-    from maljan.memory.attck_case_index import AttckCaseIndex
+    from malspark.memory.attck_case_index import AttckCaseIndex
 
     own = "ab" * 32
     other = "cd" * 32

@@ -1,7 +1,7 @@
 [project]
-name = "maljan-api"
+name = "malspark-api"
 version = "0.1.0"
-description = "Maljan Web API — FastAPI backend for malware analysis platform"
+description = "Malspark Web API — FastAPI backend for malware analysis platform"
 requires-python = ">=3.13"
 dependencies = [
     # Web framework
@@ -25,7 +25,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "python-dotenv>=1.2.2",
-    "maljan[yara]",
+    "malspark[yara]",
 ]
 
 [dependency-groups]
@@ -64,7 +64,7 @@ select = ["E", "F", "I", "W", "UP", "B"]
 asyncio_mode = "auto"
 
 # The core package comes from the workspace root, not from a relative path. uv
-# installs both members editable into one environment, so `import maljan` works
+# installs both members editable into one environment, so `import malspark` works
 # in the API process, the worker process and the test session alike.
 [tool.uv.sources]
-maljan = { workspace = true }
+malspark = { workspace = true }

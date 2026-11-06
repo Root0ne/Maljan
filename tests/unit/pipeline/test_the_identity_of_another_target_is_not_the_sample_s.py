@@ -19,15 +19,19 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     ROUTER_ONLY_IDENTITY_HEADER,
     SAMPLE_BYTES_IDENTITY_HEADER,
     SAMPLE_IDENTITY_HEADER,
     sample_identity_block,
 )
-from maljan.analysis.sample_integrity import file_sha256, sample_fingerprints, sandbox_target_record
-from maljan.pipeline import sandbox_status as status
-from maljan.pipeline.nodes import _sample_identity
+from malspark.analysis.sample_integrity import (
+    file_sha256,
+    sample_fingerprints,
+    sandbox_target_record,
+)
+from malspark.pipeline import sandbox_status as status
+from malspark.pipeline.nodes import _sample_identity
 
 BYTES = b"MZ synthetic sample bytes, never run\x00" * 64
 INTAKE = hashlib.sha256(BYTES).hexdigest()
@@ -133,7 +137,7 @@ class TestAMarkedReport:
     def test_each_judge_turn_reads_the_copy_once(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import maljan.analysis.sample_integrity as integrity
+        import malspark.analysis.sample_integrity as integrity
 
         reads: list[str] = []
         real = integrity._file_digests
@@ -214,7 +218,7 @@ class TestTheFingerprints:
         assert sample_fingerprints(path, INTAKE, len(BYTES))["size_bytes"] == len(BYTES)
         assert sample_fingerprints(path, INTAKE, len(BYTES) - 1) == {}
 
-    @pytest.mark.parametrize("path", [None, "", 7, "/nonexistent/maljan/sample"])
+    @pytest.mark.parametrize("path", [None, "", 7, "/nonexistent/malspark/sample"])
     def test_nothing_read_is_nothing_given(self, path: Any) -> None:
         assert sample_fingerprints(path, INTAKE) == {}
 
@@ -244,9 +248,9 @@ def _marked_as(report: dict[str, Any]) -> dict[str, Any]:
 
 
 def _route(path: Any, report: dict[str, Any]) -> tuple[str, str]:
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
-    return MaljanApp(mock=True)._infer_sample_platform(path, report)
+    return MalsparkApp(mock=True)._infer_sample_platform(path, report)
 
 
 class TestTheRouting:
@@ -269,7 +273,7 @@ class TestTheRouting:
         assert _route(_sample(tmp_path, elf), _marked_as(WINDOWS_TARGET)) == ("elf", "linux")
 
     def test_the_reading_is_said(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-        with caplog.at_level(logging.WARNING, logger="maljan"):
+        with caplog.at_level(logging.WARNING, logger="malspark"):
             _route(_sample(tmp_path), _marked_as(WINDOWS_TARGET))
 
         assert any("read from its own bytes only" in r.getMessage() for r in caplog.records)

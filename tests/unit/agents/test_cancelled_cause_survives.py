@@ -29,13 +29,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     _get_agent_loop,
     _run_coro_blocking,
     describe_exception_for_log,
     run_on_agent_loop,
 )
-from maljan.core.exceptions import AgentLoopCancelled, AnalystError
+from malspark.core.exceptions import AgentLoopCancelled, AnalystError
 
 
 class TestTheTwoCancellationsAreNotTheSameEvent:
@@ -138,7 +138,7 @@ class TestInitializeRunsCleanupOnCancellation:
 
     @staticmethod
     def _toolkit() -> Any:
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         return MCPLangChainToolkit(
             transport="http", http_url="http://127.0.0.1:9/mcp", output_guardrail=False

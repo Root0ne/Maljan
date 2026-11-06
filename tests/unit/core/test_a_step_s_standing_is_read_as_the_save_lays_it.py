@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 from pydantic_core import to_jsonable_python
 
-from maljan.core.pack_steps import (
+from malspark.core.pack_steps import (
     PackStep,
     _effective,
     _replaces,

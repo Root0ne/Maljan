@@ -12,9 +12,9 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import TOOL_LOOP_TURN_CALL, BaseAnalyst
-from maljan.analysis.run_summary import RunSummaryBuilder, tokens_sentence
-from maljan.core.token_ledger import TokenLedger, record_response_usage
+from malspark.agents.base_agent import TOOL_LOOP_TURN_CALL, BaseAnalyst
+from malspark.analysis.run_summary import RunSummaryBuilder, tokens_sentence
+from malspark.core.token_ledger import TokenLedger, record_response_usage
 
 _REPORTED = {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}
 

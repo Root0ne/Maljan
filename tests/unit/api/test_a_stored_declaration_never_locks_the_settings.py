@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from app.models import RuntimeSetting
 from app.services import settings_service as svc
-from maljan.core import tool_declarations
+from malspark.core import tool_declarations
 
 # A provider leaf that ships a table of its tools (Ghidra's and radare2's are
 # read from their listings, T-418 PR4), and a stored entry of one of them
@@ -66,9 +66,9 @@ def test_the_stored_row_builds_and_jobs_run(caplog: pytest.LogCaptureFixture) ->
     import logging
 
     from app.worker.analysis_worker import build_job_settings
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
-    with caplog.at_level(logging.WARNING, logger="maljan"):
+    with caplog.at_level(logging.WARNING, logger="malspark"):
         built = build_settings({"sandbox.cape2.mcp.tool_facts": STORED})
         job = build_job_settings({"sandbox.cape2.mcp.tool_facts": STORED}, None)
     for settings in (built, job):
@@ -90,7 +90,7 @@ async def test_an_unrelated_save_over_the_stored_row_goes_through() -> None:
 
 @pytest.mark.asyncio
 async def test_resending_the_stored_leaf_as_stored_or_as_shown_goes_through() -> None:
-    from maljan.core.tool_declarations import ToolFacts
+    from malspark.core.tool_declarations import ToolFacts
 
     shown = {
         tool: ToolFacts.model_validate(raw).model_dump(mode="json") for tool, raw in STORED.items()
@@ -103,7 +103,7 @@ async def test_resending_the_stored_leaf_as_stored_or_as_shown_goes_through() ->
 
 @pytest.mark.asyncio
 async def test_a_new_hand_edit_with_an_unknown_key_is_still_refused() -> None:
-    from maljan.core.settings_overrides import shipped_tool_facts
+    from malspark.core.settings_overrides import shipped_tool_facts
 
     db = _db([_stored_row()])
     # The console edits the leaf as the API serves it: the stored whole map
@@ -197,7 +197,7 @@ def _imported(
 
 
 def test_an_import_leaves_the_unknown_key_out_and_says_so() -> None:
-    saved, warnings = _imported("maljan-settings/2", marked=True)
+    saved, warnings = _imported("malspark-settings/2", marked=True)
     # What is left of the provider's declaration is what it ships: no change.
     assert saved[LEAF] == tool_declarations.with_mark({})
     assert saved["core.mcp.servers"]["invented"]["tool_facts"] == tool_declarations.with_mark(
@@ -208,10 +208,10 @@ def test_an_import_leaves_the_unknown_key_out_and_says_so() -> None:
     assert "declares nothing" in warnings["core.mcp.servers.invented.tool_facts.e"]
 
 
-@pytest.mark.parametrize("document_format", ["maljan-settings/1", "maljan-settings/2"])
+@pytest.mark.parametrize("document_format", ["malspark-settings/1", "malspark-settings/2"])
 def test_an_import_written_whole_keeps_reading_whole(document_format: str) -> None:
     """A ``/1`` document, and a map of a ``/2`` one without the mark, are whole maps."""
-    from maljan.core.settings_overrides import shipped_tool_facts
+    from malspark.core.settings_overrides import shipped_tool_facts
 
     saved, warnings = _imported(document_format)
     shipped = shipped_tool_facts("sandbox.cape2.mcp")

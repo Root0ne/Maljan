@@ -1,7 +1,7 @@
 """The sweep repairs ``running`` rows no worker is holding, and only those.
 
 Ownership is a heartbeat the owner writes about the job it is running
-(``maljan:job-owner:<job id>``, ninety seconds, refreshed every thirty). arq's
+(``malspark:job-owner:<job id>``, ninety seconds, refreshed every thirty). arq's
 own keys cannot answer the question: its in-progress claim outlives the process
 that wrote it by the length of the job timeout, and its health key is
 queue-wide and outlives a killed worker by thirty-one seconds — which is

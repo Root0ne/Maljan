@@ -17,19 +17,19 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.agents.judge_postprocess import postprocess_judge_bundle
-from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
-from maljan.pipeline.nodes import _note_export_findings
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport, NetworkIOCs, NetworkURL
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.agents.judge_postprocess import postprocess_judge_bundle
+from malspark.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
+from malspark.pipeline.nodes import _note_export_findings
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import MalwareReport, NetworkIOCs, NetworkURL
+from malspark.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_CREDIT_CODE,
     UNPUBLISHABLE_PRODUCER_CODE,
     ExtendedSTIXRenderer,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import Bundle, attack_pattern_id
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import Bundle, attack_pattern_id
 
 
 def _report(verdict: str = "Malware") -> MalwareReport:
@@ -132,8 +132,8 @@ class TestAnUnconfirmedCredit:
                             "relationship_type": "uses",
                             "source_ref": "malware--1",
                             "target_ref": "attack-pattern--T1490",
-                            "x_maljan_confidence": 0.9,
-                            "x_maljan_contributing_agents": ["STATIC ANALYST", "capa"],
+                            "x_malspark_confidence": 0.9,
+                            "x_malspark_contributing_agents": ["STATIC ANALYST", "capa"],
                         },
                     ]
                 }
@@ -154,12 +154,12 @@ class TestAnUnconfirmedCredit:
             o
             for o in exported.objects
             if getattr(o, "relationship_type", "") == "uses"
-            and getattr(o, "x_maljan_contributing_agents", None)
+            and getattr(o, "x_malspark_contributing_agents", None)
         ]
-        assert edge.x_maljan_contributing_agents == ["capa"]
+        assert edge.x_malspark_contributing_agents == ["capa"]
         assert UNPUBLISHABLE_CREDIT_CODE in [code for code, _why in renderer.declined]
         (kept,) = [o for o in judge.objects if getattr(o, "type", "") == "relationship"]
-        assert kept.x_maljan_contributing_agents == ["STATIC ANALYST", "capa"]
+        assert kept.x_malspark_contributing_agents == ["STATIC ANALYST", "capa"]
 
 
 class TestOneRuleForATechnique:

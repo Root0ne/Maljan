@@ -10,7 +10,7 @@ hex digest) before a URL is built from it; anything else answers
 lookup answers JSON: VirusTotal's engine counts under `last_analysis_stats` (a count it
 did not give is absent, and no counts give no verdict) and a `summary`.
 
-Launched by `maljan.core.config._builtin_servers()` as the `threatintel` server —
+Launched by `malspark.core.config._builtin_servers()` as the `threatintel` server —
 `sys.executable services/threatintel-mcp/server.py`, cwd `services/threatintel-mcp`,
 with `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` passed through — and its tools
 are bound to the `judge`.

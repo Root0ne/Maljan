@@ -23,14 +23,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from maljan.pipeline import nodes
-from maljan.providers.errors import ProviderError
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.pipeline import nodes
+from malspark.providers.errors import ProviderError
+from malspark.schemas.evidence import EvidenceCounter
 from tests.credential_shapes import password
 
 # Built at runtime, so no credential-shaped literal is committed.
 SECRET = password()
-STORE_URL_ERROR = f"could not connect to postgresql://maljan:{SECRET}@db.internal:5432/mem"
+STORE_URL_ERROR = f"could not connect to postgresql://malspark:{SECRET}@db.internal:5432/mem"
 
 
 class _Hashes(list):
@@ -88,10 +88,12 @@ class TestThePacksReadIsKeptForTheJudge:
             return []
 
         with (
-            patch("maljan.memory.store_factory.acquire_function_hash_store", return_value=object()),
-            patch("maljan.memory.store_factory.release_function_hash_store"),
-            patch("maljan.memory.long_term_memory.match_functions", side_effect=_match),
-            patch("maljan.memory.long_term_memory.memory_owner_of", return_value=""),
+            patch(
+                "malspark.memory.store_factory.acquire_function_hash_store", return_value=object()
+            ),
+            patch("malspark.memory.store_factory.release_function_hash_store"),
+            patch("malspark.memory.long_term_memory.match_functions", side_effect=_match),
+            patch("malspark.memory.long_term_memory.memory_owner_of", return_value=""),
         ):
             nodes._function_hash_attribution(  # type: ignore[arg-type]
                 container, {"static_sample_path": "/mirror/s.bin", "file_hash": "x"}, None
@@ -103,8 +105,8 @@ class TestThePacksReadIsKeptForTheJudge:
 
 class TestTheJudgeReadsTheSampleOffTheLoop:
     def test_attribution_and_family_rag_run_in_a_thread(self) -> None:
-        from maljan.agents.judge_agent import JudgeVerdict
-        from maljan.schemas.stix_models import Bundle
+        from malspark.agents.judge_agent import JudgeVerdict
+        from malspark.schemas.stix_models import Bundle
         from tests.unit.pipeline.test_a_fallback_verdict_assesses_nothing import (
             _Container,
             _state,
@@ -143,8 +145,8 @@ def _step(provider: Any, *, build: Any) -> Any:
         function_hashes_read=None,
     )
     with (
-        patch("maljan.memory.store_factory.build_function_hash_store", side_effect=build),
-        patch("maljan.memory.store_factory.configured_backend", return_value="postgres"),
+        patch("malspark.memory.store_factory.build_function_hash_store", side_effect=build),
+        patch("malspark.memory.store_factory.configured_backend", return_value="postgres"),
     ):
         return nodes._function_matches_step(  # type: ignore[arg-type]
             container, {"static_sample_path": "/mirror/s.bin", "file_hash": "a" * 64}
@@ -156,7 +158,7 @@ class TestAStoreErrorIsMasked:
         step = _step(_provider(_Hashes()), build=RuntimeError(STORE_URL_ERROR))
 
         with patch(
-            "maljan.memory.store_factory.leased_function_hash_store",
+            "malspark.memory.store_factory.leased_function_hash_store",
             side_effect=AssertionError("a store that could not be built is asked again"),
         ):
             args, value = step()
@@ -171,7 +173,7 @@ class TestAStoreErrorIsMasked:
 
         with (
             patch(
-                "maljan.memory.store_factory.leased_function_hash_store",
+                "malspark.memory.store_factory.leased_function_hash_store",
                 side_effect=RuntimeError(STORE_URL_ERROR),
             ),
             pytest.raises(ProviderError) as raised,
@@ -194,16 +196,18 @@ class TestAFamilyAdoptedFromTheHintAloneIsNotFiledBack:
             hold_function_hashes=lambda *args: filed.append(args),
         )
         bundle = SimpleNamespace(
-            x_maljan_assessment=SimpleNamespace(
+            x_malspark_assessment=SimpleNamespace(
                 family=SimpleNamespace(name="Emotet", evidence_ids=evidence_ids)
             )
         )
         rows = [SimpleNamespace(func_hash="h1", family=matched, sample_id="old", func_name="f")]
         with (
-            patch("maljan.memory.store_factory.acquire_function_hash_store", return_value=object()),
-            patch("maljan.memory.store_factory.release_function_hash_store"),
-            patch("maljan.memory.long_term_memory.match_functions", return_value=rows),
-            patch("maljan.memory.long_term_memory.memory_owner_of", return_value=""),
+            patch(
+                "malspark.memory.store_factory.acquire_function_hash_store", return_value=object()
+            ),
+            patch("malspark.memory.store_factory.release_function_hash_store"),
+            patch("malspark.memory.long_term_memory.match_functions", return_value=rows),
+            patch("malspark.memory.long_term_memory.memory_owner_of", return_value=""),
         ):
             nodes._function_hash_attribution(  # type: ignore[arg-type]
                 container,
@@ -229,9 +233,9 @@ class TestAFamilyAdoptedFromTheHintAloneIsNotFiledBack:
         assert self._run(["e99"], "Emotet", ledger) == []
 
     def test_the_shipped_priors_own_entry_is_no_evidence(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.declared_reading import facts_record
-        from maljan.core.tool_declarations import ToolDeclarations
+        from malspark.core.config import Settings
+        from malspark.core.declared_reading import facts_record
+        from malspark.core.tool_declarations import ToolDeclarations
 
         shipped = ToolDeclarations.from_settings(Settings(_env_file=None))
         facts = facts_record("pack", "function_matches", declared=shipped)

@@ -266,7 +266,7 @@ def _sweep(engine: sa.Engine) -> dict[str, Any]:
 def _stored(monkeypatch: pytest.MonkeyPatch, days: int) -> None:
     """The stored settings, as the sweep's own read of them answers."""
     from app.services import settings_service
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     built = build_settings({"events.retention_days": days})
 
@@ -302,7 +302,7 @@ def test_an_unreadable_retention_skips_the_sweep_rather_than_using_the_default(
         raise ConnectionError("the database did not answer")
 
     async def _default(*a: Any, **k: Any) -> Any:
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         return build_settings({"events.retention_days": 1})
 
@@ -317,7 +317,7 @@ def test_a_refused_stored_retention_skips_the_sweep(
     engine: sa.Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.services import settings_service
-    from maljan.core.settings_overrides import StoredValueRefused
+    from malspark.core.settings_overrides import StoredValueRefused
 
     async def _refused(db: Any) -> Any:
         raise StoredValueRefused({"events.retention_days": "Input should be greater than 0"})

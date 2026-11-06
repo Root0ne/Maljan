@@ -16,12 +16,12 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from mcp.types import CallToolResult, TextContent
 
-from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
-from maljan.agents.mcp_client import MCPLangChainToolkit
-from maljan.core.exceptions import SampleNotOpened
-from maljan.llm.context_window import note_call_began
-from maljan.providers.server_guard import ServerGuard
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
+from malspark.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
+from malspark.agents.mcp_client import MCPLangChainToolkit
+from malspark.core.exceptions import SampleNotOpened
+from malspark.llm.context_window import note_call_began
+from malspark.providers.server_guard import ServerGuard
+from malspark.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
 
 
 class _Sink:

@@ -1,4 +1,4 @@
-"""Unit tests for YaraLayer (src/maljan/analysis/yara_layer.py).
+"""Unit tests for YaraLayer (src/malspark/analysis/yara_layer.py).
 
 Tests cover:
   - YaraTTPRule.from_dict() construction and validation
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.analysis.yara_layer import YaraLayer, YaraTTPRule
+from malspark.analysis.yara_layer import YaraLayer, YaraTTPRule
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -200,8 +200,8 @@ class TestYaraLayerScan:
 
         # Regex fallback path (mock yara unavailable)
         with (
-            patch("maljan.analysis.yara_layer._YARA_AVAILABLE", False),
-            patch("maljan.analysis.yara_layer.yara", None),
+            patch("malspark.analysis.yara_layer._YARA_AVAILABLE", False),
+            patch("malspark.analysis.yara_layer.yara", None),
         ):
             regex_layer = YaraLayer(sample_rules)
             regex_matches = regex_layer.scan(text)
@@ -570,8 +570,8 @@ class TestTheTogetherGroupInTheRuleFile:
 
         compiled = YaraLayer(rules)
         with (
-            patch("maljan.analysis.yara_layer._YARA_AVAILABLE", False),
-            patch("maljan.analysis.yara_layer.yara", None),
+            patch("malspark.analysis.yara_layer._YARA_AVAILABLE", False),
+            patch("malspark.analysis.yara_layer.yara", None),
         ):
             fallback = YaraLayer(rules)
         for layer in (compiled, fallback):
@@ -597,13 +597,13 @@ class TestOneFallbackMatcherForTheRuleFile:
         from unittest.mock import patch
 
         with (
-            patch("maljan.analysis.yara_layer._YARA_AVAILABLE", False),
-            patch("maljan.analysis.yara_layer.yara", None),
+            patch("malspark.analysis.yara_layer._YARA_AVAILABLE", False),
+            patch("malspark.analysis.yara_layer.yara", None),
         ):
             return YaraLayer(rules)
 
     def _both(self, layer: YaraLayer, blob: bytes) -> tuple[set[str], set[str]]:
-        from maljan.tools.rules import _yara_regex_matches
+        from malspark.tools.rules import _yara_regex_matches
 
         theirs = {row["rule"] for row in _yara_regex_matches(layer, blob)}
         mine = {match.rule_id for match in layer.scan(blob)}
@@ -660,7 +660,7 @@ class TestOneFallbackMatcherForTheRuleFile:
         assert theirs == mine, label
 
     def test_the_two_fallbacks_agree_over_every_rule_in_the_shipped_file(self) -> None:
-        from maljan.analysis.yara_layer import _DEFAULT_RULES_PATH
+        from malspark.analysis.yara_layer import _DEFAULT_RULES_PATH
 
         if not _DEFAULT_RULES_PATH.exists():
             pytest.skip("Default rules file not found.")
@@ -679,7 +679,7 @@ class TestOneFallbackMatcherForTheRuleFile:
             assert theirs == mine, blob
 
     def test_the_pair_fires_for_the_tool_too(self) -> None:
-        from maljan.analysis.yara_layer import _DEFAULT_RULES_PATH
+        from malspark.analysis.yara_layer import _DEFAULT_RULES_PATH
 
         if not _DEFAULT_RULES_PATH.exists():
             pytest.skip("Default rules file not found.")
@@ -694,7 +694,7 @@ class TestNeitherEngineCallsHalfAPairEvidence:
         fired the rule, whichever engine answered."""
         from unittest.mock import patch
 
-        from maljan.analysis.yara_layer import _DEFAULT_RULES_PATH
+        from malspark.analysis.yara_layer import _DEFAULT_RULES_PATH
 
         if not _DEFAULT_RULES_PATH.exists():
             pytest.skip("Default rules file not found.")
@@ -703,8 +703,8 @@ class TestNeitherEngineCallsHalfAPairEvidence:
         if compiled._yara_rules is None:
             pytest.skip("yara-python is not installed; there is only one engine here.")
         with (
-            patch("maljan.analysis.yara_layer._YARA_AVAILABLE", False),
-            patch("maljan.analysis.yara_layer.yara", None),
+            patch("malspark.analysis.yara_layer._YARA_AVAILABLE", False),
+            patch("malspark.analysis.yara_layer.yara", None),
         ):
             fallback = YaraLayer(rules)
 

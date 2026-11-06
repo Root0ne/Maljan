@@ -15,11 +15,11 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.core import config as config_module
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.pipeline.validation import CapabilityGrounding, EntryTexts
-from maljan.reporting.models import MalwareReport
-from maljan.schemas.evidence import build_entry
+from malspark.core import config as config_module
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.pipeline.validation import CapabilityGrounding, EntryTexts
+from malspark.reporting.models import MalwareReport
+from malspark.schemas.evidence import build_entry
 
 SCANNER = {
     "command": "invented-scanner",
@@ -93,7 +93,7 @@ def _assert_grounded(grounding: CapabilityGrounding) -> None:
 
 
 def test_the_composer_grounds_by_the_declared_kinds(evidence: EntryTexts) -> None:
-    from maljan.reporting.composer import ReportComposer
+    from malspark.reporting.composer import ReportComposer
 
     spy, held = _caught()
     composer = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
@@ -105,7 +105,7 @@ def test_the_composer_grounds_by_the_declared_kinds(evidence: EntryTexts) -> Non
 
 
 def test_the_narrative_round_grounds_by_the_declared_kinds(evidence: EntryTexts) -> None:
-    from maljan.reporting.narrative_agent import NarrativeAgent
+    from malspark.reporting.narrative_agent import NarrativeAgent
 
     spy, held = _caught()
     agent = NarrativeAgent(llm=None)  # type: ignore[arg-type]

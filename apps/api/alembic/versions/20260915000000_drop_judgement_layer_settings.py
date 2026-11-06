@@ -11,7 +11,7 @@ settings service on the next read.
 ``analysis.sigma_rules_dir`` is not dropped but moved. It named a directory the
 pipeline's own Sigma stage read; Sigma matching is now a tool the ``analysis``
 sidecar serves, so an operator's directory belongs in that server's environment
-as ``MALJAN_SIGMA_RULES_DIR``. It folds into the ``core.mcp.servers`` JSON
+as ``MALSPARK_SIGMA_RULES_DIR``. It folds into the ``core.mcp.servers`` JSON
 document rather than staying a dotted key, for the reason
 ``20260905000000`` gives: the catalog has one entry for the whole map and a key
 it does not know is a key the settings service refuses. ``is_secret`` rows are
@@ -42,8 +42,8 @@ logger = logging.getLogger(__name__)
 
 MAP_KEY = "core.mcp.servers"
 SERVER_KEY = "analysis"
-SIGMA_ENV_NAME = "MALJAN_SIGMA_RULES_DIR"
-YARA_ENV_NAME = "MALJAN_YARA_RULES_DIR"
+SIGMA_ENV_NAME = "MALSPARK_SIGMA_RULES_DIR"
+YARA_ENV_NAME = "MALSPARK_YARA_RULES_DIR"
 LEGACY_SIGMA_KEY = "core.analysis.sigma_rules_dir"
 LEGACY_YARA_KEY = "core.analysis.yara_rules_dir"
 

@@ -20,8 +20,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from mcp import StdioServerParameters
 
-from maljan.agents import mcp_client
-from maljan.agents.mcp_client import MCPLangChainToolkit
+from malspark.agents import mcp_client
+from malspark.agents.mcp_client import MCPLangChainToolkit
 
 SERVER = """
 import os, sys, time

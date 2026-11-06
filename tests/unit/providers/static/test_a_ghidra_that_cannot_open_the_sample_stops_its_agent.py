@@ -34,25 +34,25 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, SecretStr, create_model
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.composition import ResolvedAgent
-from maljan.agents.configurable_analyst import ConfigurableAnalyst
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-from maljan.core.exceptions import SampleNotOpened
-from maljan.pipeline.events import describe_exception
-from maljan.providers.base import prepare_sample
-from maljan.providers.static.ghidra import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.composition import ResolvedAgent
+from malspark.agents.configurable_analyst import ConfigurableAnalyst
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+from malspark.core.exceptions import SampleNotOpened
+from malspark.pipeline.events import describe_exception
+from malspark.providers.base import prepare_sample
+from malspark.providers.static.ghidra import (
     GhidraStaticProvider,
     ghidra_not_answering,
     load_failure,
     sample_not_opened,
 )
-from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
+from malspark.schemas.evidence import EvidenceCounter
 
 CONTAINER_PATH = "/data/samples/.work/abc.exe"
-HOST_PATH = "/home/someone/Maljan/data/samples/.work/abc.exe"
+HOST_PATH = "/home/someone/Malspark/data/samples/.work/abc.exe"
 NOT_FOUND = json.dumps({"error": f"File not found: {HOST_PATH}"})
 NO_PROGRAM = json.dumps({"error": "No program loaded."})
 LOADED = json.dumps({"success": True, "program": "abc.exe"})
@@ -119,7 +119,7 @@ class TestAGhidraErrorReplyIsAFailedCall:
         assert "No program loaded." in (entry.error or "")
 
     def test_an_answer_that_only_begins_with_the_sentence_is_kept(self) -> None:
-        from maljan.providers.static.ghidra.http_client import no_program_as_error
+        from malspark.providers.static.ghidra.http_client import no_program_as_error
 
         longer = "No program loaded. Loaded programs: none; open one with load_program."
         assert no_program_as_error(longer, "t") == longer
@@ -236,7 +236,7 @@ def _status(code: int) -> httpx.HTTPStatusError:
 
 
 def _settings(*, sink: bool = True) -> Any:
-    from maljan.core.config import GHIDRA_SAMPLE_OPEN
+    from malspark.core.config import GHIDRA_SAMPLE_OPEN
 
     class _G:
         enabled = True
@@ -357,7 +357,7 @@ class TestTheLoadIsAPrecondition:
     def test_with_nothing_declared_the_load_is_made_current_and_not_analysed(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.config import SampleOpenConfig
+        from malspark.core.config import SampleOpenConfig
 
         http = _HttpClient(LOADED)
         monkeypatch.setattr("httpx.Client", http)
@@ -366,7 +366,7 @@ class TestTheLoadIsAPrecondition:
         try:
             prepare_sample(provider, CONTAINER_PATH)
         finally:
-            from maljan.core.config import GHIDRA_SAMPLE_OPEN
+            from malspark.core.config import GHIDRA_SAMPLE_OPEN
 
             provider._cfg.sample_open = GHIDRA_SAMPLE_OPEN
         assert http.paths == ["load_program", "switch_program"]
@@ -480,7 +480,7 @@ class _Analyst(BaseAnalyst):
 
 @contextlib.contextmanager
 def _loop_settings() -> Iterator[None]:
-    with patch("maljan.agents.base_agent.get_settings") as settings:
+    with patch("malspark.agents.base_agent.get_settings") as settings:
         cfg = settings.return_value
         cfg.react_agent_timeout = None
         cfg.react_agent_timeout_overrides = {}
@@ -573,7 +573,7 @@ def _generic() -> ConfigurableAnalyst:
 class TestTheFailureIsTheAgents:
     def test_the_reverser_stops_before_its_loop(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("httpx.Client", _HttpClient(NOT_FOUND))
-        monkeypatch.setattr("maljan.core.config.get_settings", lambda: _settings())
+        monkeypatch.setattr("malspark.core.config.get_settings", lambda: _settings())
         agent = _generic()
         looped: list[Any] = []
         monkeypatch.setattr(agent, "execute_tool_loop", lambda messages: looped.append(messages))
@@ -610,7 +610,7 @@ class TestTheFailureIsTheAgents:
         assert salvaged == []
 
     def test_no_later_chunk_is_tried(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+        from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
 
         agent = _generic()
         tried: list[str] = []
@@ -642,8 +642,8 @@ class TestTheFailureIsTheAgents:
         assert recorder.entries[-1].ok is False
 
     def test_the_stage_records_a_failed_agent_with_the_sentence(self) -> None:
-        from maljan.pipeline import events as ev
-        from maljan.pipeline.nodes import make_stage_agent_node
+        from malspark.pipeline import events as ev
+        from malspark.pipeline.nodes import make_stage_agent_node
         from tests.stages import ANALYSIS_STAGE
         from tests.unit.pipeline.test_a_failure_names_its_type_not_its_message import (
             _container as _node_container,
@@ -664,7 +664,7 @@ class TestTheFailureIsTheAgents:
         assert "/home/someone" not in report
         (message,) = [data for kind, data in published if kind == ev.AGENT_MESSAGE]
         assert message["status"] == "failed"
-        from maljan.pipeline.nodes import SAMPLE_NOT_OPENED_REASON
+        from malspark.pipeline.nodes import SAMPLE_NOT_OPENED_REASON
 
         (record,) = update["stage_results"].values()
         assert record["agent_reasons"] == {"network": f"network {SAMPLE_NOT_OPENED_REASON}"}
@@ -768,7 +768,7 @@ class TestTheLedgerRecordsWhatWasSent:
 
 class TestTheDebateLeavesAStoppedAgentOut:
     def test_a_stopped_analyst_is_not_a_participant(self) -> None:
-        from maljan.pipeline.nodes import SAMPLE_NOT_OPENED_REASON, _debate_participants
+        from malspark.pipeline.nodes import SAMPLE_NOT_OPENED_REASON, _debate_participants
 
         class _Roster:
             def analyst_keys(self) -> list[str]:

@@ -15,15 +15,15 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from maljan.agents.base_agent import BaseAnalyst, _trim_for_synthesis, frame_messages
-from maljan.pipeline.run_state import (
+from malspark.agents.base_agent import BaseAnalyst, _trim_for_synthesis, frame_messages
+from malspark.pipeline.run_state import (
     RUN_STATE_BEGIN,
     RUN_STATE_END,
     render_run_state,
     with_run_state,
 )
-from maljan.pipeline.triage_pack import PACK_HEADING, PIPELINE
-from maljan.schemas.evidence import build_entry, format_entry_id
+from malspark.pipeline.triage_pack import PACK_HEADING, PIPELINE
+from malspark.schemas.evidence import build_entry, format_entry_id
 
 
 def _row(tool: str, payload: Any, seq: int, *, ok: bool = True, agent: str = PIPELINE) -> dict:

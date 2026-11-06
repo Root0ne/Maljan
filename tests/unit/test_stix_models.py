@@ -1,6 +1,6 @@
 """Tests for STIX 2.1 Pydantic models."""
 
-from maljan.schemas.stix_models import (
+from malspark.schemas.stix_models import (
     AttackPattern,
     Bundle,
     Indicator,

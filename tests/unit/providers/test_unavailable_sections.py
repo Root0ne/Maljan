@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.providers.sandbox_tools import sandbox_processes, sandbox_report_section
-from maljan.reporting.ledger_projection import dynamic_from_ledger
-from maljan.reporting.models import DynamicBehavior, FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.providers.sandbox_tools import sandbox_processes, sandbox_report_section
+from malspark.reporting.ledger_projection import dynamic_from_ledger
+from malspark.reporting.models import DynamicBehavior, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import EvidenceCounter
 from tests.unit._ledger_helpers import entry
 
 

@@ -16,7 +16,7 @@ import pytest
 
 from app.services.server_map import TOKEN_MASK, server_token_key
 from app.services.settings_service import SettingsService, SettingsValidationError
-from maljan.core import settings_secrets as box
+from malspark.core import settings_secrets as box
 
 
 @pytest.fixture()
@@ -183,7 +183,7 @@ async def test_the_effective_overrides_carry_the_plain_token_to_the_worker(encry
 @pytest.mark.asyncio
 async def test_the_effective_settings_build_with_the_merged_token(encryption_key):
     from app.models import RuntimeSetting
-    from maljan.core.settings_overrides import build_settings, split_key
+    from malspark.core.settings_overrides import build_settings, split_key
 
     rows = [
         RuntimeSetting(

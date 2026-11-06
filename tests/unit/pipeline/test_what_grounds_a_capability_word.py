@@ -28,12 +28,12 @@ is said rather than denied.
 
 from __future__ import annotations
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     UNGROUNDED_CAPABILITY_CODE,
     CapabilityGrounding,
     ungrounded_capabilities,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     CapabilityCell,
     EvidenceSection,
     FileHashes,
@@ -41,7 +41,7 @@ from maljan.reporting.models import (
     SampleIdentity,
     TTPMapping,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 ANTI_FORENSICS = (
     "Despite this attribution, the binary implements defense evasion and anti-forensics "

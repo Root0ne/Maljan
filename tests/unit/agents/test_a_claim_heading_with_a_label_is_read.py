@@ -17,15 +17,15 @@ import time
 
 import pytest
 
-from maljan.agents.base_agent import read_claim_blocks
-from maljan.agents.claim_headings import (
+from malspark.agents.base_agent import read_claim_blocks
+from malspark.agents.claim_headings import (
     CLAIM_HEAD_RE,
     count_claims_begun,
     heading_number,
     heading_sentence,
 )
-from maljan.agents.repeat_watch import ClaimRepeatReader
-from maljan.pipeline.retry_merge import _first_blocks
+from malspark.agents.repeat_watch import ClaimRepeatReader
+from malspark.pipeline.retry_merge import _first_blocks
 from tests.claim_block_counts import begun_and_distinct
 
 LABELLED = """[REVERSER ANALYST — round 2]
@@ -121,7 +121,7 @@ class TestALabelledHeadingIsAClaim:
         assert begun_and_distinct(LABELLED)[0] == count_claims_begun(LABELLED) == 4
 
     def test_a_labelled_answer_is_not_merged_by_place_number(self) -> None:
-        from maljan.schemas.isr_models import AgentISR
+        from malspark.schemas.isr_models import AgentISR
 
         read = read_claim_blocks(LABELLED)
         isr = AgentISR(

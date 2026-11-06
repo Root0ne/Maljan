@@ -17,9 +17,9 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.schemas.evidence import LedgerEntry, apply_budget, fit_structures_to_budget
-from maljan.schemas.evidence_spill import EvidenceSpill
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.schemas.evidence import LedgerEntry, apply_budget, fit_structures_to_budget
+from malspark.schemas.evidence_spill import EvidenceSpill
 
 
 class _Store:

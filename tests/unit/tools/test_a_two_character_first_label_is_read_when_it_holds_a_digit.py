@@ -13,14 +13,14 @@ the run recorded it.
 
 from __future__ import annotations
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     evidence_gated_values,
     network_values_in,
     unpublished_value_violations,
 )
-from maljan.reporting.defang import ProseDefanger
-from maljan.reporting.renderers.markdown import _defanged_text
-from maljan.tools.strings import iocs_from_text, iter_string_iocs
+from malspark.reporting.defang import ProseDefanger
+from malspark.reporting.renderers.markdown import _defanged_text
+from malspark.tools.strings import iocs_from_text, iter_string_iocs
 
 
 def _domains(text: str) -> list[str]:

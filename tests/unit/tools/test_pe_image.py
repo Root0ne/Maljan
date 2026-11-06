@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import struct
 
-from maljan.tools import pe_image
-from maljan.tools.rules import capa_function_starts
+from malspark.tools import pe_image
+from malspark.tools.rules import capa_function_starts
 
 from .synthetic_pe import PDATA_RVA, RDATA_RVA, TEXT_RVA, SyntheticPE
 

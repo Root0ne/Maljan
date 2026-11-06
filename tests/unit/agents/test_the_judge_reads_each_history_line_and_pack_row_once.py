@@ -20,7 +20,7 @@ import time
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     HISTORY_LINE_BLOCKING,
     HISTORY_LINE_MARK_UNREAD,
     HISTORY_LINE_NOT_BLOCKING,
@@ -31,10 +31,10 @@ from maljan.agents.judge_agent import (
     negotiation_history_text,
     pack_rows_shown_below,
 )
-from maljan.pipeline.debate_facts import read_marks
-from maljan.pipeline.state import AgentArgument
-from maljan.pipeline.triage_pack import PACK_HEADING
-from maljan.schemas.stix_models import Bundle
+from malspark.pipeline.debate_facts import read_marks
+from malspark.pipeline.state import AgentArgument
+from malspark.pipeline.triage_pack import PACK_HEADING
+from malspark.schemas.stix_models import Bundle
 
 BLOCKING = "[analysts: STATIC ANALYST] Claim 4 says the key is 16 bytes; ev_0011 shows 32."
 NOT_BLOCKING = "[analysts: NETWORK ANALYST] Wording of claim 2. [not blocking: same value]"
@@ -334,7 +334,7 @@ def _bundle() -> Bundle:
 
 
 def _technique_prompt(evidence: dict[str, Any], pack: str) -> str:
-    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+    from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
     isrs = {
         "static": AgentISR(

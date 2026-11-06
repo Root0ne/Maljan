@@ -21,12 +21,12 @@ from datetime import UTC, datetime
 
 import pytest
 
-from maljan.analysis.disclosure import addressed_hosts, disclosure_record, endpoint_labels
-from maljan.core.config import Settings
-from maljan.core.model_assignments import assignment_chain_for
-from maljan.core.settings_overrides import public_snapshot
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.analysis.disclosure import addressed_hosts, disclosure_record, endpoint_labels
+from malspark.core.config import Settings
+from malspark.core.model_assignments import assignment_chain_for
+from malspark.core.settings_overrides import public_snapshot
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 from tests.credential_shapes import password
 
 # Built at run time: a credential written down is a secret to a scanner.
@@ -116,7 +116,7 @@ def test_a_record_without_the_labels_keeps_no_endpoint(disclosure: dict | None) 
 def test_the_render_never_reads_the_process_settings(
     monkeypatch: pytest.MonkeyPatch, disclosure: dict | None
 ) -> None:
-    from maljan.core import config
+    from malspark.core import config
 
     before = MarkdownRenderer().render(_report(disclosure))
 
@@ -142,8 +142,8 @@ _KEY_IN_THE_HOST = [
 def _run_record(api_key: str, base_url: str) -> tuple[Settings, dict]:
     from types import SimpleNamespace
 
-    from maljan.analysis.disclosure import run_disclosure
-    from maljan.core.settings_overrides import build_settings
+    from malspark.analysis.disclosure import run_disclosure
+    from malspark.core.settings_overrides import build_settings
 
     settings = build_settings(
         {
@@ -162,7 +162,7 @@ def _run_record(api_key: str, base_url: str) -> tuple[Settings, dict]:
 def test_every_label_the_run_records_is_kept_whatever_the_key_says(
     api_key: str, base_url: str
 ) -> None:
-    from maljan.core.host_locality import host_of
+    from malspark.core.host_locality import host_of
 
     settings, record = _run_record(api_key, base_url)
 

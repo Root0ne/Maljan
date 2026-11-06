@@ -24,13 +24,13 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.pipeline.validation import (
     LIBRARY_ONLY_CLAIMS_CODE,
     library_only_claims,
     library_only_claims_violation,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _isr(*claims: tuple[str, str]) -> AgentISR:
@@ -186,7 +186,7 @@ class _Analyst(BaseAnalyst):
 def _check(analyst: _Analyst, first: str = BEHAVIOUR + LIBRARIES) -> AgentISR:
     isr = analyst._text_to_isr(first, 0)
     with (
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
     ):
         return analyst._validate_isr(isr, "evidence")

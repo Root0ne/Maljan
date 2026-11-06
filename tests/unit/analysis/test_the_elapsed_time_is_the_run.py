@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import inspect
 
-from maljan.analysis.run_summary import RunSummaryBuilder, stage_duration_lines
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.analysis.run_summary import RunSummaryBuilder, stage_duration_lines
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 STAGES = [
     {"key": "triage_pack", "kind": "triage", "ran": True, "duration_ms": 191_017},
@@ -25,12 +25,12 @@ STAGES = [
 
 class TestTheClockStartsWithTheRun:
     def test_the_pipeline_accepts_the_caller_s_own_start(self) -> None:
-        from maljan.app import MaljanApp
+        from malspark.app import MalsparkApp
 
-        assert "started_at" in inspect.signature(MaljanApp.arun).parameters
+        assert "started_at" in inspect.signature(MalsparkApp.arun).parameters
 
     def test_the_state_carries_it(self) -> None:
-        from maljan.pipeline.state import AnalysisState
+        from malspark.pipeline.state import AnalysisState
 
         assert AnalysisState.__annotations__["run_started_at"] is float
 
@@ -54,7 +54,7 @@ class TestTheStagesArePrintedBesideIt:
         assert stage_duration_lines(None) == []
 
     def test_the_report_prints_the_run_and_the_stages(self) -> None:
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
 
         rendered = MarkdownRenderer()._appendix_run(
             MalwareReport(

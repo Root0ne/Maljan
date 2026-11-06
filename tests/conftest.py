@@ -9,8 +9,8 @@ from sqlalchemy.ext.compiler import compiles
 
 from app import observability
 from app.auth import throttle
-from maljan.app import MaljanApp
-from maljan.core.ctype_locale import pin_character_classification
+from malspark.app import MalsparkApp
+from malspark.core.ctype_locale import pin_character_classification
 from tests.golden_fixtures import report_absent_fixture_skips
 
 
@@ -45,8 +45,8 @@ def no_configured_secret_outlives_its_test() -> Iterator[None]:
     a job's settings; left behind, one test's defaults masked words in every
     later test's text.
     """
-    from maljan.core import settings_masking
-    from maljan.pipeline import events
+    from malspark.core import settings_masking
+    from malspark.pipeline import events
 
     events.forget_secret_values()
     settings_masking.forget_values()
@@ -83,8 +83,8 @@ def _own_servers_kept() -> tuple[tuple[str, str, dict], ...]:
     import json
     from pathlib import Path
 
-    from maljan.core.config import _builtin_servers
-    from maljan.core.tool_declarations import launch_identity
+    from malspark.core.config import _builtin_servers
+    from malspark.core.tool_declarations import launch_identity
 
     captured = json.loads(
         (Path(__file__).parent / "fixtures" / "own_server_tool_facts.json").read_text()
@@ -105,8 +105,8 @@ def _reversers_kept() -> tuple[tuple[str, str, dict], ...]:
     reads it (``tests/fixtures/tools/ghidra_mcp_schema.json``) and r2mcp's
     listing (``tests/fixtures/tools/r2mcp_tool_definitions.json``).
     """
-    from maljan.core.config import ghidra_block, r2_block
-    from maljan.core.tool_declarations import launch_identity
+    from malspark.core.config import ghidra_block, r2_block
+    from malspark.core.tool_declarations import launch_identity
 
     return (
         reverser_row("provider:ghidra", launch_identity(ghidra_block()), ghidra_listing()),
@@ -119,7 +119,7 @@ def ghidra_listing() -> list[dict]:
     import json
     from pathlib import Path
 
-    from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+    from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
     schema = json.loads(
         (Path(__file__).parent / "fixtures" / "tools" / "ghidra_mcp_schema.json").read_text()
@@ -164,8 +164,8 @@ R2_RUN_COMMAND: dict = {
 
 def reverser_row(source: str, launch: str, listing: list[dict]) -> tuple[str, str, dict]:
     """A listing's readings as the store keeps them (``served_declarations.stored_form``)."""
-    from maljan.core.derived_declarations import derived_readings, program_readings_of
-    from maljan.core.served_declarations import stored_form
+    from malspark.core.derived_declarations import derived_readings, program_readings_of
+    from malspark.core.served_declarations import stored_form
 
     read, closed = derived_readings(listing)
     return (source, launch, stored_form({}, read, closed, program_readings_of(listing)))
@@ -181,9 +181,9 @@ def _reputation_service_kept(blocks: dict) -> tuple[str, str, dict]:
     import json
     from pathlib import Path
 
-    from maljan.core.derived_declarations import derived_tool_facts
-    from maljan.core.served_declarations import stored_form
-    from maljan.core.tool_declarations import launch_identity
+    from malspark.core.derived_declarations import derived_tool_facts
+    from malspark.core.served_declarations import stored_form
+    from malspark.core.tool_declarations import launch_identity
 
     listing = json.loads(
         (Path(__file__).parent / "fixtures" / "virustotal_listing.json").read_text()
@@ -205,7 +205,7 @@ def the_own_servers_have_declared_their_tools(request: pytest.FixtureRequest) ->
     with nothing read of the built-in reputation service's listing, as a fresh
     deployment does before its first job lists it.
     """
-    from maljan.core import served_declarations
+    from malspark.core import served_declarations
 
     kept = _own_servers_kept()
     if request.node.get_closest_marker("no_kept_reputation_service") is not None:
@@ -221,7 +221,7 @@ def the_own_servers_have_declared_their_tools(request: pytest.FixtureRequest) ->
 @pytest.fixture(autouse=True, scope="session")
 def the_own_servers_declared_their_tools_before_the_first_test() -> None:
     """As above, before any fixture of a wider scope than a test is built."""
-    from maljan.core import served_declarations
+    from malspark.core import served_declarations
 
     served_declarations.install_persisted(_own_servers_kept())
 
@@ -238,7 +238,7 @@ def no_server_is_listed_or_reread_unless_a_test_asks(monkeypatch: pytest.MonkeyP
     of either asks for it itself.
     """
     from app.services import served_declarations_store
-    from maljan.providers import served_listing
+    from malspark.providers import served_listing
 
     monkeypatch.setattr(served_listing, "unlisted", lambda settings: [])
     # Read last at the end of time: never due again.
@@ -256,12 +256,12 @@ def no_floss_unless_a_test_names_one(monkeypatch: pytest.MonkeyPatch) -> None:
     The build lives outside the environment, so whether a test found one was a
     fact about the machine: on a box with it installed every pack over a
     synthetic PE spent seconds emulating it and recorded an entry a runner
-    without it never had. ``MALJAN_FLOSS_PATH`` naming no file is the one
+    without it never had. ``MALSPARK_FLOSS_PATH`` naming no file is the one
     answer both give. A test about FLOSS sets or clears the variable itself,
     and a sidecar a test starts never sees it — ``child_env`` passes no such
     variable.
     """
-    monkeypatch.setenv("MALJAN_FLOSS_PATH", "/nonexistent/maljan-tests/floss")
+    monkeypatch.setenv("MALSPARK_FLOSS_PATH", "/nonexistent/malspark-tests/floss")
 
 
 @pytest.fixture(autouse=True)
@@ -280,7 +280,7 @@ def close_the_sidecars_a_test_opened() -> Iterator[None]:
     Only what this test left is closed: the set is read before it runs and the
     difference afterwards is what it opened.
     """
-    from maljan.providers import servers
+    from malspark.providers import servers
 
     before = set(servers._ATTACHED_HANDLES)
     yield
@@ -315,7 +315,7 @@ def remove_the_staging_a_test_left() -> Iterator[None]:
     what this test composed is removed: the record is read before it runs and
     the difference afterwards is what it made.
     """
-    from maljan.tools import staging
+    from malspark.tools import staging
 
     before = {job: set(paths) for job, paths in staging._COMPOSED.items()}
     yield
@@ -327,9 +327,9 @@ def remove_the_staging_a_test_left() -> Iterator[None]:
 
 
 @pytest.fixture
-def mock_maljan_app() -> MaljanApp:
-    """MaljanApp in mock mode for fast facade-level tests."""
-    return MaljanApp(mock=True)
+def mock_malspark_app() -> MalsparkApp:
+    """MalsparkApp in mock mode for fast facade-level tests."""
+    return MalsparkApp(mock=True)
 
 
 @pytest.fixture

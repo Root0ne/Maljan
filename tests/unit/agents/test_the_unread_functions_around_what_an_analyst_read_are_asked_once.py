@@ -37,8 +37,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.callees_question import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.callees_question import (
     CALLEES_SHOWN,
     NOT_RUN_NO_LISTING,
     STARTS_CLAIMED,
@@ -51,12 +51,12 @@ from maljan.agents.callees_question import (
     reads_code,
     unread_callees_violation,
 )
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import Settings
-from maljan.core.declared_reading import declarations, facts_record
-from maljan.pipeline.validation import AnswerCheckInputs, analyst_answer_checks
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.core.config import Settings
+from malspark.core.declared_reading import declarations, facts_record
+from malspark.pipeline.validation import AnswerCheckInputs, analyst_answer_checks
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 BASE = 0x180000000
 START = BASE + 0x1000  # the export and entry point
@@ -249,7 +249,7 @@ class TestWhatIsListed:
         assert STEP in _addresses(callees_to_read(CLAIMS, [*OWN, inside], PACK))
 
     def test_an_analyst_that_listed_no_code_is_not_read_at_all(self) -> None:
-        with patch("maljan.agents.callees_question.build_function_map") as built:
+        with patch("malspark.agents.callees_question.build_function_map") as built:
             found = callees_to_read(CLAIMS, [], PACK)
 
         assert found.ranked == () and found.not_run == NOT_RUN_NO_LISTING
@@ -353,7 +353,7 @@ class TestTheComposition:
         isr = AgentISR(agent_id="a", domain="code", claims=CLAIMS)
 
         def _codes(callees: Any) -> list[str]:
-            with patch("maljan.pipeline.validation.validate_isr", return_value=[]):
+            with patch("malspark.pipeline.validation.validate_isr", return_value=[]):
                 found = analyst_answer_checks(
                     isr,
                     _inputs(),
@@ -432,7 +432,7 @@ def _events(analyst: _Analyst, first: str = FIRST) -> list[tuple[str, dict[str, 
     recorded: list[tuple[str, dict[str, Any]]] = []
     isr = analyst._text_to_isr(first, 0)
     with (
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         patch.object(
             BaseAnalyst,
@@ -521,7 +521,7 @@ class TestTheValidationTurn:
 
     def test_a_check_that_raises_says_so_and_asks_nothing(self) -> None:
         analyst = _Analyst([], list(OWN))
-        with patch("maljan.agents.base_agent.callees_to_read", side_effect=RuntimeError("x")):
+        with patch("malspark.agents.base_agent.callees_to_read", side_effect=RuntimeError("x")):
             recorded = _events(analyst)
 
         assert analyst.seen_turns == []

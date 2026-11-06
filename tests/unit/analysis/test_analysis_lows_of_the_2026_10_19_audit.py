@@ -9,21 +9,21 @@ from typing import Any
 import pytest
 from sigma.rule import SigmaRule
 
-from maljan.analysis.function_hash_attribution import (
+from malspark.analysis.function_hash_attribution import (
     FamilyHashAttribution,
     build_attribution_hint,
 )
-from maljan.analysis.function_summarizer import FunctionSummarizer
-from maljan.analysis.pcap_summary import _is_capture_time, capture_facts
-from maljan.analysis.sigma_layer import SigmaMemoryEvaluator
-from maljan.analysis.sink_reachability import (
+from malspark.analysis.function_summarizer import FunctionSummarizer
+from malspark.analysis.pcap_summary import _is_capture_time, capture_facts
+from malspark.analysis.sigma_layer import SigmaMemoryEvaluator
+from malspark.analysis.sink_reachability import (
     CallGraph,
     _sink_category,
     build_priority_hint,
 )
-from maljan.analysis.yara_layer import YaraLayer, YaraTTPRule
-from maljan.parsers.dynamic_parser import DynamicParser
-from maljan.providers.static.ghidra.call_graph import call_graph_from_text
+from malspark.analysis.yara_layer import YaraLayer, YaraTTPRule
+from malspark.parsers.dynamic_parser import DynamicParser
+from malspark.providers.static.ghidra.call_graph import call_graph_from_text
 
 # ------------------------------------------------------------------ B-L2
 

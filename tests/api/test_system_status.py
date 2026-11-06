@@ -38,7 +38,7 @@ def client() -> TestClient:
 class TestSystemStatus:
     def test_reports_mock_mode_and_key_presence(self, client: TestClient) -> None:
         fake_settings = MagicMock()
-        fake_settings.app_name = "Maljan"
+        fake_settings.app_name = "Malspark"
         fake_settings.app_version = "0.1.0"
 
         with (
@@ -72,7 +72,7 @@ class TestSystemStatus:
         assert resp.status_code == 200
         body = resp.json()
         assert body == {
-            "app_name": "Maljan",
+            "app_name": "Malspark",
             "app_version": "0.1.0",
             "mock_mode_allowed": True,
             "enrichment_enabled": True,
@@ -89,7 +89,7 @@ class TestSystemStatus:
 
     def test_admin_caller_sees_throttle_and_audit_fields(self, client: TestClient) -> None:
         fake_settings = MagicMock()
-        fake_settings.app_name = "Maljan"
+        fake_settings.app_name = "Malspark"
         fake_settings.app_version = "0.1.0"
         client.app.dependency_overrides[optional_current_user] = lambda: MagicMock(role="admin")
         try:
@@ -137,7 +137,7 @@ class TestSystemStatus:
     ) -> None:
         """The failure in force is surfaced, not only logged once (T-437)."""
         fake_settings = MagicMock()
-        fake_settings.app_name = "Maljan"
+        fake_settings.app_name = "Malspark"
         fake_settings.app_version = "0.1.0"
         user = None if role is None else MagicMock(role=role)
         client.app.dependency_overrides[optional_current_user] = lambda: user
@@ -181,7 +181,7 @@ class TestSystemStatus:
         from app.services import served_declarations_store as store
 
         fake_settings = MagicMock()
-        fake_settings.app_name = "Maljan"
+        fake_settings.app_name = "Malspark"
         fake_settings.app_version = "0.1.0"
         client.app.dependency_overrides[optional_current_user] = lambda: MagicMock(role="admin")
         values = {
@@ -215,7 +215,7 @@ class TestSystemStatus:
         # Belt-and-braces: even with both keys configured, response payload
         # must not contain the literal key text.
         fake_settings = MagicMock()
-        fake_settings.app_name = "Maljan"
+        fake_settings.app_name = "Malspark"
         fake_settings.app_version = "0.1.0"
 
         with (
@@ -251,7 +251,7 @@ class TestSystemStatus:
     def test_lists_a_source_declared_only_as_data(self, client: TestClient) -> None:
         """A source no code names is listed beside the shipped ones, with its own key."""
         fake_settings = MagicMock()
-        fake_settings.app_name = "Maljan"
+        fake_settings.app_name = "Malspark"
         fake_settings.app_version = "0.1.0"
         own_key = "-".join(["k", "own"])
         declared = {"domainrep": _invented_source(api_key=own_key), "abuseipdb": {"enabled": False}}
@@ -294,10 +294,10 @@ class TestSystemStatus:
     def test_a_server_source_is_configured_only_while_its_server_is_on(
         self, client: TestClient
     ) -> None:
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         fake_settings = MagicMock()
-        fake_settings.app_name = "Maljan"
+        fake_settings.app_name = "Malspark"
         fake_settings.app_version = "0.1.0"
         declared = {
             "intel": {
@@ -338,7 +338,7 @@ class TestSystemStatus:
 
     def test_a_status_whose_sources_cannot_be_read_still_answers(self, client: TestClient) -> None:
         fake_settings = MagicMock()
-        fake_settings.app_name = "Maljan"
+        fake_settings.app_name = "Malspark"
         fake_settings.app_version = "0.1.0"
         declared = {
             "intel": {
@@ -394,8 +394,8 @@ def _invented_source(**extra: object) -> dict[str, object]:
 
 class TestLTMPurge:
     def test_dry_run_counts_without_deleting(self, client: TestClient) -> None:
-        from maljan.memory.in_memory_store import InMemoryStore
-        from maljan.memory.long_term_memory import StoredCase
+        from malspark.memory.in_memory_store import InMemoryStore
+        from malspark.memory.long_term_memory import StoredCase
 
         store = InMemoryStore()
         store.store(
@@ -429,8 +429,8 @@ class TestLTMPurge:
         assert store.count() == 2
 
     def test_apply_removes_low_quality_entries(self, client: TestClient) -> None:
-        from maljan.memory.in_memory_store import InMemoryStore
-        from maljan.memory.long_term_memory import StoredCase
+        from malspark.memory.in_memory_store import InMemoryStore
+        from malspark.memory.long_term_memory import StoredCase
 
         store = InMemoryStore()
         store.store(

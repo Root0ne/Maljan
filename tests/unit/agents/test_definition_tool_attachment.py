@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.core.config import Settings
+from malspark.core.config import Settings
 from tests.unit.agents.tool_attachment_stubs import (
     FakeRegistry,
     StubProvider,
@@ -37,7 +37,7 @@ KNOWLEDGE_TOOL = "attck_lookup"
 
 
 def _container(profile: str = "default", registry: FakeRegistry | None = None) -> Any:
-    from maljan.core.container import ServiceContainer
+    from malspark.core.container import ServiceContainer
 
     cfg = Settings(_env_file=None)
     cfg.agents.profile = profile
@@ -242,7 +242,7 @@ class TestTheNetworkAnalystsSandboxItems:
     def test_a_definition_asking_for_the_sandbox_tools_gets_the_whole_set(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.config import ToolRef
+        from malspark.core.config import ToolRef
 
         container = _container()
         definitions = container.config.agents.definitions
@@ -265,7 +265,7 @@ class TestTheJudge:
         """The judge attaches on its own loop rather than through
         ``BaseAnalyst``, so its reference half is a second implementation and
         needs its own proof."""
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         container = _container()
         judge = JudgeAgent(llm=MagicMock(), config=container.config)
@@ -277,7 +277,7 @@ class TestTheJudge:
 
     @pytest.mark.asyncio
     async def test_the_judge_still_gets_the_server_bound_to_its_role(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         registry = FakeRegistry(bound={"judge": {"threatintel": ["check_ip_reputation"]}})
         container = _container(registry=registry)
@@ -293,7 +293,7 @@ class TestTheJudge:
 
     @pytest.mark.asyncio
     async def test_the_measurement_profile_leaves_the_judge_tool_free(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         registry = FakeRegistry(bound={"judge": {"threatintel": ["check_ip_reputation"]}})
         container = _container(profile="measurement", registry=registry)
@@ -311,7 +311,7 @@ UNRESOLVED = "capability 'nosuchkind' resolves to no server"
 
 def _with_typo(container: Any, key: str) -> None:
     """Agent ``key``'s definition, with a capability reference no server serves."""
-    from maljan.core.config import ToolRef
+    from malspark.core.config import ToolRef
 
     definitions = container.config.agents.definitions
     held = definitions[key]
@@ -346,7 +346,7 @@ class TestACapabilityThatResolvesToNoServer:
 
     @pytest.mark.asyncio
     async def test_the_judge_says_it_once(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         registry = FakeRegistry()
         container = _container(registry=registry)
@@ -361,7 +361,7 @@ class TestACapabilityThatResolvesToNoServer:
 
     @pytest.mark.asyncio
     async def test_the_judge_without_one_says_nothing(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         registry = FakeRegistry()
         container = _container(registry=registry)
@@ -379,7 +379,7 @@ class TestAnAgentWithNoContainer:
         """An analyst built bare — in a script, or in a test that wants no
         registry — must not acquire a container's worth of machinery to answer
         that it has no references."""
-        from maljan.agents.network_analyst import NetworkAnalyst
+        from malspark.agents.network_analyst import NetworkAnalyst
 
         agent = NetworkAnalyst(llm=MagicMock(), name="network")
 

@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from maljan.agents.mcp_client import MCPLangChainToolkit
+from malspark.agents.mcp_client import MCPLangChainToolkit
 
 
 class _MCPTool:

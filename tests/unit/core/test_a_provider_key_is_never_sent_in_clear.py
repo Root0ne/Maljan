@@ -17,8 +17,8 @@ import pytest
 from pydantic import ValidationError
 from tests.credential_shapes import password
 
-from maljan.core.config import Settings, credential_in_clear_refusal
-from maljan.core.settings_overrides import build_settings, stored_settings
+from malspark.core.config import Settings, credential_in_clear_refusal
+from malspark.core.settings_overrides import build_settings, stored_settings
 
 KEY = password(variant=8)
 
@@ -112,7 +112,7 @@ def test_allow_plain_http_takes_a_keyed_server_on_any_host() -> None:
 
 
 def test_allow_plain_http_is_in_the_catalogue_and_says_the_key_travels_in_clear() -> None:
-    from maljan.core.settings_catalog import core_catalog
+    from malspark.core.settings_catalog import core_catalog
 
     (entry,) = [e for e in core_catalog() if e.path == "llm.openai.allow_plain_http"]
     assert "in clear" in entry.description

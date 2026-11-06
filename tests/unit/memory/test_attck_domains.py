@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.memory import attck_loader
+from malspark.memory import attck_loader
 
 
 @pytest.fixture(autouse=True)
@@ -344,8 +344,8 @@ class TestARetiredIdIsNamedForWhatHappenedToIt:
     def test_the_catalogue_s_reasons_read_the_same_rows(
         self, retired_file: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.extractors import capability_matrix
-        from maljan.tools import knowledge
+        from malspark.extractors import capability_matrix
+        from malspark.tools import knowledge
 
         answer = knowledge.attck_lookup("T1024")
         assert answer["valid"] is False

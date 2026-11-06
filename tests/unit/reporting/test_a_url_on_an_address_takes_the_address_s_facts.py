@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.builder import build_consolidated_iocs
-from maljan.reporting.detection_signatures import build_detection_rules
-from maljan.reporting.models import (
+from malspark.reporting.builder import build_consolidated_iocs
+from malspark.reporting.detection_signatures import build_detection_rules
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkIOCs,
@@ -26,13 +26,13 @@ from maljan.reporting.models import (
     NetworkURL,
     SampleIdentity,
 )
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers.stix_renderer import (
     ExtendedSTIXRenderer,
     emulation_kwargs,
     indicator_publish_reason,
     publishes,
 )
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.stix_models import Bundle
 
 CONTACT = "185.199.111.20"
 RESOLVER = "9.9.9.9"

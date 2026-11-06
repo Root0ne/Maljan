@@ -17,15 +17,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
     VERDICT_FALLBACK_REASON,
     VERDICT_TIMEOUT_CODE,
     VERDICT_TIMEOUT_REASON,
     JudgeAgent,
 )
-from maljan.pipeline.validation import FEEDBACK_PREAMBLE
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.validation import FEEDBACK_PREAMBLE
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _bundle_json(
@@ -67,7 +67,7 @@ def _bundle_json(
             "type": "bundle",
             "id": "bundle--0f1e2d3c-4b5a-4968-8776-655443332200",
             "objects": objects,
-            "x_maljan_assessment": assessment,
+            "x_malspark_assessment": assessment,
         }
     )
 
@@ -134,7 +134,7 @@ class TestWhatReachesThePrompt:
         await judge.give_verdict(reports=REPORTS, history=[])
 
         prompt = _prompt_text(llm)
-        assert "x_maljan_assessment" in prompt
+        assert "x_malspark_assessment" in prompt
         assert '"verdict": "Malware" | "Suspicious" | "Benign"' in prompt
         assert "malware_category" in prompt
         assert "evidence_ids" in prompt
@@ -149,9 +149,9 @@ class TestSeverityIsValidatedNotCorrected:
 
         assert verdict.retries == 1
         assert verdict.violations == []
-        assert verdict.bundle.x_maljan_assessment is not None
-        assert verdict.bundle.x_maljan_assessment.severity is not None
-        assert verdict.bundle.x_maljan_assessment.severity.rating == "High"
+        assert verdict.bundle.x_malspark_assessment is not None
+        assert verdict.bundle.x_malspark_assessment.severity is not None
+        assert verdict.bundle.x_malspark_assessment.severity.rating == "High"
 
     @pytest.mark.asyncio
     async def test_the_feedback_names_the_allowed_ratings(self) -> None:
@@ -245,8 +245,8 @@ class TestFamilyAttribution:
         verdict = await judge.give_verdict(reports=REPORTS, history=[])
 
         assert [v.code for v in verdict.violations] == ["attribution.ungrounded_family"]
-        assert verdict.bundle.x_maljan_assessment is not None
-        family = verdict.bundle.x_maljan_assessment.family
+        assert verdict.bundle.x_malspark_assessment is not None
+        family = verdict.bundle.x_malspark_assessment.family
         assert family is not None and family.name == "AsyncRAT"
 
     @pytest.mark.asyncio
@@ -363,9 +363,9 @@ class TestAnAnswerThatIsNotABundle:
 
         assert verdict.retries == 1
         assert verdict.violations == []
-        assert verdict.bundle.x_maljan_assessment is not None
-        assert verdict.bundle.x_maljan_assessment.severity is not None
-        assert verdict.bundle.x_maljan_assessment.severity.rating == "High"
+        assert verdict.bundle.x_malspark_assessment is not None
+        assert verdict.bundle.x_malspark_assessment.severity is not None
+        assert verdict.bundle.x_malspark_assessment.severity.rating == "High"
 
     @pytest.mark.asyncio
     async def test_the_feedback_asks_for_the_bundle_alone(self) -> None:
@@ -394,7 +394,9 @@ class TestAnAnswerThatIsNotABundle:
         # Built, and marked as the fallback. With no claim and no whole
         # indicator it holds no object, so it writes no note: a note must name
         # an object it is about, and the record stays on the fallback mark.
-        assert verdict.bundle.x_maljan_fallback_verdict is not None, "the fallback bundle is built"
+        assert verdict.bundle.x_malspark_fallback_verdict is not None, (
+            "the fallback bundle is built"
+        )
         assert [o for o in verdict.bundle.objects if o.type == "note"] == []
 
     @pytest.mark.asyncio
@@ -420,7 +422,7 @@ class TestAnAnswerThatIsNotABundle:
 
     @pytest.mark.asyncio
     async def test_the_unresolved_fallback_reaches_the_run_summary(self) -> None:
-        from maljan.pipeline.validation import validation_metrics
+        from malspark.pipeline.validation import validation_metrics
 
         judge, _llm = _judge("not json", "not json either")
         verdict = await judge.give_verdict(reports=REPORTS, history=[])
@@ -445,7 +447,7 @@ class TestAJudgeThatNeverAnswered:
     async def test_the_timeout_is_recorded_unresolved(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import judge_agent as module
+        from malspark.agents import judge_agent as module
 
         async def _timeout(coro: Any, *args: Any, **kwargs: Any) -> Any:
             coro.close()
@@ -462,8 +464,8 @@ class TestAJudgeThatNeverAnswered:
 
     @pytest.mark.asyncio
     async def test_it_reaches_the_run_summary(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.agents import judge_agent as module
-        from maljan.pipeline.validation import validation_metrics
+        from malspark.agents import judge_agent as module
+        from malspark.pipeline.validation import validation_metrics
 
         async def _timeout(coro: Any, *args: Any, **kwargs: Any) -> Any:
             coro.close()

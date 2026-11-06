@@ -16,9 +16,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.pipeline.stopped_run import (
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.pipeline.stopped_run import (
     NO_REPORT_STAGE,
     NO_VERDICT_REASON,
     REPORT_STAGE_STOPPED,
@@ -26,8 +26,8 @@ from maljan.pipeline.stopped_run import (
     stopped_run_summary,
     stopped_state,
 )
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers import MarkdownRenderer
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers import MarkdownRenderer
 
 NOTE = "Stopped by the job timeout (60 s, core.job_timeout) 61 s into the run, here."
 

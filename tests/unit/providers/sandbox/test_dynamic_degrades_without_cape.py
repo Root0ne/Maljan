@@ -32,9 +32,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.agents.dynamic_analyst import DynamicAnalyst
-from maljan.agents.static_analyst import StaticAnalyst
-from maljan.core.exceptions import AgentLoopCancelled
+from malspark.agents.dynamic_analyst import DynamicAnalyst
+from malspark.agents.static_analyst import StaticAnalyst
+from malspark.core.exceptions import AgentLoopCancelled
 
 _CLAIM_BLOCK = (
     "CLAIM: The sample writes itself to the Run key\n"
@@ -201,7 +201,7 @@ class TestStaticStillFailsLoudly:
         """
         import inspect
 
-        from maljan.agents import static_analyst
+        from malspark.agents import static_analyst
 
         source = inspect.getsource(static_analyst.StaticAnalyst)
         assert "_try_initialize_mcp" in source, (

@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     UNGROUNDED_CAPABILITY_CODE,
     CapabilityGrounding,
     feedback_text,
@@ -26,14 +26,14 @@ from maljan.pipeline.validation import (
     section_capability_violations,
     ungrounded_capabilities,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     EvidenceSection,
     FileHashes,
     MalwareReport,
     SampleIdentity,
     TTPMapping,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 _RUN_3_SUMMARY = (
     "The sample maintains active command-and-control communication with its operator, "
@@ -88,7 +88,7 @@ class TestTheRunThatProducedIt:
     def test_an_observed_network_block_grounds_the_channel(self) -> None:
         """A block something other than the string sweep recorded a row of;
         an empty block, or one of swept rows only, grounds nothing."""
-        from maljan.reporting.models import NetworkDomain, NetworkIOCs
+        from malspark.reporting.models import NetworkDomain, NetworkIOCs
 
         observed = NetworkIOCs(domains=[NetworkDomain(fqdn="gate9.example.org", source="sandbox")])
         grounding = CapabilityGrounding.from_report(
@@ -406,7 +406,7 @@ class TestTheSummaryIsKeptAndTheTermsRecorded:
     def _agent(self, answers: list[str]) -> Any:
         from unittest.mock import MagicMock
 
-        from maljan.reporting.narrative_agent import NarrativeAgent
+        from malspark.reporting.narrative_agent import NarrativeAgent
 
         class _LLM:
             async def ainvoke(self, messages: Any) -> Any:
@@ -417,12 +417,12 @@ class TestTheSummaryIsKeptAndTheTermsRecorded:
     def _run(self, agent: Any, report: MalwareReport, isr_reports: Any = None) -> Any:
         import asyncio
 
-        from maljan.llm import registry
+        from malspark.llm import registry
 
         original = registry.structured_output_supported_for_llm
         registry.structured_output_supported_for_llm = lambda _llm: False  # type: ignore[assignment]
         try:
-            import maljan.reporting.narrative_agent as module
+            import malspark.reporting.narrative_agent as module
 
             module.structured_output_supported_for_llm = lambda _llm: False  # type: ignore[assignment]
             return asyncio.run(agent.generate(report, isr_reports))

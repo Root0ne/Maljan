@@ -18,8 +18,8 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING,
     ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
     RETRY_DROP_KEPT,
@@ -27,7 +27,7 @@ from maljan.pipeline.validation import (
     RETRY_DROPPED_CODE,
     validation_metrics,
 )
-from maljan.schemas.isr_models import AgentISR
+from malspark.schemas.isr_models import AgentISR
 
 
 def _block(n: int, technique: str, number: int | None = None, cites: str = "ev_0001") -> str:
@@ -71,7 +71,7 @@ class _Analyst(BaseAnalyst):
 def _check(analyst: _Analyst, first: str = FIRST) -> AgentISR:
     isr = analyst._text_to_isr(first, 0)
     with (
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
     ):
         return analyst._validate_isr(isr, "evidence")
@@ -223,7 +223,7 @@ class TestARetryTheNumbersDoNotPlace:
         isr = analyst._text_to_isr(FIRST, 0)
         analyst._last_answer_cut = (4096, FIRST)
         with (
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         ):
             analyst._validate_isr(isr, "evidence")
@@ -245,14 +245,14 @@ def _fenced(*titles: str) -> str:
     import json
 
     body = json.dumps({"findings": [{"title": t, "technique_ids": ["T1027"]} for t in titles]})
-    return f"```maljan-findings\n{body}\n```"
+    return f"```malspark-findings\n{body}\n```"
 
 
 def _check_written(analyst: _Analyst, text: str) -> AgentISR:
     """An answer read as the loop reads one: its findings block and its claims."""
     isr = analyst._text_to_isr(analyst._capture_findings(text), 0)
     with (
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
     ):
         return analyst._validate_isr(isr, "evidence")
@@ -297,7 +297,7 @@ class TestTheFlaggedBlockIsTheOneAsked:
 
 class TestARetryNotPlacedAsksForTheWholeAnswer:
     def test_a_one_claim_retry_numbered_from_one_is_asked_for_the_whole_answer(self) -> None:
-        from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+        from malspark.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
 
         partial = (
             "CLAIM 1: The packed section is read from disk only.\n"
@@ -363,8 +363,8 @@ class TestWithdrawalsAreRecorded:
         assert [row["reason"] for row in rows] == ["the decoder claim covers them"] * 2
 
     def test_the_rows_reach_the_run_summary_and_section_13(self) -> None:
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         analyst = _Analyst(["WITHDRAW CLAIM 3: no entry holds it.\n"])
         _check(analyst, UNGROUNDED)
@@ -389,7 +389,7 @@ class TestWhatTheMergeLeavesAlone:
         isr = analyst._text_to_isr(UNGROUNDED, 1)
         isr.dissent_items = ["The dynamic analyst's string 4 is not in its capture."]
         with (
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         ):
             result = analyst._validate_isr(isr, "evidence")
@@ -450,7 +450,7 @@ class TestTheRecordNeverContradictsTheAnswer:
     def test_a_retry_read_whole_that_writes_a_claim_and_withdraws_it_asks_for_the_whole_answer(
         self,
     ) -> None:
-        from maljan.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
+        from malspark.pipeline.validation import WHOLE_ANSWER_AFTER_RETRY_LEAD
 
         both = (
             _block(1, "T1027")

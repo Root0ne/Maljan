@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.analysis.technique_ids import (
+from malspark.analysis.technique_ids import (
     ID_BODY,
     SIGMA_TAG_RE,
     TECHNIQUE_ID_EXACT_RE,
@@ -60,7 +60,7 @@ class TestOneStrictReader:
             assert ID_BODY in pattern.pattern
 
     def test_the_claim_line_readers_are_built_from_it_and_unchanged(self) -> None:
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         # The claim grammar keeps its own boundaries; only the id is shared.
         assert base_agent._ONE_TECHNIQUE_RE.pattern == r"T\d{4}(?:\.\d{3})?"
@@ -83,9 +83,9 @@ class TestOneStrictReader:
         assert large < 20 * small + 0.05
 
     def test_no_reader_outside_this_module_writes_the_id_again(self) -> None:
-        import maljan
+        import malspark
 
-        root = Path(maljan.__file__).parent
+        root = Path(malspark.__file__).parent
         holders = {
             str(path.relative_to(root))
             for path in root.rglob("*.py")

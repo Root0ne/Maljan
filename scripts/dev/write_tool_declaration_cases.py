@@ -86,7 +86,7 @@ _BESIDE: tuple[dict[str, Any], ...] = ({}, {"display_name": "X"})
 
 
 def _declarations() -> list[dict[str, Any]]:
-    from maljan.core.tool_declarations import (
+    from malspark.core.tool_declarations import (
         KIND_DEPENDENT_FIELDS,
         KIND_FREE_FIELDS,
         ToolFacts,
@@ -123,7 +123,7 @@ def _declarations() -> list[dict[str, Any]]:
 
 def answers(declaration: dict[str, Any]) -> list[Any]:
     """The API's answer for one declaration: accepted, names no kind, the fields set."""
-    from maljan.core.tool_declarations import (
+    from malspark.core.tool_declarations import (
         ToolFacts,
         is_set,
         reads_no_kind,

@@ -23,11 +23,11 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.ledger_projection import kept_network_values, network_from_ledger
-from maljan.reporting.models import JudgeIndicator, MalwareReport
-from maljan.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer, publishes
-from maljan.schemas.evidence import build_entry
-from maljan.schemas.isr_models import AgentISR, Artifact
+from malspark.reporting.ledger_projection import kept_network_values, network_from_ledger
+from malspark.reporting.models import JudgeIndicator, MalwareReport
+from malspark.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer, publishes
+from malspark.schemas.evidence import build_entry
+from malspark.schemas.isr_models import AgentISR, Artifact
 from tests.unit.reporting._sandbox_fact import answered_the_sandbox_fact
 
 CONTACT = "185.199.108.153"

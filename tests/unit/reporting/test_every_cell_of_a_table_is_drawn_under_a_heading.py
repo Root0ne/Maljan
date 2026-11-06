@@ -16,18 +16,18 @@ import random
 from collections import Counter
 from typing import Any
 
-from maljan.reporting.ledger_projection import listed_cells, listed_columns
-from maljan.reporting.ledger_report import (
+from malspark.reporting.ledger_projection import listed_cells, listed_columns
+from malspark.reporting.ledger_report import (
     _in_the_union,
     analyst_persistence,
     build_sections,
     listed_headings,
     listed_rows,
 )
-from maljan.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.isr_models import AgentISR, Artifact
+from malspark.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.isr_models import AgentISR, Artifact
 
 
 def _merged(kind: str, *listed: tuple[list[str], list[list[str]]]) -> EvidenceSection:
