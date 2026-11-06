@@ -173,18 +173,22 @@ from maljan.pipeline.validation import (
     wrong_entry_citations,
 )
 from maljan.reporting.absence_answers import (
+    PREPOSITIONS,
     FailureCounts,
     carries_negation,
     content_words,
     count_disagrees,
     denied_groups,
     denied_heads,
+    denied_items,
     denied_subject,
     denies_an_observation,
+    denies_reading,
     frame_words,
     kept_absence,
     negated_clauses,
     quote_stands,
+    reading_denied_in,
     said_of,
 )
 from maljan.reporting.models import (
@@ -2434,11 +2438,44 @@ def _answer_violations(
         return out
     sentence = span[2]
     keeping = row.decision == "keep" and passage.closing
+    if row.decision == "rewrite" and passage.closing and repeats_sentence(sentence, row.rewrite):
+        # A rewrite saying what the sentence says is a keep on the sources it names,
+        # quoting the one of their sentences that matches it best (T-568).
+        named_sources = [
+            s for s in sources if s is not None and s.kind in (FACT, SECTION_5, DEBATE)
+        ]
+        quote = _best_quote(sentence, named_sources, generic_words(by_id or {}))
+        problem = (
+            _quote_problem(sentence, quote, named_sources, generic_words(by_id or {}), by_id or {})
+            if quote
+            else "no sentence of the sources it names states it"
+        )
+        if problem and _rests_on_its_own_sources(sentence, quote, row.sources, by_id or {}):
+            # The sources it names hold the absence in their own words, and no other
+            # source speaks of it: kept, and recorded by the rewrite's own record.
+            problem = ""
+        if problem:
+            out.append(
+                Violation(
+                    code=KEEP_UNQUOTED_CODE,
+                    message=(
+                        f"row {number}: {where} rewrites {safe_finding_value(sentence)!r} into "
+                        "the same words, which keeps it, on "
+                        f"{safe_finding_value(', '.join(_form(n) for n in row.sources))}, but "
+                        f"the best sentence of those sources {safe_finding_value(problem)}: "
+                        "rewrite it to what the sources state, or drop it."
+                        + _candidates(sentence, by_id or {})
+                    ),
+                    path=f"{path}.rewrite",
+                )
+            )
     if keeping and row.sources:
         named_sources = [
             s for s in sources if s is not None and s.kind in (FACT, SECTION_5, DEBATE)
         ]
-        problem = _quote_problem(sentence, row.quote, named_sources, generic_words(by_id or {}))
+        problem = _quote_problem(
+            sentence, row.quote, named_sources, generic_words(by_id or {}), by_id or {}
+        )
         if problem:
             out.append(
                 Violation(
@@ -2455,8 +2492,24 @@ def _answer_violations(
                     path=f"{path}.quote",
                 )
             )
-    decisive = _decisive_unread(passage, sentence) if keeping else ()
+    repeating = (
+        row.decision == "rewrite" and passage.closing and repeats_sentence(sentence, row.rewrite)
+    )
+    decisive = _decisive_unread(passage, sentence) if keeping or repeating else ()
     listing = [(by_id or {})[i] for i in decisive if i in (by_id or {})]
+    if (keeping or repeating) and not listing and denies_reading(sentence):
+        # "read only in part" of code an entry lists: the listing says otherwise. Only the
+        # address the denying clause names ("the routine at 0x1030 was read" beside it
+        # is no denial of 0x1030).
+        clause = reading_denied_in(sentence)
+        # A denying clause naming none ("…at 0x3868, which calls X, was read only in
+        # part") is said of the address written last before it.
+        named = frozenset(_addresses_named(clause)) or frozenset(
+            _addresses_named(sentence[: sentence.find(clause)])[-1:]
+        )
+        listing = [
+            f for f in (by_id or {}).values() if f.lists_code and not f.addresses.isdisjoint(named)
+        ]
     if listing:
         # A closing sentence calling code not read that an entry lists says the
         # opposite of the ledger whatever it is kept on (T-568).
@@ -2539,9 +2592,13 @@ def kept_subject(sentence: str, generic: frozenset[str] = frozenset()) -> frozen
     """What a kept closing sentence denies something of (:func:`absence_answers.denied_subject`:
     the item before its negation, never a frame), but the words saying what is denied
     (:data:`_ABSENCE_PREDICATES`) and the report's generic words (:func:`generic_words`)."""
-    return frozenset(
-        w for w in denied_subject(sentence) if w not in _ABSENCE_PREDICATES and w not in generic
+    own = frozenset(
+        w
+        for w in denied_subject(sentence)
+        if w not in _ABSENCE_PREDICATES and w not in PREPOSITIONS
     )
+    # Where the generic words are all it names, what it names stands as it is.
+    return (own - generic) or own
 
 
 # A word standing in at least this share of the section 5 prose passages, and in at
@@ -2588,19 +2645,26 @@ def quote_overlap(sentence: str, quote: str, generic: frozenset[str] = frozenset
 
 
 def _quote_problem(
-    sentence: str, quote: str, sources: Sequence[Passage], generic: frozenset[str] = frozenset()
+    sentence: str,
+    quote: str,
+    sources: Sequence[Passage],
+    generic: frozenset[str] = frozenset(),
+    by_id: dict[str, Passage] | None = None,
 ) -> str:
     """What is wrong with a kept closing sentence's quote, or ``""``.
 
     It stands whole in a named source (:func:`absence_answers.quote_stands`), and
     states an absence where the sentence does. Where the sentence names addresses, the
     quote, or a fact it names, names one of them (haiku12's "0x3868 was read only in
-    part" kept on a sentence about 0x7acc); so tied, a quote stating an absence needs
-    no more: the address is the subject. Untied, it holds two (all, where fewer) of
-    the words of what the sentence denies something of (:func:`kept_subject`: never
-    a frame, a word saying what is denied or a generic word), so "the sandbox run did
-    not reach the download commands" backs no sentence about the C2 request body
-    framed "for the sandbox run".
+    part" kept on a sentence about 0x7acc). A quote taken from a fact tying the address,
+    where both deny that code was read or listed ("0xc42c was not read" on "no entry
+    lists its code"), needs no more: the address is the subject. Any other quote holds
+    two (all, where fewer) of the words of what the sentence denies something of
+    (:func:`kept_subject`: never a frame, a word saying what is denied or a generic
+    word) and names what a denied item is, so "no entry lists its code" backs no "the
+    routine at 0xc42c never contacts the C2 host". A quote leaving out an item of a
+    coordinated list that a shown source could say otherwise of is refused; one leaving
+    out an item no source speaks of is recorded (:func:`_unbacked_items`).
     """
     if not quote_stands(quote, [s.text for s in sources]):
         return "does not stand in a source it names"
@@ -2609,10 +2673,15 @@ def _quote_problem(
         return "states no absence, while the sentence states one"
     named = frozenset(_addresses_named(sentence))
     by_quote = bool(named & set(_addresses_named(quote)))
-    by_fact = any(s.kind == FACT and not s.addresses.isdisjoint(named) for s in sources)
-    if named and not (by_quote or by_fact):
+    tying = [s for s in sources if s.kind == FACT and not s.addresses.isdisjoint(named)]
+    if named and not (by_quote or tying):
         return "names none of the addresses the sentence names"
-    if named:
+    if (
+        named
+        and any(quote_stands(quote, [s.text]) for s in tying)
+        and denies_reading(sentence)
+        and denies_reading(quote)
+    ):
         return ""
     subject = kept_subject(sentence, generic)
     if quote_overlap(sentence, quote, generic) < min(_QUOTE_SHARED, len(subject)):
@@ -2623,6 +2692,112 @@ def _quote_problem(
     heads = frozenset(h for h in denied_heads(sentence) if h not in _ABSENCE_PREDICATES)
     if heads and not said_of(quote).count(heads):
         return "names none of what the sentence denies something of"
+    if by_id is not None:
+        contradicted = [
+            item for item in _unbacked_items(sentence, quote) if _could_contradict(item, by_id)
+        ]
+        if contradicted:
+            return "leaves out an item of the sentence a source speaks of: " + "; ".join(
+                " ".join(sorted(item)) for item in contradicted
+            )
+    return ""
+
+
+# How much of a sentence's own words a rewrite repeats, and the reverse, to say the same.
+_REPEAT_SHARE = 0.8
+
+
+def repeats_sentence(sentence: str, rewrite: str) -> bool:
+    """Whether a rewrite says what its sentence says: each holds at least
+    :data:`_REPEAT_SHARE` of the other's content words (case, spacing and citations aside),
+    so changing a word or two is no way round the keep checks, and it still states every
+    absence of the sentence (:func:`absence_answers.kept_absence`): "0x2800 and 0x2c00
+    were read, 0x7000 was not" corrects "0x2800, 0x2c00 and 0x7000 were not read" in the
+    same words."""
+    mine, theirs = content_words(sentence), content_words(rewrite)
+    if not mine or not theirs:
+        return False
+    if said_of(rewrite).count(mine) < _REPEAT_SHARE * len(mine):
+        return False
+    if said_of(sentence).count(theirs) < _REPEAT_SHARE * len(theirs):
+        return False
+    return all(
+        kept_absence([clause], rewrite) is not None
+        for clause in negated_clauses(sentence)
+        if len(content_words(clause)) >= _QUOTE_SHARED
+    )
+
+
+def _rests_on_its_own_sources(
+    sentence: str, quote: str, cited: Sequence[str], by_id: dict[str, Passage]
+) -> bool:
+    """Whether a closing sentence repeated as its own rewrite rests on the sources it names
+    though no word check proves it: their best sentence states the absence where it does
+    and names a word of what a denied item is ("a file-mode download does not store the
+    body" of "The file-mode disk write is not reached"), and every source that could say
+    otherwise of it (:func:`_speaking_sources`) is one of them."""
+    if carries_negation(sentence) and not carries_negation(quote):
+        return False
+    groups = frozenset(w for w in denied_groups(sentence) if w not in _ABSENCE_PREDICATES)
+    if not groups or not said_of(quote).count(groups):
+        return False
+    named = {_form(n) for n in cited}
+    return all(pid in named for pid, _excerpt in _speaking_sources(sentence, by_id))
+
+
+def _best_quote(sentence: str, sources: Sequence[Passage], generic: frozenset[str]) -> str:
+    """The sentence of the sources that matches a closing sentence best: naming one of its
+    addresses, stating an absence where it does, then holding the most of what it denies
+    something of (:func:`kept_subject`); ``""`` for no source."""
+    named = frozenset(_addresses_named(sentence))
+    absent = carries_negation(sentence)
+    subject = kept_subject(sentence, generic)
+    best: tuple[tuple[int, int, int], str] | None = None
+    for source in sources:
+        for part in _sentences_of(source.text):
+            score = (
+                int(bool(named & set(_addresses_named(part)))),
+                int(carries_negation(part) or not absent),
+                said_of(part).count(subject),
+            )
+            if best is None or score > best[0]:
+                best = (score, part)
+    return best[1] if best else ""
+
+
+def _unbacked_items(sentence: str, quote: str) -> list[frozenset[str]]:
+    """The own words of each item of a coordinated list the sentence denies something of
+    that the quote names none of ("the C2 reply format" of "Whether the gates pass, and
+    the C2 reply format, were not established" on a quote about the gates)."""
+    items = denied_items(sentence)
+    if len(items) < _QUOTE_SHARED:
+        return []
+    said = said_of(quote)
+    return [words - PREPOSITIONS for words, group in items if group and not said.count(group)]
+
+
+def _could_contradict(item: frozenset[str], by_id: dict[str, Passage]) -> bool:
+    """Whether a shown section 5 passage, or a fact citing an entry, holds two or more of an
+    item's words (all, where it has one, the report's generic words left out): "the
+    request keys in the decoded strings" of the protocol item, which section 6 states."""
+    words = (item - generic_words(by_id) - _ABSENCE_PREDICATES) or item
+    least = min(_QUOTE_SHARED, len(words))
+    return any(
+        said_of(p.text).count(words) >= least
+        for p in by_id.values()
+        if (p.kind == SECTION_5 or (p.kind == FACT and p.cites)) and "open question" not in p.label
+    )
+
+
+def keep_record_reason(sentence: str, quote: str, generic: frozenset[str] = frozenset()) -> str:
+    """Why a closing keep on a quote that passed the checks is still recorded, or ``""``:
+    it rests on fewer than two of the words the sentence denies something of, or leaves
+    out an item of a coordinated list (named)."""
+    if quote_overlap(sentence, quote, generic) < _QUOTE_SHARED:
+        return "resting on fewer than two of the words the sentence denies something of"
+    left = _unbacked_items(sentence, quote)
+    if left:
+        return "leaving out " + "; ".join(" ".join(sorted(item)) for item in left)
     return ""
 
 
@@ -2648,8 +2823,12 @@ def _speaking_sources(sentence: str, by_id: dict[str, Passage]) -> list[tuple[st
     characters with the cut marked. Each source's sentences are read once per text.
     """
     named = frozenset(_addresses_named(sentence))
-    subject = kept_subject(sentence, generic_words(by_id))
+    # An address it names speaks through the facts tying it, never as a word of its own.
+    subject = frozenset(
+        w for w in kept_subject(sentence, generic_words(by_id)) if not _addresses_named(w)
+    )
     observed = denies_an_observation(sentence)
+    reading_denied = denies_reading(sentence)
     # What each denied item is: a source says otherwise of it only naming one of these.
     heads = frozenset(h for h in denied_groups(sentence) if h in subject)
     ranked: list[tuple[tuple[int, int, int], int, str, str]] = []
@@ -2659,7 +2838,15 @@ def _speaking_sources(sentence: str, by_id: dict[str, Passage]) -> list[tuple[st
         if source.kind == FACT and "open question" in source.label:
             # A question an analyst left open states nothing to say otherwise with.
             continue
-        by_address = bool(named and source.kind == FACT and not source.addresses.isdisjoint(named))
+        # A fact on whether a routine's code was listed says otherwise only of a sentence
+        # denying a reading ("0x463c's purpose was not established" it does not touch).
+        reading_fact = source.lists_code or _NOT_LISTED in source.text
+        by_address = bool(
+            named
+            and source.kind == FACT
+            and not source.addresses.isdisjoint(named)
+            and (reading_denied or not reading_fact)
+        )
         # A denied observation is said otherwise of only by a sentence holding two of its
         # words (a passage of code describing an exchange observes none); any other
         # denial by a passage holding them (the request built over several sentences).
@@ -3613,22 +3800,13 @@ def apply_rows(
                     # check, on two or more words of what it denies something of, is
                     # counted; one kept on no source, on a source a check refused, or
                     # on fewer of those words, is recorded with what it rests on (T-568).
-                    if (
-                        row.sources
-                        and not found
-                        and quote_overlap(standing[2], row.quote, generic_words(by_id))
-                        >= _QUOTE_SHARED
-                    ):
+                    reason = keep_record_reason(standing[2], row.quote, generic_words(by_id))
+                    if row.sources and not found and not reason:
                         continue
                     rests = (
                         f"{', '.join(_form(s) for s in row.sources)}, quoting "
                         f"{_capped(row.quote)!r}, "
-                        + (
-                            f"a source the checks refused ({_codes_of(found)})"
-                            if found
-                            else "resting on fewer than two of the words the sentence "
-                            "denies something of"
-                        )
+                        + (f"a source the checks refused ({_codes_of(found)})" if found else reason)
                         if row.sources
                         else f"no source, because {_capped(row.reason)!r}"
                         + (f", which the checks refused ({_codes_of(found)})" if found else "")

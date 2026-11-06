@@ -130,6 +130,11 @@ class _Said:
     def holds(self, word: str) -> bool:
         if word in self.words or (len(word) >= _STEM_FLOOR and word in self.prefixes):
             return True
+        if word.endswith("s") and word[:-1] in self.words:
+            return True  # "apis" in "API"
+        if "-" in word:
+            # "file-mode" is not "file": a hyphenated word is held whole or not at all.
+            return False
         return any(
             word[:end] in self.words for end in range(_STEM_FLOOR, min(len(word), _PREFIX_REACH))
         )
@@ -214,7 +219,7 @@ _JOINS = frozenset({"and"})
 # before ("the body was not read").
 _DENIES_WHAT_FOLLOWS = frozenset({"no", "none", "nothing", "neither", "nor", "without"})
 # The words after which an item's own words end and a modifier begins.
-_PREPOSITIONS = frozenset(
+PREPOSITIONS = frozenset(
     (
         "in for during on as from within after before at by under over beyond of to with "
         "through via about into onto than like across behind between among toward towards "
@@ -255,7 +260,8 @@ def _items_before_negation(sentence: str) -> list[_Item]:
         part = before[begin:end]
         first = next((w.lower() for w in _WORD.findall(part)), "")
         if first:
-            items.append(_Item(content_words(part), first, joined, _head(part), _group(part)))
+            own = _without_references(part)
+            items.append(_Item(content_words(own), first, joined, _head(own), _group(own)))
             joined = False
         if match is not None:
             begin = match.end()
@@ -265,7 +271,7 @@ def _items_before_negation(sentence: str) -> list[_Item]:
 
 # The verbs that make a denial one of observation ("observed no network exchange", "was
 # not recorded"): only an observation says otherwise of it.
-_OBSERVING = frozenset("observed recorded seen captured watched logged".split())
+_OBSERVING = frozenset("observed recorded seen captured watched logged shown".split())
 # How many words on either side of a negation are read for such a verb.
 _OBSERVING_REACH = 3
 
@@ -284,6 +290,16 @@ def denies_an_observation(sentence: str) -> bool:
     return any(word in _OBSERVING for word in (*before, *after))
 
 
+# A noun a demonstrative points back with ("that set", "these routines"): it names what
+# the sentence said before, nothing a source could say otherwise of on its own.
+_REFERENCE = re.compile(r"\b(?:that|this|these|those)\s+[\w'-]+", re.IGNORECASE)
+
+
+def _without_references(part: str) -> str:
+    """An item's text without the nouns a demonstrative points back with."""
+    return _REFERENCE.sub(" ", part)
+
+
 def frame_words(sentence: str) -> frozenset[str]:
     """The words of the frame a sentence opens with ("analysed", "sample" of "In the
     analysed sample, …"), or none: the scene a report sets, not what it says."""
@@ -299,7 +315,7 @@ def _before_preposition(part: str) -> str:
     "YARA hits among 31 rules")."""
     words = part.split()
     for at, word in enumerate(words):
-        if at > 0 and word.lower().strip(",.;:()") in _PREPOSITIONS:
+        if at > 0 and word.lower().strip(",.;:()") in PREPOSITIONS:
             return " ".join(words[:at])
     return part
 
@@ -308,11 +324,11 @@ def _group(part: str) -> frozenset[str]:
     """An item's own words before its first preposition (past its first word); for one
     opening on a preposition, its last word of its own."""
     words = [m.group(0) for m in _WORD.finditer(part)]
-    if words and words[0].lower() in _PREPOSITIONS:
+    if words and words[0].lower() in PREPOSITIONS:
         head = _head(part)
         return frozenset({head}) if head else frozenset()
     cut = next(
-        (at for at, word in enumerate(words) if at > 0 and word.lower() in _PREPOSITIONS),
+        (at for at, word in enumerate(words) if at > 0 and word.lower() in PREPOSITIONS),
         len(words),
     )
     return content_words(" ".join(words[:cut]))
@@ -323,7 +339,7 @@ def _head(part: str) -> str:
     word), else its last word of its own."""
     words = [m.group(0) for m in _WORD.finditer(part)]
     cut = next(
-        (at for at, word in enumerate(words) if at > 0 and word.lower() in _PREPOSITIONS),
+        (at for at, word in enumerate(words) if at > 0 and word.lower() in PREPOSITIONS),
         len(words),
     )
     for chosen in (words[:cut], words):
@@ -351,7 +367,7 @@ def _denied_items(sentence: str) -> list[_Item]:
     if found and found.group(0).lower() in _DENIES_WHAT_FOLLOWS:
         rest = sentence[found.end() :]
         cut = _ITEM_BREAK.search(rest)
-        part = _before_preposition(rest[: cut.start()] if cut else rest)
+        part = _without_references(_before_preposition(rest[: cut.start()] if cut else rest))
         words = content_words(part)
         return [_Item(words, "", False, _head(part), _group(part))] if words else []
     items = [item for item in _items_before_negation(sentence) if item.opener not in _FRAME_OPENERS]
@@ -380,6 +396,43 @@ def _denied_items(sentence: str) -> list[_Item]:
 def denied_subject(sentence: str) -> frozenset[str]:
     """The words of what a sentence denies something of (:func:`_denied_items`)."""
     return frozenset(word for item in _denied_items(sentence) for word in item.words)
+
+
+def denied_items(sentence: str) -> list[tuple[frozenset[str], frozenset[str]]]:
+    """Each item a sentence denies something of: its words, and its own words
+    (:func:`_denied_items`, :func:`_group`)."""
+    return [(item.words, item.group) for item in _denied_items(sentence)]
+
+
+# A denial of reading or listing code: "was not read", "body unread", "not decompiled",
+# "no entry lists its code".
+_READING_DENIAL = re.compile(
+    r"\bunread\b"
+    r"|\bread\s+(?:only\s+)?(?:in\s+part|partly|partially)\b"
+    r"|\b(?:partly|partially)\s+read\b"
+    r"|\b(?:not|never|no)\b[^.;:]{0,40}?\b(?:read|decompiled|disassembled|listed|lists|"
+    r"examined|opened)\b",
+    re.IGNORECASE,
+)
+
+
+def denies_reading(text: str) -> bool:
+    """Whether the text denies that code was read or listed (:data:`_READING_DENIAL`)."""
+    return _READING_DENIAL.search(text) is not None
+
+
+def reading_denied_in(text: str) -> str:
+    """The clause of the text denying that code was read or listed, or ``""``: its words
+    from the clause break before the denial to the one after it."""
+    found = _READING_DENIAL.search(text)
+    if not found:
+        return ""
+    begin = 0
+    for match in _ITEM_BREAK.finditer(text[: found.start()]):
+        if match.group(0) in ",;:":
+            begin = match.end()
+    after = re.search(r"[,;:]", text[found.end() :])
+    return text[begin : found.end() + (after.start() if after else len(text))]
 
 
 def denied_groups(sentence: str) -> frozenset[str]:

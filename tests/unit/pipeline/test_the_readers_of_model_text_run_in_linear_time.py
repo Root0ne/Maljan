@@ -41,10 +41,12 @@ from maljan.reporting.absence_answers import (
     FailureCounts,
     count_disagrees,
     denied_subject,
+    denies_an_observation,
     failure_counts,
     kept_absence,
     negated_clauses,
     quote_stands,
+    reading_denied_in,
 )
 from maljan.reporting.section_agreement import (
     _candidates,
@@ -272,6 +274,18 @@ LISTED = [SimpleNamespace(addresses=frozenset({0x1400}), id="listed.1")]
             lambda t: denied_subject("and, " * (len(t) // 5) + " not known"),
             id="the items of what a sentence denies",
         ),
+        pytest.param(
+            lambda t: reading_denied_in("no " * (len(t) // 3) + "0x1400 was not read."),
+            id="the clause denying a reading",
+        ),
+        pytest.param(
+            lambda t: denies_an_observation("not " + "that word " * (len(t) // 10)),
+            id="a denied observation",
+        ),
+        pytest.param(
+            lambda t: denied_subject("that set " * (len(t) // 9) + "was not known"),
+            id="nouns a demonstrative points back with",
+        ),
         pytest.param(lambda t: kept_absence(negated_clauses(t), t), id="an absence kept"),
         pytest.param(
             lambda t: kept_absence(
@@ -309,6 +323,7 @@ LISTED = [SimpleNamespace(addresses=frozenset({0x1400}), id="listed.1")]
                         cites=frozenset(),
                         addresses=frozenset(),
                         write=print,
+                        lists_code=False,
                         label="5",
                     )
                 },  # type: ignore[dict-item]

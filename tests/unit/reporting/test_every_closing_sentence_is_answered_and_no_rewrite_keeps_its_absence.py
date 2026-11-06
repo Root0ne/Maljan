@@ -746,8 +746,12 @@ def test_haiku12_s_c2_to_c5_kept_unsourced_on_both_answers_are_left_out_and_reco
         assert said[which] not in body, which
     dropped = [v.message for v in records if v.code == DROPPED_CODE]
     assert len(dropped) == 3
-    assert all("no source, because 'no source speaks of it'" in m for m in dropped)
-    assert all(KEEP_UNQUOTED_CODE in m for m in dropped)
+    # C2 "read only in part" of listed code: the ledger says otherwise of it.
+    assert all(
+        "no source, because 'no source speaks of it'" in m or "the ledger says otherwise" in m
+        for m in dropped
+    )
+    assert all(KEEP_UNQUOTED_CODE in m or UNREAD_STANDING_CODE in m for m in dropped)
     # Nothing left out silently: every sentence gone is one recorded.
     gone = [s for s in _sentences_of(_by_id["limitations"].text) if s not in body]
     assert all(
@@ -1060,3 +1064,88 @@ def test_the_stored_runs_false_closing_sentences_cannot_be_kept(
     if not any(s.startswith(opening) for s in _sentences_of(text)):
         pytest.skip(f"{run}'s {passage} holds no sentence opening {opening!r}")
     assert not _keepable(run, passage, opening)
+
+
+# -- review round 5 ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("sentence", "sources"),
+    [
+        # A reading fact ties the address, but they deny another thing than a reading.
+        ("The gate routine at 0x6328 does not check the debugger [ev_0086].", ("0x6328", "0xc42c")),
+        ("The routine at 0xc42c does not register any scheduled task [ev_0025].", ("0xc42c",)),
+        ("The routine at 0xc42c never contacts the C2 host [ev_0025].", ("0xc42c",)),
+        ("No network code exists at 0xc42c [ev_0025].", ("0xc42c",)),
+    ],
+)
+def test_haiku12_s_reading_fact_backs_no_other_denial_of_its_address(
+    sentence: str, sources: tuple[str, ...]
+) -> None:
+    from maljan.reporting.section_agreement import _quote_problem
+
+    _passages, by_id, _said = _haiku12_limitations()
+    facts = [by_id[_fact_about(by_id, offset)] for offset in sources]
+    assert _quote_problem(sentence, "no entry lists its code", facts)
+
+
+def test_haiku12_s_reading_denial_is_kept_on_its_own_unread_fact() -> None:
+    from maljan.reporting.section_agreement import _quote_problem
+
+    _passages, by_id, said = _haiku12_limitations()
+    fact = by_id[_fact_about(by_id, "0xc42c")]
+    assert _quote_problem(said["TASK"], "no entry lists its code", [fact]) == ""
+
+
+def test_a_list_keep_leaving_out_an_item_a_source_speaks_of_is_refused() -> None:
+    passages, by_id, _said = _haiku12_limitations()
+    sentence = "Whether the gates pass, and the C2 reply format, were not established."
+    quote = "Whether the gates pass on a live host is not established from the sandbox run."
+    from maljan.reporting.section_agreement import _quote_problem, generic_words, keep_record_reason
+
+    problem = _quote_problem(
+        sentence, quote, [by_id["command_and_control"]], generic_words(by_id), by_id
+    )
+    # Refused where section 6 speaks of the reply format; else kept and recorded.
+    assert problem.startswith("leaves out an item") or keep_record_reason(sentence, quote)
+
+
+@pytest.mark.parametrize(
+    ("which", "source"),
+    [("C4", "string_resolution"), ("C2", "command_and_control")],
+)
+def test_haiku12_s_rewrite_repeating_its_sentence_is_a_keep(which: str, source: str) -> None:
+    passages, by_id, said = _haiku12_limitations()
+    sentence = said[which]
+    for rewrite in (
+        sentence,
+        # One word changed is the same sentence.
+        sentence.replace(" also ", " still ")
+        if " also " in sentence
+        else sentence.replace("body", "bodies", 1),
+    ):
+        row = _row("limitations", sentence, "rewrite", [source], rewrite=rewrite)
+        found = agreement_violations({"sentences": [row]}, passages)
+        codes = {v.code for v in found if v.path.startswith("sentences")}
+        assert codes & {KEEP_UNQUOTED_CODE, UNREAD_STANDING_CODE}, (which, rewrite[:60])
+
+
+def test_haiku8_s_true_limitation_repeated_on_its_body_passage_stands() -> None:
+    report, ledger = _stored("haiku8")
+    passages = passages_of(report, entries=ledger)
+    by_id = {p.id: p for p in passages}
+    sentence = next(
+        s
+        for s in _sentences_of(by_id["conclusion"].text)
+        if s.startswith("The file-mode disk write is not reached")
+    )
+    row = _row("conclusion", sentence, "rewrite", ["payloads"], rewrite=sentence)
+    found = agreement_violations({"sentences": [row]}, passages)
+    assert not [v for v in found if v.path.startswith("sentences")]
+
+
+def test_a_subject_of_generic_words_alone_stands_as_it_is() -> None:
+    from maljan.reporting.section_agreement import kept_subject
+
+    sentence = "The sandbox run was not observed."
+    assert kept_subject(sentence, frozenset({"sandbox", "run"})) == frozenset({"sandbox", "run"})
