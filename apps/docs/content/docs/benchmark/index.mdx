@@ -63,7 +63,7 @@ export const run = {
     ['The export directory’s own name, UpdaterTag.dll', 'ev_0004'],
     ['Five sections with their entropies, and no packer', 'ev_0004, ev_0050'],
     ['The string cipher in full: seed 0x33629d40, length XOR the low 16 bits of the seed, first key 0x41, decoder at 0xae78', 'ev_0021, ev_0077, ev_0079'],
-    ['The order in which 0x6328 calls the resolver tables, and that any failure returns -1', 'ev_0086'],
+    ['The download-and-run routine 0xb4cc: it builds rundll32.exe %s,%s (0xfe90) or %s (0xfef0) and starts it with CreateProcessW through slot 0x10b38', 'ev_0078, ev_0021'],
     ['The Content-Type: application/x-www-form-urlencoded header on the beacon', 'ev_0021'],
     ['The command thread that runs each discovery line through a pipe, with its STARTUPINFO flags', 'ev_0079, ev_0025'],
     ['The full command dispatcher at 0x3cf4, code by code', 'ev_0084'],
@@ -72,7 +72,7 @@ export const run = {
   ],
   knownGaps: [
     'The Limitations section has six sentences that disagree with the report body or the ledger. Three say the request body, the reply protocol and the environment gates were not established, while the C2 section describes them from code.',
-    'The debate ran to its five-round limit instead of settling earlier. Two blocking lines were still open, and the mediator ruled on them from the ledger.',
+    'The debate ran to its five-round limit instead of settling earlier. Two blocking lines were still open when the limit ended it.',
     'The hash emulation tool never reproduced a hash value in this run.',
     'Some agreement rewrites left a sentence half old and half new, so a few sentences in the Functionality section contradict themselves, for example on the mutex name.',
   ],
@@ -161,9 +161,10 @@ listed separately and left out of the total.
 - **The run is blind to the key.** The human reports are not given to the
   agents, and the run starts on {run.memory}, so nothing learnt from an earlier
   run of the same sample reaches it.
-- **Nothing is tuned for the sample.** The team, its prompts and every setting
-  are the shipped ones or the importable [all-tools
-  team](/examples/profiles/all-tools.json), unchanged for the run.
+- **Nothing is tuned for the sample.** The team and its prompts are the
+  importable [all-tools team](/examples/profiles/all-tools.json), unchanged;
+  the model, effort and sandbox are the ones listed under Setup, and nothing
+  was set for this sample.
 - **Blind A/B scoring is available.** When two runs are compared, the
   [blind scoring](/docs/blind-scoring/) tool hides which report came from which
   run until the scorer has finished. This page scores a single run, so it has

@@ -40,7 +40,7 @@ and every worker on the host, named as a readable directory for every sidecar
 started afterwards, and removed by nothing. It now lands in the job's own
 `captures/` directory, at 0600 inside a 0700 tree, is named as a readable
 directory for that job's sidecars only, and goes when the job does. Whatever an
-earlier release left in `malspark-cape-pcap` is swept on the same TTL; nothing
+earlier release left in the capture directory name used before the rename is swept on the same TTL; nothing
 writes there any more.
 
 Everything in it is live malware, on the same terms as `SAMPLES_DIR`: exclude it

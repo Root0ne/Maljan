@@ -52,7 +52,7 @@ name says what reads it.
 
 ### `agreement.absence_kept`
 
-A rewrite resting on a fact that states again the absence of the sentence the fact contradicts, the same words on the same addresses (T-568).
+A rewrite resting on a fact that states again the absence of the sentence the fact contradicts, the same words on the same addresses.
 
 - **Raised at** `maljan.reporting.section_agreement:_answer_violations`
 - **Constant** `maljan.reporting.section_agreement:ABSENCE_KEPT_CODE`
@@ -60,7 +60,7 @@ A rewrite resting on a fact that states again the absence of the sentence the fa
 
 ### `agreement.dropped`
 
-A sentence of the conclusion or the limitations paragraph listed as saying otherwise than a section 5 passage, a fact or a closed debate line, whose rewrite passed no check: left out of the section, which only sums up what sections 4 to 6 state, and recorded here with what stood (T-554); one the answer leaves out with its reason, keeps while the ledger says otherwise (a failed call a later call redid), or keeps on no source or a quote the checks refused, the same way, with the refused keep's sources, quote or reason (T-568).
+A sentence of the conclusion or the limitations paragraph listed as saying otherwise than a section 5 passage, a fact or a closed debate line, whose rewrite passed no check: left out of the section, which only sums up what sections 4 to 6 state, and recorded here with what stood; one the answer leaves out with its reason, keeps while the ledger says otherwise (a failed call a later call redid), or keeps on no source or a quote the checks refused, the same way, with the refused keep's sources, quote or reason.
 
 - **Raised at** `maljan.reporting.section_agreement:_left_out`, `maljan.reporting.section_agreement:apply_rows`
 - **Constant** `maljan.reporting.section_agreement:DROPPED_CODE`
@@ -68,7 +68,7 @@ A sentence of the conclusion or the limitations paragraph listed as saying other
 
 ### `agreement.failure_count`
 
-A sentence, or a rewrite, giving failed calls a number the ledger's count does not (T-568).
+A sentence, or a rewrite, giving failed calls a number the ledger's count does not.
 
 - **Raised at** `maljan.reporting.section_agreement:_count_violation`
 - **Constant** `maljan.reporting.section_agreement:FAILURE_COUNT_CODE`
@@ -76,7 +76,7 @@ A sentence, or a rewrite, giving failed calls a number the ledger's count does n
 
 ### `agreement.failure_redone`
 
-A rewrite of a limitations sentence that still says a call failed, or a reading could not be made, where a later call redid it (T-526).
+A rewrite of a limitations sentence that still says a call failed, or a reading could not be made, where a later call redid it.
 
 - **Raised at** `maljan.reporting.section_agreement:_failure_redone_violation`
 - **Constant** `maljan.reporting.section_agreement:FAILURE_REDONE_CODE`
@@ -84,7 +84,7 @@ A rewrite of a limitations sentence that still says a call failed, or a reading 
 
 ### `agreement.held_kept`
 
-A sentence of the conclusion or the limitations that the answer kept on no source with its reason, or on a source a check refused: it stands, and is recorded where a reader finds it. One kept on a source whose quote passed every check is counted, not recorded (T-568).
+A sentence of the conclusion or the limitations that the answer kept on no source with its reason, or on a source a check refused: it stands, and is recorded where a reader finds it. One kept on a source whose quote passed every check is counted, not recorded.
 
 - **Raised at** `maljan.reporting.section_agreement:apply_rows`
 - **Constant** `maljan.reporting.section_agreement:HELD_KEPT_CODE`
@@ -92,7 +92,7 @@ A sentence of the conclusion or the limitations that the answer kept on no sourc
 
 ### `agreement.held_unlisted`
 
-A held sentence (any sentence of the conclusion or the limitations, T-568; one calling open an address or a value a section 5 passage or a fact states) that no row of the answer lists: the model decides each one, and is asked once more (T-554).
+A held sentence (any sentence of the conclusion or the limitations; one calling open an address or a value a section 5 passage or a fact states) that no row of the answer lists: the model decides each one, and is asked once more.
 
 - **Raised at** `maljan.reporting.section_agreement:_held_unlisted`
 - **Constant** `maljan.reporting.section_agreement:HELD_UNLISTED_CODE`
@@ -100,7 +100,7 @@ A held sentence (any sentence of the conclusion or the limitations, T-568; one c
 
 ### `agreement.keep_unquoted`
 
-A kept closing sentence whose row quotes no words of a source it names that state the same (two or more of its own words, an absence on words stating one), or that names no source while a shown one speaks of it (T-568). Still so after the retry, the sentence is left out and recorded (`DROPPED_CODE`).
+A kept closing sentence whose row quotes no words of a source it names that state the same (two or more of its own words, an absence on words stating one), or that names no source while a shown one speaks of it. Still so after the retry, the sentence is left out and recorded (`DROPPED_CODE`).
 
 - **Raised at** `maljan.reporting.section_agreement:_answer_violations`
 - **Constant** `maljan.reporting.section_agreement:KEEP_UNQUOTED_CODE`
@@ -116,7 +116,7 @@ A sentence of a passage shown for reading only (a section 5 passage, a record's 
 
 ### `agreement.qualified`
 
-A held sentence whose own clause calls code not read that an entry lists, left standing by the answer (no row, a kept row, or a rewrite that failed): the platform adds what the ledger shows to it, in the facts' own words, and records what stood (T-562). Never left out, never left as written. Also a section 5 denial a decoded value's fact contradicts whose rewrite in the model's words passed no check: the fact's clause is added, and what stood recorded (T-568).
+A held sentence whose own clause calls code not read that an entry lists, left standing by the answer (no row, a kept row, or a rewrite that failed): the platform adds what the ledger shows to it, in the facts' own words, and records what stood. Never left out, never left as written. Also a section 5 denial a decoded value's fact contradicts whose rewrite in the model's words passed no check: the fact's clause is added, and what stood recorded.
 
 - **Raised at** `maljan.reporting.section_agreement:_qualify_unread_left`, `maljan.reporting.section_agreement:apply_rows`
 - **Constant** `maljan.reporting.section_agreement:QUALIFIED_CODE`
@@ -188,7 +188,7 @@ A row names a source the round was not shown, or answers a section 5 passage wit
 
 ### `agreement.unread_standing`
 
-A held sentence whose own clause calls code not read that an entry lists, which the answer left standing or rewrote still calling it not read: the retry names the listing, so the model may state it in its own words (T-562).
+A held sentence whose own clause calls code not read that an entry lists, which the answer left standing or rewrote still calling it not read: the retry names the listing, so the model may state it in its own words.
 
 - **Raised at** `maljan.reporting.section_agreement:_unread_standing`
 - **Constant** `maljan.reporting.section_agreement:UNREAD_STANDING_CODE`

@@ -2240,7 +2240,7 @@ in a `/tmp` tmpfs sized below its memory ceiling (`UNBLOB_TMPFS_SIZE`). See
 
 ## Teams and stages
 
-A team (`core.agents.profiles.<key>`, edited under Settings → Agents and
+A team (`core.agents.profiles.<key>`, edited under Settings → Configuration → Agents and
 pipeline → Teams) is an ordered list of stages. Each stage is:
 
 | Field | Meaning |
@@ -3605,7 +3605,7 @@ thing standing between a live job and its own directory; there is no reason to.
 The sandbox capture a job fetches lands in a `captures/` child of the same
 directory and obeys every rule above: 0700, files 0600 from their first byte,
 removed with the job, swept by the same TTL, and unreachable from another job.
-The directory an earlier release used, `malspark-cape-pcap` under the system temp
+The capture directory name used before the rename, under the system temp
 directory, is swept as well and is no longer written.
 
 One configuration would widen this if nothing else stopped it: a

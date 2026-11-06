@@ -4299,8 +4299,8 @@ A cleared answer stays cleared under the same line on every later turn. Never
 cleared: the newest turn's answers, an answer without the recorder's stamp, the
 system prompt, the task and its pack, the run-state block, the agent's own
 turns and the reasoning a provider requires back on them (DeepSeek's
-`reasoning_content`). There is no setting to clear earlier: priced on run 7's
-reverser, clearing a loop that would have gone on cost more than it saved on
+`reasoning_content`). There is no setting to clear earlier: priced on the
+reverser of an earlier stored all-tools run, clearing a loop that would have gone on cost more than it saved on
 Claude Haiku 5.5 and on DeepSeek, because the first clear changes the tool list
 and the provider reads that whole request again uncached.
 

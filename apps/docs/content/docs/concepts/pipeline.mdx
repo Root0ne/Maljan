@@ -105,9 +105,10 @@ works in a loop: call a tool, read the answer, decide the next call. It stops
 when it has an answer, and files it as **claims**. Each claim carries a
 confidence and the `ev_` ids it rests on.
 
-A stage can carry a condition. The detonation stage of the shipped teams runs
-only when a sandbox report exists (`when: has_sandbox_report`); the Android
-stage only for an APK or DEX file. A stage that does not run says which
+A stage can carry a condition. The `default` team runs its dynamic analyst in
+its one analysis stage, with no condition. The `mobile` team gates its dynamic
+stage on a sandbox report (`when: has_sandbox_report`), and its Android stage
+on an APK or DEX file (`when: file_type in ("apk", "dex")`). A stage that does not run says which
 condition failed.
 
 On a hosted API the analysts of a stage run in parallel. On a single-slot local

@@ -103,7 +103,7 @@ for a worker that runs on the host.
 | :-- | :-- | :-- |
 | `postgres` | `postgres:16-alpine` | Relational store. Healthchecked with `pg_isready`. |
 | `redis` | `redis:7-alpine` | Queue, events, rate-limit counters. Password-protected; the healthcheck asserts an actual `PONG`. |
-| `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. Runs under the `qdrant` profile, which the shipped `docker/.env` turns on; without `QDRANT_API_KEY` it restarts, logging the variable to set. |
+| `qdrant` | `qdrant/qdrant:v1.18.3` | Vector store, pinned to match the client version. Runs under the `qdrant` profile, which the shipped `docker/.env` turns on; without `QDRANT_API_KEY` it restarts, logging the variable to set. |
 | `minio` | `malspark-minio`, built from `docker/Dockerfile.minio` | Sample storage, with its own console. The server is compiled from MinIO's pinned release (`RELEASE.2025-10-15T17-29-55Z`); see *MinIO, built from source* below. |
 | `ghidra-mcp` | built from `external/ghidra-mcp` | A static analyser. Runs (and is built) under the `ghidra` profile, which the shipped `docker/.env` turns on; without `GHIDRA_MCP_AUTH_TOKEN` it refuses to bind and restarts. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [Configuration](/docs/configuration/). |
 | `ghidra-port` | `alpine/socat` (pinned by digest) | Publishes Ghidra's port on `BIND_ADDRESS` for a worker run on the host, under the `ghidra` profile; `ghidra-mcp` itself is on an internal network only. See *The container that opens the sample* below. |

@@ -12,6 +12,7 @@ For a production install, read [Deployment](/docs/deployment/) afterwards.
 
 - Docker with the Compose plugin
 - Python 3.13 and [uv](https://astral.sh/uv/)
+- `curl` and `jq`, for the API examples
 - Free host ports for the services below. Every published port binds to
   `BIND_ADDRESS`, which is `127.0.0.1` by default.
 
@@ -51,7 +52,7 @@ Malspark reads two files, and neither is committed.
 ```bash
 cp docker/.env.example docker/.env
 python -c "import secrets; [print(f'{k}={secrets.token_urlsafe(32)}') for k in ('GHIDRA_MCP_AUTH_TOKEN','REDIS_PASSWORD','QDRANT_API_KEY','POSTGRES_PASSWORD','MINIO_ROOT_PASSWORD')]"
-python -c "from cryptography.fernet import Fernet; print('SETTINGS_ENCRYPTION_KEY=' + Fernet.generate_key().decode())"
+uv run python -c "from cryptography.fernet import Fernet; print('SETTINGS_ENCRYPTION_KEY=' + Fernet.generate_key().decode())"
 python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_hex(32))"
 ```
 
@@ -61,6 +62,9 @@ to start while one is missing.
 
 **`bootstrap.env`** (repository root) holds the same contract as process
 environment, for anything you run outside Compose, such as `make migrate`.
+`make dev-up` sources it too, so fill in the same secrets as in
+`docker/.env`. An empty value there overrides `docker/.env` and trips the
+compose file's `:?` guards.
 
 ```bash
 cp bootstrap.env.example bootstrap.env
@@ -138,7 +142,7 @@ guides you need:
 - **Set up long-term memory.** Qdrant at `http://qdrant:6333` with your
   `QDRANT_API_KEY`.
 
-Each guide ends with a connection test and a review step. Malspark refuses a
+Each guide includes a connection test and ends with a review step. Malspark refuses a
 job whose model has never answered a connection test, so run the test.
 
 </Step>
