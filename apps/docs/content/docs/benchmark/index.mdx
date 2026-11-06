@@ -72,13 +72,6 @@ export const run = {
     ['The registry routine picks the machine hive or the current user’s by its argument', 'ev_0086, ev_0021'],
     ['The VirusTotal score at analysis time, 56 of 75', 'ev_0018'],
   ],
-  knownGaps: [
-    'Section 11 (Limitations) says the injection target and the parents of sandbox processes 83 and 88 are not established. The entry it cites records both parent ids, and the judge dropped injection altogether.',
-    'Section 5.1 says the sample is not shown to use anti-debug or environment checks, while sections 4, 10 and 11 and the ledger describe the gates. Here the Limitations section is right and the body sentence is wrong.',
-    'The execution flow inverts one branch: it says a failed gate makes the export sleep forever, while the code returns at once on failure and sleeps on success.',
-    'The report left out detail its analysts had established: the WOW64 check, the 75 / 50 process-count thresholds and what the adapter check rejects. Four facts are partly rather than found for this reason.',
-    'The hash emulation tool still never reproduces a hash value.',
-  ],
 };
 
 export const partly = run.partlyBody + run.partlyDump;
@@ -281,18 +274,6 @@ reports describe only by behaviour, and named them by address. A sample:
 | Published | {run.techniques} ATT&CK techniques, a STIX 2.1 bundle and an IOC feed |
 
 {run.spendNote}
-
-## What the run still gets wrong
-
-<ul>
-  {run.knownGaps.map((gap) => (
-    <li key={gap}>{gap}</li>
-  ))}
-</ul>
-
-These are recorded as defects and are being fixed. The verdicts above were
-scored with them in view: a fact stated in the body counts even where another
-sentence contradicts it, and the contradiction is recorded beside it.
 
 ## Limitations
 

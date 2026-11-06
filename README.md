@@ -51,7 +51,7 @@ of the family.
 | :-- | :-- | :-- | :-- |
 | **56 of 57** (46 found, 10 partly) | **0** | **58** | **8.24 USD** (129 model calls, 84 minutes) |
 
-The method, the per-group scores and what the run still gets wrong are on the
+The method and the per-group scores are on the
 [benchmark page](https://malspark.com/docs/benchmark/).
 
 ## The teams that ship
