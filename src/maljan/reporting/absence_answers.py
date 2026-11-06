@@ -49,7 +49,7 @@ _STOPWORDS = frozenset(
         "into onto any all also only then than there their they them these those such each "
         "our out per via would could can may might does did being what who how where when "
         "yet still here both either one some most more less same other not none nor neither "
-        "never without cannot"
+        "never without cannot but because"
     ).split()
 )
 # A word whose prefix denies it ("unnamed"): read as the word it denies ("named").
@@ -188,6 +188,25 @@ def absence_subject(sentence: str) -> frozenset[str]:
     """The words of a sentence before its first negation: what it denies something of
     ("request", "body" of "The C2 request body is also not established")."""
     return _subject(sentence)
+
+
+# Where the clause a negation stands in begins, read back from the negation: a mark,
+# or a word joining two clauses.
+_SUBJECT_BREAK = re.compile(r"[,;:]|\b(?:and|but|so|whether|because)\b", re.IGNORECASE)
+
+
+def subject_items(sentence: str) -> list[frozenset[str]]:
+    """The items of what a sentence denies something of: its words before its first
+    negation, cut at each clause break and each word joining two clauses or list items
+    ("whether its gates pass", "whether its beacon reaches the configured hosts", "and
+    how it persists" of "…: whether its gates pass, whether its beacon reaches the
+    configured hosts, and how it persists were not established"). One pass over the
+    words before the negation."""
+    found = _NEGATION.search(sentence)
+    if not found:
+        return []
+    items = [content_words(part) for part in _SUBJECT_BREAK.split(sentence[: found.start()])]
+    return [item for item in items if item]
 
 
 def _addresses(text: str) -> frozenset[str]:

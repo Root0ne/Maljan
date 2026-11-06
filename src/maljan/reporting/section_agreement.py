@@ -181,6 +181,7 @@ from maljan.reporting.absence_answers import (
     negated_clauses,
     quote_stands,
     said_of,
+    subject_items,
 )
 from maljan.reporting.models import (
     C2Channel,
@@ -2524,14 +2525,38 @@ _ABSENCE_PREDICATES = frozenset(
 
 def kept_subject(sentence: str) -> frozenset[str]:
     """What a kept closing sentence denies something of: its words before its first
-    negation, but the words saying what is denied (:data:`_ABSENCE_PREDICATES`)."""
-    return frozenset(word for word in absence_subject(sentence) if word not in _ABSENCE_PREDICATES)
+    negation, never the words saying what is denied (:data:`_ABSENCE_PREDICATES`)."""
+    return frozenset(w for w in absence_subject(sentence) if w not in _ABSENCE_PREDICATES)
+
+
+def _items(sentence: str) -> list[frozenset[str]]:
+    """The items of :func:`kept_subject`, each a clause or list item of two or more words
+    (:func:`absence_answers.subject_items`)."""
+    out = []
+    for item in subject_items(sentence):
+        words = frozenset(w for w in item if w not in _ABSENCE_PREDICATES)
+        if len(words) >= _QUOTE_SHARED:
+            out.append(words)
+    return out
 
 
 def quote_overlap(sentence: str, quote: str) -> int:
     """How many of :func:`kept_subject`'s words the quote holds (a shared beginning
     counts)."""
     return said_of(quote).count(kept_subject(sentence))
+
+
+def _holds_an_item(sentence: str, quote: str) -> bool:
+    """Whether the quote holds an item of what the sentence denies something of: two
+    thirds or more of one clause or list item, two words at least ("whether its gates
+    pass" of "…: whether its gates pass, whether its beacon reaches the configured
+    hosts, and how it persists were not established"). Half of one long item ("decoded
+    strings … keys" of "The C2 protocol beyond the request keys in the decoded strings")
+    is not one."""
+    said = said_of(quote)
+    return any(
+        said.count(item) >= max(_QUOTE_SHARED, -(-2 * len(item) // 3)) for item in _items(sentence)
+    )
 
 
 def _quote_problem(sentence: str, quote: str, sources: Sequence[Passage]) -> str:
@@ -2541,10 +2566,11 @@ def _quote_problem(sentence: str, quote: str, sources: Sequence[Passage]) -> str
     the sentence names addresses, the quote, or a fact it names, names one of them
     (haiku12's "0x3868 was read only in part" kept on a sentence about 0x7acc); it
     holds at least :data:`_QUOTE_SHARED` of what the sentence denies something of
-    (:func:`kept_subject`), at least half of those words where the quote names none
-    of the sentence's addresses, never the words saying what is denied ("decoded
-    strings" of another sentence, "established, passed"); and it states an absence
-    where the sentence does.
+    (:func:`kept_subject`), never the words saying what is denied ("established,
+    passed"); where no address ties it, at least half of those words, or one clause or
+    list item of them (:func:`_holds_an_item`), so the matching body sentence of a long
+    closing sentence is a quote and "decoded strings" of another sentence is not; and
+    it states an absence where the sentence does.
     """
     if not quote_stands(quote, [s.text for s in sources]):
         return "does not stand in a source it names"
@@ -2554,10 +2580,13 @@ def _quote_problem(sentence: str, quote: str, sources: Sequence[Passage]) -> str
     if named and not (by_quote or by_fact):
         return "names none of the addresses the sentence names"
     subject = kept_subject(sentence)
-    least = min(_QUOTE_SHARED, len(subject))
-    if not (by_quote or by_fact):
-        least = max(least, -(-len(subject) // 2))
-    if quote_overlap(sentence, quote) < least:
+    overlap = quote_overlap(sentence, quote)
+    if by_quote or by_fact:
+        enough = overlap >= min(_QUOTE_SHARED, len(subject))
+    else:
+        half = max(min(_QUOTE_SHARED, len(subject)), -(-len(subject) // 2))
+        enough = overlap >= half or _holds_an_item(sentence, quote)
+    if not enough:
         return "shares too few of the words the sentence denies something of"
     if carries_negation(sentence) and not carries_negation(quote):
         return "states no absence, while the sentence states one"
@@ -3538,8 +3567,13 @@ def apply_rows(
                         continue
                     rests = (
                         f"{', '.join(_form(s) for s in row.sources)}, quoting "
-                        f"{_capped(row.quote)!r}, a source the checks refused "
-                        f"({_codes_of(found)})"
+                        f"{_capped(row.quote)!r}, "
+                        + (
+                            f"a source the checks refused ({_codes_of(found)})"
+                            if found
+                            else "resting on fewer than two of the words the sentence "
+                            "denies something of"
+                        )
                         if row.sources
                         else f"no source, because {_capped(row.reason)!r}"
                         + (f", which the checks refused ({_codes_of(found)})" if found else "")

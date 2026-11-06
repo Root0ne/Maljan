@@ -859,9 +859,13 @@ def test_a_keep_resting_on_fewer_than_two_subject_words_is_recorded() -> None:
         "quote": "Packing is not established by any section entropy reading",
     }
     counts, found = apply_rows({"sentences": [row]}, [source, closing])
-    # One subject word: the keep passes, and is recorded, not only counted.
+    # One subject word: the keep passes, and is recorded, not only counted, saying why.
     assert counts["held_kept"] == 1 and counts["dropped"] == 0
     assert [v.code for v in found] == [HELD_KEPT_CODE]
+    assert "resting on fewer than two of the words the sentence denies something of" in (
+        found[0].message
+    )
+    assert "refused ()" not in found[0].message
 
 
 def test_a_restated_absence_is_found_among_many_unrelated_denials() -> None:
@@ -887,3 +891,64 @@ def test_a_restated_absence_is_found_among_many_unrelated_denials() -> None:
 )
 def test_calls_counted_before_the_number(sentence: str, counts: list[int]) -> None:
     assert failure_counts(sentence) == counts
+
+
+# -- review round 3 ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("passage", "opening", "source", "quote"),
+    [
+        # Section 7, clean in the score: one list item of what it calls open.
+        (
+            "conclusion",
+            "Confidence is lower on what the sample does in a live host",
+            "command_and_control",
+            "Whether the gates pass on a live host is not established from the sandbox run.",
+        ),
+        (
+            "limitations",
+            "The analysed sample is a single 60,928-byte PE DLL",
+            "payloads",
+            "Our assessment is that the sandbox run did not reach the download commands",
+        ),
+        (
+            "limitations",
+            "The string decoder recovered 101 texts",
+            "evasion_antiforensics",
+            'Command strings such as "/c systeminfo" and the C2 path fragments are therefore '
+            "recovered only by decoding, not by reading the file's text.",
+        ),
+    ],
+)
+def test_haiku12_s_true_long_closing_sentences_are_kept_on_their_body_quote(
+    passage: str, opening: str, source: str, quote: str
+) -> None:
+    report, ledger = _stored("haiku12")
+    passages = passages_of(report, entries=ledger)
+    by_id = {p.id: p for p in passages}
+    sentence = next(s for s in by_id[passage].held if s.startswith(opening))
+    assert quote.rstrip(".") in by_id[source].text
+    row = _row(passage, sentence, "keep", [source], quote=quote)
+    found = agreement_violations({"sentences": [row]}, passages)
+    assert KEEP_UNQUOTED_CODE not in [v.code for v in found if v.path.startswith("sentences")]
+
+
+def test_haiku12_s_c1_c4_c5_c6_stay_refused_on_any_body_sentence() -> None:
+    passages, by_id, said = _haiku12_limitations()
+    sources = [p for p in passages if p.kind in ("fact", "section 5", "debate")]
+    for which in ("C1", "C4", "C5", "C6"):
+        for source in sources:
+            for quote in _sentences_of(source.text):
+                if len(quote) < 12:
+                    continue
+                row = _row("limitations", said[which], "keep", [source.id], quote=quote)
+                found = agreement_violations({"sentences": [row]}, passages)
+                codes = {
+                    v.code
+                    for v in found
+                    if v.path.startswith("sentences") or said[which][:30] in v.message
+                }
+                # C4 and C5 on no quote; C1 on its listing, C6 on the ledger's redo.
+                refused = {KEEP_UNQUOTED_CODE, UNREAD_STANDING_CODE, FAILURE_REDONE_CODE}
+                assert codes & refused, (which, source.id, quote[:80])

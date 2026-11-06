@@ -44,6 +44,7 @@ from maljan.reporting.absence_answers import (
     kept_absence,
     negated_clauses,
     quote_stands,
+    subject_items,
 )
 from maljan.reporting.section_agreement import (
     _candidates,
@@ -267,6 +268,10 @@ LISTED = [SimpleNamespace(addresses=frozenset({0x1400}), id="listed.1")]
             lambda t: whole_code_absences(t, unsettled=True), id="unsettled section 5 absences"
         ),
         pytest.param(negated_clauses, id="negated clauses"),
+        pytest.param(
+            lambda t: subject_items("and, " * (len(t) // 5) + " not known"),
+            id="the items of what a sentence denies",
+        ),
         pytest.param(lambda t: kept_absence(negated_clauses(t), t), id="an absence kept"),
         pytest.param(
             lambda t: kept_absence(
