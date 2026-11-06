@@ -37,6 +37,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from malspark.core.previous_name import PREVIOUS_NAME
+
 from app import observability
 from app.logging_config import get_logger
 from app.services import audit_anchor, ledger_chain
@@ -45,12 +47,16 @@ logger = get_logger("api.audit_chain")
 
 # The id of the PostgreSQL advisory lock every chained append takes
 # (``pg_advisory_xact_lock``): one 64-bit number for the one chain, the ASCII of
-# "maljanAC", chosen so no other lock in the application can share it.
-AUDIT_CHAIN_LOCK = 0x6D616C6A616E4143  # "maljanAC"
-_ENTRY_TAG = b"maljan-audit-entry/1\n"
-_GENESIS_TAG = b"maljan-audit-chain/1\n"
-_LINK_TAG = b"maljan-audit-link/1\n"
-_HEAD_TAG = b"maljan-audit-head/1\n"
+# the previous product name followed by "AC", chosen so no other lock in the
+# application can share it. Kept through the rename, so a process of an earlier
+# release and one of this release still exclude each other.
+AUDIT_CHAIN_LOCK = 0x6D616C6A616E4143
+# The chain's domain tags, as the stored chain was written under them
+# (``malspark.core.previous_name``): a new tag would refuse every stored head.
+_ENTRY_TAG = f"{PREVIOUS_NAME}-audit-entry/1\n".encode("ascii")
+_GENESIS_TAG = f"{PREVIOUS_NAME}-audit-chain/1\n".encode("ascii")
+_LINK_TAG = f"{PREVIOUS_NAME}-audit-link/1\n".encode("ascii")
+_HEAD_TAG = f"{PREVIOUS_NAME}-audit-head/1\n".encode("ascii")
 HEAD_NAME = "audit"
 
 

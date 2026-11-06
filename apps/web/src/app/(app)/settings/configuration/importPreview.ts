@@ -9,7 +9,7 @@
  */
 import type { CatalogEntry, ToolDeclarationFields } from "@/types/settings";
 import { deepEqual, describeChange, type ChangeLine } from "./describeChange";
-import { SETTINGS_IMPORT_FORMATS } from "@/types/settings";
+import { SETTINGS_IMPORT_FORMATS, currentSettingsFormat } from "@/types/settings";
 
 /** The shape of a parsed `.json` export file, before it is known to be valid.
  *  `values` is `unknown` rather than `Record<string, unknown>` on purpose: a
@@ -47,7 +47,8 @@ export function buildImportPreview(
   fields: ToolDeclarationFields | null = null
 ): ImportPreview {
   if (
-    !SETTINGS_IMPORT_FORMATS.includes(doc.format) ||
+    typeof doc.format !== "string" ||
+    !SETTINGS_IMPORT_FORMATS.includes(currentSettingsFormat(doc.format)) ||
     typeof doc.values !== "object" ||
     doc.values === null ||
     Array.isArray(doc.values)

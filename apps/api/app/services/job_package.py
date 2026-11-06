@@ -86,13 +86,18 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import IO, Any, BinaryIO, Protocol
 
+from malspark.core.previous_name import PREVIOUS_NAME
+
 from app.services import ledger_chain
 from app.services.run_export import LAYOUT
 
 FORMAT = "malspark-job-package/2"
-# The HKDF purpose label the signature key is derived under.
-SIGNATURE_LABEL = b"maljan-job-package-v1"
-_SIGNATURE_TAG = b"maljan-job-package-manifest/1\n"
+# The HKDF purpose label the signature key is derived under, and the
+# signature's domain tag: both keep the previous product name
+# (``malspark.core.previous_name``), so a package signed before the rename
+# still verifies.
+SIGNATURE_LABEL = f"{PREVIOUS_NAME}-job-package-v1".encode("ascii")
+_SIGNATURE_TAG = f"{PREVIOUS_NAME}-job-package-manifest/1\n".encode("ascii")
 SIGNATURE_ALGORITHM = "HMAC-SHA256"
 SIGNATURE_PROVES = (
     "An HMAC under a key derived from the platform's settings encryption key: it proves the "
@@ -133,6 +138,12 @@ _HEX = frozenset("0123456789abcdef")
 # gzip header the builder wrote then (no flags, no time, maximum compression,
 # no named system).
 LEGACY_FORMAT = "malspark-job-package/1"
+# Both formats as a package built before the rename names them, read as the
+# format each is (``malspark.core.previous_name``).
+PREVIOUS_NAME_FORMATS = {
+    f"{PREVIOUS_NAME}-job-package/2": FORMAT,
+    f"{PREVIOUS_NAME}-job-package/1": LEGACY_FORMAT,
+}
 _LEGACY_HEADER = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff"
 # The current header: the same fields with FEXTRA set, and one extra subfield
 # ("MJ") holding the SHA-256 of the rest of the file and its HMAC.
@@ -145,7 +156,7 @@ _HEADER = (
     + struct.pack("<H", 2 * _DIGEST_BYTES)
 )
 _HEADER_BYTES = len(_HEADER) + 2 * _DIGEST_BYTES
-_FILE_TAG = b"maljan-job-package-file/1\n"
+_FILE_TAG = f"{PREVIOUS_NAME}-job-package-file/1\n".encode("ascii")
 _NO_HMAC = bytes(_DIGEST_BYTES)
 
 VERIFIED = "verified"
@@ -1224,9 +1235,14 @@ def verify_package(
                         manifest_bytes = handle.read()
                         parsed = _parse(manifest_bytes, MANIFEST_DEPTH)
                         formats = (FORMAT, LEGACY_FORMAT)
-                        if not isinstance(parsed, dict) or parsed.get("format") not in formats:
+                        named = (
+                            PREVIOUS_NAME_FORMATS.get(parsed.get("format"), parsed.get("format"))
+                            if isinstance(parsed, dict)
+                            else None
+                        )
+                        if named not in formats:
                             return _broken(MANIFEST, f"The manifest is not a {FORMAT} manifest.")
-                        if parsed["format"] != (LEGACY_FORMAT if legacy else FORMAT):
+                        if named != (LEGACY_FORMAT if legacy else FORMAT):
                             return _broken(MANIFEST, FORMAT_MISMATCH)
                         manifest = parsed
                         found = _listing(manifest, max_bytes)

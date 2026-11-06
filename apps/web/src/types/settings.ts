@@ -663,6 +663,19 @@ export const SETTINGS_IMPORT_FORMATS: readonly string[] = [
   "malspark-settings/2",
   "malspark-settings/1",
 ];
+/** The format prefix an export written before the product was renamed
+ *  carries, mirrored from `PREVIOUS_NAME_FORMAT_PREFIX` in
+ *  `apps/api/app/api/v1/settings.py`: such a document reads as the same
+ *  version under the current name, so an operator's earlier exports still
+ *  import. */
+export const PREVIOUS_NAME_SETTINGS_FORMAT_PREFIX = "maljan-settings/";
+
+/** `format` under the current name (`current_format` in the API). */
+export function currentSettingsFormat(format: string): string {
+  return format.startsWith(PREVIOUS_NAME_SETTINGS_FORMAT_PREFIX)
+    ? "malspark-settings/" + format.slice(PREVIOUS_NAME_SETTINGS_FORMAT_PREFIX.length)
+    : format;
+}
 
 export interface ExportResponse {
   format: string;

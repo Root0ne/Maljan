@@ -46,6 +46,8 @@ from collections.abc import Mapping
 from hashlib import sha256
 from pathlib import Path
 
+from malspark.core.previous_name import PREVIOUS_NAME
+
 # The base directory, the per-job leaf inside it, and how long anything in
 # either is kept. Named here so the sidecars, the spawn and the worker read
 # one spelling of each.
@@ -94,8 +96,9 @@ ARTEFACTS_DIRECTORY = "artefacts"
 
 # Where the release before this fetched captures. Written by nothing now; the
 # sweep still reaches it, because it is this project's directory and what is
-# in it is somebody's traffic.
-LEGACY_CAPTURE_DIR_NAME = "maljan-cape-pcap"
+# in it is somebody's traffic. It carries the product's previous name
+# (``malspark.core.previous_name``), as that release wrote it.
+LEGACY_CAPTURE_DIR_NAME = f"{PREVIOUS_NAME}-cape-pcap"
 
 # A job id is a uuid in every deployment, but it arrives as a string and a
 # directory name is not a place to find out otherwise. Anything outside this

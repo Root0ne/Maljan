@@ -37,8 +37,9 @@ from malspark.core.tool_declarations import STRICT_DECLARATIONS, ToolFacts
 SNAPSHOT_PATH = "data/legacy_tool_facts_v1.json"
 SNAPSHOT_SCHEMA = "malspark-legacy-tool-facts/v1"
 # The sha256 of the snapshot's UTF-8 text, as it was cut (the file's bytes:
-# the file is UTF-8 with LF line ends).
-SNAPSHOT_SHA256 = "3cf4058ce94d31eb67c1cc877a609df2596129994bb8cf2e39e4fdd172c4b221"
+# the file is UTF-8 with LF line ends), with its schema label under the
+# product's current name (T-576); not one fact in it changed.
+SNAPSHOT_SHA256 = "3c2ae629ba80ae4d12885a6c132aff4ad37740faa00fe314f0dd4dde572bbf10"
 
 
 @cache

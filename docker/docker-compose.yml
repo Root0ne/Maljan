@@ -1,3 +1,9 @@
+# The compose project: every volume and network is named under it
+# (malspark_pgdata, ...), whichever directory compose is started from.
+# scripts/upgrade/rename-volumes-and-env.sh copies the volumes of a deployment
+# started before it was named into these names.
+name: malspark
+
 # One backend image for the three services that run this codebase (migrations,
 # API, worker). Declared once and tagged explicitly, so compose builds and
 # stores a single image instead of one per service.

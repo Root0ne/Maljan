@@ -41,12 +41,18 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from malspark.core.previous_name import PREVIOUS_NAME
+
 CHAIN_VERSION = 1
-_ENTRY_TAG = b"maljan-evidence-entry/1\n"
-_GENESIS_TAG = b"maljan-evidence-ledger/1\n"
-_LINK_TAG = b"maljan-evidence-link/1\n"
+# The chain's domain tags and key label keep the previous product name
+# (``malspark.core.previous_name``): every stored chain, seal and key id was
+# written under them, and a new tag would verify none of them.
+_ENTRY_TAG = f"{PREVIOUS_NAME}-evidence-entry/1\n".encode("ascii")
+_GENESIS_TAG = f"{PREVIOUS_NAME}-evidence-ledger/1\n".encode("ascii")
+_LINK_TAG = f"{PREVIOUS_NAME}-evidence-link/1\n".encode("ascii")
 # The HKDF purpose label the chain key is derived under.
-KEY_LABEL = b"maljan-ledger-chain-v1"
+KEY_LABEL = f"{PREVIOUS_NAME}-ledger-chain-v1".encode("ascii")
+_KEY_ID_TAG = f"{PREVIOUS_NAME}-ledger-chain-key-id/1\n".encode("ascii")
 
 # Every column of ``evidence_entries`` the digest covers, by column name.
 DIGESTED: tuple[str, ...] = (
@@ -232,7 +238,7 @@ def derive_key(secret: str, label: bytes = KEY_LABEL) -> ChainKey:
     key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=label).derive(
         secret.encode("utf-8")
     )
-    digest = hashlib.sha256(b"maljan-ledger-chain-key-id/1\n" + key).hexdigest()
+    digest = hashlib.sha256(_KEY_ID_TAG + key).hexdigest()
     return ChainKey(key=key, key_id=digest[:KEY_ID_LENGTH])
 
 
@@ -325,9 +331,9 @@ def chain_rows(job_id: Any, rows: Iterable[Any], key: ChainKey) -> str:
 SEAL_KEY = "ledger_seal"
 AMENDMENTS_KEY = "ledger_amendments"
 _SEAL_KEYS = frozenset({SEAL_KEY, AMENDMENTS_KEY})
-_REPORT_TAG = b"maljan-stored-report/1\n"
-_RECORD_TAG = b"maljan-ledger-record/1\n"
-_FOLLOW_UP_TAG = b"maljan-follow-up/1\n"
+_REPORT_TAG = f"{PREVIOUS_NAME}-stored-report/1\n".encode("ascii")
+_RECORD_TAG = f"{PREVIOUS_NAME}-ledger-record/1\n".encode("ascii")
+_FOLLOW_UP_TAG = f"{PREVIOUS_NAME}-follow-up/1\n".encode("ascii")
 
 
 def _without_seal(document: Any) -> Any:

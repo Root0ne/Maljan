@@ -567,7 +567,7 @@ writes in the base itself. The name cannot be set in a server's `env` or
 stored value would point that server at another job's bytes.
 
 The sweep also takes what an earlier release left in the shared capture
-directory, `maljan-cape-pcap` under the system temp directory. Nothing writes
+directory (`LEGACY_CAPTURE_DIR_NAME` in `malspark.tools.staging`) under the system temp directory. Nothing writes
 there now.
 
 Every `path` argument is resolved (symlinks followed) and refused unless it
