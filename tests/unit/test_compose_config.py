@@ -271,7 +271,9 @@ def test_minio_is_built_from_the_release_its_tag_names() -> None:
     # sent none of it.
     assert not re.search(r"^(COPY|ADD) (?!--from=)", text, re.MULTILINE)
     ignore = (ROOT / "docker" / "Dockerfile.minio.dockerignore").read_text(encoding="utf-8")
-    assert "*" in ignore.splitlines()
+    assert [line for line in ignore.splitlines() if line.strip() and not line.startswith("#")] == [
+        "*"
+    ]
 
 
 def _workflow_service_images() -> dict[str, str]:

@@ -150,11 +150,11 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
-      # Dockerfile.minio compiles the pinned MinIO release with the Go line
-      # its go.mod asks for; the Go line moves with that release, by hand.
-      # Patch and digest bumps still come.
+      # Dockerfile.minio compiles the pinned MinIO release with a supported
+      # Go; a Go 2 would be a migration of its own. Minor, patch and digest
+      # bumps still come.
       - dependency-name: "golang"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+        update-types: ["version-update:semver-major"]
 
   # The images compose pulls (postgres, redis, qdrant), each pinned by
   # tag and digest; the entry above reads the Dockerfiles only. A digest bump

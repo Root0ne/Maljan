@@ -44,8 +44,9 @@ builds `maljan-backend` once rather than once per service.
 MinIO publishes its releases as source only, and the `minio/minio` image the
 stack used to pull is no longer served by its registry. Compose therefore
 builds the server: `docker/Dockerfile.minio` clones the pinned release tag,
-stops the build if the tag is not the pinned commit, compiles it with the Go
-line the release's `go.mod` asks for, and copies the binary and its licence
+stops the build if the tag is not the pinned commit, compiles it with a Go
+release that still gets upstream fixes (the release's `go.mod` names only a
+floor, Go 1.24), and copies the binary and its licence
 onto a small Alpine image tagged `maljan-minio:<release>`. The first `up`
 builds it (a few minutes, with network access to GitHub and the Go module
 proxy); later ones reuse it. The Go stage cross-compiles for the target's
