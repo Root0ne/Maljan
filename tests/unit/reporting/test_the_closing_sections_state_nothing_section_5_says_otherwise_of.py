@@ -184,17 +184,25 @@ def test_a_report_without_them_asks_as_before() -> None:
 def test_a_closing_sentence_a_source_contradicts_is_rewritten() -> None:
     report = _report()
     rewrite = "The mutex the gate routine creates is named 'alphaname' [ev_0002][ev_0004]."
-    # Every other closing sentence is kept, with the reason (T-568).
-    rows = _every_other_kept(report, [_row("limitations", OPEN_MUTEX, ["bound.1"], rewrite)])
+    # The gate sentence: section 5 speaks of the environment read, so it is no
+    # sentence no source speaks of (T-568); rewritten on it.
+    gate = "The environment read at 0x1200 returns -1 and stops the start-up [ev_0006]."
+    rows = _every_other_kept(
+        report,
+        [
+            _row("limitations", OPEN_MUTEX, ["bound.1"], rewrite),
+            _row("limitations", OPEN_GATE, ["evasion_antiforensics"], gate),
+        ],
+    )
     done, reporter = _ask(report, {"sentences": rows})
     assert len(reporter.asked) == 1
     body = report.technical_analysis.analyst_limitations.body  # type: ignore[union-attr]
-    assert body == f"{rewrite} {OPEN_GATE} {KEPT}"
-    assert done.summary["rewritten"] == 1 and done.summary["dropped"] == 0
-    # Every kept closing sentence is counted and recorded with its reason (T-568).
+    assert body == f"{rewrite} {gate} {KEPT}"
+    assert done.summary["rewritten"] == 2 and done.summary["dropped"] == 0
+    # Every closing sentence kept on no source is counted and recorded with its reason.
     codes = [r["code"] for r in done.tally.unresolved]
-    assert codes.count(REWRITTEN_CODE) == 1 and codes.count(HELD_KEPT_CODE) == len(rows) - 1
-    assert done.summary["held_kept"] == len(rows) - 1
+    assert codes.count(REWRITTEN_CODE) == 2 and codes.count(HELD_KEPT_CODE) == len(rows) - 2
+    assert done.summary["held_kept"] == len(rows) - 2
 
 
 def test_a_closing_sentence_whose_rewrite_fails_is_left_out_and_recorded() -> None:

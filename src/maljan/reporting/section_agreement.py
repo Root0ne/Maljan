@@ -107,13 +107,16 @@ limitations (T-568), so the platform no longer chooses which closing sentences
 are asked: every sentence of the conclusion and the limitations is held, and
 each routine a closing passage names is shown with its listing where an entry
 lists it. The answer keeps a closing sentence naming the sources it read and
-quoting ("quote") the words of one that state the same (an absence on words
-stating one), or naming none with its reason where no source speaks of it and
-no fact about a routine it names is shown; rewrites it; or leaves it out
-("drop") with its reason. Every keep and every drop is recorded. A kept closing
-sentence the ledger itself says otherwise of (a failed call a later call redid,
-a number of failed calls the ledger's count does not hold) is left out after
-the retry, and recorded. A rewrite resting on a fact that states again the
+quoting ("quote") the words of one that state the same (two or more of the
+sentence's own words, an absence on words stating one), or naming none with its
+reason where no fact about a routine it names, and no section 5 passage or fact
+holding what it denies something of, is shown; rewrites it; or leaves it out
+("drop") with its reason. A keep on a quote that passes is counted; a keep on no
+source or on a refused one, and every drop, is recorded. A kept closing sentence
+the ledger itself says otherwise of (a failed call a later call redid) is left
+out after the retry, and recorded; a number of failed calls the ledger's count
+does not hold is recorded, never a reason to leave a sentence out. A rewrite
+resting on a fact that states again the
 absence the fact contradicts, the same words on the same addresses
 (``absence_answers.kept_absence``), or calling unread a routine a closing
 passage's listing shows read, is refused. A section 5 sentence denying what a
@@ -168,12 +171,15 @@ from maljan.pipeline.validation import (
 )
 from maljan.reporting.absence_answers import (
     FailureCounts,
+    absence_subject,
     carries_negation,
     content_words,
     count_disagrees,
     kept_absence,
     negated_clauses,
     quote_stands,
+    said_of,
+    shares_words,
 )
 from maljan.reporting.models import (
     C2Channel,
@@ -234,7 +240,7 @@ FAILURE_REDONE_CODE = "agreement.failure_redone"
 # rewrite passed no check: left out of the section, which only sums up what
 # sections 4 to 6 state, and recorded here with what stood (T-554); one the answer
 # leaves out with its reason, or keeps while the ledger says otherwise (a failed call
-# a later call redid, a count of failed calls), the same way (T-568).
+# a later call redid), the same way (T-568).
 DROPPED_CODE = "agreement.dropped"
 # A held sentence (any sentence of the conclusion or the limitations, T-568; one
 # calling open an address or a value a section 5 passage or a fact states) that no
@@ -248,9 +254,10 @@ HELD_UNLISTED_CODE = "agreement.held_unlisted"
 # section 5 denial a decoded value's fact contradicts whose rewrite in the model's
 # words passed no check: the fact's clause is added, and what stood recorded (T-568).
 QUALIFIED_CODE = "agreement.qualified"
-# A sentence of the conclusion or the limitations that the answer kept: on the
-# sources it named and the words of one it quoted, or on no source with its
-# reason. It stands, and every one is recorded where a reader finds it (T-568).
+# A sentence of the conclusion or the limitations that the answer kept on no
+# source with its reason, or on a source a check refused: it stands, and is
+# recorded where a reader finds it. One kept on a source whose quote passed every
+# check is counted, not recorded (T-568).
 HELD_KEPT_CODE = "agreement.held_kept"
 # A held sentence whose own clause calls code not read that an entry lists,
 # which the answer left standing or rewrote still calling it not read: the
@@ -2373,11 +2380,12 @@ def _answer_violations(
     A row names its sources, but one on a closing sentence that keeps it where no
     source speaks of it, or leaves it out, with the reason; only a closing
     sentence is left out. A kept closing sentence quotes the words of a source it
-    names that state the same, an absence quoted on words stating one. A kept
-    sentence the ledger itself contradicts (a failed call a later call redid, a
-    count of failed calls) is not kept. A rewrite gives failed calls no number the
-    ledger's count does not, and states no absence again that a fact it rests on
-    contradicts (:func:`absence_answers.kept_absence`).
+    names that state the same (:func:`_quote_problem`); one kept on no source has
+    no shown source speaking of it (:func:`_speaking_of`). A kept sentence the
+    ledger itself contradicts (a failed call a later call redid) is not kept; one
+    giving failed calls a number the ledger's count does not is told so. A rewrite
+    gives failed calls no such number, and states no absence again that a fact it
+    rests on contradicts (:func:`absence_answers.kept_absence`).
     """
     path = f"sentences.{index}"
     number = safe_finding_value(index + 1)
@@ -2416,44 +2424,37 @@ def _answer_violations(
     if span is None:
         return out
     sentence = span[2]
-    named = frozenset(_addresses_named(sentence)) if passage.closing and not row.sources else ()
-    facts_about = [
-        fact.id
-        for fact in (by_id or {}).values()
-        if named and fact.kind == FACT and fact.cites and not fact.addresses.isdisjoint(named)
-    ]
-    if row.decision == "keep" and passage.closing and row.sources:
+    keeping = row.decision == "keep" and passage.closing
+    if keeping and row.sources:
         texts = [s.text for s in sources if s is not None and s.kind in (FACT, SECTION_5, DEBATE)]
-        absent = carries_negation(sentence)
-        if not quote_stands(row.quote, texts) or (absent and not carries_negation(row.quote)):
+        problem = _quote_problem(sentence, row.quote, texts)
+        if problem:
             out.append(
                 Violation(
                     code=KEEP_UNQUOTED_CODE,
                     message=(
                         f"row {number}: {where} keeps {safe_finding_value(sentence)!r} on "
                         f"{safe_finding_value(', '.join(_form(n) for n in row.sources))}, but "
-                        + (
-                            "its quote states no absence, while the sentence states one: "
-                            if quote_stands(row.quote, texts)
-                            else "its quote does not stand in a source it names: "
-                        )
-                        + "quote the words of a source that state the same thing, or "
-                        "rewrite the sentence on the source that states otherwise."
+                        f"its quote {safe_finding_value(problem)}: quote the words of a source "
+                        "that state the same thing, or rewrite the sentence on the source that "
+                        "states otherwise."
                     ),
                     path=f"{path}.quote",
                 )
             )
-    if row.decision == "keep" and passage.closing and not row.sources and facts_about:
-        # "No source speaks of it" while a fact about a routine it names is shown:
-        # the model names that fact, and quotes it, or rewrites (T-568).
+    speaking = _speaking_of(sentence, by_id or {}) if keeping and not row.sources else []
+    if speaking:
+        # "No source speaks of it" while a fact about a routine it names, or a
+        # passage or fact about what it denies something of, is shown: the model
+        # names it and quotes it, or rewrites (T-568).
         out.append(
             Violation(
                 code=KEEP_UNQUOTED_CODE,
                 message=(
                     f"row {number}: {where} keeps {safe_finding_value(sentence)!r} naming no "
-                    f"source, but {safe_finding_value(', '.join(facts_about))} speaks of a "
-                    "routine it names: name it and quote its words that state the same "
-                    "thing, or rewrite the sentence on it."
+                    f"source, but {safe_finding_value(', '.join(speaking))} speaks of what it "
+                    "names: name the source and quote its words that state the same thing, or "
+                    "rewrite the sentence on it."
                 ),
                 path=f"{path}.sources",
             )
@@ -2493,6 +2494,55 @@ def _answer_violations(
                     path=f"{path}.rewrite",
                 )
             )
+    return out
+
+
+# How many of a kept sentence's own words its quote shares, at least (fewer where the
+# sentence has fewer), so "is not established" quotes no particular absence.
+_QUOTE_SHARED = 2
+# How many sources a no-source keep is told of, at most; the count of the rest is said.
+_SPEAKING_SHOWN = 3
+
+
+def _quote_problem(sentence: str, quote: str, texts: Sequence[str]) -> str:
+    """What is wrong with a kept closing sentence's quote, or ``""``: it stands whole in a
+    named source (:func:`absence_answers.quote_stands`), shares at least
+    :data:`_QUOTE_SHARED` of the sentence's own words (a shared beginning counts), and
+    states an absence where the sentence does."""
+    if not quote_stands(quote, texts):
+        return "does not stand in a source it names"
+    words = content_words(sentence)
+    if not shares_words(quote, words, min(_QUOTE_SHARED, len(words))):
+        return "shares too few of the sentence's own words to state the same thing"
+    if carries_negation(sentence) and not carries_negation(quote):
+        return "states no absence, while the sentence states one"
+    return ""
+
+
+def _speaking_of(sentence: str, by_id: dict[str, Passage]) -> list[str]:
+    """The shown sources a closing sentence kept on no source is about: a fact about an
+    address it names, or a section 5 passage or a fact holding at least half (two or more)
+    of the words before its first negation, what it denies something of. Each source's
+    words are read once per text."""
+    named = frozenset(_addresses_named(sentence))
+    subject = absence_subject(sentence)
+    least = max(_QUOTE_SHARED, -(-len(subject) // 2))
+    out: list[str] = []
+    for source in by_id.values():
+        if source.kind not in (FACT, SECTION_5):
+            continue
+        if (
+            named
+            and source.kind == FACT
+            and source.cites
+            and not source.addresses.isdisjoint(named)
+        ):
+            out.append(source.id)
+        elif len(subject) >= _QUOTE_SHARED and (source.kind == SECTION_5 or source.cites):
+            if said_of(source.text).count(subject) >= least:
+                out.append(source.id)
+    if len(out) > _SPEAKING_SHOWN:
+        return [*out[:_SPEAKING_SHOWN], f"{len(out) - _SPEAKING_SHOWN} more"]
     return out
 
 
@@ -3350,7 +3400,7 @@ def apply_rows(
                 )
             elif passage is not None and passage.closing and _ledger_says_otherwise(found):
                 # A closing sentence the ledger itself says otherwise of (a failed
-                # call a later call redid, a count of failed calls) is never kept as
+                # call a later call redid) is never kept as
                 # written: left out, and recorded with what stood (T-568).
                 span = _sentences(passage).span(row.sentence)
                 taken = spans.setdefault(passage.id, [])
@@ -3368,18 +3418,23 @@ def apply_rows(
                 counts["kept"] += 1
                 standing = (
                     _sentences(passage).span(row.sentence)
-                    if passage is not None and passage.closing and not found
+                    if passage is not None and passage.closing
                     else None
                 )
                 if passage is not None and standing is not None and standing[2] in passage.held:
                     counts["held_kept"] += 1
-                    # Every closing sentence the answer keeps is recorded, with what it
-                    # rests on: its sources and quote, or the reason none speaks of it.
+                    # A closing sentence kept on a source whose quote passed every
+                    # check is counted; one kept on no source, or on a source a check
+                    # refused, is recorded with what it rests on (T-568).
+                    if row.sources and not found:
+                        continue
                     rests = (
                         f"{', '.join(_form(s) for s in row.sources)}, quoting "
-                        f"{_capped(row.quote)!r}"
+                        f"{_capped(row.quote)!r}, a source the checks refused "
+                        f"({_codes_of(found)})"
                         if row.sources
                         else f"no source, because {_capped(row.reason)!r}"
+                        + (f", which the checks refused ({_codes_of(found)})" if found else "")
                     )
                     listed.append(
                         Violation(
@@ -3528,8 +3583,10 @@ def _fact_fallback(
 
 
 # The codes by which the ledger itself, not a model's words, says a kept sentence
-# is false.
-_LEDGER_CODES = frozenset({FAILURE_REDONE_CODE, FAILURE_COUNT_CODE})
+# is false: a failed call a later call redid. A count of failed calls the ledger's
+# does not hold is read off the words and recorded, never a reason to leave a
+# sentence out.
+_LEDGER_CODES = frozenset({FAILURE_REDONE_CODE})
 
 
 def _ledger_says_otherwise(found: Sequence[Violation]) -> bool:

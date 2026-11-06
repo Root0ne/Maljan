@@ -88,6 +88,9 @@ MUTEX = (
     "not passed in that call [ev_0002]."
 )
 HASHED = "What the hashing routine hashes is not established."
+WHOLE_READ = "The routine at 0x1400 was read whole [ev_0002]."
+# A closing sentence a section 5 passage states too, kept on its words.
+STILL_OPEN = "What the hashing routine hashes is still not established."
 GATES_READ = (
     "The gate routines at 0x2800 and 0x2c00 were read [ev_0003][ev_0004], 0x7000 was not, "
     "and whether they pass in a guest is not known [ev_0002]."
@@ -216,10 +219,8 @@ def _settled(report: MalwareReport, rows: list[dict[str, Any]]) -> list[dict[str
                 read = _listed_ids(report, GATE_A, GATE_B)
                 out.append(_row(passage.id, sentence, "rewrite", read, rewrite=GATES_READ))
             elif sentence == IN_PART:
-                # Kept beside the listing it names, quoting it: the model's call.
-                quote = "lists its code (decompiled or disassembled)"
                 listing = _listed_ids(report, CALLER)
-                out.append(_row(passage.id, sentence, "keep", listing, quote=quote))
+                out.append(_row(passage.id, sentence, "rewrite", listing, rewrite=WHOLE_READ))
             elif passage.closing:
                 out.append(_row(passage.id, sentence, "keep", [], reason="no source speaks of it"))
             else:
@@ -304,23 +305,20 @@ def test_a_closing_rewrite_stating_the_listing_is_put_in() -> None:
     report = _report()
     done, reporter = _ask(report, {"sentences": _settled(report, [])})
     assert len(reporter.asked) == 1
-    # The gates' and the redone failure's rewrites; the routine "read in part" kept.
-    assert _limitations(report).startswith(f"{GATES_READ} {IN_PART} One decompiler call failed")
-    assert done.summary["rewritten"] == 2
-    # Still kept beside the listing: the model's call, recorded with its reason.
-    assert any(
-        IN_PART[:30] in r["message"] for r in done.tally.unresolved if r["code"] == HELD_KEPT_CODE
-    )
+    # The gates', the routine "read in part"'s and the redone failure's rewrites.
+    assert _limitations(report).startswith(f"{GATES_READ} {WHOLE_READ} One decompiler call failed")
+    assert done.summary["rewritten"] == 3
 
 
 def test_a_kept_closing_sentence_quotes_a_source_stating_the_same() -> None:
-    report = _report()
-    unquoted = _row("limitations", SCOPE, "keep", ["persistence_detail"])
-    no_absence = {**unquoted, "quote": "Routine 0x1400 calls 0x2800 and 0x2c00"}
+    report = _report(limitations=f"{STILL_OPEN} {SCOPE}")
+    unquoted = _row("limitations", STILL_OPEN, "keep", ["persistence_detail"])
     passages = passages_of(report, entries=_ledger())
     for row, said in (
         (unquoted, "does not stand in a source it names"),
-        (no_absence, "its quote states no absence"),
+        # haiku12's gamed keep: words that stand, but quote no particular absence.
+        ({**unquoted, "quote": "is not established"}, "shares too few"),
+        ({**unquoted, "quote": "Routine 0x1400 calls 0x2800 and"}, "shares too few"),
     ):
         found = agreement_violations({"sentences": _settled(report, [row])}, passages)
         (violation,) = [v for v in found if v.code == KEEP_UNQUOTED_CODE]
@@ -328,6 +326,24 @@ def test_a_kept_closing_sentence_quotes_a_source_stating_the_same() -> None:
     quoted = {**unquoted, "quote": "What the hashing routine hashes is not established"}
     found = agreement_violations({"sentences": _settled(report, [quoted])}, passages)
     assert KEEP_UNQUOTED_CODE not in [v.code for v in found]
+
+
+def test_a_keep_on_a_quote_that_passes_is_counted_one_on_no_source_recorded() -> None:
+    quoted = _row(
+        "limitations",
+        STILL_OPEN,
+        "keep",
+        ["persistence_detail"],
+        quote="What the hashing routine hashes is not established",
+    )
+    scope = _row("limitations", SCOPE, "keep", [], reason="no passage speaks of an operator")
+    report = _report(limitations=f"{STILL_OPEN} {SCOPE}")
+    done, reporter = _ask(report, {"sentences": _settled(report, [quoted, scope])})
+    assert len(reporter.asked) == 1
+    assert done.summary["held_kept"] == 3  # the two, and the conclusion's sentence
+    records = [r["message"] for r in done.tally.unresolved if r["code"] == HELD_KEPT_CODE]
+    assert not any(STILL_OPEN[:30] in m for m in records)
+    assert any(SCOPE[:30] in m and "no passage speaks of an operator" in m for m in records)
 
 
 def test_a_sentence_no_source_speaks_of_is_kept_with_the_reason_and_recorded() -> None:
@@ -348,7 +364,7 @@ def test_no_source_speaks_of_a_routine_a_shown_fact_is_about() -> None:
         {"sentences": _settled(report, [kept])}, passages_of(report, entries=_ledger())
     )
     (violation,) = [v for v in found if v.code == KEEP_UNQUOTED_CODE]
-    assert "speaks of a routine it names" in violation.message
+    assert "speaks of what it names" in violation.message
     assert _listed_ids(report, CALLER)[0] in violation.message
 
 
@@ -420,10 +436,42 @@ def test_a_number_given_failed_calls_is_held_to_the_ledger_s_count() -> None:
     assert done.summary["rewritten"] == 1
 
 
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        # Numbers that count no call (review r1): never read as a failure count.
+        "Emulation of 20 candidate API names failed to match the hash for 17 of them [ev_0040].",
+        "The decompiler output for 3 of the 150 functions failed to recover types.",
+        "Hash resolution over 164 values failed for 12 of them, so 12 API slots stay unnamed.",
+        "Two of the 11 DNS lookups the sample's calls made failed in the sandbox.",
+        "4 of 158 functions failed to decompile, so their bodies are not read.",
+        "Of 158 tool calls, 12 hit cached answers and 4 failed.",
+        "In 2 of the 3 emulations the hash failed to match.",
+    ],
+)
+def test_a_number_counting_no_call_is_no_failure_count(sentence: str) -> None:
+    counts = FailureCounts(failed=6, redone=6, by_name={"decompil": (4, 4)})
+    assert failure_counts(sentence) == []
+    assert not count_disagrees(sentence, counts)
+
+
+def test_a_kept_miscount_is_recorded_never_left_out() -> None:
+    # A wrong number, the redo stated: only the count disagrees with the ledger.
+    miscount = "Three tool calls failed, and later calls redid them [ev_0005][ev_0006]."
+    report = _report(limitations=f"{SCOPE} {miscount}")
+    keep = _row("limitations", miscount, "keep", [], reason="as the run said")
+    answer = {"sentences": _settled(report, [keep])}
+    done, _ = _ask(report, answer, answer)
+    assert miscount in _limitations(report)
+    assert done.summary["dropped"] == 0
+    assert FAILURE_COUNT_CODE in {r["code"] for r in done.tally.unresolved}
+
+
 def test_the_count_reader() -> None:
     counts = FailureCounts(failed=6, redone=6, by_name={"decompil": (4, 4)})
     assert failure_counts("4 of 158 tool calls failed and were not redone.") == [4]
     assert failure_counts("Six calls failed.") == [6]
+    assert failure_counts("Two decompile calls failed and were not redone.") == [2]
     assert failure_counts("The beacon failed twice.") == []
     assert count_disagrees("4 of 158 tool calls failed and were not redone.", counts)
     assert not count_disagrees("Six tool calls failed; all six were redone.", counts)
@@ -485,6 +533,38 @@ def test_a_section_5_sentence_calling_something_unsettled_is_held() -> None:
         ("0x2800 and 0x2c00 were not read", "0x2800 was not read [ev_0002].", False),
         # One word in common is no absence.
         ("whether they pass in a guest is not known", "the name is not known", False),
+        # Another absence of the same subject is no absence kept (review r1, haiku12's
+        # own mutex and request-body rewrites among them).
+        (
+            "the mutex name is not passed in that call",
+            "The code passes the mutex name as argument 3 [ev_0010]; what the mutex name "
+            "guards is not known.",
+            False,
+        ),
+        (
+            "the mutex name is not passed in that call",
+            "The call passes it as the mutex name [ev_0010], although the mutex name is not "
+            "checked afterwards.",
+            False,
+        ),
+        (
+            "The C2 request body is not established",
+            "The C2 request body is built from the template [ev_0079]; no POST carrying the "
+            "request body was observed.",
+            False,
+        ),
+        (
+            "the mutex name was not recovered",
+            'The code passes "alphaname" to CreateMutexW as argument 3 (lpName) [ev_0021], '
+            "and what the mutex name guards against is not established.",
+            False,
+        ),
+        (
+            "The registry key name is not known",
+            "The registry key name is Software\\X [ev_1]; whether the key is written on every "
+            "run is not known.",
+            False,
+        ),
     ],
 )
 def test_the_absence_a_rewrite_keeps(absence: str, rewrite: str, kept: bool) -> None:
@@ -534,6 +614,52 @@ def test_haiku12_s_limitations_are_answered_against_every_listing_they_name() ->
     held = {s for p in passages.values() for s in p.held}
     assert any(s.startswith("What the FNV routine hashes is not established") for s in held)
     assert any("information-class values" in s for s in held)
+
+
+def _haiku12_limitations() -> tuple[list[Any], dict[str, Any], dict[str, str]]:
+    report, ledger = _stored("haiku12")
+    passages = passages_of(report, entries=ledger)
+    by_id = {p.id: p for p in passages}
+    held = by_id["limitations"].held
+
+    def opening(words: str) -> str:
+        return next(s for s in held if s.startswith(words))
+
+    said = {
+        "C2": opening("The body of the routine at 0x3868"),
+        "C3": opening("Whether the beacon"),
+        "C4": opening("The C2 request body"),
+        "C5": opening("The C2 protocol beyond"),
+        "SCOPE": opening("Traffic beyond the captured window"),
+    }
+    return passages, by_id, said
+
+
+@pytest.mark.parametrize("which", ["C2", "C3", "C4", "C5"])
+def test_haiku12_s_c2_to_c5_are_kept_on_no_generic_quote_and_no_empty_source(which: str) -> None:
+    passages, by_id, said = _haiku12_limitations()
+    general = next(
+        p.id for p in passages if "is not established" in p.text and p.kind == "section 5"
+    )
+    sentence = said[which]
+    for row in (
+        _row("limitations", sentence, "keep", [general], quote="is not established"),
+        _row("limitations", sentence, "keep", [], reason="no source speaks of it"),
+    ):
+        found = agreement_violations({"sentences": [row]}, passages)
+        assert KEEP_UNQUOTED_CODE in [v.code for v in found], (which, row["sources"])
+
+
+def test_haiku12_s_genuinely_sourced_keep_passes() -> None:
+    passages, by_id, said = _haiku12_limitations()
+    sentence = said["SCOPE"]
+    # The section 5 words that state the same: the capture shows no contact past its
+    # window (command_and_control).
+    source = by_id["command_and_control"].text
+    quote = next(s for s in _sentences_of(source) if "window" in s and ("no " in s or "not " in s))
+    row = _row("limitations", sentence, "keep", ["command_and_control"], quote=quote)
+    found = agreement_violations({"sentences": [row]}, passages)
+    assert KEEP_UNQUOTED_CODE not in [v.code for v in found if v.path.startswith("sentences")]
 
 
 @pytest.mark.parametrize("name", ["haiku10", "haiku11", "haiku12"])

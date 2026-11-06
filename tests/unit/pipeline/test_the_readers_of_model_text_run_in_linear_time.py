@@ -273,6 +273,15 @@ LISTED = [SimpleNamespace(addresses=frozenset({0x1400}), id="listed.1")]
             ),
             id="an absence kept among many clauses",
         ),
+        pytest.param(
+            lambda t: kept_absence(
+                negated_clauses(
+                    "; ".join(f"wordx{i} alphax{i} is not known" for i in range(len(t) // 30))
+                ),
+                "; ".join(f"betay{i} gammay{i} is not shown" for i in range(len(t) // 30)),
+            ),
+            id="an absence kept among distinct clauses on both sides",
+        ),
         pytest.param(lambda t: quote_stands(t[: len(t) // 2], [t]), id="a kept sentence's quote"),
         pytest.param(
             lambda t: failure_counts("4 of 158 calls " * (len(t) // 15) + "failed"),

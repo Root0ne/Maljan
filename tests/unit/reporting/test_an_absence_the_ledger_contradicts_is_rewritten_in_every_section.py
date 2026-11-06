@@ -574,7 +574,7 @@ def test_a_closing_negation_is_held_and_a_kept_one_is_counted() -> None:
     assert "no source names the routine" in record["message"]
 
 
-def test_a_closing_negation_kept_on_a_debate_round_alone_is_recorded() -> None:
+def test_a_closing_negation_kept_on_a_quoted_debate_round_is_counted_not_recorded() -> None:
     denial = "The flag read was not attributed to a routine [ev_0002]."
     closing = Passage(
         id="limitations",
@@ -599,8 +599,15 @@ def test_a_closing_negation_kept_on_a_debate_round_alone_is_recorded() -> None:
         "quote": "was not attributed to any routine",
     }
     counts, found = apply_rows({"sentences": [{**row, "decision": "keep"}]}, [debate, closing])
+    # A quote that passes every check: counted, not recorded (T-568 review ruling).
+    assert counts["held_kept"] == 1
+    assert found == []
+    # Kept on no source: recorded with its reason.
+    reasoned = {**row, "sources": [], "quote": "", "reason": "no round names it"}
+    counts, found = apply_rows({"sentences": [{**reasoned, "decision": "keep"}]}, [debate, closing])
     assert counts["held_kept"] == 1
     assert [v.code for v in found] == [HELD_KEPT_CODE]
+    assert "no round names it" in found[0].message
 
 
 @pytest.mark.parametrize(

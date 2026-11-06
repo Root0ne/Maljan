@@ -21,8 +21,9 @@ Each reader is one pass over its text.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 # A word that denies something: what makes a clause an absence.
 _NEGATION = re.compile(
@@ -128,11 +129,65 @@ class _Said:
             word[:end] in self.words for end in range(_STEM_FLOOR, min(len(word), _PREFIX_REACH))
         )
 
+    def count(self, words: Iterable[str]) -> int:
+        """How many of ``words`` the text holds."""
+        return sum(1 for word in words if self.holds(word))
+
 
 def _subject(clause: str) -> frozenset[str]:
     """The words of a clause before its first negation: what it denies something of."""
     found = _NEGATION.search(clause)
     return content_words(clause[: found.start()]) if found else frozenset()
+
+
+def _denied(clause: str) -> str:
+    """The first word of a clause after its first negation: what it denies ("passed" of
+    "the mutex name is not passed in that call"), or ``""``."""
+    found = _NEGATION.search(clause)
+    if not found:
+        return ""
+    for word in _ordered_words(clause[found.end() :]):
+        return word
+    return ""
+
+
+def _ordered_words(text: str) -> Iterator[str]:
+    """:func:`content_words`'s words in the order they stand."""
+    for match in _WORD.finditer(text):
+        word = match.group(0).lower().strip("'-")
+        if word in _DENIED_WORDS:
+            word = word[2:]
+        if len(word) < _WORD_FLOOR or word in _STOPWORDS or _ENTRY_ID.match(word):
+            continue
+        if not word.isdigit():
+            yield word
+
+
+def _prefix_denied(clause: str) -> frozenset[str]:
+    """The words a clause denies by a prefix ("named" of "unnamed")."""
+    return frozenset(
+        word.lower()[2:]
+        for word in (m.group(0) for m in _WORD.finditer(clause))
+        if word.lower() in _DENIED_WORDS
+    )
+
+
+def shares_words(text: str, words: frozenset[str], least: int) -> bool:
+    """Whether ``text`` holds at least ``least`` of ``words``, whole or by a shared
+    beginning (:class:`_Said`)."""
+    return said_of(text).count(words) >= least
+
+
+@lru_cache(maxsize=1024)
+def said_of(text: str) -> _Said:
+    """The words of ``text`` as :class:`_Said` reads them, read once per text."""
+    return _Said(content_words(text))
+
+
+def absence_subject(sentence: str) -> frozenset[str]:
+    """The words of a sentence before its first negation: what it denies something of
+    ("request", "body" of "The C2 request body is also not established")."""
+    return _subject(sentence)
 
 
 def _addresses(text: str) -> frozenset[str]:
@@ -150,20 +205,28 @@ def kept_absence(absences: Iterable[str], rewrite: str) -> str | None:
     A rewrite's clause states an absence again where it denies something, writes
     the same addresses (none for none), and holds at least :data:`KEPT_SHARE` of
     the absence's own words (at least two of them), or every word of the subject
-    the absence denies something of where that subject has two or more ("The
-    mutex is unnamed" of "The mutex name is not established"); a word is held
+    the absence denies something of (two or more) together with the word it denies,
+    the first after its negation ("the mutex name is not passed" of "the mutex name
+    is not passed in that call" holds "passed"; "what the mutex name guards is not
+    known" denies something else of the same subject and is another absence), or
+    with a word of that subject the rewrite denies by its prefix ("The mutex is
+    unnamed" of "The mutex name is not established"). A word is held
     whole or by a shared beginning ("name", "named"). Measured for each pair of
     clauses on its own, never pooled. A clause that splits the absence ("0x10 was
     not read" from "0x10 and 0x20 were not read") names other addresses and is
-    another statement. Identical clauses are read once, so a text repeating one
-    clause costs one comparison.
+    another statement. The rewrite's clauses are read once each, indexed by the
+    addresses they write; an absence is compared with at most
+    :data:`_COMPARED_CLAUSES` of them, so the read is linear in both texts (a
+    rewrite denying more than that many things on one address set is past any
+    sentence's length).
     """
-    kept: dict[tuple[frozenset[str], frozenset[str]], _Said] = {}
+    by_address: dict[frozenset[str], dict[frozenset[str], tuple[_Said, _Said]]] = {}
     for clause in negated_clauses(rewrite):
-        key = (content_words(clause), _addresses(clause))
-        if key not in kept:
-            kept[key] = _Said(key[0])
-    if not kept:
+        words = content_words(clause)
+        group = by_address.setdefault(_addresses(clause), {})
+        if words not in group and len(group) < _COMPARED_CLAUSES:
+            group[words] = (_Said(words), _Said(_prefix_denied(clause)))
+    if not by_address:
         return None
     seen: set[tuple[frozenset[str], frozenset[str]]] = set()
     for absence in absences:
@@ -171,16 +234,24 @@ def kept_absence(absences: Iterable[str], rewrite: str) -> str | None:
         if len(words) < _LEAST_WORDS or (words, named) in seen:
             continue
         seen.add((words, named))
-        subject = _subject(absence)
+        subject, denied = _subject(absence), _denied(absence)
         need = KEPT_SHARE * len(words)
-        for (_said, where), said in kept.items():
-            if where != named:
-                continue
-            if sum(1 for word in words if said.holds(word)) >= need:
+        for said, by_prefix in by_address.get(named, {}).values():
+            if said.count(words) >= need:
                 return absence
-            if len(subject) >= _SUBJECT_WORDS and all(said.holds(word) for word in subject):
+            if len(subject) < _SUBJECT_WORDS or said.count(subject) < len(subject):
+                continue
+            # The same subject, and the same thing denied of it: the word the absence
+            # denies, or a word of the subject the rewrite denies by its prefix ("The
+            # mutex is unnamed" of "The mutex name is not established").
+            if (denied and said.holds(denied)) or any(by_prefix.holds(w) for w in subject):
                 return absence
     return None
+
+
+# How many of a rewrite's denying clauses on one address set an absence is compared
+# with at most.
+_COMPARED_CLAUSES = 64
 
 
 def _spaced(text: str) -> str:
@@ -235,29 +306,52 @@ def _number(word: str) -> int | None:
     return _NUMBERS.get(lowered)
 
 
+# What a number counts where it counts calls: the word after it, or after "of [the]
+# N" ("4 of 158 tool calls"), one of these or a word before one ("two decompile
+# calls"). "20 candidate API names" or "3 of the 150 functions" count no call.
+_COUNTED_NOUNS = frozenset({"call", "calls", "tool", "tools", "failure", "failures"})
+# How many words after a count (or its whole) may name what it counts.
+_NOUN_REACH = 2
+
+
+def _counted(tokens: Sequence[str], at: int) -> tuple[int, bool]:
+    """Where the words after the number at ``at`` end that a count's whole is read in, and
+    whether the words after it name calls (:data:`_COUNTED_NOUNS`)."""
+    after = at + 1
+    if after < len(tokens) and tokens[after].lower() == "of":
+        step = after + 1
+        if step < len(tokens) and tokens[step].lower() == "the":
+            step += 1
+        if step < len(tokens) and _number(tokens[step]) is not None:
+            after = step + 1
+    nouns = [t.lower() for t in tokens[after : after + _NOUN_REACH]]
+    return after, any(noun in _COUNTED_NOUNS for noun in nouns)
+
+
 def failure_counts(sentence: str) -> list[int]:
-    """Each number the sentence gives failed calls: the nearest number at most
-    :data:`_COUNT_REACH` words before a word saying calls failed, in its clause ("4 of
-    158 tool calls failed": 4). None where the sentence names no call."""
+    """Each number the sentence gives failed calls: a number counting calls
+    (:func:`_counted`) at most :data:`_COUNT_REACH` words before a word saying they
+    failed, in its clause ("4 of 158 tool calls failed": 4). None where the sentence
+    names no call. One pass over the words."""
     if not _NAMES_CALLS.search(sentence):
         return []
+    tokens = [m.group(0) for m in _TOKEN.finditer(sentence)]
     out: list[int] = []
-    last: tuple[int, int] | None = None  # (place, number) of the last number in the clause
-    place = 0
-    for match in _TOKEN.finditer(sentence):
-        token = match.group(0)
+    last: tuple[int, int] | None = None  # (place, number) of the count in the clause
+    skip_to = -1
+    for at, token in enumerate(tokens):
         if token in _BREAKS:
             last = None
             continue
-        place += 1
+        if at < skip_to:
+            continue
         value = _number(token)
         if value is not None:
-            # "4 of 158": the count is the first number, the whole the second.
-            if not (last is not None and place - last[0] == 2):
-                last = (place, value)
+            skip_to, counts_calls = _counted(tokens, at)
+            last = (at, value) if counts_calls else None
             continue
         if token.lower() in _FAILED_WORDS and last is not None:
-            if place - last[0] <= _COUNT_REACH:
+            if at - last[0] <= _COUNT_REACH:
                 out.append(last[1])
             last = None
     return out
