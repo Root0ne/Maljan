@@ -1,27 +1,111 @@
 ---
 title: "Deployment"
-description: "Compose services and healthchecks, required secrets, health endpoints, Kubernetes and systemd notes, upgrades and migrations."
+description: "The compose stack and its topology, required secrets, how the sample is isolated, and running outside Compose."
 ---
 
-How the stack is assembled, what it refuses to start without, how to check that
-it is healthy, and how to upgrade it. For the meaning of individual settings
-see [configuration.md](/docs/configuration/).
+How the stack is assembled, what it refuses to start without, and how the
+containers that open the sample are kept apart. For the meaning of individual
+settings see [Configuration](/docs/configuration/).
 
 ## The compose stack
 
-[`docker/docker-compose.yml`](https://github.com/Root0ne/Maljan/blob/dev/docker/docker-compose.yml)
+[`docker/docker-compose.yml`](https://github.com/Root0ne/Malspark/blob/dev/docker/docker-compose.yml)
 is the production
 shape. `docker/docker-compose.dev.yml` is an overlay that swaps the frontend to
 `next dev` and supervises the worker so source edits take effect; `make dev-up`
 applies both.
 
+<div style={{ overflowX: 'auto', margin: '1.5rem 0' }}>
+<svg viewBox="0 0 860 470" role="img" aria-labelledby="dt-title" style={{ width: '100%', minWidth: 620, height: 'auto', fontFamily: 'inherit' }}>
+  <title id="dt-title">Deployment topology: the browser reaches the console and the API; the API and the worker share Postgres, Redis and MinIO; the worker calls the model, the sandbox and the tool sidecars, each sidecar on an internal network of its own</title>
+  <style>{`
+    .dt-box { fill: var(--color-fd-card, transparent); stroke: var(--color-fd-border, currentColor); stroke-width: 1.5; }
+    .dt-key { fill: var(--color-fd-accent, transparent); stroke: var(--color-fd-primary, currentColor); stroke-width: 1.5; }
+    .dt-ext { fill: none; stroke: currentColor; opacity: 0.6; stroke-width: 1.3; stroke-dasharray: 5 4; }
+    .dt-net { fill: none; stroke: var(--color-fd-border, currentColor); stroke-width: 1.2; stroke-dasharray: 2 4; }
+    .dt-t { fill: currentColor; font-size: 14px; font-weight: 600; }
+    .dt-s { fill: currentColor; opacity: 0.72; font-size: 12px; }
+    .dt-a { stroke: currentColor; opacity: 0.55; stroke-width: 1.5; fill: none; }
+  `}</style>
+  <defs>
+    <marker id="dt-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" style={{ fill: 'currentColor', opacity: 0.55 }} />
+    </marker>
+  </defs>
+  <rect className="dt-ext" x="10" y="30" width="120" height="56" rx="10" />
+  <text className="dt-t" x="70" y="63" textAnchor="middle">Browser</text>
+  <rect className="dt-box" x="180" y="30" width="150" height="56" rx="10" />
+  <text className="dt-t" x="255" y="55" textAnchor="middle">frontend</text>
+  <text className="dt-s" x="255" y="73" textAnchor="middle">console, :3000</text>
+  <rect className="dt-key" x="380" y="30" width="150" height="56" rx="10" />
+  <text className="dt-t" x="455" y="55" textAnchor="middle">backend-api</text>
+  <text className="dt-s" x="455" y="73" textAnchor="middle">REST + WebSocket, :8000</text>
+  <path className="dt-a" d="M130 58H176" markerEnd="url(#dt-arrow)" />
+  <path className="dt-a" d="M330 58H376" markerEnd="url(#dt-arrow)" />
+  <rect className="dt-box" x="180" y="140" width="110" height="50" rx="10" />
+  <text className="dt-t" x="235" y="163" textAnchor="middle">postgres</text>
+  <text className="dt-s" x="235" y="180" textAnchor="middle">jobs, ledger</text>
+  <rect className="dt-box" x="305" y="140" width="110" height="50" rx="10" />
+  <text className="dt-t" x="360" y="163" textAnchor="middle">redis</text>
+  <text className="dt-s" x="360" y="180" textAnchor="middle">queue, events</text>
+  <rect className="dt-box" x="430" y="140" width="110" height="50" rx="10" />
+  <text className="dt-t" x="485" y="163" textAnchor="middle">minio</text>
+  <text className="dt-s" x="485" y="180" textAnchor="middle">samples</text>
+  <rect className="dt-box" x="555" y="140" width="110" height="50" rx="10" />
+  <text className="dt-t" x="610" y="163" textAnchor="middle">qdrant</text>
+  <text className="dt-s" x="610" y="180" textAnchor="middle">memory</text>
+  <path className="dt-a" d="M455 86V112H235V136" markerEnd="url(#dt-arrow)" />
+  <path className="dt-a" d="M455 112H360V136" markerEnd="url(#dt-arrow)" />
+  <path className="dt-a" d="M455 112V136" markerEnd="url(#dt-arrow)" />
+  <rect className="dt-key" x="180" y="240" width="360" height="56" rx="10" />
+  <text className="dt-t" x="360" y="265" textAnchor="middle">backend-worker</text>
+  <text className="dt-s" x="360" y="283" textAnchor="middle">the pipeline, one job at a time</text>
+  <rect className="dt-box" x="580" y="240" width="200" height="56" rx="10" />
+  <text className="dt-t" x="680" y="265" textAnchor="middle">enrichment-worker</text>
+  <text className="dt-s" x="680" y="283" textAnchor="middle">indicator lookups</text>
+  <path className="dt-a" d="M300 236V194" markerEnd="url(#dt-arrow)" />
+  <path className="dt-a" d="M360 236V194" markerEnd="url(#dt-arrow)" />
+  <path className="dt-a" d="M420 236V194" markerEnd="url(#dt-arrow)" />
+  <path className="dt-a" d="M500 236L600 194" markerEnd="url(#dt-arrow)" />
+  <rect className="dt-net" x="10" y="340" width="560" height="110" rx="12" />
+  <text className="dt-s" x="24" y="360">tool sidecars, each on an internal network of its own</text>
+  <rect className="dt-box" x="24" y="372" width="120" height="56" rx="10" />
+  <text className="dt-t" x="84" y="397" textAnchor="middle">ghidra-mcp</text>
+  <text className="dt-s" x="84" y="415" textAnchor="middle">:8089</text>
+  <rect className="dt-box" x="158" y="372" width="120" height="56" rx="10" />
+  <text className="dt-t" x="218" y="397" textAnchor="middle">die, ilspy, …</text>
+  <text className="dt-s" x="218" y="415" textAnchor="middle">:8090–8097</text>
+  <rect className="dt-box" x="292" y="372" width="120" height="56" rx="10" />
+  <text className="dt-t" x="352" y="397" textAnchor="middle">analysis-mcp</text>
+  <text className="dt-s" x="352" y="415" textAnchor="middle">:8098</text>
+  <rect className="dt-box" x="426" y="372" width="130" height="56" rx="10" />
+  <text className="dt-t" x="491" y="397" textAnchor="middle">network-mcp</text>
+  <text className="dt-s" x="491" y="415" textAnchor="middle">:8099</text>
+  <path className="dt-a" d="M300 296V336" markerEnd="url(#dt-arrow)" />
+  <rect className="dt-ext" x="620" y="340" width="220" height="50" rx="10" />
+  <text className="dt-t" x="730" y="361" textAnchor="middle">LLM provider</text>
+  <text className="dt-s" x="730" y="378" textAnchor="middle">hosted API or local server</text>
+  <rect className="dt-ext" x="620" y="400" width="220" height="50" rx="10" />
+  <text className="dt-t" x="730" y="421" textAnchor="middle">Sandbox, VirusTotal</text>
+  <text className="dt-s" x="730" y="438" textAnchor="middle">external services</text>
+  <path className="dt-a" d="M540 280H560V365H616" markerEnd="url(#dt-arrow)" />
+  <path className="dt-a" d="M560 365V425H616" markerEnd="url(#dt-arrow)" />
+  <text className="dt-s" x="590" y="22">dashed: outside the stack</text>
+</svg>
+</div>
+
+Only the console and the API need to face users. Every port binds to
+`BIND_ADDRESS`, `127.0.0.1` by default. Each container that opens the sample
+sits on an internal network with no gateway; a small relay publishes its port
+for a worker that runs on the host.
+
 | Service | Image | Purpose |
 | :-- | :-- | :-- |
 | `postgres` | `postgres:16-alpine` | Relational store. Healthchecked with `pg_isready`. |
 | `redis` | `redis:7-alpine` | Queue, events, rate-limit counters. Password-protected; the healthcheck asserts an actual `PONG`. |
-| `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. Runs under the `qdrant` profile, which the shipped `docker/.env` turns on; without `QDRANT_API_KEY` it restarts, logging the variable to set. |
-| `minio` | `maljan-minio`, built from `docker/Dockerfile.minio` | Sample storage, with its own console. The server is compiled from MinIO's pinned release (`RELEASE.2025-10-15T17-29-55Z`); see *MinIO, built from source* below. |
-| `ghidra-mcp` | built from `external/ghidra-mcp` | A static analyser. Runs (and is built) under the `ghidra` profile, which the shipped `docker/.env` turns on; without `GHIDRA_MCP_AUTH_TOKEN` it refuses to bind and restarts. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [configuration.md](/docs/configuration/). |
+| `qdrant` | `qdrant/qdrant:v1.18.3` | Vector store, pinned to match the client version. Runs under the `qdrant` profile, which the shipped `docker/.env` turns on; without `QDRANT_API_KEY` it restarts, logging the variable to set. |
+| `minio` | `malspark-minio`, built from `docker/Dockerfile.minio` | Sample storage, with its own console. The server is compiled from MinIO's pinned release (`RELEASE.2025-10-15T17-29-55Z`); see *MinIO, built from source* below. |
+| `ghidra-mcp` | built from `external/ghidra-mcp` | A static analyser. Runs (and is built) under the `ghidra` profile, which the shipped `docker/.env` turns on; without `GHIDRA_MCP_AUTH_TOKEN` it refuses to bind and restarts. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [Configuration](/docs/configuration/). |
 | `ghidra-port` | `alpine/socat` (pinned by digest) | Publishes Ghidra's port on `BIND_ADDRESS` for a worker run on the host, under the `ghidra` profile; `ghidra-mcp` itself is on an internal network only. See *The container that opens the sample* below. |
 | `die-mcp`, `ilspy-mcp`, `goresym-mcp` | built from `services/<name>/Dockerfile` | The identification servers (Detect It Easy, ILSpy, GoReSym), each under its own profile (`die`, `ilspy`, `goresym`), which the shipped `docker/.env` does not turn on; each refuses to start without its token. Capped at 2 GB, 4 GB and 2 GB of memory and swap (`DIE_MEM_LIMIT`, `ILSPY_MEM_LIMIT`, `GORESYM_MEM_LIMIT`). See [Identification servers](/docs/tools/identification/). |
 | `die-port`, `ilspy-port`, `goresym-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8090, 8091, 8092) on `BIND_ADDRESS` for a worker run on the host, under the server's profile, as `ghidra-port` does. |
@@ -29,15 +113,17 @@ applies both.
 | `yarax-port`, `oletools-port`, `webcrack-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8093, 8094, 8095) on `BIND_ADDRESS` for a worker run on the host, under the server's profile. |
 | `unblob-mcp`, `jadx-mcp` | built from `services/<name>/Dockerfile` | The container and Android servers (unblob, JADX), each under its own profile (`unblob`, `jadx`), off in the shipped `docker/.env`; each refuses to start without its token. Capped at 2 GB and 4 GB of memory and swap (`UNBLOB_MEM_LIMIT`, `JADX_MEM_LIMIT`). Each has a `/tmp` tmpfs of its own, sized below its ceiling (`UNBLOB_TMPFS_SIZE`, `JADX_TMPFS_SIZE`). `unblob-mcp` writes what it extracts there, never beside the sample, and is handed `UPLOAD_MAX_BYTES`, `UNBLOB_MAX_ENTRIES` and `CARVED_KEEP_SECONDS`. See [Container and Android servers](/docs/tools/containers-and-android/). |
 | `unblob-port`, `jadx-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8096, 8097) on `BIND_ADDRESS` for a worker run on the host, under the server's profile. |
-| `analysis-mcp`, `network-mcp` | `maljan-backend` | The platform's own analysis and network servers, each in a container of its own under its profile (`analysis`, `network`), off in the shipped `docker/.env`; each refuses to listen without its token (`ANALYSIS_MCP_AUTH_TOKEN`, `NETWORK_MCP_AUTH_TOKEN`). They run the worker's image and source read-only, with no platform credential. With a server's built-in block pointed at its container (transport `streamable-http`, url `http://analysis-mcp:8098/mcp` or `http://network-mcp:8099/mcp`, the token, `sample_mount` `/data/samples`), the triage pack's own readings of the sample run there. The worker still reads the sample for its hashes and routing, and for the few readings `tests/unit/test_sample_reading_guard.py` lists as left for a later change. Each job's staging directory in the container's `/tmp` (capa's and FLOSS's scratch, the unpacked program, a capture handed over) is removed when the job ends, the worker calling the server's `release_job` with the job's id; a release that fails leaves it to the server's own sweep `MALJAN_STAGING_TTL_HOURS` (24 h unless set) after it last changed, and it counts against the tmpfs and the memory ceiling until then. Capped at 8 GB and 2 GB of memory and swap (`ANALYSIS_MEM_LIMIT`, `NETWORK_MEM_LIMIT`), with a `/tmp` tmpfs for each job's staging (`ANALYSIS_TMPFS_SIZE` 2g, `NETWORK_TMPFS_SIZE` 512m). |
+| `analysis-mcp`, `network-mcp` | `malspark-backend` | The platform's own analysis and network servers, each in a container of its own under its profile (`analysis`, `network`), off in the shipped `docker/.env`; each refuses to listen without its token (`ANALYSIS_MCP_AUTH_TOKEN`, `NETWORK_MCP_AUTH_TOKEN`). They run the worker's image and source read-only, with no platform credential. With a server's built-in block pointed at its container (transport `streamable-http`, url `http://analysis-mcp:8098/mcp` or `http://network-mcp:8099/mcp`, the token, `sample_mount` `/data/samples`), the triage pack's own readings of the sample run there. The worker still reads the sample for its hashes and routing, and for the few readings `tests/unit/test_sample_reading_guard.py` lists as left for a later change. Each job's staging directory in the container's `/tmp` (capa's and FLOSS's scratch, the unpacked program, a capture handed over) is removed when the job ends, the worker calling the server's `release_job` with the job's id; a release that fails leaves it to the server's own sweep `MALSPARK_STAGING_TTL_HOURS` (24 h unless set) after it last changed, and it counts against the tmpfs and the memory ceiling until then. Capped at 8 GB and 2 GB of memory and swap (`ANALYSIS_MEM_LIMIT`, `NETWORK_MEM_LIMIT`), with a `/tmp` tmpfs for each job's staging (`ANALYSIS_TMPFS_SIZE` 2g, `NETWORK_TMPFS_SIZE` 512m). |
 | `analysis-port`, `network-port` | `alpine/socat` (pinned by digest) | Each publishes its server's port (8098, 8099) on `BIND_ADDRESS` for a worker run on the host, under the server's profile. |
-| `migrate` | `maljan-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start; on an upgrade, migrate before restarting either, since a stored built-in team written before a seeding revision loads under a renamed key until the revision has run. |
-| `backend-api` | `maljan-backend` | The FastAPI service. |
-| `backend-worker` | `maljan-backend` | The arq worker. Capped at 8 GB memory and swap; `WORKER_RSS_RESTART_MB` makes it exit between jobs before it gets there, and `restart: unless-stopped` brings it back. It runs one analysis at a time (`WorkerSettings.max_jobs = 1`): a job's settings, the values the event scrub masks and the API names its hash resolution read are held per process, so any other `max_jobs` is refused at startup with that reason. More analyses at once take more worker processes. |
+| `volume-init` | `malspark-backend` | One-shot. Hands the sample mirror, upload staging, ATT&CK cache and Ghidra projects that root owns to `MALSPARK_UID:MALSPARK_GID`, changes nothing else, and stops the stack with the id to set if an entry belongs to anyone else. See *Volume ownership* below. |
+| `migrate` | `malspark-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start; on an upgrade, migrate before restarting either, since a stored built-in team written before a seeding revision loads under a renamed key until the revision has run. |
+| `backend-api` | `malspark-backend` | The FastAPI service. |
+| `backend-worker` | `malspark-backend` | The arq worker. Capped at 8 GB memory and swap; `WORKER_RSS_RESTART_MB` makes it exit between jobs before it gets there, and `restart: unless-stopped` brings it back. It runs one analysis at a time (`WorkerSettings.max_jobs = 1`): a job's settings, the values the event scrub masks and the API names its hash resolution read are held per process, so any other `max_jobs` is refused at startup with that reason. More analyses at once take more worker processes. |
+| `enrichment-worker` | `malspark-backend` | Runs the indicator lookups (VirusTotal, AbuseIPDB and the rest) on a queue of its own, two at a time, so they never hold the analysis worker's slot. The compose file sets `ENRICHMENT_DEDICATED_WORKER` on the API and the worker to send them here; drop that line with the service. |
 | `frontend` | built from `docker/Dockerfile.frontend` | The console. |
 
 The three backend services share one build and one image tag, so Compose
-builds `maljan-backend` once rather than once per service.
+builds `malspark-backend` once rather than once per service.
 
 ### MinIO, built from source
 
@@ -47,7 +133,7 @@ builds the server: `docker/Dockerfile.minio` clones the pinned release tag,
 stops the build if the tag is not the pinned commit, compiles it with a Go
 release that still gets upstream fixes (the release's `go.mod` names only a
 floor, Go 1.24), and copies the binary and its licence
-onto a small Alpine image tagged `maljan-minio:<release>`. The first `up`
+onto a small Alpine image tagged `malspark-minio:<release>`. The first `up`
 builds it (a few minutes, with network access to GitHub and the Go module
 proxy); later ones reuse it. The Go stage cross-compiles for the target's
 architecture, so the same file builds linux/amd64 and linux/arm64; it needs
@@ -112,7 +198,7 @@ other service is stopped by it.
 
 Optional knobs with defaults: `BIND_ADDRESS` (`127.0.0.1`), the published
 ports, `RUN_MIGRATIONS_ON_STARTUP`, `CORS_ORIGINS`, `COOKIE_SECURE`,
-`WORKER_RSS_RESTART_MB`, `MALJAN_EMBED_THREADS` and `MALJAN_EMBED_BATCH`.
+`WORKER_RSS_RESTART_MB`, `MALSPARK_EMBED_THREADS` and `MALSPARK_EMBED_BATCH`.
 
 Every published port binds to `BIND_ADDRESS`, which the example file sets to
 `127.0.0.1`. The stack is unreachable from the network until that is changed
@@ -130,7 +216,7 @@ dev-up`) mounts the sources writable and reloads the API on an edit.
 The API, the workers and the migration run as an unprivileged account (uid and
 gid 10001 by default) with every Linux capability dropped and
 `no-new-privileges`. The image's virtual environment and sources are owned by
-root, so that account can only read them. Set `MALJAN_UID` and `MALJAN_GID` in
+root, so that account can only read them. Set `MALSPARK_UID` and `MALSPARK_GID` in
 `docker/.env` to run them under another id; on a machine where a login user
 also works in this checkout's `data/`, use that user's ids (`id -u`, `id -g`)
 so the files stay theirs. `make docker-up` and `make dev-up` set both to the
@@ -142,13 +228,13 @@ environment nor `docker/.env` sets them, and to 10001 when that user is root.
 Before the backend ran unprivileged it ran as root, so a deployment created
 then has entries in `data/samples/`, `data/uploads/` and the `attck_cache`
 volume owned by root. The one-shot `volume-init` service hands the
-root-owned ones to `MALJAN_UID:MALJAN_GID` before the API and the worker
+root-owned ones to `MALSPARK_UID:MALSPARK_GID` before the API and the worker
 start, on every `up`:
 
 - It never takes a file from anyone else. An entry owned by a uid or gid that
   is neither root nor the target stops it before it has changed anything, with
   the id to set, for example `volume-init: data/samples is owned by uid 1000;
-  set MALJAN_UID/MALJAN_GID=1000 in docker/.env`. The API and the worker then
+  set MALSPARK_UID/MALSPARK_GID=1000 in docker/.env`. The API and the worker then
   do not start.
 - It changes ownership only (`chown -h`), never a file's content or mode, never
   through a symbolic link, never past the mount it was given, and executes
@@ -161,10 +247,10 @@ start, on every `up`:
 
 Nothing needs doing by hand: the first `docker compose up -d` after the upgrade
 runs it. To run it alone, `docker compose run --rm volume-init`. The ATT&CK
-cache now mounts at `/home/maljan/.cache/maljan` (the volume keeps its name),
+cache now mounts at `/home/malspark/.cache/malspark` (the volume keeps its name),
 so its contents carry over.
 
-The worker writes its sample mirrors 0700 and 0600 as `MALJAN_UID`. The
+The worker writes its sample mirrors 0700 and 0600 as `MALSPARK_UID`. The
 `ghidra-mcp` container runs as that same uid and gid, so it reads them through
 its read-only mount; it shares nothing else with the worker. A Ghidra that runs
 as another user needs a group it shares with the worker, and mirrors written
@@ -173,7 +259,7 @@ as another user needs a group it shares with the worker, and mirrors written
 ### The container that opens the sample
 
 `ghidra-mcp` opens the sample, so it is kept from the platform: it runs as
-`MALJAN_UID:MALJAN_GID` (volume-init hands the `ghidra_projects` volume over
+`MALSPARK_UID:MALSPARK_GID` (volume-init hands the `ghidra_projects` volume over
 first), with no Linux capability, no way to gain one and a process limit
 (`GHIDRA_PIDS_LIMIT`, 2048 by default). Its only secret is its own
 `GHIDRA_MCP_AUTH_TOKEN`. Its one network is `ghidra`, internal (no gateway),
@@ -197,7 +283,7 @@ Ghidra refuses a project owned by another name; an operator who opens such
 projects sets `GHIDRA_USER=root` in `docker/.env`.
 
 The identification servers (`die-mcp`, `ilspy-mcp`, `goresym-mcp`) open the
-sample too, and are held the same way: `MALJAN_UID:MALJAN_GID`, no capability,
+sample too, and are held the same way: `MALSPARK_UID:MALSPARK_GID`, no capability,
 no way to gain one, a process limit, and its own token as its only secret.
 Each also runs with a read-only root whose only writable place is a tmpfs at
 `/tmp`, mounts the samples directory read-only at `/data/samples` and nothing
@@ -260,7 +346,7 @@ Static provider 'ghidra' mirrors a sample to data/samples/.work/<sha256> and is 
 `GHIDRA_CONTAINER_SAMPLES_PATH` is retired. The migration that retired it read
 a value other than `/data/samples` once into `core.static.ghidra.sample_mount`,
 where the store held none; a worker that still has it set warns at start and
-names that setting. `MALJAN_ATTCK_MAX_AGE_DAYS` is retired the same way: a
+names that setting. `MALSPARK_ATTCK_MAX_AGE_DAYS` is retired the same way: a
 whole number other than 7 is read once into `core.validation.attck_refresh_days`
 (0 or less as 0, never check), which the console edits under Analysis layers →
 ATT&CK data. The revision reads the environment of the process that runs it; in
@@ -296,31 +382,8 @@ in, so the end of it is something you write down.
 
 Nothing rotates on its own. The point of the timestamp is that a secret you
 forget stops being honoured rather than being honoured for the life of the
-deployment. See [security.md](/docs/security/) for where signing sits among the
+deployment. See [Security](/docs/security/) for where signing sits among the
 rest of the auth posture.
-
-## Health
-
-`GET /health` and `GET /healthz` are the same endpoint under two paths, so both
-a bare and a Kubernetes-style liveness probe work without extra configuration.
-
-- Without parameters it performs no I/O: it returns `status`, the service name
-  and version, and a `config` block reporting `bootstrap` and `encryption`,
-  both of which the process already satisfied before it could serve anything.
-  A liveness probe must not restart the API because Postgres blinked.
-- `GET /health?deep=true` probes Postgres, Redis, MinIO and the configured
-  long-term-memory backend (`components.memory`, which names the backend it
-  probed) concurrently, each with a three-second budget, and reports every
-  result as data. An in-process backend answers without I/O; a backend id no
-  registered builder knows is reported with `ok: null` and `detail: "not
-  configured"`, never as a failure, and one whose package failed to load with
-  `ok: false`, `detail: "unavailable"` and the reason in `error`. `status` becomes `degraded` when Postgres
-  or Redis is unreachable and `degraded_optional` when only MinIO or the memory
-  store is, so use the deep form for readiness and the bare form for liveness.
-
-Operational detail — throttle state and dropped audit rows — lives on
-`GET /api/v1/system/status`, where those fields are returned to admin callers
-only; the health endpoint publishes only the public readiness bit.
 
 ## Outside Compose
 
@@ -368,34 +431,10 @@ A server added this way is started with exactly the names it lists. A built-in
 is the one case where that field has a floor: `analysis` and `network` are
 always passed the sample roots and the staging directory, whatever the stored
 registry holds, because a child without them refuses the run's own sample. See
-[configuration.md](/docs/configuration/#which-directories-a-sidecar-may-read).
+[Configuration](/docs/configuration/#which-directories-a-sidecar-may-read).
 
-## Upgrades and migrations
+## Next
 
-The API does not migrate on startup unless `RUN_MIGRATIONS_ON_STARTUP` is set,
-which it should not be in production.
-
-- On the compose stack the `migrate` service reruns on the next `up` and exits
-  immediately when there is nothing to apply: `docker compose up migrate`.
-- Elsewhere, `make migrate` from the repository root. It sources
-  `bootstrap.env` when present and runs `alembic upgrade head` from
-  `apps/api`; `DATABASE_URL` must be reachable from where you run it, so the
-  compose-internal `postgres:5432` will not do.
-
-After a pull that adds a revision, migrate before restarting the services. The
-production stack bakes the frontend into an image and runs the worker under
-plain `arq`, so neither picks up a source edit on its own: `make fe-rebuild`
-rebuilds and replaces the frontend container, and `make worker-restart`
-restarts the worker.
-
-A stack that ran the pulled MinIO image (`minio/minio:RELEASE.2025-09-07T16-13-09Z`)
-builds `maljan-minio` on its next `up` and starts it on the same `minio_data`
-volume, under the same service and container name, ports, credentials and
-command. Nothing needs migrating: the release built is the one after it, which
-changes no on-disk format, so buckets, objects, versions, policies and object
-lock settings read as before. `docker compose build minio` builds it ahead of
-the restart.
-
-There is no automatic import of a previous `.env` deployment. An instance
-upgrading from one enters its settings once in Settings → Configuration, or
-imports a JSON export from another instance.
+- [Upgrades](/docs/upgrades/): migrations and rebuilding after a pull.
+- [Backups](/docs/backups/): what to back up, and how to restore.
+- [Monitoring](/docs/monitoring/): health checks, logs and what a run's metrics mean.

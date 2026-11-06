@@ -23,7 +23,7 @@ A key acts as the account that minted it, so mint it signed in as the account
 the pipeline should act as:
 
 ```bash
-curl -s -X POST http://maljan.internal:8000/api/v1/audit/api-keys \
+curl -s -X POST http://malspark.internal:8000/api/v1/audit/api-keys \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"name": "ci", "expires_in_days": 90}'
 ```
@@ -42,8 +42,8 @@ call. See [Security](/docs/security/#authentication).
 **Upload the sample.**
 
  ```bash
- SAMPLE=$(curl -s -X POST "$MALJAN/api/v1/samples/upload" \
-   -H "X-API-Key: $MALJAN_API_KEY" -F "file=@$SAMPLE_PATH" | jq -r .id)
+ SAMPLE=$(curl -s -X POST "$MALSPARK/api/v1/samples/upload" \
+   -H "X-API-Key: $MALSPARK_API_KEY" -F "file=@$SAMPLE_PATH" | jq -r .id)
  ```
 
 </Step>
@@ -53,8 +53,8 @@ call. See [Security](/docs/security/#authentication).
 **Start the job**, naming the team if it is not the deployment's active one.
 
  ```bash
- JOB=$(curl -s -X POST "$MALJAN/api/v1/jobs" \
-   -H "X-API-Key: $MALJAN_API_KEY" -H 'Content-Type: application/json' \
+ JOB=$(curl -s -X POST "$MALSPARK/api/v1/jobs" \
+   -H "X-API-Key: $MALSPARK_API_KEY" -H 'Content-Type: application/json' \
    -d "{\"sample_id\":\"$SAMPLE\",\"config\":{\"profile\":\"default\"}}" | jq -r .id)
  ```
 
@@ -70,7 +70,7 @@ call. See [Security](/docs/security/#authentication).
 
  ```bash
  while :; do
-   STATUS=$(curl -s "$MALJAN/api/v1/jobs/$JOB" -H "X-API-Key: $MALJAN_API_KEY" | jq -r .status)
+   STATUS=$(curl -s "$MALSPARK/api/v1/jobs/$JOB" -H "X-API-Key: $MALSPARK_API_KEY" | jq -r .status)
    case "$STATUS" in completed|failed|cancelled) break ;; esac
    sleep 30
  done
@@ -83,12 +83,12 @@ call. See [Security](/docs/security/#authentication).
 **Read the verdict and fetch what to act on.**
 
  ```bash
- REPORT=$(curl -s "$MALJAN/api/v1/reports/job/$JOB" -H "X-API-Key: $MALJAN_API_KEY")
+ REPORT=$(curl -s "$MALSPARK/api/v1/reports/job/$JOB" -H "X-API-Key: $MALSPARK_API_KEY")
  echo "$REPORT" | jq '{verdict, verdict_reading, overall_confidence}'
  REPORT_ID=$(echo "$REPORT" | jq -r .id)
 
- curl -s "$MALJAN/api/v1/reports/$REPORT_ID/iocs" -H "X-API-Key: $MALJAN_API_KEY" > iocs.json
- curl -s "$MALJAN/api/v1/reports/$REPORT_ID/stix" -H "X-API-Key: $MALJAN_API_KEY" > bundle.json
+ curl -s "$MALSPARK/api/v1/reports/$REPORT_ID/iocs" -H "X-API-Key: $MALSPARK_API_KEY" > iocs.json
+ curl -s "$MALSPARK/api/v1/reports/$REPORT_ID/stix" -H "X-API-Key: $MALSPARK_API_KEY" > bundle.json
  ```
 
 </Step>

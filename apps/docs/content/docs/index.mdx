@@ -1,16 +1,16 @@
 ---
 title: "Malspark documentation"
 sidebarTitle: "Introduction"
-description: "Multi-agent malware analysis with an evidence ledger behind every claim."
+description: "AI agents analyse malware end to end: they use real tools, argue in a debate, a judge decides, and every claim in the report cites the evidence."
 ---
 
-import { Brain, FileSearch, ListOrdered, MonitorCog, Network, Rocket, Scale, Settings, Share, Wrench } from 'lucide-react';
+import { BookOpen, FlaskConical, Plug, Rocket } from 'lucide-react';
 
-<Hero tagline="Multi-agent malware analysis in which every claim in the report resolves back to the tool call it came from.">
+<Hero tagline="AI agents analyse a malware sample from start to finish. Every claim in the report points back to the tool call that proves it.">
 
-Malspark connects LLM agent teams to malware-analysis tools: signature scanners,
-rule engines, binary and capture readers, a sandbox, an ATT&CK catalogue. The
-output is a report against MITRE ATT&CK and a STIX 2.1 bundle.
+Upload a sample. A team of agents runs real analysis tools, argues over what
+they found, and a judge decides. You get a report against MITRE ATT&CK, a STIX
+2.1 bundle and an evidence ledger behind every sentence.
 
 </Hero>
 
@@ -18,191 +18,153 @@ output is a report against MITRE ATT&CK and a STIX 2.1 bundle.
 
 <Card icon={<Rocket />} title="Quick start" href="/docs/getting-started/">
 
-From a clean checkout to a first finished analysis on the compose stack:
-the two configuration files, the first account, the first run.
+Start the stack, connect a model and run your first analysis.
 
 </Card>
 
-<Card icon={<MonitorCog />} title="Console" href="/docs/console/">
+<Card icon={<BookOpen />} title="Concepts" href="/docs/concepts/pipeline/">
 
-The web console: submitting samples, following a run as a conversation,
-reading the evidence ledger and the report.
-
-</Card>
-
-<Card icon={<Brain />} title="LLM providers" href="/docs/providers/">
-
-OpenAI-compatible endpoints (DeepSeek included), Anthropic, Gemini,
-Ollama and a local llama.cpp server, per agent if you like.
+The pipeline, the agents, the ledger, the debate and the report.
 
 </Card>
 
-<Card icon={<Wrench />} title="Tools" href="/docs/tools/">
+<Card icon={<Plug />} title="Bring your own tools" href="/docs/tools/">
 
-Ghidra, radare2, capa and YARA, CAPE and Triage sandboxes, VirusTotal,
-the built-in analysis sidecars and any MCP server of your own.
+Plug in any MCP server, sidecar, model or sandbox. No code change.
+
+</Card>
+
+<Card icon={<FlaskConical />} title="Benchmark" href="/docs/benchmark/">
+
+The latest scored run against public human reports.
 
 </Card>
 
 </Cards>
 
-## Key capabilities
+## What Malspark does
 
-- <Network className="mj-inline-icon" aria-hidden /> **Teams are configuration, not code.** A team is
-  an ordered list of stages — triage, the passes the sample is worth, a debate,
-  a verdict and a report — each with a condition, so a team applies to a sample
-  rather than being written for one. See [Teams and profiles](/docs/usage/teams/).
-- <ListOrdered className="mj-inline-icon" aria-hidden /> **An evidence ledger with citable ids.** Every
-  tool call is written to the ledger as `ev_NNNN`, and every section of the
-  report names the ids it was built from. See [the evidence
-  ledger](/docs/architecture/#the-evidence-ledger).
-- <Scale className="mj-inline-icon" aria-hidden /> **The agent decides, the code says what is wrong.**
-  Nothing rewrites a claim, a technique id, a confidence or an attribution
-  behind the producer's back: a problem goes back to the producer as feedback,
-  with one turn to fix it. See [validation loops](/docs/architecture/#validation-loops).
-- <FileSearch className="mj-inline-icon" aria-hidden /> **Format-agnostic routing.** The sample's own
-  bytes decide its route (PE, ELF, Mach-O, APK, DEX, documents, scripts,
-  archives); a format nothing recognises gets the neutral path and a report
-  that says so. See [format routing](/docs/architecture/#format-routing).
-- <Share className="mj-inline-icon" aria-hidden /> **Reports that other systems can act on.** Markdown,
-  HTML, PDF, the full JSON document, STIX 2.1, an IOC feed with a publish
-  decision on every row, and detection drafts. See [Reports and
-  exports](/docs/usage/reports-and-exports/).
-- <Settings className="mj-inline-icon" aria-hidden /> **Configured from the console.** A small bootstrap
-  environment, and every other setting in a store edited from the web console,
-  with setup guides and connection tests. See
-  [Configuration](/docs/configuration/).
+Malspark runs the whole analysis without a human in the loop:
 
-## Multi-agent architecture in brief
+1. **Code establishes the facts first.** The triage pack identifies the file,
+   hashes it, checks its signature, runs the rule engines and decodes its
+   strings. No model is involved.
+2. **Analyst agents investigate.** Each analyst uses real tools: a decompiler,
+   a disassembler, a sandbox, capture readers, reputation services. The agent
+   decides what to call and when to stop.
+3. **The analysts argue.** A mediator puts their claims side by side and lists
+   every contradiction. The analysts it names must revise, with the evidence in
+   front of them.
+4. **A judge decides.** The judge states the verdict, the family and the
+   ATT&CK techniques, and drops what the evidence does not support.
+5. **The report cites everything.** Every tool call is written to the evidence
+   ledger with an id such as `ev_0021`. Every report section names the ids it
+   rests on.
 
-A run is one team executing over one sample. The deterministic triage pack
-establishes the facts first — what the file is, its hashes and signature, what
-the rule engines and the reputation services say — and writes each to the
-evidence ledger. The analysts of each stage then call the tools they were
-given, the debate puts their positions against each other, the judge states the
-verdict, and the report is assembled from the ledger and the claims that cite
-it.
+<div style={{ overflowX: 'auto', margin: '1.5rem 0' }}>
+<svg viewBox="0 0 880 210" role="img" aria-labelledby="intro-flow-title" style={{ width: '100%', minWidth: 620, height: 'auto', fontFamily: 'inherit' }}>
+  <title id="intro-flow-title">From sample to report: triage pack, analysts, debate, judge, report, all writing to one evidence ledger</title>
+  <style>{`
+    .if-box { fill: var(--color-fd-card, transparent); stroke: var(--color-fd-border, currentColor); stroke-width: 1.5; }
+    .if-key { fill: var(--color-fd-accent, transparent); stroke: var(--color-fd-primary, currentColor); stroke-width: 1.5; }
+    .if-t { fill: currentColor; font-size: 15px; font-weight: 600; }
+    .if-s { fill: currentColor; opacity: 0.72; font-size: 12px; }
+    .if-a { stroke: currentColor; opacity: 0.55; stroke-width: 1.5; fill: none; }
+    .if-d { stroke: var(--color-fd-primary, currentColor); stroke-width: 1.3; fill: none; stroke-dasharray: 4 4; }
+  `}</style>
+  <defs>
+    <marker id="if-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" style={{ fill: 'currentColor', opacity: 0.55 }} />
+    </marker>
+  </defs>
+  <rect className="if-box" x="10" y="20" width="140" height="70" rx="10" />
+  <text className="if-t" x="80" y="50" textAnchor="middle">Triage pack</text>
+  <text className="if-s" x="80" y="70" textAnchor="middle">code, no model</text>
+  <rect className="if-box" x="190" y="20" width="140" height="70" rx="10" />
+  <text className="if-t" x="260" y="50" textAnchor="middle">Analysts</text>
+  <text className="if-s" x="260" y="70" textAnchor="middle">agents + real tools</text>
+  <rect className="if-box" x="370" y="20" width="140" height="70" rx="10" />
+  <text className="if-t" x="440" y="50" textAnchor="middle">Debate</text>
+  <text className="if-s" x="440" y="70" textAnchor="middle">contradictions, revisions</text>
+  <rect className="if-box" x="550" y="20" width="140" height="70" rx="10" />
+  <text className="if-t" x="620" y="50" textAnchor="middle">Judge</text>
+  <text className="if-s" x="620" y="70" textAnchor="middle">verdict, techniques</text>
+  <rect className="if-box" x="730" y="20" width="140" height="70" rx="10" />
+  <text className="if-t" x="800" y="50" textAnchor="middle">Report</text>
+  <text className="if-s" x="800" y="70" textAnchor="middle">every claim cited</text>
+  <path className="if-a" d="M150 55H186" markerEnd="url(#if-arrow)" />
+  <path className="if-a" d="M330 55H366" markerEnd="url(#if-arrow)" />
+  <path className="if-a" d="M510 55H546" markerEnd="url(#if-arrow)" />
+  <path className="if-a" d="M690 55H726" markerEnd="url(#if-arrow)" />
+  <rect className="if-key" x="10" y="140" width="860" height="56" rx="10" />
+  <text className="if-t" x="440" y="166" textAnchor="middle">Evidence ledger</text>
+  <text className="if-s" x="440" y="185" textAnchor="middle">ev_0001, ev_0002, … one entry per tool call, sealed when the run is stored</text>
+  <path className="if-a" d="M80 90V136" markerEnd="url(#if-arrow)" />
+  <path className="if-a" d="M260 90V136" markerEnd="url(#if-arrow)" />
+  <path className="if-a" d="M440 90V136" markerEnd="url(#if-arrow)" />
+  <path className="if-a" d="M620 90V136" markerEnd="url(#if-arrow)" />
+  <path className="if-d" d="M800 136V94" markerEnd="url(#if-arrow)" />
+  <text className="if-s" x="808" y="120">cites</text>
+</svg>
+</div>
 
-![Malspark runtime components](/assets/architecture.svg)
+The pipeline is described step by step in [Pipeline](/docs/concepts/pipeline/).
 
-The components, the job lifecycle and every stage are described in
-[Architecture](/docs/architecture/).
+## Why it is built this way
 
-## A quick example
+- **The agent decides; the code checks.** Nothing rewrites a claim, a
+  technique id or a confidence behind an agent's back. When a claim breaks a
+  rule, the code tells the agent why, with a [validation
+  code](/docs/concepts/validation/), and the agent gets a turn to fix it. What
+  it will not fix stays on the record.
+- **Evidence or it did not happen.** A claim that cites no ledger entry, or an
+  entry that does not hold what the claim says, is flagged. A reader can open
+  every citation and see the call, its arguments and its answer.
+- **Any tool, any model.** Teams, tools, models and sandboxes are
+  configuration. An MCP server Malspark has never seen is used at full
+  strength. See [Bring your own tools](/docs/tools/).
+- **Any format.** The sample's own bytes decide its route: PE, ELF, Mach-O,
+  APK, DEX, documents, scripts, archives. A format nothing recognises still
+  gets an analysis, and the report says so.
 
-Upload a sample and start an analysis with the `default` team.
+## What you get
 
-<Tabs items={["Console", "REST API", "CLI, without Docker"]}>
+| Output | Where |
+| :-- | :-- |
+| The report, as Markdown, HTML and PDF | The console, or `GET /api/v1/reports/{report_id}/markdown` |
+| A STIX 2.1 bundle | `GET /api/v1/reports/{report_id}/stix` |
+| An ATT&CK Navigator layer | `GET /api/v1/reports/{report_id}/attack-layer` |
+| An IOC feed with a publish decision on every row | `GET /api/v1/reports/{report_id}/iocs` |
+| Detection drafts: YARA, Suricata, Sigma | In the report's Detection section |
+| The evidence bundle and the sealed ledger | `GET /api/v1/reports/{report_id}/evidence-bundle.html` |
 
-<Tab value="Console">
+See [Reports and exports](/docs/usage/reports-and-exports/).
 
-<Steps>
+## How well it works
 
-<Step>
-
-Open the console at `http://localhost:3000` and sign in.
-
-</Step>
-
-<Step>
-
-Upload the sample and start an analysis.
-
-</Step>
-
-<Step>
-
-Watch the **CONVERSATION** tab: every agent's messages, its tool calls
-and the verdict, with each stage filling in on the analysis header.
-
-</Step>
-
-<Step>
-
-Read the report from the evidence up: every section carries the ledger
-ids it was built from, and each opens that call on the **EVIDENCE** tab.
-
-</Step>
-
-</Steps>
-
-</Tab>
-
-<Tab value="REST API">
-
-```bash
-TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"you@example.com","password":"..."}' | python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
-
-curl -X POST http://localhost:8000/api/v1/samples/upload \
-  -H "Authorization: Bearer $TOKEN" -F 'file=@sample.exe'
-
-curl -X POST http://localhost:8000/api/v1/jobs \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"sample_id":"<id from the upload>"}'
-```
-
-</Tab>
-
-<Tab value="CLI, without Docker">
-
-```bash
-uv run maljan analyze sample_1 --mock --name test.exe
-```
-
-The standalone CLI runs the pipeline without the API, the worker or any of
-the backing services, and reads the process environment rather than the
-settings store.
-
-</Tab>
-
-</Tabs>
+The latest benchmark run analysed a Latrodectus sample with a hosted model. It
+recovered 56 of 57 facts from public human reports, got none wrong, and stated
+58 verified facts those reports do not hold. See [Benchmark](/docs/benchmark/).
 
 <Callout type="warn" title="Analyse malware only in isolated, authorised environments">
 
 Malspark handles live malware. Run it, and any sandbox it submits to, only on
-hosts and networks you are authorised to use for that purpose, isolated
-from production systems and data. A sandbox detonates the sample; the mock
-sandbox, the default, executes nothing. Uploading a sample to an external
-service such as VirusTotal publishes it; that tool ships unticked. See
+hosts and networks you are authorised to use for that purpose, isolated from
+production systems and data. A sandbox detonates the sample; the mock sandbox,
+the default, executes nothing. Uploading a sample to an external service such
+as VirusTotal publishes it; that tool ships switched off. See
 [Security](/docs/security/#handling-samples).
 
 </Callout>
 
-## All documents
+## Where to go next
 
-Each document is written against the code in this repository: the bootstrap
-contract in `apps/api/app/bootstrap.py`, the settings catalog in
-`src/maljan/core/`, the routers under `apps/api/app/api/v1/` and the compose
-stack in `docker/`.
-
-| Document | What it covers |
+| If you want to | Read |
 | :-- | :-- |
-| [Quick start](/docs/getting-started/) | Prerequisites, the two configuration files, starting the stack, first login and first analysis. |
-| [Console](/docs/console/) | The navigation tree, the analysis tabs, the Conversation view and how the console follows a run. |
-| [Running an analysis](/docs/usage/running-an-analysis/) | Samples, jobs, the per-job overrides, the sandbox choice and following a run. |
-| [Teams and profiles](/docs/usage/teams/) | The teams that ship, stages and conditions, the measurement baseline, writing a team of your own. |
-| [Reports and exports](/docs/usage/reports-and-exports/) | The report, its renderings, STIX, the IOC feed, detection drafts and comparing two runs. |
-| [LLM providers](/docs/providers/) | The four provider backends, per-agent models and fallbacks, and a page per provider. |
-| [Tools](/docs/tools/) | Static providers, sandboxes, VirusTotal, the built-in sidecars and generic MCP servers. |
-| [REST API](/docs/api/) | Router groups, the evidence endpoint, the run-summary fields, the stage events on the WebSocket, authentication and pagination. |
-| [MCP servers](/docs/integrations/mcp-servers/) | Transports, remote sample delivery, and the conventions that make a tool server a good citizen of a run. |
-| [CI](/docs/integrations/ci/) | Driving Malspark from a pipeline with an API key. |
-| [Configuration](/docs/configuration/) | The bootstrap environment contract, Settings → Configuration, the setup guides, connection probes, JSON export and import, secret storage. |
-| [Architecture](/docs/architecture/) | Components, the request and job lifecycle, teams as stages, agents and their tools, the evidence ledger, validation loops and report assembly. |
-| [Security](/docs/security/) | Authentication, roles, API keys, secret encryption, what an export leaves out, CORS and cookie flags, vulnerability reporting. |
-| [Deployment](/docs/deployment/) | Compose services and healthchecks, required secrets, health endpoints, Kubernetes and systemd notes, upgrades and migrations. |
-| [Operations](/docs/operations/) | Logs, what a run's metrics mean, staged samples, the audit trail, rate limits, backups and a troubleshooting table. |
-| [Development](/docs/development/) | Repository layout, `make` targets, the test suites, CI jobs and the branch workflow. |
-| [Benchmark](/docs/benchmark/) | The benchmark: samples, models, the scoring key, results across iterations and against a human report, the findings beyond it, the false-positive control and limitations. |
-
-Images used by these documents and by the top-level
-[README.md](https://github.com/Root0ne/Maljan/blob/dev/README.md) live in
-[apps/docs/public/assets/](https://github.com/Root0ne/Maljan/tree/dev/apps/docs/public/assets).
-
-## Historical design record
-
-The specs, plans and superpowers notes that once lived under `docs/specs/`,
-`docs/plans/` and `docs/superpowers/` are no longer carried in the working
-tree; read them with `git log -- docs/plans docs/specs docs/superpowers`.
+| Run Malspark for the first time | [Quick start](/docs/getting-started/) |
+| Understand how a run works | [Pipeline](/docs/concepts/pipeline/), [Debate and judge](/docs/concepts/debate-and-judge/) |
+| Submit samples and read reports | [Running an analysis](/docs/usage/running-an-analysis/), [Reports and exports](/docs/usage/reports-and-exports/) |
+| Add a tool, a model or a sandbox | [Bring your own tools](/docs/tools/), [LLM providers](/docs/providers/), [Sandboxes](/docs/tools/sandboxes/) |
+| Look up a setting, an endpoint or a code | [Configuration](/docs/configuration/), [REST API](/docs/api/), [Validation codes](/docs/validation-codes/) |
+| Run it in production | [Deployment](/docs/deployment/), [Upgrades](/docs/upgrades/), [Backups](/docs/backups/), [Monitoring](/docs/monitoring/) |
+| Contribute | [Development](/docs/development/) |

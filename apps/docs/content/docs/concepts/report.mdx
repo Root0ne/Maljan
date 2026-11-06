@@ -1,0 +1,100 @@
+---
+title: "Report"
+description: "What the report contains, how its citations lead back to the ledger, and what the code checks before it is stored."
+---
+
+The report is written by the reporter agent from the claims in force, the
+judge's verdict and the ledger. It reads like a professional malware report.
+The difference is that every statement in it can be traced to the tool call
+that proves it.
+
+## Sections
+
+| Section | What it holds |
+| :-- | :-- |
+| 1. Executive summary | The key findings, each with its citation, and the verdict. |
+| 2. Introduction and scope | What was analysed, with which tools, and what was not available. |
+| 3. Sample metadata | Hashes, file type, size, signature, sections, imports. |
+| 4. Execution flow | What the sample does, step by step. |
+| 5. Functionality | Obfuscation and anti-analysis, API resolution, persistence, discovery, payloads. |
+| 6. Command and control | Protocol, endpoints, configuration, commands. |
+| 7. Conclusion | What the evidence supports, and how firmly. |
+| 8. Detection | Indicators, detection rule drafts, hunting guidance. |
+| 9. Recommendations | What a defender should do. |
+| 10. MITRE ATT&CK mapping | Each published technique with its evidence, and the techniques the judge dropped, with why. |
+| 11. Limitations | What the run could not establish, and why. |
+| Appendix | The detection rules in full, analyst statements that add detail, references. |
+
+Where no sandbox ran, the report says so in one sentence instead of printing
+empty tables.
+
+## An excerpt
+
+From the report of an earlier run of the [benchmark](/docs/benchmark/) sample. Live indicators are
+defanged by the report itself.
+
+> **Verdict:** Malware (high confidence) · **Severity:** High · **Family:**
+> Latrodectus (moderate confidence)[[1]](#an-excerpt) · **Category:** loader /
+> C2-driven backdoor (download-and-execute)
+>
+> **1. Executive summary**
+>
+> - The sample is a C2-driven loader whose code builds a counter-coded POST
+>   beacon, RC4-encrypts and base64-encodes it, and sends it through WinINet to
+>   the decoded base URLs hxxps://titnovacrion[.]top/live/ and
+>   hxxps://skinnyjeanso[.]com/live/; this is read from code and no POST was
+>   observed.[[2]](#an-excerpt)
+> - In the sandbox run the sample was launched as a DLL through rundll32 with
+>   ordinal #1 in two processes, and no C2 contact was observed in the
+>   capture.[[6]](#an-excerpt)
+>
+> **6.1 Protocol and endpoints**
+>
+> Routine 0xae78 decodes two base URLs from the file:
+> hxxps://titnovacrion[.]top/live/ and
+> hxxps://skinnyjeanso[.]com/live/[[46]](#an-excerpt). Function 0x6988 copies
+> both into a URL list[[64]](#an-excerpt).
+
+Each bracketed number is a note in the evidence bundle. Each note lists the
+ledger entries it rests on:
+
+| Note | Entries | What they are |
+| :-- | :-- | :-- |
+| [1] | `ev_0014`, `ev_0018` | The sandbox's signatures; the VirusTotal report |
+| [2] | `ev_0019`, `ev_0020`, `ev_0021`, `ev_0023` | FLOSS; API hash resolution; decoded string blobs; crypto constants |
+| [6] | `ev_0012`, `ev_0017`, `ev_0028` | The sandbox's processes; the capture summary; the links from behaviour to code |
+| [46] | `ev_0019`, `ev_0021` | FLOSS; the decoded string blobs |
+| [64] | `ev_0094`, `ev_0025` | The reverser's decompile of `0x6988`; the function index |
+
+Note how the report keeps two kinds of fact apart: what was *read from code*
+and what was *observed* in the sandbox. Every statement says which it is.
+
+## What the code checks
+
+The reporter writes; the code checks. Before the report is stored:
+
+- every citation must name an entry that exists and holds the value the
+  sentence states;
+- the closing sections, the Conclusion and the Limitations, are held against
+  the body and the ledger, so a "not established" sentence cannot contradict a
+  section that establishes the fact;
+- an absence sentence ("no file was written") is held against the ledger;
+- an indicator is published only with a reason, and the reason is printed
+  beside it in the IOC feed and the detection drafts.
+
+A failed check goes back to the reporter with a [validation
+code](/docs/concepts/validation/) and one turn to fix it. A problem it does not
+fix stays visible in the run summary.
+
+## The evidence bundle
+
+Beside the report sits the evidence bundle, as HTML and JSON
+(`malspark-evidence-bundle/1`). It prints every section as the report does,
+every note with its entries, and an index of every ledger entry: agent, tool,
+source and outcome. A reader with only the bundle can check every citation.
+
+## Formats
+
+The same report is served as Markdown, HTML, PDF, the full JSON document,
+STIX 2.1, an ATT&CK Navigator layer, an IOC feed and detection drafts. See
+[Reports and exports](/docs/usage/reports-and-exports/).

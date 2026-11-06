@@ -1,0 +1,80 @@
+---
+title: "Backups"
+description: "What carries state that cannot be rebuilt, how to back it up, and how to restore it."
+---
+
+Two things carry state that cannot be rebuilt: the Postgres volume (`pgdata`)
+and the MinIO volume (`minio_data`). The Qdrant volume holds long-term memory,
+which is derived from past analyses; the ATT&CK cache volume is purely derived.
+
+```bash
+cd docker
+docker compose exec -T postgres pg_dump -U malspark malspark > malspark-$(date +%F).sql
+```
+
+Back up MinIO by copying the bucket out with any S3 client, or by snapshotting
+the `minio_data` volume while the stack is down.
+
+A database dump is not enough on its own: every secret in the settings store is
+encrypted with `SETTINGS_ENCRYPTION_KEY`, which is not in the dump. Store the
+key with the backup, or the restored instance comes up with every credential
+unreadable. A JSON export (see [Export and import](/docs/configuration/#export-and-import)) is a
+useful complement — it is safe to keep next to the dump precisely because it
+carries no credentials.
+
+## What to keep
+
+| What | Where | Rebuildable |
+| :-- | :-- | :-- |
+| Jobs, reports, the sealed ledger, settings, users, the audit chain | Postgres, volume `pgdata` | No |
+| Samples and uploaded sandbox reports | MinIO, volume `minio_data` | No |
+| `SETTINGS_ENCRYPTION_KEY`, `JWT_SECRET_KEY` and the rest of `docker/.env` | Your secret store | No |
+| Long-term memory of past cases | Qdrant, volume `qdrant_data` | Only by rerunning the analyses |
+| The ATT&CK cache | Volume `attck_cache` | Yes, fetched again |
+| Ghidra projects | Volume `ghidra_projects` | Yes, analysed again |
+
+## Restoring
+
+<Steps>
+
+<Step>
+
+Start Postgres alone, with the same `POSTGRES_PASSWORD` the dump's instance
+used:
+
+```bash
+cd docker && docker compose up -d postgres
+```
+
+</Step>
+
+<Step>
+
+Load the dump:
+
+```bash
+docker compose exec -T postgres psql -U malspark -d malspark < malspark-2026-11-06.sql
+```
+
+</Step>
+
+<Step>
+
+Put the MinIO objects back, and the same `SETTINGS_ENCRYPTION_KEY` in
+`docker/.env`.
+
+</Step>
+
+<Step>
+
+Start the stack with `make docker-up`. The `migrate` service brings an older
+dump up to the current schema.
+
+</Step>
+
+</Steps>
+
+After a restore, check a stored report's ledger seal with
+`GET /api/v1/jobs/{job_id}/evidence/verify`. If you keep the audit chain's
+anchor outside the database (`AUDIT_ANCHOR`), back the anchor up with the
+dump; see [The bootstrap contract](/docs/configuration/#the-bootstrap-contract).

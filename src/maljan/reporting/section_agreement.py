@@ -243,47 +243,46 @@ REWRITTEN_CODE = "agreement.rewritten"
 # as written: the model's answer, recorded where a reader finds it.
 LISTED_CODE = "agreement.listed"
 # A rewrite of a limitations sentence that still says a call failed, or a
-# reading could not be made, where a later call redid it (T-526).
+# reading could not be made, where a later call redid it.
 FAILURE_REDONE_CODE = "agreement.failure_redone"
 # A sentence of the conclusion or the limitations paragraph listed as saying
 # otherwise than a section 5 passage, a fact or a closed debate line, whose
 # rewrite passed no check: left out of the section, which only sums up what
-# sections 4 to 6 state, and recorded here with what stood (T-554); one the answer
+# sections 4 to 6 state, and recorded here with what stood; one the answer
 # leaves out with its reason, keeps while the ledger says otherwise (a failed call a
 # later call redid), or keeps on no source or a quote the checks refused, the same
-# way, with the refused keep's sources, quote or reason (T-568).
+# way, with the refused keep's sources, quote or reason.
 DROPPED_CODE = "agreement.dropped"
-# A held sentence (any sentence of the conclusion or the limitations, T-568; one
+# A held sentence (any sentence of the conclusion or the limitations; one
 # calling open an address or a value a section 5 passage or a fact states) that no
-# row of the answer lists: the model decides each one, and is asked once more
-# (T-554).
+# row of the answer lists: the model decides each one, and is asked once more.
 HELD_UNLISTED_CODE = "agreement.held_unlisted"
 # A held sentence whose own clause calls code not read that an entry lists,
 # left standing by the answer (no row, a kept row, or a rewrite that failed):
 # the platform adds what the ledger shows to it, in the facts' own words, and
-# records what stood (T-562). Never left out, never left as written. Also a
+# records what stood. Never left out, never left as written. Also a
 # section 5 denial a decoded value's fact contradicts whose rewrite in the model's
-# words passed no check: the fact's clause is added, and what stood recorded (T-568).
+# words passed no check: the fact's clause is added, and what stood recorded.
 QUALIFIED_CODE = "agreement.qualified"
 # A sentence of the conclusion or the limitations that the answer kept on no
 # source with its reason, or on a source a check refused: it stands, and is
 # recorded where a reader finds it. One kept on a source whose quote passed every
-# check is counted, not recorded (T-568).
+# check is counted, not recorded.
 HELD_KEPT_CODE = "agreement.held_kept"
 # A held sentence whose own clause calls code not read that an entry lists,
 # which the answer left standing or rewrote still calling it not read: the
-# retry names the listing, so the model may state it in its own words (T-562).
+# retry names the listing, so the model may state it in its own words.
 UNREAD_STANDING_CODE = "agreement.unread_standing"
 # A rewrite resting on a fact that states again the absence of the sentence the
-# fact contradicts, the same words on the same addresses (T-568).
+# fact contradicts, the same words on the same addresses.
 ABSENCE_KEPT_CODE = "agreement.absence_kept"
 # A kept closing sentence whose row quotes no words of a source it names that state
 # the same (two or more of its own words, an absence on words stating one), or that
-# names no source while a shown one speaks of it (T-568). Still so after the retry,
+# names no source while a shown one speaks of it. Still so after the retry,
 # the sentence is left out and recorded (``DROPPED_CODE``).
 KEEP_UNQUOTED_CODE = "agreement.keep_unquoted"
-# A sentence, or a rewrite, giving failed calls a number the ledger's count does
-# not (T-568).
+# A sentence, or a rewrite, giving failed calls a number the ledger's count
+# does not.
 FAILURE_COUNT_CODE = "agreement.failure_count"
 # What every retry turn of the round asks besides the fix: the whole answer.
 _EVERY_ROW = " Answer with every row again, this one included."

@@ -1,0 +1,68 @@
+---
+title: "Monitoring"
+description: "Health checks, logs, the system status, and the run metrics to read before a verdict."
+---
+
+## Health checks
+
+`GET /health` and `GET /healthz` are the same endpoint under two paths, so both
+a bare and a Kubernetes-style liveness probe work without extra configuration.
+
+- Without parameters it performs no I/O: it returns `status`, the service name
+  and version, and a `config` block reporting `bootstrap` and `encryption`,
+  both of which the process already satisfied before it could serve anything.
+  A liveness probe must not restart the API because Postgres blinked.
+- `GET /health?deep=true` probes Postgres, Redis, MinIO and the configured
+  long-term-memory backend (`components.memory`, which names the backend it
+  probed) concurrently, each with a three-second budget, and reports every
+  result as data. An in-process backend answers without I/O; a backend id no
+  registered builder knows is reported with `ok: null` and `detail: "not
+  configured"`, never as a failure, and one whose package failed to load with
+  `ok: false`, `detail: "unavailable"` and the reason in `error`. `status` becomes `degraded` when Postgres
+  or Redis is unreachable and `degraded_optional` when only MinIO or the memory
+  store is, so use the deep form for readiness and the bare form for liveness.
+
+Operational detail — throttle state and dropped audit rows — lives on
+`GET /api/v1/system/status`, where those fields are returned to admin callers
+only; the health endpoint publishes only the public readiness bit.
+
+## Logs
+
+The API and the worker log through `apps/api/app/logging_config.py`. Production
+output is one JSON object per line — timestamp, level, logger, message,
+correlation id, module, function and line, plus the extra fields the request
+middleware attaches (`method`, `url`, `status_code`, `duration_ms`,
+`client_ip`, `user_id`) and a structured `exception` block when one is
+attached. A human-readable coloured format is used in debug mode.
+
+Every request carries a correlation id: the middleware reuses an inbound
+`X-Request-ID` or generates one, puts it in every log line for that request and
+echoes it back in the `X-Request-ID` response header.
+
+`SQL_ECHO` adds every SQL statement; it is deliberately
+independent of `DEBUG`, because turning it on drowns pipeline stages in
+duplicated queries.
+
+```bash
+make dev-logs                                   # the whole dev stack
+cd docker && docker compose logs -f backend-worker
+```
+
+## What a run's metrics mean
+
+Every finished report carries a `run_summary`, and six of its keys are about
+the run rather than the sample. They are the numbers to read before the
+verdict, because each of them says how much the verdict is standing on.
+
+| Metric | Healthy | What a bad number means, and what to do |
+| :-- | :-- | :-- |
+| `validation.retries` | A handful | Every retry is one extra model round trip. A run spending dozens of them is a model that keeps answering in the wrong shape; check `by_code` for which rule it keeps breaking, and the agent's prompt or its model choice. |
+| `validation.unresolved` | Empty | A producer was told what was wrong, got its turn, and did not fix it. The finding is on the record with the agent that owns it; identical rows (same agent, code, message and flags) are listed once with `count`, and the evidence bundle prints them once as "left N times"; the headline counts, the run summary and the CLI count every finding left, as does `validation.by_code`. A recurring code from one agent is a prompt problem; a recurring `technique_id` code across agents usually means the ATT&CK cache is stale. |
+| `sections_without_evidence` | `0` | A report section that can name neither a ledger entry nor the finding it came from. Nothing in the console can resolve it, so a reader has no way to check it. Not an operator setting — it is a defect in whichever builder produced the section. |
+| `evidence.failed` | Low | Tool calls that raised. A few are normal (a parser that cannot open a container); a large share against one server means that server is misconfigured or down, and the analysts spent the run guessing. |
+| `evidence.trimmed` | `0` | Entries whose output was dropped to keep an agent inside `report.evidence_budget_bytes`. The call and its result still stand and are still citable; the text is gone. Persistent trimming means the budget is too small for the tools this deployment runs, or one tool is answering with a log file. |
+| `stages` | Every stage `ran` | A stage that declined records the condition that turned it off. A team where the same stage always declines is a condition that does not match the samples this deployment sees, not a broken run. |
+
+`fp_warnings` is the post-run linter and changes nothing: C6 flags a section or
+a TTP row with nothing citable behind it, C7 a technique id the validation loop
+could not get resolved.

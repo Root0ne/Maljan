@@ -9,43 +9,56 @@ expected to follow.
 ## Repository layout
 
 ```
-Maljan/
+Malspark/
 ├── apps/
-│   ├── api/           FastAPI app, arq worker, Alembic migrations ("maljan-api")
+│   ├── api/           FastAPI app, arq worker, Alembic migrations ("malspark-api")
 │   ├── docs/          these documentation pages: content/docs/, images under
 │   │                  public/assets/, and the content check (npm run check)
 │   └── web/           Next.js console, Playwright specs under e2e/
-├── src/maljan/        the core package: agents, pipeline, analysis layers,
+├── src/malspark/        the core package: agents, pipeline, analysis layers,
 │                      providers, memory, reporting, core (config, container)
-├── services/          stdio MCP sidecars, one server.py each
+├── services/          the tool servers, one directory each: the analysis,
+│                      knowledge, network and threat-intel servers, and the
+│                      sidecars that wrap one program (cli-sidecar is their
+│                      shared runner)
 ├── scripts/
+│   ├── audit/         the surfaces check: what each report surface says
+│   ├── benchmark/     the known-answer gate over scored runs
+│   ├── blind/         blind A/B scoring
+│   ├── calibration/   the calibration set and its scorer
+│   ├── changelog/     folds changelog.d/ fragments into CHANGELOG.md
 │   ├── ci/            the uv.lock dependency-graph submission the workflow runs
 │   ├── dev/           fetch_external.sh, the Ghidra image manager and
 │   │                  run_capped.py, the capped scope for heavy local runs
 │   ├── goldens/       capture scripts that write tests/fixtures/golden/, plus
 │   │                  render_team_graphs.py, which draws the team-*.svg diagrams
-│   └── knowledge/     builders for the data/ assets
+│   ├── knowledge/     builders for the data/ assets
+│   ├── ledger/        verifies a stored run's sealed ledger
+│   ├── package/       builds and verifies a job package
+│   ├── rehearsal/     the rehearsal before a paid run
+│   ├── replay/        replays a stored run's rules with no model call
+│   └── validation_codes/  generates the validation-code register page
 ├── tests/             unit/ api/ integration/ fixtures/
 ├── data/              tracked knowledge assets, loaded lazily, each with a fallback
 ├── docker/            Dockerfiles, the compose stack and its dev overlay
-├── docs/              examples/: the importable all-tools team document
+├── docs/              examples/: the importable all-tools team and a tool
+│                      declaration, served under /examples/
 ├── Makefile           every gate and every generator
-└── pyproject.toml uv.lock   one uv workspace: maljan plus apps/api
+└── pyproject.toml uv.lock   one uv workspace: malspark plus apps/api
 ```
 
 The repository is one uv workspace with one lockfile. `uv sync --all-extras
---all-packages` installs both Python packages, so `import maljan` and
+--all-packages` installs both Python packages, so `import malspark` and
 `import app` work from any directory without `PYTHONPATH`, in the venv, in the
 backend image and in CI alike.
 
 Route-local React components stay in their route folder; a component two routes
-use moves to `apps/web/src/components/`. `tests/unit/` mirrors `src/maljan`,
+use moves to `apps/web/src/components/`. `tests/unit/` mirrors `src/malspark`,
 one subdirectory per subpackage, and is where a new test starts.
 
 Host-specific helpers (a launcher for a local llama-server, a memory guard, a
 restart wrapper for long evaluations) live outside the repository. For the
-record, the local model server the measurements in this repository were taken
-with ran `ik_llama.cpp` as
+record, the project's local model server runs `ik_llama.cpp` as
 `llama-server -m Qwen3.6-35B-A3B-IQ3_K_R4.gguf -c 131072 -t 16 -fa on -ctk q8_0 -ctv q8_0 -ngl 999 -ot 'blk\.([1-3][0-9])\.ffn_(up|gate|down)_exps=CPU' --context-shift on --jinja`
 on loopback port 8080.
 
@@ -80,7 +93,7 @@ on loopback port 8080.
   (`tests/fixtures/sandbox/cape2_synthetic.json`) whose registry calls and
   network rows CI compares. A case whose source is absent is skipped, and the
   session ends with the number of such skips (on GitHub Actions also a warning
-  annotation and a line in the job summary). `MALJAN_TEST_NO_CAPE_REPORTS=1`
+  annotation and a line in the job summary). `MALSPARK_TEST_NO_CAPE_REPORTS=1`
   takes that path on a machine that has the reports. A golden whose text
   passes 5 MB is written as `<name>.json.gz` and read back decompressed. The
   same script writes the two prompt fixtures under `tests/fixtures/prompts/`,
@@ -103,8 +116,12 @@ on loopback port 8080.
   two refs. Run it before and after a change to a check, the report builder or
   a publish rule; see [Replaying a stored run](/docs/replay/).
 
-The evaluation harness behind the earlier measurements is no longer part of
-this tree; the [benchmark](/docs/benchmark/) holds the current results.
+- **Evaluation** — `scripts/benchmark/` reads scored runs back and holds a
+  change to them ([Known-answer gate](/docs/known-answer-gate/));
+  `scripts/blind/` hides which run is which while scoring ([Blind A/B
+  scoring](/docs/blind-scoring/)); `scripts/calibration/` scores stored runs
+  against a calibration set ([Calibration set](/docs/calibration/)). The
+  latest scored run is on [Benchmark](/docs/benchmark/).
 
 ### Heavy local runs in a capped scope
 
@@ -124,7 +141,7 @@ whose unit name it prints, under a hard memory cap (`--memory`, default
 `12G`, refused at or above the host's memory), no swap (`MemorySwapMax=0`), a
 task ceiling (`--tasks`, default 4096) and a CPU quota (`--cpu`, a percentage,
 default three quarters of the host's CPUs). `--unit` names the scope (default
-`maljan-capped-<pid>-<time>`); it must not name a unit that is already loaded,
+`malspark-capped-<pid>-<time>`); it must not name a unit that is already loaded,
 and such a name is refused rather than shared.
 
 A watcher polls the scope, and acts only once it has seen the command's own
@@ -163,7 +180,7 @@ differs. Each of the platform's own processes therefore sets `LC_CTYPE`, and
 nothing else, to `C.UTF-8` (or `C.utf8`) when it starts, before any thread or
 the YARA engine loads, and keeps it only when the C library then folds `I` to
 `i` (`core.ctype_locale.pin_character_classification`). This covers the analysis
-worker, the `maljan` CLI, `scripts/validation/run.py`, `scripts/rehearsal/run.py`
+worker, the `malspark` CLI, `scripts/validation/run.py`, `scripts/rehearsal/run.py`
 and the analysis and network sidecars, whose line goes to standard error
 because standard output is their protocol. The test session pins the same way
 in `tests/conftest.py`, and a test that changes the locale itself runs in a
@@ -185,7 +202,7 @@ separately on Cloudflare Pages: production reads these three directories from
 other as `/docs/<page>/`. The sidebar's order and groups are
 `content/docs/meta.json`.
 
-[`.github/workflows/docs.yml`](https://github.com/Root0ne/Maljan/blob/dev/.github/workflows/docs.yml)
+[`.github/workflows/docs.yml`](https://github.com/Root0ne/Malspark/blob/dev/.github/workflows/docs.yml)
 checks the content on every pull request that touches it; run the same check
 from `apps/docs` with `npm ci` and `npm run check`. It fails if a page does not
 compile as MDX, its frontmatter has no title or a field of the wrong type, or it
@@ -196,9 +213,10 @@ not parse or lists a page that is not there; if a link to `/docs/...`,
 relative, outside those three, or points at the old GitHub Pages address; and
 if an address the old site served (`scripts/old-addresses.mjs`) no longer
 leads to a page. On `main` the workflow also publishes a redirect site to
-GitHub Pages, so the old address `https://root0ne.github.io/Maljan/<page>/`
-leads to the same page under `https://malspark.com/docs/`, and a page that
-moved, such as `/paper/`, to the page that holds its text now.
+GitHub Pages, so every address of the old GitHub Pages site leads to the same
+page under `https://malspark.com/docs/`, and a page that moved, such as
+`/paper/` or a retired benchmark score page, to the page that holds its text
+now.
 
 [Validation codes](/docs/validation-codes/) is generated, not written. Run
 `uv run python scripts/validation_codes/run.py` and commit the page after any of
@@ -222,7 +240,7 @@ nothing raises a code, and when no test names one.
 
 ## Continuous integration
 
-[`.github/workflows/ci.yml`](https://github.com/Root0ne/Maljan/blob/dev/.github/workflows/ci.yml)
+[`.github/workflows/ci.yml`](https://github.com/Root0ne/Malspark/blob/dev/.github/workflows/ci.yml)
 runs on pushes to
 `main` and `dev` and on pull requests into `main`, `dev` or `feat/**`:
 
@@ -233,9 +251,10 @@ runs on pushes to
 | `test` | `pytest tests/ -q --tb=short` on Python 3.13. |
 | `test-qdrant` | `tests/unit/test_qdrant_store.py` against a live Qdrant service container. |
 | `frontend` | `tsc --noEmit`, eslint, vitest and a production `next build`. |
+| `npm-audit` | `npm audit` over the console's shipped packages; high or critical fails. Not a required check, so an advisory published overnight does not block an unrelated merge. |
 | `e2e` | Playwright, through the same `npm run test:e2e` entry point developers use. |
 
-Three more workflows run beside CI. **CodeQL** analyses Python, TypeScript and
+More workflows run beside CI. **Docs** checks these pages on every pull request that touches them (see *Documentation site* above). **CodeQL** analyses Python, TypeScript and
 the workflow files themselves on every push and pull request to `main` and
 `dev`, with the `security-extended` query suite, and weekly. **Dependency
 review** blocks a pull request that introduces a dependency with a known high
@@ -250,7 +269,7 @@ current. A **dependency submission** workflow posts the packages resolved in
 Python alerts follow the lockfile the way the console's follow
 `package-lock.json`. Secret scanning with push protection is on for the repository, and
 vulnerabilities are reported through private vulnerability reporting (see
-[SECURITY.md](https://github.com/Root0ne/Maljan/blob/dev/SECURITY.md)).
+[SECURITY.md](https://github.com/Root0ne/Malspark/blob/dev/SECURITY.md)).
 
 ## Conventions
 
@@ -262,7 +281,7 @@ vulnerabilities are reported through private vulnerability reporting (see
 - A comment explains why the code is the way it is. Process tags — dated audit
   identifiers, ticket numbers, "new in phase B" — do not belong in the tree;
   the reasoning stays, the bookkeeping goes.
-- New settings need an entry in `src/maljan/core/settings_annotations.py`, or
+- New settings need an entry in `src/malspark/core/settings_annotations.py`, or
   they appear in the console under their dotted path with no description.
 - A removal is not done until `grep` shows zero remaining references across
   `src apps tests scripts docs` and the affected tests are updated.

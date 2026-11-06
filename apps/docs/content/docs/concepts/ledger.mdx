@@ -1,0 +1,123 @@
+---
+title: "Evidence ledger"
+description: "Every tool call a run makes is written down with a citable id, and every claim in the report points back to one."
+---
+
+The evidence ledger is the record of every tool call a run made. Each entry
+has an id such as `ev_0094`. Agents cite these ids in their claims, the judge
+cites them in the verdict, and the report cites them in every section. A
+reader can open any citation and see exactly what the tool was asked and what
+it answered.
+
+## How an entry is made
+
+The tool loop wraps every tool. When an agent calls one, the loop times the
+call, records the arguments and the answer, and hands the answer back to the
+model with the entry's id on the front:
+
+```
+[ev_0094]
+{"0x1360bc0b344": "int FUN_1360bc0b344(undefined8 *param_1) { ... }", ...}
+```
+
+The model sees the id with the answer, so it can cite it. The entry holds the
+answer whole, exactly as the model received it.
+
+Ids count up across the whole run. The triage pack's calls come first, under
+the agent `pipeline`. The judge's own calls and one agent's question to
+another go through the same recorder, so a verdict that leans on them can cite
+them too.
+
+## What an entry holds
+
+This is `ev_0094` from an earlier run of the [benchmark](/docs/benchmark/) sample, as
+`GET /api/v1/jobs/{job_id}/evidence` returns it, shortened:
+
+```json
+{
+  "entry_id": "ev_0094",
+  "stage": "reversing",
+  "agent": "all_tools_reverser_ghidra",
+  "tool": "batch_decompile",
+  "source": "provider:ghidra",
+  "model": "anthropic/claude-haiku-5-5",
+  "ok": true,
+  "duration_ms": 1394,
+  "args": {"functions": "0x1360bc0b344,0x1360bc0b154,0x1360bc03a24,..."},
+  "output": "{\"0x1360bc0b344\": \"int FUN_1360bc0b344(...) ...\"}",
+  "truncated": false,
+  "repeated_of": null,
+  "facts": {"kind": "decompile_batch", "effects": {"executes": "no", "network": false, "third_party": "no"}},
+  "digest": "86a40391…",
+  "chain": "74157505…"
+}
+```
+
+| Field | Meaning |
+| :-- | :-- |
+| `entry_id` | The id a claim cites. |
+| `stage`, `agent` | Who made the call, and in which stage. |
+| `tool`, `server`, `source` | Which tool answered, and how it was reached: a tool server, a static provider, the pack. |
+| `model` | The model whose turn asked for the call. An agent can fall back to another model mid-run, so this is recorded per call. |
+| `ok`, `error`, `remediation` | Whether the call succeeded. A failed call is still an entry, with the error and what would fix it. |
+| `truncated` | Set when a per-agent byte budget dropped the output. The call is kept and counted. |
+| `repeated_of` | Set when the same call was made again and answered from the earlier entry. |
+| `facts` | What the platform knows about the tool: the kind of answer, and whether it executes the sample, uses the network or reaches a third party. |
+| `digest`, `chain` | The seal. See below. |
+
+## How claims use it
+
+An analyst's claim names the entries it rests on. This is one of the triage
+agent's claims from the same run, as the stored findings hold it:
+
+```json
+{
+  "claim": "The current user is read in code and is not observed. \"/c whoami /groups\" (0xf680, xref 0x2876 in 0x2200) runs through 0x1030. The result is placed in \"&whoami_group=\" (0xf7d0). GetUserNameA is resolved in 0x8ae0 and 0x904c.",
+  "evidence_ref": "ev_0021, ev_0025, ev_0020",
+  "confidence": 0.65,
+  "technique_id": "T1033"
+}
+```
+
+`ev_0021` is the pack's decoded strings, `ev_0025` its function index and
+`ev_0020` its API hash resolution. Each value in the claim can be found in
+one of them.
+
+Code checks every citation. A claim that cites no entry, cites one that does
+not exist, or cites one whose answer does not hold the value the claim states
+is sent back to the analyst with a [validation code](/docs/concepts/validation/)
+such as `isr.ungrounded_technique` or `report.citation_wrong_entry`. The
+analyst gets a turn to fix it.
+
+The report turns citations into numbered notes. Each note lists its entries,
+and the evidence bundle beside the report prints every entry the notes name.
+
+## Sealed when stored
+
+When the run is stored, the worker seals the ledger. Each entry gets `digest`,
+a SHA-256 of everything stored for it, and `chain`, an HMAC that links it to
+the entry before. The chain head is written to the audit chain beside the
+report's own digest. A changed, removed or reordered entry, or a changed
+report, no longer verifies.
+
+```bash
+curl -s http://localhost:8000/api/v1/jobs/$JOB/evidence/verify \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+An enrichment that changes a sealed report later appends an amendment. Sealed
+rows are never rewritten. See [Sealed evidence
+ledger](/docs/operations/#sealed-evidence-ledger).
+
+## Reading the ledger
+
+| Where | What |
+| :-- | :-- |
+| The console's **Evidence → Records** | Every entry, filterable by stage, agent and tool. A citation chip in the report opens its entry. |
+| `GET /api/v1/jobs/{job_id}/evidence` | The entries, filterable by stage, agent and tool. |
+| `GET /api/v1/jobs/{job_id}/evidence/call-map` | Which call led to which. |
+| `GET /api/v1/jobs/{job_id}/evidence/verify` | Checks the seal. |
+| `GET /api/v1/reports/{report_id}/evidence-bundle.html` | The report's notes, each with the entries it cites. |
+| `GET /api/v1/jobs/{job_id}/package` | The whole run as one archive. See [Job package](/docs/operations/#job-package). |
+
+The full entry format is in [Architecture](/docs/architecture/#the-evidence-ledger).

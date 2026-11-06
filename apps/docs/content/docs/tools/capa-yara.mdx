@@ -51,10 +51,10 @@ the worker, is the isolation work that closes that, and it is not done yet.
 Its run directory is `<staging base>/job-…/capa/run-*`, in the job's own staging directory, so the
 job's teardown removes it however the run ended; a run with no job (a script,
 an analysis server started by hand) gets a private temporary directory of its
-own (`maljan-capa-*`), removed when the run ends. A run with no job whose
+own (`malspark-capa-*`), removed when the run ends. A run with no job whose
 process was killed outright leaves its directory; the next run with no job
 removes such directories of the same user once nothing in them has changed for
-the staging TTL (`MALJAN_STAGING_TTL_HOURS`, a day by default; zero keeps them). It dies with the process that
+the staging TTL (`MALSPARK_STAGING_TTL_HOURS`, a day by default; zero keeps them). It dies with the process that
 started it, whether that process is killed, exits or has its process group
 stopped.
 
@@ -97,8 +97,8 @@ that server's `env` (**Settings → Tool servers → `analysis` → `env`**):
 
 | Name | What it names | Default |
 | :-- | :-- | :-- |
-| `MALJAN_SIGMA_RULES_DIR` | Directory of Sigma rule YAML, loaded recursively. | `data/sigma_rules` |
-| `MALJAN_YARA_RULES_DIR` | The YARA rule file the scan compiles, or a directory of them (`*.yml`, `*.yaml`, read in name order and compiled as one corpus; a file that cannot be read is skipped and named in the answer's `files_not_loaded`). | `data/yara_ttp_rules.yaml` |
+| `MALSPARK_SIGMA_RULES_DIR` | Directory of Sigma rule YAML, loaded recursively. | `data/sigma_rules` |
+| `MALSPARK_YARA_RULES_DIR` | The YARA rule file the scan compiles, or a directory of them (`*.yml`, `*.yaml`, read in name order and compiled as one corpus; a file that cannot be read is skipped and named in the answer's `files_not_loaded`). | `data/yara_ttp_rules.yaml` |
 
 A corpus that loads no rule (a path that does not exist, an empty file, a
 directory holding no rule file) is a scan that did not run, never one that

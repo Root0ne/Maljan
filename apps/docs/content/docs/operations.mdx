@@ -1,60 +1,21 @@
 ---
 title: "Operations"
-description: "Logs, what a run's metrics mean, staged samples, the audit trail, rate limits, backups and a troubleshooting table."
+sidebarTitle: "Day-to-day operations"
+description: "Staged samples, the audit trail, the sealed ledger, the job package, rate limits, sample storage and a troubleshooting table."
 ---
 
-Day-to-day running of a deployed instance: what the logs say, what is recorded,
-what is throttled, where samples live, what to back up, and what the common
-failures look like.
-
-## Logs
-
-The API and the worker log through `apps/api/app/logging_config.py`. Production
-output is one JSON object per line — timestamp, level, logger, message,
-correlation id, module, function and line, plus the extra fields the request
-middleware attaches (`method`, `url`, `status_code`, `duration_ms`,
-`client_ip`, `user_id`) and a structured `exception` block when one is
-attached. A human-readable coloured format is used in debug mode.
-
-Every request carries a correlation id: the middleware reuses an inbound
-`X-Request-ID` or generates one, puts it in every log line for that request and
-echoes it back in the `X-Request-ID` response header.
-
-`SQL_ECHO` adds every SQL statement; it is deliberately
-independent of `DEBUG`, because turning it on drowns pipeline stages in
-duplicated queries.
-
-```bash
-make dev-logs                                   # the whole dev stack
-cd docker && docker compose logs -f backend-worker
-```
-
-## What a run's metrics mean
-
-Every finished report carries a `run_summary`, and five of its keys are about
-the run rather than the sample. They are the numbers to read before the
-verdict, because each of them says how much the verdict is standing on.
-
-| Metric | Healthy | What a bad number means, and what to do |
-| :-- | :-- | :-- |
-| `validation.retries` | A handful | Every retry is one extra model round trip. A run spending dozens of them is a model that keeps answering in the wrong shape; check `by_code` for which rule it keeps breaking, and the agent's prompt or its model choice. |
-| `validation.unresolved` | Empty | A producer was told what was wrong, got its turn, and did not fix it. The finding is on the record with the agent that owns it; identical rows (same agent, code, message and flags) are listed once with `count`, and section 13 prints them once as "left N times"; the headline counts, the run summary and the CLI count every finding left, as does `validation.by_code`. A recurring code from one agent is a prompt problem; a recurring `technique_id` code across agents usually means the ATT&CK cache is stale. |
-| `sections_without_evidence` | `0` | A report section that can name neither a ledger entry nor the finding it came from. Nothing in the console can resolve it, so a reader has no way to check it. Not an operator setting — it is a defect in whichever builder produced the section. |
-| `evidence.failed` | Low | Tool calls that raised. A few are normal (a parser that cannot open a container); a large share against one server means that server is misconfigured or down, and the analysts spent the run guessing. |
-| `evidence.trimmed` | `0` | Entries whose output was dropped to keep an agent inside `report.evidence_budget_bytes`. The call and its result still stand and are still citable; the text is gone. Persistent trimming means the budget is too small for the tools this deployment runs, or one tool is answering with a log file. |
-| `stages` | Every stage `ran` | A stage that declined records the condition that turned it off. A team where the same stage always declines is a condition that does not match the samples this deployment sees, not a broken run. |
-
-`fp_warnings` is the post-run linter and changes nothing: C6 flags a section or
-a TTP row with nothing citable behind it, C7 a technique id the validation loop
-could not get resolved.
+Day-to-day running of a deployed instance: what is recorded, what is
+throttled, where samples live, and what the common failures look like. Logs
+and health checks are on [Monitoring](/docs/monitoring/); backups on
+[Backups](/docs/backups/).
 
 ## Staged samples
 
 A tool server reached over HTTP does not share the worker's filesystem, so the
 sample is delivered to it rather than named. The worker writes each delivery
-into the staging directory (`MALJAN_STAGING_DIR`, a `maljan-analysis-mcp` directory under the
+into the staging directory (`MALSPARK_STAGING_DIR`, a `malspark-analysis-mcp` directory under the
 system temp directory by default) and the sidecars sweep it on a TTL
-(`MALJAN_STAGING_TTL_HOURS`, 24 hours by default; `0` disables pruning).
+(`MALSPARK_STAGING_TTL_HOURS`, 24 hours by default; `0` disables pruning).
 
 **Staging is per job.** The configured directory is the base, and each job gets
 one directory of its own inside it, `job-<the job's id>`: the sidecar's
@@ -79,7 +40,7 @@ and every worker on the host, named as a readable directory for every sidecar
 started afterwards, and removed by nothing. It now lands in the job's own
 `captures/` directory, at 0600 inside a 0700 tree, is named as a readable
 directory for that job's sidecars only, and goes when the job does. Whatever an
-earlier release left in `maljan-cape-pcap` is swept on the same TTL; nothing
+earlier release left in the capture directory name used before the rename is swept on the same TTL; nothing
 writes there any more.
 
 Everything in it is live malware, on the same terms as `SAMPLES_DIR`: exclude it
@@ -154,7 +115,7 @@ When a run is stored, the worker seals its evidence ledger
   record; a follow-up edited afterwards reads `broken`.
 
 The key is derived with HKDF from `SETTINGS_ENCRYPTION_KEY` (label
-`maljan-ledger-chain-v1`); no new secret exists, and the key is never logged or
+`malspark-ledger-chain-v1`); no new secret exists, and the key is never logged or
 served. Its id (16 hex characters of a hash of the derived key) is kept beside
 the seal. A platform without a settings key seals nothing: the rows are stored
 as before, and the worker's warning names why (the variable is not set, or
@@ -261,8 +222,8 @@ with the latest anchored head:
 | `none`, or unset with no URL | nowhere | nothing beyond the database head, as before |
 
 A database anchor takes this, run once as a database owner:
-`CREATE ROLE maljan_anchor LOGIN PASSWORD '...'`,
-`GRANT SELECT, INSERT ON audit_chain_anchor TO maljan_anchor` and
+`CREATE ROLE malspark_anchor LOGIN PASSWORD '...'`,
+`GRANT SELECT, INSERT ON audit_chain_anchor TO malspark_anchor` and
 `ALTER TABLE audit_chain_anchor OWNER TO <a role the application is not>`. An
 object lock can only be set when a bucket is created. What protects the anchor
 is read from its store (the roles' privileges, the table's owner and trigger,
@@ -388,8 +349,8 @@ the file, a byte flipped, cut off or appended, reads `broken`, naming the
 entry a check of the archive caught it in, or else the package itself, and a
 failed digest or HMAC is reported before the seal is looked at;
 `seal_unverifiable` therefore never means damage. The manifest's format names
-the envelope: `maljan-job-package/2` carries the digest, and a package built
-before it (`maljan-job-package/1`, under the old plain header) still verifies
+the envelope: `malspark-job-package/2` carries the digest, and a package built
+before it (`malspark-job-package/1`, under the old plain header) still verifies
 and reads `file_digest: legacy`: in the same pass it is compared byte for byte
 with what the builder wrote then (the gzip header, every tar header and
 padding byte, the end marker and record padding, the gzip CRC and length,
@@ -425,7 +386,7 @@ exits:
 
 **What the signature proves.** It is an HMAC under a key derived with HKDF
 from `SETTINGS_ENCRYPTION_KEY` under its own purpose label
-(`maljan-job-package-v1`), so it is not the ledger chain's key and no new
+(`malspark-job-package-v1`), so it is not the ledger chain's key and no new
 secret exists. It proves the manifest, and through its digests every file,
 unchanged only to a holder of that key; a holder can also sign another
 manifest, and anyone without the key cannot check it. The manifest's digests
@@ -450,7 +411,7 @@ same state.
 ## Sample storage
 
 Sample bytes live in MinIO, in the bucket named by `MINIO_BUCKET`
-(`maljan-samples` by default), beside the uploaded sandbox reports; metadata,
+(`malspark-samples` by default), beside the uploaded sandbox reports; metadata,
 jobs, reports and the evidence ledger live in Postgres. One module builds every
 client and creates the bucket (`app/services/object_store.py`): the API's
 upload, read and delete paths, the health probe and the worker's download all
@@ -496,27 +457,6 @@ per job. Deleting a sample removes the objects of every job it removes, after
 the delete is committed, best effort and logged, as it does the sandbox-report
 objects; deleting a report keeps them with the ledger. Back them up with the
 MinIO volume.
-
-## Backups
-
-Two things carry state that cannot be rebuilt: the Postgres volume (`pgdata`)
-and the MinIO volume (`minio_data`). The Qdrant volume holds long-term memory,
-which is derived from past analyses; the ATT&CK cache volume is purely derived.
-
-```bash
-cd docker
-docker compose exec -T postgres pg_dump -U maljan maljan > maljan-$(date +%F).sql
-```
-
-Back up MinIO by copying the bucket out with any S3 client, or by snapshotting
-the `minio_data` volume while the stack is down.
-
-A database dump is not enough on its own: every secret in the settings store is
-encrypted with `SETTINGS_ENCRYPTION_KEY`, which is not in the dump. Store the
-key with the backup, or the restored instance comes up with every credential
-unreadable. A JSON export (see [configuration.md](/docs/configuration/)) is a
-useful complement — it is safe to keep next to the dump precisely because it
-carries no credentials.
 
 ## Troubleshooting
 

@@ -166,10 +166,10 @@ on the [Sandboxes](/docs/tools/sandboxes/) page.
 
 ## Following a run
 
-The console's **CONVERSATION** tab draws the run as the exchange it is: every
+The console's **Evidence → Analyst discussion** draws the run as the exchange it is: every
 agent's messages, its tool calls and the verdict, while the analysis header
 draws the team's stages, each filling in as it starts and finishes. The
-**EVIDENCE** tab is the ledger of every tool call the run made. See
+**Evidence → Records** view is the ledger of every tool call the run made. See
 [Console](/docs/console/).
 
 Programmatically:
@@ -191,7 +191,7 @@ The standalone CLI runs the pipeline without the API, the worker or any of the
 backing services:
 
 ```bash
-uv run maljan analyze sample_1 --mock --name test.exe
+uv run malspark analyze sample_1 --mock --name test.exe
 ```
 
 It builds the core `Settings` model directly, so it reads the process

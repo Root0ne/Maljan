@@ -1,0 +1,69 @@
+---
+title: "Validation and feedback"
+description: "How the code checks every agent's answer without rewriting it, and what a validation code tells you."
+---
+
+Malspark has one rule for checking agents: **the agent decides, and the code
+says what is wrong with the decision.** The code never rewrites a claim, a
+technique id, a confidence or a family behind an agent's back. It tells the
+agent what is wrong, gives it one turn to fix it, and keeps on the record
+whatever it will not fix.
+
+## A finding and its code
+
+Every problem the validators find is filed under a **validation code**: a
+string of the form `family.name`. The family says which validator raised it.
+
+| Family | What it checks |
+| :-- | :-- |
+| `isr` | An analyst's structured claims: confidence, citations, the code a claim says it read. |
+| `attck` | ATT&CK technique ids: that they exist, fit the platform and match the claim. |
+| `stix` | The judge's STIX 2.1 bundle. |
+| `verdict` | The judge's verdict and its parts. |
+| `attribution` | A family name and what supports it. |
+| `report` | The report's sections and citations. |
+| `agreement` | That the report agrees with the claims and the ledger. |
+| `composer`, `narrative`, `question`, `tool`, `validation` | Smaller checks around the report, the judge's questions and tool calls. |
+
+## What the agent is told
+
+The finding's message goes back to the agent that wrote the answer. It says
+what is wrong and what would fix it. For example, a technique id that is not
+in the catalogue is answered with `attck.unknown_id`:
+
+```
+TECHNIQUE T1059.099 is not in the MITRE ATT&CK catalogue. The closest real techniques
+are T1059.003, T1059.001. Use one of them, or omit the technique id.
+```
+
+And claims written without a confidence get
+`isr.claim_without_confidence`:
+
+```
+2 CLAIM block(s) state no CONFIDENCE, so they are not claims. Give each the confidence
+you hold it at, as a number from 0.0 to 1.0, or leave it out.
+```
+
+The agent answers in its next turn. If the problem is gone, nothing more
+happens. If it is still there, the finding stays on the record as
+**unresolved**. A later turn never silently replaces the agent's answer with a
+corrected one.
+
+## Where to see the findings
+
+- **The run summary** counts the findings by code under
+  `run_summary.validation.by_code`, and lists each unresolved one with its
+  code and message.
+- **The report** prints what stayed unresolved where it affects a reader, such
+  as a technique the judge could not support.
+
+In an earlier run of the [benchmark](/docs/benchmark/) sample, the analysts received 255 findings.
+Most were `attck.claim_does_not_describe`: a technique whose claim did not
+describe the behaviour. The agents took 47 retry turns, and 48 findings
+stayed unresolved and are listed in the run summary.
+
+## Every code, listed
+
+[Validation codes](/docs/validation-codes/) lists every code the platform
+raises: where it is raised, what it means and which pages name it. That page
+is generated from the source, and a test fails when it falls behind.

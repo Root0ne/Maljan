@@ -9,6 +9,14 @@ other application setting lives in the settings store in Postgres and is edited
 from the web console. This document describes both, the export and import
 format, and how secrets are stored.
 
+<Callout title="Looking for a first setup">
+
+The [quick start](/docs/getting-started/) walks the settings a first run needs.
+This page is the full reference: every group, every setting and every rule
+behind them.
+
+</Callout>
+
 ## The bootstrap contract
 
 `apps/api/app/config.py` builds `APISettings` from the process environment
@@ -18,13 +26,13 @@ only — no `.env` file is discovered or read. Construction never refuses;
 deployment does not have to be restarted once per missing variable.
 
 The full surface is documented in
-[`bootstrap.env.example`](https://github.com/Root0ne/Maljan/blob/dev/bootstrap.env.example).
+[`bootstrap.env.example`](https://github.com/Root0ne/Malspark/blob/dev/bootstrap.env.example).
 The table below is the
 same contract in short form.
 
 | Variable | Required | Default | Notes |
 | :-- | :-- | :-- | :-- |
-| `DATABASE_URL` | yes | `postgresql+asyncpg://maljan:maljan_dev@127.0.0.1:5433/maljan` | Async driver. |
+| `DATABASE_URL` | yes | `postgresql+asyncpg://malspark:malspark_dev@127.0.0.1:5433/malspark` | Async driver. |
 | `REDIS_URL` | yes | `redis://127.0.0.1:6379/0` | Job queue, events, rate-limit counters. |
 | `MINIO_ENDPOINT` | yes | `127.0.0.1:9000` | Host and port, no scheme. |
 | `MINIO_ACCESS_KEY` | yes | `minioadmin` | |
@@ -35,18 +43,18 @@ same contract in short form.
 | `DB_MAX_OVERFLOW` | no | `10` | |
 | `DB_POOL_RECYCLE_SECONDS` | no | `1800` | |
 | `RUN_MIGRATIONS_ON_STARTUP` | no | `false` | Leave off in production; migrate as a deploy step. |
-| `MINIO_BUCKET` | no | `maljan-samples` | |
+| `MINIO_BUCKET` | no | `malspark-samples` | |
 | `MINIO_SECURE` | no | `false` | |
 | `AUDIT_ANCHOR` | no | — | `database`, `object_store` or `none`: where the audit chain's head is kept outside the database (see Operations). Unset means `database` when `AUDIT_ANCHOR_DATABASE_URL` is set, else `none`; any other value is refused at startup. Read from the environment only. |
 | `AUDIT_ANCHOR_DATABASE_URL` | with `AUDIT_ANCHOR=database` | — | A role that may only INSERT and SELECT `audit_chain_anchor`; startup warns when it is the application's own role. A platform secret. |
 | `JWT_ALGORITHM` | no | `HS256` | |
-| `JWT_ISSUER` | no | `maljan-api` | |
-| `JWT_AUDIENCE` | no | `maljan-clients` | |
+| `JWT_ISSUER` | no | `malspark-api` | |
+| `JWT_AUDIENCE` | no | `malspark-clients` | |
 | `JWT_KEY_ID` | no | `v1` | `kid` stamped on new tokens. |
 | `JWT_PREVIOUS_SECRET_KEY` | no | — | Accepted alongside the current secret during a rotation window; set `JWT_PREVIOUS_SECRET_NOT_AFTER` beside it to give that window an end. |
 | `JWT_PREVIOUS_KEY_ID` | no | `v0` | |
 | `JWT_PREVIOUS_SECRET_NOT_AFTER` | no | — | ISO-8601 moment (UTC when it carries no offset) after which a token signed with the previous secret is refused. Unset means the window has no end, which the startup check warns about at every start; a value that does not read as a moment is refused at startup. |
-| `APP_NAME` | no | `Maljan` | |
+| `APP_NAME` | no | `Malspark` | |
 | `APP_VERSION` | no | `0.1.0` | |
 | `DEBUG` | no | `false` | Also enables `/docs`, `/redoc` and `/openapi.json`. |
 | `SQL_ECHO` | no | `false` | Independent of `DEBUG`. |
@@ -75,7 +83,7 @@ handed it as /data/samples/.work/<sha256>.`).
 Seven of these variables open the platform's own stores: `DATABASE_URL`,
 `REDIS_URL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `SETTINGS_ENCRYPTION_KEY`,
 `JWT_SECRET_KEY` and `JWT_PREVIOUS_SECRET_KEY`. Each is marked once, on
-`PlatformSecrets` in `src/maljan/core/platform_secrets.py`, which `APISettings`
+`PlatformSecrets` in `src/malspark/core/platform_secrets.py`, which `APISettings`
 inherits and gives each its default, with what it opens and the names the
 shipped Compose file writes the same value under (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`,
 `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`). Those names are what no tool server's
@@ -93,10 +101,10 @@ it; for a bare process, `set -a; . ./bootstrap.env; set +a` first.
 ## Settings → Configuration
 
 Everything else is a catalog entry. The catalog is derived from the core
-`Settings` model (`src/maljan/core/config.py`) plus the editable and read-only
+`Settings` model (`src/malspark/core/config.py`) plus the editable and read-only
 API fields (`apps/api/app/services/settings_catalog_api.py`), and each entry
 carries its own title, description, type, bounds, choices and the group it
-belongs to (`src/maljan/core/settings_annotations.py`).
+belongs to (`src/malspark/core/settings_annotations.py`).
 
 The backend exposes eighteen groups, in this order:
 
@@ -305,7 +313,7 @@ wants a `function_call_output` for every `function_call`, Anthropic wants each
 `tool_use` block answered by a `tool_result` block at the front of the next
 user turn, and Gemini wants as many `functionResponse` parts as the model turn
 has `functionCall` parts. Each request is completed as it is sent, in the
-provider's own message shape (`maljan.llm.tool_replies`): a call with no reply
+provider's own message shape (`malspark.llm.tool_replies`): a call with no reply
 anywhere in the conversation gets one saying no reply was recorded (and, for a
 call whose arguments did not parse, that it was not run), and a warning says
 how many.
@@ -409,7 +417,7 @@ until the model has been probed at the new level.
 
 ### Setup guides
 
-**Settings → Setup** offers seven guided flows
+**Settings → Setup guides** offers seven guided flows
 (`apps/web/src/app/(app)/settings/setup/guides.ts`): `llm`, `static`,
 `sandbox`, `tool-server`, `agent`, `memory`, `enrichment`. A guide walks
 provider choice, credentials, a connection test and a review step, and applies
@@ -424,7 +432,7 @@ registered provider's id: a static or sandbox provider is built from the
 candidate settings and its own `probe()` is asked, a memory backend's
 `readiness()`, a reputation source's `probe()`. The `llm` probe lists models,
 builds its one short turn and reads the answer through the selected LLM
-provider's adapter (`maljan.llm.provider_base`). A provider registered at
+provider's adapter (`malspark.llm.provider_base`). A provider registered at
 runtime has a "Test" button the day it is registered, and the test and the job
 read one object built one way. They are reached at
 `POST /api/v1/settings/test/{probe}`, with `/test/mcp` and `/test/agent` taking
@@ -567,7 +575,7 @@ nothing*, so that failure and a timeout both carry a sentence naming the
 setting and what it does. A measured 12B reasoning model failed the probe in
 55 s at the default and passed in 243 ms with the setting on; with
 `llm.require_probe` on, every job is refused in between. See the low-memory
-option in [getting-started.md](/docs/getting-started/).
+option in [Quick start](/docs/getting-started/).
 Ollama's body also carries `options.num_ctx` and `keep_alive` from
 `llm.ollama.num_ctx` and `llm.ollama.keep_alive`, the two fields a run sends
 with every call that decide which instance Ollama keeps loaded. Ollama loads a
@@ -593,7 +601,7 @@ every model it falls back to, one after another — the agent passes only when
 every model on its list answered. The `llm` probe asks the fallbacks served by
 the selected provider along with the per-agent entries.
 
-Where a call goes is worked out in one place (`maljan.core.model_assignments`)
+Where a call goes is worked out in one place (`malspark.core.model_assignments`)
 for the probe and for the gate alike, and folded there the way a URL folds —
 lower-case scheme and host, the scheme's default port dropped, no trailing
 slash — so `http://box:8080/v1/`, `HTTP://BOX:8080/v1` and `http://box:80/v1`
@@ -766,8 +774,8 @@ overwrites, names the ids a previous release had, the release that retired them
 and, where the bundle states one, the id that revoked them — so an older
 report's `T1562.001` is reported as retired rather than as an invented id, and
 the data builders can retarget it mechanically.
-`src/maljan/memory/attck_loader.py` downloads and caches each domain's STIX
-bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`) for the ranked
+`src/malspark/memory/attck_loader.py` downloads and caches each domain's STIX
+bundle under `~/.cache/malspark/attck/` (or `MALSPARK_ATTCK_CACHE`) for the ranked
 index alone — `tools.knowledge.resolve_technique` and the alignment gate — and
 consults it for platforms only when a real id is missing from the vendored
 table. Enterprise is required; Mobile and ICS are additive, and a box that can
@@ -778,7 +786,7 @@ A failed index build is remembered for `validation.index_retry_seconds`
 (default 900) and then attempted again, so one unreachable moment does not cost
 a worker its index for the life of the process; 0 never re-attempts. The value
 travels to the knowledge tool server — the process where the build happens — as
-`MALJAN_INDEX_RETRY_SECONDS`, which is on that server's `env_allow` and cannot
+`MALSPARK_INDEX_RETRY_SECONDS`, which is on that server's `env_allow` and cannot
 be taken off it.
 
 #### Keeping the cached bundles current
@@ -795,8 +803,8 @@ failed automatic check it waits one hour, then twice as long after each failure
 in a row, never longer than the interval, and logs when it will try again; the
 console's next-check line shows that time. The loader's own refresh at the first index build after the interval
 reads the same setting, which reaches it and the knowledge tool server as
-`MALJAN_ATTCK_REFRESH_DAYS` (on that server's `env_allow`, written by the
-container from the store). `MALJAN_ATTCK_MAX_AGE_DAYS` is retired: the
+`MALSPARK_ATTCK_REFRESH_DAYS` (on that server's `env_allow`, written by the
+container from the store). `MALSPARK_ATTCK_MAX_AGE_DAYS` is retired: the
 migration that retired it read a whole number other than 7 once into the
 setting, where the store held none (0 or a negative number, which the old
 loader read as "never check", as 0, and so is a number past the setting's
@@ -981,8 +989,8 @@ server (Settings → Tool servers → `analysis` → `env`):
 
 | Name | What it names | Default |
 | :-- | :-- | :-- |
-| `MALJAN_SIGMA_RULES_DIR` | Directory of Sigma rule YAML, loaded recursively. | `data/sigma_rules` |
-| `MALJAN_YARA_RULES_DIR` | The YARA rule file the scan compiles, or a directory of them (`*.yml`, `*.yaml`, compiled as one corpus; a file that cannot be read is skipped and named in the answer). | `data/yara_ttp_rules.yaml` |
+| `MALSPARK_SIGMA_RULES_DIR` | Directory of Sigma rule YAML, loaded recursively. | `data/sigma_rules` |
+| `MALSPARK_YARA_RULES_DIR` | The YARA rule file the scan compiles, or a directory of them (`*.yml`, `*.yaml`, compiled as one corpus; a file that cannot be read is skipped and named in the answer). | `data/yara_ttp_rules.yaml` |
 
 An unset value means the corpus the project ships. A corpus that loads no rule
 (a path that does not exist, an empty file, a directory holding no rule file) is
@@ -1023,7 +1031,7 @@ the context window the served model was found to have. A positive value is an
 explicit operator cap and behaves as this setting always did: that many
 characters, on every answer, whatever the window.
 
-The arithmetic lives in one function (`maljan.llm.context_window`) and reads:
+The arithmetic lives in one function (`malspark.llm.context_window`) and reads:
 the served window, less the tokens held back for the model's own reply (the
 larger of `core.llm.expert_max_tokens` and `core.llm.judge_max_tokens` where an
 operator set them, never more than a quarter of the window, and a quarter of it
@@ -1988,7 +1996,7 @@ redeploying with a different environment.
 
 Four tool servers are enabled out of the box, and a fifth (`virustotal`)
 ships ready to enable. What each offers is in
-[architecture.md](/docs/architecture/); what an operator changes here is the
+[Architecture](/docs/architecture/); what an operator changes here is the
 binding, the exposure (`tools`) and whether the server runs at all (`enabled`).
 
 There are two ways a server reaches an agent, and the built-ins use both.
@@ -2031,21 +2039,21 @@ pinned standalone Linux build, v3.1.1 (zip sha256
 `40c05a869f34f7e2417b17ca290cc54bd3671ee1f0a2d9bd5103284c01a54666`), outside the
 Python environment. The backend image installs it at `/usr/local/bin/floss` in
 a checksum-verified build stage; on a host, `scripts/install_floss.sh` installs
-it at `~/.local/share/maljan/tools/floss-3.1.1/floss`. To use a
-build elsewhere, set `MALJAN_FLOSS_PATH` in the `analysis` server's `env`. The
+it at `~/.local/share/malspark/tools/floss-3.1.1/floss`. To use a
+build elsewhere, set `MALSPARK_FLOSS_PATH` in the `analysis` server's `env`. The
 tool runs only the executable whose sha256 is the pinned one. Without it the
 capability manifest marks `floss` unavailable with the reason and the remedy and
 the model is not offered the tool; with it, the first call on a sample emulates
 for up to ten minutes (the tool's declared `timeout_s`) within 4 GiB of address
 space, and later pages of the answer come from the kept result. The triage pack
-runs the same function once on every PE, reading `MALJAN_FLOSS_PATH` and
-`MALJAN_STAGING_DIR` from this process's environment with the decoder's
+runs the same function once on every PE, reading `MALSPARK_FLOSS_PATH` and
+`MALSPARK_STAGING_DIR` from this process's environment with the decoder's
 server's `env` over it. That server is the decoded-strings step's own `server`
 when it names an enabled one, else the server whose tool declarations name the
 step's tool (`floss`), else one declaring a tool of that tool's kind. The
 pack's UPX carve picks its server apart, by the same rule applied to the unpack
 tool (`unpack_upx`, kind `unpack`), and writes under that server's
-`MALJAN_STAGING_DIR`, so the `carved_path` it states is one that server's file
+`MALSPARK_STAGING_DIR`, so the `carved_path` it states is one that server's file
 tools open even when the decoded-strings step is moved to another server. The
 in-process steps run whether the server is switched on or not, so a
 switched-off server still lends its `env`; among several candidates, enabled
@@ -2053,7 +2061,7 @@ servers come first (by name, then by kind, in `mcp.servers` order) and
 switched-off ones are the last resort. The run logs the choice once when
 several qualify or the one read is switched off. As shipped, both are the
 `analysis` server. Name a build in the server's `env` and the pack
-and the tool find the same one; a `MALJAN_FLOSS_PATH` set only in the worker's own
+and the tool find the same one; a `MALSPARK_FLOSS_PATH` set only in the worker's own
 environment reaches the pack and not the tool, whose child environment carries
 only the server's `env` and its allowed keys. Without a build the pack's entry
 says so and names the remedy.
@@ -2063,7 +2071,7 @@ the three analysts with their tools.
 `measurement` is the same three analysts with `exclude_servers: ["*"]`,
 `exclude_sandbox_tools` on and `static_provider` forced to `none` — the
 baseline for measuring what the ensemble contributes without any tool. Select
-it from Settings → Agents and pipeline like any other team; a run under it
+it from Settings → Configuration → Agents and pipeline like any other team; a run under it
 resolves each analyst to a prompt, a model and no tools at all.
 
 The wildcard is deliberate. A fixed list of the four built-in keys would still
@@ -2133,7 +2141,7 @@ The lookups are ticked by default and are read-only:
 `get_analysis` and `get_submission`. `submit_file` is advertised and stays
 **unticked**: uploading a sample publishes it to VirusTotal, which is a
 disclosure an operator opts into, so it takes a deliberate tick in the Tools
-step. See [security.md](/docs/security/) for what that changes.
+step. See [Security](/docs/security/) for what that changes.
 
 The token is subject to VirusTotal's published quotas. Over quota, the server
 answers the tool call with a 429 carrying `Retry-After`; the analyst records
@@ -2177,7 +2185,7 @@ the same agent token from `VTAI_TOKEN`, and that form offers one tool the
 remote one cannot: `submit_local_file`, which uploads by path. The remote
 server has no view of this host's filesystem, so it offers `submit_file`
 (the bytes, base64) instead. Operators who want the local-path upload install
-it as described in [deployment.md](/docs/deployment/) and add a second server
+it as described in [VirusTotal over stdio](/docs/deployment/#virustotal-over-stdio-optional) and add a second server
 entry with transport `stdio`.
 
 ### The identification servers
@@ -2232,7 +2240,7 @@ in a `/tmp` tmpfs sized below its memory ceiling (`UNBLOB_TMPFS_SIZE`). See
 
 ## Teams and stages
 
-A team (`core.agents.profiles.<key>`, edited under Settings → Agents and
+A team (`core.agents.profiles.<key>`, edited under Settings → Configuration → Agents and
 pipeline → Teams) is an ordered list of stages. Each stage is:
 
 | Field | Meaning |
@@ -2472,7 +2480,7 @@ each stage card.
 
 An **error** is a team apply refuses, and the lint reports it in the words
 apply refuses it with: the lint reads its errors off the same functions the
-settings model raises from (`maljan.core.team_lint`), and the apply path
+settings model raises from (`malspark.core.team_lint`), and the apply path
 refuses from the lint. A test holds the two together: every refusal the
 settings model makes about a team is a lint error, word for word. The errors:
 
@@ -2511,7 +2519,7 @@ as written, never from a guess about the sample:
 - an agent reading the static provider's tools while the static provider is
   `none` (the note apply already returns).
 
-The layout the graph uses is `maljan.core.team_layout`: a stage one row below
+The layout the graph uses is `malspark.core.team_layout`: a stage one row below
 the lowest stage it runs after, stages that share a row side by side in the
 order they are written. The team diagrams on the architecture page are drawn
 with the same layout.
@@ -2529,7 +2537,7 @@ with the same layout.
 `triage_pack` is a stage of kind `triage`: the pipeline itself running the
 deterministic tools over the sample and writing each result to the evidence
 ledger before any analyst starts (see *The triage pack* in
-[architecture.md](/docs/architecture/)). Every team but `measurement` ships with
+[Architecture](/docs/architecture/)). Every team but `measurement` ships with
 it first, a team written by hand may leave it out, and a stored team gains it
 on upgrade (`make migrate`). Its six settings sit in the Analysis layers
 group: `triage.enabled` (off leaves the stage in place and makes it decline
@@ -2550,9 +2558,9 @@ the server, or `triage.reputation = off`, keeps such a run offline.
 
 ### The pack's steps
 
-The pack is a list of steps (`maljan.core.pack_steps`), each declared as
+The pack is a list of steps (`malspark.core.pack_steps`), each declared as
 data. The shipped list is the pack described in
-[architecture.md](/docs/architecture/), in that order; `triage.steps` holds your
+[Architecture](/docs/architecture/), in that order; `triage.steps` holds your
 own, laid over it (the console edits them as a form, see *Adding a step in the
 console* below):
 
@@ -2692,9 +2700,9 @@ over a server's step the run does not have is off, saying so.
 **Files passed between servers.** A file one server's tool writes (a payload
 carved out of the sample, an archive member, a decoded script) reaches
 another server's tool through the job's artefact store
-(`maljan.pipeline.artefacts`). A step that declares `outputs` has each file
+(`malspark.pipeline.artefacts`). A step that declares `outputs` has each file
 its answer names taken in: copied under the job's own staging directory
-(`<MALJAN_STAGING_DIR>/<job>/artefacts/<sha256>/<name>`, every directory
+(`<MALSPARK_STAGING_DIR>/<job>/artefacts/<sha256>/<name>`, every directory
 0o700 and the file 0o600, removed with the job's staging) under a stable id,
 `art_<sha256>`; its name is kept to its last part in safe characters, never
 deciding where it lands. The bytes come over the producing server's
@@ -2814,10 +2822,10 @@ the gate build the index once, on a thread, and go without it),
 `validation.weak_alignment` (false — the ranking is recorded on the claim and
 shown to the judge, and nothing is asked again; true lets it question a claim,
 at one correction turn per batch), `validation.alignment_threshold` (0.05, the
-paper's gate) and `validation.alignment_margin` (0.20, how far a candidate from
+gate score below which a claim is questioned) and `validation.alignment_margin` (0.20, how far a candidate from
 the sample's own domain and another tactic must beat the claimed id before it
 is questioned). The measurement behind the default off is in *The technique
-check* in [architecture.md](/docs/architecture/).
+check* in [Architecture](/docs/architecture/).
 
 `validation.claim_repeat_margin` (empty) is how many claims an analyst's
 answer may write again before it is asked once for a whole answer
@@ -2829,7 +2837,7 @@ Ollama, DeepSeek) the same margin ends the answer while it streams.
 
 `mobile` and `deep_static` are built from three seeded generic agent
 definitions — `triage`, `android_static` and `reverser` — whose prompts live in
-`src/maljan/agents/prompts/`. A generic agent has no class: it is a definition,
+`src/malspark/agents/prompts/`. A generic agent has no class: it is a definition,
 a prompt and a tool list, which is what makes a team of your own something to
 write rather than something to build. Clone one of these as the starting point.
 
@@ -2889,7 +2897,7 @@ report; `network` when there is a capture or a sandbox report; then `debate`,
 `verdict` and `report`. The later stages depend on every earlier analysis
 stage and read their findings (`inject_upstream: findings`).
 
-It is a settings import document (`maljan-settings/1`) holding
+It is a settings import document (`malspark-settings/1`) holding
 `core.agents.definitions` and `core.agents.profiles`. Each of those is one
 setting holding a whole map, and an import replaces what it names, so merge the
 document into your own export first. The document's keys are all `all_tools_*`
@@ -2898,7 +2906,7 @@ document into your own export first. The document's keys are all `all_tools_*`
 ```bash
 curl -s http://localhost:8000/api/v1/settings/export \
   -H "Authorization: Bearer $TOKEN" > current.json
-jq -s '{format: "maljan-settings/1", values: {
+jq -s '{format: "malspark-settings/1", values: {
   "core.agents.definitions": ((.[0].values["core.agents.definitions"] // {})
                               + .[1].values["core.agents.definitions"]),
   "core.agents.profiles":    ((.[0].values["core.agents.profiles"] // {})
@@ -3056,7 +3064,7 @@ any role; the agent editor's Tools tree offers it as **the job's sandbox report
 tools**.
 
 The seeded `lead` definition (role `lead`, prompt in
-`src/maljan/agents/prompts/lead.md`) references `static`, `dynamic`,
+`src/malspark/agents/prompts/lead.md`) references `static`, `dynamic`,
 `network`, `reverser` and `triage`, and keeps the `knowledge` server; the
 `team_lead` team runs it as its one analysis stage. A team of your own may put
 a reference on any analyst: a static clone that asks the network analyst is as
@@ -3093,7 +3101,7 @@ deprecated and operator-only: they ship empty, and an entry you write is still
 read for an agent whose definition sets neither, before the deployment's
 value; a definition's own value wins over them. A map entry that is not a
 whole number of at least one is dropped with a warning when the settings are
-built, the same bound the definition's own fields carry. See *Delegation* in [architecture.md](/docs/architecture/) for
+built, the same bound the definition's own fields carry. See *Delegation* in [Architecture](/docs/architecture/) for
 what the ledger and the transcript record.
 
 ### A name a later release takes
@@ -3116,7 +3124,7 @@ A seeded definition whose prompt a later release rewrote is not such an entry.
 A save stores the whole definition map, seeds included, so a database holds
 each seeded row with the prompt it had on the day of its last save; a prompt
 the seed itself shipped with before (`FORMER_SEED_PROMPT_DIGESTS` in
-`maljan.core.config`, by SHA-256 of the exact text) is read as the seed's, and
+`malspark.core.config`, by SHA-256 of the exact text) is read as the seed's, and
 the row loads as the seed rather than being renamed. A release that rewrites a
 seeded prompt adds the one it replaced to that list.
 
@@ -3428,7 +3436,7 @@ system turn — sample, identity, signature, reputation, stages run or skipped,
 ledger count, failed tools, remaining steps and seconds — regenerated on every
 turn. Neither is a setting of the stage: a team without a triage stage has no
 pack and its agents see only the run state. See *The triage pack* in
-[architecture.md](/docs/architecture/).
+[Architecture](/docs/architecture/).
 
 Which slice of the job an agent reads is its own setting,
 `agents.definitions.<key>.data_sources`. Empty means the slice the agent's
@@ -3559,19 +3567,19 @@ name the prompt showed it.
 The built-in `analysis` sidecar implements `put_sample*` even though it ships as
 a stdio server, because an operator may run that same file behind an HTTP
 transport on another host. Two environment variables configure that, and with
-`MALJAN_SAMPLE_ROOTS` — defined once in the next section, and seen by the
+`MALSPARK_SAMPLE_ROOTS` — defined once in the next section, and seen by the
 `network` sidecar as well — they are the only ones it is allowed to see:
 
 | variable | default | meaning |
 | :-- | :-- | :-- |
-| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | the base uploads land under |
-| `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample, and a payload carved out of one, is kept; `0` disables pruning |
+| `MALSPARK_STAGING_DIR` | a `malspark-analysis-mcp` directory under the system temp dir | the base uploads land under |
+| `MALSPARK_STAGING_TTL_HOURS` | `24` | how long a staged sample, and a payload carved out of one, is kept; `0` disables pruning |
 
-`MALJAN_STAGING_DIR` is the **base**, and each job writes into one directory of
+`MALSPARK_STAGING_DIR` is the **base**, and each job writes into one directory of
 its own inside it — `job-<the job's id>`, holding that job's uploads and its
 `carved/<sha256>/` trees. The name is composed by the process that starts the
-sidecar and handed over as a third variable, `MALJAN_STAGING_JOB`; it is a
-single directory name, never a path, so an operator's `MALJAN_STAGING_DIR` is
+sidecar and handed over as a third variable, `MALSPARK_STAGING_JOB`; it is a
+single directory name, never a path, so an operator's `MALSPARK_STAGING_DIR` is
 the base whatever else is configured. That variable is not read from the
 environment and is not something to set: a sidecar started without one writes
 into the base itself, which is what a settings probe and a server run by hand
@@ -3597,11 +3605,11 @@ thing standing between a live job and its own directory; there is no reason to.
 The sandbox capture a job fetches lands in a `captures/` child of the same
 directory and obeys every rule above: 0700, files 0600 from their first byte,
 removed with the job, swept by the same TTL, and unreachable from another job.
-The directory an earlier release used, `maljan-cape-pcap` under the system temp
+The capture directory name used before the rename, under the system temp
 directory, is swept as well and is no longer written.
 
 One configuration would widen this if nothing else stopped it: a
-`MALJAN_SAMPLE_ROOTS` entry containing the staging base — the deployment's
+`MALSPARK_SAMPLE_ROOTS` entry containing the staging base — the deployment's
 whole samples directory, say, with the base inside it — which names every
 job's directory as one a sidecar may read. `confined_to_this_job` refuses it
 anyway: a path argument resolving under the base but outside this job's own
@@ -3617,7 +3625,7 @@ file-reading sidecars — `analysis` and `network` — therefore resolve every
 anything that lands outside the directories they were given:
 
 * this job's staging directory, where their own uploads land, and
-* every directory in `MALJAN_SAMPLE_ROOTS`.
+* every directory in `MALSPARK_SAMPLE_ROOTS`.
 
 This job's, not the base: a path that resolves into another job's staging
 directory is refused even when a sample root happens to contain the base, so
@@ -3648,10 +3656,10 @@ directory, a FIFO, a device or a socket is refused.
 
 | variable | default | meaning | seen by |
 | :-- | :-- | :-- | :-- |
-| `MALJAN_SAMPLE_ROOTS` | empty | the directories a `path`, `pcap_path` or delivered sample may be read in, separated by `:` | `analysis`, `network` |
-| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where a delivered sample lands, and a root for both | `analysis`, `network` |
+| `MALSPARK_SAMPLE_ROOTS` | empty | the directories a `path`, `pcap_path` or delivered sample may be read in, separated by `:` | `analysis`, `network` |
+| `MALSPARK_STAGING_DIR` | a `malspark-analysis-mcp` directory under the system temp dir | where a delivered sample lands, and a root for both | `analysis`, `network` |
 
-Those two, plus `MALJAN_STAGING_TTL_HOURS` above, are the whole of what the
+Those two, plus `MALSPARK_STAGING_TTL_HOURS` above, are the whole of what the
 `analysis` sidecar's `env_allow` carries; the `network` sidecar's carries the
 two in this table and nothing else. Neither is started with a credential in its
 environment. That holds for the environment alone: each runs as the worker's
@@ -3661,7 +3669,7 @@ that user can read there, a sidecar can read too.
 **How the variable reaches a sidecar.** A stdio child is started with a built
 environment rather than the worker's own: the general-purpose names (`PATH`,
 `HOME`, the locale and temp ones), then exactly the names that server's
-`env_allow` lists, then its `env` map. `MALJAN_SAMPLE_ROOTS` is therefore named
+`env_allow` lists, then its `env` map. `MALSPARK_SAMPLE_ROOTS` is therefore named
 on the two file-reading built-ins and on no others — a variable that says where
 this host keeps malware is not something every child Malspark starts has any
 business reading. A tool server an operator adds receives it only when they
@@ -3693,8 +3701,8 @@ setting, and an operator may list it in the `env_allow` of a server that needs
 it.
 
 **The names a built-in always gets.** Three names are not an operator's to
-take away: `MALJAN_SAMPLE_ROOTS` and `MALJAN_STAGING_DIR` on `analysis` and
-`network`, and `MALJAN_STAGING_TTL_HOURS` on `analysis`. They are what a
+take away: `MALSPARK_SAMPLE_ROOTS` and `MALSPARK_STAGING_DIR` on `analysis` and
+`network`, and `MALSPARK_STAGING_TTL_HOURS` on `analysis`. They are what a
 sidecar cannot work out for itself — which directories it may read, where a
 delivered sample lands and how long it is kept — so they are put back on load,
 on save, in the Configuration tab's own view and in the connection test. The
@@ -3705,7 +3713,7 @@ whole whenever
 anything in it is saved, so without that floor a deployment that had configured
 its servers
 before a sidecar gained a variable would keep starting that sidecar without
-it — which for `MALJAN_SAMPLE_ROOTS` means every tool call on the run's own
+it — which for `MALSPARK_SAMPLE_ROOTS` means every tool call on the run's own
 sample refused with `path_outside_roots`.
 
 Every other name a built-in ships with is a default rather than a floor:
@@ -3719,14 +3727,14 @@ names them.
 A refusal is the ordinary structured error with the code `path_outside_roots`
 and a remedy, and it names no host path.
 
-The worker fills `MALJAN_SAMPLE_ROOTS` in for itself: its download directory
+The worker fills `MALSPARK_SAMPLE_ROOTS` in for itself: its download directory
 (`UPLOAD_TEMP_DIR`), the sample mirrors under `SAMPLES_DIR` and the directory a
 sandbox capture is fetched to are exported before any sidecar starts, so a
 default deployment needs no configuration. Set the variable when a sample lives
 somewhere the worker did not put it — a corpus directory an operator points the
 CLI at, or an HTTP sidecar on another host that is handed paths rather than
 uploads. `ruleset` is held to the rule corpora instead: the repository's `data`
-tree and whatever `MALJAN_YARA_RULES_DIR` and `MALJAN_SIGMA_RULES_DIR` name.
+tree and whatever `MALSPARK_YARA_RULES_DIR` and `MALSPARK_SIGMA_RULES_DIR` name.
 
 ### A server whose open resets its analysis
 
@@ -3928,7 +3936,7 @@ it hands the sidecars are the shipped mirror directories (`.work`, `r2-work`)
 and the mirror directory of each static provider the settings select and
 switch on, so a server you add is cleaned up like a built-in. A directory is
 used only when it is a plain child of the samples directory, never a symbolic
-link, that the worker created (it writes a `.maljan-mirror` marker into it) or
+link, that the worker created (it writes a `.malspark-mirror` marker into it) or
 a shipped one: a `work_dir` naming a folder of your own corpus is refused, the
 job's copy for that server is not made, and nothing in the folder is changed.
 Only files named as the worker names a copy (the SHA-256 and a plain suffix)
@@ -3946,7 +3954,7 @@ are ever removed.
 | `variable_names` | environment variable names of the server's that are not secrets; those a shipped declaration or a registered provider class (`variable_names`) names are kept whole in published text, read from those so the redaction does not depend on a run's settings |
 | `reads_staged_sample` | whether the server's path-taking tools read the sample the platform staged |
 | `platform_owned` | whether the server is the platform's own, whose answers are the platform's code |
-| `trusts_served_declaration` | whether what the server declares of its own tools when it lists them (each tool's `_meta` at `maljan/tool_facts`) is read as this block's declaration, under what the block itself says; off, only its cautious claims are read, as the server's own statement, and the rest is proposed (see [Writing a tool server](#writing-a-tool-server)). Shipped on for the platform's own sidecars, and that shipped trust holds only while the block still starts or reaches the server it shipped with (its transport, command, arguments, working directory and address); a block pointed at another server trusts it only where you set the flag yourself, so set it when you point a built-in block at that sidecar's own container: the platform ships no table of its sidecars' tools, and an untrusted block reads only their cautious claims. The console's server editor shows the trust in force (a built-in pointed elsewhere shows it off), and a tick there is recorded with the launch it was given for (`trust_granted_for`, a digest of the transport, command, arguments, working directory and address as written, so a release changes nothing of it): the trust holds while the block points there, and pointing the block at another server withdraws it on save, which the editor says before you save. A shipped value sent back is never read as your tick |
+| `trusts_served_declaration` | whether what the server declares of its own tools when it lists them (each tool's `_meta` at `malspark/tool_facts`) is read as this block's declaration, under what the block itself says; off, only its cautious claims are read, as the server's own statement, and the rest is proposed (see [Writing a tool server](#writing-a-tool-server)). Shipped on for the platform's own sidecars, and that shipped trust holds only while the block still starts or reaches the server it shipped with (its transport, command, arguments, working directory and address); a block pointed at another server trusts it only where you set the flag yourself, so set it when you point a built-in block at that sidecar's own container: the platform ships no table of its sidecars' tools, and an untrusted block reads only their cautious claims. The console's server editor shows the trust in force (a built-in pointed elsewhere shows it off), and a tick there is recorded with the launch it was given for (`trust_granted_for`, a digest of the transport, command, arguments, working directory and address as written, so a release changes nothing of it): the trust holds while the block points there, and pointing the block at another server withdraws it on save, which the editor says before you save. A shipped value sent back is never read as your tick |
 | `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`); every server's join the shipped ones (`FUN_`, `fcn.`, `sub_`, `func.`, `loc.`, `LAB_`, `SUB_`, `sub.`) wherever a function's auto-name is read as its address |
 | `data_label_prefixes` | the prefixes its decompiler writes before an address when it names a datum itself (`DAT_`); every server's join the shipped one (`DAT_`, which the Ghidra block also declares) wherever the report reads a claim's code locations (claims not discussed), and are never read as a function's name |
 | `reference_urls` | sample lookup URL templates, `https://` and naming `{sha256}`, `{md5}` or `{sha1}`; a report links them, under the name its lookup's record gives (else the server's label), only when the run recorded an entry from this server. `reporting.reference_urls` holds the lookups linked on every report (shipped with VirusTotal's and MalwareBazaar's) |
@@ -4406,7 +4414,7 @@ tool of yours that answers in that shape may name one:
 word of letters, digits and underscores is accepted, so a new kind of tool
 needs no release to be declared. The built-ins' kinds are as fine as the tables
 the platform reads tools by today, so each table is exactly a set of kinds
-(`CONSUMER_KINDS` in `maljan.core.builtin_declarations`, held tool by tool by a
+(`CONSUMER_KINDS` in `malspark.core.builtin_declarations`, held tool by tool by a
 test): for example `strings` (the analysis server's printable strings),
 `listing_strings` (a disassembler's string listing), `emulated_strings`,
 `decoded_strings`, `file_iocs`, `text_iocs`, `iocs_with_context`,
@@ -4895,7 +4903,7 @@ takes one (a save through `PATCH /api/v1/settings`, a connection test, a
 probe's candidate settings, and an import in either format), a marked map is
 the block's changes, so a tool it leaves out is not removed and `null` removes
 one; a map without the mark is the whole map, as earlier releases read every
-map, so a shipped tool it leaves out is removed. A `maljan-settings/1` import
+map, so a shipped tool it leaves out is removed. A `malspark-settings/1` import
 reads the same way: its maps carry no mark, so they are whole, and a map marked
 as changes (only `/2` writes the mark, so such a file was relabelled from one)
 is its changes there too, never a whole map that would remove every shipped
@@ -4970,7 +4978,7 @@ Per job and per tool server, three settings under **Tool servers → Resilience*
 | `core.mcp.breaker.cooldown_seconds` | 60 | A judgement: long enough for a sidecar being restarted to come back, short against the analysts' own loop budgets. |
 | `core.mcp.breaker.call_timeout_seconds` | 0 (per server) | Set, the budget of every call to every server. Zero gives each server the `call_timeout_seconds` its own block declares, and a server that declares none (every built-in) `core.mcp.breaker.default_call_timeout_seconds`. A tool whose server declares a longer budget in its manifest or its declaration (`tool_facts.<tool>.timeout_seconds`) gets that, a long-running tool (by either) none unless this is set, and thirty seconds of grace are added either way. |
 | `<server block>.call_timeout_seconds` | empty | Each server's own budget per call (an `mcp.servers` entry, `static.ghidra`, `static.r2`, `sandbox.cape2.mcp`), read when `core.mcp.breaker.call_timeout_seconds` is zero; zero sends its calls with no deadline of their own, empty takes `core.mcp.breaker.default_call_timeout_seconds`. Ghidra's REST requests (open, call graph, anti-analysis scan) and radare2's open before the loop wait it too. |
-| `core.mcp.breaker.default_call_timeout_seconds` | 300 | The budget per call of every server whose block declares none (every built-in), read alike whatever the server or its tools are called; zero sends their calls with no deadline of their own. 300 is the floor every server got before servers declared their own, the longer of the two static timeouts as they ship. It used to be derived from `core.static.capa.timeout_seconds` and `core.static.yara.timeout_seconds`, two blocks named for one provider's tools; the upgrade wrote a deployment's own floor here (900 on a slow host still fits), so no server's budget changed, and importing a `maljan-settings/2` or `/1` export gives it the floor that export carried. |
+| `core.mcp.breaker.default_call_timeout_seconds` | 300 | The budget per call of every server whose block declares none (every built-in), read alike whatever the server or its tools are called; zero sends their calls with no deadline of their own. 300 is the floor every server got before servers declared their own, the longer of the two static timeouts as they ship. It used to be derived from `core.static.capa.timeout_seconds` and `core.static.yara.timeout_seconds`, two blocks named for one provider's tools; the upgrade wrote a deployment's own floor here (900 on a slow host still fits), so no server's budget changed, and importing a `malspark-settings/2` or `/1` export gives it the floor that export carried. |
 | `core.mcp.breaker.max_concurrent_calls` | 4 | A judgement: the shipped teams run their analysts one after another, and four lets one analyst's parallel tool calls through while bounding a team that fans out. `0` leaves the calls uncapped, as every server was before. |
 
 An unanswered call is either a transport failure — a timeout, a refused or
@@ -5023,7 +5031,7 @@ answers what the server can do on the host it runs on:
 ```
 
 Compute it when the server starts, by probing — an import, a `which`, an
-environment variable — never by asserting; `maljan.tools.capabilities.manifest`
+environment variable — never by asserting; `malspark.tools.capabilities.manifest`
 does that for a list of `ToolNeeds` and is what the sidecars use. The registry
 reads the manifest once per job when it attaches the server and keeps it on
 the server's entry; the connection test (`POST /api/v1/settings/test/mcp`)
@@ -5067,14 +5075,14 @@ summary keeps what the degraded flag was decided on (`loss_facts`), and the head
 the lost tools from it.
 
 **Data a tool reads.** A `ToolNeeds` entry may also declare a data path
-(`maljan.tools.capabilities.data`): the default path the tool reads, the core
+(`malspark.tools.capabilities.data`): the default path the tool reads, the core
 setting whose value a caller that reads it hands the tool instead, the server
 environment variable that replaces the default, and the file pattern a directory
 must hold. The built-in sidecars declare every rule engine's corpus: the ones
 fetched rather than tracked, capa's rules (`*.yml`; `static.capa.rules_dir`,
-which the analysis server's `capa` tool reads as `MALJAN_CAPA_RULES_DIR`) and
-the Sigma corpus (`*.yml` or `*.yaml`; `MALJAN_SIGMA_RULES_DIR`, else
-`data/sigma_rules`), and the tracked YARA corpus (`MALJAN_YARA_RULES_DIR`, else
+which the analysis server's `capa` tool reads as `MALSPARK_CAPA_RULES_DIR`) and
+the Sigma corpus (`*.yml` or `*.yaml`; `MALSPARK_SIGMA_RULES_DIR`, else
+`data/sigma_rules`), and the tracked YARA corpus (`MALSPARK_YARA_RULES_DIR`, else
 `data/yara_ttp_rules.yaml`), which only an override can name missing.
 
 Besides the servers a job calls and the pack's readings, the check looks at every
@@ -5122,7 +5130,7 @@ raises:
 
 The codes are `missing_dependency`, `timeout`, `bad_argument`, `no_such_file`,
 `unsupported_format`, `not_configured` and `tool_failed`; a code of your own is
-kept as written. `maljan.tools.errors.tool_error(code, message, tool=...)`
+kept as written. `malspark.tools.errors.tool_error(code, message, tool=...)`
 builds the shape with the authored remediation for the code, and each sidecar's
 guard maps an exception it catches to a code. The older flat shape,
 `{"error": "<text>"}`, is still read: the sidecars rewrite it into the
@@ -5137,7 +5145,7 @@ when it lists them, so it is read at full strength with nothing stored for it.
 Each tool's MCP `annotations` give its `title` and the hints `readOnlyHint`,
 `idempotentHint`, `destructiveHint` and `openWorldHint` (kept on each of the
 tool's ledger entries as the server's hints), and the tool's `_meta` holds,
-under the key `maljan/tool_facts`, its declaration in the vocabulary of
+under the key `malspark/tool_facts`, its declaration in the vocabulary of
 `tool_facts` (below: `kind`, `rows`, `places`, `values`, `techniques`,
 `routed_formats`, `shows`, `does_not_show`, `effects`, `long_running`,
 `timeout_seconds`, `reader`, `arguments`, `read_only` and the rest):
@@ -5145,7 +5153,7 @@ under the key `maljan/tool_facts`, its declaration in the vocabulary of
 ```json
 {"name": "scan_file", "annotations": {"title": "Scan a file", "readOnlyHint": true,
   "idempotentHint": true, "destructiveHint": false, "openWorldHint": false},
- "_meta": {"maljan/tool_facts": {"kind": "identification", "rows": "/detections/*",
+ "_meta": {"malspark/tool_facts": {"kind": "identification", "rows": "/detections/*",
   "values": {"name": "/name"}, "arguments": {"path": "path"}, "read_only": true,
   "effects": {"executes": "no", "network": false, "third_party": "no"}}}}
 ```
@@ -5210,7 +5218,7 @@ tools (`prepass_tools`), the triage pack's choice of the server whose
 environment an in-process step reads and of the server its readings run on,
 the reputation lookups it asks and their order, the formats a tool serves,
 the servers a capability reference binds and the check of a pack step's
-kind. In FastMCP, `maljan.tools.declared_facts.tool_declaration` writes both
+kind. In FastMCP, `malspark.tools.declared_facts.tool_declaration` writes both
 parts for `@mcp.tool(...)`; every built-in sidecar declares its tools so, and
 a test holds what each declares equal, field by field, to what the platform
 read for it before. The platform ships no table of its own sidecars' tools:
@@ -5252,10 +5260,10 @@ through an entry point in the group of its kind:
 
 | Kind | Entry-point group | The entry point names |
 | :-- | :-- | :-- |
-| `llm` | `maljan.llm_providers` | a subclass of `maljan.llm.provider_base.LLMProvider` with a `build_model` method |
-| `static` | `maljan.static_providers` | a subclass of `maljan.providers.base.StaticProvider`, its abstract methods written |
-| `sandbox` | `maljan.sandbox_providers` | a subclass of `maljan.providers.base.SandboxProvider`, its abstract methods written |
-| `memory` | `maljan.memory_backends` | a callable that calls `register_memory_backend(<name>, builder, ...)` |
+| `llm` | `malspark.llm_providers` | a subclass of `malspark.llm.provider_base.LLMProvider` with a `build_model` method |
+| `static` | `malspark.static_providers` | a subclass of `malspark.providers.base.StaticProvider`, its abstract methods written |
+| `sandbox` | `malspark.sandbox_providers` | a subclass of `malspark.providers.base.SandboxProvider`, its abstract methods written |
+| `memory` | `malspark.memory_backends` | a callable that calls `register_memory_backend(<name>, builder, ...)` |
 
 The entry point's name is the provider id the plugin adds: it is what
 `llm.provider`, `static.provider`, `sandbox.provider`, `memory.backend`, an
@@ -5264,8 +5272,8 @@ lowercase letters, digits, `_` and `-`, and starts with a letter. A package's
 `pyproject.toml` declares one like this:
 
 ```toml
-[project.entry-points."maljan.static_providers"]
-acme = "acme_maljan.provider:AcmeProvider"
+[project.entry-points."malspark.static_providers"]
+acme = "acme_malspark.provider:AcmeProvider"
 ```
 
 The classes are the ones the built-in providers derive from, so a plugin
@@ -5294,7 +5302,7 @@ provider. It comes before the provider class's `declaration(cfg)` hook, which
 answers only while no block is set, and the run's settings snapshot records
 its declaration fields as it does a built-in's. The provider reads how its
 server is reached from the same block
-(`maljan.core.tool_declarations.provider_block(settings, "<id>")`), and a class
+(`malspark.core.tool_declarations.provider_block(settings, "<id>")`), and a class
 may name `providers.<id>` as its `declaration_block`; another provider's entry,
 the whole map or a path inside a tool server's block is refused at
 registration. A provider whose class names another block keeps it: its entry
@@ -5464,7 +5472,7 @@ entry point carries its name, the revision says so in its output and its log,
 naming the installed memory entry points, and the backend does not load; the
 health check and every job then name those entry points and the rule. To keep
 it: install a release of the plugin whose entry point in the
-`maljan.memory_backends` group is named after the backend id, then allow
+`malspark.memory_backends` group is named after the backend id, then allow
 `memory:<id>`; or select a shipped backend.
 
 ### What allowing a plugin trusts
@@ -5478,11 +5486,11 @@ source you trust; the list decides what is loaded, not what is safe.
 ## Export and import
 
 `GET /api/v1/settings/export` (admin) returns the configuration as JSON and
-sets `Content-Disposition: attachment; filename=maljan-settings.json`:
+sets `Content-Disposition: attachment; filename=malspark-settings.json`:
 
 ```json
 {
-  "format": "maljan-settings/3",
+  "format": "malspark-settings/3",
   "exported_at": "2026-09-12T00:00:00Z",
   "values": { "core.llm.provider": "openai" },
   "secrets_omitted": ["core.llm.openai.api_key"]
@@ -5506,18 +5514,18 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
   fails the settings page or the export.
 
 `POST /api/v1/settings/import` (admin) accepts the same document. In
-`maljan-settings/3`, as in `/2`, a built-in block's tool declarations are stored as their
+`malspark-settings/3`, as in `/2`, a built-in block's tool declarations are stored as their
 changes over the shipped ones, one tool at a time (see **Tool declarations are
 saved one tool at a time**), so an export and import round trip keeps exactly
 those changes. A map in a `/3` or `/2` document without the mark is read whole, as
-a stored one is. A document in `maljan-settings/2`, written before a server's
+a stored one is. A document in `malspark-settings/2`, written before a server's
 call budget had a setting of its own, is read as `/3` is, except that where it
 carries `core.static.capa.timeout_seconds` or `core.static.yara.timeout_seconds`
 and no `core.mcp.breaker.default_call_timeout_seconds`, the budget is given the
 floor that document gave every server (the longer of the two, each at its
 shipped default where it is absent), and its YARA timeout is the check budget
 `core.reporting.detection_rule_check_seconds`; a `/3` document's static
-timeouts are their own. A document in `maljan-settings/1`, written before, is still
+timeouts are their own. A document in `malspark-settings/1`, written before, is still
 accepted: a built-in block's tool declarations there are its whole map, so a
 shipped tool it does not name stays removed and a tool it names reads as
 written; a map marked as changes reads as it does in `/2`, and its call budget as in `/2`. A `format` other than these three is rejected with 422; unknown or read-only keys
@@ -5533,7 +5541,7 @@ configuration before sending it.
 ## Secrets
 
 Secret settings are encrypted with Fernet under `SETTINGS_ENCRYPTION_KEY` and
-stored as `enc:v1:<token>` (`src/maljan/core/settings_secrets.py`). The API and
+stored as `enc:v1:<token>` (`src/malspark/core/settings_secrets.py`). The API and
 the worker both read the key from their own environment, so both can open the
 same rows.
 

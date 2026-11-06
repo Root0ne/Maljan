@@ -53,6 +53,18 @@ export const OLD_PATHS = [
 /* Old path -> its address on malspark.com, where it is not /docs + the path. */
 export const MOVED = {
   '/paper/': '/docs/benchmark/',
+  // The per-run score pages were folded into the one benchmark page, which
+  // holds the latest run only.
+  '/benchmark/scores/latrodectus-all-tools-local6/': '/docs/benchmark/',
+  '/benchmark/scores/latrodectus-all-tools-run5/': '/docs/benchmark/',
+  '/benchmark/scores/latrodectus-all-tools-run4/': '/docs/benchmark/',
+  '/benchmark/scores/latrodectus-iteration6-default/': '/docs/benchmark/',
+  '/benchmark/scores/latrodectus-iteration5-default/': '/docs/benchmark/',
+  '/benchmark/scores/latrodectus-iteration4-default/': '/docs/benchmark/',
+  '/benchmark/scores/latrodectus-iteration2-default/': '/docs/benchmark/',
+  '/benchmark/scores/latrodectus-iteration2-r2/': '/docs/benchmark/',
+  '/benchmark/scores/latrodectus-iteration1-default/': '/docs/benchmark/',
+  '/benchmark/scores/latrodectus-iteration1-small/': '/docs/benchmark/',
 };
 
 /** The malspark.com path an old address leads to. */

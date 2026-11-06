@@ -13,7 +13,7 @@ a vulnerability.
 Two credentials are accepted, and an explicit one wins.
 
 - **JWT bearer** — `POST /api/v1/auth/login` returns a short-lived access token
-  and sets an HttpOnly refresh cookie (`maljan_refresh`, scoped to path
+  and sets an HttpOnly refresh cookie (`malspark_refresh`, scoped to path
   `/api/v1/auth`, `SameSite=Lax`, `Secure` per `COOKIE_SECURE`). Send
   the access token as `Authorization: Bearer <token>`. `POST /auth/refresh`
   exchanges the cookie for a new pair, `POST /auth/logout` clears it. Refresh
@@ -100,7 +100,7 @@ setting is optional and a grace secret without one is accepted with no end, so
 an upgrade changes nothing for a rotation already under way; the startup check
 says so at every start until the moment is set or the previous pair is removed.
 `GET /api/v1/system/status` reports the rotation to an admin caller under
-`jwt_grace_secret`. The runbook is in [deployment.md](/docs/deployment/).
+`jwt_grace_secret`. The runbook is in [Rotating the JWT signing secret](/docs/deployment/#rotating-the-jwt-signing-secret).
 
 **The development bypass.** `AUTH_DISABLED` skips every token check and
 attributes each request to a seeded admin user. It is refused at startup
@@ -162,7 +162,7 @@ is refused, and the spawn drops one whatever a block says
 The settings a run ran with are stored as `run_summary.settings_snapshot` and
 read by everyone who may read the report, and the disclosure record and the
 efficiency fingerprint are built from the same masking
-(`maljan.core.settings_masking`, through `settings_overrides.public_snapshot`).
+(`malspark.core.settings_masking`, through `settings_overrides.public_snapshot`).
 It carries no secret: every leaf the settings catalogue types as a secret, a
 tool server's `auth_token` under `mcp.servers` included, is `***` when set;
 every tool server's `env` value (`mcp.servers.*`, `static.ghidra`,
@@ -342,8 +342,8 @@ server map's JSON row, never echoed to the browser, and masked in an export.
 ## Reporting a vulnerability
 
 Use GitHub's private vulnerability reporting at
-[https://github.com/Root0ne/Maljan/security/advisories/new](https://github.com/Root0ne/Maljan/security/advisories/new). Do not open a
+[https://github.com/Root0ne/Malspark/security/advisories/new](https://github.com/Root0ne/Malspark/security/advisories/new). Do not open a
 public issue for an unfixed vulnerability. Include the version or commit, the
 configuration that reproduces it, and the impact you observed. Response
 targets, scope and supported versions are in the repository's
-[SECURITY.md](https://github.com/Root0ne/Maljan/blob/dev/SECURITY.md).
+[SECURITY.md](https://github.com/Root0ne/Malspark/blob/dev/SECURITY.md).

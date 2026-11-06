@@ -22,7 +22,7 @@ because it can already open the file.
 
 A stdio server's stdout carries protocol messages only; its logs, banners and
 progress output belong on stderr. Malspark's own sidecars route the root
-handler and the `maljan` logger to stderr first of all (`core.stdio_safe`), so
+handler and the `malspark` logger to stderr first of all (`core.stdio_safe`), so
 none of their log lines reaches stdout. A UTF-8 text line on stdout that is not a
 protocol message (a log line, a JSON log record, a dependency's download
 progress bar) does not break the connection: the client leaves it out, warns at
