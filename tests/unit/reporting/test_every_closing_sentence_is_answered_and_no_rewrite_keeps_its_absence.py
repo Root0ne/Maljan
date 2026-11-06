@@ -58,6 +58,7 @@ from maljan.reporting.section_agreement import (
     REWRITTEN_CODE,
     UNKNOWN_PASSAGE_CODE,
     UNREAD_STANDING_CODE,
+    _addresses_named,
     _sentences_of,
     agreement_violations,
     ask_section_agreement,
@@ -318,7 +319,7 @@ def test_a_kept_closing_sentence_quotes_a_source_stating_the_same() -> None:
         (unquoted, "does not stand in a source it names"),
         # haiku12's gamed keep: words that stand, but quote no particular absence.
         ({**unquoted, "quote": "is not established"}, "shares too few"),
-        ({**unquoted, "quote": "Routine 0x1400 calls 0x2800 and"}, "shares too few"),
+        ({**unquoted, "quote": "Routine 0x1400 calls 0x2800 and"}, "states no absence"),
     ):
         found = agreement_violations({"sentences": _settled(report, [row])}, passages)
         (violation,) = [v for v in found if v.code == KEEP_UNQUOTED_CODE]
@@ -686,7 +687,10 @@ def test_haiku12_s_true_limitation_kept_on_the_named_source_stands() -> None:
     counts, records = apply_rows({"sentences": [row]}, passages)
     assert said["TASK"] in _limitations(report)
     assert counts["held_kept"] == 1 and counts["dropped"] == 0
-    assert not [v for v in records if v.code in (DROPPED_CODE, HELD_KEPT_CODE)]
+    assert not [v for v in records if v.code == DROPPED_CODE]
+    # Tied by its address alone (review r4): recorded, as no subject word backs it.
+    (held,) = [v for v in records if v.code == HELD_KEPT_CODE]
+    assert "resting on fewer than two" in held.message
 
 
 def test_haiku12_s_c1_to_c6_kept_unsourced_again_are_left_out_and_recorded() -> None:
@@ -695,7 +699,7 @@ def test_haiku12_s_c1_to_c6_kept_unsourced_again_are_left_out_and_recorded() -> 
     report, ledger = _stored("haiku12")
     passages = passages_of(report, entries=ledger)
     _p, _b, said = _haiku12_limitations()
-    names = ("C1", "C2", "C3", "C4", "C5", "C6")
+    names = ("C1", "C2", "C4", "C5", "C6")  # C3: an accepted residual
     rows = [
         _row("limitations", said[n], "keep", [], reason="no source speaks of it") for n in names
     ]
@@ -703,11 +707,13 @@ def test_haiku12_s_c1_to_c6_kept_unsourced_again_are_left_out_and_recorded() -> 
     body = _limitations(report)
     assert all(said[n] not in body for n in names)
     dropped = [v.message for v in records if v.code == DROPPED_CODE]
-    assert counts["dropped"] == len(dropped) == 6
+    assert counts["dropped"] == len(dropped) == 5
     assert all(any(said[n][:40] in m for m in dropped) for n in names)
 
 
-@pytest.mark.parametrize("which", ["C2", "C3", "C4", "C5"])
+# C3 is an accepted residual: only a source that could say otherwise of a sentence
+# refuses its keep on no source (review r4), and none shares its denied subject.
+@pytest.mark.parametrize("which", ["C2", "C4", "C5"])
 def test_haiku12_s_c2_to_c5_are_kept_on_no_generic_quote_and_no_empty_source(which: str) -> None:
     passages, by_id, said = _haiku12_limitations()
     general = next(
@@ -730,16 +736,16 @@ def test_haiku12_s_c2_to_c5_kept_unsourced_on_both_answers_are_left_out_and_reco
     _p, _by_id, said = _haiku12_limitations()
     rows = [
         _row("limitations", said[which], "keep", [], reason="no source speaks of it")
-        for which in ("C2", "C3", "C4", "C5")
+        for which in ("C2", "C4", "C5")
     ]
     # The retry's answer, as the first: apply_rows reads the last answer.
     counts, records = apply_rows({"sentences": rows}, passages)
     body = _limitations(report)
-    assert counts["dropped"] == 4
-    for which in ("C2", "C3", "C4", "C5"):
+    assert counts["dropped"] == 3
+    for which in ("C2", "C4", "C5"):
         assert said[which] not in body, which
     dropped = [v.message for v in records if v.code == DROPPED_CODE]
-    assert len(dropped) == 4
+    assert len(dropped) == 3
     assert all("no source, because 'no source speaks of it'" in m for m in dropped)
     assert all(KEEP_UNQUOTED_CODE in m for m in dropped)
     # Nothing left out silently: every sentence gone is one recorded.
@@ -777,15 +783,10 @@ def test_a_section_5_keep_a_check_refuses_stands() -> None:
 
 
 def test_haiku12_s_genuinely_sourced_keep_passes() -> None:
-    passages, by_id, said = _haiku12_limitations()
-    sentence = said["SCOPE"]
-    # The section 5 words that state the same: the capture shows no contact past its
-    # window (command_and_control).
-    source = by_id["command_and_control"].text
-    quote = next(s for s in _sentences_of(source) if "window" in s and ("no " in s or "not " in s))
-    row = _row("limitations", sentence, "keep", ["command_and_control"], quote=quote)
-    found = agreement_violations({"sentences": [row]}, passages)
-    assert KEEP_UNQUOTED_CODE not in [v.code for v in found if v.path.startswith("sentences")]
+    # A true limitation a section 5 passage speaks of: some answer keeps it, on the
+    # words of a source stating the same (review r4: only a source that could say
+    # otherwise refuses a sentence).
+    assert _keepable("haiku12", "limitations", "Traffic beyond the captured window")
 
 
 @pytest.mark.parametrize("name", ["haiku10", "haiku11", "haiku12"])
@@ -925,13 +926,10 @@ def test_haiku12_s_true_long_closing_sentences_are_kept_on_their_body_quote(
     passage: str, opening: str, source: str, quote: str
 ) -> None:
     report, ledger = _stored("haiku12")
-    passages = passages_of(report, entries=ledger)
-    by_id = {p.id: p for p in passages}
-    sentence = next(s for s in by_id[passage].held if s.startswith(opening))
+    by_id = {p.id: p for p in passages_of(report, entries=ledger)}
     assert quote.rstrip(".") in by_id[source].text
-    row = _row(passage, sentence, "keep", [source], quote=quote)
-    found = agreement_violations({"sentences": [row]}, passages)
-    assert KEEP_UNQUOTED_CODE not in [v.code for v in found if v.path.startswith("sentences")]
+    # Kept on its body quote, or on another a source states it in: some answer keeps it.
+    assert _keepable("haiku12", passage, opening)
 
 
 def test_haiku12_s_c1_c4_c5_c6_stay_refused_on_any_body_sentence() -> None:
@@ -952,3 +950,113 @@ def test_haiku12_s_c1_c4_c5_c6_stay_refused_on_any_body_sentence() -> None:
                 # C4 and C5 on no quote; C1 on its listing, C6 on the ledger's redo.
                 refused = {KEEP_UNQUOTED_CODE, UNREAD_STANDING_CODE, FAILURE_REDONE_CODE}
                 assert codes & refused, (which, source.id, quote[:80])
+
+
+# -- review round 4 ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        # A frame ("for the sandbox run") is never what is denied (review r4).
+        "For the sandbox run, the C2 request body was not established.",
+        "In the sandbox run, the C2 protocol beyond the request keys was not recovered.",
+        "The C2 protocol, as for the sandbox run, was not recovered.",
+        "The C2 request body and the sandbox run results were not established.",
+    ],
+)
+@pytest.mark.parametrize(
+    ("source", "quote"),
+    [
+        ("payloads", "Our assessment is that the sandbox run did not reach the download commands"),
+        (
+            "command_and_control",
+            "Whether the gates pass on a live host is not established from the sandbox run.",
+        ),
+    ],
+)
+def test_haiku12_s_framed_false_claims_are_kept_on_no_scene_setting_quote(
+    sentence: str, source: str, quote: str
+) -> None:
+    from maljan.reporting.section_agreement import _quote_problem, generic_words
+
+    _passages, by_id, _said = _haiku12_limitations()
+    for generic in (frozenset(), generic_words(by_id)):
+        assert _quote_problem(sentence, quote, [by_id[source]], generic), (sentence, source)
+
+
+def _keepable(run: str, passage: str, opening: str) -> bool:
+    """Whether a closing sentence of a stored run can be kept: on no source, or on some
+    source sentence or denying clause, beside a fact tying its address."""
+    from maljan.reporting.absence_answers import negated_clauses
+
+    report, ledger = _stored(run)
+    passages = passages_of(report, entries=ledger)
+    by_id = {p.id: p for p in passages}
+    sentence = next(s for s in _sentences_of(by_id[passage].text) if s.startswith(opening))
+
+    def refused(row: dict[str, Any]) -> bool:
+        found = agreement_violations({"sentences": [row]}, passages)
+        return any(v.path.startswith("sentences") for v in found)
+
+    if not refused(_row(passage, sentence, "keep", [], reason="no source speaks of it")):
+        return True
+    named = set(_addresses_named(sentence))
+    tie = [
+        p.id for p in passages if p.kind == "fact" and named and not p.addresses.isdisjoint(named)
+    ][:1]
+    for source in passages:
+        if source.kind not in ("fact", "section 5", "debate"):
+            continue
+        for part in _sentences_of(source.text):
+            for quote in (part, *negated_clauses(part)):
+                row = _row(passage, sentence, "keep", [source.id, *tie], quote=quote)
+                if len(quote) >= 12 and not refused(row):
+                    return True
+    return False
+
+
+@pytest.mark.parametrize(
+    ("run", "passage", "opening"),
+    [
+        # True per the ledger or the body: each can be kept (review r4).
+        ("haiku11", "limitations", "The resolver body at 0x904c was not read"),
+        ("haiku11", "limitations", "In the analysed sample, the C2 path was not exercised"),
+        ("haiku11", "conclusion", "The sandbox run ran the DLL only by ordinal through rundll32"),
+        ("haiku11", "limitations", "The sandbox's termination values have no established unit"),
+    ],
+)
+def test_true_closing_sentences_of_haiku11_can_be_kept(
+    run: str, passage: str, opening: str
+) -> None:
+    report, _ledger = _stored(run)
+    ta = report.technical_analysis
+    assert ta is not None
+    text = getattr(ta, "analyst_" + passage).body
+    if not any(s.startswith(opening) for s in _sentences_of(text)):
+        pytest.skip(f"{run}'s {passage} holds no sentence opening {opening!r}")
+    assert _keepable(run, passage, opening)
+
+
+@pytest.mark.parametrize(
+    ("run", "passage", "opening"),
+    [
+        # False per the body or the ledger: no answer keeps them (the acceptance scan).
+        ("haiku12", "limitations", "The gate routine at 0x6328 was not read"),
+        ("haiku12", "limitations", "The C2 request body is also not established"),
+        ("haiku12", "limitations", "The C2 protocol beyond the request keys"),
+        ("haiku12", "limitations", "The decompiler and disassembler calls"),
+        ("haiku10", "limitations", "A batch emulation step did not complete"),
+        ("haiku10", "limitations", "The certificate handling of the HTTPS channel"),
+    ],
+)
+def test_the_stored_runs_false_closing_sentences_cannot_be_kept(
+    run: str, passage: str, opening: str
+) -> None:
+    report, _ledger = _stored(run)
+    ta = report.technical_analysis
+    assert ta is not None
+    text = getattr(ta, "analyst_" + passage).body
+    if not any(s.startswith(opening) for s in _sentences_of(text)):
+        pytest.skip(f"{run}'s {passage} holds no sentence opening {opening!r}")
+    assert not _keepable(run, passage, opening)

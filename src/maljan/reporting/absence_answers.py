@@ -27,7 +27,7 @@ from functools import lru_cache
 
 # A word that denies something: what makes a clause an absence.
 _NEGATION = re.compile(
-    r"\b(?:no|not|never|none|nor|neither|without|cannot|unknown|unread|unestablished|"
+    r"\b(?:no|not|never|none|nothing|nor|neither|without|cannot|unknown|unread|unestablished|"
     r"unnamed|unresolved|unidentified|unconfirmed|unrecovered|undetermined|unattributed|"
     r"unobserved|unshown)\b"
     r"|n't\b",
@@ -49,7 +49,7 @@ _STOPWORDS = frozenset(
         "into onto any all also only then than there their they them these those such each "
         "our out per via would could can may might does did being what who how where when "
         "yet still here both either one some most more less same other not none nor neither "
-        "never without cannot but because"
+        "never nothing without cannot but because"
     ).split()
 )
 # A word whose prefix denies it ("unnamed"): read as the word it denies ("named").
@@ -93,13 +93,18 @@ def negated_clauses(sentence: str) -> list[str]:
     return [clause for clause in clauses_of(sentence) if carries_negation(clause)]
 
 
+def _possessive_off(word: str) -> str:
+    """A word without its possessive ending ("sandbox's": "sandbox")."""
+    return word[:-2] if word.endswith("'s") else word
+
+
 def content_words(text: str) -> frozenset[str]:
     """The words a clause is about: lowered, at least three characters, no stop word, no
     negation, no entry id and no bare number; a word its prefix denies as the word it
     denies ("unnamed": "named")."""
     out: set[str] = set()
     for match in _WORD.finditer(text):
-        word = match.group(0).lower().strip("'-")
+        word = _possessive_off(match.group(0).lower().strip("'-"))
         if word in _DENIED_WORDS:
             word = word[2:]
         if len(word) < _WORD_FLOOR or word in _STOPWORDS or _ENTRY_ID.match(word):
@@ -154,7 +159,7 @@ def _denied(clause: str) -> str:
 def _ordered_words(text: str) -> Iterator[str]:
     """:func:`content_words`'s words in the order they stand."""
     for match in _WORD.finditer(text):
-        word = match.group(0).lower().strip("'-")
+        word = _possessive_off(match.group(0).lower().strip("'-"))
         if word in _DENIED_WORDS:
             word = word[2:]
         if len(word) < _WORD_FLOOR or word in _STOPWORDS or _ENTRY_ID.match(word):
@@ -192,21 +197,199 @@ def absence_subject(sentence: str) -> frozenset[str]:
 
 # Where the clause a negation stands in begins, read back from the negation: a mark,
 # or a word joining two clauses.
-_SUBJECT_BREAK = re.compile(r"[,;:]|\b(?:and|but|so|whether|because)\b", re.IGNORECASE)
+# Where an item of what a sentence denies begins: a mark, or a word joining two
+# clauses or list items (kept, as it tells a coordinated item from a new clause).
+_ITEM_BREAK = re.compile(r"[,;:]|\b(?:and|but|so|because)\b", re.IGNORECASE)
+# The words that open an item of a coordinated list ("whether its gates pass, whether
+# its beacon reaches the hosts, and how it persists were not established").
+_LIST_OPENERS = frozenset("whether how what which who when where why if".split())
+# The words that open a frame ("In the sandbox run", "For the sandbox run", "as for
+# the sandbox run"): it sets the scene of the denial and is never what is denied.
+_FRAME_OPENERS = frozenset(
+    "in for during on as from within after before at by under over including excluding "
+    "such like".split()
+)
+_JOINS = frozenset({"and"})
+# The negations that deny what follows them ("no packer signature"), not what stands
+# before ("the body was not read").
+_DENIES_WHAT_FOLLOWS = frozenset({"no", "none", "nothing", "neither", "nor", "without"})
+# The words after which an item's own words end and a modifier begins.
+_PREPOSITIONS = frozenset(
+    (
+        "in for during on as from within after before at by under over beyond of to with "
+        "through via about into onto than like across behind between among toward towards "
+        "outside inside including excluding except"
+    ).split()
+)
 
 
-def subject_items(sentence: str) -> list[frozenset[str]]:
-    """The items of what a sentence denies something of: its words before its first
-    negation, cut at each clause break and each word joining two clauses or list items
-    ("whether its gates pass", "whether its beacon reaches the configured hosts", "and
-    how it persists" of "…: whether its gates pass, whether its beacon reaches the
-    configured hosts, and how it persists were not established"). One pass over the
-    words before the negation."""
+@dataclass(frozen=True)
+class _Item:
+    """One item of what a sentence denies something of: its words, its first word, and
+    whether "and" joins it to the item before."""
+
+    words: frozenset[str]
+    opener: str
+    joined: bool
+    # The last word of its own before a preposition: what the item is ("protocol" of
+    # "The C2 protocol beyond the request keys", "results" of "the sandbox run
+    # results").
+    head: str = ""
+    # Its words before its first preposition ("certificate", "handling" of "The
+    # certificate handling of the HTTPS channel"); for a phrase opening on one, its
+    # last word ("ransomware" of "in the evidence shows ransomware").
+    group: frozenset[str] = frozenset()
+
+
+def _items_before_negation(sentence: str) -> list[_Item]:
+    """The items of a sentence's words before its first negation, in order, each marked
+    where "and" joins it to the item before; an item of no word at all is left out."""
     found = _NEGATION.search(sentence)
     if not found:
         return []
-    items = [content_words(part) for part in _SUBJECT_BREAK.split(sentence[: found.start()])]
-    return [item for item in items if item]
+    before = sentence[: found.start()]
+    items: list[_Item] = []
+    begin, joined = 0, False
+    for match in [*_ITEM_BREAK.finditer(before), None]:
+        end = match.start() if match is not None else len(before)
+        part = before[begin:end]
+        first = next((w.lower() for w in _WORD.findall(part)), "")
+        if first:
+            items.append(_Item(content_words(part), first, joined, _head(part), _group(part)))
+            joined = False
+        if match is not None:
+            begin = match.end()
+            joined = joined or match.group(0).lower() in _JOINS
+    return items
+
+
+# The verbs that make a denial one of observation ("observed no network exchange", "was
+# not recorded"): only an observation says otherwise of it.
+_OBSERVING = frozenset("observed recorded seen captured watched logged".split())
+# How many words on either side of a negation are read for such a verb.
+_OBSERVING_REACH = 3
+
+
+def denies_an_observation(sentence: str) -> bool:
+    """Whether a sentence's first negation denies an observation: an observing verb stands
+    within :data:`_OBSERVING_REACH` words of it ("observed no network exchange", "was not
+    observed")."""
+    found = _NEGATION.search(sentence)
+    if not found:
+        return False
+    before = [w.lower() for w in _WORD.findall(sentence[: found.start()])][-_OBSERVING_REACH:]
+    after = [w.lower() for w in _WORD.findall(sentence[found.end() : found.end() + 80])][
+        :_OBSERVING_REACH
+    ]
+    return any(word in _OBSERVING for word in (*before, *after))
+
+
+def frame_words(sentence: str) -> frozenset[str]:
+    """The words of the frame a sentence opens with ("analysed", "sample" of "In the
+    analysed sample, …"), or none: the scene a report sets, not what it says."""
+    first = next((w.lower() for w in _WORD.findall(sentence[:40])), "")
+    if first not in _FRAME_OPENERS:
+        return frozenset()
+    cut = _ITEM_BREAK.search(sentence)
+    return content_words(sentence[: cut.start()] if cut else sentence) - _addresses(sentence)
+
+
+def _before_preposition(part: str) -> str:
+    """An item's words up to its first preposition past its first word ("YARA hits" of
+    "YARA hits among 31 rules")."""
+    words = part.split()
+    for at, word in enumerate(words):
+        if at > 0 and word.lower().strip(",.;:()") in _PREPOSITIONS:
+            return " ".join(words[:at])
+    return part
+
+
+def _group(part: str) -> frozenset[str]:
+    """An item's own words before its first preposition (past its first word); for one
+    opening on a preposition, its last word of its own."""
+    words = [m.group(0) for m in _WORD.finditer(part)]
+    if words and words[0].lower() in _PREPOSITIONS:
+        head = _head(part)
+        return frozenset({head}) if head else frozenset()
+    cut = next(
+        (at for at, word in enumerate(words) if at > 0 and word.lower() in _PREPOSITIONS),
+        len(words),
+    )
+    return content_words(" ".join(words[:cut]))
+
+
+def _head(part: str) -> str:
+    """The last word of its own an item writes before its first preposition (past its first
+    word), else its last word of its own."""
+    words = [m.group(0) for m in _WORD.finditer(part)]
+    cut = next(
+        (at for at, word in enumerate(words) if at > 0 and word.lower() in _PREPOSITIONS),
+        len(words),
+    )
+    for chosen in (words[:cut], words):
+        own = list(_ordered_words(" ".join(chosen)))
+        if own:
+            return own[-1]
+    return ""
+
+
+def _denied_items(sentence: str) -> list[_Item]:
+    """The items of what a sentence denies something of, never the scene it sets.
+
+    The item right before its first negation. Where that item is a bare verb ("..., and
+    the server responses, were not recovered"), the item before it with every item
+    "and" chains to it ("The C2 protocol beyond the request keys ...", "the server
+    responses"). Where the item opens a coordinated list ("..., and how it persists were
+    not established"), every item of that list ("whether its gates pass", "whether its
+    beacon reaches the configured hosts"). An item opening with a preposition ("In the
+    sandbox run", "as for the sandbox run") is a frame, never what is denied. Where the
+    negation denies what follows it ("no packer signature", "no contact with the C2
+    hosts", "neither configured host"), that phrase, up to the next clause break. One
+    pass over the words around the negation.
+    """
+    found = _NEGATION.search(sentence)
+    if found and found.group(0).lower() in _DENIES_WHAT_FOLLOWS:
+        rest = sentence[found.end() :]
+        cut = _ITEM_BREAK.search(rest)
+        part = _before_preposition(rest[: cut.start()] if cut else rest)
+        words = content_words(part)
+        return [_Item(words, "", False, _head(part), _group(part))] if words else []
+    items = [item for item in _items_before_negation(sentence) if item.opener not in _FRAME_OPENERS]
+    chained = False
+    while items and not items[-1].words:
+        if items.pop().joined:
+            # "it rests on decoded strings and was not observed": the bare verb "and"
+            # joins shares the clause's own subject ("it"), which no word names.
+            return []
+        chained = True
+    if not items:
+        return []
+    last = items[-1]
+    out = [last]
+    if last.opener in _LIST_OPENERS:
+        out.extend(item for item in items[:-1] if item.opener in _LIST_OPENERS)
+    elif chained:
+        # The bare verb's subject is a coordinated list: every item "and" chains to it.
+        for at in range(len(items) - 1, 0, -1):
+            if not items[at].joined:
+                break
+            out.append(items[at - 1])
+    return out
+
+
+def denied_subject(sentence: str) -> frozenset[str]:
+    """The words of what a sentence denies something of (:func:`_denied_items`)."""
+    return frozenset(word for item in _denied_items(sentence) for word in item.words)
+
+
+def denied_groups(sentence: str) -> frozenset[str]:
+    """The own words of each item a sentence denies something of (:func:`_group`)."""
+    return frozenset(word for item in _denied_items(sentence) for word in item.group)
+
+
+def denied_heads(sentence: str) -> frozenset[str]:
+    """What each item a sentence denies something of is (:func:`_head`)."""
+    return frozenset(item.head for item in _denied_items(sentence) if item.head)
 
 
 def _addresses(text: str) -> frozenset[str]:

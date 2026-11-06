@@ -40,11 +40,11 @@ from maljan.pipeline.validation import (
 from maljan.reporting.absence_answers import (
     FailureCounts,
     count_disagrees,
+    denied_subject,
     failure_counts,
     kept_absence,
     negated_clauses,
     quote_stands,
-    subject_items,
 )
 from maljan.reporting.section_agreement import (
     _candidates,
@@ -269,7 +269,7 @@ LISTED = [SimpleNamespace(addresses=frozenset({0x1400}), id="listed.1")]
         ),
         pytest.param(negated_clauses, id="negated clauses"),
         pytest.param(
-            lambda t: subject_items("and, " * (len(t) // 5) + " not known"),
+            lambda t: denied_subject("and, " * (len(t) // 5) + " not known"),
             id="the items of what a sentence denies",
         ),
         pytest.param(lambda t: kept_absence(negated_clauses(t), t), id="an absence kept"),
@@ -303,7 +303,13 @@ LISTED = [SimpleNamespace(addresses=frozenset({0x1400}), id="listed.1")]
                 "The more words of 0x1400 are not read.",
                 {
                     "s": SimpleNamespace(
-                        id="s", kind="section 5", text=t, cites=frozenset(), addresses=frozenset()
+                        id="s",
+                        kind="section 5",
+                        text=t,
+                        cites=frozenset(),
+                        addresses=frozenset(),
+                        write=print,
+                        label="5",
                     )
                 },  # type: ignore[dict-item]
             ),

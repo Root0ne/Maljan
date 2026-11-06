@@ -135,10 +135,11 @@ Every step is one pass over the passages and the answer's rows.
 from __future__ import annotations
 
 import bisect
+import math
 import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
-from functools import cached_property
+from functools import cached_property, lru_cache
 from typing import TYPE_CHECKING, Any, Literal
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -173,15 +174,18 @@ from maljan.pipeline.validation import (
 )
 from maljan.reporting.absence_answers import (
     FailureCounts,
-    absence_subject,
     carries_negation,
     content_words,
     count_disagrees,
+    denied_groups,
+    denied_heads,
+    denied_subject,
+    denies_an_observation,
+    frame_words,
     kept_absence,
     negated_clauses,
     quote_stands,
     said_of,
-    subject_items,
 )
 from maljan.reporting.models import (
     C2Channel,
@@ -2434,7 +2438,7 @@ def _answer_violations(
         named_sources = [
             s for s in sources if s is not None and s.kind in (FACT, SECTION_5, DEBATE)
         ]
-        problem = _quote_problem(sentence, row.quote, named_sources)
+        problem = _quote_problem(sentence, row.quote, named_sources, generic_words(by_id or {}))
         if problem:
             out.append(
                 Violation(
@@ -2451,6 +2455,12 @@ def _answer_violations(
                     path=f"{path}.quote",
                 )
             )
+    decisive = _decisive_unread(passage, sentence) if keeping else ()
+    listing = [(by_id or {})[i] for i in decisive if i in (by_id or {})]
+    if listing:
+        # A closing sentence calling code not read that an entry lists says the
+        # opposite of the ledger whatever it is kept on (T-568).
+        out.append(replace(_unread_standing(passage, sentence, listing), path=f"{path}.decision"))
     speaking = _speaking_of(sentence, by_id or {}) if keeping and not row.sources else []
     if speaking:
         # "No source speaks of it" while a fact about a routine it names, or a
@@ -2518,78 +2528,101 @@ _SPEAKING_SHOWN = 3
 _ABSENCE_PREDICATES = frozenset(
     (
         "established establish known recovered read observed shown passed found appears "
-        "appear present attributed determined identified resolved confirmed listed"
+        "appear present attributed determined identified resolved confirmed listed "
+        "recorded seen captured reached executed exercised completed tied matched examined "
+        "decompiled disassembled traced stated"
     ).split()
 )
 
 
-def kept_subject(sentence: str) -> frozenset[str]:
-    """What a kept closing sentence denies something of: its words before its first
-    negation, never the words saying what is denied (:data:`_ABSENCE_PREDICATES`)."""
-    return frozenset(w for w in absence_subject(sentence) if w not in _ABSENCE_PREDICATES)
-
-
-def _items(sentence: str) -> list[frozenset[str]]:
-    """The items of :func:`kept_subject`, each a clause or list item of two or more words
-    (:func:`absence_answers.subject_items`)."""
-    out = []
-    for item in subject_items(sentence):
-        words = frozenset(w for w in item if w not in _ABSENCE_PREDICATES)
-        if len(words) >= _QUOTE_SHARED:
-            out.append(words)
-    return out
-
-
-def quote_overlap(sentence: str, quote: str) -> int:
-    """How many of :func:`kept_subject`'s words the quote holds (a shared beginning
-    counts)."""
-    return said_of(quote).count(kept_subject(sentence))
-
-
-def _holds_an_item(sentence: str, quote: str) -> bool:
-    """Whether the quote holds an item of what the sentence denies something of: two
-    thirds or more of one clause or list item, two words at least ("whether its gates
-    pass" of "…: whether its gates pass, whether its beacon reaches the configured
-    hosts, and how it persists were not established"). Half of one long item ("decoded
-    strings … keys" of "The C2 protocol beyond the request keys in the decoded strings")
-    is not one."""
-    said = said_of(quote)
-    return any(
-        said.count(item) >= max(_QUOTE_SHARED, -(-2 * len(item) // 3)) for item in _items(sentence)
+def kept_subject(sentence: str, generic: frozenset[str] = frozenset()) -> frozenset[str]:
+    """What a kept closing sentence denies something of (:func:`absence_answers.denied_subject`:
+    the item before its negation, never a frame), but the words saying what is denied
+    (:data:`_ABSENCE_PREDICATES`) and the report's generic words (:func:`generic_words`)."""
+    return frozenset(
+        w for w in denied_subject(sentence) if w not in _ABSENCE_PREDICATES and w not in generic
     )
 
 
-def _quote_problem(sentence: str, quote: str, sources: Sequence[Passage]) -> str:
+# A word standing in at least this share of the section 5 prose passages, and in at
+# least :data:`_GENERIC_LEAST` of them, says nothing of what one sentence is about.
+_GENERIC_SHARE = 0.8
+_GENERIC_LEAST = 3
+
+
+# A word the body's own frames use in at least this many sentences is a scene word.
+_FRAME_LEAST = 2
+
+
+def generic_words(by_id: dict[str, Passage]) -> frozenset[str]:
+    """The report's generic words, read off its own vocabulary, never off a list of tool
+    or sample names: those standing in four fifths or more (three at least) of its
+    section 5 prose passages ("sandbox", "code", "routine"), and those its section 5
+    sentences set the scene with in two or more frames ("analysed", "sample" of "In the
+    analysed sample, …"). A table row is no passage here."""
+    texts = [p.text for p in by_id.values() if p.kind == SECTION_5 and p.write is not None]
+    return _generic_of(tuple(texts))
+
+
+@lru_cache(maxsize=32)
+def _generic_of(texts: tuple[str, ...]) -> frozenset[str]:
+    counts: dict[str, int] = {}
+    framed: dict[str, int] = {}
+    for text in texts:
+        for word in content_words(text):
+            counts[word] = counts.get(word, 0) + 1
+        for sentence in _sentences_of(text):
+            for word in frame_words(sentence):
+                framed[word] = framed.get(word, 0) + 1
+    least = max(_GENERIC_LEAST, math.ceil(len(texts) * _GENERIC_SHARE))
+    common = {w for w, n in counts.items() if n >= least} if len(texts) >= _GENERIC_LEAST else set()
+    scene = {w for w, n in framed.items() if n >= _FRAME_LEAST}
+    # An address names one routine however often it is written: never generic.
+    return frozenset(w for w in common | scene if not _addresses_named(w))
+
+
+def quote_overlap(sentence: str, quote: str, generic: frozenset[str] = frozenset()) -> int:
+    """How many of :func:`kept_subject`'s words the quote holds (a shared beginning
+    counts)."""
+    return said_of(quote).count(kept_subject(sentence, generic))
+
+
+def _quote_problem(
+    sentence: str, quote: str, sources: Sequence[Passage], generic: frozenset[str] = frozenset()
+) -> str:
     """What is wrong with a kept closing sentence's quote, or ``""``.
 
-    It stands whole in a named source (:func:`absence_answers.quote_stands`); where
-    the sentence names addresses, the quote, or a fact it names, names one of them
-    (haiku12's "0x3868 was read only in part" kept on a sentence about 0x7acc); it
-    holds at least :data:`_QUOTE_SHARED` of what the sentence denies something of
-    (:func:`kept_subject`), never the words saying what is denied ("established,
-    passed"); where no address ties it, at least half of those words, or one clause or
-    list item of them (:func:`_holds_an_item`), so the matching body sentence of a long
-    closing sentence is a quote and "decoded strings" of another sentence is not; and
-    it states an absence where the sentence does.
+    It stands whole in a named source (:func:`absence_answers.quote_stands`), and
+    states an absence where the sentence does. Where the sentence names addresses, the
+    quote, or a fact it names, names one of them (haiku12's "0x3868 was read only in
+    part" kept on a sentence about 0x7acc); so tied, a quote stating an absence needs
+    no more: the address is the subject. Untied, it holds two (all, where fewer) of
+    the words of what the sentence denies something of (:func:`kept_subject`: never
+    a frame, a word saying what is denied or a generic word), so "the sandbox run did
+    not reach the download commands" backs no sentence about the C2 request body
+    framed "for the sandbox run".
     """
     if not quote_stands(quote, [s.text for s in sources]):
         return "does not stand in a source it names"
+    absent = carries_negation(sentence)
+    if absent and not carries_negation(quote):
+        return "states no absence, while the sentence states one"
     named = frozenset(_addresses_named(sentence))
     by_quote = bool(named & set(_addresses_named(quote)))
     by_fact = any(s.kind == FACT and not s.addresses.isdisjoint(named) for s in sources)
     if named and not (by_quote or by_fact):
         return "names none of the addresses the sentence names"
-    subject = kept_subject(sentence)
-    overlap = quote_overlap(sentence, quote)
-    if by_quote or by_fact:
-        enough = overlap >= min(_QUOTE_SHARED, len(subject))
-    else:
-        half = max(min(_QUOTE_SHARED, len(subject)), -(-len(subject) // 2))
-        enough = overlap >= half or _holds_an_item(sentence, quote)
-    if not enough:
+    if named:
+        return ""
+    subject = kept_subject(sentence, generic)
+    if quote_overlap(sentence, quote, generic) < min(_QUOTE_SHARED, len(subject)):
         return "shares too few of the words the sentence denies something of"
-    if carries_negation(sentence) and not carries_negation(quote):
-        return "states no absence, while the sentence states one"
+    # What an item denied is ("protocol" of "The C2 protocol beyond the request keys in
+    # the decoded strings"): a quote holding only its modifiers ("decoded strings") is
+    # about something else.
+    heads = frozenset(h for h in denied_heads(sentence) if h not in _ABSENCE_PREDICATES)
+    if heads and not said_of(quote).count(heads):
+        return "names none of what the sentence denies something of"
     return ""
 
 
@@ -2598,36 +2631,57 @@ _EXCERPT_CHARS = 160
 
 
 def _speaking_sources(sentence: str, by_id: dict[str, Passage]) -> list[tuple[str, str]]:
-    """The shown sources a closing sentence is about, each with an excerpt, best first.
+    """The shown sources that could say otherwise than a closing sentence, each with an
+    excerpt, best first.
 
-    A source speaks of the sentence where it is a fact about an address the sentence
-    names, or where it (a section 5 passage, or a fact citing an entry) holds at least
-    half (two or more) of the words before the sentence's first negation, what it
-    denies something of. The excerpt is the source's sentence whose own first address
-    the closing sentence names, then the one naming the most of those words; the
-    sources rank the same way, a fact writing that address first ("0x7acc … is called
-    by …") before one naming it as a caller. On one line, cut at
-    :data:`_EXCERPT_CHARS` characters with the cut marked. Each source's sentences are
-    read once per text.
+    A source could where it is a fact about an address the sentence names, or where it
+    (a section 5 passage, or a fact citing an entry) holds two or more words of what the
+    sentence denies something of (:func:`kept_subject`, the report's generic words left
+    out), one of them what a denied item is (:func:`absence_answers.denied_groups`): in one
+    sentence where the sentence denies an observation
+    (:func:`absence_answers.denies_an_observation`), anywhere in it otherwise. A question
+    an analyst left open states nothing to say otherwise with. The excerpt is the
+    source's sentence whose own first address the closing sentence names, then the one
+    naming the most of those words; the sources
+    rank the same way, a fact writing that address first ("0x7acc … is called by …")
+    before one naming it as a caller. On one line, cut at :data:`_EXCERPT_CHARS`
+    characters with the cut marked. Each source's sentences are read once per text.
     """
     named = frozenset(_addresses_named(sentence))
-    subject = absence_subject(sentence)
-    least = max(_QUOTE_SHARED, -(-len(subject) // 2))
+    subject = kept_subject(sentence, generic_words(by_id))
+    observed = denies_an_observation(sentence)
+    # What each denied item is: a source says otherwise of it only naming one of these.
+    heads = frozenset(h for h in denied_groups(sentence) if h in subject)
     ranked: list[tuple[tuple[int, int, int], int, str, str]] = []
     for order, source in enumerate(by_id.values()):
         if source.kind not in (FACT, SECTION_5) or not (source.kind == SECTION_5 or source.cites):
             continue
+        if source.kind == FACT and "open question" in source.label:
+            # A question an analyst left open states nothing to say otherwise with.
+            continue
         by_address = bool(named and source.kind == FACT and not source.addresses.isdisjoint(named))
-        by_subject = len(subject) >= _QUOTE_SHARED and said_of(source.text).count(subject) >= least
+        # A denied observation is said otherwise of only by a sentence holding two of its
+        # words (a passage of code describing an exchange observes none); any other
+        # denial by a passage holding them (the request built over several sentences).
+        texts = _sentences_of(source.text) if observed else [source.text]
+        by_subject = len(subject) >= _QUOTE_SHARED and any(
+            said_of(text).count(subject) >= _QUOTE_SHARED
+            and (not heads or said_of(text).count(heads) > 0)
+            for text in texts
+        )
         if not (by_address or by_subject):
             continue
         best: tuple[tuple[int, int, int], str] | None = None
         for part in _sentences_of(source.text):
-            words = said_of(part).count(subject) if len(subject) >= _QUOTE_SHARED else 0
+            words = said_of(part).count(subject) if subject else 0
             # A fact writes its address first, the virtual address and its offset.
             first = _addresses_named(part)[:2] if named else []
             own = int(any(address in named for address in first))
-            score = (own, int(by_address and bool(named & set(first))), words)
+            # A fact opening on the address is about that routine ("0x…c42c (offset
+            # 0xc42c) is called by …"), before a question or a passage naming it.
+            head = " ".join(part.split()[:3])  # the address, and its offset in brackets
+            opens = int(bool(named) and bool(named & set(_addresses_named(head))))
+            score = (opens, own, words)
             if best is None or score > best[0]:
                 best = (score, part)
         if best is not None:
@@ -3562,7 +3616,8 @@ def apply_rows(
                     if (
                         row.sources
                         and not found
-                        and quote_overlap(standing[2], row.quote) >= _QUOTE_SHARED
+                        and quote_overlap(standing[2], row.quote, generic_words(by_id))
+                        >= _QUOTE_SHARED
                     ):
                         continue
                     rests = (
@@ -3725,10 +3780,10 @@ def _fact_fallback(
 
 
 # The codes by which the ledger itself, not a model's words, says a kept sentence
-# is false: a failed call a later call redid. A count of failed calls the ledger's
-# does not hold is read off the words and recorded, never a reason to leave a
-# sentence out.
-_LEDGER_CODES = frozenset({FAILURE_REDONE_CODE})
+# is false: a failed call a later call redid, or code an entry lists called not read
+# in a closing sentence. A count of failed calls the ledger's does not hold is read
+# off the words and recorded, never a reason to leave a sentence out.
+_LEDGER_CODES = frozenset({FAILURE_REDONE_CODE, UNREAD_STANDING_CODE})
 
 
 def _ledger_says_otherwise(found: Sequence[Violation]) -> bool:
