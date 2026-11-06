@@ -92,6 +92,10 @@ that copies every object into the new bucket from inside the API container.
 
 Some values keep the old name on purpose, because data already written is
 bound to them: the domain tags of the evidence ledger, audit chain, stored
-report seals and job package signatures, the ledger chain's key label, and the
-capture directory an earlier release left under the system temp directory. They are listed in
+report seals and job package signatures, the ledger chain's key label, the
+namespace MISP attribute uuids are derived in and the STIX producer identity's
+id (so a MISP instance or a STIX consumer that holds earlier exports sees the
+same attributes and the same producer), the prefix of the settings repair
+markers in the database, and the capture directory an earlier release left
+under the system temp directory. They are listed in
 `src/malspark/core/previous_name.py`.

@@ -20,6 +20,12 @@ file to the new one:
   current name;
 - the job package signature key label an earlier release signed under, which
   a verification still derives beside the current one;
+- the identifiers other stores already hold: the namespace of each MISP
+  attribute's uuid (``malspark.reporting.misp``), the STIX producer identity's
+  id (``stix_renderer.PRODUCER_IDENTITY_ID``) and the prefix of the settings
+  repair markers (``app.services.settings_service.MARKER_PREFIX``);
+- the tag of an analyst's findings block and the custom properties of a judge
+  answer stored before the rename, which a replay still reads;
 - the STIX custom properties a stored bundle carries, which the bundle
   endpoint reads under the current names.
 

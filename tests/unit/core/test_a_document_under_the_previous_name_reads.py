@@ -114,3 +114,20 @@ def test_identifiers_external_stores_hold_keep_their_values() -> None:
         f"identity--{uuid.uuid5(ATTACK_PATTERN_NAMESPACE, PREVIOUS_NAME)}"
     )
     assert MARKER_PREFIX == f"{PREVIOUS_NAME}.repair."
+
+
+def test_a_judge_answer_stored_with_previous_name_properties_is_renamed_in_place() -> None:
+    from malspark.schemas.stix_models import current_property_names_in_place
+
+    obj = {"type": "malware", "id": "malware--1", f"x_{PREVIOUS_NAME}_confidence": 0.8}
+    both = {
+        "type": "indicator",
+        f"x_{PREVIOUS_NAME}_confidence": 0.1,
+        f"x_{CURRENT_NAME}_confidence": 0.9,
+    }
+    bundle = {"type": "bundle", "objects": [obj, both], f"x_{PREVIOUS_NAME}_assessment": {}}
+    current_property_names_in_place(bundle)
+    assert bundle["objects"][0] is obj
+    assert obj == {"type": "malware", "id": "malware--1", f"x_{CURRENT_NAME}_confidence": 0.8}
+    assert both == {"type": "indicator", f"x_{CURRENT_NAME}_confidence": 0.9}
+    assert f"x_{CURRENT_NAME}_assessment" in bundle
