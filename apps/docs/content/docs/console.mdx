@@ -15,19 +15,16 @@ The web console in `apps/web`. It talks to the API in `apps/api` over
                         the tools recent runs used, runtime banners
 /samples                Upload a sample, browse samples, submit an analysis
 /jobs                   Every analysis, filtered by status; cancel a running one
-/analysis/{jobId}
-  ├── SUMMARY           Severity, findings counts, time per stage, key findings, technical analysis, exports
-  ├── CONVERSATION      The run as a group conversation, live and replayed
-  ├── IDENTITY          Hashes, file metadata, signatures, reputation
-  ├── STATIC            Binary structure, imports, strings, packers
-  ├── DYNAMIC           Process tree, behaviour, sandbox findings
-  ├── NETWORK           Domains, IPs, URLs, and their enrichment
-  ├── PERSISTENCE       Autoruns, services, scheduled tasks
-  ├── ATT&CK            The technique matrix for this sample
-  ├── ATTRIBUTION       Family, campaign, and the evidence behind each
-  ├── DETECTION         Rule matches, generated rules, the STIX bundle and its graph
-  ├── DEFENSE           Recommended mitigations and hunts
-  └── EVIDENCE          The ledger: every tool call the run made
+/analysis/{id}          Six tabs, the same on every finished analysis
+  ├── Overview          Severity, key findings, summary, configuration, recommendations, references
+  ├── Behaviour         Process tree, sandbox findings, persistence, ATT&CK matrix, technical analysis
+  ├── Network           Domains, IPs, URLs, and their enrichment
+  ├── Static & code     Identity and reputation, binary structure, imports, strings, decoded text
+  ├── Indicators & detection
+  │                     IOCs, attribution, generated rules, rule matches, the STIX bundle and its graph
+  └── Evidence          Evidence bundle, Records (every tool call), Analyst discussion, Debate,
+                        and a view per agent and per server of the run
+/compare                Two runs of the same sample side by side
 /settings
   ├── Profile           Name, email, password
   ├── API keys          Issue and revoke keys
@@ -47,8 +44,8 @@ each, the two values an operator pastes somewhere else. The buttons sit outside
 the row's link, their names say which row's value they copy, and the
 confirmation is read out from a live region rather than left to the button's
 word changing under focus. The same control
-(`apps/web/src/components/ui/CopyButton.tsx`) copies the IDENTITY hashes and
-the DETECTION rule cards; its name stays the same under focus and holds the
+(`apps/web/src/components/ui/CopyButton.tsx`) copies the Static & code hashes and
+the Indicators & detection rule cards; its name stays the same under focus and holds the
 word it shows, the "Copied" a sighted reader sees is not read a second time,
 and each button is at least 24 px tall.
 
@@ -84,13 +81,13 @@ restated under it; the confidence is printed here, once, as a two-decimal
 number, and a run whose judge never answered reads "not assessed" rather than
 being scored zero.
 
-**Time per stage.** SUMMARY lists each stage that took time with its duration
+**Time per stage.** Overview lists each stage that took time with its duration
 and a flat bar measured against the run's total elapsed, which is printed
 beside them with the time the stages account for; the gap is queueing,
 ingestion and the writing of the report. The rows are the ones the stage strip
 draws, from the same run store and the same formatter
 (`stageTiming` in `apps/web/src/components/analysis/stageTimeline.ts`), so the
-Summary and the strip cannot print different durations for one stage. A stage
+Overview and the strip cannot print different durations for one stage. A stage
 that declined has no row, and a run stored before stages were timed has no
 card.
 
@@ -117,21 +114,16 @@ per-agent results table use. One selector answers for all of them
 (`apps/web/src/lib/rosterNames.ts`), reading the roster the job carries and
 falling back to the published key where the roster names nobody.
 
-**Only the tabs the run filled.** A tab is offered when the report carries
-what it draws: a ledger section routed to it, or its own typed block
-(`apps/web/src/components/analysis/analysisTabs.ts`). Where a tab's content
-needs parsing before it is known to be drawable, the rule and the panel share
-one reading — the rule for DETECTION is the rule-match reader itself
-(`ruleMatches.ts`), and the rule for ATT&CK is the mapped techniques the
-matrix is built from, never the corroboration it only decorates a card with. SUMMARY, CONVERSATION
-and EVIDENCE are always offered — the first is where a run lands, the second
-answers whatever state the job is in, and on the third "no call matches these
-filters" is information rather than an apology. While a job is still running
-those three are all there is, and the rest appear as the report fills them.
-Inside a tab the same rule applies to every panel, so a run with no observed
-traffic shows no empty Domains table.
+**Every tab, every time.** A finished analysis always shows the same six
+tabs in the same order (`apps/web/src/components/analysis/overview.ts`). A tab
+with nothing to draw says so inside, so a reader learns the layout once and an
+absence reads as an answer. Every part of the stored report has a place on
+some tab (`apps/web/src/components/analysis/analysisMap.ts`), and a test fails
+when a field of the report has none. While a job is still running, only
+Overview and Evidence are offered, and Evidence opens on its Records and the
+Analyst discussion as they fill.
 
-**The report model's words, labelled as its words.** SUMMARY draws what the
+**The report model's words, labelled as its words.** Overview draws what the
 report model wrote in the order the exported report prints it: the key
 findings, each bullet with the ledger entries it cites (or *no evidence cited*),
 then the summary paragraph; and a technical-analysis card with the execution
@@ -153,22 +145,24 @@ written `hxxp://`, `[.]` and `[:]`; the machine surfaces keep them live. The
 severity card's platform line reads *Platform (from the file format,
 measured)*, since the builder reads it from the format and the judge did not
 assess it. A report stored before key findings
-existed shows its summary and the capability paragraphs it carried. IDENTITY
+existed shows its summary and the capability paragraphs it carried. Static & code
 adds the header facts the format tool read — architecture, whether the image is
 a DLL, the export directory's name and the version resource's internal name —
-and STATIC lists the exports with their ordinal and address when the tool
-reported them. ATTRIBUTION says who named the family: the judge, with the
+and lists the exports with their ordinal and address when the tool
+reported them. Indicators & detection says who named the family: the judge, with the
 entries it cited, or the sandbox's own classification when the judge named
 none. None of it is drawn with a gradient.
 
-Older analysis URLs still resolve, from the server: `/ttps` goes to ATT&CK,
-`/rules`, `/signatures` and `/stix` to DETECTION, and `/live`, `/process`,
-`/agents`, `/pipeline` and `/timeline` to CONVERSATION
-(`apps/web/next.config.ts`).
+Older analysis URLs still resolve, from the server: `/conversation`, `/live`,
+`/process`, `/agents`, `/pipeline` and `/timeline` go to Evidence → Analyst
+discussion; `/dynamic`, `/ttps`, `/capabilities` and `/persistence` to
+Behaviour; `/identity` to Static & code; `/detection`, `/rules`, `/signatures`,
+`/stix` and `/attribution` to Indicators & detection; and `/defense` to the
+recommendations at the end of Overview (`apps/web/next.config.ts`).
 
 ## Conversation
 
-One tab for a run that is happening and a run that happened. It draws the
+Evidence → Analyst discussion is one view for a run that is happening and a run that happened. It draws the
 participants, what each said, the tool calls they made, the corrections they
 were shown, the questions the judge asked and the verdict that closed the run —
 in the order the publisher numbered them.
@@ -189,7 +183,7 @@ them into.
 **Kinds.** A message is drawn as what it is: speech as a bubble; a tool call as
 one monospaced line with the tool, whether it succeeded — in the icon's shape
 and in words a screen reader can read — how long it took and a chip that opens
-its row on the EVIDENCE tab; a validator correction and a cap notice as
+its row on Evidence → Records; a validator correction and a cap notice as
 centred notes; a judge's question and a delegated ask and answer as bubbles
 with an arrow to the agent addressed; the verdict as a closing card.
 Streamed text appends into the speaker's open bubble and is replaced by the
@@ -254,7 +248,7 @@ A run asks one reputation service about the sample's hash: any server whose
 tool declares `kind: reputation` (VirusTotal's own MCP server before the
 threat-intel sidecar, with the shipped declarations; see
 [reputation lookups](/docs/configuration/#what-a-server-declares-about-its-tools)). The answer is drawn on
-IDENTITY, beside the hashes, under the service's declared name — its engine
+Static & code, beside the hashes, under the service's declared name — its engine
 counts, its labels, when it was first and last seen, and a link to the full
 report when the answer carried one.
 
@@ -273,7 +267,7 @@ another shape. A table row is left alone, because its cells are positional.
 
 A column says nothing in the same way. A column whose every row holds the same
 value is stated once above the table and taken out of it, and one that is
-empty on every row is dropped: the NETWORK indicator table spent two of its
+empty on every row is dropped: the Network tab's indicator table spent two of its
 four columns on one evidence id and forty dashes.
 
 Machine names and machine values are read back before they are drawn
@@ -285,7 +279,7 @@ keys are read as sentences with an acronym list, and the header values as
 their named constants, a human size, a UTC date and a hex entry point. A field
 or a constant nothing knows is drawn as it arrived rather than guessed at.
 
-IDENTITY applies it twice over. The `identity` section is the one that
+Static & code applies it twice over. The `identity` section is the one that
 overlaps the tab's own blocks, so it is split: its hashes go to the File
 hashes block, which draws only the fingerprints a tool produced, and its
 signing row is stated as a sentence rather than as `present=no`. A report
@@ -297,7 +291,7 @@ for the format the run routed on and drops the rest.
 
 One ladder owns severity: Critical, High, Medium, Low, Informational, the
 judge's five words, with one colour each (`apps/web/src/lib/severity.ts`).
-The Summary's rating, the DYNAMIC signature badges and the header's
+The Overview's rating, the Behaviour tab's signature badges and the header's
 verdict-against-severity rule read it, and anything sorted by severity is
 sorted by the ladder's rank, never by the label's alphabetical order — which
 would put High before Informational before Low before Medium. A word that is
@@ -305,11 +299,11 @@ not a rung sorts last and is drawn in Informational's colour with its own word
 beside it. The colour is never the only carrier: the rung's word is always
 printed.
 
-DETECTION's rule matches are the report sections the rule tools' ledger rows
-build, each headed by the chips of the ledger entries it came from, as STATIC
+Indicators & detection's rule matches are the report sections the rule tools' ledger rows
+build, each headed by the chips of the ledger entries it came from, as Static & code
 drew them before: `yara_matches` and `sigma_matches`, whose Level column is
-the level the Sigma rule's author declared. They are routed to DETECTION and to nowhere
-else; STATIC says where they are and links there rather than drawing the same
+the level the Sigma rule's author declared. They are routed to Indicators & detection and to nowhere
+else; Static & code says where they are and links there rather than drawing the same
 table twice. A Sigma row shows its level labelled as the rule's level, sorted
 and dotted by it on the same ladder (one dot per rung from Informational up);
 a rule that declares none says "no level declared" and takes no part in the
@@ -319,7 +313,7 @@ its Sigma rows say "level not recorded", draw no dots, take no part in the
 sort, and show the layer's confidence — set from the rule's maturity status —
 as the number it is. Nothing reads a confidence as a severity.
 
-A generated YARA rule's card on DETECTION says what checking it against the
+A generated YARA rule's card on Indicators & detection says what checking it against the
 sample it was drafted from found, read from the clauses the engine recorded
 (`matched_by`) and never from a threshold worked out again: "its strings match
 its sample" in green, "matches its sample by hash only" in amber (the draft
@@ -335,7 +329,7 @@ read from the record's `printed` and `standing`: the Precision line in muted
 text, or why its body is not printed there; a rule stored before those fields
 shows the badge alone.
 
-A DYNAMIC signature's number is the sandbox's own, and its scale depends on
+A Behaviour tab signature's number is the sandbox's own, and its scale depends on
 which sandbox produced it: a CAPEv2 signature declares 1 to 3 (low, medium,
 high), and Hatching Triage writes its 1 to 10 signature score into the same
 field (1 no malicious behaviour, 2–5 likely benign, 6–7 suspicious, 8–9 likely
@@ -437,7 +431,7 @@ than the built CSS.
 
 ## The relationship graph
 
-DETECTION's STIX section shows the exported bundle three ways: Graph, Table
+Indicators & detection's STIX section shows the exported bundle three ways: Graph, Table
 and JSON. All three read the bundle `GET /api/v1/reports/{id}/stix` serves,
 the one the Download button saves, and nothing is assembled beside it.
 
@@ -464,7 +458,7 @@ validation findings name it.
 
 Selecting a node or an edge by pointer, or a node with Enter or Space, shows
 its STIX JSON, its relationships, and the evidence-ledger ids it carries in
-`x_malspark_evidence_refs` as links into EVIDENCE; the Relationships table lists
+`x_malspark_evidence_refs` as links into Evidence → Records; the Relationships table lists
 them too. Nodes take keyboard focus and edges do not: a selected node lists
 each of its relationships as a button, which is how the keyboard reaches an
 edge, and a bundle with hundreds of edges does not put hundreds of stops in
@@ -506,7 +500,7 @@ a key finding reworded or a STIX report object, and are never paired by
 guess. A changed row's badge names what changed ("Changed: level", "Changed:
 who stated it") and the row lists every field, marking those equal in both
 runs "(same in both)", so the value that did not change stays in view; the
-evidence column links each run's cited ledger ids into that run's EVIDENCE
+evidence column links each run's cited ledger ids into that run's Evidence → Records
 tab, and shows none where the record holds no id for the row. Ids a record
 cites for a whole section, as the rule-match sections do, are listed under
 the section heading as section evidence. Differences come first; "Show

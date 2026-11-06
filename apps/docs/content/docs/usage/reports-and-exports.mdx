@@ -14,8 +14,8 @@ it. How the report is built is described in
 
 Read it from the evidence up rather than from the verdict down. Every section
 carries the ledger ids it was built from, rendered as chips in the console; a
-chip opens that call on the **EVIDENCE** tab with its arguments, its result and
-how long it took. The **Evidence** card on the summary tab counts what the
+chip opens that call under **Evidence → Records** with its arguments, its result and
+how long it took. The **Run quality** section under Evidence counts what the
 whole report stands on: how many calls were made, how many failed, and how many
 sections can name nothing at all.
 
@@ -378,7 +378,7 @@ earlier version has no effects part and renders as before.
 A run whose block was not built stores why (`{"not_built": …}`: reporting
 off, no run summary as in a mock run, or a build that failed), so it is told
 apart from a report stored before the block existed, which shows none. The
-console's summary tab does not draw the block yet; the record is in the stored
+console's Overview tab does not draw the block yet; the record is in the stored
 run summary.
 
 ## What the run spent its input on

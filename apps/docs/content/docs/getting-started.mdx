@@ -162,9 +162,9 @@ JOB=$(curl -s -X POST $API/jobs -H "Authorization: Bearer $TOKEN" \
   -d "{\"sample_id\":\"$SAMPLE\"}" | jq -r .id)
 ```
 
-Follow the run on the analysis page. The **CONVERSATION** tab shows every
-agent's messages and tool calls as they happen; the **EVIDENCE** tab is the
-ledger. When the job is `completed`, read the report:
+Follow the run on the analysis page. **Evidence → Analyst discussion** shows
+every agent's messages and tool calls as they happen; **Evidence → Records**
+is the ledger. When the job is `completed`, read the report:
 
 ```bash
 curl -s $API/reports/job/$JOB -H "Authorization: Bearer $TOKEN" | jq -r .id
@@ -178,9 +178,9 @@ curl -s $API/reports/<report id>/markdown -H "Authorization: Bearer $TOKEN" > re
 ## Read the report from the evidence up
 
 Every report section carries the ledger ids it was built from. In the console
-each id is a chip that opens the call on the **EVIDENCE** tab, with its
-arguments, its answer and its duration. The **Evidence** card on the summary
-tab counts the calls, the failures, and any section that cites nothing. See
+each id is a chip that opens the call under **Evidence → Records**, with its
+arguments, its answer and its duration. **Evidence → Evidence bundle** prints
+every section with the entries it cites. See
 [The evidence ledger](/docs/concepts/ledger/).
 
 ## Next steps
