@@ -14,6 +14,13 @@ import zipfile
 
 import atheris
 
+# py7zr loads pycryptodome, whose native parts are opened with RTLD_DEEPBIND,
+# and the address sanitizer cannot run beside a library opened that way: the
+# first 7z input would stop the fuzzer with a sanitizer error that says
+# nothing about Malspark. The 7z reader is left out of this harness (the lister
+# then answers that py7zr is not installed); every other format is fuzzed.
+sys.modules["py7zr"] = None  # type: ignore[assignment]
+
 with atheris.instrument_imports():
     from maljan.tools import binary
 

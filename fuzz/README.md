@@ -30,3 +30,8 @@ uv run --with atheris python fuzz/fuzz_safe_json.py -max_total_time=60
 Any libFuzzer flag works after the harness (`-runs=`, `-max_len=`, a corpus
 directory). A crashing input is written to `crash-<sha1>` in the working
 directory; rerun it with `python fuzz/fuzz_safe_json.py crash-<sha1>`.
+
+The document harness leaves the 7z reader out: py7zr loads pycryptodome, whose
+native parts are opened with `RTLD_DEEPBIND`, and the address sanitizer cannot
+run beside such a library. The lister then answers that py7zr is not installed;
+every other format is fuzzed.
