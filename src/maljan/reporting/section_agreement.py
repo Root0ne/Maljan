@@ -112,10 +112,12 @@ sentence's own words, an absence on words stating one), or naming none with its
 reason where no fact about a routine it names, and no section 5 passage or fact
 holding what it denies something of, is shown; rewrites it; or leaves it out
 ("drop") with its reason. A keep on a quote that passes is counted; a keep on no
-source or on a refused one, and every drop, is recorded. A kept closing sentence
-the ledger itself says otherwise of (a failed call a later call redid) is left
-out after the retry, and recorded; a number of failed calls the ledger's count
-does not hold is recorded, never a reason to leave a sentence out. A rewrite
+source with its reason, and every drop, is recorded. A kept closing sentence
+the ledger itself says otherwise of (a failed call a later call redid), or kept
+on no source or a quote a check refused, is left out after the retry, and
+recorded (a section 5 keep a check refuses stands, as before); a number of
+failed calls the ledger's count does not hold is recorded, never a reason to
+leave a sentence out. A rewrite
 resting on a fact that states again the
 absence the fact contradicts, the same words on the same addresses
 (``absence_answers.kept_absence``), or calling unread a routine a closing
@@ -239,8 +241,9 @@ FAILURE_REDONE_CODE = "agreement.failure_redone"
 # otherwise than a section 5 passage, a fact or a closed debate line, whose
 # rewrite passed no check: left out of the section, which only sums up what
 # sections 4 to 6 state, and recorded here with what stood (T-554); one the answer
-# leaves out with its reason, or keeps while the ledger says otherwise (a failed call
-# a later call redid), the same way (T-568).
+# leaves out with its reason, keeps while the ledger says otherwise (a failed call a
+# later call redid), or keeps on no source or a quote the checks refused, the same
+# way, with the refused keep's sources, quote or reason (T-568).
 DROPPED_CODE = "agreement.dropped"
 # A held sentence (any sentence of the conclusion or the limitations, T-568; one
 # calling open an address or a value a section 5 passage or a fact states) that no
@@ -266,8 +269,10 @@ UNREAD_STANDING_CODE = "agreement.unread_standing"
 # A rewrite resting on a fact that states again the absence of the sentence the
 # fact contradicts, the same words on the same addresses (T-568).
 ABSENCE_KEPT_CODE = "agreement.absence_kept"
-# A kept closing sentence whose row quotes no words that stand in a source it
-# names, or, for a sentence stating an absence, words stating none (T-568).
+# A kept closing sentence whose row quotes no words of a source it names that state
+# the same (two or more of its own words, an absence on words stating one), or that
+# names no source while a shown one speaks of it (T-568). Still so after the retry,
+# the sentence is left out and recorded (``DROPPED_CODE``).
 KEEP_UNQUOTED_CODE = "agreement.keep_unquoted"
 # A sentence, or a rewrite, giving failed calls a number the ledger's count does
 # not (T-568).
@@ -3398,10 +3403,16 @@ def apply_rows(
                         answered=True,
                     )
                 )
-            elif passage is not None and passage.closing and _ledger_says_otherwise(found):
+            elif (
+                passage is not None
+                and passage.closing
+                and (_ledger_says_otherwise(found) or _unbacked(found))
+            ):
                 # A closing sentence the ledger itself says otherwise of (a failed
-                # call a later call redid) is never kept as
-                # written: left out, and recorded with what stood (T-568).
+                # call a later call redid), or kept on no source or a quote the checks
+                # refused, is never kept as written: the closing sections state only
+                # what a source backs. Left out, and recorded with what stood and the
+                # refused keep's sources, quote or reason (T-568).
                 span = _sentences(passage).span(row.sentence)
                 taken = spans.setdefault(passage.id, [])
                 if span is None or any(
@@ -3411,9 +3422,18 @@ def apply_rows(
                     continue
                 taken.append((*left_out_span(passage.text, span[0], span[1]), ""))
                 counts["dropped"] += 1
-                written.append(
-                    _left_out(passage, index, span[2], "the ledger says otherwise", found)
+                why = (
+                    "the ledger says otherwise"
+                    if _ledger_says_otherwise(found)
+                    else "kept on no source a check accepts: "
+                    + (
+                        f"{', '.join(_form(s) for s in row.sources)}, quoting "
+                        f"{_capped(row.quote)!r}"
+                        if row.sources
+                        else f"no source, because {_capped(row.reason)!r}"
+                    )
                 )
+                written.append(_left_out(passage, index, span[2], why, found))
             else:
                 counts["kept"] += 1
                 standing = (
@@ -3594,11 +3614,20 @@ def _ledger_says_otherwise(found: Sequence[Violation]) -> bool:
     return any(violation.code in _LEDGER_CODES for violation in found)
 
 
+def _unbacked(found: Sequence[Violation]) -> bool:
+    """Whether a closing keep's findings say no source backs it (``KEEP_UNQUOTED_CODE``)."""
+    return any(violation.code == KEEP_UNQUOTED_CODE for violation in found)
+
+
 def _left_out(
     passage: Passage, index: int, sentence: str, why: str, found: Sequence[Violation]
 ) -> Violation:
     """The record of a closing sentence left out: what stood, and why."""
-    codes = ", ".join(dict.fromkeys(v.code for v in found if v.code in _LEDGER_CODES))
+    codes = ", ".join(
+        dict.fromkeys(
+            v.code for v in found if v.code in _LEDGER_CODES or v.code == KEEP_UNQUOTED_CODE
+        )
+    )
     return Violation(
         code=DROPPED_CODE,
         message=(

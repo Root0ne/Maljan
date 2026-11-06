@@ -49,6 +49,7 @@ from maljan.reporting.renderers.layout import ANALYST
 from maljan.reporting.section_agreement import (
     CLAIM_LED,
     DEBATE,
+    DROPPED_CODE,
     HELD_KEPT_CODE,
     QUALIFIED_CODE,
     REWRITE_UNGROUNDED_CODE,
@@ -546,7 +547,7 @@ def test_a_whole_code_rewrite_rests_on_no_claim_and_cites_its_source() -> None:
         assert codes & {UNKNOWN_SOURCE_CODE, REWRITE_UNGROUNDED_CODE}, (sources, codes)
 
 
-def test_a_closing_negation_is_held_and_a_kept_one_is_counted() -> None:
+def test_a_closing_negation_kept_on_no_source_section_5_speaks_of_is_left_out() -> None:
     denial = "The flag read was not attributed to a routine [ev_0002]."
     report = _whole_report(limitations=denial)
     passages = {p.id: p for p in passages_of(report, entries=_ledger())}
@@ -568,10 +569,11 @@ def test_a_closing_negation_is_held_and_a_kept_one_is_counted() -> None:
     )
     assert len(reporter.asked) == 2
     assert "its quote states no absence" in str(reporter.asked[1][-1].content)
-    # Every kept closing sentence is counted and recorded with what it rests on.
-    assert done.summary["held_kept"] == 1
-    (record,) = [r for r in done.tally.unresolved if r["code"] == HELD_KEPT_CODE]
-    assert "no source names the routine" in record["message"]
+    # Kept on no source while section 5 speaks of the flag read: no source backs it,
+    # so it is left out, recorded with the refused keep's reason (T-568).
+    assert done.summary["held_kept"] == 0 and done.summary["dropped"] == 1
+    (record,) = [r for r in done.tally.unresolved if r["code"] == DROPPED_CODE]
+    assert "no source names the routine" in record["message"] and denial in record["message"]
 
 
 def test_a_closing_negation_kept_on_a_quoted_debate_round_is_counted_not_recorded() -> None:

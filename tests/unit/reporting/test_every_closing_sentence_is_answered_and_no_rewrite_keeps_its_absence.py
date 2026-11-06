@@ -650,6 +650,60 @@ def test_haiku12_s_c2_to_c5_are_kept_on_no_generic_quote_and_no_empty_source(whi
         assert KEEP_UNQUOTED_CODE in [v.code for v in found], (which, row["sources"])
 
 
+def test_haiku12_s_c2_to_c5_kept_unsourced_on_both_answers_are_left_out_and_recorded() -> None:
+    from maljan.reporting.section_agreement import apply_rows
+
+    report, ledger = _stored("haiku12")
+    passages = passages_of(report, entries=ledger)
+    _p, _by_id, said = _haiku12_limitations()
+    rows = [
+        _row("limitations", said[which], "keep", [], reason="no source speaks of it")
+        for which in ("C2", "C3", "C4", "C5")
+    ]
+    # The retry's answer, as the first: apply_rows reads the last answer.
+    counts, records = apply_rows({"sentences": rows}, passages)
+    body = _limitations(report)
+    assert counts["dropped"] == 4
+    for which in ("C2", "C3", "C4", "C5"):
+        assert said[which] not in body, which
+    dropped = [v.message for v in records if v.code == DROPPED_CODE]
+    assert len(dropped) == 4
+    assert all("no source, because 'no source speaks of it'" in m for m in dropped)
+    assert all(KEEP_UNQUOTED_CODE in m for m in dropped)
+    # Nothing left out silently: every sentence gone is one recorded.
+    gone = [s for s in _sentences_of(_by_id["limitations"].text) if s not in body]
+    assert all(
+        any(s[:40] in m for m in dropped) for s in gone if s in [r["sentence"] for r in rows]
+    )
+
+
+def test_a_closing_keep_on_a_refused_quote_is_left_out_with_its_quote() -> None:
+    report = _report(limitations=f"{STILL_OPEN} {SCOPE}")
+    gamed = _row(
+        "limitations", STILL_OPEN, "keep", ["persistence_detail"], quote="is not established"
+    )
+    scope = _row("limitations", SCOPE, "keep", [], reason="no passage speaks of an operator")
+    answer = {"sentences": _settled(report, [gamed, scope])}
+    done, reporter = _ask(report, answer, answer)
+    assert len(reporter.asked) == 2
+    assert _limitations(report) == SCOPE
+    (record,) = [r for r in done.tally.unresolved if r["code"] == DROPPED_CODE]
+    assert "persistence_detail, quoting 'is not established'" in record["message"]
+    assert STILL_OPEN in record["message"]
+
+
+def test_a_section_5_keep_a_check_refuses_stands() -> None:
+    report = _report()
+    # A section 5 sentence listed on another passage's words: refused, and it stands.
+    keep = _row("persistence_detail", HASHED, "keep", ["conclusion"])
+    answer = {"sentences": _settled(report, [keep])}
+    done, _ = _ask(report, answer, answer)
+    ta = report.technical_analysis
+    assert ta is not None and ta.persistence_detail is not None
+    assert ta.persistence_detail.body.endswith(HASHED)
+    assert done.summary["dropped"] == 0
+
+
 def test_haiku12_s_genuinely_sourced_keep_passes() -> None:
     passages, by_id, said = _haiku12_limitations()
     sentence = said["SCOPE"]

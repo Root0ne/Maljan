@@ -393,10 +393,12 @@ def test_a_held_sentence_left_unlisted_is_asked_once_more_and_then_kept() -> Non
     )
     assert len(reporter.asked) == 2
     assert HELD_UNLISTED_CODE in str(reporter.asked[1][-1].content)
-    # Kept on the model's reading: never left out on the platform's read alone.
-    assert _limitations(report) == f"{HELD} {KEPT}"
-    # Every closing sentence was kept on the retry: five, the held one among them.
-    assert done.summary["kept"] == 5 and done.summary["dropped"] == 0
+    # Kept on no source while the bound value's fact speaks of it: no source backs
+    # it, so it is left out and recorded with the refused keep's reason (T-568).
+    assert _limitations(report) == KEPT
+    assert done.summary["kept"] == 4 and done.summary["dropped"] == 1
+    (dropped,) = [r for r in done.tally.unresolved if r["code"] == DROPPED_CODE]
+    assert HELD in dropped["message"] and "not tied to this mutex here" in dropped["message"]
     assert HELD_UNLISTED_CODE not in [r["code"] for r in done.tally.unresolved]
 
 
