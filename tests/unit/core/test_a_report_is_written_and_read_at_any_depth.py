@@ -448,6 +448,7 @@ class TestAHostileDeepBody:
 
 _CHUNK_SCRIPT = """
 import json, resource, sys, time
+from maljan.utils.peak_memory import rss_to_bytes
 from maljan.core.safe_json import loads
 mode, depth, size = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 chunk = "[" * depth + "]" * depth
@@ -457,7 +458,7 @@ base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 started = time.process_time()
 value = read(text)
 seconds = time.process_time() - started
-print((resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - base) * 1024, seconds)
+print(rss_to_bytes(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - base), seconds)
 """
 
 
@@ -484,6 +485,7 @@ def _chunked_read(mode: str, depth: int, size: int) -> tuple[int, float]:
 
 _PEAK_SCRIPT = """
 import json, resource, sys
+from maljan.utils.peak_memory import rss_to_bytes
 from maljan.core.safe_json import loads
 kind, unit, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
 closer = "}]" if unit.startswith("[") else "]}"
@@ -493,7 +495,7 @@ else:
     text, read = "[" + ",".join(['{"":0}'] * (n // 7)) + "]", json.loads
 base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 value = read(text)
-print((resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - base) * 1024)
+print(rss_to_bytes(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - base))
 """
 
 

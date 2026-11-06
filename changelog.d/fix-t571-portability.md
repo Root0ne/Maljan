@@ -1,0 +1,3 @@
+### Fixed
+
+- **A fresh clone of a pinned external tool no longer fails on line-ending rules, and a child's peak memory is read in the unit the platform reports (T-571).** `scripts/dev/fetch_external.sh` cloned the default branch and then checked out the pin. Where the default branch added a `.gitattributes` with LF normalisation, the CRLF files of the pinned tag looked modified and the checkout stopped (ghidra-mcp v5.6.0). A fresh clone now uses `--no-checkout`, so no default-branch tree is written; the existing-checkout path is unchanged and never forces. `ru_maxrss` is kibibytes on Linux and bytes on macOS; `maljan.utils.peak_memory` converts it once, and the capa runner and the memory probes in the tests use it.

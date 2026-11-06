@@ -52,6 +52,7 @@ from maljan.providers.base import (
 from maljan.providers.registry import register_static_provider
 from maljan.providers.static import capa_child
 from maljan.tools import staging
+from maljan.utils.peak_memory import maxrss_bytes
 
 if TYPE_CHECKING:
     from maljan.core.config import Settings, StaticCapaConfig, StaticYaraConfig
@@ -246,8 +247,8 @@ def _stop(process: subprocess.Popen[bytes]) -> Any:
 
 
 def _note_peak(usage: Any) -> None:
-    """The child's peak resident memory, which the kernel gives in kilobytes."""
-    note_capa_peak(getattr(usage, "ru_maxrss", 0) * 1024)
+    """The child's peak resident memory in bytes."""
+    note_capa_peak(maxrss_bytes(usage))
 
 
 def run_capa_document(

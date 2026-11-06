@@ -467,6 +467,7 @@ class TestTheAnswer:
 # Run in a process of its own, so its peak resident memory is the scan's alone.
 _MEASURE = """
 import json, resource, time
+from maljan.utils.peak_memory import rss_to_bytes
 from maljan.analysis.directed_text import Groups, scan_bytes_into
 blob = b"[inst]" * 200_000
 before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -475,7 +476,7 @@ groups = Groups()
 scan_bytes_into(groups, blob, "file")
 took = time.process_time() - started
 after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-print(json.dumps({"size": len(blob), "took": took, "grew_kib": after - before,
+print(json.dumps({"size": len(blob), "took": took, "grew": rss_to_bytes(after - before),
                   "total": groups.total, "rows": groups.rows()[0]}))
 """
 
@@ -507,12 +508,13 @@ class TestTheCostIsBoundedByTheFile:
         assert (row["phrase"], row["count"]) == ("role_marker:inst", 200_000)
         assert row["last"]["offset"] == hex(size - 6)
         assert said["took"] < size * 10e-6
-        assert said["grew_kib"] * 1024 < 16 * size
+        assert said["grew"] < 16 * size
 
 
 # Run in a process of its own, so its peak resident memory is the scan's alone.
 _SPACED_MEASURE = """
 import json, resource, time
+from maljan.utils.peak_memory import rss_to_bytes
 from maljan.analysis.directed_text import Groups, scan_bytes_into
 blob = b"a " * 6_000_000
 before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -521,7 +523,7 @@ groups = Groups()
 scan_bytes_into(groups, blob, "file")
 took = time.process_time() - started
 after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-print(json.dumps({"size": len(blob), "took": took, "grew_kib": after - before,
+print(json.dumps({"size": len(blob), "took": took, "grew": rss_to_bytes(after - before),
                   "total": groups.total}))
 """
 
@@ -543,7 +545,7 @@ class TestTheViewsAreStreamed:
         said = json.loads(done.stdout.strip().splitlines()[-1])
         assert said["total"] == 0
         assert said["took"] < said["size"] * 10e-6
-        assert said["grew_kib"] * 1024 < 16 * said["size"]
+        assert said["grew"] < 16 * said["size"]
 
 
 class TestEveryOffsetPointsAtItsBytes:

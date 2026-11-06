@@ -66,7 +66,9 @@ for spec in "${targets[@]}"; do
   fi
 
   echo "  clone    $name $ref"
-  git clone --quiet "$url" "$dest"
+  # No default-branch checkout: its .gitattributes line-ending rules can make the
+  # pinned ref's files look locally modified and block the checkout below.
+  git clone --quiet --no-checkout "$url" "$dest"
   git -C "$dest" checkout --quiet "$ref"
 done
 
